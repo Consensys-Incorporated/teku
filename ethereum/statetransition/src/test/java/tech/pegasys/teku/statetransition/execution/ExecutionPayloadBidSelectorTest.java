@@ -21,12 +21,9 @@ import static tech.pegasys.teku.spec.executionlayer.BuilderBoostFactorEvaluator.
 import static tech.pegasys.teku.spec.executionlayer.BuilderBoostFactorEvaluator.BUILDER_BOOST_FACTOR_PREFER_BUILDER;
 import static tech.pegasys.teku.spec.executionlayer.BuilderBoostFactorEvaluator.BUILDER_BOOST_FACTOR_PREFER_EXECUTION;
 
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
-import java.util.NavigableSet;
 import java.util.Optional;
-import java.util.TreeSet;
+import java.util.Set;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.Test;
@@ -46,7 +43,7 @@ import tech.pegasys.teku.statetransition.execution.DefaultExecutionPayloadBidMan
 
 public class ExecutionPayloadBidSelectorTest {
 
-  private final Spec spec = TestSpecFactory.createMainnetGloas();
+  private final Spec spec = TestSpecFactory.createMinimalGloas();
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
 
   private final ExecutionPayloadBidCircuitBreaker circuitBreaker =
@@ -60,7 +57,8 @@ public class ExecutionPayloadBidSelectorTest {
   void selectBestRemoteBidReturnsEmptyWhenBidsAreEmpty() {
     assertThat(
             selector.selectBestRemoteBid(
-                Collections.emptyNavigableSet(),
+                Set.of(),
+                List.of(),
                 dataStructureUtil.randomBytes32(),
                 dataStructureUtil.randomBytes32(),
                 state))
@@ -68,7 +66,7 @@ public class ExecutionPayloadBidSelectorTest {
   }
 
   @Test
-  void selectBestRemoteBidFiltersOnParentRootAndParentBlockHash() {
+  void selectBestRemoteBidFiltersP2PBidsOnParentRootAndParentBlockHash() {
     final UInt64 slot = UInt64.valueOf(10);
     final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
     final Bytes32 parentBlockHash = dataStructureUtil.randomBytes32();
@@ -80,14 +78,18 @@ public class ExecutionPayloadBidSelectorTest {
         createBid(slot, parentRoot, dataStructureUtil.randomBytes32(), UInt64.valueOf(300));
     when(circuitBreaker.isBuilderAllowed(any(), any())).thenReturn(true);
 
-    final NavigableSet<SignedExecutionPayloadBid> bids = bidSet(wrongRoot, wrongHash, matching);
-
-    assertThat(selector.selectBestRemoteBid(bids, parentRoot, parentBlockHash, state))
+    assertThat(
+            selector.selectBestRemoteBid(
+                Set.of(wrongRoot, wrongHash, matching),
+                List.of(),
+                parentRoot,
+                parentBlockHash,
+                state))
         .contains(matching);
   }
 
   @Test
-  void selectBestRemoteBidReturnsHighestValueMatchingBid() {
+  void selectBestRemoteBidReturnsHighestValueMatching() {
     final UInt64 slot = UInt64.valueOf(10);
     final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
     final Bytes32 parentBlockHash = dataStructureUtil.randomBytes32();
@@ -99,7 +101,7 @@ public class ExecutionPayloadBidSelectorTest {
 
     assertThat(
             selector.selectBestRemoteBid(
-                bidSet(lowerBid, higherBid), parentRoot, parentBlockHash, state))
+                Set.of(lowerBid, higherBid), List.of(), parentRoot, parentBlockHash, state))
         .contains(higherBid);
   }
 
@@ -112,9 +114,44 @@ public class ExecutionPayloadBidSelectorTest {
         createBid(slot, parentRoot, parentBlockHash, UInt64.valueOf(100));
     when(circuitBreaker.isBuilderAllowed(any(), any())).thenReturn(false);
 
-    final NavigableSet<SignedExecutionPayloadBid> bids = bidSet(bid);
+    assertThat(
+            selector.selectBestRemoteBid(
+                Set.of(bid), List.of(), parentRoot, parentBlockHash, state))
+        .isEmpty();
+  }
 
-    assertThat(selector.selectBestRemoteBid(bids, parentRoot, parentBlockHash, state)).isEmpty();
+  @Test
+  void selectBestRemoteBidPrefersBuilderBidOnEqualValue() {
+    final UInt64 slot = UInt64.valueOf(10);
+    final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 parentBlockHash = dataStructureUtil.randomBytes32();
+    final UInt64 value = UInt64.valueOf(100);
+    final SignedExecutionPayloadBid p2pBid = createBid(slot, parentRoot, parentBlockHash, value);
+    final SignedExecutionPayloadBid builderBid =
+        createBid(slot, parentRoot, parentBlockHash, value);
+    when(circuitBreaker.isBuilderAllowed(any(), any())).thenReturn(true);
+
+    assertThat(
+            selector.selectBestRemoteBid(
+                Set.of(p2pBid), List.of(builderBid), parentRoot, parentBlockHash, state))
+        .contains(builderBid);
+  }
+
+  @Test
+  void selectBestRemoteBidSelectsHigherValueBuilderBidOverP2P() {
+    final UInt64 slot = UInt64.valueOf(10);
+    final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 parentBlockHash = dataStructureUtil.randomBytes32();
+    final SignedExecutionPayloadBid p2pBid =
+        createBid(slot, parentRoot, parentBlockHash, UInt64.valueOf(100));
+    final SignedExecutionPayloadBid builderBid =
+        createBid(slot, parentRoot, parentBlockHash, UInt64.valueOf(200));
+    when(circuitBreaker.isBuilderAllowed(any(), any())).thenReturn(true);
+
+    assertThat(
+            selector.selectBestRemoteBid(
+                Set.of(p2pBid), List.of(builderBid), parentRoot, parentBlockHash, state))
+        .contains(builderBid);
   }
 
   @Test
@@ -259,7 +296,7 @@ public class ExecutionPayloadBidSelectorTest {
     final LocalBid localBid = new LocalBid(randomLocalSelfBuiltBid(slot), UInt256.ONE, true);
     final SignedExecutionPayloadBid selectedBid =
         selectorWithOverrideDisabled.selectBestBid(
-            Optional.of(remoteBid), Optional.of(localBid), BuilderConfig.NO_OP, slot);
+            Optional.of(localBid), Optional.of(remoteBid), BuilderConfig.NO_OP, slot);
 
     assertThat(selectedBid).isEqualTo(remoteBid);
   }
@@ -274,8 +311,8 @@ public class ExecutionPayloadBidSelectorTest {
 
     final SignedExecutionPayloadBid selectedBid =
         selector.selectBestBid(
-            Optional.of(remoteBid),
             Optional.empty(),
+            Optional.of(remoteBid),
             BuilderConfig.withBuilderBoostFactor(BUILDER_BOOST_FACTOR_PREFER_EXECUTION),
             slot);
 
@@ -364,16 +401,7 @@ public class ExecutionPayloadBidSelectorTest {
     final LocalBid localBid =
         new LocalBid(randomLocalSelfBuiltBid(slot), localValue, shouldOverrideBuilder);
     return selector.selectBestBid(
-        Optional.of(remoteBid), Optional.of(localBid), builderConfig, slot);
-  }
-
-  private NavigableSet<SignedExecutionPayloadBid> bidSet(final SignedExecutionPayloadBid... bids) {
-    final NavigableSet<SignedExecutionPayloadBid> set =
-        new TreeSet<>(Comparator.comparing(b -> b.hashTreeRoot().toHexString()));
-    for (final SignedExecutionPayloadBid bid : bids) {
-      set.add(bid);
-    }
-    return set;
+        Optional.of(localBid), Optional.of(remoteBid), builderConfig, slot);
   }
 
   private SignedExecutionPayloadBid randomLocalSelfBuiltBid(final UInt64 slot) {

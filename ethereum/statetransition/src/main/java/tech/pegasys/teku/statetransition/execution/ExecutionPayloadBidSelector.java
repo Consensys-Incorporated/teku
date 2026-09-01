@@ -18,7 +18,9 @@ import static tech.pegasys.teku.infrastructure.logging.Converter.weiToEth;
 import static tech.pegasys.teku.infrastructure.logging.LogFormatter.formatAbbreviatedHashRoot;
 import static tech.pegasys.teku.spec.constants.EthConstants.GWEI_TO_WEI;
 
+import com.google.common.base.Predicate;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import org.apache.logging.log4j.LogManager;
@@ -54,25 +56,45 @@ public class ExecutionPayloadBidSelector {
   }
 
   /**
-   * Selects the highest-value remote bid matching the given parent root and parent block hash,
-   * filtered by {@code isBuilderAllowed}. Returns empty if {@code bids} no bid passes all filters.
-   *
-   * <p>The bids are already sorted
+   * Selects the highest-value bid from p2p and builder bids. P2P bids are filtered by parent root,
+   * parent block hash, and {@code isBuilderAllowed}; builder bids are filtered by {@code
+   * isBuilderAllowed} only because all validation is done during fetching the bids. On equal value,
+   * the builder bid is preferred.
    */
   public Optional<SignedExecutionPayloadBid> selectBestRemoteBid(
-      final Set<SignedExecutionPayloadBid> remoteBids,
+      final Set<SignedExecutionPayloadBid> p2pBids,
+      final List<SignedExecutionPayloadBid> builderBids,
       final Bytes32 parentRoot,
       final Bytes32 parentBlockHash,
       final BeaconState state) {
-    return remoteBids.stream()
-        .filter(bid -> bid.getMessage().getParentBlockRoot().equals(parentRoot))
-        .filter(bid -> bid.getMessage().getParentBlockHash().equals(parentBlockHash))
-        .filter(
-            bid ->
-                executionPayloadBidCircuitBreaker.isBuilderAllowed(
-                    bid.getMessage().getBuilderIndex(), state))
-        .sorted(BID_BY_VALUE_DESCENDING)
-        .findFirst();
+    final Predicate<SignedExecutionPayloadBid> isBuilderAllowedPredicate =
+        bid ->
+            executionPayloadBidCircuitBreaker.isBuilderAllowed(
+                bid.getMessage().getBuilderIndex(), state);
+    final Optional<SignedExecutionPayloadBid> bestP2PBid =
+        p2pBids.stream()
+            .filter(bid -> bid.getMessage().getParentBlockRoot().equals(parentRoot))
+            .filter(bid -> bid.getMessage().getParentBlockHash().equals(parentBlockHash))
+            .filter(isBuilderAllowedPredicate)
+            .min(BID_BY_VALUE_DESCENDING);
+
+    final Optional<SignedExecutionPayloadBid> bestBuilderBid =
+        builderBids.stream().filter(isBuilderAllowedPredicate).min(BID_BY_VALUE_DESCENDING);
+
+    if (bestBuilderBid.isEmpty()) {
+      return bestP2PBid;
+    }
+    if (bestP2PBid.isEmpty()) {
+      return bestBuilderBid;
+    }
+    // on equal value, prefer the builder bid
+    return getBidValue(bestBuilderBid.get()).isGreaterThanOrEqualTo(getBidValue(bestP2PBid.get()))
+        ? bestBuilderBid
+        : bestP2PBid;
+  }
+
+  private UInt64 getBidValue(final SignedExecutionPayloadBid bid) {
+    return bid.getMessage().getValue();
   }
 
   /**
@@ -91,8 +113,8 @@ public class ExecutionPayloadBidSelector {
    * </ol>
    */
   public SignedExecutionPayloadBid selectBestBid(
-      final Optional<SignedExecutionPayloadBid> maybeRemoteBid,
       final Optional<LocalBid> maybeLocalBid,
+      final Optional<SignedExecutionPayloadBid> maybeRemoteBid,
       final BuilderConfig builderConfig,
       final UInt64 slot) {
 
@@ -102,7 +124,7 @@ public class ExecutionPayloadBidSelector {
               () ->
                   new IllegalStateException(
                       String.format(
-                          "No remote or local bid is available for block at slot %s.", slot))),
+                          "No remote or self-built bid is available for block at slot %s.", slot))),
           slot);
     }
 
@@ -121,13 +143,13 @@ public class ExecutionPayloadBidSelector {
     }
 
     final UInt256 remoteValueInWei =
-        UInt256.valueOf(remoteBid.getMessage().getValue().bigIntegerValue()).multiply(GWEI_TO_WEI);
+        UInt256.valueOf(getBidValue(remoteBid).bigIntegerValue()).multiply(GWEI_TO_WEI);
     final UInt64 builderBoostFactor = builderConfig.getBuilderBoostFactor();
     final boolean localValueWins =
         BuilderBoostFactorEvaluator.isLocalValueWinning(
             localBid.valueInWei(), remoteValueInWei, builderBoostFactor);
     logValueComparison(
-        localValueWins, builderBoostFactor, localBid.valueInWei(), remoteBid.getMessage(), slot);
+        localValueWins, builderBoostFactor, localBid.valueInWei(), remoteValueInWei, slot);
     return localValueWins ? selectLocalBid(localBid, slot) : selectRemoteBid(remoteBid, slot);
   }
 
@@ -156,17 +178,17 @@ public class ExecutionPayloadBidSelector {
       final boolean localValueWins,
       final UInt64 builderBoostFactor,
       final UInt256 localValue,
-      final ExecutionPayloadBid remoteBid,
+      final UInt256 remoteValue,
       final UInt64 slot) {
     LOG.info(
         "{} - builder boost factor: {}, source: VC.",
         localValueWins
             ? String.format(
                 "Local execution payload (%s ETH) is chosen over remote bid (%s ETH) for block at slot %s",
-                weiToEth(localValue), gweiToEth(remoteBid.getValue()), slot)
+                weiToEth(localValue), weiToEth(remoteValue), slot)
             : String.format(
                 "Remote bid (%s ETH) is chosen over local execution payload (%s ETH) for block at slot %s",
-                gweiToEth(remoteBid.getValue()), weiToEth(localValue), slot),
+                weiToEth(remoteValue), weiToEth(localValue), slot),
         BuilderBoostFactorFormatter.formatBuilderBoostFactor(builderBoostFactor));
   }
 }

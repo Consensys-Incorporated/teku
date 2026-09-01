@@ -26,6 +26,8 @@ import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.SAVE_FOR_FUTURE;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -71,6 +73,7 @@ public class DefaultExecutionPayloadBidManagerTest {
       mock(ExecutionPayloadBidGossipValidator.class);
   private final ExecutionPayloadBidCircuitBreaker executionPayloadBidCircuitBreaker =
       mock(ExecutionPayloadBidCircuitBreaker.class);
+  private final BuilderBidFetcher builderBidFetcher = mock(BuilderBidFetcher.class);
   private final ExecutionPayloadBidSelector bidSelector = mock(ExecutionPayloadBidSelector.class);
 
   private final ReceivedExecutionPayloadBidEventsChannel
@@ -90,11 +93,14 @@ public class DefaultExecutionPayloadBidManagerTest {
           executionPayloadBidCircuitBreaker,
           receivedExecutionPayloadBidEventsChannelPublisher,
           pendingExecutionPayloadBids,
+          builderBidFetcher,
           bidSelector);
 
   @BeforeEach
   public void setup() {
     when(executionPayloadBidCircuitBreaker.isEngaged(any(), any())).thenReturn(false);
+    when(builderBidFetcher.getBuilderBids(any(), any(), any(), any(), any()))
+        .thenReturn(SafeFuture.completedFuture(Collections.emptyList()));
     executionPayloadBidManager.subscribeOperationAdded(operationAddedSubscriber);
   }
 
@@ -109,7 +115,7 @@ public class DefaultExecutionPayloadBidManagerTest {
 
     when(executionPayloadBidCircuitBreaker.isEngaged(parentRoot, state)).thenReturn(true);
     when(bidSelector.selectBestBid(
-            eq(Optional.empty()), argThat(Optional::isPresent), any(), eq(slot)))
+            argThat(Optional::isPresent), eq(Optional.empty()), any(), eq(slot)))
         .thenReturn(localBid);
 
     final SignedExecutionPayloadBid signedBid =
@@ -123,7 +129,7 @@ public class DefaultExecutionPayloadBidManagerTest {
                 blockProductionPerformance));
 
     assertThat(signedBid).isEqualTo(localBid);
-    verify(bidSelector, never()).selectBestRemoteBid(any(), any(), any(), any());
+    verify(bidSelector, never()).selectBestRemoteBid(any(), any(), any(), any(), any());
   }
 
   @Test
@@ -139,10 +145,14 @@ public class DefaultExecutionPayloadBidManagerTest {
     addAcceptedBid(remoteBid);
 
     when(bidSelector.selectBestRemoteBid(
-            eq(Set.of(remoteBid)), eq(parentRoot), eq(parentBlockHash), any()))
+            eq(Set.of(remoteBid)),
+            eq(Collections.emptyList()),
+            eq(parentRoot),
+            eq(parentBlockHash),
+            any()))
         .thenReturn(Optional.empty());
     when(bidSelector.selectBestBid(
-            eq(Optional.empty()), argThat(Optional::isPresent), any(), eq(state.getSlot())))
+            argThat(Optional::isPresent), eq(Optional.empty()), any(), eq(state.getSlot())))
         .thenReturn(localBid);
 
     final SignedExecutionPayloadBid signedBid =
@@ -160,6 +170,37 @@ public class DefaultExecutionPayloadBidManagerTest {
   }
 
   @Test
+  public void retrievedBuilderBidsArePassedToBidSelector() {
+    final UInt64 slot = UInt64.valueOf(10);
+    final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 parentBlockHash = dataStructureUtil.randomBytes32();
+    final BeaconStateGloas state = stateAtSlot(slot);
+    final SignedExecutionPayloadBid builderBid =
+        createBid(slot, parentRoot, parentBlockHash, UInt64.valueOf(200));
+    final List<SignedExecutionPayloadBid> builderBids = List.of(builderBid);
+
+    when(builderBidFetcher.getBuilderBids(any(), any(), any(), any(), any()))
+        .thenReturn(SafeFuture.completedFuture(builderBids));
+    when(bidSelector.selectBestRemoteBid(any(), eq(builderBids), any(), any(), any()))
+        .thenReturn(Optional.of(builderBid));
+    when(bidSelector.selectBestBid(any(), eq(Optional.of(builderBid)), any(), eq(slot)))
+        .thenReturn(builderBid);
+
+    final SignedExecutionPayloadBid selectedBid =
+        SafeFutureAssert.safeJoin(
+            executionPayloadBidManager.getBidForBlock(
+                parentRoot,
+                parentBlockHash,
+                state,
+                SafeFuture.completedFuture(randomGetPayloadResponse(slot, parentBlockHash)),
+                BuilderConfig.NO_OP,
+                blockProductionPerformance));
+
+    assertThat(selectedBid).isEqualTo(builderBid);
+    verify(bidSelector).selectBestRemoteBid(any(), eq(builderBids), any(), any(), any());
+  }
+
+  @Test
   public void selectsRemoteBidWhenLocalPayloadHasWrongParentHash() {
     final UInt64 slot = UInt64.valueOf(10);
     final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
@@ -169,10 +210,14 @@ public class DefaultExecutionPayloadBidManagerTest {
     addAcceptedBid(remoteBid);
 
     when(bidSelector.selectBestRemoteBid(
-            eq(Set.of(remoteBid)), eq(parentRoot), eq(parentBlockHash), any()))
+            eq(Set.of(remoteBid)),
+            eq(Collections.emptyList()),
+            eq(parentRoot),
+            eq(parentBlockHash),
+            any()))
         .thenReturn(Optional.of(remoteBid));
     when(bidSelector.selectBestBid(
-            eq(Optional.of(remoteBid)), eq(Optional.empty()), any(), eq(slot)))
+            eq(Optional.empty()), eq(Optional.of(remoteBid)), any(), eq(slot)))
         .thenReturn(remoteBid);
 
     final SignedExecutionPayloadBid selectedBid =
@@ -199,10 +244,14 @@ public class DefaultExecutionPayloadBidManagerTest {
     addAcceptedBid(remoteBid);
 
     when(bidSelector.selectBestRemoteBid(
-            eq(Set.of(remoteBid)), eq(parentRoot), eq(parentBlockHash), any()))
+            eq(Set.of(remoteBid)),
+            eq(Collections.emptyList()),
+            eq(parentRoot),
+            eq(parentBlockHash),
+            any()))
         .thenReturn(Optional.of(remoteBid));
     when(bidSelector.selectBestBid(
-            eq(Optional.of(remoteBid)), eq(Optional.empty()), any(), eq(slot)))
+            eq(Optional.empty()), eq(Optional.of(remoteBid)), any(), eq(slot)))
         .thenReturn(remoteBid);
 
     final SignedExecutionPayloadBid selectedBid =
@@ -503,7 +552,7 @@ public class DefaultExecutionPayloadBidManagerTest {
   }
 
   @Test
-  public void onSlotPrunesBidsForPriorSlots() {
+  public void onSlotPrunesP2PBidsForPriorSlots() {
     final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
     final Bytes32 parentBlockHash = dataStructureUtil.randomBytes32();
     final UInt64 currentSlot = UInt64.valueOf(10);
@@ -519,16 +568,16 @@ public class DefaultExecutionPayloadBidManagerTest {
     addAcceptedBid(currentSlotBid);
     addAcceptedBid(nextSlotBid);
 
-    assertThat(executionPayloadBidManager.getBidsForSlot(staleBid.getMessage().getSlot()))
+    assertThat(executionPayloadBidManager.getP2PBidsForSlot(staleBid.getMessage().getSlot()))
         .containsExactly(staleBid);
 
     executionPayloadBidManager.onSlot(currentSlot);
 
-    assertThat(executionPayloadBidManager.getBidsForSlot(staleBid.getMessage().getSlot()))
+    assertThat(executionPayloadBidManager.getP2PBidsForSlot(staleBid.getMessage().getSlot()))
         .isEmpty();
-    assertThat(executionPayloadBidManager.getBidsForSlot(currentSlotBid.getMessage().getSlot()))
+    assertThat(executionPayloadBidManager.getP2PBidsForSlot(currentSlotBid.getMessage().getSlot()))
         .containsExactly(currentSlotBid);
-    assertThat(executionPayloadBidManager.getBidsForSlot(nextSlotBid.getMessage().getSlot()))
+    assertThat(executionPayloadBidManager.getP2PBidsForSlot(nextSlotBid.getMessage().getSlot()))
         .containsExactly(nextSlotBid);
   }
 
