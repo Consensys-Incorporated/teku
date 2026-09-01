@@ -217,7 +217,7 @@ dependencyRules {
 				":infrastructure:",
 				":ethereum:",
 				":storage",
-                ":builder"
+				":builder"
 			]
 		}
 		register(":ethereum:weaksubjectivity") {
