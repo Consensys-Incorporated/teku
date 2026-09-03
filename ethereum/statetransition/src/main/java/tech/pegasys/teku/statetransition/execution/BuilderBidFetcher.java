@@ -60,11 +60,7 @@ public class BuilderBidFetcher {
                     stakedBuilderClientProvider
                         .getClient(builderEntry.getUrl())
                         .getExecutionPayloadBid(
-                            state.getSlot(),
-                            parentHash,
-                            parentRoot,
-                            proposerPubkey,
-                            builderEntry.getAuth())
+                            slot, parentHash, parentRoot, proposerPubkey, builderEntry.getAuth())
                         .whenComplete(
                             (maybeBid, exception) -> {
                               if (exception != null) {
