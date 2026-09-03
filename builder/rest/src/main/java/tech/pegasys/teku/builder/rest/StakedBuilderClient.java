@@ -35,7 +35,7 @@ public interface StakedBuilderClient {
       Bytes32 parentHash,
       Bytes32 parentRoot,
       BLSPublicKey proposerPubkey,
-      Optional<SignedBuilderRequestAuth> auth)
+      SignedBuilderRequestAuth auth)
       throws BuilderClientException;
 
   SafeFuture<Void> submitBuilderPreferences(

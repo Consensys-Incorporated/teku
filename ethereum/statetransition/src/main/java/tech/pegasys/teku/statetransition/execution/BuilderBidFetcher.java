@@ -64,7 +64,7 @@ public class BuilderBidFetcher {
                             parentHash,
                             parentRoot,
                             proposerPubkey,
-                            Optional.of(builderEntry.getAuth()))
+                            builderEntry.getAuth())
                         .whenComplete(
                             (maybeBid, exception) -> {
                               if (exception != null) {
