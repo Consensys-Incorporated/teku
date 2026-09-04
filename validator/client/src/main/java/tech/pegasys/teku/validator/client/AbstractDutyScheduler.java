@@ -137,25 +137,9 @@ public abstract class AbstractDutyScheduler implements ValidatorTimingChannel {
     toInvalidate.values().forEach(PendingDuties::recalculate);
   }
 
-  protected Optional<UInt64> getCurrentEpoch() {
+  private Optional<UInt64> getCurrentEpoch() {
     return currentEpoch;
   }
-
-  protected boolean isAbleToVerifyEpoch(final UInt64 slot) {
-    if (currentEpoch.isEmpty()) {
-      return false;
-    }
-    final UInt64 signingEpoch = spec.computeEpochAtSlot(slot);
-    final UInt64 epoch = currentEpoch.get();
-    final int lookAheadEpochs = getLookAheadEpochs(epoch);
-    return !signingEpoch.isGreaterThan(epoch.plus(lookAheadEpochs + 1));
-  }
-
-  @Override
-  public void onBlockProductionDue(final UInt64 slot) {}
-
-  @Override
-  public void onAttestationCreationDue(final UInt64 slot) {}
 
   protected void onProductionDue(final UInt64 slot) {
     // Check slot being null for the edge case of genesis slot (i.e. slot 0)
@@ -168,13 +152,8 @@ public abstract class AbstractDutyScheduler implements ValidatorTimingChannel {
       return;
     }
 
-    if (!isAbleToVerifyEpoch(slot)) {
-      LOG.info(
-          "Not performing {} duties for slot {} because epoch {} is too far ahead of the current epoch {}",
-          dutyType,
-          slot,
-          spec.computeEpochAtSlot(slot),
-          getCurrentEpoch().map(UInt64::toString).orElse("UNDEFINED"));
+    if (isSlotTooFarAhead(slot)) {
+      logEpochTooFarAhead(dutyType, slot);
       return;
     }
 
@@ -190,16 +169,30 @@ public abstract class AbstractDutyScheduler implements ValidatorTimingChannel {
 
   @Override
   public void onAttestationAggregationDue(final UInt64 slot) {
-    if (!isAbleToVerifyEpoch(slot)) {
-      LOG.info(
-          "Not performing {} aggregation duties for slot {} because epoch {} is too far ahead of the current epoch {}",
-          dutyType,
-          slot,
-          spec.computeEpochAtSlot(slot),
-          getCurrentEpoch().map(UInt64::toString).orElse("UNDEFINED"));
+    if (isSlotTooFarAhead(slot)) {
+      logEpochTooFarAhead(dutyType + " aggregation", slot);
       return;
     }
 
     notifyEpochDuties(PendingDuties::onAggregationDue, slot);
+  }
+
+  private boolean isSlotTooFarAhead(final UInt64 slot) {
+    if (currentEpoch.isEmpty()) {
+      return true;
+    }
+    final UInt64 signingEpoch = spec.computeEpochAtSlot(slot);
+    final UInt64 epoch = currentEpoch.get();
+    final int lookAheadEpochs = getLookAheadEpochs(epoch);
+    return signingEpoch.isGreaterThan(epoch.plus(lookAheadEpochs + 1));
+  }
+
+  private void logEpochTooFarAhead(final String dutyType, final UInt64 slot) {
+    LOG.info(
+        "Not performing {} duties for slot {} because epoch {} is too far ahead of the current epoch {}",
+        dutyType,
+        slot,
+        spec.computeEpochAtSlot(slot),
+        getCurrentEpoch().map(UInt64::toString).orElse("UNDEFINED"));
   }
 }
