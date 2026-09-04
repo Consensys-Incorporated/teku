@@ -101,6 +101,7 @@ import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.OperationPool;
 import tech.pegasys.teku.statetransition.attestation.AggregatingAttestationPool;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidManager;
+import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidManager.BidForBlock;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadManager;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoiceNotifier;
 import tech.pegasys.teku.statetransition.payloadattestation.PayloadAttestationPool;
@@ -664,10 +665,14 @@ public abstract class AbstractBlockFactoryTest {
                               .map(blobKzgCommitmentsSchema::createFromBlobsBundle)
                               .orElse(blobKzgCommitmentsSchema.of()),
                           dataStructureUtil.emptyExecutionRequests(slot).hashTreeRoot());
-              return SafeFuture.completedFuture(
-                  schemaDefinitions
-                      .getSignedExecutionPayloadBidSchema()
-                      .create(executionPayloadBid, BLSSignature.infinity()));
+              return getPayloadResponseFuture.thenApply(
+                  getPayloadResponse ->
+                      new BidForBlock(
+                          schemaDefinitions
+                              .getSignedExecutionPayloadBidSchema()
+                              .create(executionPayloadBid, BLSSignature.infinity()),
+                          getPayloadResponse.getExecutionPayloadValue(),
+                          Optional.empty()));
             });
     // simulate caching of the payload result
     when(executionLayer.getCachedPayloadResult(any()))

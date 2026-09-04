@@ -29,6 +29,7 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidManager.RemoteBid;
 
 public class BuilderBidFetcher {
 
@@ -43,7 +44,7 @@ public class BuilderBidFetcher {
     this.stakedBuilderClientProvider = stakedBuilderClientProvider;
   }
 
-  public SafeFuture<List<SignedExecutionPayloadBid>> getBuilderBids(
+  public SafeFuture<List<RemoteBid>> getBuilderBids(
       final BeaconState state,
       final UInt64 slot,
       final BuilderConfig builderConfig,
@@ -53,7 +54,7 @@ public class BuilderBidFetcher {
         spec.atSlot(slot).beaconStateAccessors().getBeaconProposerIndex(state, slot);
     final BLSPublicKey proposerPubkey =
         spec.getValidatorPubKey(state, UInt64.valueOf(proposerIndex)).orElseThrow();
-    final Stream<SafeFuture<Optional<SignedExecutionPayloadBid>>> builderBids =
+    final Stream<SafeFuture<Optional<RemoteBid>>> builderBids =
         builderConfig.getBuilders().stream()
             .map(
                 builderEntry ->
@@ -61,6 +62,21 @@ public class BuilderBidFetcher {
                         .getClient(builderEntry.getUrl())
                         .getExecutionPayloadBid(
                             slot, parentHash, parentRoot, proposerPubkey, builderEntry.getAuth())
+                        .thenApply(
+                            maybeBid ->
+                                maybeBid
+                                    // TODO-GLOAS: validate the builder bids
+                                    // https://github.com/Consensys/teku/issues/11191
+                                    .map(
+                                    bid -> {
+                                      final UInt64 valueInGwei =
+                                          getBidValueInGwei(
+                                              bid,
+                                              builderEntry.getMaxExecutionPayment(),
+                                              builderEntry.getUrl());
+                                      return new RemoteBid(
+                                          bid, valueInGwei, Optional.of(builderEntry.getUrl()));
+                                    }))
                         .whenComplete(
                             (maybeBid, exception) -> {
                               if (exception != null) {
@@ -75,8 +91,8 @@ public class BuilderBidFetcher {
                                       LOG.info(
                                           "Retrieved bid from {} (builder index: {}, value: {} ETH) for block at slot {}",
                                           builderEntry.getUrl(),
-                                          bid.getMessage().getBuilderIndex(),
-                                          gweiToEth(bid.getMessage().getValue()),
+                                          bid.bid().getMessage().getBuilderIndex(),
+                                          gweiToEth(bid.valueInGwei()),
                                           slot),
                                   () ->
                                       LOG.info(
@@ -86,7 +102,22 @@ public class BuilderBidFetcher {
                             }));
     // Remove empty responses and return only the successfully retrieved bids
     return SafeFuture.collectAllSuccessful(builderBids)
-        // TODO-GLOAS: validate the builder bids https://github.com/Consensys/teku/issues/11191
         .thenApply(bids -> bids.stream().flatMap(Optional::stream).toList());
+  }
+
+  // For bids received via the builder API, the total bid
+  // score accounts for both the on-chain collateral commitment
+  // and the trusted execution layer payment, capped at the
+  // `max_execution_payment` the validator advertised
+  private UInt64 getBidValueInGwei(
+      final SignedExecutionPayloadBid bid, final UInt64 maxExecutionPayment, final String url) {
+    try {
+      return bid.getMessage()
+          .getValue()
+          .plus(bid.getMessage().getExecutionPayment().min(maxExecutionPayment));
+    } catch (final ArithmeticException ex) {
+      LOG.warn("Failed to compute bid value for a bid coming from {}", url);
+      return UInt64.ZERO;
+    }
   }
 }

@@ -31,6 +31,7 @@ import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfi
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidManager.RemoteBid;
 
 public class BuilderBidFetcherTest {
 
@@ -48,7 +49,7 @@ public class BuilderBidFetcherTest {
   void returnsEmptyListWhenNoBuildersDefined() {
     final BeaconState state = dataStructureUtil.randomBeaconState();
 
-    final List<SignedExecutionPayloadBid> result =
+    final List<RemoteBid> result =
         SafeFutureAssert.safeJoin(
             fetcher.getBuilderBids(
                 state,
@@ -71,7 +72,7 @@ public class BuilderBidFetcherTest {
         .thenReturn(SafeFuture.completedFuture(Optional.of(firstBid)))
         .thenReturn(SafeFuture.completedFuture(Optional.of(secondBid)));
 
-    final List<SignedExecutionPayloadBid> result =
+    final List<RemoteBid> result =
         SafeFutureAssert.safeJoin(
             fetcher.getBuilderBids(
                 state,
@@ -80,7 +81,12 @@ public class BuilderBidFetcherTest {
                 dataStructureUtil.randomBytes32(),
                 dataStructureUtil.randomBytes32()));
 
-    assertThat(result).containsExactly(firstBid, secondBid);
+    assertThat(result).map(RemoteBid::bid).containsExactly(firstBid, secondBid);
+    assertThat(result)
+        .map(RemoteBid::builderUrl)
+        .containsExactly(
+            Optional.of(builderConfig.getBuilders().get(0).getUrl()),
+            Optional.of(builderConfig.getBuilders().get(1).getUrl()));
   }
 
   @Test
@@ -96,7 +102,7 @@ public class BuilderBidFetcherTest {
         // second request fails
         .thenReturn(SafeFuture.failedFuture(new RuntimeException("oopsy, builder is bad")));
 
-    final List<SignedExecutionPayloadBid> result =
+    final List<RemoteBid> result =
         SafeFutureAssert.safeJoin(
             fetcher.getBuilderBids(
                 state,
@@ -105,6 +111,6 @@ public class BuilderBidFetcherTest {
                 dataStructureUtil.randomBytes32(),
                 dataStructureUtil.randomBytes32()));
 
-    assertThat(result).containsExactly(successfulBid);
+    assertThat(result).map(RemoteBid::bid).containsExactly(successfulBid);
   }
 }

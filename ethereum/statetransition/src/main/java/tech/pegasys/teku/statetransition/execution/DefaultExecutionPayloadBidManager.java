@@ -22,10 +22,10 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
-import org.apache.tuweni.units.bigints.UInt256;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.ethereum.events.SlotEventsChannel;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionPerformance;
@@ -196,7 +196,7 @@ public class DefaultExecutionPayloadBidManager
   }
 
   @Override
-  public SafeFuture<SignedExecutionPayloadBid> getBidForBlock(
+  public SafeFuture<BidForBlock> getBidForBlock(
       final Bytes32 parentRoot,
       final Bytes32 parentBlockHash,
       final BeaconState state,
@@ -204,7 +204,7 @@ public class DefaultExecutionPayloadBidManager
       final BuilderConfig builderConfig,
       final BlockProductionPerformance blockProductionPerformance) {
     final UInt64 slot = state.getSlot();
-    final SafeFuture<Optional<SignedExecutionPayloadBid>> remoteBidFuture;
+    final SafeFuture<Optional<RemoteBid>> remoteBidFuture;
     if (executionPayloadBidCircuitBreaker.isEngaged(parentRoot, state)) {
       LOG.info("Builder circuit breaker engaged for block at slot {}; self-building", slot);
       remoteBidFuture = SafeFuture.completedFuture(Optional.empty());
@@ -216,9 +216,9 @@ public class DefaultExecutionPayloadBidManager
               .getBuilderBids(state, slot, builderConfig, parentBlockHash, parentRoot)
               .thenApply(
                   builderBids -> {
-                    final Set<SignedExecutionPayloadBid> p2pBids = getP2PBidsForSlot(slot);
+                    final Set<RemoteBid> p2pBids = getP2PBidsForSlot(slot);
                     return bidSelector.selectBestRemoteBid(
-                        p2pBids, builderBids, parentRoot, parentBlockHash, state);
+                        p2pBids, builderBids, parentRoot, parentBlockHash, state, builderConfig);
                   });
     }
 
@@ -252,12 +252,19 @@ public class DefaultExecutionPayloadBidManager
     return localBidFuture.thenCombine(
         remoteBidFuture,
         (maybeLocalBid, maybeRemoteBid) ->
-            bidSelector.selectBestBid(maybeLocalBid, maybeRemoteBid, builderConfig, slot));
+            bidSelector.selectBestBidForBlock(maybeLocalBid, maybeRemoteBid, builderConfig, slot));
   }
 
+  /**
+   * P2P bids are scored solely by `bid.value`, the on-chain collateral commitment.
+   * `bid.execution_payment` is ignored for p2p bids because there is no per-request
+   * `max_execution_payment` negotiation over gossip.
+   */
   @VisibleForTesting
-  Set<SignedExecutionPayloadBid> getP2PBidsForSlot(final UInt64 slot) {
-    return bidsBySlot.getOrDefault(slot, Collections.emptySet());
+  Set<RemoteBid> getP2PBidsForSlot(final UInt64 slot) {
+    return bidsBySlot.getOrDefault(slot, Collections.emptySet()).stream()
+        .map(p2pBid -> new RemoteBid(p2pBid, p2pBid.getMessage().getValue(), Optional.empty()))
+        .collect(Collectors.toUnmodifiableSet());
   }
 
   private SignedExecutionPayloadBid createLocalSelfBuiltSignedBid(
@@ -283,7 +290,4 @@ public class DefaultExecutionPayloadBidManager
         .getSignedExecutionPayloadBidSchema()
         .create(bid, BLSSignature.infinity());
   }
-
-  public record LocalBid(
-      SignedExecutionPayloadBid bid, UInt256 valueInWei, boolean shouldOverrideBuilder) {}
 }
