@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright Consensys Software Inc., 2022
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -29,8 +29,9 @@ public abstract class AbstractDutyScheduler implements ValidatorTimingChannel {
   private static final Logger LOG = LogManager.getLogger();
   private final MetricsSystem metricsSystem;
   private final String dutyType;
-  protected final Spec spec;
+  private final Spec spec;
   private final DutyLoader<?> epochDutiesScheduler;
+  private final int lookAheadEpochs;
 
   private UInt64 lastProductionSlot;
 
@@ -41,10 +42,12 @@ public abstract class AbstractDutyScheduler implements ValidatorTimingChannel {
       final MetricsSystem metricsSystem,
       final String dutyType,
       final DutyLoader<?> epochDutiesScheduler,
+      final int lookAheadEpochs,
       final Spec spec) {
     this.metricsSystem = metricsSystem;
     this.dutyType = dutyType;
     this.epochDutiesScheduler = epochDutiesScheduler;
+    this.lookAheadEpochs = lookAheadEpochs;
     this.spec = spec;
   }
 
@@ -84,8 +87,6 @@ public abstract class AbstractDutyScheduler implements ValidatorTimingChannel {
                         dutyEpoch)));
   }
 
-  abstract int getLookAheadEpochs(UInt64 epoch);
-
   protected abstract Bytes32 getExpectedDependentRoot(
       Bytes32 headBlockRoot,
       Bytes32 previousDutyDependentRoot,
@@ -105,25 +106,13 @@ public abstract class AbstractDutyScheduler implements ValidatorTimingChannel {
   }
 
   private void calculateDuties(final UInt64 epochNumber) {
-    calculateDutiesForEpoch(epochNumber);
-    final int lookAheadEpochs = getLookAheadEpochs(epochNumber);
+    dutiesByEpoch.computeIfAbsent(epochNumber, this::createEpochDuties);
     for (int i = 1; i <= lookAheadEpochs; i++) {
-      calculateDutiesForEpoch(epochNumber.plus(i));
+      dutiesByEpoch.computeIfAbsent(epochNumber.plus(i), this::createEpochDuties);
     }
-  }
-
-  private void calculateDutiesForEpoch(final UInt64 epochNumber) {
-    if (shouldScheduleDutiesAtEpoch(epochNumber)) {
-      dutiesByEpoch.computeIfAbsent(epochNumber, this::createEpochDuties);
-    }
-  }
-
-  protected boolean shouldScheduleDutiesAtEpoch(final UInt64 epochNumber) {
-    return true;
   }
 
   private PendingDuties createEpochDuties(final UInt64 epochNumber) {
-    LOG.trace("Creating epoch duties for epoch {}", epochNumber);
     return PendingDuties.calculateDuties(metricsSystem, epochDutiesScheduler, epochNumber);
   }
 
@@ -137,8 +126,17 @@ public abstract class AbstractDutyScheduler implements ValidatorTimingChannel {
     toInvalidate.values().forEach(PendingDuties::recalculate);
   }
 
-  private Optional<UInt64> getCurrentEpoch() {
+  protected Optional<UInt64> getCurrentEpoch() {
     return currentEpoch;
+  }
+
+  protected boolean isAbleToVerifyEpoch(final UInt64 slot) {
+    if (currentEpoch.isEmpty()) {
+      return false;
+    }
+    final UInt64 signingEpoch = spec.computeEpochAtSlot(slot);
+    final UInt64 epoch = currentEpoch.get();
+    return !signingEpoch.isGreaterThan(epoch.plus(lookAheadEpochs + 1));
   }
 
   protected void onProductionDue(final UInt64 slot) {
@@ -152,8 +150,13 @@ public abstract class AbstractDutyScheduler implements ValidatorTimingChannel {
       return;
     }
 
-    if (isSlotTooFarAhead(slot)) {
-      logEpochTooFarAhead(dutyType, slot);
+    if (!isAbleToVerifyEpoch(slot)) {
+      LOG.info(
+          "Not performing {} duties for slot {} because epoch {} is too far ahead of the current epoch {}",
+          dutyType,
+          slot,
+          spec.computeEpochAtSlot(slot),
+          getCurrentEpoch().map(UInt64::toString).orElse("UNDEFINED"));
       return;
     }
 
@@ -169,30 +172,16 @@ public abstract class AbstractDutyScheduler implements ValidatorTimingChannel {
 
   @Override
   public void onAttestationAggregationDue(final UInt64 slot) {
-    if (isSlotTooFarAhead(slot)) {
-      logEpochTooFarAhead(dutyType + " aggregation", slot);
+    if (!isAbleToVerifyEpoch(slot)) {
+      LOG.info(
+          "Not performing {} aggregation duties for slot {} because epoch {} is too far ahead of the current epoch {}",
+          dutyType,
+          slot,
+          spec.computeEpochAtSlot(slot),
+          getCurrentEpoch().map(UInt64::toString).orElse("UNDEFINED"));
       return;
     }
 
     notifyEpochDuties(PendingDuties::onAggregationDue, slot);
-  }
-
-  private boolean isSlotTooFarAhead(final UInt64 slot) {
-    if (currentEpoch.isEmpty()) {
-      return true;
-    }
-    final UInt64 signingEpoch = spec.computeEpochAtSlot(slot);
-    final UInt64 epoch = currentEpoch.get();
-    final int lookAheadEpochs = getLookAheadEpochs(epoch);
-    return signingEpoch.isGreaterThan(epoch.plus(lookAheadEpochs + 1));
-  }
-
-  private void logEpochTooFarAhead(final String dutyType, final UInt64 slot) {
-    LOG.info(
-        "Not performing {} duties for slot {} because epoch {} is too far ahead of the current epoch {}",
-        dutyType,
-        slot,
-        spec.computeEpochAtSlot(slot),
-        getCurrentEpoch().map(UInt64::toString).orElse("UNDEFINED"));
   }
 }
