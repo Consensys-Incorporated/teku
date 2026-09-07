@@ -219,6 +219,14 @@ public class DefaultExecutionPayloadBidManager
                     final Set<RemoteBid> p2pBids = getP2PBidsForSlot(slot);
                     return bidSelector.selectBestRemoteBid(
                         p2pBids, builderBids, parentRoot, parentBlockHash, state, builderConfig);
+                  })
+              .exceptionally(
+                  error -> {
+                    LOG.warn(
+                        "Remote bid is unavailable for block at slot {}. Will proceed with the local bid instead.",
+                        slot,
+                        error);
+                    return Optional.empty();
                   });
     }
 
