@@ -76,6 +76,7 @@ import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfi
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
@@ -581,6 +582,27 @@ class RemoteValidatorApiHandlerTest {
 
     assertThat(result).isCompletedWithValue(expectedErrors);
     verify(typeDefClient).sendPayloadAttestationMessages(payloadAttestationMessages);
+  }
+
+  @Test
+  public void sendSignedProposerPreferences_InvokeApiWithCorrectRequest() {
+    final SignedProposerPreferences signedProposerPreferences =
+        new DataStructureUtil(TestSpecFactory.createMinimalGloas())
+            .randomSignedProposerPreferences();
+    final List<SignedProposerPreferences> signedProposerPreferencesList =
+        List.of(signedProposerPreferences);
+    final List<SubmitDataError> expectedErrors =
+        List.of(new SubmitDataError(UInt64.valueOf(3), "invalid proposer preferences"));
+
+    when(typeDefClient.sendSignedProposerPreferences(signedProposerPreferencesList))
+        .thenReturn(expectedErrors);
+
+    final SafeFuture<List<SubmitDataError>> result =
+        apiHandler.sendSignedProposerPreferences(signedProposerPreferencesList);
+    asyncRunner.executeQueuedActions();
+
+    assertThat(result).isCompletedWithValue(expectedErrors);
+    verify(typeDefClient).sendSignedProposerPreferences(signedProposerPreferencesList);
   }
 
   @Test

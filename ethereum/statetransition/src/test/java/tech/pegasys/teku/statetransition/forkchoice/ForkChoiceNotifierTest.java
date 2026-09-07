@@ -339,7 +339,7 @@ class ForkChoiceNotifierTest {
     final UInt64 blockSlot = headState.getSlot().plus(1);
 
     final int notTheNextProposer = spec.getBeaconProposerIndex(headState, blockSlot) + 1;
-    proposersDataManager.updatePreparedProposers(
+    proposersDataManager.updatePreparedProposersFromPrepareBeaconProposer(
         List.of(
             new BeaconPreparableProposer(
                 UInt64.valueOf(notTheNextProposer), dataStructureUtil.randomEth1Address())),
@@ -408,7 +408,7 @@ class ForkChoiceNotifierTest {
             forkChoiceState, headState, blockSlot, defaultFeeRecipient);
 
     final int notTheNextProposer = spec.getBeaconProposerIndex(headState, blockSlot) + 1;
-    proposersDataManager.updatePreparedProposers(
+    proposersDataManager.updatePreparedProposersFromPrepareBeaconProposer(
         List.of(
             new BeaconPreparableProposer(
                 UInt64.valueOf(notTheNextProposer), dataStructureUtil.randomEth1Address())),
@@ -1184,7 +1184,7 @@ class ForkChoiceNotifierTest {
             overrideFeeRecipient,
             validatorRegistration);
     if (doPrepare) {
-      proposersDataManager.updatePreparedProposers(
+      proposersDataManager.updatePreparedProposersFromPrepareBeaconProposer(
           List.of(
               new BeaconPreparableProposer(
                   proposerIndex, payloadBuildingAttributes.feeRecipient())),
@@ -1230,7 +1230,7 @@ class ForkChoiceNotifierTest {
       throw new UnsupportedOperationException(
           "unsupported test scenario: with same proposer for different slots");
     }
-    proposersDataManager.updatePreparedProposers(
+    proposersDataManager.updatePreparedProposersFromPrepareBeaconProposer(
         List.of(
             new BeaconPreparableProposer(proposerIndex1, payloadBuildingAttributes1.feeRecipient()),
             new BeaconPreparableProposer(

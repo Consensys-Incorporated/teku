@@ -85,7 +85,6 @@ import tech.pegasys.teku.validator.remote.apiclient.PostStateValidatorsNotExisti
 import tech.pegasys.teku.validator.remote.apiclient.RateLimitedException;
 import tech.pegasys.teku.validator.remote.typedef.OkHttpValidatorTypeDefClient;
 
-// TODO-GLOAS: https://github.com/Consensys/teku/issues/9997 (not required for devnet-0)
 public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
 
   private static final Logger LOG = LogManager.getLogger();
@@ -297,7 +296,8 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
   @Override
   public SafeFuture<List<SubmitDataError>> sendSignedProposerPreferences(
       final List<SignedProposerPreferences> signedProposerPreferences) {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not yet implemented"));
+    return sendRequest(
+        () -> typeDefClient.sendSignedProposerPreferences(signedProposerPreferences));
   }
 
   @Override
@@ -382,6 +382,8 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
     return sendRequest(() -> typeDefClient.getSyncCommitteeSelectionProof(requests));
   }
 
+  // TODO-GLOAS: https://github.com/Consensys-Incorporated/teku/issues/11099 (only required when
+  // Teku implements the functionality to be a builder)
   @Override
   public SafeFuture<Optional<ExecutionPayloadBid>> createUnsignedExecutionPayloadBid(
       final UInt64 slot, final UInt64 builderIndex) {

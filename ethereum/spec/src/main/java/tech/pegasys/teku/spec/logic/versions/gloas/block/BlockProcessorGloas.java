@@ -319,6 +319,12 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
                 beaconStateAccessors.getBlockRootAtSlot(state, state.getSlot().minusMinZero(1)))) {
       throw new BlockProcessingException("Bid is not for the right parent block");
     }
+
+    // Verify that the bid's block hash differs from its parent block hash
+    if (bid.getBlockHash().equals(bid.getParentBlockHash())) {
+      throw new BlockProcessingException("Bid's block hash is the same as the parent block hash");
+    }
+
     if (!bid.getPrevRandao()
         .equals(
             beaconStateAccessors.getRandaoMix(
