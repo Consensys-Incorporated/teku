@@ -119,7 +119,7 @@ public class ProposerDataManagerTest {
     response.complete(null);
     assertThat(updateCall).isCompleted();
 
-    proposersDataManager.updatePreparedProposers(
+    proposersDataManager.updatePreparedProposersFromPrepareBeaconProposer(
         List.of(
             new BeaconPreparableProposer(
                 dataStructureUtil.randomUInt64(), dataStructureUtil.randomEth1Address())),

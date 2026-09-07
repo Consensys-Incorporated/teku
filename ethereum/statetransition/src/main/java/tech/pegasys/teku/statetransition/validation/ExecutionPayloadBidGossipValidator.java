@@ -88,6 +88,14 @@ public class ExecutionPayloadBidGossipValidator {
     }
 
     /*
+     * [REJECT] The bid's block hash is not equal to its parent block hash
+     */
+
+    if (bid.getBlockHash().equals(bid.getParentBlockHash())) {
+      return completedFuture(rejectBid(bid, "block hash and parent block hash are the same"));
+    }
+
+    /*
      * [IGNORE] bid.slot is the current slot or the next slot.
      */
     if (!gossipValidationHelper.isSlotCurrentOrNext(bid.getSlot())) {
