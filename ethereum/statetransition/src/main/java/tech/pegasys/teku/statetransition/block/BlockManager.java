@@ -188,7 +188,9 @@ public class BlockManager extends Service
   @Override
   public void onSlot(final UInt64 slot) {
     futureBlocks.onSlot(slot);
-    futureBlocks.prune(slot).forEach(this::importBlockIgnoringResult);
+    futureBlocks
+        .prune(slot)
+        .forEach(block -> validateAndImportBlock(block, Optional.empty()).finishError(LOG));
   }
 
   public void subscribeFailedPayloadExecution(final FailedPayloadExecutionSubscriber subscriber) {
