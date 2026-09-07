@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.spec.datastructures.metadata;
 
+import java.util.Optional;
 import org.apache.tuweni.units.bigints.UInt256;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.BlockContainer;
@@ -21,10 +22,76 @@ public record BlockContainerAndMetaData(
     BlockContainer blockContainer,
     SpecMilestone specMilestone,
     UInt256 executionPayloadValue,
-    UInt256 consensusBlockValue) {
+    UInt256 consensusBlockValue,
+    boolean payloadIncluded,
+    Optional<String> builderUrl) {
 
-  public BlockContainerAndMetaData withBlockContents(final BlockContainer blockContents) {
-    return new BlockContainerAndMetaData(
-        blockContents, specMilestone, executionPayloadValue, consensusBlockValue);
+  public Builder toBuilder() {
+    return new Builder(this);
+  }
+
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  public static class Builder {
+
+    private BlockContainer blockContainer;
+    private SpecMilestone specMilestone;
+    private UInt256 executionPayloadValue;
+    private UInt256 consensusBlockValue;
+    private boolean payloadIncluded;
+    private Optional<String> builderUrl = Optional.empty();
+
+    private Builder() {}
+
+    private Builder(final BlockContainerAndMetaData source) {
+      this.blockContainer = source.blockContainer;
+      this.specMilestone = source.specMilestone;
+      this.executionPayloadValue = source.executionPayloadValue;
+      this.consensusBlockValue = source.consensusBlockValue;
+      this.payloadIncluded = source.payloadIncluded;
+      this.builderUrl = source.builderUrl;
+    }
+
+    public Builder blockContainer(final BlockContainer blockContainer) {
+      this.blockContainer = blockContainer;
+      return this;
+    }
+
+    public Builder specMilestone(final SpecMilestone specMilestone) {
+      this.specMilestone = specMilestone;
+      return this;
+    }
+
+    public Builder executionPayloadValue(final UInt256 executionPayloadValue) {
+      this.executionPayloadValue = executionPayloadValue;
+      return this;
+    }
+
+    public Builder consensusBlockValue(final UInt256 consensusBlockValue) {
+      this.consensusBlockValue = consensusBlockValue;
+      return this;
+    }
+
+    public Builder payloadIncluded(final boolean payloadIncluded) {
+      this.payloadIncluded = payloadIncluded;
+      return this;
+    }
+
+    public Builder builderUrl(final Optional<String> builderUrl) {
+      this.builderUrl = builderUrl;
+      return this;
+    }
+
+    public BlockContainerAndMetaData build() {
+      return new BlockContainerAndMetaData(
+          blockContainer,
+          specMilestone,
+          executionPayloadValue,
+          consensusBlockValue,
+          payloadIncluded,
+          builderUrl);
+    }
   }
 }

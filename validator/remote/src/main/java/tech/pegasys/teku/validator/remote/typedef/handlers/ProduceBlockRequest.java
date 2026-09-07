@@ -20,6 +20,7 @@ import static tech.pegasys.teku.infrastructure.http.RestApiConstants.CONSENSUS_B
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.EXECUTION_PAYLOAD_BLINDED;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.EXECUTION_PAYLOAD_VALUE;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.GRAFFITI;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_BUILDER_URL;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_BLOCK_VALUE;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_EXECUTION_PAYLOAD_BLINDED;
@@ -208,11 +209,14 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
   }
 
   private BlockContainerAndMetaData toMetaData(final ProduceBlockResponse response) {
-    return new BlockContainerAndMetaData(
-        response.getData(),
-        response.getSpecMilestone(),
-        response.executionPayloadValue,
-        response.consensusBlockValue);
+    return BlockContainerAndMetaData.builder()
+        .blockContainer(response.data)
+        .specMilestone(response.specMilestone)
+        .executionPayloadValue(response.executionPayloadValue)
+        .consensusBlockValue(response.consensusBlockValue)
+        .payloadIncluded(response.executionPayloadIncluded)
+        .builderUrl(response.builderUrl)
+        .build();
   }
 
   private Optional<ProduceBlockResponse> handleBlockContainerResult(
@@ -251,13 +255,17 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
             parseUInt256Header(response, HEADER_EXECUTION_PAYLOAD_VALUE);
         final UInt256 consensusBlockValue =
             parseUInt256Header(response, HEADER_CONSENSUS_BLOCK_VALUE);
+        // only in v4
+        final Optional<String> builderUrl =
+            Optional.ofNullable(response.header(HEADER_BUILDER_URL));
         final BlockContainerSchema<BlockContainer> schema =
             Boolean.parseBoolean(response.header(discriminatorHeader)) ? trueSchema : falseSchema;
         return Optional.of(
             new ProduceBlockResponse(
                 schema.sszDeserialize(Bytes.of(response.body().bytes())),
                 executionPayloadValue,
-                consensusBlockValue));
+                consensusBlockValue,
+                builderUrl));
       } else {
         return Optional.of(
             JsonUtil.parseBasedOnHeader(
@@ -357,16 +365,19 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
     private UInt256 executionPayloadValue;
     private UInt256 consensusBlockValue;
     private SpecMilestone specMilestone;
+    private Optional<String> builderUrl;
 
     public ProduceBlockResponse() {}
 
     public ProduceBlockResponse(
         final BlockContainer data,
         final UInt256 executionPayloadValue,
-        final UInt256 consensusBlockValue) {
+        final UInt256 consensusBlockValue,
+        final Optional<String> builderUrl) {
       this.data = data;
       this.executionPayloadValue = executionPayloadValue;
       this.consensusBlockValue = consensusBlockValue;
+      this.builderUrl = builderUrl;
     }
 
     public BlockContainer getData() {
