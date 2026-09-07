@@ -119,8 +119,7 @@ public class SpecLogicAltair extends AbstractSpecLogic {
     final ValidatorsUtil validatorsUtil =
         new ValidatorsUtil(config, miscHelpers, beaconStateAccessors);
     final BeaconStateUtil beaconStateUtil =
-        new BeaconStateUtil(
-            config, schemaDefinitions, predicates, miscHelpers, beaconStateAccessors);
+        new BeaconStateUtil(config, predicates, miscHelpers, beaconStateAccessors);
     final AttestationUtil attestationUtil =
         new AttestationUtilPhase0(config, schemaDefinitions, beaconStateAccessors, miscHelpers);
     // specific operation validator from spec so that things can hapepn like rejecting bls to

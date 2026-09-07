@@ -35,12 +35,24 @@ import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.Deposit;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 
 public interface BeaconBlockBodySchema<T extends BeaconBlockBody> extends SszContainerSchema<T> {
   SafeFuture<? extends BeaconBlockBody> createBlockBody(
       Function<BeaconBlockBodyBuilder, SafeFuture<Void>> bodyBuilder);
 
   BeaconBlockBody createEmpty();
+
+  /**
+   * Creates the body of the genesis block for the supplied genesis state.
+   *
+   * <p>Up to Fulu, {@code initialize_beacon_state_from_eth1} defines the genesis block body as an
+   * empty {@code BeaconBlockBody}. Forks whose genesis block body embeds data from the genesis
+   * state (Gloas) override this.
+   */
+  default BeaconBlockBody createGenesisBody(final BeaconState genesisState) {
+    return createEmpty();
+  }
 
   @Override
   T createFromBackingNode(TreeNode node);

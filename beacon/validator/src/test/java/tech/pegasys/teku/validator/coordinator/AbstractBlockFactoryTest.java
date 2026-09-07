@@ -101,6 +101,7 @@ import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.OperationPool;
 import tech.pegasys.teku.statetransition.attestation.AggregatingAttestationPool;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidManager;
+import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidManager.BidForBlock;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadManager;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoiceNotifier;
 import tech.pegasys.teku.statetransition.payloadattestation.PayloadAttestationPool;
@@ -270,13 +271,9 @@ public abstract class AbstractBlockFactoryTest {
       blockProposerRewards = UInt64.ZERO;
     }
 
-    final Optional<UInt64> requestedBuilderBoostFactor = Optional.of(UInt64.valueOf(42));
+    final BuilderConfig builderConfig = BuilderConfig.withBuilderBoostFactor(UInt64.valueOf(42));
     setupExecutionLayerBlockAndBlobsProduction(
-        UInt64.valueOf(blockSlot),
-        spec,
-        dataStructureUtil,
-        blockExecutionValue,
-        requestedBuilderBoostFactor);
+        UInt64.valueOf(blockSlot), spec, dataStructureUtil, blockExecutionValue, builderConfig);
 
     executionPayloadBuilder.accept(blockSlotState);
 
@@ -290,7 +287,7 @@ public abstract class AbstractBlockFactoryTest {
                     randaoReveal,
                     Optional.empty(),
                     includePayload,
-                    requestedBuilderBoostFactor.map(BuilderConfig::withBuilderBoostFactor),
+                    Optional.of(builderConfig),
                     BlockProductionPerformance.NOOP)));
 
     final BeaconBlock block = blockContainerAndMetaData.blockContainer().getBlock();
@@ -574,7 +571,7 @@ public abstract class AbstractBlockFactoryTest {
       final Spec spec,
       final DataStructureUtil dataStructureUtil,
       final UInt256 value,
-      final Optional<UInt64> expectedRequestedBuilderBoostFactor) {
+      final BuilderConfig expectedBuilderConfig) {
     // non-blinded
     when(executionLayer.initiateBlockProduction(any(), any(), eq(false), any(), any()))
         .thenAnswer(
@@ -637,13 +634,12 @@ public abstract class AbstractBlockFactoryTest {
               final Bytes32 parentBlockHash = args.getArgument(1);
               final BeaconStateGloas state = BeaconStateGloas.required(args.getArgument(2));
               final SafeFuture<GetPayloadResponse> getPayloadResponseFuture = args.getArgument(3);
-              final Optional<UInt64> requestedBuilderBoostFactor = args.getArgument(4);
+              final BuilderConfig actualBuilderConfig = args.getArgument(4);
               // verify we pass the correct future to the bid manager
               assertThat(getPayloadResponseFuture)
                   .isEqualTo(
                       cachedExecutionPayloadResult.getPayloadResponseFutureFromLocalFlowRequired());
-              assertThat(requestedBuilderBoostFactor)
-                  .isEqualTo(expectedRequestedBuilderBoostFactor);
+              assertThat(actualBuilderConfig).isEqualTo(expectedBuilderConfig);
               assertThat(parentBlockHash).isEqualTo(executionPayload.getParentHash());
               final UInt64 slot = state.getSlot();
               final SchemaDefinitionsGloas schemaDefinitions =
@@ -669,10 +665,14 @@ public abstract class AbstractBlockFactoryTest {
                               .map(blobKzgCommitmentsSchema::createFromBlobsBundle)
                               .orElse(blobKzgCommitmentsSchema.of()),
                           dataStructureUtil.emptyExecutionRequests(slot).hashTreeRoot());
-              return SafeFuture.completedFuture(
-                  schemaDefinitions
-                      .getSignedExecutionPayloadBidSchema()
-                      .create(executionPayloadBid, BLSSignature.infinity()));
+              return getPayloadResponseFuture.thenApply(
+                  getPayloadResponse ->
+                      new BidForBlock(
+                          schemaDefinitions
+                              .getSignedExecutionPayloadBidSchema()
+                              .create(executionPayloadBid, BLSSignature.infinity()),
+                          getPayloadResponse.getExecutionPayloadValue(),
+                          Optional.empty()));
             });
     // simulate caching of the payload result
     when(executionLayer.getCachedPayloadResult(any()))

@@ -37,7 +37,81 @@ permissions:
   contents: read
 
 jobs:
+  planShards:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: 'recursive'
+
+      - name: Restore cached test timings
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: test-timing-${{ inputs.stage_key }}.json
+          key: test-timing-${{ inputs.stage_key }}-nonexistent
+          restore-keys: |
+            test-timing-${{ inputs.stage_key }}-
+
+      # Greedy LPT (longest-processing-time-first) bin-packing of test classes across
+      # shards, using timings cached by collate-junit-reports on the last master run.
+      # Classes with no cached timing (new classes, or no cache yet) get the average of
+      # known classes so the plan stays balanced instead of dumping them all in shard 0.
+      - name: Compute shard plan
+        shell: bash
+        env:
+          STAGE_KEY: ${{ inputs.stage_key }}
+          SRC_PATTERN: ${{ inputs.src_pattern }}
+          SRC_ROOT: ${{ inputs.src_root }}
+        run: |
+          find . -type f -name "*.java" -path "$SRC_PATTERN" \
+            | sed "s@.*/$SRC_ROOT/@@" \
+            | sed 's@/@.@g' \
+            | sed 's/.\{5\}$//' \
+            | sort > classes.txt
+
+          python3 <<'PY'
+          import json, os
+
+          stage = os.environ["STAGE_KEY"]
+          shards = 12
+
+          with open("classes.txt") as f:
+              classes = [line.strip() for line in f if line.strip()]
+
+          timing_file = f"test-timing-{stage}.json"
+          timings = {}
+          if os.path.exists(timing_file):
+              with open(timing_file) as f:
+                  timings = json.load(f)
+
+          known = [timings[c] for c in classes if c in timings]
+          default_time = (sum(known) / len(known)) if known else 1.0
+
+          weighted = sorted(
+              ((c, timings.get(c, default_time)) for c in classes), key=lambda x: -x[1]
+          )
+          bin_totals = [0.0] * shards
+          plan = {str(i): [] for i in range(shards)}
+          for classname, duration in weighted:
+              target = min(range(shards), key=lambda i: bin_totals[i])
+              bin_totals[target] += duration
+              plan[str(target)].append(classname)
+
+          with open("plan.json", "w") as f:
+              json.dump(plan, f)
+          print(f"planned {len(classes)} classes across {shards} shards ({len(known)} with known timing)")
+          PY
+
+      - name: Upload shard plan
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ inputs.stage_key }}-shard-plan
+          path: plan.json
+          retention-days: 1
+
   matrix-tests-template:
+    needs: planShards
     runs-on: ${{ inputs.runner }}
     strategy:
       fail-fast: false
@@ -63,6 +137,12 @@ jobs:
           merge-multiple: true
           path: ${{ github.workspace }}
 
+      - name: Download shard plan
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ inputs.stage_key }}-shard-plan
+          path: ${{ github.workspace }}
+
       - name: Prepare
         uses: ./.github/actions/prepare
 
@@ -81,21 +161,17 @@ jobs:
         id: shard
         shell: bash
         run: |
-          SRC_PATTERN="${{ inputs.src_pattern }}" # e.g. */src/test/java/* or */src/property-test/java/* etc 
-          # 1) Collect test classes by pattern = FQNs
-          CLASSNAMES=$(find . -type f -name "*.java" -path "$SRC_PATTERN" \
-            | sed "s@.*/${{ inputs.src_root }}/@@" \
-            | sed 's@/@.@g' \
-            | sed 's/.\{5\}$//' \
-            | sort )
-          # 2) Modulo split i.e (NR-1) % shards == shard
-          CLASSES_FOR_SHARD=$(printf "%s\n" "$CLASSNAMES" \
-            | awk -v shards=${{ matrix.total }} -v shard=${{ matrix.shard }} '((NR-1) % shards) == shard')
+          # Classes for this shard come from the timing-based plan built by planShards.
+          CLASSES_FOR_SHARD=$(python3 -c "
+          import json
+          plan = json.load(open('plan.json'))
+          print('\n'.join(plan.get('${{ matrix.shard }}', [])))
+          ")
           if [ -z "$CLASSES_FOR_SHARD" ]; then
             echo "args=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # 3) Build --tests args
+          # Build --tests args
           GRADLE_ARGS=$(printf "%s\n" "$CLASSES_FOR_SHARD" | awk '{printf "--tests %s ", $0}')
           echo "Prepared arguments for Gradle (${{ inputs.stage_name }}): $GRADLE_ARGS"
           echo "args=$GRADLE_ARGS" >> "$GITHUB_OUTPUT"

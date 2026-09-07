@@ -47,6 +47,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestat
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
@@ -72,6 +73,7 @@ import tech.pegasys.teku.validator.remote.typedef.handlers.CreateSyncCommitteeCo
 import tech.pegasys.teku.validator.remote.typedef.handlers.GetExecutionPayloadEnvelopeRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.GetPeerCountRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.GetProposerDutiesRequest;
+import tech.pegasys.teku.validator.remote.typedef.handlers.GetProposerDutiesV2Request;
 import tech.pegasys.teku.validator.remote.typedef.handlers.GetStateValidatorsRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.GetSyncingStatusRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.PostAttesterDutiesRequest;
@@ -86,6 +88,7 @@ import tech.pegasys.teku.validator.remote.typedef.handlers.SendContributionAndPr
 import tech.pegasys.teku.validator.remote.typedef.handlers.SendPayloadAttestationMessagesRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.SendSignedAttestationsRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.SendSignedBlockRequest;
+import tech.pegasys.teku.validator.remote.typedef.handlers.SendSignedProposerPreferencesRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.SendSubscribeToSyncCommitteeSubnetsRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.SendSyncCommitteeMessagesRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.SendValidatorLivenessRequest;
@@ -125,6 +128,12 @@ public class OkHttpValidatorTypeDefClient extends OkHttpValidatorMinimalTypeDefC
     final GetProposerDutiesRequest getProposerDutiesRequest =
         new GetProposerDutiesRequest(getBaseEndpoint(), getOkHttpClient());
     return getProposerDutiesRequest.submit(epoch);
+  }
+
+  public Optional<ProposerDuties> getProposerDutiesV2(final UInt64 epoch) {
+    final GetProposerDutiesV2Request getProposerDutiesV2Request =
+        new GetProposerDutiesV2Request(getBaseEndpoint(), getOkHttpClient());
+    return getProposerDutiesV2Request.submit(epoch);
   }
 
   public Optional<PeerCount> getPeerCount() {
@@ -340,6 +349,13 @@ public class OkHttpValidatorTypeDefClient extends OkHttpValidatorMinimalTypeDefC
     final SendPayloadAttestationMessagesRequest sendPayloadAttestationMessagesRequest =
         new SendPayloadAttestationMessagesRequest(getBaseEndpoint(), getOkHttpClient());
     return sendPayloadAttestationMessagesRequest.submit(payloadAttestationMessages);
+  }
+
+  public List<SubmitDataError> sendSignedProposerPreferences(
+      final List<SignedProposerPreferences> signedProposerPreferences) {
+    final SendSignedProposerPreferencesRequest sendSignedProposerPreferencesRequest =
+        new SendSignedProposerPreferencesRequest(getBaseEndpoint(), getOkHttpClient());
+    return sendSignedProposerPreferencesRequest.submit(signedProposerPreferences);
   }
 
   public PublishSignedExecutionPayloadResult publishSignedExecutionPayload(

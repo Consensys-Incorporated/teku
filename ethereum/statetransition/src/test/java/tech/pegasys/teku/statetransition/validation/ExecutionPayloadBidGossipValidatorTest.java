@@ -438,6 +438,16 @@ public class ExecutionPayloadBidGossipValidatorTest {
   }
 
   @TestTemplate
+  void shouldReject_whenBlockHashEqualsParentBlockHash() {
+    final SignedExecutionPayloadBid bidWithMatchingBlockHashes =
+        signedBidWithBlockHash(parentBlockHash);
+
+    assertThatSafeFuture(bidValidator.validate(bidWithMatchingBlockHashes))
+        .isCompletedWithValue(
+            rejectBid(bidWithMatchingBlockHashes, "block hash and parent block hash are the same"));
+  }
+
+  @TestTemplate
   void shouldSaveForFuture_whenStateIsUnavailable() {
     when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
@@ -788,6 +798,25 @@ public class ExecutionPayloadBidGossipValidatorTest {
                 bid.getBlobKzgCommitments(),
                 bid.getExecutionRequestsRoot());
     return dataStructureUtil.randomSignedExecutionPayloadBid(bidWithGasLimit);
+  }
+
+  private SignedExecutionPayloadBid signedBidWithBlockHash(final Bytes32 blockHash) {
+    final ExecutionPayloadBid bidWithBlockHash =
+        bid.getSchema()
+            .create(
+                bid.getParentBlockHash(),
+                bid.getParentBlockRoot(),
+                blockHash,
+                bid.getPrevRandao(),
+                bid.getFeeRecipient(),
+                bid.getGasLimit(),
+                bid.getBuilderIndex(),
+                bid.getSlot(),
+                bid.getValue(),
+                bid.getExecutionPayment(),
+                bid.getBlobKzgCommitments(),
+                bid.getExecutionRequestsRoot());
+    return dataStructureUtil.randomSignedExecutionPayloadBid(bidWithBlockHash);
   }
 
   private SignedExecutionPayloadBid signedBidForParent(

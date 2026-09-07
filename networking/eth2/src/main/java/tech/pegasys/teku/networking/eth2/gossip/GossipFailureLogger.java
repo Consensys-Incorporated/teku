@@ -15,6 +15,7 @@ package tech.pegasys.teku.networking.eth2.gossip;
 
 import com.google.common.base.Throwables;
 import io.libp2p.core.SemiDuplexNoOutboundStreamException;
+import io.libp2p.pubsub.DroppedRpcPartsException;
 import io.libp2p.pubsub.MessageAlreadySeenException;
 import io.libp2p.pubsub.NoPeersForOutboundMessageException;
 import io.netty.channel.socket.ChannelOutputShutdownException;
@@ -83,6 +84,15 @@ public class GossipFailureLogger {
           LOG.log(
               suppress ? Level.DEBUG : Level.WARN,
               "Failed to publish {}{} because no active outbound stream for the required gossip topic",
+              messageType,
+              slotLog);
+      // a peer whose outbound queue is being dropped is expected during gossip mesh churn (e.g.
+      // startup, or a peer that's genuinely slow); it is downscored and recovers on its own.
+      case DroppedRpcPartsException ignored ->
+          LOG.log(
+              suppress ? Level.DEBUG : Level.WARN,
+              "Failed to publish {}{} because a peer's outbound gossip queue was full and"
+                  + " low-priority messages were dropped",
               messageType,
               slotLog);
       // a closed/half-closed stream is expected peer churn (e.g. a disconnecting peer, or one that

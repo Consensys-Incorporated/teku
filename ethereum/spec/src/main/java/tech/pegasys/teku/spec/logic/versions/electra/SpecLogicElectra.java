@@ -138,8 +138,7 @@ public class SpecLogicElectra extends AbstractSpecLogic {
     final ValidatorsUtil validatorsUtil =
         new ValidatorsUtil(config, miscHelpers, beaconStateAccessors);
     final BeaconStateUtil beaconStateUtil =
-        new BeaconStateUtil(
-            config, schemaDefinitions, predicates, miscHelpers, beaconStateAccessors);
+        new BeaconStateUtil(config, predicates, miscHelpers, beaconStateAccessors);
     final AttestationUtil attestationUtil =
         new AttestationUtilElectra(config, schemaDefinitions, beaconStateAccessors, miscHelpers);
     final AttestationDataValidator attestationDataValidator =

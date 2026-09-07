@@ -13,33 +13,30 @@
 
 package tech.pegasys.teku.statetransition.execution;
 
-import static tech.pegasys.teku.infrastructure.logging.Converter.gweiToEth;
-import static tech.pegasys.teku.infrastructure.logging.Converter.weiToEth;
-import static tech.pegasys.teku.infrastructure.logging.LogFormatter.formatAbbreviatedHashRoot;
-import static tech.pegasys.teku.spec.constants.EthConstants.GWEI_TO_WEI;
-
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import java.util.Collection;
-import java.util.Comparator;
-import java.util.NavigableSet;
+import java.util.Collections;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
-import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
-import org.apache.tuweni.units.bigints.UInt256;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.ethereum.events.SlotEventsChannel;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionPerformance;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
-import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.subscribers.Subscribers;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
@@ -48,8 +45,6 @@ import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
 import tech.pegasys.teku.spec.datastructures.execution.GetPayloadResponse;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
-import tech.pegasys.teku.spec.executionlayer.BuilderBoostFactorEvaluator;
-import tech.pegasys.teku.spec.executionlayer.BuilderBoostFactorFormatter;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.statetransition.OperationAddedSubscriber;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
@@ -66,14 +61,6 @@ public class DefaultExecutionPayloadBidManager
 
   private static final Logger LOG = LogManager.getLogger();
 
-  // bids are sorted by value descending so the highest-value bid is iterated first;
-  // hashTreeRoot is a tiebreaker to keep the comparator a total order (required by
-  // ConcurrentSkipListSet)
-  private static final Comparator<SignedExecutionPayloadBid> BID_BY_VALUE_DESCENDING =
-      Comparator.<SignedExecutionPayloadBid, UInt64>comparing(bid -> bid.getMessage().getValue())
-          .reversed()
-          .thenComparing(SszData::hashTreeRoot);
-
   private final Spec spec;
   private final ExecutionPayloadBidGossipValidator executionPayloadBidGossipValidator;
   private final ExecutionPayloadBidCircuitBreaker executionPayloadBidCircuitBreaker;
@@ -82,12 +69,13 @@ public class DefaultExecutionPayloadBidManager
   private final PendingPool<SignedExecutionPayloadBid> pendingExecutionPayloadBids;
   private final Subscribers<OperationAddedSubscriber<SignedExecutionPayloadBid>> subscribers =
       Subscribers.create(true);
-  private final UInt64 builderBidCompareFactor;
-  private final boolean useShouldOverrideBuilderFlag;
+  private final BuilderBidFetcher builderBidFetcher;
+  private final ExecutionPayloadBidSelector bidSelector;
 
   // bids are valid for the current and next slot, so they're indexed by bid.slot for pruning;
-  // the inner set is sorted by value descending for cheap best-bid lookup
-  private final ConcurrentNavigableMap<UInt64, NavigableSet<SignedExecutionPayloadBid>> bidsBySlot =
+  // Sorting bids is only needed during block production, which occurs infrequently. To prevent
+  // unnecessary insertion overhead the rest of the time, we keep them in a standard set.
+  private final ConcurrentNavigableMap<UInt64, Set<SignedExecutionPayloadBid>> bidsBySlot =
       new ConcurrentSkipListMap<>();
 
   public DefaultExecutionPayloadBidManager(
@@ -97,16 +85,16 @@ public class DefaultExecutionPayloadBidManager
       final ReceivedExecutionPayloadBidEventsChannel
           receivedExecutionPayloadBidEventsChannelPublisher,
       final PendingPool<SignedExecutionPayloadBid> pendingExecutionPayloadBids,
-      final UInt64 builderBidCompareFactor,
-      final boolean useShouldOverrideBuilderFlag) {
+      final BuilderBidFetcher builderBidFetcher,
+      final ExecutionPayloadBidSelector bidSelector) {
     this.spec = spec;
     this.executionPayloadBidGossipValidator = executionPayloadBidGossipValidator;
     this.executionPayloadBidCircuitBreaker = executionPayloadBidCircuitBreaker;
     this.receivedExecutionPayloadBidEventsChannelPublisher =
         receivedExecutionPayloadBidEventsChannelPublisher;
     this.pendingExecutionPayloadBids = pendingExecutionPayloadBids;
-    this.builderBidCompareFactor = builderBidCompareFactor;
-    this.useShouldOverrideBuilderFlag = useShouldOverrideBuilderFlag;
+    this.builderBidFetcher = builderBidFetcher;
+    this.bidSelector = bidSelector;
   }
 
   @Override
@@ -151,6 +139,12 @@ public class DefaultExecutionPayloadBidManager
               signedBid.getMessage().getBuilderIndex(),
               result);
     }
+  }
+
+  private void addBid(final SignedExecutionPayloadBid signedBid) {
+    bidsBySlot
+        .computeIfAbsent(signedBid.getMessage().getSlot(), __ -> ConcurrentHashMap.newKeySet())
+        .add(signedBid);
   }
 
   private void retryPendingBids(final Collection<SignedExecutionPayloadBid> pendingBids) {
@@ -202,233 +196,83 @@ public class DefaultExecutionPayloadBidManager
   }
 
   @Override
-  public SafeFuture<SignedExecutionPayloadBid> getBidForBlock(
+  public SafeFuture<BidForBlock> getBidForBlock(
       final Bytes32 parentRoot,
       final Bytes32 parentBlockHash,
       final BeaconState state,
       final SafeFuture<GetPayloadResponse> getPayloadResponseFuture,
-      final Optional<UInt64> requestedBuilderBoostFactor,
+      final BuilderConfig builderConfig,
       final BlockProductionPerformance blockProductionPerformance) {
     final UInt64 slot = state.getSlot();
+    final SafeFuture<Optional<RemoteBid>> remoteBidFuture;
     if (executionPayloadBidCircuitBreaker.isEngaged(parentRoot, state)) {
-      LOG.info("Builder circuit breaker engaged for Gloas block at slot {}; self-building", slot);
-      return getLocalSelfBuiltBid(parentRoot, parentBlockHash, slot, getPayloadResponseFuture);
+      LOG.info("Builder circuit breaker engaged for block at slot {}; self-building", slot);
+      remoteBidFuture = SafeFuture.completedFuture(Optional.empty());
+    } else {
+      // Remote bids include the bids retrieved from configured builders plus any valid p2p bids
+      // received by block proposal time
+      remoteBidFuture =
+          builderBidFetcher
+              .getBuilderBids(state, slot, builderConfig, parentBlockHash, parentRoot)
+              .thenApply(
+                  builderBids -> {
+                    final Set<RemoteBid> p2pBids = getP2PBidsForSlot(slot);
+                    return bidSelector.selectBestRemoteBid(
+                        p2pBids, builderBids, parentRoot, parentBlockHash, state, builderConfig);
+                  })
+              .exceptionally(
+                  error -> {
+                    LOG.warn(
+                        "Remote bid is unavailable for block at slot {}. Will proceed with the local bid instead.",
+                        slot,
+                        error);
+                    return Optional.empty();
+                  });
     }
 
-    final Optional<SignedExecutionPayloadBid> bestRemoteBid =
-        findBestRemoteBid(slot, parentRoot, parentBlockHash, state);
-    if (bestRemoteBid.isEmpty()) {
-      return getLocalSelfBuiltBid(parentRoot, parentBlockHash, slot, getPayloadResponseFuture);
-    }
-    return selectRemoteOrLocalBid(
-        bestRemoteBid.orElseThrow(),
-        parentRoot,
-        parentBlockHash,
-        slot,
-        getPayloadResponseFuture,
-        requestedBuilderBoostFactor,
-        blockProductionPerformance);
-  }
-
-  private void addBid(final SignedExecutionPayloadBid signedBid) {
-    bidsBySlot
-        .computeIfAbsent(
-            signedBid.getMessage().getSlot(),
-            __ -> new ConcurrentSkipListSet<>(BID_BY_VALUE_DESCENDING))
-        .add(signedBid);
-  }
-
-  private Optional<SignedExecutionPayloadBid> findBestRemoteBid(
-      final UInt64 slot,
-      final Bytes32 parentRoot,
-      final Bytes32 parentBlockHash,
-      final BeaconState state) {
-    final NavigableSet<SignedExecutionPayloadBid> bids = bidsBySlot.get(slot);
-    if (bids == null) {
-      return Optional.empty();
-    }
-    // bids iterate from highest to lowest value; return the first one matching the exact parent
-    return bids.stream()
-        .filter(bid -> bid.getMessage().getParentBlockRoot().equals(parentRoot))
-        .filter(bid -> bid.getMessage().getParentBlockHash().equals(parentBlockHash))
-        .filter(
-            bid ->
-                executionPayloadBidCircuitBreaker.isBuilderAllowed(
-                    bid.getMessage().getBuilderIndex(), state))
-        .findFirst();
-  }
-
-  private SafeFuture<SignedExecutionPayloadBid> getLocalSelfBuiltBid(
-      final Bytes32 parentRoot,
-      final Bytes32 parentBlockHash,
-      final UInt64 slot,
-      final SafeFuture<GetPayloadResponse> getPayloadResponseFuture) {
-    return getPayloadResponseFuture.thenApply(
-        getPayloadResponse ->
-            createLocalBid(
-                validateLocalResponse(getPayloadResponse, parentBlockHash, slot),
-                slot,
-                parentRoot));
-  }
-
-  /**
-   * Selects between the highest eligible remote bid and the locally built execution payload.
-   *
-   * <p>If the local payload is unavailable or invalid, the remote bid wins. When both are viable,
-   * selection follows this precedence:
-   *
-   * <ol>
-   *   <li>If {@code useShouldOverrideBuilderFlag} is enabled and the EL returns {@code
-   *       shouldOverrideBuilder}, the local payload wins.
-   *   <li>Otherwise, {@code requestedBuilderBoostFactor}, supplied by the validator client through
-   *       the Produce Block API, is used when present.
-   *   <li>If the validator client does not supply a factor, {@code builderBidCompareFactor} from
-   *       the beacon node's {@code --builder-bid-compare-factor} configuration is used.
-   * </ol>
-   *
-   * <p>A factor of {@code 0} always prefers a viable local payload, {@code UInt64.MAX_VALUE} always
-   * prefers the remote bid, and other factors scale the remote value as a percentage. Equal
-   * adjusted values select the local payload.
-   */
-  private SafeFuture<SignedExecutionPayloadBid> selectRemoteOrLocalBid(
-      final SignedExecutionPayloadBid remoteBid,
-      final Bytes32 parentRoot,
-      final Bytes32 parentBlockHash,
-      final UInt64 slot,
-      final SafeFuture<GetPayloadResponse> getPayloadResponseFuture,
-      final Optional<UInt64> requestedBuilderBoostFactor,
-      final BlockProductionPerformance blockProductionPerformance) {
-    final SafeFuture<Optional<LocalBidCandidate>> viableLocalBid =
+    final SafeFuture<Optional<LocalBid>> localBidFuture =
         getPayloadResponseFuture
             .thenApply(
-                response ->
-                    Optional.of(
-                        createLocalBidCandidate(
-                            validateLocalResponse(response, parentBlockHash, slot),
-                            slot,
-                            parentRoot)))
+                getPayloadResponse -> {
+                  final Bytes32 localParentBlockHash =
+                      getPayloadResponse.getExecutionPayload().getParentHash();
+                  Preconditions.checkState(
+                      localParentBlockHash.equals(parentBlockHash),
+                      "Local execution payload parent hash %s does not match selected production parent execution hash %s for block at slot %s",
+                      localParentBlockHash,
+                      parentBlockHash,
+                      slot);
+                  return new LocalBid(
+                      createLocalSelfBuiltSignedBid(getPayloadResponse, slot, parentRoot),
+                      getPayloadResponse.getExecutionPayloadValue(),
+                      getPayloadResponse.getShouldOverrideBuilder());
+                })
+            .thenApply(Optional::of)
             .exceptionally(
                 error -> {
                   LOG.warn(
-                      "Local execution payload is unavailable for block at slot {}. Selecting remote bid instead",
+                      "Local execution payload is unavailable for block at slot {}. Will attempt to select a remote bid instead.",
                       slot,
                       error);
                   return Optional.empty();
                 });
 
-    return viableLocalBid.thenApply(
-        maybeLocalBid -> {
-          if (maybeLocalBid.isEmpty()) {
-            return selectRemoteBid(remoteBid, slot, blockProductionPerformance);
-          }
-
-          final LocalBidCandidate localBid = maybeLocalBid.orElseThrow();
-          final GetPayloadResponse localResponse = localBid.response();
-          if (useShouldOverrideBuilderFlag && localResponse.getShouldOverrideBuilder()) {
-            LOG.info(
-                "Selected self-built bid for block at slot {} because shouldOverrideBuilder is true",
-                slot);
-            return selectLocalBid(localBid, slot);
-          }
-
-          final UInt256 remoteValueInWei =
-              UInt256.valueOf(remoteBid.getMessage().getValue().bigIntegerValue())
-                  .multiply(GWEI_TO_WEI);
-          final UInt64 builderBoostFactor =
-              requestedBuilderBoostFactor.orElse(builderBidCompareFactor);
-          final boolean localValueWins =
-              BuilderBoostFactorEvaluator.isLocalValueWinning(
-                  localResponse.getExecutionPayloadValue(), remoteValueInWei, builderBoostFactor);
-          logValueComparison(
-              localValueWins,
-              builderBoostFactor,
-              requestedBuilderBoostFactor.isPresent(),
-              localResponse.getExecutionPayloadValue(),
-              remoteBid.getMessage(),
-              slot);
-          return localValueWins
-              ? selectLocalBid(localBid, slot)
-              : selectRemoteBid(remoteBid, slot, blockProductionPerformance);
-        });
+    return localBidFuture.thenCombine(
+        remoteBidFuture,
+        (maybeLocalBid, maybeRemoteBid) ->
+            bidSelector.selectBestBidForBlock(maybeLocalBid, maybeRemoteBid, builderConfig, slot));
   }
 
-  private GetPayloadResponse validateLocalResponse(
-      final GetPayloadResponse response, final Bytes32 parentBlockHash, final UInt64 slot) {
-    final ExecutionPayload payload = response.getExecutionPayload();
-    if (!payload.getParentHash().equals(parentBlockHash)) {
-      throw new IllegalStateException(
-          String.format(
-              "Self-built execution payload parent hash %s does not match selected production parent execution hash %s for block at slot %s",
-              formatAbbreviatedHashRoot(payload.getParentHash()),
-              formatAbbreviatedHashRoot(parentBlockHash),
-              slot));
-    }
-    if (response.getBlobsBundle().isEmpty()) {
-      throw new IllegalStateException("Self-built execution payload is missing blobs bundle");
-    }
-    if (response.getExecutionRequests().isEmpty()) {
-      throw new IllegalStateException("Self-built execution payload is missing execution requests");
-    }
-    return response;
-  }
-
-  private SignedExecutionPayloadBid createLocalBid(
-      final GetPayloadResponse getPayloadResponse, final UInt64 slot, final Bytes32 parentRoot) {
-    return selectLocalBid(createLocalBidCandidate(getPayloadResponse, slot, parentRoot), slot);
-  }
-
-  private LocalBidCandidate createLocalBidCandidate(
-      final GetPayloadResponse getPayloadResponse, final UInt64 slot, final Bytes32 parentRoot) {
-    return new LocalBidCandidate(
-        getPayloadResponse, createLocalSelfBuiltSignedBid(getPayloadResponse, slot, parentRoot));
-  }
-
-  private SignedExecutionPayloadBid selectLocalBid(
-      final LocalBidCandidate localBid, final UInt64 slot) {
-    LOG.info(
-        "Considering self-built bid (value: {} ETH, EL block: {}) for block at slot {}",
-        weiToEth(localBid.response().getExecutionPayloadValue()),
-        formatAbbreviatedHashRoot(localBid.signedBid().getMessage().getBlockHash()),
-        slot);
-    return localBid.signedBid();
-  }
-
-  private SignedExecutionPayloadBid selectRemoteBid(
-      final SignedExecutionPayloadBid remoteBid,
-      final UInt64 slot,
-      final BlockProductionPerformance blockProductionPerformance) {
-    final ExecutionPayloadBid bid = remoteBid.getMessage();
-    LOG.info(
-        "Selected remote bid (value: {} ETH, builder index: {}, EL block: {}) for block at slot {}",
-        gweiToEth(bid.getValue()),
-        bid.getBuilderIndex(),
-        formatAbbreviatedHashRoot(bid.getBlockHash()),
-        slot);
-    blockProductionPerformance.builderBidValidated();
-    return remoteBid;
-  }
-
-  private void logValueComparison(
-      final boolean localValueWins,
-      final UInt64 builderBoostFactor,
-      final boolean isRequestedBuilderBoostFactor,
-      final UInt256 localValue,
-      final ExecutionPayloadBid remoteBid,
-      final UInt64 slot) {
-    final String comparisonFactor =
-        BuilderBoostFactorFormatter.formatBuilderBoostFactor(builderBoostFactor);
-
-    LOG.info(
-        "{} - builder compare factor: {}, source: {}.",
-        localValueWins
-            ? String.format(
-                "Local execution payload (%s ETH) is chosen over remote bid (%s ETH) for block at slot %s",
-                weiToEth(localValue), gweiToEth(remoteBid.getValue()), slot)
-            : String.format(
-                "Remote bid (%s ETH) is chosen over local execution payload (%s ETH) for block at slot %s",
-                gweiToEth(remoteBid.getValue()), weiToEth(localValue), slot),
-        comparisonFactor,
-        isRequestedBuilderBoostFactor ? "VC" : "BN");
+  /**
+   * P2P bids are scored solely by `bid.value`, the on-chain collateral commitment.
+   * `bid.execution_payment` is ignored for p2p bids because there is no per-request
+   * `max_execution_payment` negotiation over gossip.
+   */
+  @VisibleForTesting
+  Set<RemoteBid> getP2PBidsForSlot(final UInt64 slot) {
+    return bidsBySlot.getOrDefault(slot, Collections.emptySet()).stream()
+        .map(p2pBid -> new RemoteBid(p2pBid, p2pBid.getMessage().getValue(), Optional.empty()))
+        .collect(Collectors.toUnmodifiableSet());
   }
 
   private SignedExecutionPayloadBid createLocalSelfBuiltSignedBid(
@@ -454,7 +298,4 @@ public class DefaultExecutionPayloadBidManager
         .getSignedExecutionPayloadBidSchema()
         .create(bid, BLSSignature.infinity());
   }
-
-  private record LocalBidCandidate(
-      GetPayloadResponse response, SignedExecutionPayloadBid signedBid) {}
 }

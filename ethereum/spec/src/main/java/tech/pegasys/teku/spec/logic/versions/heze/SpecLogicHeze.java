@@ -150,8 +150,7 @@ public class SpecLogicHeze extends AbstractSpecLogic {
     final ValidatorsUtilGloas validatorsUtil =
         new ValidatorsUtilGloas(config, miscHelpers, beaconStateAccessors);
     final BeaconStateUtil beaconStateUtil =
-        new BeaconStateUtil(
-            config, schemaDefinitions, predicates, miscHelpers, beaconStateAccessors);
+        new BeaconStateUtil(config, predicates, miscHelpers, beaconStateAccessors);
     final AttestationUtilGloas attestationUtil =
         new AttestationUtilGloas(config, schemaDefinitions, beaconStateAccessors, miscHelpers);
     final AttestationDataValidatorGloas attestationDataValidator =

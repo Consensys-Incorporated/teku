@@ -43,7 +43,6 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider;
-import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
@@ -82,7 +81,7 @@ public class PayloadAttestationMessageGossipValidatorTest {
     when(gossipValidationHelper.isSlotCurrent(slot)).thenReturn(true);
     when(gossipValidationHelper.isBlockAvailable(blockRoot)).thenReturn(true);
     when(gossipValidationHelper.getSlotForBlockRoot(blockRoot)).thenReturn(Optional.of(slot));
-    when(gossipValidationHelper.getStateAtSlotAndBlockRoot(new SlotAndBlockRoot(slot, blockRoot)))
+    when(gossipValidationHelper.getStateAtBlockRoot(blockRoot))
         .thenReturn(SafeFuture.completedFuture(Optional.of(postState)));
     final SpecVersion specVersion = mock(SpecVersion.class);
     final MiscHelpers miscHelpers = mock(MiscHelpers.class);
@@ -157,7 +156,7 @@ public class PayloadAttestationMessageGossipValidatorTest {
   void shouldIgnore_whenAlreadySeen_AfterInitialCheck() {
     final SafeFuture<Optional<BeaconState>> getStateFuture1 = new SafeFuture<>();
     final SafeFuture<Optional<BeaconState>> getStateFuture2 = new SafeFuture<>();
-    when(gossipValidationHelper.getStateAtSlotAndBlockRoot(any()))
+    when(gossipValidationHelper.getStateAtBlockRoot(any()))
         .thenReturn(getStateFuture1)
         .thenReturn(getStateFuture2);
 
@@ -213,7 +212,7 @@ public class PayloadAttestationMessageGossipValidatorTest {
 
   @TestTemplate
   void shouldSaveForFuture_whenStateIsUnavailable() {
-    when(gossipValidationHelper.getStateAtSlotAndBlockRoot(new SlotAndBlockRoot(slot, blockRoot)))
+    when(gossipValidationHelper.getStateAtBlockRoot(blockRoot))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
     assertThatSafeFuture(
             payloadAttestationMessageGossipValidator.validate(
@@ -252,7 +251,7 @@ public class PayloadAttestationMessageGossipValidatorTest {
                 validatablePayloadAttestationMessage()))
         .isCompletedWithValue(ACCEPT);
     verify(gossipValidationHelper).isBlockAvailable(blockRoot);
-    verify(gossipValidationHelper).getStateAtSlotAndBlockRoot(any());
+    verify(gossipValidationHelper).getStateAtBlockRoot(any());
     verify(gossipValidationHelper)
         .isSignatureValidWithRespectToProposerIndex(any(), any(), any(), any());
 
@@ -267,7 +266,7 @@ public class PayloadAttestationMessageGossipValidatorTest {
                 "Payload attestation for slot %s and validator index %s already seen",
                 slot, validatorIndex));
     verify(gossipValidationHelper, never()).isBlockAvailable(blockRoot);
-    verify(gossipValidationHelper, never()).getStateAtSlotAndBlockRoot(any());
+    verify(gossipValidationHelper, never()).getStateAtBlockRoot(any());
     verify(gossipValidationHelper, never())
         .isSignatureValidWithRespectToProposerIndex(any(), any(), any(), any());
   }

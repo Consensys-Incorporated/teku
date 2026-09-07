@@ -48,6 +48,7 @@ public enum ValidatorApiMethod {
   GET_SYNC_COMMITTEE_DUTIES("eth/v1/validator/duties/sync/:epoch"),
   GET_SYNC_COMMITTEE_CONTRIBUTION("eth/v1/validator/sync_committee_contribution"),
   GET_PROPOSER_DUTIES("eth/v1/validator/duties/proposer/:epoch"),
+  GET_PROPOSER_DUTIES_V2("eth/v2/validator/duties/proposer/:epoch"),
   GET_PEER_COUNT("eth/v1/node/peer_count"),
   PREPARE_BEACON_PROPOSER("/eth/v1/validator/prepare_beacon_proposer"),
   REGISTER_VALIDATOR("/eth/v1/validator/register_validator"),
@@ -57,7 +58,8 @@ public enum ValidatorApiMethod {
   SEND_VALIDATOR_LIVENESS("/eth/v1/validator/liveness/:epoch"),
   BEACON_COMMITTEE_SELECTIONS("/eth/v1/validator/beacon_committee_selections"),
   SYNC_COMMITTEE_SELECTIONS("/eth/v1/validator/sync_committee_selections"),
-  SEND_SIGNED_EXECUTION_PAYLOAD_ENVELOPE("eth/v1/beacon/execution_payload_envelopes");
+  SEND_SIGNED_EXECUTION_PAYLOAD_ENVELOPE("eth/v1/beacon/execution_payload_envelopes"),
+  SEND_SIGNED_PROPOSER_PREFERENCES("eth/v1/validator/proposer_preferences");
 
   private final String path;
 

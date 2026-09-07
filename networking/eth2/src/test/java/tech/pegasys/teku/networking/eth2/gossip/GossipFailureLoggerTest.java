@@ -18,6 +18,7 @@ import static tech.pegasys.teku.networking.eth2.gossip.GossipFailureLogger.creat
 import static tech.pegasys.teku.networking.eth2.gossip.GossipFailureLogger.createSuppressing;
 
 import io.libp2p.core.SemiDuplexNoOutboundStreamException;
+import io.libp2p.pubsub.DroppedRpcPartsException;
 import io.libp2p.pubsub.MessageAlreadySeenException;
 import io.libp2p.pubsub.NoPeersForOutboundMessageException;
 import io.netty.channel.socket.ChannelOutputShutdownException;
@@ -36,6 +37,8 @@ class GossipFailureLoggerTest {
       new SemiDuplexNoOutboundStreamException("So Lonely");
   public static final NoPeersForOutboundMessageException NO_PEERS_FOR_OUTBOUND_MESSAGE_EXCEPTION =
       new NoPeersForOutboundMessageException("no peers");
+  public static final DroppedRpcPartsException SLOW_PEER_EXCEPTION =
+      new DroppedRpcPartsException("Queued low priority RPC parts were dropped");
 
   private final GossipFailureLogger loggerSuppressing = createSuppressing("thingy");
   private final GossipFailureLogger loggerNoSuppression = createNonSuppressing("thingy");
@@ -144,6 +147,39 @@ class GossipFailureLoggerTest {
   }
 
   @Test
+  void shouldLogFirstSlowPeerErrorsAtWarningLevel() {
+    try (final LogCaptor logCaptor = LogCaptor.forClass(GossipFailureLogger.class)) {
+      loggerSuppressing.log(new RuntimeException("Foo", SLOW_PEER_EXCEPTION), SLOT);
+      logCaptor.assertWarnLog(slowPeerMessage(SLOT, true));
+      assertThat(logCaptor.getErrorLogs()).isEmpty();
+    }
+  }
+
+  @Test
+  void shouldLogRepeatedSlowPeerErrorsAtDebugLevel() {
+    try (final LogCaptor logCaptor = LogCaptor.forClass(GossipFailureLogger.class)) {
+      loggerSuppressing.log(new RuntimeException("Foo", SLOW_PEER_EXCEPTION), SLOT);
+      logCaptor.clearLogs();
+
+      loggerSuppressing.log(new IllegalStateException("Foo", SLOW_PEER_EXCEPTION), SLOT);
+      logCaptor.assertDebugLog(slowPeerMessage(SLOT, true));
+      assertThat(logCaptor.getErrorLogs()).isEmpty();
+    }
+  }
+
+  @Test
+  void shouldLogSlowPeerErrorsWithoutSuppression() {
+    try (final LogCaptor logCaptor = LogCaptor.forClass(GossipFailureLogger.class)) {
+      loggerNoSuppression.log(new RuntimeException("Foo", SLOW_PEER_EXCEPTION), SLOT);
+      logCaptor.clearLogs();
+
+      loggerNoSuppression.log(new IllegalStateException("Foo", SLOW_PEER_EXCEPTION), SLOT);
+      logCaptor.assertWarnLog(slowPeerMessage(SLOT, false));
+      assertThat(logCaptor.getErrorLogs()).isEmpty();
+    }
+  }
+
+  @Test
   void shouldLogFirstGenericErrorAtErrorLevel() {
     try (final LogCaptor logCaptor = LogCaptor.forClass(GossipFailureLogger.class)) {
       loggerSuppressing.log(new RuntimeException("Foo", new IllegalStateException("Boom")), SLOT);
@@ -232,6 +268,13 @@ class GossipFailureLoggerTest {
         + (shouldSuppress ? "(s)" : "")
         + slot.map(s -> " for slot " + s).orElse("")
         + " because no active outbound stream for the required gossip topic";
+  }
+
+  private static String slowPeerMessage(final Optional<UInt64> slot, final boolean shouldSuppress) {
+    return "Failed to publish thingy"
+        + (shouldSuppress ? "(s)" : "")
+        + slot.map(s -> " for slot " + s).orElse("")
+        + " because a peer's outbound gossip queue was full and low-priority messages were dropped";
   }
 
   private static String genericError(final Optional<UInt64> slot, final boolean shouldSuppress) {

@@ -2151,7 +2151,7 @@ public final class DataStructureUtil {
 
   public BuilderEntry randomBuilderEntry() {
     return BUILDER_ENTRY_SCHEMA.create(
-        "https://" + randomString(6) + ".com",
+        Bytes.of(("https://" + randomString(6) + ".com").getBytes(StandardCharsets.UTF_8)),
         randomSignedBuilderRequestAuth(),
         List.of(),
         randomUInt64(),

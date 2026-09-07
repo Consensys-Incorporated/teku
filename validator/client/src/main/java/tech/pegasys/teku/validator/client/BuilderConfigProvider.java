@@ -47,13 +47,13 @@ public class BuilderConfigProvider {
     }
     final Stream<SafeFuture<BuilderEntry>> builderEntriesFutures =
         validatorConfig.getBuilderUrls().stream()
+            .map(url -> Bytes.of(url.toExternalForm().getBytes(StandardCharsets.UTF_8)))
             .map(
                 builderUrl -> {
                   final BuilderRequestAuth auth =
                       ApiSchemas.BUILDER_REQUEST_AUTH_SCHEMA.create(
                           // default to the UTF-8 bytes of the builder's own advertised URL
-                          Bytes.of(builderUrl.toExternalForm().getBytes(StandardCharsets.UTF_8)),
-                          slot);
+                          builderUrl, slot);
                   // Authenticates bid requests to the builder
                   return validator
                       .getSigner()
@@ -64,7 +64,7 @@ public class BuilderConfigProvider {
                                 ApiSchemas.SIGNED_BUILDER_REQUEST_AUTH_SCHEMA.create(
                                     auth, signature);
                             return ApiSchemas.BUILDER_ENTRY_SCHEMA.create(
-                                builderUrl.toExternalForm(),
+                                builderUrl,
                                 signedAuth,
                                 List.of(),
                                 SpecConfigGloas.MAX_EXECUTION_PAYMENT,

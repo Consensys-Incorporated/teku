@@ -14,6 +14,7 @@
 package tech.pegasys.teku.spec.datastructures.builder.versions.gloas;
 
 import java.util.List;
+import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszByteList;
@@ -55,7 +56,7 @@ public class BuilderEntrySchema
   }
 
   public BuilderEntry create(
-      final String url,
+      final Bytes url,
       final SignedBuilderRequestAuth auth,
       final List<BLSPublicKey> builderPubkeys,
       final UInt64 maxExecutionPayment,

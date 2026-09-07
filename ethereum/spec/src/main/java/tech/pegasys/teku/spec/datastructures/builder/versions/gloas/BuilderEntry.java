@@ -37,7 +37,7 @@ public class BuilderEntry
 
   protected BuilderEntry(
       final BuilderEntrySchema schema,
-      final String url,
+      final Bytes url,
       final SignedBuilderRequestAuth auth,
       final List<BLSPublicKey> builderPubkeys,
       final UInt64 maxExecutionPayment,
@@ -45,7 +45,7 @@ public class BuilderEntry
       final UInt64 builderBoostFactor) {
     super(
         schema,
-        schema.getUrlSchema().fromBytes(Bytes.wrap(url.getBytes(StandardCharsets.UTF_8))),
+        schema.getUrlSchema().fromBytes(url),
         auth,
         schema
             .getBuilderPubkeysSchema()

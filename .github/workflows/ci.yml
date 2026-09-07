@@ -4,7 +4,7 @@ name: ci
 ## RUNNERS
 # https://docs.github.com/en/actions/reference/runners/github-hosted-runners
 # ubuntu-24.04 = 4cpu, 16GB
-# ubuntu-latest-128 = 32, 128GB
+# gha-runner-scale-set-ubuntu-24-amd64-xxl = 32, 128GB
 # ubuntu-24.04-arm = 4cpu, 16GB
 # macos-13 = 4cpu, 14GB
 # macos-15 = 3cpu(M1), 7GB
@@ -193,7 +193,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     # assemble is in our critical path so we want it to finish as quick as possible
-    runs-on: ubuntu-latest-128
+    runs-on: gha-runner-scale-set-ubuntu-24-amd64-xxl
     outputs:
       workflow-run-id: ${{ steps.workflowdetails.outputs.run_id }}
       publish-version: ${{ steps.projectDetails.outputs.publish-version }}
@@ -253,7 +253,7 @@ jobs:
   prDistributions:
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-latest-128
+    runs-on: gha-runner-scale-set-ubuntu-24-amd64-xxl
     steps:
       - name: Checkout PR head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -365,7 +365,7 @@ jobs:
           npm ci
           node publish.js
       - name: Deploy to GitHub Pages
-        uses: JamesIves/github-pages-deploy-action@9d877eea73427180ae43cf98e8914934fe157a1a # 4.7.6
+        uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445 # v4.9.0
         with:
           folder: .openapidoc/dist
           branch: gh-pages
@@ -373,7 +373,7 @@ jobs:
           clean: false
 
   ## Tests
-  unitTests:
+  unitTestsSuite:
     needs: assemble
     permissions:
       actions: read
@@ -392,7 +392,7 @@ jobs:
   unitTestsResult:
     name: unitTests
     runs-on: ubuntu-24.04
-    needs: [changes, unitTests]
+    needs: [changes, unitTestsSuite]
     if: always()
     steps:
       - run: |
@@ -400,16 +400,35 @@ jobs:
             echo "⏭️ Docs-only change; unitTests not required."
             exit 0
           fi
-          echo "unitTests result: ${{ needs.unitTests.result }}"
-          if [ "${{ needs.unitTests.result }}" != "success" ]; then
+          echo "unitTests result: ${{ needs.unitTestsSuite.result }}"
+          if [ "${{ needs.unitTestsSuite.result }}" != "success" ]; then
             echo "❌ One or more unitTests matrix jobs failed."
             exit 1
           fi
           echo "✅ All unitTests matrix jobs passed."
 
+  # Runs in its own job, isolated from collate-junit-reports: this org's action-allowlist
+  # policy is enforced per-job, so if capture-test-timings shared a job with anything that
+  # references a disallowed action, the whole job gets killed part-way through regardless
+  # of continue-on-error (verified: https://github.com/Consensys/teku/pull/11204).
+  unitTestsCaptureTimings:
+    runs-on: ubuntu-24.04
+    needs: [changes, unitTestsSuite]
+    if: always() && needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/capture-test-timings
+        continue-on-error: true
+        if: always()
+        with:
+          stage_key: unit
+
   unitTestsReport:
     runs-on: ubuntu-24.04
-    needs: [changes, unitTests]
+    needs: [changes, unitTestsSuite]
     if: always() && needs.changes.outputs.code == 'true'
     permissions:
       contents: read
@@ -423,7 +442,7 @@ jobs:
         with:
           stage_key: unit
 
-  integrationTests:
+  integrationTestsSuite:
     needs: assemble
     permissions:
       actions: read
@@ -442,7 +461,7 @@ jobs:
   integrationTestsResult:
     name: integrationTests
     runs-on: ubuntu-24.04
-    needs: [changes, integrationTests]
+    needs: [changes, integrationTestsSuite]
     if: always()
     steps:
       - run: |
@@ -450,16 +469,31 @@ jobs:
             echo "⏭️ Docs-only change; integrationTests not required."
             exit 0
           fi
-          echo "integrationTests result: ${{ needs.integrationTests.result }}"
-          if [ "${{ needs.integrationTests.result }}" != "success" ]; then
+          echo "integrationTests result: ${{ needs.integrationTestsSuite.result }}"
+          if [ "${{ needs.integrationTestsSuite.result }}" != "success" ]; then
             echo "❌ One or more integrationTests matrix jobs failed."
             exit 1
           fi
           echo "✅ All integrationTests matrix jobs passed."
 
+  integrationTestsCaptureTimings:
+    runs-on: ubuntu-24.04
+    needs: [changes, integrationTestsSuite]
+    if: always() && needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/capture-test-timings
+        continue-on-error: true
+        if: always()
+        with:
+          stage_key: integration
+
   integrationTestsReport:
     runs-on: ubuntu-24.04
-    needs: [changes, integrationTests]
+    needs: [changes, integrationTestsSuite]
     if: always() && needs.changes.outputs.code == 'true'
     permissions:
       contents: read
@@ -473,7 +507,7 @@ jobs:
         with:
           stage_key: integration
 
-  propertyTests:
+  propertyTestsSuite:
     needs: assemble
     permissions:
       actions: read
@@ -492,7 +526,7 @@ jobs:
   propertyTestsResult:
     name: propertyTests
     runs-on: ubuntu-24.04
-    needs: [changes, propertyTests]
+    needs: [changes, propertyTestsSuite]
     if: always()
     steps:
       - run: |
@@ -500,16 +534,31 @@ jobs:
             echo "⏭️ Docs-only change; propertyTests not required."
             exit 0
           fi
-          echo "propertyTests result: ${{ needs.propertyTests.result }}"
-          if [ "${{ needs.propertyTests.result }}" != "success" ]; then
+          echo "propertyTests result: ${{ needs.propertyTestsSuite.result }}"
+          if [ "${{ needs.propertyTestsSuite.result }}" != "success" ]; then
             echo "❌ One or more propertyTests matrix jobs failed."
             exit 1
           fi
           echo "✅ All propertyTests matrix jobs passed."
 
+  propertyTestsCaptureTimings:
+    runs-on: ubuntu-24.04
+    needs: [changes, propertyTestsSuite]
+    if: always() && needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/capture-test-timings
+        continue-on-error: true
+        if: always()
+        with:
+          stage_key: property
+
   propertyTestsReport:
     runs-on: ubuntu-24.04
-    needs: [changes, propertyTests]
+    needs: [changes, propertyTestsSuite]
     if: always() && needs.changes.outputs.code == 'true'
     permissions:
       contents: read
@@ -523,7 +572,7 @@ jobs:
         with:
           stage_key: property
 
-  acceptanceTests:
+  acceptanceTestsSuite:
     needs: assemble
     permissions:
       actions: read
@@ -536,13 +585,13 @@ jobs:
       gradle_task: acceptanceTest
       src_pattern: "*/src/acceptance-test/java/*"
       src_root: "src/acceptance-test/java"
-      runner: "ubuntu-latest-128"
+      runner: "gha-runner-scale-set-ubuntu-24-amd64-xxl"
       gradle_args: ${{ (inputs.gradle_log_level == 'info' && '--info') || (inputs.gradle_log_level == 'debug' && '--debug') || '' }}
 
   acceptanceTestsResult:
     name: acceptanceTests
     runs-on: ubuntu-24.04
-    needs: [changes, acceptanceTests]
+    needs: [changes, acceptanceTestsSuite]
     if: always()
     steps:
       - run: |
@@ -550,16 +599,31 @@ jobs:
             echo "⏭️ Docs-only change; acceptanceTests not required."
             exit 0
           fi
-          echo "acceptanceTests result: ${{ needs.acceptanceTests.result }}"
-          if [ "${{ needs.acceptanceTests.result }}" != "success" ]; then
+          echo "acceptanceTests result: ${{ needs.acceptanceTestsSuite.result }}"
+          if [ "${{ needs.acceptanceTestsSuite.result }}" != "success" ]; then
             echo "❌ One or more acceptanceTests matrix jobs failed."
             exit 1
           fi
           echo "✅ All acceptanceTests matrix jobs passed."
 
+  acceptanceTestsCaptureTimings:
+    runs-on: ubuntu-24.04
+    needs: [changes, acceptanceTestsSuite]
+    if: always() && needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/capture-test-timings
+        continue-on-error: true
+        if: always()
+        with:
+          stage_key: acceptance
+
   acceptanceTestsReport:
     runs-on: ubuntu-24.04
-    needs: [changes, acceptanceTests]
+    needs: [changes, acceptanceTestsSuite]
     if: always() && needs.changes.outputs.code == 'true'
     permissions:
       contents: read
@@ -575,7 +639,7 @@ jobs:
 
   referenceTestsPrep:
     needs: assemble
-    runs-on: ubuntu-latest-128
+    runs-on: gha-runner-scale-set-ubuntu-24-amd64-xxl
     outputs:
       cache-key: ${{ steps.ref-cache-key.outputs.key }}
     steps:
@@ -763,7 +827,7 @@ jobs:
 
   publishDockerJDK25:
     if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/')
-    needs: [assemble, unitTests, integrationTests, propertyTests, acceptanceTests, referenceTests]
+    needs: [assemble, unitTestsSuite, integrationTestsSuite, propertyTestsSuite, acceptanceTestsSuite, referenceTests]
     permissions:
       actions: read
       contents: read
@@ -777,7 +841,7 @@ jobs:
 
   publishDockerJDK26:
     if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/')
-    needs: [assemble, unitTests, integrationTests, propertyTests, acceptanceTests, referenceTests]
+    needs: [assemble, unitTestsSuite, integrationTestsSuite, propertyTestsSuite, acceptanceTestsSuite, referenceTests]
     permissions:
       actions: read
       contents: read
@@ -792,7 +856,7 @@ jobs:
   # Release Distribution
   publishRelease:
     if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/')
-    needs: [assemble, unitTests, integrationTests, propertyTests, acceptanceTests, referenceTests]
+    needs: [assemble, unitTestsSuite, integrationTestsSuite, propertyTestsSuite, acceptanceTestsSuite, referenceTests]
     permissions:
       actions: read
       contents: write
