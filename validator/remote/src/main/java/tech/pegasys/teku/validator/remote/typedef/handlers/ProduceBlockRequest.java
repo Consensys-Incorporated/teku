@@ -147,7 +147,7 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
             emptyMap(),
             headers,
             this.responseHandler)
-        .map(this::toMetaData);
+        .map(this::toMetaDataV3);
   }
 
   public Optional<BlockContainerAndMetaData> submitV4(
@@ -169,7 +169,7 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
             builderConfig,
             ApiSchemas.BUILDER_CONFIG_SCHEMA.getJsonTypeDefinition(),
             this.responseHandlerV4)
-        .map(this::toMetaData);
+        .map(this::toMetaDataV4);
   }
 
   private Map<String, String> buildQueryParamsV3(
@@ -208,7 +208,16 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
     return headers;
   }
 
-  private BlockContainerAndMetaData toMetaData(final ProduceBlockResponse response) {
+  private BlockContainerAndMetaData toMetaDataV3(final ProduceBlockResponse response) {
+    return BlockContainerAndMetaData.builder()
+        .blockContainer(response.data)
+        .specMilestone(response.specMilestone)
+        .executionPayloadValue(response.executionPayloadValue)
+        .consensusBlockValue(response.consensusBlockValue)
+        .build();
+  }
+
+  private BlockContainerAndMetaData toMetaDataV4(final ProduceBlockResponse response) {
     return BlockContainerAndMetaData.builder()
         .blockContainer(response.data)
         .specMilestone(response.specMilestone)
