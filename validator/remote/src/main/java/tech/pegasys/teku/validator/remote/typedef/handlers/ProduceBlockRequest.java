@@ -258,15 +258,14 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
       final DeserializableOneOfTypeDefinition<ProduceBlockResponse> jsonTypeDefinition) {
     try {
       final String responseContentType = response.header("Content-Type");
+      // only in v4
+      final Optional<String> builderUrl = Optional.ofNullable(response.header(HEADER_BUILDER_URL));
       if (responseContentType != null
           && MediaType.parse(responseContentType).is(MediaType.OCTET_STREAM)) {
         final UInt256 executionPayloadValue =
             parseUInt256Header(response, HEADER_EXECUTION_PAYLOAD_VALUE);
         final UInt256 consensusBlockValue =
             parseUInt256Header(response, HEADER_CONSENSUS_BLOCK_VALUE);
-        // only in v4
-        final Optional<String> builderUrl =
-            Optional.ofNullable(response.header(HEADER_BUILDER_URL));
         final BlockContainerSchema<BlockContainer> schema =
             Boolean.parseBoolean(response.header(discriminatorHeader)) ? trueSchema : falseSchema;
         return Optional.of(
@@ -276,11 +275,11 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
                 consensusBlockValue,
                 builderUrl));
       } else {
-        return Optional.of(
+        final ProduceBlockResponse produceBlockResponse =
             JsonUtil.parseBasedOnHeader(
-                response.header(discriminatorHeader),
-                response.body().string(),
-                jsonTypeDefinition));
+                response.header(discriminatorHeader), response.body().string(), jsonTypeDefinition);
+        produceBlockResponse.setBuilderUrl(builderUrl);
+        return Optional.of(produceBlockResponse);
       }
     } catch (final IOException ex) {
       LOG.error("Failed to parse response object creating block", ex);
@@ -374,7 +373,7 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
     private UInt256 executionPayloadValue;
     private UInt256 consensusBlockValue;
     private SpecMilestone specMilestone;
-    private Optional<String> builderUrl;
+    private Optional<String> builderUrl = Optional.empty();
 
     public ProduceBlockResponse() {}
 
@@ -435,6 +434,10 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
 
     public void setSpecMilestone(final SpecMilestone specMilestone) {
       this.specMilestone = specMilestone;
+    }
+
+    public void setBuilderUrl(final Optional<String> builderUrl) {
+      this.builderUrl = builderUrl;
     }
   }
 }
