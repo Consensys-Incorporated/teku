@@ -338,13 +338,16 @@ public class ValidatorApiHandlerIntegrationTest {
         .thenReturn(
             SafeFuture.completedFuture(InternalValidationResult.reject(rejectionDescription)));
 
+    final List<SignedProposerPreferences> signedProposerPreferences = List.of(accepted, rejected);
     final SafeFuture<List<SubmitDataError>> result =
-        handler.sendSignedProposerPreferences(List.of(accepted, rejected));
+        handler.sendSignedProposerPreferences(signedProposerPreferences);
 
     assertThatSafeFuture(result)
         .isCompletedWithValue(List.of(new SubmitDataError(ONE, rejectionDescription)));
     verify(proposerPreferencesManager).addLocal(accepted);
     verify(proposerPreferencesManager).addLocal(rejected);
+    verify(proposersDataManager)
+        .updatePreparedProposersFromProposerPreferences(signedProposerPreferences, UInt64.ZERO);
   }
 
   @TestTemplate
@@ -360,12 +363,16 @@ public class ValidatorApiHandlerIntegrationTest {
     when(proposerPreferencesManager.addLocal(savedForFuture))
         .thenReturn(SafeFuture.completedFuture(InternalValidationResult.SAVE_FOR_FUTURE));
 
+    final List<SignedProposerPreferences> signedProposerPreferences =
+        List.of(ignored, savedForFuture);
     final SafeFuture<List<SubmitDataError>> result =
-        handler.sendSignedProposerPreferences(List.of(ignored, savedForFuture));
+        handler.sendSignedProposerPreferences(signedProposerPreferences);
 
     assertThatSafeFuture(result).isCompletedWithValue(List.of());
     verify(proposerPreferencesManager).addLocal(ignored);
     verify(proposerPreferencesManager).addLocal(savedForFuture);
+    verify(proposersDataManager)
+        .updatePreparedProposersFromProposerPreferences(signedProposerPreferences, UInt64.ZERO);
   }
 
   private SafeFuture<BlockImportAndBroadcastValidationResults> prepareBlockImportResult(

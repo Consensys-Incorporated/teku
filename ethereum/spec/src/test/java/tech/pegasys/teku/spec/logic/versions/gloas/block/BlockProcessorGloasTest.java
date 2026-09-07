@@ -224,6 +224,37 @@ class BlockProcessorGloasTest {
   }
 
   @Test
+  void processExecutionPayloadBid_shouldRejectWhenBlockHashEqualsParentBlockHash() {
+    final UInt64 currentSlot = UInt64.valueOf(8);
+    final MutableBeaconStateGloas mutableState =
+        BeaconStateGloas.required(dataStructureUtil.randomBeaconState(currentSlot))
+            .createWritableCopy();
+    final Bytes32 parentBlockHash = mutableState.getLatestBlockHash();
+    final ExecutionPayloadBid bid =
+        schemaDefinitions
+            .getExecutionPayloadBidSchema()
+            .create(
+                parentBlockHash,
+                spec.getBlockRootAtSlot(mutableState, mutableState.getSlot().minusMinZero(1)),
+                parentBlockHash,
+                spec.getRandaoMix(mutableState, spec.getCurrentEpoch(mutableState)),
+                dataStructureUtil.randomBytes20(),
+                UInt64.ZERO,
+                SpecConfigGloas.BUILDER_INDEX_SELF_BUILD,
+                mutableState.getSlot(),
+                UInt64.ZERO,
+                UInt64.ZERO,
+                schemaDefinitions.getExecutionPayloadBidSchema().getBlobKzgCommitmentsSchema().of(),
+                dataStructureUtil.randomBytes32());
+    final SignedExecutionPayloadBid signedBid =
+        schemaDefinitions.getSignedExecutionPayloadBidSchema().create(bid, BLSSignature.infinity());
+
+    assertThatThrownBy(() -> blockProcessor().processExecutionPayloadBid(mutableState, signedBid))
+        .isInstanceOf(BlockProcessingException.class)
+        .hasMessage("Bid's block hash is the same as the parent block hash");
+  }
+
+  @Test
   void processAttestation_shouldUseExplicitParentSlotForRewards() {
     final MismatchedParentFixture fixture = mismatchedParentFixture();
 

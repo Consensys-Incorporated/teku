@@ -37,7 +37,6 @@ import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
-import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
@@ -95,7 +94,7 @@ public class ExecutionPayloadGossipValidatorTest {
     when(gossipValidationHelper.isBeforeFinalizedSlot(slot)).thenReturn(false);
     when(gossipValidationHelper.retrieveBlockByRoot(blockRoot))
         .thenReturn(SafeFuture.completedFuture(Optional.of(beaconBlock)));
-    when(gossipValidationHelper.getStateAtSlotAndBlockRoot(any(SlotAndBlockRoot.class)))
+    when(gossipValidationHelper.getStateAtBlockRoot(any(Bytes32.class)))
         .thenReturn(SafeFuture.completedFuture(Optional.of(postState)));
     final SpecVersion specVersion = mock(SpecVersion.class);
     final MiscHelpers miscHelpers = mock(MiscHelpers.class);
@@ -242,7 +241,7 @@ public class ExecutionPayloadGossipValidatorTest {
 
   @TestTemplate
   void shouldSaveForFutureIfStateIsUnavailable() {
-    when(gossipValidationHelper.getStateAtSlotAndBlockRoot(any(SlotAndBlockRoot.class)))
+    when(gossipValidationHelper.getStateAtBlockRoot(any(Bytes32.class)))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
     assertThatSafeFuture(validator.validate(signedEnvelope)).isCompletedWithValue(SAVE_FOR_FUTURE);
   }

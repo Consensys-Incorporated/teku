@@ -32,7 +32,6 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.collections.LimitedSet;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
-import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
@@ -143,8 +142,11 @@ public class PayloadAttestationMessageGossipValidator {
               data.getBeaconBlockRoot(), blockSlot, data.getSlot()));
     }
 
+    // The block has just been checked to be at data.slot, so the state to validate against is its
+    // own post state. Looking it up by block root avoids the checkpoint state task queue, whose
+    // lock every message of the payload committee would otherwise contend for.
     return gossipValidationHelper
-        .getStateAtSlotAndBlockRoot(new SlotAndBlockRoot(data.getSlot(), data.getBeaconBlockRoot()))
+        .getStateAtBlockRoot(data.getBeaconBlockRoot())
         .thenApply(
             maybeState -> {
               if (maybeState.isEmpty()) {

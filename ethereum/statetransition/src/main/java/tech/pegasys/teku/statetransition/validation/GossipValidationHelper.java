@@ -164,9 +164,15 @@ public class GossipValidationHelper {
         stateRetrievalData.slot());
   }
 
-  public SafeFuture<Optional<BeaconState>> getStateAtSlotAndBlockRoot(
-      final SlotAndBlockRoot slotAndBlockRoot) {
-    return recentChainData.retrieveBlockState(slotAndBlockRoot);
+  /**
+   * Retrieve the post state of the block, without advancing it to any later slot. Callers that have
+   * already established that the state they need is at the block's own slot should use this rather
+   * than looking the state up by slot and block root: the slot based lookup goes through the
+   * checkpoint state task queue, which would only skip the slot processing after having taken that
+   * queue's lock, searched the cache for an earlier state to rebase on and scheduled a task.
+   */
+  public SafeFuture<Optional<BeaconState>> getStateAtBlockRoot(final Bytes32 blockRoot) {
+    return recentChainData.retrieveBlockState(blockRoot);
   }
 
   public boolean currentFinalizedCheckpointIsAncestorOfBlock(

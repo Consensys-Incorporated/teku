@@ -74,7 +74,7 @@ public class LibP2PParamsFactory {
   }
 
   // max_compressed_len from p2p-interface spec
-  private static int maxCompressedLength(final int length) {
+  public static int maxCompressedLength(final int length) {
     return length + 32 + length / 6;
   }
 
