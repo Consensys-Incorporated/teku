@@ -70,14 +70,15 @@ public class FastConfirmationTracker {
   private final Counter restartsCounter;
 
   /**
-   * Where {@code confirmed_root} landed on the most recent slot that produced an outcome, so {@link
-   * #fallbacksCounter} and {@link #restartsCounter} count episodes rather than slots: both
-   * conditions hold for many consecutive slots once entered. Keyed on the kind of outcome, not on
-   * the roots, so a fallback that persists while finalization advances stays one episode. Slots
-   * that produce no outcome (stale-head skip, abandoned computation) leave it untouched, so they
-   * neither open nor close an episode. Reset to {@code FALLBACK} on (re)initialization: the store
-   * is seeded from finality, and that warm-up is a seeded state rather than a fallback away from a
-   * real confirmation (see {@link #warmedUp}).
+   * Where {@link FastConfirmationStore#confirmedRoot() confirmed_root} landed on the most recent
+   * slot that produced an outcome, so {@link #fallbacksCounter} and {@link #restartsCounter} count
+   * episodes rather than slots: both conditions hold for many consecutive slots once entered. Keyed
+   * on the kind of outcome, not on the roots, so a fallback that persists while finalization
+   * advances stays one episode. Slots that produce no outcome (stale-head skip, abandoned
+   * computation) leave it untouched, so they neither open nor close an episode. Reset to {@link
+   * ConfirmationOutcome#FALLBACK} on (re)initialization: the store is seeded from finality, and
+   * that warm-up is a seeded state rather than a fallback away from a real confirmation (see {@link
+   * #warmedUp}).
    */
   private final AtomicReference<ConfirmationOutcome> lastConfirmationOutcome =
       new AtomicReference<>(ConfirmationOutcome.fallback());
