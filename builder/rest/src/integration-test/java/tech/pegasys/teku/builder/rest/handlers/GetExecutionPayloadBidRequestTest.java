@@ -48,6 +48,7 @@ class GetExecutionPayloadBidRequestTest extends AbstractBuilderRequestTestBase {
   private Bytes32 parentHash;
   private Bytes32 parentRoot;
   private BLSPublicKey proposerPubkey;
+  private SignedBuilderRequestAuth auth;
 
   @BeforeEach
   void setupRequest() {
@@ -56,6 +57,7 @@ class GetExecutionPayloadBidRequestTest extends AbstractBuilderRequestTestBase {
     parentHash = dataStructureUtil.randomBytes32();
     parentRoot = dataStructureUtil.randomBytes32();
     proposerPubkey = dataStructureUtil.randomPublicKey();
+    auth = dataStructureUtil.randomSignedBuilderRequestAuth();
   }
 
   @TestTemplate
@@ -69,33 +71,22 @@ class GetExecutionPayloadBidRequestTest extends AbstractBuilderRequestTestBase {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_OK).setBody(body));
 
     final Optional<SignedExecutionPayloadBid> result =
-        request.submit(slot, parentHash, parentRoot, proposerPubkey, Optional.empty());
+        request.submit(slot, parentHash, parentRoot, proposerPubkey, auth);
 
     assertThat(result).isPresent();
     assertThat(result.get()).isEqualTo(expected);
-  }
-
-  @TestTemplate
-  void shouldReturnEmptyOn204() {
-    mockWebServer.enqueue(new MockResponse().setResponseCode(SC_NO_CONTENT));
-
-    final Optional<SignedExecutionPayloadBid> result =
-        request.submit(slot, parentHash, parentRoot, proposerPubkey, Optional.empty());
-
-    assertThat(result).isEmpty();
-  }
-
-  @TestTemplate
-  void shouldIncludeAuthInBodyWhenPresent() throws Exception {
-    final SignedBuilderRequestAuth auth = dataStructureUtil.randomSignedBuilderRequestAuth();
-    mockWebServer.enqueue(new MockResponse().setResponseCode(SC_NO_CONTENT));
-
-    request.submit(slot, parentHash, parentRoot, proposerPubkey, Optional.of(auth));
 
     final RecordedRequest recorded = mockWebServer.takeRequest();
+    // verify POST
     assertThat(recorded.getMethod()).isEqualTo("POST");
     assertThat(recorded.getBody().size()).isGreaterThan(0);
-
+    // verify path parameters
+    final String path = recorded.getRequestUrl().encodedPath();
+    assertThat(path).contains(slot.toString());
+    assertThat(path).contains(parentHash.toHexString());
+    assertThat(path).contains(parentRoot.toHexString());
+    assertThat(path).contains(proposerPubkey.toString());
+    // verify headers
     final String expectedMilestone = spec.atSlot(slot).getMilestone().lowerCaseName();
     assertThat(recorded.getHeader("Eth-Consensus-Version")).isEqualTo(expectedMilestone);
     assertThat(recorded.getHeader("Date-Milliseconds")).isNotBlank();
@@ -103,37 +94,20 @@ class GetExecutionPayloadBidRequestTest extends AbstractBuilderRequestTestBase {
   }
 
   @TestTemplate
-  void shouldPostEmptyBodyWithNoContentTypeWhenNoAuth() throws Exception {
+  void shouldReturnEmptyOn204() {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_NO_CONTENT));
 
-    request.submit(slot, parentHash, parentRoot, proposerPubkey, Optional.empty());
+    final Optional<SignedExecutionPayloadBid> result =
+        request.submit(slot, parentHash, parentRoot, proposerPubkey, auth);
 
-    final RecordedRequest recorded = mockWebServer.takeRequest();
-    assertThat(recorded.getMethod()).isEqualTo("POST");
-    assertThat(recorded.getBody().size()).isEqualTo(0);
-    assertThat(recorded.getHeader("Content-Type")).isNull();
-  }
-
-  @TestTemplate
-  void shouldVerifyUrlContainsPathParams() throws Exception {
-    mockWebServer.enqueue(new MockResponse().setResponseCode(SC_NO_CONTENT));
-
-    request.submit(slot, parentHash, parentRoot, proposerPubkey, Optional.empty());
-
-    final RecordedRequest recorded = mockWebServer.takeRequest();
-    final String path = recorded.getRequestUrl().encodedPath();
-    assertThat(path).contains(slot.toString());
-    assertThat(path).contains(parentHash.toHexString());
-    assertThat(path).contains(parentRoot.toHexString());
-    assertThat(path).contains(proposerPubkey.toString());
+    assertThat(result).isEmpty();
   }
 
   @TestTemplate
   void shouldThrowBuilderClientExceptionOn400() {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_BAD_REQUEST));
 
-    assertThatThrownBy(
-            () -> request.submit(slot, parentHash, parentRoot, proposerPubkey, Optional.empty()))
+    assertThatThrownBy(() -> request.submit(slot, parentHash, parentRoot, proposerPubkey, auth))
         .isInstanceOf(BuilderClientException.class)
         .hasMessageContaining("Bad request");
   }
@@ -142,8 +116,7 @@ class GetExecutionPayloadBidRequestTest extends AbstractBuilderRequestTestBase {
   void shouldThrowBuilderClientExceptionOn401() {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_UNAUTHORIZED));
 
-    assertThatThrownBy(
-            () -> request.submit(slot, parentHash, parentRoot, proposerPubkey, Optional.empty()))
+    assertThatThrownBy(() -> request.submit(slot, parentHash, parentRoot, proposerPubkey, auth))
         .isInstanceOf(BuilderClientException.class)
         .hasMessageContaining("Unauthorized");
   }
@@ -152,8 +125,7 @@ class GetExecutionPayloadBidRequestTest extends AbstractBuilderRequestTestBase {
   void shouldThrowBuilderClientExceptionOn500() {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_INTERNAL_SERVER_ERROR));
 
-    assertThatThrownBy(
-            () -> request.submit(slot, parentHash, parentRoot, proposerPubkey, Optional.empty()))
+    assertThatThrownBy(() -> request.submit(slot, parentHash, parentRoot, proposerPubkey, auth))
         .isInstanceOf(BuilderClientException.class);
   }
 }
