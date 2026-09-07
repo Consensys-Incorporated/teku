@@ -175,6 +175,45 @@ public class DefaultExecutionPayloadBidManagerTest {
   }
 
   @Test
+  public void fallsBackToLocalSelfBuiltBidWhenRemoteBidFutureFails() {
+    final BeaconStateGloas state = BeaconStateGloas.required(dataStructureUtil.randomBeaconState());
+    final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 parentBlockHash = dataStructureUtil.randomBytes32();
+
+    final SignedExecutionPayloadBid localBid =
+        createBid(state.getSlot(), parentRoot, parentBlockHash, UInt64.valueOf(100));
+    final BidForBlock localBidForBlock = new BidForBlock(localBid, UInt256.ONE, Optional.empty());
+    final SignedExecutionPayloadBid remoteBid =
+        createBid(state.getSlot(), parentRoot, parentBlockHash, UInt64.valueOf(100));
+    addAcceptedBid(remoteBid);
+
+    when(bidSelector.selectBestRemoteBid(
+            eq(Set.of(toRemoteBid(remoteBid))),
+            eq(Collections.emptyList()),
+            eq(parentRoot),
+            eq(parentBlockHash),
+            any(),
+            any()))
+        .thenThrow(new IllegalStateException("oopsy, bad builder"));
+    when(bidSelector.selectBestBidForBlock(
+            argThat(Optional::isPresent), eq(Optional.empty()), any(), eq(state.getSlot())))
+        .thenReturn(localBidForBlock);
+
+    final BidForBlock result =
+        SafeFutureAssert.safeJoin(
+            executionPayloadBidManager.getBidForBlock(
+                parentRoot,
+                parentBlockHash,
+                state,
+                SafeFuture.completedFuture(
+                    randomGetPayloadResponse(state.getSlot(), parentBlockHash)),
+                BuilderConfig.NO_OP,
+                blockProductionPerformance));
+
+    assertThat(result).isEqualTo(localBidForBlock);
+  }
+
+  @Test
   public void retrievedBuilderBidsArePassedToBidSelector() {
     final UInt64 slot = UInt64.valueOf(10);
     final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
