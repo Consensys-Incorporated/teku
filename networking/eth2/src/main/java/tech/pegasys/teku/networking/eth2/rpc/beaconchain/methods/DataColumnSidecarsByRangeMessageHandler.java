@@ -28,6 +28,8 @@ import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
@@ -58,6 +60,8 @@ import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 public class DataColumnSidecarsByRangeMessageHandler
     extends PeerRequiredLocalMessageHandler<
         DataColumnSidecarsByRangeRequestMessage, DataColumnSidecar> {
+
+  private static final Logger LOG = LogManager.getLogger();
 
   private final Spec spec;
   private final CombinedChainDataClient combinedChainDataClient;
@@ -399,11 +403,27 @@ public class DataColumnSidecarsByRangeMessageHandler
           .thenCompose(
               maybeBlock -> {
                 if (maybeBlock.isEmpty()) {
+                  LOG.debug(
+                      "Cannot reconstruct pruned data column sidecar slot {} index {}: "
+                          + "block not available",
+                      columnSlotAndIdentifier.slot(),
+                      columnSlotAndIdentifier.columnIndex());
                   return SafeFuture.completedFuture(Optional.empty());
                 }
 
-                return dataColumnSidecarArchiveReconstructor.reconstructDataColumnSidecar(
-                    maybeBlock.get(), columnSlotAndIdentifier.columnIndex(), messageId);
+                return dataColumnSidecarArchiveReconstructor
+                    .reconstructDataColumnSidecar(
+                        maybeBlock.get(), columnSlotAndIdentifier.columnIndex(), messageId)
+                    .thenPeek(
+                        maybeSidecar ->
+                            maybeSidecar.ifPresent(
+                                sidecar ->
+                                    LOG.debug(
+                                        "Serving reconstructed data column sidecar slot {} index {} "
+                                            + "blockRoot {} for by-range request",
+                                        sidecar.getSlot(),
+                                        sidecar.getIndex(),
+                                        columnSlotAndIdentifier.blockRoot())));
               });
     }
 
