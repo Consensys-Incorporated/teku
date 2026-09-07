@@ -120,14 +120,16 @@ public class ExecutionPayloadBidSelectorTest {
     final UInt64 slot = UInt64.valueOf(10);
     final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
     final Bytes32 parentBlockHash = dataStructureUtil.randomBytes32();
-    final SignedExecutionPayloadBid bid =
+    final SignedExecutionPayloadBid p2pBid =
         createBid(slot, parentRoot, parentBlockHash, UInt64.valueOf(100));
+    final SignedExecutionPayloadBid builderBid =
+        createBid(slot, parentRoot, parentBlockHash, UInt64.valueOf(42));
     when(circuitBreaker.isBuilderAllowed(any(), any())).thenReturn(false);
 
     assertThat(
             selector.selectBestRemoteBid(
-                Set.of(toRemoteBid(bid)),
-                List.of(),
+                Set.of(toRemoteBid(p2pBid)),
+                List.of(toRemoteBid(builderBid)),
                 parentRoot,
                 parentBlockHash,
                 state,

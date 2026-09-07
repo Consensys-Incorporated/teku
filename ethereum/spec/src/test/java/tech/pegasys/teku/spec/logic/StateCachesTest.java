@@ -51,6 +51,8 @@ public class StateCachesTest {
   protected ChainBuilder chainBuilder = storageSystem.chainBuilder();
   protected ChainUpdater chainUpdater = storageSystem.chainUpdater();
 
+  private final String builderUrl = "https://foobar.com";
+
   private BeaconState stateWithCaches;
   private SignedBlockAndState bestBlock;
 
@@ -73,7 +75,7 @@ public class StateCachesTest {
     final SlotCaches slotCaches = BeaconStateCache.getSlotCaches(stateWithCaches);
     slotCaches.increaseBlockProposerRewards(UInt64.valueOf(84));
     slotCaches.setBlockExecutionValue(UInt256.valueOf(42));
-    slotCaches.setBuilderUrl("https://www.foobar.com");
+    slotCaches.setBuilderUrl(builderUrl);
 
     final BeaconState stateAtSlot3 = spec.processSlots(stateWithCaches, UInt64.valueOf(3));
 
@@ -102,8 +104,9 @@ public class StateCachesTest {
     assertThat(BeaconStateCache.getSlotCaches(stateAtSlot3).getBlockProposerRewards())
         .isEqualByComparingTo(UInt64.ZERO);
 
-    // execution value should not be affected by block processing
+    // execution value and builder url should not be affected by block processing
     BeaconStateCache.getSlotCaches(stateAtSlot3).setBlockExecutionValue(UInt256.valueOf(42));
+    BeaconStateCache.getSlotCaches(stateAtSlot3).setBuilderUrl(builderUrl);
 
     final SignedBeaconBlock blockAtSlot3 = createWorthyBlock(blockRewardsSource);
 
@@ -128,6 +131,8 @@ public class StateCachesTest {
     // execution value should not be affected by block processing
     assertThat(BeaconStateCache.getSlotCaches(stateAtSlot3WithBlock).getBlockExecutionValue())
         .isEqualByComparingTo(UInt256.valueOf(42));
+    assertThat(BeaconStateCache.getSlotCaches(stateAtSlot3WithBlock).getBuilderUrl())
+        .hasValue(builderUrl);
   }
 
   private SignedBeaconBlock createWorthyBlock(final BlockRewardsSource blockRewardsSource) {
