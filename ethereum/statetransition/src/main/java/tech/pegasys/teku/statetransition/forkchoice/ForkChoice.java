@@ -772,8 +772,14 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
         computeEarliestBlobSidecarsSlot(
             recentChainData.getStore(), dataAndValidationResult, block.getMessage());
 
-    final Optional<ForkChoiceNode> preImportHead =
-        recentChainData.getChainHead().map(ChainHead::getForkChoiceNode);
+    // Per spec's on_block, "head" here must be get_head(store) computed fresh, immediately
+    // before this block is added to the store. recentChainData.getChainHead() is only a cache
+    // that gets refreshed by explicit updateHead()/processHead() calls, so it can lag behind the
+    // ForkChoiceStrategy's live vote/weight state whenever votes are applied through a path that
+    // doesn't refresh it (e.g. onAttestation/onAttesterSlashing, or the reference test harness
+    // applying skipped old-epoch attestation weights directly). Recomputing the head here avoids
+    // using a stale node when deciding whether to set the proposer boost root.
+    final ForkChoiceNode preImportHead = findNewChainHead(forkChoiceStrategy).node();
 
     forkChoiceUtil.applyBlockToStore(
         transaction,
@@ -784,12 +790,7 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
         earliestBlobSidecarsSlot);
 
     final boolean shouldUpdateProposerBoostRoot =
-        preImportHead
-            .filter(
-                forkChoiceNode ->
-                    shouldUpdateProposerBoostRoot(
-                        block, forkChoiceNode, forkChoiceStrategy, transaction))
-            .isPresent();
+        shouldUpdateProposerBoostRoot(block, preImportHead, forkChoiceStrategy, transaction);
     if (shouldUpdateProposerBoostRoot) {
       transaction.setProposerBoostRoot(block.getRoot());
     }
