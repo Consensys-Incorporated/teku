@@ -151,12 +151,6 @@ public abstract class AbstractDutyScheduler implements ValidatorTimingChannel {
     return !signingEpoch.isGreaterThan(epoch.plus(lookAheadEpochs + 1));
   }
 
-  @Override
-  public void onBlockProductionDue(final UInt64 slot) {}
-
-  @Override
-  public void onAttestationCreationDue(final UInt64 slot) {}
-
   protected void onProductionDue(final UInt64 slot) {
     // Check slot being null for the edge case of genesis slot (i.e. slot 0)
     if (lastProductionSlot != null && slot.compareTo(lastProductionSlot) <= 0) {
