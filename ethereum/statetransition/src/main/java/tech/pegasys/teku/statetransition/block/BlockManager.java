@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.statetransition.block;
 
+import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
+
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -48,7 +50,6 @@ import tech.pegasys.teku.statetransition.util.PendingBlockPool;
 import tech.pegasys.teku.statetransition.validation.BlockBroadcastValidator;
 import tech.pegasys.teku.statetransition.validation.BlockValidator;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
-import tech.pegasys.teku.statetransition.validation.ValidationResultCode.ValidationResultSubCode;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
 public class BlockManager extends Service
@@ -256,19 +257,22 @@ public class BlockManager extends Service
   }
 
   private void processFutureBlock(final QueuedFutureBlock futureBlock) {
-    // This future-block retry path handles a block that gossip accepts but import still defers.
+    // Future-block retries need to handle the exact sequence below.
     //
     // 1. Gossip validation may accept a near-future block because of clock tolerance.
     // 2. Import can still return BLOCK_IS_FROM_FUTURE, so we queue it for later.
-    // 3. When the slot arrives, gossip revalidation may return IGNORE_ALREADY_SEEN because the
-    //    block was already marked as seen.
-    // 4. Retry the import without gossip validation so the block is not lost.
+    // 3. When the slot arrives, retry gossip may return IGNORE_ALREADY_SEEN.
+    // 4. In that case, retry the import without gossip validation so the block is not lost.
+    // 5. Retry gossip may also return IGNORE_EQUIVOCATION_DETECTED.
+    // 6. In that case, drop the block listeners and stop.
     if (futureBlock.needsGossipValidation()) {
       validateAndImportBlock(futureBlock.block(), Optional.empty())
           .thenAccept(
               result -> {
                 if (result.isIgnoreAlreadySeen()) {
                   importBlockIgnoringResult(futureBlock.block());
+                } else if (result.isIgnoreEquivocationDetected()) {
+                  blockEventsListener.removeAllForBlock(futureBlock.block().getSlotAndBlockRoot());
                 }
               })
           .finishError(LOG);
