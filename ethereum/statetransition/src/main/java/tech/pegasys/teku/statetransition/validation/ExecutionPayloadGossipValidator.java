@@ -354,10 +354,16 @@ public class ExecutionPayloadGossipValidator {
             count, description, limit));
   }
 
+  /**
+   * The envelope's slot has already been checked to equal the slot of its beacon block, so the
+   * state to validate against is the block's own post state. It is looked up by block root rather
+   * than by slot and block root to keep the checkpoint state task queue off the path a payload has
+   * to travel before it can be propagated.
+   */
   private SafeFuture<InternalValidationResult> performWithStateValidation(
       final SignedExecutionPayloadEnvelope envelope) {
     return gossipValidationHelper
-        .getStateAtSlotAndBlockRoot(envelope.getSlotAndBlockRoot())
+        .getStateAtBlockRoot(envelope.getBeaconBlockRoot())
         .thenApply(
             maybeState -> {
               if (maybeState.isEmpty()) {

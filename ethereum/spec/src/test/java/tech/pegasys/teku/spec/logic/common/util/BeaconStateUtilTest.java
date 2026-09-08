@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static tech.pegasys.teku.spec.config.SpecConfig.GENESIS_SLOT;
 
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -25,6 +26,7 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.constants.ValidatorConstants;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
+import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.state.BeaconStateTestBuilder;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.helpers.StateTooOldException;
@@ -40,9 +42,35 @@ public class BeaconStateUtilTest {
 
   @Test
   void getPreviousDutyDependentRoot_genesisStateReturnsFinalizedCheckpointRoot() {
-    final BeaconState state = dataStructureUtil.randomBeaconState(GENESIS_SLOT);
+    final BeaconState state = genesisState(spec, dataStructureUtil);
     assertThat(beaconStateUtil.getPreviousDutyDependentRoot(state))
         .isEqualTo(BeaconBlock.fromGenesisState(spec, state).getRoot());
+  }
+
+  @Test
+  void getCurrentDutyDependentRoot_genesisStateWithForkScheduledAfterGenesis() {
+    // Gloas activates at epoch 1, so the genesis state is a Fulu state while the duties for
+    // epoch 1 are computed by the Gloas milestone's BeaconStateUtil
+    final Spec forkSpec = TestSpecFactory.createMinimalWithGloasForkEpoch(UInt64.ONE);
+    final BeaconState state = genesisState(forkSpec, new DataStructureUtil(forkSpec));
+    final BeaconStateUtil forkBeaconStateUtil = forkSpec.atEpoch(UInt64.ONE).getBeaconStateUtil();
+    assertThat(forkBeaconStateUtil.getCurrentDutyDependentRoot(state))
+        .isEqualTo(BeaconBlock.fromGenesisState(forkSpec, state).getRoot());
+  }
+
+  /** A genesis-slot state whose latest block header carries the genesis block body root */
+  private static BeaconState genesisState(final Spec spec, final DataStructureUtil util) {
+    final BeaconState state = util.randomBeaconState(GENESIS_SLOT);
+    final Bytes32 genesisBodyRoot =
+        spec.getGenesisSchemaDefinitions()
+            .getBeaconBlockBodySchema()
+            .createGenesisBody(state)
+            .hashTreeRoot();
+    return state.updated(
+        mutableState ->
+            mutableState.setLatestBlockHeader(
+                new BeaconBlockHeader(
+                    GENESIS_SLOT, UInt64.ZERO, Bytes32.ZERO, Bytes32.ZERO, genesisBodyRoot)));
   }
 
   @Test

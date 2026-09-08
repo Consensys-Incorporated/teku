@@ -13,14 +13,18 @@
 
 package tech.pegasys.teku.statetransition.execution;
 
+import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
+import org.apache.tuweni.units.bigints.UInt256;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionPerformance;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.execution.GetPayloadResponse;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.statetransition.OperationAddedSubscriber;
+import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidManager.BidForBlock;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 
 public interface ExecutionPayloadBidManager {
@@ -44,7 +48,7 @@ public interface ExecutionPayloadBidManager {
             final OperationAddedSubscriber<SignedExecutionPayloadBid> subscriber) {}
 
         @Override
-        public SafeFuture<SignedExecutionPayloadBid> getBidForBlock(
+        public SafeFuture<BidForBlock> getBidForBlock(
             final Bytes32 parentRoot,
             final Bytes32 parentBlockHash,
             final BeaconState state,
@@ -60,11 +64,27 @@ public interface ExecutionPayloadBidManager {
 
   void subscribeOperationAdded(OperationAddedSubscriber<SignedExecutionPayloadBid> subscriber);
 
-  SafeFuture<SignedExecutionPayloadBid> getBidForBlock(
+  SafeFuture<BidForBlock> getBidForBlock(
       Bytes32 parentRoot,
       Bytes32 parentBlockHash,
       BeaconState state,
       SafeFuture<GetPayloadResponse> getPayloadResponseFuture,
       BuilderConfig builderConfig,
       BlockProductionPerformance blockProductionPerformance);
+
+  record LocalBid(
+      SignedExecutionPayloadBid bid, UInt256 valueInWei, boolean shouldOverrideBuilder) {}
+
+  // can represent both P2P bids and Builder API bids
+  record RemoteBid(SignedExecutionPayloadBid bid, UInt64 valueInGwei, Optional<String> builderUrl) {
+
+    public UInt64 builderIndex() {
+      return bid.getMessage().getBuilderIndex();
+    }
+  }
+
+  // The best bid determined for the block proposal after evaluating local bids, P2P bids, and
+  // Builder API bids
+  record BidForBlock(
+      SignedExecutionPayloadBid bid, UInt256 valueInWei, Optional<String> builderUrl) {}
 }
