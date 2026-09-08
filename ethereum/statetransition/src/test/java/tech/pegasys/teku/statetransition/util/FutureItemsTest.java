@@ -39,7 +39,18 @@ public class FutureItemsTest {
     final UInt64 itemSlot = currentSlot.plus(FutureItems.DEFAULT_FUTURE_SLOT_TOLERANCE);
     final Item item = new Item(itemSlot);
 
-    futureItems.add(item);
+    assertThat(futureItems.add(item)).isTrue();
+    assertThat(futureItems.size()).isEqualTo(1);
+    assertThat(futureItems.contains(item)).isTrue();
+  }
+
+  @Test
+  public void add_duplicate_isStillAccepted() {
+    final UInt64 itemSlot = currentSlot.plus(FutureItems.DEFAULT_FUTURE_SLOT_TOLERANCE);
+    final Item item = new Item(itemSlot);
+
+    assertThat(futureItems.add(item)).isTrue();
+    assertThat(futureItems.add(item)).isTrue();
     assertThat(futureItems.size()).isEqualTo(1);
     assertThat(futureItems.contains(item)).isTrue();
   }
@@ -50,8 +61,8 @@ public class FutureItemsTest {
     final Item itemA = new Item(itemSlot);
     final Item itemB = new Item(itemSlot.plus(10));
 
-    futureItems.add(itemA);
-    futureItems.add(itemB);
+    assertThat(futureItems.add(itemA)).isFalse();
+    assertThat(futureItems.add(itemB)).isFalse();
     assertThat(futureItems.size()).isEqualTo(0);
     assertThat(futureItems.contains(itemA)).isFalse();
     assertThat(futureItems.contains(itemB)).isFalse();
@@ -62,7 +73,7 @@ public class FutureItemsTest {
     final UInt64 itemSlot = currentSlot.plus(FutureItems.DEFAULT_FUTURE_SLOT_TOLERANCE);
     final Item item = new Item(itemSlot);
 
-    futureItems.add(item);
+    assertThat(futureItems.add(item)).isTrue();
 
     final UInt64 priorSlot = item.getSlot().minus(UInt64.ONE);
     final List<Item> pruned = futureItems.prune(priorSlot);
@@ -77,7 +88,7 @@ public class FutureItemsTest {
     final UInt64 itemSlot = currentSlot.plus(FutureItems.DEFAULT_FUTURE_SLOT_TOLERANCE);
     final Item item = new Item(itemSlot);
 
-    futureItems.add(item);
+    assertThat(futureItems.add(item)).isTrue();
 
     final List<Item> pruned = futureItems.prune(item.getSlot());
     assertThat(pruned).containsExactly(item);
@@ -90,7 +101,7 @@ public class FutureItemsTest {
     final UInt64 itemSlot = currentSlot.plus(FutureItems.DEFAULT_FUTURE_SLOT_TOLERANCE);
     final Item item = new Item(itemSlot);
 
-    futureItems.add(item);
+    assertThat(futureItems.add(item)).isTrue();
     verify(gauge).set(1L, "items");
 
     final UInt64 pruneSlot = item.getSlot().plus(UInt64.ONE);
@@ -104,7 +115,7 @@ public class FutureItemsTest {
     final UInt64 itemSlot = currentSlot.plus(FutureItems.DEFAULT_FUTURE_SLOT_TOLERANCE);
     final Item item = new Item(itemSlot);
 
-    futureItems.add(item);
+    assertThat(futureItems.add(item)).isTrue();
 
     final List<Item> pruned = futureItems.prune(item.getSlot().plus(UInt64.ONE));
     assertThat(pruned).containsExactly(item);

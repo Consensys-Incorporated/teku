@@ -45,6 +45,7 @@ import static tech.pegasys.teku.statetransition.block.BlockImportPerformance.PRO
 import static tech.pegasys.teku.statetransition.block.BlockImportPerformance.TRANSACTION_COMMITTED_EVENT_LABEL;
 import static tech.pegasys.teku.statetransition.block.BlockImportPerformance.TRANSACTION_PREPARED_EVENT_LABEL;
 import static tech.pegasys.teku.statetransition.validation.BlockBroadcastValidator.BroadcastValidationResult.SUCCESS;
+import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.ValidationResultSubCode.IGNORE_EQUIVOCATION_DETECTED;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -559,6 +560,34 @@ public class BlockManagerTest {
         .thenReturn(SafeFuture.completedFuture(InternalValidationResult.SAVE_FOR_FUTURE))
         .thenReturn(
             SafeFuture.completedFuture(InternalValidationResult.reject("retry validation failed")));
+
+    assertThatSafeFuture(blockManager.validateAndImportBlock(futureBlock, Optional.empty()))
+        .isCompletedWithValue(InternalValidationResult.SAVE_FOR_FUTURE);
+    Waiter.waitFor(() -> assertThat(futureBlocks.size()).isEqualTo(1));
+    assertThat(futureBlocks.contains(futureBlock)).isTrue();
+    assertThat(invalidBlockRoots).isEmpty();
+
+    incrementSlot();
+
+    Waiter.waitFor(() -> verify(blockValidator, times(2)).validateGossip(eq(futureBlock)));
+    Waiter.waitFor(() -> assertThat(invalidBlockRoots).isEmpty());
+    Waiter.waitFor(() -> assertThat(futureBlocks.size()).isEqualTo(0));
+    verify(blockEventsListenerRouter).removeAllForBlock(futureBlock.getSlotAndBlockRoot());
+  }
+
+  @Test
+  public void onProposedBlock_futureBlock_shouldCleanupEquivocationOnRetry() {
+    incrementSlot();
+    final UInt64 nextSlot = currentSlot.plus(UInt64.ONE);
+    final SignedBeaconBlock futureBlock =
+        localChain.chainBuilder().generateBlockAtSlot(nextSlot).getBlock();
+
+    when(blockValidator.validateGossip(eq(futureBlock)))
+        .thenReturn(SafeFuture.completedFuture(InternalValidationResult.SAVE_FOR_FUTURE))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                InternalValidationResult.ignore(
+                    IGNORE_EQUIVOCATION_DETECTED, "retry validation found equivocation")));
 
     assertThatSafeFuture(blockManager.validateAndImportBlock(futureBlock, Optional.empty()))
         .isCompletedWithValue(InternalValidationResult.SAVE_FOR_FUTURE);
