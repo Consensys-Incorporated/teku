@@ -14,28 +14,32 @@
 package tech.pegasys.teku.validator.coordinator.publisher;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockPublishingPerformance;
-import tech.pegasys.teku.infrastructure.async.AsyncRunner;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.gossip.BlockGossipChannel;
 import tech.pegasys.teku.networking.eth2.gossip.DataColumnSidecarGossipChannel;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
-import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
+import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult.FailureReason;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.blobs.RemoteOrigin;
 import tech.pegasys.teku.statetransition.block.BlockImportChannel;
 import tech.pegasys.teku.statetransition.datacolumns.CustodyGroupCountManager;
+import tech.pegasys.teku.validator.api.SendSignedBlockResult;
 import tech.pegasys.teku.validator.coordinator.BlockFactory;
 import tech.pegasys.teku.validator.coordinator.DutyMetrics;
 
@@ -44,10 +48,10 @@ class BlockPublisherFuluTest {
       mock(DataColumnSidecarGossipChannel.class);
   private final CustodyGroupCountManager custodyGroupCountManager =
       mock(CustodyGroupCountManager.class);
+  private final BlockFactory blockFactory = mock(BlockFactory.class);
   private final BlockPublisherFulu blockPublisherFulu =
       new BlockPublisherFulu(
-          mock(AsyncRunner.class),
-          mock(BlockFactory.class),
+          blockFactory,
           mock(BlockImportChannel.class),
           mock(BlockGossipChannel.class),
           dataColumnSidecarGossipChannel,
@@ -58,7 +62,6 @@ class BlockPublisherFuluTest {
   private final int dasPublishWithholdColumnsEverySlots = 10;
   final BlockPublisherFulu blockPublisherFuluTest =
       new BlockPublisherFulu(
-          mock(AsyncRunner.class),
           mock(BlockFactory.class),
           mock(BlockImportChannel.class),
           mock(BlockGossipChannel.class),
@@ -74,15 +77,18 @@ class BlockPublisherFuluTest {
       dataStructureUtil.randomDataColumnSidecars();
 
   @Test
-  void publishBlobSidecars_shouldThrow() {
-    final BlobSidecar blobSidecar = mock(BlobSidecar.class);
-    final List<BlobSidecar> blobSidecars = List.of(blobSidecar);
-    assertThatThrownBy(
-            () ->
-                blockPublisherFulu.publishBlobSidecars(
-                    blobSidecars, BlockPublishingPerformance.NOOP))
-        .isInstanceOf(RuntimeException.class)
-        .hasMessage("Unexpected call to publishBlobSidecars in Fulu");
+  void missingBlockAfterUnblinding_shouldReturnBuilderWithhold() {
+    final SignedBeaconBlock signedBlock = dataStructureUtil.randomSignedBeaconBlock();
+    when(blockFactory.unblindSignedBlockIfBlinded(signedBlock, BlockPublishingPerformance.NOOP))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+
+    assertThatSafeFuture(
+            blockPublisherFulu.sendSignedBlock(
+                signedBlock,
+                BroadcastValidationLevel.NOT_REQUIRED,
+                BlockPublishingPerformance.NOOP))
+        .isCompletedWithValue(
+            SendSignedBlockResult.notImported(FailureReason.BUILDER_WITHHOLD.name()));
   }
 
   @Test

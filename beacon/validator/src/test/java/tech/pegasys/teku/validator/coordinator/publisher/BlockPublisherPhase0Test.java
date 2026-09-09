@@ -21,7 +21,6 @@ import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockPublishingPerformance;
-import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.networking.eth2.gossip.BlockGossipChannel;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
@@ -31,17 +30,16 @@ import tech.pegasys.teku.validator.coordinator.BlockFactory;
 import tech.pegasys.teku.validator.coordinator.DutyMetrics;
 
 class BlockPublisherPhase0Test {
+
   private final BlockGossipChannel blockGossipChannel = mock(BlockGossipChannel.class);
   private final BlockImportChannel blockImportChannel = mock(BlockImportChannel.class);
 
   private final BlockPublisherPhase0 blockPublisherPhase0 =
       new BlockPublisherPhase0(
-          mock(AsyncRunner.class),
           mock(BlockFactory.class),
           blockGossipChannel,
           blockImportChannel,
-          mock(DutyMetrics.class),
-          false);
+          mock(DutyMetrics.class));
 
   private final SignedBeaconBlock signedBlock = mock(SignedBeaconBlock.class);
 
@@ -54,9 +52,7 @@ class BlockPublisherPhase0Test {
 
   @Test
   void importBlock_shouldImportBlock() {
-    safeJoin(
-        blockPublisherPhase0.importBlock(
-            signedBlock, BroadcastValidationLevel.NOT_REQUIRED, BlockPublishingPerformance.NOOP));
+    safeJoin(blockPublisherPhase0.importBlock(signedBlock, BroadcastValidationLevel.NOT_REQUIRED));
 
     verify(blockImportChannel).importBlock(signedBlock, BroadcastValidationLevel.NOT_REQUIRED);
   }
