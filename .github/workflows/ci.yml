@@ -4,7 +4,7 @@ name: ci
 ## RUNNERS
 # https://docs.github.com/en/actions/reference/runners/github-hosted-runners
 # ubuntu-24.04 = 4cpu, 16GB
-# gha-runner-scale-set-ubuntu-24-amd64-xxl = 32, 128GB
+# ubuntu-latest-128 = 32, 128GB
 # ubuntu-24.04-arm = 4cpu, 16GB
 # macos-13 = 4cpu, 14GB
 # macos-15 = 3cpu(M1), 7GB
@@ -193,7 +193,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     # assemble is in our critical path so we want it to finish as quick as possible
-    runs-on: gha-runner-scale-set-ubuntu-24-amd64-xxl
+    runs-on: ubuntu-latest-128
     outputs:
       workflow-run-id: ${{ steps.workflowdetails.outputs.run_id }}
       publish-version: ${{ steps.projectDetails.outputs.publish-version }}
@@ -253,7 +253,7 @@ jobs:
   prDistributions:
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
-    runs-on: gha-runner-scale-set-ubuntu-24-amd64-xxl
+    runs-on: ubuntu-latest-128
     steps:
       - name: Checkout PR head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -585,7 +585,7 @@ jobs:
       gradle_task: acceptanceTest
       src_pattern: "*/src/acceptance-test/java/*"
       src_root: "src/acceptance-test/java"
-      runner: "gha-runner-scale-set-ubuntu-24-amd64-xxl"
+      runner: "ubuntu-latest-128"
       gradle_args: ${{ (inputs.gradle_log_level == 'info' && '--info') || (inputs.gradle_log_level == 'debug' && '--debug') || '' }}
 
   acceptanceTestsResult:
@@ -639,7 +639,7 @@ jobs:
 
   referenceTestsPrep:
     needs: assemble
-    runs-on: gha-runner-scale-set-ubuntu-24-amd64-xxl
+    runs-on: ubuntu-latest-128
     outputs:
       cache-key: ${{ steps.ref-cache-key.outputs.key }}
     steps:
