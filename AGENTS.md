@@ -398,6 +398,11 @@ Circular dependencies are prevented by build-time dependency checks (DepCheckPlu
 4. Run module-specific tests: `./gradlew :<module>:test`
 5. Run `./gradlew build` for full verification before committing
 
+## Agent Behaviour Rules
+
+- **No git actions without explicit instruction.** Never run `git commit`, `git commit --amend`, or `git push` unless the user explicitly asks. Stage changes and stop — let the user decide when to commit.
+- **No co-author lines.** Do not add `Co-Authored-By:` trailers to commit messages.
+
 ## Running Teku Locally
 
 After building with `./gradlew installDist`, run:
