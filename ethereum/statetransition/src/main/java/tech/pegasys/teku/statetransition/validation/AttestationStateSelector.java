@@ -207,16 +207,16 @@ public class AttestationStateSelector {
 
   /**
    * Checks that {@code candidateRoot} (a chain head, or a fork's chain head) shares the same
-   * shuffling-determining history as {@code targetRoot} for {@code epoch}, before we reuse
-   * {@code candidateRoot}'s state to compute {@code targetRoot}'s committees.
+   * shuffling-determining history as {@code targetRoot} for {@code epoch}, before we reuse {@code
+   * candidateRoot}'s state to compute {@code targetRoot}'s committees.
    *
    * <p>Structural ancestry alone (i.e. {@code targetRoot} lies on the chain leading to {@code
    * candidateRoot}) is not sufficient: the two branches can still have diverged after {@code
-   * targetRoot} but before the block whose RANDAO reveal fixes the shuffling seed for {@code
-   * epoch} (the "shuffling dependent root", per the {@code get_shuffling_dependent_root} spec
-   * helper). If they diverged before that point, {@code candidateRoot}'s state has a different
-   * seed and will produce different committees than {@code targetRoot}'s own branch would, so its
-   * state must not be reused.
+   * targetRoot} but before the block whose RANDAO reveal fixes the shuffling seed for {@code epoch}
+   * (the "shuffling dependent root", per the {@code get_shuffling_dependent_root} spec helper). If
+   * they diverged before that point, {@code candidateRoot}'s state has a different seed and will
+   * produce different committees than {@code targetRoot}'s own branch would, so its state must not
+   * be reused.
    */
   private boolean hasMatchingShufflingDependentRoot(
       final Bytes32 candidateRoot, final Bytes32 targetRoot, final UInt64 epoch) {
