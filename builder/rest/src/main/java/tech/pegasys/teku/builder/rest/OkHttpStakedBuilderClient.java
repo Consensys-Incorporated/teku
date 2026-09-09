@@ -57,7 +57,7 @@ class OkHttpStakedBuilderClient implements StakedBuilderClient {
       final Bytes32 parentHash,
       final Bytes32 parentRoot,
       final BLSPublicKey proposerPubkey,
-      final Optional<SignedBuilderRequestAuth> auth) {
+      final SignedBuilderRequestAuth auth) {
     return asyncRunner.runAsync(
         () ->
             getExecutionPayloadBidRequest.submit(

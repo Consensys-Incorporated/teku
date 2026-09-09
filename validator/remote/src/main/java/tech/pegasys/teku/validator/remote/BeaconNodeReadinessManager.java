@@ -26,17 +26,12 @@ import java.util.stream.Stream;
 import okhttp3.HttpUrl;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.tuweni.bytes.Bytes32;
-import tech.pegasys.teku.api.response.ValidatorStatus;
-import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.json.types.node.PeerCount;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.logging.ValidatorLogger;
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.service.serviceutils.Service;
-import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
-import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
 
 /**
@@ -108,51 +103,9 @@ public class BeaconNodeReadinessManager extends Service implements ValidatorTimi
   }
 
   @Override
-  public void onSlot(final UInt64 slot) {}
-
-  @Override
-  public void onHeadUpdate(
-      final UInt64 slot,
-      final Bytes32 previousDutyDependentRoot,
-      final Bytes32 currentDutyDependentRoot,
-      final Bytes32 headBlockRoot) {}
-
-  @Override
-  public void onPossibleMissedEvents() {}
-
-  @Override
-  public void onValidatorsAdded() {}
-
-  @Override
-  public void onBlockProductionDue(final UInt64 slot) {}
-
-  @Override
-  public void onAttestationCreationDue(final UInt64 slot) {}
-
-  @Override
   public void onAttestationAggregationDue(final UInt64 slot) {
     performReadinessCheckAgainstAllNodes().finishError(LOG);
   }
-
-  @Override
-  public void onSyncCommitteeCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onContributionCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onPayloadAttestationCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onAttesterSlashing(final AttesterSlashing attesterSlashing) {}
-
-  @Override
-  public void onProposerSlashing(final ProposerSlashing proposerSlashing) {}
-
-  @Override
-  public void onUpdatedValidatorStatuses(
-      final Map<BLSPublicKey, ValidatorStatus> newValidatorStatuses,
-      final boolean possibleMissingEvents) {}
 
   private ReadinessWithErrorTimestamp getReadiness(final RemoteValidatorApiChannel beaconNodeApi) {
     return readinessStatusCache.computeIfAbsent(
