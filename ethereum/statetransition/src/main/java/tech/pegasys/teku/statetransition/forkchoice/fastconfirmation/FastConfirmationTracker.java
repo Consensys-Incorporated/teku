@@ -69,6 +69,32 @@ public class FastConfirmationTracker {
   /** Total number of restarts from a safe unrealized justified block */
   private final Counter restartsCounter;
 
+  /**
+   * Where {@link FastConfirmationStore#confirmedRoot() confirmed_root} landed on the most recent
+   * slot that produced an outcome, so {@link #fallbacksCounter} and {@link #restartsCounter} count
+   * episodes rather than slots: both conditions hold for many consecutive slots once entered. Keyed
+   * on the kind of outcome, not on the roots, so a fallback that persists while finalization
+   * advances stays one episode. Slots that produce no outcome (stale-head skip, abandoned
+   * computation) leave it untouched, so they neither open nor close an episode. Reset to {@link
+   * ConfirmationOutcome#FALLBACK} on (re)initialization: the store is seeded from finality, and
+   * that warm-up is a seeded state rather than a fallback away from a real confirmation (see {@link
+   * #warmedUp}).
+   */
+  private final AtomicReference<ConfirmationOutcome> lastConfirmationOutcome =
+      new AtomicReference<>(ConfirmationOutcome.fallback());
+
+  /**
+   * Whether that same slot also switched the confirmed block to another chain, so a stretch of
+   * consecutive switching slots counts as the one period of instability it is; the episode closes
+   * on the first slot whose confirmed root stays on its chain.
+   *
+   * <p>Tracked separately from {@link #lastConfirmationOutcome} because the two are orthogonal: a
+   * slot can restart from an observed justified checkpoint <i>and</i> switch chains doing so, which
+   * must count on both counters. Folding them into one value would force a choice between the two
+   * and let one episode's continuation be misread as a new event.
+   */
+  private final AtomicBoolean previousSlotWasReorg = new AtomicBoolean(false);
+
   /** Wall-clock duration of a single per-slot fast confirmation run; {@code null} when disabled. */
   private final MetricsHistogram calculationTimer;
 
@@ -142,17 +168,17 @@ public class FastConfirmationTracker {
         metricsSystem.createCounter(
             TekuMetricCategory.BEACON,
             "fast_confirmation_reorgs_total",
-            "Total number of confirmed block reorganizations");
+            "Total number of confirmed block reorganizations (a run of consecutive reorganizing slots counts once)");
     this.fallbacksCounter =
         metricsSystem.createCounter(
             TekuMetricCategory.BEACON,
             "fast_confirmation_fallbacks_total",
-            "Total number of fallbacks to finality");
+            "Total number of fallbacks to finality (a fallback held over consecutive slots counts once)");
     this.restartsCounter =
         metricsSystem.createCounter(
             TekuMetricCategory.BEACON,
             "fast_confirmation_restarts_total",
-            "Total number of restarts from a safe unrealized justified block");
+            "Total number of restarts from a safe unrealized justified block (a restart held over consecutive slots counts once)");
     this.calculationTimer =
         new MetricsHistogram(
             metricsSystem,
@@ -195,6 +221,8 @@ public class FastConfirmationTracker {
     }
     lastProcessedSlot.set(null);
     warmedUp.set(false);
+    lastConfirmationOutcome.set(ConfirmationOutcome.fallback());
+    previousSlotWasReorg.set(false);
     fastConfirmationStore.set(FastConfirmationStore.create(store));
   }
 
@@ -403,10 +431,8 @@ public class FastConfirmationTracker {
         rotatedStore.store().getForkChoiceStrategy();
     final UInt64 confirmedSlot = forkChoiceStrategy.blockSlot(confirmedRoot).orElse(UInt64.ZERO);
     latestConfirmedSlot.set(confirmedSlot.intValue());
-    if (isConfirmedRootReorg(
-        input.slot(), forkChoiceStrategy, rotatedStore.confirmedRoot(), confirmedRoot)) {
-      reorgsCounter.inc();
-    }
+    recordReorgOutcome(
+        input.slot(), forkChoiceStrategy, rotatedStore.confirmedRoot(), confirmedRoot);
 
     LOG.info(
         "Fast confirmation update for slot {}: head={}, confirmed_root={}, confirmed_slot={}{}",
@@ -476,7 +502,9 @@ public class FastConfirmationTracker {
           "Fast confirmation for slot {}: source states unavailable, falling back to finalized {}",
           slot,
           finalizedRoot);
-      fallbacksCounter.inc();
+      // The same fallback state as the rule reverting to finality, so it goes through the same
+      // episode counting: consecutive slots (whatever mix of the two causes) count once.
+      recordConfirmationOutcome(fcrStore, finalizedRoot, finalizedRoot);
       return finalizedRoot;
     }
 
@@ -488,29 +516,78 @@ public class FastConfirmationTracker {
     return confirmedRoot;
   }
 
+  /**
+   * Classifies this slot's confirmation outcome and counts it only when it opens a new episode (see
+   * {@link #lastConfirmationOutcome}), so a condition that holds for many consecutive slots is
+   * reported as the single event it is.
+   */
   void recordConfirmationOutcome(
       final FastConfirmationStore fcrStore,
       final Bytes32 confirmedRoot,
       final Bytes32 finalizedRoot) {
     if (confirmedRoot.equals(finalizedRoot)) {
-      fallbacksCounter.inc();
+      // A fallback that persists across an advancing finalized checkpoint (confirmed_root moving
+      // from the old finalized root to the new one) is the same episode: the outcome carries no
+      // root, so it is unchanged.
+      if (opensNewEpisode(ConfirmationOutcome.fallback())) {
+        fallbacksCounter.inc();
+      }
       return;
     }
     // Confirmed beyond finality, so the rule is no longer running on the values seeded at
     // (re)initialization. Set once and never cleared for the rest of this initialization.
     warmedUp.set(true);
-    if (confirmedRoot.equals(fcrStore.currentEpochObservedJustifiedCheckpoint().getRoot())) {
-      restartsCounter.inc();
+    final Bytes32 observedJustifiedRoot =
+        fcrStore.currentEpochObservedJustifiedCheckpoint().getRoot();
+    if (confirmedRoot.equals(observedJustifiedRoot)) {
+      // Restarting from the checkpoint the previous episode already restarted from is that episode
+      // continuing; a different checkpoint (the variables rotated at an epoch boundary in between)
+      // is a genuinely new restart, as is coming from a fallback or an advance.
+      if (opensNewEpisode(ConfirmationOutcome.restart(observedJustifiedRoot))) {
+        restartsCounter.inc();
+      }
+      return;
+    }
+    lastConfirmationOutcome.set(ConfirmationOutcome.advanced());
+  }
+
+  /**
+   * Records this slot's confirmation outcome, returning whether it opens a new episode, i.e.
+   * differs from the outcome of the last slot that produced one.
+   */
+  private boolean opensNewEpisode(final ConfirmationOutcome outcome) {
+    return !lastConfirmationOutcome.getAndSet(outcome).equals(outcome);
+  }
+
+  /**
+   * Counts a confirmed block reorganization when this slot switches the confirmed block to another
+   * chain and the previous slot did not, so a stretch of consecutive switching slots is reported as
+   * one period of instability (see {@link #previousSlotWasReorg}).
+   */
+  void recordReorgOutcome(
+      final UInt64 slot,
+      final ReadOnlyForkChoiceStrategy forkChoiceStrategy,
+      final Bytes32 previousConfirmedRoot,
+      final Bytes32 confirmedRoot) {
+    if (!isConfirmedRootReorg(slot, forkChoiceStrategy, previousConfirmedRoot, confirmedRoot)) {
+      previousSlotWasReorg.set(false);
+      return;
+    }
+    if (!previousSlotWasReorg.getAndSet(true)) {
+      reorgsCounter.inc();
     }
   }
 
   /**
    * Returns whether changing between two confirmed block roots switches chains. Advancing to a
-   * descendant or falling back to an ancestor is not a reorg.
+   * descendant or falling back to an ancestor is not a reorg, and neither is a change involving a
+   * root that fork choice cannot place on a chain.
    *
    * <p>Confirmed roots are resolved through {@code get_node_for_root}, which deliberately produces
    * PENDING nodes under Gloas. Unlike an attestation latest message, a confirmed root has no vote
-   * slot or payload hint with which to call {@code get_supported_node}.
+   * slot or payload hint with which to call {@code get_supported_node}. A PENDING ancestor matches
+   * any payload status, so under Gloas this compares the two roots' block ancestry, which is what a
+   * confirmed block reorganization means.
    */
   boolean isConfirmedRootReorg(
       final UInt64 slot,
@@ -518,6 +595,13 @@ public class FastConfirmationTracker {
       final Bytes32 previousConfirmedRoot,
       final Bytes32 confirmedRoot) {
     if (confirmedRoot.equals(previousConfirmedRoot)) {
+      return false;
+    }
+    // A root fork choice does not know cannot be placed on a chain, so both ancestry checks below
+    // would fail and report a reorg that never happened. The usual cause is pruning: the previous
+    // confirmed root is dropped once finalization advances past it. Treat it as no reorg observed.
+    if (forkChoiceStrategy.blockSlot(previousConfirmedRoot).isEmpty()
+        || forkChoiceStrategy.blockSlot(confirmedRoot).isEmpty()) {
       return false;
     }
     return !isAncestor(slot, forkChoiceStrategy, confirmedRoot, previousConfirmedRoot)
@@ -538,5 +622,41 @@ public class FastConfirmationTracker {
 
   public Optional<FastConfirmationStore> getFastConfirmationStore() {
     return Optional.ofNullable(fastConfirmationStore.get());
+  }
+
+  private enum ConfirmationOutcomeKind {
+    /** {@code confirmed_root} is a block beyond both finality and the observed justified block. */
+    ADVANCED,
+    /** {@code confirmed_root} is the finalized block. */
+    FALLBACK,
+    /** {@code confirmed_root} is the current epoch's observed justified block. */
+    RESTART
+  }
+
+  /**
+   * A slot's confirmation outcome. {@code restartCheckpointRoot} is the observed justified
+   * checkpoint root the rule restarted from, and is only set for {@link
+   * ConfirmationOutcomeKind#RESTART}.
+   */
+  private record ConfirmationOutcome(
+      ConfirmationOutcomeKind kind, Optional<Bytes32> restartCheckpointRoot) {
+
+    private static final ConfirmationOutcome ADVANCED =
+        new ConfirmationOutcome(ConfirmationOutcomeKind.ADVANCED, Optional.empty());
+    private static final ConfirmationOutcome FALLBACK =
+        new ConfirmationOutcome(ConfirmationOutcomeKind.FALLBACK, Optional.empty());
+
+    static ConfirmationOutcome advanced() {
+      return ADVANCED;
+    }
+
+    static ConfirmationOutcome fallback() {
+      return FALLBACK;
+    }
+
+    static ConfirmationOutcome restart(final Bytes32 restartCheckpointRoot) {
+      return new ConfirmationOutcome(
+          ConfirmationOutcomeKind.RESTART, Optional.of(restartCheckpointRoot));
+    }
   }
 }
