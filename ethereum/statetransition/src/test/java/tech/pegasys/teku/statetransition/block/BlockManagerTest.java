@@ -572,8 +572,7 @@ public class BlockManagerTest {
 
     incrementSlot();
 
-    Waiter.waitFor(
-        () -> verify(blockValidator, times(2)).validateGossip(eq(futureBlock)));
+    Waiter.waitFor(() -> verify(blockValidator, times(2)).validateGossip(eq(futureBlock)));
     Waiter.waitFor(
         () ->
             verify(receivedBlockEventsChannelPublisher, times(1))
