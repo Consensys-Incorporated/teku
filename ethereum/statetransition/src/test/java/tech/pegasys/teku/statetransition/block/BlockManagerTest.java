@@ -45,6 +45,7 @@ import static tech.pegasys.teku.statetransition.block.BlockImportPerformance.PRO
 import static tech.pegasys.teku.statetransition.block.BlockImportPerformance.TRANSACTION_COMMITTED_EVENT_LABEL;
 import static tech.pegasys.teku.statetransition.block.BlockImportPerformance.TRANSACTION_PREPARED_EVENT_LABEL;
 import static tech.pegasys.teku.statetransition.validation.BlockBroadcastValidator.BroadcastValidationResult.SUCCESS;
+import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.ValidationResultSubCode.IGNORE_ALREADY_SEEN;
 import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.ValidationResultSubCode.IGNORE_EQUIVOCATION_DETECTED;
 
 import java.util.ArrayList;
@@ -550,7 +551,7 @@ public class BlockManagerTest {
   }
 
   @Test
-  public void onProposedBlock_futureBlock_shouldRerunGossipValidationOnRetry() {
+  public void onProposedBlock_futureBlock_shouldRerunGossipValidationAndImportOnRetry() {
     incrementSlot();
     final UInt64 nextSlot = currentSlot.plus(UInt64.ONE);
     final SignedBeaconBlock futureBlock =
@@ -559,7 +560,9 @@ public class BlockManagerTest {
     when(blockValidator.validateGossip(eq(futureBlock)))
         .thenReturn(SafeFuture.completedFuture(InternalValidationResult.SAVE_FOR_FUTURE))
         .thenReturn(
-            SafeFuture.completedFuture(InternalValidationResult.reject("retry validation failed")));
+            SafeFuture.completedFuture(
+                InternalValidationResult.ignore(
+                    IGNORE_ALREADY_SEEN, "retry validation found already seen")));
 
     assertThatSafeFuture(blockManager.validateAndImportBlock(futureBlock, Optional.empty()))
         .isCompletedWithValue(InternalValidationResult.SAVE_FOR_FUTURE);
@@ -569,10 +572,15 @@ public class BlockManagerTest {
 
     incrementSlot();
 
-    Waiter.waitFor(() -> verify(blockValidator, times(2)).validateGossip(eq(futureBlock)));
+    Waiter.waitFor(
+        () -> verify(blockValidator, times(2)).validateGossip(eq(futureBlock)));
+    Waiter.waitFor(
+        () ->
+            verify(receivedBlockEventsChannelPublisher, times(1))
+                .onBlockImported(futureBlock, false));
     Waiter.waitFor(() -> assertThat(invalidBlockRoots).isEmpty());
     Waiter.waitFor(() -> assertThat(futureBlocks.size()).isEqualTo(0));
-    verify(blockEventsListenerRouter).removeAllForBlock(futureBlock.getSlotAndBlockRoot());
+    verify(blockEventsListenerRouter).onBlockImported(futureBlock);
   }
 
   @Test
