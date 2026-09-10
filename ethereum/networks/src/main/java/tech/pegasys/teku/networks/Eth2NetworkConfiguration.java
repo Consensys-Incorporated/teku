@@ -1231,7 +1231,7 @@ public class Eth2NetworkConfiguration {
           .trustedSetupFromClasspath(MAINNET_TRUSTED_SETUP_FILENAME)
           .eth1DepositContractDeployBlock(0)
           .checkpointSyncUrl("https://ephemery.beaconstate.ethstaker.cc")
-          .discoveryBootnodesFromUrl("https://ephemery.dev/latest/boot_enr.txt");
+          .discoveryBootnodesFromUrl("https://ephemery.dev/latest/metadata/bootstrap_nodes.txt");
     }
 
     private Builder applyHoodiNetworkDefaults() {
