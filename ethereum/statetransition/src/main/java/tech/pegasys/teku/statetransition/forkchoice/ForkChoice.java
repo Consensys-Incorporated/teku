@@ -69,6 +69,7 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 import tech.pegasys.teku.spec.datastructures.forkchoice.InvalidCheckpointException;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.spec.datastructures.forkchoice.SlotAndForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
@@ -507,13 +508,20 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
       final BeaconState justifiedState,
       final Checkpoint finalizedCheckpoint,
       final Checkpoint justifiedCheckpoint) {
-    if (forkChoiceLateBlockReorgEnabled) {
-      recentChainData.getStore().computeBalanceThresholds(justifiedState);
-    }
+    // Balance thresholds are used both by the opt-in late-block-reorg feature and, unconditionally,
+    // by shouldApplyProposerBoost's weak-parent check below, so compute them regardless of the
+    // forkChoiceLateBlockReorgEnabled flag.
+    recentChainData.getStore().computeBalanceThresholds(justifiedState);
     final VoteUpdater transaction = recentChainData.startVoteUpdate();
     final List<UInt64> justifiedEffectiveBalances =
         spec.getBeaconStateUtil(justifiedState.getSlot())
             .getEffectiveActiveUnslashedBalances(justifiedState);
+
+    final Optional<Bytes32> proposerBoostRoot = recentChainData.getStore().getProposerBoostRoot();
+    final UInt64 proposerBoostAmount =
+        proposerBoostRoot.isPresent() && shouldApplyProposerBoost(proposerBoostRoot.get())
+            ? spec.getProposerBoostAmount(justifiedState)
+            : UInt64.ZERO;
 
     // If a runtime exception occurs while updating protoarray, we could skip the transaction
     // commit.
@@ -527,8 +535,8 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
             finalizedCheckpoint,
             justifiedCheckpoint,
             justifiedEffectiveBalances,
-            recentChainData.getStore().getProposerBoostRoot(),
-            spec.getProposerBoostAmount(justifiedState));
+            proposerBoostRoot,
+            proposerBoostAmount);
 
     try {
       recentChainData.updateHead(headNode.node(), nodeSlot.orElse(headNode.slot()));
@@ -540,6 +548,24 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
     }
 
     return recentChainData.getChainHead();
+  }
+
+  /**
+   * Spec mapping: {@code should_apply_proposer_boost(store)}. Resolves the fork-versioned {@link
+   * ForkChoiceUtil} for the boosted block's own slot so pre-Gloas forks keep the unconditional
+   * default while Gloas can suppress boost on a weak, same-slot-equivocated parent.
+   */
+  private boolean shouldApplyProposerBoost(final Bytes32 proposerBoostRoot) {
+    final ReadOnlyStore store = recentChainData.getStore();
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy = store.getForkChoiceStrategy();
+    final Optional<UInt64> maybeBoostBlockSlot = forkChoiceStrategy.blockSlot(proposerBoostRoot);
+    if (maybeBoostBlockSlot.isEmpty()) {
+      return true;
+    }
+    return spec.atSlot(maybeBoostBlockSlot.get())
+        .getForkChoiceUtil()
+        .shouldApplyProposerBoost(
+            recentChainData, proposerBoostRoot, forkChoiceStrategy, store.getReorgThreshold());
   }
 
   /**

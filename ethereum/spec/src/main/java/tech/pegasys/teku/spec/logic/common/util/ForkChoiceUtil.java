@@ -928,10 +928,10 @@ public class ForkChoiceUtil {
   }
 
   public boolean shouldApplyProposerBoost(
+      final ForkChoiceReorgContext context,
       final Bytes32 proposerBoostRoot,
       final ReadOnlyForkChoiceStrategy forkChoiceStrategy,
-      final UInt64 reorgThreshold,
-      final BeaconState justifiedState) {
+      final UInt64 reorgThreshold) {
     return true;
   }
 
