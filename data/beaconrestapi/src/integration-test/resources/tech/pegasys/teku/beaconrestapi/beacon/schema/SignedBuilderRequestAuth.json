@@ -1,0 +1,16 @@
+{
+  "title" : "SignedBuilderRequestAuth",
+  "type" : "object",
+  "required" : [ "message", "signature" ],
+  "properties" : {
+    "message" : {
+      "$ref" : "#/components/schemas/BuilderRequestAuth"
+    },
+    "signature" : {
+      "type" : "string",
+      "pattern" : "^0x[a-fA-F0-9]{2,}$",
+      "description" : "SSZ hexadecimal",
+      "format" : "bytes"
+    }
+  }
+}

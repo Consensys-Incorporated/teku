@@ -61,7 +61,7 @@ public class BeaconBlock
         UInt64.ZERO,
         Bytes32.ZERO,
         genesisState.hashTreeRoot(),
-        genesisSchema.getBeaconBlockBodySchema().createEmpty());
+        genesisSchema.getBeaconBlockBodySchema().createGenesisBody(genesisState));
   }
 
   public BeaconBlock withStateRoot(final Bytes32 stateRoot) {

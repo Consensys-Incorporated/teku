@@ -70,24 +70,31 @@ public class ProposerPreferencesGossipValidator {
     final Bytes32 dependentRoot = proposerPreferences.getDependentRoot();
 
     /*
-     * [IGNORE]_ `preferences.proposal_slot` is within the proposer lookahead --
-     * i.e. `compute_epoch_at_slot(preferences.proposal_slot)` is in the range
-     * [compute_epoch_at_slot(current_slot), compute_epoch_at_slot(current_slot) + MIN_SEED_LOOKAHEAD]`.
+     * The proposer lookahead for proposal_slot is fixed as of the start of
+     * compute_epoch_at_slot(proposal_slot) - MIN_SEED_LOOKAHEAD, so that epoch and its start slot
+     * anchor the remaining rules.
      */
-    if (!gossipValidationHelper.isSlotInCurrentEpochWithMinSeedLookaheadTolerance(proposalSlot)) {
+    final int minSeedLookahead = spec.atSlot(proposalSlot).getConfig().getMinSeedLookahead();
+    final UInt64 lookaheadEpoch =
+        spec.computeEpochAtSlot(proposalSlot).minusMinZero(minSeedLookahead);
+    final UInt64 lookaheadEpochStartSlot = spec.computeStartSlotAtEpoch(lookaheadEpoch);
+
+    /*
+     * [IGNORE] The proposal slot has not started yet.
+     */
+    if (gossipValidationHelper.hasSlotStarted(proposalSlot)) {
       return completedFuture(
-          ignorePreferences(
-              proposerPreferences,
-              "proposal slot is not in the current or within the lookahead epoch"));
+          ignorePreferences(proposerPreferences, "proposal slot has already started"));
     }
 
     /*
-     * [IGNORE] preferences.proposal_slot has not already passed
+     * [IGNORE] The proposer for the proposal slot is known -- i.e. the lookahead epoch has started,
+     * so its proposer lookahead can be computed.
      */
-    if (!gossipValidationHelper.isSlotFromFuture(proposalSlot)
-        && !gossipValidationHelper.isSlotCurrent(proposalSlot)) {
+    if (gossipValidationHelper.isSlotFromFuture(lookaheadEpochStartSlot)) {
       return completedFuture(
-          ignorePreferences(proposerPreferences, "proposal slot has already passed"));
+          ignorePreferences(
+              proposerPreferences, "proposer for the proposal slot is not yet known"));
     }
 
     /*
@@ -103,63 +110,63 @@ public class ProposerPreferencesGossipValidator {
 
     /*
      * [IGNORE] The signed_proposer_preferences is the first valid message for the tuple
-     * (preferences.dependent_root, preferences.proposal_slot, preferences.validator_index)
+     * (preferences.dependent_root, preferences.proposal_slot). The validator index is deliberately
+     * excluded: only one validator can be the proposer for that pair, so keying on it as well would
+     * let a peer force full validation of arbitrarily many messages for the same slot.
      */
     final ProposerPreferencesDedupKey dedupKey =
-        new ProposerPreferencesDedupKey(
-            dependentRoot, proposalSlot, proposerPreferences.getValidatorIndex());
+        new ProposerPreferencesDedupKey(dependentRoot, proposalSlot);
     if (seenProposerPreferences.contains(dedupKey)) {
       return completedFuture(ignoreAlreadySeen(proposerPreferences));
     }
 
     /*
-     * Look up the checkpoint state at (proposal_epoch - MIN_SEED_LOOKAHEAD, dependent_root). The state used by
-     * is_valid_proposal_slot has current_epoch == proposal_epoch - MIN_SEED_LOOKAHEAD, so the lookahead index for
-     * proposal_slot is MIN_SEED_LOOKAHEAD * SLOTS_PER_EPOCH + (proposal_slot % SLOTS_PER_EPOCH).
+     * [REJECT] The dependent root is before the proposer lookahead epoch. A dependent root at or
+     * after that boundary cannot be the latest block preceding the epoch.
      */
-    final int minSeedLookahead = spec.atSlot(proposalSlot).getConfig().getMinSeedLookahead();
-    final UInt64 checkpointEpoch =
-        spec.computeEpochAtSlot(proposalSlot).minusMinZero(minSeedLookahead);
-
-    /*
-     * Pre-flight the checkpoint-state precondition for the [REJECT] is_valid_proposal_slot rule below.
-     * A dependent root at or after the checkpoint boundary cannot be the root of the checkpoint state
-     * required by that rule.
-     */
-    final UInt64 checkpointBoundarySlot = spec.computeStartSlotAtEpoch(checkpointEpoch);
     final Optional<UInt64> maybeDependentRootSlot =
         recentChainData.getSlotForBlockRoot(dependentRoot);
     if (maybeDependentRootSlot.isPresent()) {
       final UInt64 dependentRootSlot = maybeDependentRootSlot.get();
-      if (!dependentRootSlot.isLessThan(checkpointBoundarySlot)) {
+      if (!dependentRootSlot.isLessThan(lookaheadEpochStartSlot)) {
         return completedFuture(
             rejectPreferences(
                 proposerPreferences,
-                "dependent root is at slot %s but must be before checkpoint boundary slot %s",
+                "dependent root is at slot %s but must be before the proposer lookahead epoch start slot %s",
                 dependentRootSlot,
-                checkpointBoundarySlot));
+                lookaheadEpochStartSlot));
       }
     }
+
+    /*
+     * [IGNORE] The dependent root is a possible dependent block for the lookahead epoch. Without
+     * this the checkpoint state below would be built by skipping slots that already contain blocks,
+     * yielding a proposer lookahead that no branch actually agrees with.
+     */
+    if (!gossipValidationHelper.isPossibleDependentRoot(dependentRoot, lookaheadEpochStartSlot)) {
+      return completedFuture(
+          ignorePreferences(
+              proposerPreferences, "dependent root is not a possible dependent block"));
+    }
+
     return recentChainData
-        .retrieveCheckpointState(new Checkpoint(checkpointEpoch, dependentRoot))
+        .retrieveCheckpointState(new Checkpoint(lookaheadEpoch, dependentRoot))
         .thenApply(
             maybeState -> {
               if (maybeState.isEmpty()) {
                 return savePreferencesForFuture(
                     proposerPreferences,
-                    "checkpoint state for checkpoint epoch %s is unavailable; saving for future processing",
-                    checkpointEpoch);
+                    "checkpoint state for lookahead epoch %s is unavailable; saving for future processing",
+                    lookaheadEpoch);
               }
               final BeaconState state = maybeState.get();
 
               /*
-               * [REJECT] is_valid_proposal_slot(state, preferences) returns True, where state is the checkpoint state
-               * at the epoch compute_epoch_at_slot(preferences.proposal_slot) - MIN_SEED_LOOKAHEAD
-               * and the root preferences.dependent_root.
+               * [REJECT] The validator is the proposer for the given slot in the proposer lookahead
+               * of the checkpoint state at (lookahead_epoch, preferences.dependent_root).
                */
-              final int slotsPerEpoch = spec.atSlot(proposalSlot).getConfig().getSlotsPerEpoch();
               final int lookaheadIndex =
-                  minSeedLookahead * slotsPerEpoch + proposalSlot.mod(slotsPerEpoch).intValue();
+                  proposalSlot.minusMinZero(lookaheadEpochStartSlot).intValue();
               final UInt64 expectedValidatorIndex =
                   BeaconStateFulu.required(state).getProposerLookahead().getElement(lookaheadIndex);
               if (!expectedValidatorIndex.equals(proposerPreferences.getValidatorIndex())) {
@@ -188,8 +195,8 @@ public class ProposerPreferencesGossipValidator {
               return rejectPreferencesWithError(
                   proposerPreferences,
                   error,
-                  "unable to generate checkpoint state for checkpoint epoch %s",
-                  checkpointEpoch);
+                  "unable to generate checkpoint state for lookahead epoch %s",
+                  lookaheadEpoch);
             });
   }
 
@@ -282,6 +289,5 @@ public class ProposerPreferencesGossipValidator {
     return ignorePreferences(proposerPreferences, "already received");
   }
 
-  private record ProposerPreferencesDedupKey(
-      Bytes32 dependentRoot, UInt64 proposalSlot, UInt64 validatorIndex) {}
+  private record ProposerPreferencesDedupKey(Bytes32 dependentRoot, UInt64 proposalSlot) {}
 }

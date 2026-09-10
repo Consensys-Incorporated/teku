@@ -228,14 +228,30 @@ public interface Database extends AutoCloseable {
 
   void storeVotes(Map<UInt64, VoteTracker> votes);
 
+  /**
+   * Returns exact entry counts for all (or filtered) columns. Performs a full sequential scan of
+   * each included column — O(N) per column, potentially very slow on large databases.
+   */
   Map<String, Long> getColumnCounts(final Optional<String> maybeColumnFilter);
 
   Map<String, Optional<String>> getVariables();
 
+  /**
+   * Returns the exact number of blob sidecar entries. Performs a full sequential scan of the blob
+   * sidecar column — O(N), may take minutes on large datasets.
+   */
   long getBlobSidecarColumnCount();
 
+  /**
+   * Returns the exact number of data column sidecar entries. Performs a full sequential scan of the
+   * sidecar column — O(N), may take minutes on large datasets.
+   */
   long getSidecarColumnCount();
 
+  /**
+   * Returns the exact number of non-canonical blob sidecar entries. Performs a full sequential scan
+   * of the non-canonical blob sidecar column — O(N), may take minutes on large datasets.
+   */
   long getNonCanonicalBlobSidecarColumnCount();
 
   Optional<Checkpoint> getAnchor();

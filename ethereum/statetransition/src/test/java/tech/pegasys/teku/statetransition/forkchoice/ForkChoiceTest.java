@@ -40,7 +40,6 @@ import static tech.pegasys.teku.statetransition.forkchoice.ForkChoice.BLOCK_CREA
 import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.ints.IntSet;
-import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -380,11 +379,12 @@ class ForkChoiceTest {
     when(dataAvailabilitySampler.checkDataAvailability(any(), any()))
         .thenReturn(new SafeFuture<>());
     doReturn(true).when(spec).isAvailabilityOfDataColumnSidecarsRequiredAtSlot(any(), any());
+    doReturn(1).when(spec).getSlotDurationMillis(any());
     spec.reinitializeForTesting(
         block -> blobSidecarsAvailabilityChecker,
         block ->
             new DataColumnSidecarAvailabilityChecker(
-                dataAvailabilitySampler, spec, recentChainData, block, Duration.ofMillis(1)),
+                dataAvailabilitySampler, spec, recentChainData, block),
         KZG.DISABLED);
     final SignedBlockAndState blockAndState = chainBuilder.generateBlockAtSlot(ONE);
 
@@ -2033,6 +2033,8 @@ class ForkChoiceTest {
             debugDataDumper,
             metricsSystem,
             AsyncBLSSignatureVerifier.wrap(BLSSignatureVerifier.SIMPLE));
+    // Started as BeaconChainController does, so the per-slot fast confirmation pipeline runs.
+    assertThat(forkChoice.getFastConfirmationService().start()).isCompleted();
   }
 
   private IntSet ptcPositions(final int count) {

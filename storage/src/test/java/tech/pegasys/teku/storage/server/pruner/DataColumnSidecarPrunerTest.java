@@ -59,13 +59,15 @@ public class DataColumnSidecarPrunerTest {
           database,
           stubMetricsSystem,
           asyncRunner,
+          asyncRunner,
           timeProvider,
           PRUNE_INTERVAL,
           PRUNE_LIMIT,
           false,
           "test",
           mock(SettableLabelledGauge.class),
-          mock(SettableLabelledGauge.class));
+          mock(SettableLabelledGauge.class),
+          Duration.ofMinutes(5));
 
   @BeforeEach
   void setUp() {

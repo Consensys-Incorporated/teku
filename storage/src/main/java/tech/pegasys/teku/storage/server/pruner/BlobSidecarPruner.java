@@ -41,6 +41,7 @@ public class BlobSidecarPruner extends Service {
   private final Spec spec;
   private final Database database;
   private final AsyncRunner asyncRunner;
+  private final AsyncRunner metricsAsyncRunner;
   private final Duration pruneInterval;
   private final int pruneLimit;
   private final TimeProvider timeProvider;
@@ -48,8 +49,10 @@ public class BlobSidecarPruner extends Service {
   private final String pruningMetricsType;
   private final SettableLabelledGauge pruningTimingsLabelledGauge;
   private final SettableLabelledGauge pruningActiveLabelledGauge;
+  private final Duration pruningWarnTimeout;
 
   private Optional<Cancellable> scheduledPruner = Optional.empty();
+  private Optional<Cancellable> scheduledMetricsUpdater = Optional.empty();
   private Optional<UInt64> genesisTime = Optional.empty();
 
   private final AtomicLong blobColumnSize = new AtomicLong(0);
@@ -63,6 +66,7 @@ public class BlobSidecarPruner extends Service {
       final BlobSidecarsArchiver blobSidecarsArchiver,
       final MetricsSystem metricsSystem,
       final AsyncRunner asyncRunner,
+      final AsyncRunner metricsAsyncRunner,
       final TimeProvider timeProvider,
       final Duration pruneInterval,
       final int pruneLimit,
@@ -70,11 +74,13 @@ public class BlobSidecarPruner extends Service {
       final String pruningMetricsType,
       final SettableLabelledGauge pruningTimingsLabelledGauge,
       final SettableLabelledGauge pruningActiveLabelledGauge,
-      final boolean storeNonCanonicalBlobSidecars) {
+      final boolean storeNonCanonicalBlobSidecars,
+      final Duration pruningWarnTimeout) {
     this.spec = spec;
     this.database = database;
     this.blobSidecarsArchiver = blobSidecarsArchiver;
     this.asyncRunner = asyncRunner;
+    this.metricsAsyncRunner = metricsAsyncRunner;
     this.pruneInterval = pruneInterval;
     this.pruneLimit = pruneLimit;
     this.timeProvider = timeProvider;
@@ -83,6 +89,7 @@ public class BlobSidecarPruner extends Service {
     this.pruningTimingsLabelledGauge = pruningTimingsLabelledGauge;
     this.pruningActiveLabelledGauge = pruningActiveLabelledGauge;
     this.storeNonCanonicalBlobSidecars = storeNonCanonicalBlobSidecars;
+    this.pruningWarnTimeout = pruningWarnTimeout;
 
     if (blobSidecarsStorageCountersEnabled) {
       LabelledSuppliedMetric labelledGauge =
@@ -106,12 +113,22 @@ public class BlobSidecarPruner extends Service {
                 Duration.ZERO,
                 pruneInterval,
                 error -> LOG.error("Failed to prune old blobs", error)));
+    if (blobSidecarsStorageCountersEnabled) {
+      scheduledMetricsUpdater =
+          Optional.of(
+              metricsAsyncRunner.runWithFixedDelay(
+                  this::doUpdateBlobSidecarMetrics,
+                  Duration.ZERO,
+                  pruneInterval,
+                  error -> LOG.error("Failed to update blob sidecar storage counters", error)));
+    }
     return SafeFuture.COMPLETE;
   }
 
   @Override
   protected synchronized SafeFuture<?> doStop() {
     scheduledPruner.ifPresent(Cancellable::cancel);
+    scheduledMetricsUpdater.ifPresent(Cancellable::cancel);
     return SafeFuture.COMPLETE;
   }
 
@@ -121,14 +138,33 @@ public class BlobSidecarPruner extends Service {
 
     pruneBlobsPriorToAvailabilityWindow();
 
-    pruningTimingsLabelledGauge.set(System.currentTimeMillis() - start, pruningMetricsType);
+    final long elapsed = System.currentTimeMillis() - start;
+    pruningTimingsLabelledGauge.set(elapsed, pruningMetricsType);
     pruningActiveLabelledGauge.set(0, pruningMetricsType);
-
-    if (blobSidecarsStorageCountersEnabled) {
-      blobColumnSize.set(database.getBlobSidecarColumnCount());
-      earliestBlobSidecarSlot.set(
-          database.getEarliestBlobSidecarSlot().map(UInt64::longValue).orElse(-1L));
+    if (elapsed > pruningWarnTimeout.toMillis()) {
+      LOG.warn(
+          "Pruning task for {} took {} ms, exceeding the warn threshold of {} ms",
+          pruningMetricsType,
+          elapsed,
+          pruningWarnTimeout.toMillis());
     }
+  }
+
+  /**
+   * Updates storage counter gauges by performing a full sequential scan of the blob sidecar column.
+   * O(N) — may take minutes on nodes with large blob datasets.
+   */
+  private void doUpdateBlobSidecarMetrics() {
+    LOG.debug("Updating blob sidecar storage counters (full column scan — may be slow)");
+    final long start = System.currentTimeMillis();
+    blobColumnSize.set(database.getBlobSidecarColumnCount());
+    earliestBlobSidecarSlot.set(
+        database.getEarliestBlobSidecarSlot().map(UInt64::longValue).orElse(-1L));
+    LOG.debug(
+        "Blob sidecar storage counters updated in {} ms: total={}, earliestSlot={}",
+        System.currentTimeMillis() - start,
+        blobColumnSize.get(),
+        earliestBlobSidecarSlot.get());
   }
 
   private void pruneBlobsPriorToAvailabilityWindow() {

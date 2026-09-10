@@ -49,7 +49,7 @@ public class ExecutionPayloadFactoryGloas implements ExecutionPayloadFactory {
 
   @Override
   public SafeFuture<ExecutionPayloadEnvelope> createUnsignedExecutionPayload(
-      final UInt64 builderIndex, final BeaconBlockAndState blockAndState) {
+      final BeaconBlockAndState blockAndState) {
     final UInt64 proposalSlot = blockAndState.getSlot();
     final SchemaDefinitionsGloas schemaDefinitions =
         SchemaDefinitionsGloas.required(spec.atSlot(proposalSlot).getSchemaDefinitions());
@@ -65,7 +65,7 @@ public class ExecutionPayloadFactoryGloas implements ExecutionPayloadFactory {
                             .createFromBlobsBundle(
                                 getPayloadResponse.getBlobsBundle().orElseThrow())));
     return spec.createNewUnsignedExecutionPayload(
-        proposalSlot, builderIndex, blockAndState, executionPayloadProposalDataFuture);
+        proposalSlot, blockAndState, executionPayloadProposalDataFuture);
   }
 
   @Override

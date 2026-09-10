@@ -87,6 +87,14 @@ public class DataColumnReqRespBatchingImpl implements DataColumnReqResp {
     final Map<UInt256, List<RequestEntry>> byNodes = new HashMap<>();
     RequestEntry request;
     while ((request = bufferedRequests.poll()) != null) {
+      if (request.promise().isDone()) {
+        // Abandoned before it ever reached the wire - typically the caller cancelled the promise
+        // because the column arrived via gossip in the meantime. Sending it now would cost a
+        // round trip whose response nobody consumes, and would count against the peer's request
+        // budget and response score.
+        LOG.trace("Dropping already-completed buffered request {}", request.columnIdentifier());
+        continue;
+      }
       byNodes.computeIfAbsent(request.nodeId, __ -> new ArrayList<>()).add(request);
     }
     for (final Map.Entry<UInt256, List<RequestEntry>> entry : byNodes.entrySet()) {

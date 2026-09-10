@@ -1,43 +1,50 @@
 {
-  "title" : "BuilderEntry",
-  "type" : "object",
-  "required" : [ "url", "auth", "builder_pubkeys", "max_execution_payment", "min_bid", "builder_boost_factor" ],
-  "properties" : {
-    "url" : {
-      "type" : "string",
-      "pattern" : "^0x[a-fA-F0-9]{2,}$",
-      "description" : "SSZ encoded byte list",
-      "format" : "bytes"
+  "title": "BuilderEntry",
+  "type": "object",
+  "required": [
+    "url",
+    "auth",
+    "builder_pubkeys",
+    "max_execution_payment",
+    "min_bid",
+    "builder_boost_factor"
+  ],
+  "properties": {
+    "url": {
+      "type": "string",
+      "pattern": "^0x[a-fA-F0-9]{2,}$",
+      "description": "SSZ encoded byte list",
+      "format": "bytes"
     },
-    "auth" : {
-      "$ref" : "#/components/schemas/SignedRequestAuthV1"
+    "auth": {
+      "$ref": "#/components/schemas/SignedBuilderRequestAuth"
     },
-    "builder_pubkeys" : {
-      "type" : "array",
-      "items" : {
-        "type" : "string",
-        "pattern" : "^0x[a-fA-F0-9]{2,}$",
-        "description" : "Bytes48 hexadecimal",
-        "format" : "bytes"
+    "builder_pubkeys": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^0x[a-fA-F0-9]{2,}$",
+        "description": "Bytes48 hexadecimal",
+        "format": "bytes"
       }
     },
-    "max_execution_payment" : {
-      "type" : "string",
-      "description" : "unsigned 64 bit integer",
-      "example" : "1",
-      "format" : "uint64"
+    "max_execution_payment": {
+      "type": "string",
+      "description": "unsigned 64 bit integer",
+      "example": "1",
+      "format": "uint64"
     },
-    "min_bid" : {
-      "type" : "string",
-      "description" : "unsigned 64 bit integer",
-      "example" : "1",
-      "format" : "uint64"
+    "min_bid": {
+      "type": "string",
+      "description": "unsigned 64 bit integer",
+      "example": "1",
+      "format": "uint64"
     },
-    "builder_boost_factor" : {
-      "type" : "string",
-      "description" : "unsigned 64 bit integer",
-      "example" : "1",
-      "format" : "uint64"
+    "builder_boost_factor": {
+      "type": "string",
+      "description": "unsigned 64 bit integer",
+      "example": "1",
+      "format": "uint64"
     }
   }
 }

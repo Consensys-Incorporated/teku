@@ -138,6 +138,21 @@ class Eth2NetworkOptionsTest extends AbstractBeaconNodeCommandTest {
   }
 
   @Test
+  void shouldDisableFastConfirmationByDefault() {
+    final TekuConfiguration config = getTekuConfigurationFromArguments();
+    assertThat(config.eth2NetworkConfiguration().isFastConfirmationEnabled()).isFalse();
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"true", "false"})
+  void shouldSetFastConfirmationEnabled(final String value) {
+    final TekuConfiguration config =
+        getTekuConfigurationFromArguments("--Xfast-confirmation-enabled", value);
+    assertThat(config.eth2NetworkConfiguration().isFastConfirmationEnabled())
+        .isEqualTo(Boolean.valueOf(value));
+  }
+
+  @Test
   void shouldAggregatingAttestationPoolProfilerDisabledByDefault() {
     final TekuConfiguration config = getTekuConfigurationFromArguments();
     assertThat(config.eth2NetworkConfiguration().isAggregatingAttestationPoolProfilingEnabled())

@@ -22,12 +22,22 @@ import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.service.serviceutils.Service;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.storage.client.ChainHead;
 
-/** Glue between {@code ForkChoice.onTick} and the fast confirmation side runner. */
-public final class ForkChoiceFastConfirmation {
+/**
+ * Glue between {@code ForkChoice.onTick} and the fast confirmation side runner.
+ *
+ * <p>A {@link Service} so its per-slot pipeline has an explicit lifecycle: it is started and
+ * stopped by the beacon chain controller, and must be stopped before the fork-choice event thread
+ * is (see {@link #doStop}).
+ */
+public final class ForkChoiceFastConfirmation extends Service {
   private static final Logger LOG = LogManager.getLogger();
+
+  /** Segment timeout, in slots, while the tracker is warming up. See {@link #segmentTimeout}. */
+  private static final int WARM_UP_SEGMENT_TIMEOUT_SLOTS = 4;
 
   private final Spec spec;
   private final FastConfirmationTracker fastConfirmationTracker;
@@ -85,16 +95,21 @@ public final class ForkChoiceFastConfirmation {
    *
    * <p>Because serialization means a stuck stage would otherwise block every later slot, each
    * slot's segment is bounded by {@link #segmentTimeout}. This guards the currently-unbounded
-   * {@code processHead} (its async checkpoint-state load); the confirmation itself is separately
-   * bounded inside {@link FastConfirmationTracker}. On timeout the slot is abandoned and the chain
-   * moves on, so a hung {@code processHead} degrades to "FCR skips that slot" rather than wedging
-   * FCR until restart.
+   * {@code processHead} (its async checkpoint-state load) and, since {@link
+   * FastConfirmationTracker} bounds only its source-state load and not {@code
+   * get_latest_confirmed}, the confirmation computation as well. On timeout the slot is abandoned
+   * and the chain moves on, so a hung {@code processHead} degrades to "FCR skips that slot" rather
+   * than wedging FCR until restart. Note that the timeout does not cancel the work — an abandoned
+   * slot's confirmation can still land later.
    */
   public void processForSlot(
       final UInt64 currentSlot,
       final SafeFuture<Void> deferredAttestationsFuture,
       final Function<UInt64, SafeFuture<Optional<ChainHead>>> processHead,
       final Supplier<SafeFuture<Void>> sendForkChoiceUpdated) {
+    if (!isRunning()) {
+      return;
+    }
     final SafeFuture<Void> segment =
         slotChain
             .thenCompose(__ -> deferredAttestationsFuture)
@@ -115,9 +130,32 @@ public final class ForkChoiceFastConfirmation {
             // cannot wedge later slots.
             .exceptionally(
                 error -> {
-                  LOG.error("Fast confirmation update for slot {} failed", currentSlot, error);
+                  if (isRunning()) {
+                    LOG.error("Fast confirmation update for slot {} failed", currentSlot, error);
+                  } else {
+                    LOG.debug(
+                        "Fast confirmation update for slot {} abandoned during shutdown",
+                        currentSlot,
+                        error);
+                  }
                   return null;
                 });
+  }
+
+  @Override
+  protected SafeFuture<?> doStart() {
+    return SafeFuture.COMPLETE;
+  }
+
+  /**
+   * Stops scheduling new per-slot work; any segment still in flight is left to fail or time out
+   * quietly. Must be called before the fork-choice event thread is stopped, otherwise the in-flight
+   * segment's work is rejected with "EventThread not started" and logged as an FCR error on every
+   * clean shutdown.
+   */
+  @Override
+  protected SafeFuture<?> doStop() {
+    return SafeFuture.COMPLETE;
   }
 
   private SafeFuture<Void> withSegmentTimeout(final SafeFuture<Void> segment, final UInt64 slot) {
@@ -131,8 +169,22 @@ public final class ForkChoiceFastConfirmation {
    * One full slot: comfortably longer than the tracker's own (half-slot) confirmation timeout, so
    * in the normal slow-confirmation case that inner timeout fires first (preserving the slot's
    * rotation), and this outer bound only trips when {@code processHead} itself is stuck.
+   *
+   * <p>Relaxed to {@link #WARM_UP_SEGMENT_TIMEOUT_SLOTS} slots while the tracker is warming up. The
+   * update that ends the warm-up advances {@code confirmed_root} across every block accumulated
+   * while it was pinned to finality — up to two epochs — and {@code
+   * find_latest_confirmed_descendant} scores each of those blocks over the whole active validator
+   * set, so that single slot can exceed a one-slot budget on a large network. It is a one-off: in
+   * steady state the walk covers a single block. Timing out here would not stop the work (the
+   * timeout does not cancel it) but would log it as a failure and send the slot's fcU late, so the
+   * bound is widened for the catch-up instead. A stopgap — the real fix is to score the whole chain
+   * segment in one pass over the validator set.
    */
   private Duration segmentTimeout(final UInt64 slot) {
-    return Duration.ofMillis(spec.getSlotDurationMillis(slot));
+    final long slotDurationMillis = spec.getSlotDurationMillis(slot);
+    return Duration.ofMillis(
+        fastConfirmationTracker.isWarmingUp()
+            ? slotDurationMillis * WARM_UP_SEGMENT_TIMEOUT_SLOTS
+            : slotDurationMillis);
   }
 }

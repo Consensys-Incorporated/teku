@@ -931,7 +931,11 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
       final List<SignedProposerPreferences> signedProposerPreferences) {
     return SafeFuture.collectAll(
             signedProposerPreferences.stream().map(proposerPreferencesManager::addLocal))
-        .thenApply(this::convertInternalValidationResults);
+        .thenApply(this::convertInternalValidationResults)
+        .thenPeek(
+            __ ->
+                proposersDataManager.updatePreparedProposersFromProposerPreferences(
+                    signedProposerPreferences, combinedChainDataClient.getCurrentSlot()));
   }
 
   @Override
@@ -939,7 +943,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
       final Collection<BeaconPreparableProposer> beaconPreparableProposers) {
     return SafeFuture.fromRunnable(
         () ->
-            proposersDataManager.updatePreparedProposers(
+            proposersDataManager.updatePreparedProposersFromPrepareBeaconProposer(
                 beaconPreparableProposers, combinedChainDataClient.getCurrentSlot()));
   }
 
@@ -992,7 +996,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
 
   @Override
   public SafeFuture<Optional<ExecutionPayloadEnvelope>> createUnsignedExecutionPayload(
-      final UInt64 slot, final UInt64 builderIndex) {
+      final UInt64 slot, final Bytes32 beaconBlockRoot) {
     if (isSyncActive()) {
       return NodeSyncingException.failedFuture();
     }
@@ -1004,10 +1008,18 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
                 return CompletableFuture.completedFuture(Optional.empty());
               }
               final BeaconBlockAndState blockAndState = maybeBlockAndState.get();
+              if (!blockAndState.getRoot().equals(beaconBlockRoot)) {
+                LOG.warn(
+                    "Unable to produce execution payload for slot {} and block {} because the block for this slot according to the BN is {}",
+                    slot,
+                    beaconBlockRoot,
+                    blockAndState.getRoot());
+                return CompletableFuture.completedFuture(Optional.empty());
+              }
               LOG.info(
                   "Producing unsigned execution payload for slot {} and block {}",
                   slot,
-                  blockAndState.getRoot());
+                  beaconBlockRoot);
               if (combinedChainDataClient.isOptimisticBlock(blockAndState.getParentRoot())) {
                 LOG.warn(
                     "Unable to produce execution payload for slot {} and block {} because parent has optimistically validated payload",
@@ -1016,7 +1028,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
                 return NodeSyncingException.failedFuture();
               }
               return executionPayloadFactory
-                  .createUnsignedExecutionPayload(builderIndex, blockAndState)
+                  .createUnsignedExecutionPayload(blockAndState)
                   .thenApply(Optional::of);
             });
   }

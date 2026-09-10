@@ -23,11 +23,13 @@ public enum ValidatorApiMethod {
   GET_GENESIS("eth/v1/beacon/genesis"),
   GET_VALIDATORS("eth/v1/beacon/states/head/validators"),
   GET_UNSIGNED_BLOCK_V3("eth/v3/validator/blocks/:slot"),
-  GET_UNSIGNED_BLOCK_V4("eth/v4/validator/blocks/:slot"),
+  POST_UNSIGNED_BLOCK_V4("eth/v4/validator/blocks/:slot"),
   SEND_SIGNED_BLOCK_V2("eth/v2/beacon/blocks"),
   SEND_SIGNED_BLINDED_BLOCK_V2("eth/v2/beacon/blinded_blocks"),
   GET_ATTESTATION_DATA("eth/v1/validator/attestation_data"),
   GET_PAYLOAD_ATTESTATION_DATA("eth/v1/validator/payload_attestation_data"),
+  GET_EXECUTION_PAYLOAD_ENVELOPE(
+      "eth/v1/validator/execution_payload_envelopes/:slot/:beacon_block_root"),
   SEND_SIGNED_ATTESTATION("eth/v1/beacon/pool/attestations"),
   SEND_SIGNED_ATTESTATION_V2("eth/v2/beacon/pool/attestations"),
   SEND_PAYLOAD_ATTESTATION_MESSAGES("eth/v1/beacon/pool/payload_attestations"),
@@ -46,6 +48,7 @@ public enum ValidatorApiMethod {
   GET_SYNC_COMMITTEE_DUTIES("eth/v1/validator/duties/sync/:epoch"),
   GET_SYNC_COMMITTEE_CONTRIBUTION("eth/v1/validator/sync_committee_contribution"),
   GET_PROPOSER_DUTIES("eth/v1/validator/duties/proposer/:epoch"),
+  GET_PROPOSER_DUTIES_V2("eth/v2/validator/duties/proposer/:epoch"),
   GET_PEER_COUNT("eth/v1/node/peer_count"),
   PREPARE_BEACON_PROPOSER("/eth/v1/validator/prepare_beacon_proposer"),
   REGISTER_VALIDATOR("/eth/v1/validator/register_validator"),
@@ -55,7 +58,8 @@ public enum ValidatorApiMethod {
   SEND_VALIDATOR_LIVENESS("/eth/v1/validator/liveness/:epoch"),
   BEACON_COMMITTEE_SELECTIONS("/eth/v1/validator/beacon_committee_selections"),
   SYNC_COMMITTEE_SELECTIONS("/eth/v1/validator/sync_committee_selections"),
-  SEND_SIGNED_EXECUTION_PAYLOAD_ENVELOPE("eth/v1/beacon/execution_payload_envelopes");
+  SEND_SIGNED_EXECUTION_PAYLOAD_ENVELOPE("eth/v1/beacon/execution_payload_envelopes"),
+  SEND_SIGNED_PROPOSER_PREFERENCES("eth/v1/validator/proposer_preferences");
 
   private final String path;
 

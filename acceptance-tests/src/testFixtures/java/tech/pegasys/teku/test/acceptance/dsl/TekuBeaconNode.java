@@ -167,6 +167,43 @@ public class TekuBeaconNode extends TekuNode {
         .orElse(0L);
   }
 
+  /**
+   * Returns the most recent {@code fast_confirmation} SSE event, or empty if none received yet.
+   * Requires {@code startEventListener(EventType.fast_confirmation)} to have been called.
+   */
+  public Optional<FastConfirmationEventData> getLatestFastConfirmationEvent() throws IOException {
+    final Optional<Eth2EventHandler.PackedMessage> maybeMessage =
+        maybeEventStreamListener.flatMap(
+            listener ->
+                listener.getMessages().stream()
+                    .filter(
+                        packedMessage ->
+                            packedMessage.getEvent().equals(EventType.fast_confirmation.name()))
+                    .reduce((ignored, latest) -> latest));
+    if (maybeMessage.isEmpty()) {
+      return Optional.empty();
+    }
+    final String rawData = maybeMessage.get().getMessageEvent().getData();
+    final JsonNode data = OBJECT_MAPPER.readTree(rawData);
+    return Optional.of(
+        new FastConfirmationEventData(
+            Bytes32.fromHexString(getRequiredTextField(data, "block", rawData)),
+            UInt64.valueOf(getRequiredTextField(data, "slot", rawData)),
+            UInt64.valueOf(getRequiredTextField(data, "current_slot", rawData))));
+  }
+
+  private static String getRequiredTextField(
+      final JsonNode data, final String fieldName, final String rawData) {
+    final JsonNode field = data.get(fieldName);
+    if (field == null || field.isNull() || field.asText().isEmpty()) {
+      throw new IllegalStateException(
+          "fast_confirmation event is missing field '" + fieldName + "': " + rawData);
+    }
+    return field.asText();
+  }
+
+  public record FastConfirmationEventData(Bytes32 block, UInt64 slot, UInt64 currentSlot) {}
+
   public void waitForGenesis() {
     LOG.debug("Wait for genesis");
     waitFor(this::fetchGenesisTime);

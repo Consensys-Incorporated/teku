@@ -29,7 +29,7 @@ public class BuilderEntry
     extends Container6<
         BuilderEntry,
         SszByteList,
-        SignedRequestAuth,
+        SignedBuilderRequestAuth,
         SszList<SszPublicKey>,
         SszUInt64,
         SszUInt64,
@@ -37,15 +37,15 @@ public class BuilderEntry
 
   protected BuilderEntry(
       final BuilderEntrySchema schema,
-      final String url,
-      final SignedRequestAuth auth,
+      final Bytes url,
+      final SignedBuilderRequestAuth auth,
       final List<BLSPublicKey> builderPubkeys,
       final UInt64 maxExecutionPayment,
       final UInt64 minBid,
       final UInt64 builderBoostFactor) {
     super(
         schema,
-        schema.getUrlSchema().fromBytes(Bytes.wrap(url.getBytes(StandardCharsets.UTF_8))),
+        schema.getUrlSchema().fromBytes(url),
         auth,
         schema
             .getBuilderPubkeysSchema()
@@ -63,7 +63,7 @@ public class BuilderEntry
     return new String(getField0().getBytes().toArrayUnsafe(), StandardCharsets.UTF_8);
   }
 
-  public SignedRequestAuth getAuth() {
+  public SignedBuilderRequestAuth getAuth() {
     return getField1();
   }
 

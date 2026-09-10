@@ -1,0 +1,19 @@
+{
+  "title" : "BuilderRequestAuth",
+  "type" : "object",
+  "required" : [ "data", "slot" ],
+  "properties" : {
+    "data" : {
+      "type" : "string",
+      "pattern" : "^0x[a-fA-F0-9]{2,}$",
+      "description" : "SSZ encoded byte list",
+      "format" : "bytes"
+    },
+    "slot" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    }
+  }
+}

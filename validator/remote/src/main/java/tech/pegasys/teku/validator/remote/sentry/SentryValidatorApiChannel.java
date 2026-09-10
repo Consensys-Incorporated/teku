@@ -301,10 +301,10 @@ public class SentryValidatorApiChannel implements ValidatorApiChannel {
 
   @Override
   public SafeFuture<Optional<ExecutionPayloadEnvelope>> createUnsignedExecutionPayload(
-      final UInt64 slot, final UInt64 builderIndex) {
+      final UInt64 slot, final Bytes32 beaconBlockRoot) {
     return blockHandlerChannel
         .orElse(dutiesProviderChannel)
-        .createUnsignedExecutionPayload(slot, builderIndex);
+        .createUnsignedExecutionPayload(slot, beaconBlockRoot);
   }
 
   @Override

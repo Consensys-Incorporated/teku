@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.test.acceptance.dsl;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.toml.TomlMapper;
 import com.google.common.io.Resources;
@@ -184,6 +185,29 @@ public class BesuNode extends Node {
     return OBJECT_MAPPER.readTree(response).get("result").asBoolean();
   }
 
+  /**
+   * Returns the {@code result} of {@code eth_getBlockByNumber(blockLabel, false)}, e.g. the block
+   * the execution layer currently treats as {@code "safe"} or {@code "finalized"} (as set by the
+   * consensus layer via {@code engine_forkchoiceUpdated}). Fields such as {@code hash} and {@code
+   * number} are hex strings.
+   */
+  public JsonNode getExecutionBlock(final String blockLabel) throws Exception {
+    final URI baseUri = new URI(getExternalJsonRpcUrl());
+    final String response =
+        httpClient.post(
+            baseUri,
+            "",
+            OBJECT_MAPPER.writeValueAsString(
+                new Request("eth_getBlockByNumber", blockLabel, false)));
+    final JsonNode responseNode = OBJECT_MAPPER.readTree(response);
+    final JsonNode error = responseNode.get("error");
+    if (error != null && !error.isNull()) {
+      throw new IllegalStateException(
+          "eth_getBlockByNumber(" + blockLabel + ") failed with error: " + error);
+    }
+    return responseNode.get("result");
+  }
+
   public String getRichBenefactorAddress() {
     return "0xfe3b557e8fb62b89f4916b721be55ceb828dbd73";
   }
@@ -264,11 +288,11 @@ public class BesuNode extends Node {
 
     public final String jsonrpc = "2.0";
     public final String method;
-    public final String[] params;
+    public final Object[] params;
     private static final AtomicInteger ID_COUNTER = new AtomicInteger(0);
     public final int id;
 
-    public Request(final String method, final String... params) {
+    public Request(final String method, final Object... params) {
       this.method = method;
       this.params = params;
       this.id = ID_COUNTER.incrementAndGet();

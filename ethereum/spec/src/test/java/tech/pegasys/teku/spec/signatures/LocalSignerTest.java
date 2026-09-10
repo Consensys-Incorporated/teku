@@ -27,6 +27,7 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.builder.ValidatorRegistration;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderRequestAuth;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
@@ -291,6 +292,25 @@ class LocalSignerTest {
 
     final SafeFuture<BLSSignature> result =
         signer.signProposerPreferences(proposerPreferences, fork);
+    asyncRunner.executeQueuedActions();
+
+    assertThat(result)
+        .withFailMessage(
+            "expected: %s\nbut was: %s",
+            expectedSignature.toBytesCompressed().toBase64String(),
+            result.getImmediately().toBytesCompressed().toBase64String())
+        .isCompletedWithValue(expectedSignature);
+  }
+
+  @Test
+  public void shouldSignBuilderRequestAuth() {
+    final BuilderRequestAuth builderRequestAuth = dataStructureUtil.randomBuilderRequestAuth();
+    final BLSSignature expectedSignature =
+        BLSSignature.fromBytesCompressed(
+            Bytes.fromBase64String(
+                "gOFmUY0C3aq3sR1lczCHjPsJYs4G/UBMHMf3PSAvTdaLGHIFZ03PbddY4wtptu5hFk3cm4xE2IzGKR8IIqYfWqZG1YfimbWQPSvIK+WW8F2RRYf4DHvwjIw1MxVkJJYu"));
+
+    final SafeFuture<BLSSignature> result = signer.signBuilderRequestAuth(builderRequestAuth);
     asyncRunner.executeQueuedActions();
 
     assertThat(result)

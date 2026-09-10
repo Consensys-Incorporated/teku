@@ -1,80 +1,76 @@
 {
-  "get": {
-    "tags": [
-      "Beacon"
-    ],
-    "operationId": "getSignedExecutionPayloadEnvelope",
-    "summary": "Get signed execution payload envelope",
-    "description": "Retrieves signed execution payload envelope for a given block id.",
-    "parameters": [
-      {
-        "name": "block_id",
-        "required": true,
-        "in": "path",
-        "schema": {
-          "type": "string",
-          "description": "Block identifier. Can be one of: \"head\" (canonical head in node's view), \"genesis\", \"finalized\", &lt;slot&gt;, &lt;hex encoded blockRoot with 0x prefix&gt;.",
-          "example": "head"
-        }
+  "get" : {
+    "tags" : [ "Beacon" ],
+    "operationId" : "getSignedExecutionPayloadEnvelope",
+    "summary" : "Get signed execution payload envelope",
+    "description" : "Retrieves signed execution payload envelope for a given block id.",
+    "parameters" : [ {
+      "name" : "block_id",
+      "required" : true,
+      "in" : "path",
+      "schema" : {
+        "type" : "string",
+        "description" : "Block identifier. Can be one of: \"head\" (canonical head in node's view), \"genesis\", \"finalized\", &lt;slot&gt;, &lt;hex encoded blockRoot with 0x prefix&gt;.",
+        "example" : "head"
       }
-    ],
-    "responses": {
-      "200": {
-        "description": "Request successful",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/GetExecutionPayloadEnvelopeResponse"
+    } ],
+    "responses" : {
+      "200" : {
+        "description" : "Request successful",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/GetSignedExecutionPayloadEnvelopeResponse"
             }
           },
-          "application/octet-stream": {
-            "schema": {
-              "type": "string",
-              "format": "binary"
+          "application/octet-stream" : {
+            "schema" : {
+              "type" : "string",
+              "format" : "binary"
             }
           }
         }
       },
-      "404": {
-        "description": "Not found",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/HttpErrorResponse"
+      "404" : {
+        "description" : "Not found",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
             }
           }
         }
       },
-      "503": {
-        "description": "Service unavailable",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/HttpErrorResponse"
+      "503" : {
+        "description" : "Service unavailable",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
             }
           }
         }
       },
-      "204": {
-        "description": "Data is unavailable because the chain has not yet reached genesis",
-        "content": {}
+      "204" : {
+        "description" : "Data is unavailable because the chain has not yet reached genesis",
+        "content" : { }
       },
-      "400": {
-        "description": "The request could not be processed, check the response for more information.",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/HttpErrorResponse"
+      "400" : {
+        "description" : "The request could not be processed, check the response for more information.",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
             }
           }
         }
       },
-      "500": {
-        "description": "Internal server error",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/HttpErrorResponse"
+      "500" : {
+        "description" : "Internal server error",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
             }
           }
         }

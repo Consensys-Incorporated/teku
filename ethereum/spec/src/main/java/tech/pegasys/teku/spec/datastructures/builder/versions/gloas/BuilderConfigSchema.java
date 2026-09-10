@@ -40,10 +40,6 @@ public class BuilderConfigSchema
     return new BuilderConfig(this, minBid, builderBoostFactor, builders);
   }
 
-  public BuilderConfig create(final UInt64 builderBoostFactor) {
-    return new BuilderConfig(this, UInt64.ZERO, builderBoostFactor, List.of());
-  }
-
   @Override
   public BuilderConfig createFromBackingNode(final TreeNode node) {
     return new BuilderConfig(this, node);

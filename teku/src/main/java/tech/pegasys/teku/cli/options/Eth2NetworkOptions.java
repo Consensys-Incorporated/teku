@@ -155,6 +155,17 @@ public class Eth2NetworkOptions {
       Eth2NetworkConfiguration.DEFAULT_FORK_CHOICE_LATE_BLOCK_REORG_ENABLED;
 
   @Option(
+      names = {"--Xfast-confirmation-enabled"},
+      paramLabel = "<BOOLEAN>",
+      description = "Enable the experimental fast confirmation rule.",
+      arity = "0..1",
+      fallbackValue = "true",
+      showDefaultValue = Visibility.ALWAYS,
+      hidden = true)
+  private boolean fastConfirmationEnabled =
+      Eth2NetworkConfiguration.DEFAULT_FAST_CONFIRMATION_ENABLED;
+
+  @Option(
       names = {"--Xprepare-block-production-enabled"},
       paramLabel = "<BOOLEAN>",
       description = "Enable block production to be prepared in advance.",
@@ -573,6 +584,7 @@ public class Eth2NetworkOptions {
         .asyncBeaconChainMaxThreads(asyncBeaconChainMaxThreads)
         .forkChoiceLateBlockReorgEnabled(forkChoiceLateBlockReorgEnabled)
         .lightClientServerEnabled(lightClientServerEnabled)
+        .fastConfirmationEnabled(fastConfirmationEnabled)
         .prepareBlockProductionEnabled(prepareBlockProductionEnabled)
         .aggregatingAttestationPoolProfilingEnabled(aggregatingAttestationPoolProfilingEnabled)
         .aggregatingAttestationPoolV2BlockAggregationTimeLimit(

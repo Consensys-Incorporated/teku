@@ -23,6 +23,7 @@ import static tech.pegasys.teku.statetransition.validation.InternalValidationRes
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
@@ -31,6 +32,7 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.collections.LimitedSet;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.BlockRootAndBuilderIndex;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
@@ -38,6 +40,8 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloa
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
+import tech.pegasys.teku.spec.datastructures.execution.versions.capella.ExecutionPayloadCapella;
+import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
@@ -47,6 +51,7 @@ public class ExecutionPayloadGossipValidator {
 
   private static final Logger LOG = LogManager.getLogger();
 
+  private final Spec spec;
   private final GossipValidationHelper gossipValidationHelper;
   private final BlockGossipValidator blockGossipValidator;
   private final SigningRootUtil signingRootUtil;
@@ -61,6 +66,7 @@ public class ExecutionPayloadGossipValidator {
       final GossipValidationHelper gossipValidationHelper,
       final BlockGossipValidator blockGossipValidator,
       final Map<Bytes32, BlockImportResult> invalidBlockRoots) {
+    this.spec = spec;
     this.gossipValidationHelper = gossipValidationHelper;
     this.blockGossipValidator = blockGossipValidator;
     this.invalidBlockRoots = invalidBlockRoots;
@@ -286,13 +292,78 @@ public class ExecutionPayloadGossipValidator {
               envelope.getSlot(), beaconBlockSlot));
     }
 
-    return Optional.empty();
+    return verifyRequestAndWithdrawalLimits(envelope);
   }
 
+  /**
+   * [REJECT] Each execution request count, and the withdrawal count, is within its configured limit
+   * -- i.e. spec {@code verify_execution_requests_limits} plus the MAX_WITHDRAWALS_PER_PAYLOAD
+   * check. These bound the work an envelope can impose before it is propagated, so they are checked
+   * ahead of the expensive state lookup and signature verification.
+   */
+  private Optional<InternalValidationResult> verifyRequestAndWithdrawalLimits(
+      final ExecutionPayloadEnvelope envelope) {
+    final SpecConfigGloas config =
+        SpecConfigGloas.required(spec.atSlot(envelope.getSlot()).getConfig());
+    final ExecutionRequestsGloas executionRequests =
+        ExecutionRequestsGloas.required(envelope.getExecutionRequests());
+
+    final Optional<InternalValidationResult> requestLimitResult =
+        Stream.of(
+                rejectIfOverLimit(
+                    "withdrawal requests",
+                    executionRequests.getWithdrawals().size(),
+                    config.getMaxWithdrawalRequestsPerPayload()),
+                rejectIfOverLimit(
+                    "consolidation requests",
+                    executionRequests.getConsolidations().size(),
+                    config.getMaxConsolidationRequestsPerPayload()),
+                rejectIfOverLimit(
+                    "builder deposit requests",
+                    executionRequests.getBuilderDeposits().size(),
+                    config.getMaxBuilderDepositRequestsPerPayload()),
+                rejectIfOverLimit(
+                    "builder exit requests",
+                    executionRequests.getBuilderExits().size(),
+                    config.getMaxBuilderExitRequestsPerPayload()))
+            .flatMap(Optional::stream)
+            .findFirst();
+    if (requestLimitResult.isPresent()) {
+      return requestLimitResult;
+    }
+
+    return rejectIfOverLimit(
+        "withdrawals",
+        ExecutionPayloadCapella.required(envelope.getPayload()).getWithdrawals().size(),
+        config.getMaxWithdrawalsPerPayload());
+  }
+
+  private Optional<InternalValidationResult> rejectIfOverLimit(
+      final String description, final int count, final int limit) {
+    if (count <= limit) {
+      return Optional.empty();
+    }
+    LOG.trace(
+        "Execution payload envelope has {} {} which exceeds the limit of {}. Rejecting the execution payload envelope",
+        count,
+        description,
+        limit);
+    return Optional.of(
+        reject(
+            "Execution payload envelope has %s %s which exceeds the limit of %s",
+            count, description, limit));
+  }
+
+  /**
+   * The envelope's slot has already been checked to equal the slot of its beacon block, so the
+   * state to validate against is the block's own post state. It is looked up by block root rather
+   * than by slot and block root to keep the checkpoint state task queue off the path a payload has
+   * to travel before it can be propagated.
+   */
   private SafeFuture<InternalValidationResult> performWithStateValidation(
       final SignedExecutionPayloadEnvelope envelope) {
     return gossipValidationHelper
-        .getStateAtSlotAndBlockRoot(envelope.getSlotAndBlockRoot())
+        .getStateAtBlockRoot(envelope.getBeaconBlockRoot())
         .thenApply(
             maybeState -> {
               if (maybeState.isEmpty()) {

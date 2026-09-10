@@ -59,6 +59,7 @@ public class BatchSync implements Sync {
   private final BatchChain activeBatches;
 
   private Optional<Batch> importingBatch = Optional.empty();
+  private Optional<SafeFuture<BatchImportResult>> importingBatchFuture = Optional.empty();
   private boolean switchingBranches = false;
 
   private SafeFuture<UInt64> commonAncestorSlot;
@@ -387,9 +388,19 @@ public class BatchSync implements Sync {
             batch -> {
               lastImportTimerStartPointSeconds = timeProvider.getTimeInSeconds();
               importingBatch = Optional.of(batch);
-              batchImporter
-                  .importBatch(batch)
-                  .thenAcceptAsync(result -> onImportComplete(result, batch), eventThread)
+              final SafeFuture<BatchImportResult> importFuture = batchImporter.importBatch(batch);
+              importingBatchFuture = Optional.of(importFuture);
+              importFuture
+                  .handleAsync(
+                      (result, error) -> {
+                        if (error != null) {
+                          onImportFailed(batch, error);
+                        } else {
+                          onImportComplete(result, batch);
+                        }
+                        return null;
+                      },
+                      eventThread)
                   .propagateExceptionTo(syncResult);
             });
   }
@@ -414,6 +425,23 @@ public class BatchSync implements Sync {
     contestedBatches.forEach(Batch::markAsContested);
   }
 
+  /**
+   * Handles an import which completed exceptionally, for example because it failed unexpectedly.
+   * The batch didn't import, so it is handled as any other failed import - importing state has to
+   * be released either way, otherwise the sync would wait forever for an import that already
+   * finished.
+   */
+  private void onImportFailed(final Batch importedBatch, final Throwable error) {
+    eventThread.checkOnEventThread();
+    if (!isCurrentlyImportingBatch(importedBatch)) {
+      // already released, e.g. the sync was aborted which cancelled the import
+      return;
+    }
+    // an import should never fail exceptionally, so make it visible rather than only retrying
+    LOG.warn("Import of batch {} failed unexpectedly", importedBatch, error);
+    onImportComplete(BatchImportResult.IMPORT_FAILED, importedBatch);
+  }
+
   private void onImportComplete(
       final BatchImporter.BatchImportResult result, final Batch importedBatch) {
     eventThread.checkOnEventThread();
@@ -421,6 +449,7 @@ public class BatchSync implements Sync {
         isCurrentlyImportingBatch(importedBatch),
         "Received import complete for batch that shouldn't have been importing");
     importingBatch = Optional.empty();
+    importingBatchFuture = Optional.empty();
     if (switchingBranches) {
       // We switched to a different chain while this was importing. Can't infer anything about other
       // batches from this result but should still penalise the peer that sent it to us.
@@ -445,7 +474,11 @@ public class BatchSync implements Sync {
     } else if (result == BatchImportResult.EXECUTION_CLIENT_OFFLINE
         || result == BatchImportResult.DATA_NOT_AVAILABLE) {
       if (!scheduledProgressSync) {
-        LOG.warn("Unable to import blocks: {}", result);
+        LOG.warn(
+            "Unable to import blocks ({} - {}): {}",
+            importedBatch.getFirstSlot(),
+            importedBatch.getLastSlot(),
+            result);
         asyncRunner
             .runAfterDelay(
                 () ->
@@ -558,12 +591,15 @@ public class BatchSync implements Sync {
   public void abort() {
     eventThread.checkOnEventThread();
     LOG.warn("Aborting sync {}", this::describeState);
+    final Optional<SafeFuture<BatchImportResult>> importToCancel = importingBatchFuture;
     importingBatch = Optional.empty();
+    importingBatchFuture = Optional.empty();
     activeBatches.removeAll();
     switchingBranches = false;
     commonAncestorSlot = null;
     targetChain = null;
     syncResult.complete(SyncResult.FAILED);
+    importToCancel.ifPresent(importFuture -> importFuture.cancel(true));
   }
 
   private String describeState() {

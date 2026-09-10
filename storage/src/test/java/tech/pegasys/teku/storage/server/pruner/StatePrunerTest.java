@@ -62,7 +62,8 @@ public class StatePrunerTest {
           PRUNE_LIMIT,
           "test",
           mock(SettableLabelledGauge.class),
-          pruningActiveLabelledGauge);
+          pruningActiveLabelledGauge,
+          Duration.ofMinutes(5));
 
   @BeforeEach
   void setUp() {

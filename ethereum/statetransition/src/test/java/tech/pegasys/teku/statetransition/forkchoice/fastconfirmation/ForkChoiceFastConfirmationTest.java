@@ -26,6 +26,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
@@ -57,6 +58,7 @@ class ForkChoiceFastConfirmationTest {
       };
 
   ForkChoiceFastConfirmationTest() {
+    assertThat(forkChoiceFastConfirmation.start()).isCompleted();
     when(tracker.onSlot(any(), any()))
         .thenAnswer(
             invocation -> {
@@ -121,6 +123,43 @@ class ForkChoiceFastConfirmationTest {
   }
 
   @Test
+  void shouldAllowALongerSegmentWhileWarmingUp() {
+    // The update that ends the warm-up advances the confirmed root across every block accumulated
+    // while it was pinned to finality, which can outrun a one-slot budget.
+    when(tracker.isWarmingUp()).thenReturn(true);
+    final SafeFuture<Optional<ChainHead>> slowHead = new SafeFuture<>();
+
+    forkChoiceFastConfirmation.processForSlot(
+        UInt64.ONE, SafeFuture.COMPLETE, slot -> slowHead, sendForkChoiceUpdated);
+
+    // Past the normal one-slot bound: still running rather than abandoned.
+    timeProvider.advanceTimeBy(slotDuration.plusMillis(1));
+    asyncRunner.executeDueActionsRepeatedly();
+    slowHead.complete(Optional.of(chainHead(Bytes32.random())));
+
+    assertThat(onSlotInvocations).containsExactly(UInt64.ONE);
+  }
+
+  @Test
+  void shouldTimeoutTheRelaxedWarmUpSegmentEventually() {
+    when(tracker.isWarmingUp()).thenReturn(true);
+
+    forkChoiceFastConfirmation.processForSlot(
+        UInt64.ONE, SafeFuture.COMPLETE, slot -> new SafeFuture<>(), sendForkChoiceUpdated);
+    forkChoiceFastConfirmation.processForSlot(
+        UInt64.valueOf(2),
+        SafeFuture.COMPLETE,
+        slot -> SafeFuture.completedFuture(Optional.of(chainHead(Bytes32.random()))),
+        sendForkChoiceUpdated);
+
+    // Four slots is the warm-up bound, so slot 1 is abandoned there and slot 2 proceeds.
+    timeProvider.advanceTimeBy(slotDuration.multipliedBy(4).plusMillis(1));
+    asyncRunner.executeDueActionsRepeatedly();
+
+    assertThat(onSlotInvocations).containsExactly(UInt64.valueOf(2));
+  }
+
+  @Test
   void shouldContinueProcessingLaterSlotsAfterAnEarlierSlotFails() {
     final Function<UInt64, SafeFuture<Optional<ChainHead>>> processHead =
         slot ->
@@ -148,6 +187,52 @@ class ForkChoiceFastConfirmationTest {
     // No head, so neither onSlot nor the fcU runs for this slot.
     assertThat(onSlotInvocations).isEmpty();
     assertThat(events).isEmpty();
+  }
+
+  @Test
+  void shouldNotScheduleNewSlotWorkAfterStop() {
+    final Function<UInt64, SafeFuture<Optional<ChainHead>>> processHead =
+        slot -> SafeFuture.completedFuture(Optional.of(chainHead(Bytes32.random())));
+
+    assertThat(forkChoiceFastConfirmation.stop()).isCompleted();
+    forkChoiceFastConfirmation.processForSlot(
+        UInt64.ONE, SafeFuture.COMPLETE, processHead, sendForkChoiceUpdated);
+
+    assertThat(onSlotInvocations).isEmpty();
+    assertThat(events).isEmpty();
+  }
+
+  @Test
+  void shouldNotLogErrorWhenAnInFlightSegmentFailsAfterStop() {
+    // The fork-choice event thread is stopped while a segment is in flight, so its work fails with
+    // "EventThread not started". That is expected shutdown noise, not an FCR failure.
+    final SafeFuture<Optional<ChainHead>> pendingHead = new SafeFuture<>();
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(ForkChoiceFastConfirmation.class)) {
+      forkChoiceFastConfirmation.processForSlot(
+          UInt64.ONE, SafeFuture.COMPLETE, slot -> pendingHead, sendForkChoiceUpdated);
+
+      assertThat(forkChoiceFastConfirmation.stop()).isCompleted();
+      pendingHead.completeExceptionally(new IllegalStateException("EventThread not started"));
+
+      assertThat(logCaptor.getErrorLogs()).isEmpty();
+      assertThat(logCaptor.getDebugLogs())
+          .anyMatch(log -> log.contains("Fast confirmation update for slot 1 abandoned"));
+    }
+  }
+
+  @Test
+  void shouldLogErrorWhenASegmentFailsWhileRunning() {
+    try (final LogCaptor logCaptor = LogCaptor.forClass(ForkChoiceFastConfirmation.class)) {
+      forkChoiceFastConfirmation.processForSlot(
+          UInt64.ONE,
+          SafeFuture.COMPLETE,
+          slot -> SafeFuture.failedFuture(new IllegalStateException("processHead failed")),
+          sendForkChoiceUpdated);
+
+      assertThat(logCaptor.getErrorLogs())
+          .anyMatch(log -> log.contains("Fast confirmation update for slot 1 failed"));
+    }
   }
 
   private ChainHead chainHead(final Bytes32 root) {

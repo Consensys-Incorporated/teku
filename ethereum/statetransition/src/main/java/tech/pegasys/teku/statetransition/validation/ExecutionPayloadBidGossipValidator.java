@@ -17,6 +17,7 @@ import static tech.pegasys.teku.infrastructure.async.SafeFuture.completedFuture;
 import static tech.pegasys.teku.infrastructure.logging.Converter.gweiToEth;
 import static tech.pegasys.teku.spec.config.Constants.HIGHEST_BID_SET_SIZE;
 import static tech.pegasys.teku.spec.config.Constants.MAX_SLOTS_TO_TRACK_BUILDERS_BIDS;
+import static tech.pegasys.teku.spec.config.SpecConfigGloas.PAYLOAD_BUILDER_VERSION;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ignore;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.reject;
@@ -34,12 +35,15 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.collections.LimitedMap;
+import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
 import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
 
@@ -47,6 +51,7 @@ public class ExecutionPayloadBidGossipValidator {
 
   private static final Logger LOG = LogManager.getLogger();
 
+  private final Spec spec;
   private final GossipValidationHelper gossipValidationHelper;
   private final SigningRootUtil signingRootUtil;
   private final int minBidIncrementPercentage;
@@ -62,6 +67,7 @@ public class ExecutionPayloadBidGossipValidator {
       final GossipValidationHelper gossipValidationHelper,
       final ProposerPreferencesManager proposerPreferencesManager,
       final int minBidIncrementPercentage) {
+    this.spec = spec;
     this.gossipValidationHelper = gossipValidationHelper;
     this.proposerPreferencesManager = proposerPreferencesManager;
     this.minBidIncrementPercentage = minBidIncrementPercentage;
@@ -82,11 +88,37 @@ public class ExecutionPayloadBidGossipValidator {
     }
 
     /*
+     * [REJECT] The bid's block hash is not equal to its parent block hash
+     */
+
+    if (bid.getBlockHash().equals(bid.getParentBlockHash())) {
+      return completedFuture(rejectBid(bid, "block hash and parent block hash are the same"));
+    }
+
+    /*
      * [IGNORE] bid.slot is the current slot or the next slot.
      */
     if (!gossipValidationHelper.isSlotCurrentOrNext(bid.getSlot())) {
       return completedFuture(
           ignoreBid(bid, "must be for current or next slot but was for slot %s", bid.getSlot()));
+    }
+
+    /*
+     * [REJECT] the number of bid.blob_kzg_commitments is within the limit for the bid's epoch
+     * -- i.e. len(bid.blob_kzg_commitments) <= get_blob_parameters(proposal_epoch).max_blobs_per_block.
+     */
+    final Optional<Integer> maybeMaxBlobsPerBlock = spec.getMaxBlobsPerBlockAtSlot(bid.getSlot());
+    if (maybeMaxBlobsPerBlock.isPresent()) {
+      final int maxBlobsPerBlock = maybeMaxBlobsPerBlock.get();
+      final int blobKzgCommitmentsCount = bid.getBlobKzgCommitments().size();
+      if (blobKzgCommitmentsCount > maxBlobsPerBlock) {
+        return completedFuture(
+            rejectBid(
+                bid,
+                "has %s blob kzg commitments which exceeds the maximum of %s for the slot",
+                blobKzgCommitmentsCount,
+                maxBlobsPerBlock));
+      }
     }
 
     /*
@@ -252,12 +284,41 @@ public class ExecutionPayloadBidGossipValidator {
               /*
                * [REJECT] bid.builder_index is a valid/active builder index -- i.e. is_active_builder(state, bid.builder_index) returns True
                */
+              /*
+               * [REJECT] bid.builder_index is within range -- i.e.
+               * bid.builder_index < len(state.builders). Checked explicitly rather than relying on
+               * isActiveBuilder so that the builder lookups below are always in bounds.
+               */
+              final SszList<Builder> builders = BeaconStateGloas.required(state).getBuilders();
+              if (bid.getBuilderIndex().isGreaterThanOrEqualTo(builders.size())) {
+                return rejectBid(
+                    bid,
+                    "builder index %s is out of range for the %s builders in the state",
+                    bid.getBuilderIndex(),
+                    builders.size());
+              }
+
               if (!gossipValidationHelper.isActiveBuilder(
                   bid.getBuilderIndex(), state, bid.getSlot())) {
                 return rejectBid(
                     bid,
                     "builder index %s is not valid, active, and non-slashed",
                     bid.getBuilderIndex());
+              }
+
+              /*
+               * [REJECT] the builder is a payload builder -- i.e.
+               * state.builders[bid.builder_index].version == PAYLOAD_BUILDER_VERSION.
+               */
+              final int builderVersion =
+                  builders.get(bid.getBuilderIndex().intValue()).getVersion();
+              if (builderVersion != PAYLOAD_BUILDER_VERSION) {
+                return rejectBid(
+                    bid,
+                    "builder index %s has version %s but only payload builder version %s may bid",
+                    bid.getBuilderIndex(),
+                    builderVersion,
+                    PAYLOAD_BUILDER_VERSION);
               }
 
               /*

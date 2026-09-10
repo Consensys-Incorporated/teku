@@ -66,7 +66,8 @@ class BlockPrunerTest {
           PRUNE_SLOTS,
           "test",
           mock(SettableLabelledGauge.class),
-          pruningActiveLabelledGauge);
+          pruningActiveLabelledGauge,
+          Duration.ofMinutes(5));
 
   @BeforeEach
   void setUp() {

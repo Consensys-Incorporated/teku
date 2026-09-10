@@ -64,6 +64,8 @@ public class ProposerPreferencesGossipValidatorTest {
   private UInt64 proposalSlot;
   private UInt64 validatorIndex;
   private Bytes32 dependentRoot;
+  private UInt64 lookaheadEpoch;
+  private UInt64 lookaheadEpochStartSlot;
   private SignedProposerPreferences signedProposerPreferences;
 
   @BeforeEach
@@ -88,10 +90,16 @@ public class ProposerPreferencesGossipValidatorTest {
     signedProposerPreferences =
         createSignedProposerPreferences(dependentRoot, proposalSlot, validatorIndex);
 
-    when(gossipValidationHelper.isSlotInCurrentEpochWithMinSeedLookaheadTolerance(proposalSlot))
-        .thenReturn(true);
-    when(gossipValidationHelper.isSlotFromFuture(proposalSlot)).thenReturn(true);
+    lookaheadEpoch =
+        spec.computeEpochAtSlot(proposalSlot)
+            .minusMinZero(spec.atSlot(proposalSlot).getConfig().getMinSeedLookahead());
+    lookaheadEpochStartSlot = spec.computeStartSlotAtEpoch(lookaheadEpoch);
+
+    when(gossipValidationHelper.hasSlotStarted(proposalSlot)).thenReturn(false);
+    when(gossipValidationHelper.isSlotFromFuture(lookaheadEpochStartSlot)).thenReturn(false);
     when(gossipValidationHelper.isBlockAvailable(dependentRoot)).thenReturn(true);
+    when(gossipValidationHelper.isPossibleDependentRoot(dependentRoot, lookaheadEpochStartSlot))
+        .thenReturn(true);
     when(gossipValidationHelper.isSignatureValidWithRespectToProposerIndex(
             any(), any(), any(), any()))
         .thenReturn(true);
@@ -113,25 +121,47 @@ public class ProposerPreferencesGossipValidatorTest {
   }
 
   @TestTemplate
-  void shouldIgnore_whenSlotNotInCurrentEpochWithMinSeedLookaheadTolerance() {
-    when(gossipValidationHelper.isSlotInCurrentEpochWithMinSeedLookaheadTolerance(proposalSlot))
-        .thenReturn(false);
+  void shouldIgnore_whenProposalSlotHasAlreadyStarted() {
+    when(gossipValidationHelper.hasSlotStarted(proposalSlot)).thenReturn(true);
     assertThatSafeFuture(validator.validate(signedProposerPreferences))
         .isCompletedWithValue(
-            ignorePreferences(
-                signedProposerPreferences,
-                "proposal slot is not in the current or within the lookahead epoch"));
+            ignorePreferences(signedProposerPreferences, "proposal slot has already started"));
     verify(recentChainData, never()).retrieveCheckpointState(any(Checkpoint.class));
   }
 
   @TestTemplate
-  void shouldIgnore_whenSlotHasAlreadyPassed() {
-    when(gossipValidationHelper.isSlotFromFuture(proposalSlot)).thenReturn(false);
-    when(gossipValidationHelper.isSlotCurrent(proposalSlot)).thenReturn(false);
+  void shouldIgnore_whenLookaheadEpochHasNotStarted() {
+    when(gossipValidationHelper.isSlotFromFuture(lookaheadEpochStartSlot)).thenReturn(true);
     assertThatSafeFuture(validator.validate(signedProposerPreferences))
         .isCompletedWithValue(
-            ignorePreferences(signedProposerPreferences, "proposal slot has already passed"));
+            ignorePreferences(
+                signedProposerPreferences, "proposer for the proposal slot is not yet known"));
     verify(recentChainData, never()).retrieveCheckpointState(any(Checkpoint.class));
+  }
+
+  @TestTemplate
+  void shouldIgnore_whenDependentRootIsNotAPossibleDependentBlock() {
+    when(gossipValidationHelper.isPossibleDependentRoot(dependentRoot, lookaheadEpochStartSlot))
+        .thenReturn(false);
+    assertThatSafeFuture(validator.validate(signedProposerPreferences))
+        .isCompletedWithValue(
+            ignorePreferences(
+                signedProposerPreferences, "dependent root is not a possible dependent block"));
+    verify(recentChainData, never()).retrieveCheckpointState(any(Checkpoint.class));
+  }
+
+  @TestTemplate
+  void shouldIgnoreDuplicate_whenOnlyTheValidatorIndexDiffers() {
+    assertThatSafeFuture(validator.validate(signedProposerPreferences))
+        .isCompletedWithValue(ACCEPT);
+
+    // Only one validator can be the proposer for a (dependent root, proposal slot) pair, so a
+    // message differing only by validator index must not be validated again.
+    final SignedProposerPreferences otherValidatorPreferences =
+        createSignedProposerPreferences(dependentRoot, proposalSlot, validatorIndex.plus(1));
+    assertThatSafeFuture(validator.validate(otherValidatorPreferences))
+        .isCompletedWithValue(ignorePreferences(otherValidatorPreferences, "already received"));
+    verify(recentChainData, times(1)).retrieveCheckpointState(any(Checkpoint.class));
   }
 
   @TestTemplate
@@ -152,21 +182,17 @@ public class ProposerPreferencesGossipValidatorTest {
   }
 
   @TestTemplate
-  void shouldReject_whenDependentRootBlockIsNotBeforeCheckpointBoundary() {
-    final UInt64 checkpointBoundarySlot =
-        spec.computeStartSlotAtEpoch(
-            spec.computeEpochAtSlot(proposalSlot)
-                .minusMinZero(spec.atSlot(proposalSlot).getConfig().getMinSeedLookahead()));
+  void shouldReject_whenDependentRootBlockIsNotBeforeLookaheadEpoch() {
     when(recentChainData.getSlotForBlockRoot(dependentRoot))
-        .thenReturn(Optional.of(checkpointBoundarySlot));
+        .thenReturn(Optional.of(lookaheadEpochStartSlot));
 
     assertThatSafeFuture(validator.validate(signedProposerPreferences))
         .isCompletedWithValue(
             rejectPreferences(
                 signedProposerPreferences,
-                "dependent root is at slot %s but must be before checkpoint boundary slot %s",
-                checkpointBoundarySlot,
-                checkpointBoundarySlot));
+                "dependent root is at slot %s but must be before the proposer lookahead epoch start slot %s",
+                lookaheadEpochStartSlot,
+                lookaheadEpochStartSlot));
     verify(recentChainData, never()).retrieveCheckpointState(any(Checkpoint.class));
   }
 
@@ -174,15 +200,12 @@ public class ProposerPreferencesGossipValidatorTest {
   void shouldReject_whenCheckpointStateRetrievalFails() {
     when(recentChainData.retrieveCheckpointState(any(Checkpoint.class)))
         .thenReturn(SafeFuture.failedFuture(new IllegalStateException("checkpoint state failed")));
-    final int minSeedLookahead = spec.atSlot(proposalSlot).getConfig().getMinSeedLookahead();
-    final UInt64 checkpointEpoch =
-        spec.computeEpochAtSlot(proposalSlot).minusMinZero(minSeedLookahead);
     assertThatSafeFuture(validator.validate(signedProposerPreferences))
         .isCompletedWithValue(
             rejectPreferences(
                 signedProposerPreferences,
-                "unable to generate checkpoint state for checkpoint epoch %s",
-                checkpointEpoch));
+                "unable to generate checkpoint state for lookahead epoch %s",
+                lookaheadEpoch));
     verify(gossipValidationHelper, never())
         .isSignatureValidWithRespectToProposerIndex(any(), any(), any(), any());
   }

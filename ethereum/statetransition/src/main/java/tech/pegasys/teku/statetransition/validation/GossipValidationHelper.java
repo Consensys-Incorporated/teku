@@ -76,18 +76,38 @@ public class GossipValidationHelper {
   }
 
   public boolean isSlotFromFuture(final UInt64 slot) {
-    final ReadOnlyStore store = recentChainData.getStore();
-    final UInt64 maxTime = store.getTimeInMillis().plus(maxOffsetTimeInMillis);
+    final UInt64 maxTime = getCurrentTimeMillis().plus(maxOffsetTimeInMillis);
     final UInt64 maxCurrSlot =
-        spec.getCurrentSlotFromTimeMillis(maxTime, store.getGenesisTimeMillis());
+        spec.getCurrentSlotFromTimeMillis(maxTime, recentChainData.getGenesisTimeMillis());
     return slot.isGreaterThan(maxCurrSlot);
   }
 
+  public boolean isEpochFromFuture(final UInt64 epoch) {
+    return isSlotFromFuture(spec.computeStartSlotAtEpoch(epoch));
+  }
+
+  public boolean hasSlotStarted(final UInt64 slot) {
+    // Also prevents overflow when converting an extreme future slot to milliseconds.
+    if (isSlotFromFuture(slot)) {
+      return false;
+    }
+
+    final UInt64 slotStartTimeMillis =
+        spec.computeTimeMillisAtSlot(slot, recentChainData.getGenesisTimeMillis());
+    return getCurrentTimeMillis().isGreaterThan(slotStartTimeMillis.plus(maxOffsetTimeInMillis));
+  }
+
   public boolean isSlotCurrent(final UInt64 slot) {
+    // Also prevents overflow when converting an extreme future slot to milliseconds.
+    if (isSlotFromFuture(slot)) {
+      return false;
+    }
+
     final UInt64 slotStartTimeMillis =
         spec.computeTimeMillisAtSlot(slot, recentChainData.getGenesisTimeMillis());
     final UInt64 slotEndTimeMillis = slotStartTimeMillis.plus(spec.getSlotDurationMillis(slot));
     final UInt64 currentTimeMillis = getCurrentTimeMillis();
+
     return currentTimeMillis.isGreaterThanOrEqualTo(
             slotStartTimeMillis.minusMinZero(maxOffsetTimeInMillis))
         && currentTimeMillis.isLessThanOrEqualTo(slotEndTimeMillis.plus(maxOffsetTimeInMillis));
@@ -148,9 +168,15 @@ public class GossipValidationHelper {
         stateRetrievalData.slot());
   }
 
-  public SafeFuture<Optional<BeaconState>> getStateAtSlotAndBlockRoot(
-      final SlotAndBlockRoot slotAndBlockRoot) {
-    return recentChainData.retrieveBlockState(slotAndBlockRoot);
+  /**
+   * Retrieve the post state of the block, without advancing it to any later slot. Callers that have
+   * already established that the state they need is at the block's own slot should use this rather
+   * than looking the state up by slot and block root: the slot based lookup goes through the
+   * checkpoint state task queue, which would only skip the slot processing after having taken that
+   * queue's lock, searched the cache for an earlier state to rebase on and scheduled a task.
+   */
+  public SafeFuture<Optional<BeaconState>> getStateAtBlockRoot(final Bytes32 blockRoot) {
+    return recentChainData.retrieveBlockState(blockRoot);
   }
 
   public boolean currentFinalizedCheckpointIsAncestorOfBlock(
@@ -279,24 +305,50 @@ public class GossipValidationHelper {
     return beaconStateAccessors.getRandaoMix(state, beaconStateAccessors.getCurrentEpoch(state));
   }
 
+  /**
+   * Returns true when {@code slot} is the current or the next slot, allowing for
+   * MAXIMUM_GOSSIP_CLOCK_DISPARITY -- i.e. spec {@code is_current_or_next_slot}, which is defined
+   * as {@code is_current_slot(slot) or is_current_slot(slot - 1)}.
+   */
   public boolean isSlotCurrentOrNext(final UInt64 slot) {
-    return recentChainData
-        .getCurrentSlot()
-        .map(currentSlot -> slot.equals(currentSlot) || slot.equals(currentSlot.plus(ONE)))
-        .orElse(false);
+    return isSlotCurrent(slot) || (!slot.isZero() && isSlotCurrent(slot.decrement()));
   }
 
-  public boolean isSlotInCurrentEpochWithMinSeedLookaheadTolerance(final UInt64 slot) {
-    return recentChainData
-        .getCurrentEpoch()
-        .map(
-            currentEpoch -> {
-              final UInt64 slotEpoch = spec.computeEpochAtSlot(slot);
-              return slotEpoch.isGreaterThanOrEqualTo(currentEpoch)
-                  && slotEpoch.isLessThanOrEqualTo(
-                      currentEpoch.plus(spec.atSlot(slot).getConfig().getMinSeedLookahead()));
-            })
-        .orElse(false);
+  /**
+   * Returns true when the block with the given {@code root} is a possible dependent block for the
+   * epoch starting at {@code epochStartSlot} -- i.e. spec {@code is_valid_dependent_root}. That
+   * holds when, on some branch, the block is or could become the latest block prior to the start of
+   * the epoch.
+   */
+  public boolean isPossibleDependentRoot(final Bytes32 root, final UInt64 epochStartSlot) {
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy = getForkChoiceStrategy();
+    final Optional<UInt64> rootSlot = forkChoiceStrategy.blockSlot(root);
+    if (rootSlot.isPresent() && rootSlot.get().isGreaterThanOrEqualTo(epochStartSlot)) {
+      return false;
+    }
+    final UInt64 lastSlotBeforeEpoch = epochStartSlot.minusMinZero(ONE);
+    // The root already is the latest block before the epoch on any branch where it has a child at
+    // or after epochStartSlot. Rather than scanning every block in the store for such a child, walk
+    // back from each chain head to the last slot before the epoch: that ancestor is the root
+    // exactly when the root's next block on that branch sits at or after epochStartSlot. Heads
+    // equal to the root are skipped, as reaching the root without traversing a child proves
+    // nothing.
+    final boolean hasChildAtOrAfterEpochStart =
+        forkChoiceStrategy.getChainHeads(true).stream()
+            .map(ProtoNodeData::getRoot)
+            .filter(headRoot -> !headRoot.equals(root))
+            .anyMatch(
+                headRoot ->
+                    forkChoiceStrategy
+                        .getAncestor(headRoot, lastSlotBeforeEpoch)
+                        .filter(root::equals)
+                        .isPresent());
+    if (hasChildAtOrAfterEpochStart) {
+      return true;
+    }
+    // Otherwise the root could still become the latest block before the epoch if it is the head,
+    // because the next block to extend it would be at or after epochStartSlot.
+    return recentChainData.getBestBlockRoot().filter(root::equals).isPresent();
   }
 
   public boolean builderHasEnoughBalanceForBid(

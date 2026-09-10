@@ -740,10 +740,10 @@ public class P2POptionsTest extends AbstractBeaconNodeCommandTest {
   }
 
   @Test
-  public void gossipSnappyAircompressorEnabled_defaultIsFalse() {
+  public void gossipSnappyAircompressorEnabled_defaultIsTrue() {
     final TekuConfiguration config = getTekuConfigurationFromArguments();
-    assertThat(config.p2p().isGossipSnappyAircompressorEnabled()).isEqualTo(false);
-    assertThat(config.p2p().getGossipEncoding()).isSameAs(GossipEncoding.SSZ_SNAPPY);
+    assertThat(config.p2p().isGossipSnappyAircompressorEnabled()).isTrue();
+    assertThat(config.p2p().getGossipEncoding()).isSameAs(GossipEncoding.SSZ_SNAPPY_AIRCOMPRESSOR);
   }
 
   @Test
@@ -763,9 +763,9 @@ public class P2POptionsTest extends AbstractBeaconNodeCommandTest {
   }
 
   @Test
-  public void rpcSnappyAircompressorEnabled_defaultIsFalse() {
+  public void rpcSnappyAircompressorEnabled_defaultIsTrue() {
     final TekuConfiguration config = getTekuConfigurationFromArguments();
-    assertThat(config.p2p().isRpcSnappyAircompressorEnabled()).isFalse();
+    assertThat(config.p2p().isRpcSnappyAircompressorEnabled()).isTrue();
   }
 
   @Test

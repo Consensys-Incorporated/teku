@@ -4,12 +4,8 @@ import yaml from "js-yaml";
 import GitUrlParse from "git-url-parse";
 
 const distDir = process.env.OA_DIST_DIR || "./dist";
-const specDir =
-    process.env.OA_SPEC_DIR || "./spec";
-const gitUrl =
-    process.env.OA_GIT_URL || "git@github.com:Consensys/teku.git";
-const gitUserName = process.env.OA_GIT_USERNAME || "CircleCI Build";
-const gitEmail = process.env.OA_GIT_EMAIL || "ci-build@consensys.net";
+const specDir = process.env.OA_SPEC_DIR || "./spec";
+const gitUrl = process.env.OA_GIT_URL || "https://github.com/Consensys/teku.git";
 const branch = process.env.OA_GH_PAGES_BRANCH || "gh-pages";
 const versionsFileName = process.env.OA_VERSIONS_FILE_NAME || "versions.json";
 
@@ -28,16 +24,6 @@ function getConfig() {
     specs: specs,
     distDir: distDir,
     versions: calculateVersionDetails(repo, branch),
-    ghPagesConfig: {
-      add: true, // allows gh-pages module to keep remote files
-      branch: branch,
-      repo: gitUrl,
-      user: {
-        name: gitUserName,
-        email: gitEmail,
-      },
-      message: `[skip ci] OpenAPI Publish [${specs[0].version}]`,
-    },
   };
 }
 

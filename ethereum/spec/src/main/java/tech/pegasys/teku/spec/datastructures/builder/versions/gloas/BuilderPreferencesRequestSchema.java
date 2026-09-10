@@ -17,19 +17,20 @@ import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema2;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 
 public class BuilderPreferencesRequestSchema
-    extends ContainerSchema2<BuilderPreferencesRequest, BuilderPreferences, SignedRequestAuth> {
+    extends ContainerSchema2<
+        BuilderPreferencesRequest, BuilderPreferences, SignedBuilderRequestAuth> {
 
   public BuilderPreferencesRequestSchema(
       final BuilderPreferencesSchema builderPreferencesSchema,
-      final SignedRequestAuthSchema signedRequestAuthSchema) {
+      final SignedBuilderRequestAuthSchema authSchema) {
     super(
         "BuilderPreferencesRequestV1",
         namedSchema("preferences", builderPreferencesSchema),
-        namedSchema("auth", signedRequestAuthSchema));
+        namedSchema("auth", authSchema));
   }
 
   public BuilderPreferencesRequest create(
-      final BuilderPreferences preferences, final SignedRequestAuth auth) {
+      final BuilderPreferences preferences, final SignedBuilderRequestAuth auth) {
     return new BuilderPreferencesRequest(this, preferences, auth);
   }
 

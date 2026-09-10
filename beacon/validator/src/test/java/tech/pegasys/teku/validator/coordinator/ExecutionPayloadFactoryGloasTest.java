@@ -166,17 +166,15 @@ class ExecutionPayloadFactoryGloasTest {
 
     setupCachingOfThePayloadResult(slot, getPayloadResponse);
 
-    final UInt64 builderIndex = getBidFromBlock(blockAndState.getBlock()).getBuilderIndex();
-
     final ExecutionPayloadEnvelope executionPayload =
-        safeJoin(
-            executionPayloadFactory.createUnsignedExecutionPayload(builderIndex, blockAndState));
+        safeJoin(executionPayloadFactory.createUnsignedExecutionPayload(blockAndState));
 
     // result assertions
     assertThat(executionPayload.getPayload()).isEqualTo(getPayloadResponse.getExecutionPayload());
     assertThat(executionPayload.getExecutionRequests())
         .isEqualTo(getPayloadResponse.getExecutionRequests().orElseThrow());
-    assertThat(executionPayload.getBuilderIndex()).isEqualTo(builderIndex);
+    assertThat(executionPayload.getBuilderIndex())
+        .isEqualTo(getBidFromBlock(blockAndState.getBlock()).getBuilderIndex());
     assertThat(executionPayload.getBeaconBlockRoot()).isEqualTo(blockAndState.getRoot());
     assertThat(executionPayload.getSlot()).isEqualTo(slot);
   }

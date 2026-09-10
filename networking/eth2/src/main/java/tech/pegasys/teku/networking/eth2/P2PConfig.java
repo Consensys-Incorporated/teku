@@ -48,8 +48,8 @@ public class P2PConfig {
   public static final boolean DEFAULT_SUBSCRIBE_ALL_SUBNETS_ENABLED = false;
   public static final boolean DEFAULT_GOSSIP_SCORING_ENABLED = true;
   public static final boolean DEFAULT_GOSSIP_BLOBS_AFTER_BLOCK_ENABLED = true;
-  public static final boolean DEFAULT_GOSSIP_SNAPPY_AIRCOMPRESSOR_ENABLED = false;
-  public static final boolean DEFAULT_RPC_SNAPPY_AIRCOMPRESSOR_ENABLED = false;
+  public static final boolean DEFAULT_GOSSIP_SNAPPY_AIRCOMPRESSOR_ENABLED = true;
+  public static final boolean DEFAULT_RPC_SNAPPY_AIRCOMPRESSOR_ENABLED = true;
   public static final boolean DEFAULT_DAS_DISABLE_EL_RECOVERY = false;
   public static final boolean DEFAULT_COLUMNS_DATA_AVAILABILITY_HALF_CHECK_ENABLED = true;
   public static final int DEFAULT_BATCH_VERIFY_MAX_THREADS =
@@ -62,6 +62,7 @@ public class P2PConfig {
   public static final int DEFAULT_DAS_PUBLISH_WITHHOLD_COLUMNS_EVERY_SLOTS = -1;
   public static final int DEFAULT_RECOVERY_TIMEOUT_MS = 300_000;
   public static final int DEFAULT_DOWNLOAD_TIMEOUT_MS = 240_000;
+  public static final double DEFAULT_SIDECAR_RETRIEVAL_OVERLAP_FRACTION = 0.05;
 
   public static final int DEFAULT_COLUMN_CUSTODY_BACKFILLER_POLL_PERIOD_SECONDS = 30;
   public static final int DEFAULT_COLUMN_CUSTODY_BACKFILLER_BATCH_SIZE = 3;
@@ -104,6 +105,7 @@ public class P2PConfig {
   private final boolean allTopicsFilterEnabled;
   private final int sidecarRecoveryTimeout;
   private final int sidecarDownloadTimeout;
+  private final double sidecarRetrievalOverlapFraction;
   private final int sidecarSyncBatchSize;
   private final int sidecarSyncPollPeriod;
   private final boolean columnsDataAvailabilityHalfCheckEnabled;
@@ -137,6 +139,7 @@ public class P2PConfig {
       final boolean isRpcSnappyAircompressorEnabled,
       final int sidecarRecoveryTimeout,
       final int sidecarDownloadTimeout,
+      final double sidecarRetrievalOverlapFraction,
       final Integer sidecarSyncBatchSize,
       final Integer sidecarSyncPollPeriod,
       final boolean columnsDataAvailabilityHalfCheckEnabled,
@@ -169,6 +172,7 @@ public class P2PConfig {
     this.isRpcSnappyAircompressorEnabled = isRpcSnappyAircompressorEnabled;
     this.sidecarDownloadTimeout = sidecarDownloadTimeout;
     this.sidecarRecoveryTimeout = sidecarRecoveryTimeout;
+    this.sidecarRetrievalOverlapFraction = sidecarRetrievalOverlapFraction;
     this.sidecarSyncBatchSize = sidecarSyncBatchSize;
     this.sidecarSyncPollPeriod = sidecarSyncPollPeriod;
     this.columnsDataAvailabilityHalfCheckEnabled = columnsDataAvailabilityHalfCheckEnabled;
@@ -293,6 +297,10 @@ public class P2PConfig {
     return sidecarDownloadTimeout;
   }
 
+  public double getSidecarRetrievalOverlapFraction() {
+    return sidecarRetrievalOverlapFraction;
+  }
+
   public int getSidecarSyncBatchSize() {
     return sidecarSyncBatchSize;
   }
@@ -345,6 +353,7 @@ public class P2PConfig {
     private boolean executionProofTopicEnabled = DEFAULT_EXECUTION_PROOF_GOSSIP_ENABLED;
     private Integer sidecarRecoveryTimeout = DEFAULT_RECOVERY_TIMEOUT_MS;
     private Integer sidecarDownloadTimeout = DEFAULT_DOWNLOAD_TIMEOUT_MS;
+    private Double sidecarRetrievalOverlapFraction = DEFAULT_SIDECAR_RETRIEVAL_OVERLAP_FRACTION;
 
     private boolean columnsDataAvailabilityHalfCheckEnabled =
         DEFAULT_COLUMNS_DATA_AVAILABILITY_HALF_CHECK_ENABLED;
@@ -357,11 +366,11 @@ public class P2PConfig {
     public P2PConfig build() {
       validate();
 
-      if (gossipSnappyAircompressorEnabled) {
-        LOG.info("Experimental aircompressor Snappy encoding is enabled for gossip");
+      if (!gossipSnappyAircompressorEnabled) {
+        LOG.warn("Gossip snappy encoding is using snappy-java; aircompressor is disabled");
       }
-      if (rpcSnappyAircompressorEnabled) {
-        LOG.info("Experimental aircompressor Snappy encoding is enabled for RPC");
+      if (!rpcSnappyAircompressorEnabled) {
+        LOG.warn("RPC snappy encoding is using snappy-java; aircompressor is disabled");
       }
 
       final GossipConfigurator gossipConfigurator =
@@ -430,6 +439,7 @@ public class P2PConfig {
           rpcSnappyAircompressorEnabled,
           sidecarRecoveryTimeout,
           sidecarDownloadTimeout,
+          sidecarRetrievalOverlapFraction,
           sidecarSyncBatchSize,
           sidecarSyncPollPeriod,
           columnsDataAvailabilityHalfCheckEnabled,
@@ -623,6 +633,18 @@ public class P2PConfig {
 
     public Builder sidecarDownloadTimeout(final Integer sidecarDownloadTimeout) {
       this.sidecarDownloadTimeout = sidecarDownloadTimeout;
+      return this;
+    }
+
+    public Builder sidecarRetrievalOverlapFraction(final Double sidecarRetrievalOverlapFraction) {
+      checkNotNull(sidecarRetrievalOverlapFraction);
+      if (sidecarRetrievalOverlapFraction < 0.0 || sidecarRetrievalOverlapFraction > 1.0) {
+        throw new InvalidConfigurationException(
+            String.format(
+                "Invalid sidecarRetrievalOverlapFraction: %s (must be within [0, 1])",
+                sidecarRetrievalOverlapFraction));
+      }
+      this.sidecarRetrievalOverlapFraction = sidecarRetrievalOverlapFraction;
       return this;
     }
 

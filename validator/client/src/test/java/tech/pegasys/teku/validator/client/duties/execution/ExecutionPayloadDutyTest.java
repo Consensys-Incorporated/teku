@@ -21,6 +21,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -67,11 +68,12 @@ class ExecutionPayloadDutyTest {
   @Test
   public void performsDuty_onSelfBuiltBidIncludedInBlock() {
     final ExecutionPayloadBid bid = dataStructureUtil.randomExecutionPayloadBid();
+    final Bytes32 beaconBlockRoot = dataStructureUtil.randomBytes32();
 
     final SignedExecutionPayloadEnvelope signedExecutionPayload =
         dataStructureUtil.randomSignedExecutionPayloadEnvelope(42);
 
-    when(validatorApiChannel.createUnsignedExecutionPayload(bid.getSlot(), bid.getBuilderIndex()))
+    when(validatorApiChannel.createUnsignedExecutionPayload(bid.getSlot(), beaconBlockRoot))
         .thenReturn(SafeFuture.completedFuture(Optional.of(signedExecutionPayload.getMessage())));
     when(signer.signExecutionPayloadEnvelope(signedExecutionPayload.getMessage(), fork))
         .thenReturn(SafeFuture.completedFuture(signedExecutionPayload.getSignature()));
@@ -81,7 +83,7 @@ class ExecutionPayloadDutyTest {
                 PublishSignedExecutionPayloadResult.success(
                     signedExecutionPayload.getBeaconBlockRoot())));
 
-    duty.onSelfBuiltBidIncludedInBlock(validator, fork, bid);
+    duty.onSelfBuiltBidIncludedInBlock(validator, fork, bid, beaconBlockRoot);
 
     // should execute now
     asyncRunner.executeDueActions();
@@ -98,12 +100,13 @@ class ExecutionPayloadDutyTest {
   @Test
   public void dutyFailureLogsAnError() {
     final ExecutionPayloadBid bid = dataStructureUtil.randomExecutionPayloadBid();
+    final Bytes32 beaconBlockRoot = dataStructureUtil.randomBytes32();
 
     final IllegalStateException exception = new IllegalStateException("oopsy");
-    when(validatorApiChannel.createUnsignedExecutionPayload(bid.getSlot(), bid.getBuilderIndex()))
+    when(validatorApiChannel.createUnsignedExecutionPayload(bid.getSlot(), beaconBlockRoot))
         .thenReturn(SafeFuture.failedFuture(exception));
 
-    duty.onSelfBuiltBidIncludedInBlock(validator, fork, bid);
+    duty.onSelfBuiltBidIncludedInBlock(validator, fork, bid, beaconBlockRoot);
     asyncRunner.executeDueActions();
 
     verify(validatorLogger)

@@ -21,8 +21,8 @@ import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfi
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderEntrySchema;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesRequestSchema;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesSchema;
-import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.RequestAuthSchema;
-import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.SignedRequestAuthSchema;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderRequestAuthSchema;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.SignedBuilderRequestAuthSchema;
 
 public class ApiSchemas {
 
@@ -39,17 +39,18 @@ public class ApiSchemas {
           SIGNED_VALIDATOR_REGISTRATION_SCHEMA, MAX_VALIDATOR_REGISTRATIONS_SIZE);
 
   // https://github.com/ethereum/builder-specs/blob/main/specs/gloas/validator.md#new-containers
-  public static final RequestAuthSchema REQUEST_AUTH_SCHEMA =
-      new RequestAuthSchema(SpecConfigGloas.MAX_DATA_SIZE);
+  public static final BuilderRequestAuthSchema BUILDER_REQUEST_AUTH_SCHEMA =
+      new BuilderRequestAuthSchema(SpecConfigGloas.MAX_DATA_SIZE);
 
-  public static final SignedRequestAuthSchema SIGNED_REQUEST_AUTH_SCHEMA =
-      new SignedRequestAuthSchema(REQUEST_AUTH_SCHEMA);
+  public static final SignedBuilderRequestAuthSchema SIGNED_BUILDER_REQUEST_AUTH_SCHEMA =
+      new SignedBuilderRequestAuthSchema(BUILDER_REQUEST_AUTH_SCHEMA);
 
   public static final BuilderPreferencesSchema BUILDER_PREFERENCES_SCHEMA =
       new BuilderPreferencesSchema();
 
   public static final BuilderPreferencesRequestSchema BUILDER_PREFERENCES_REQUEST_SCHEMA =
-      new BuilderPreferencesRequestSchema(BUILDER_PREFERENCES_SCHEMA, SIGNED_REQUEST_AUTH_SCHEMA);
+      new BuilderPreferencesRequestSchema(
+          BUILDER_PREFERENCES_SCHEMA, SIGNED_BUILDER_REQUEST_AUTH_SCHEMA);
 
   // https://github.com/ethereum/beacon-APIs/pull/630/
   public static final BuilderEntrySchema BUILDER_ENTRY_SCHEMA = new BuilderEntrySchema();

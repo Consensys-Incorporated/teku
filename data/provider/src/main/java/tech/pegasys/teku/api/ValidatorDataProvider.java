@@ -34,6 +34,7 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
@@ -167,6 +168,14 @@ public class ValidatorDataProvider {
       return SafeFuture.failedFuture(new ChainDataUnavailableException());
     }
     return validatorApiChannel.createPayloadAttestationData(slot);
+  }
+
+  public SafeFuture<Optional<ExecutionPayloadEnvelope>> createUnsignedExecutionPayload(
+      final UInt64 slot, final Bytes32 beaconBlockRoot) {
+    if (!isStoreAvailable()) {
+      return SafeFuture.failedFuture(new ChainDataUnavailableException());
+    }
+    return validatorApiChannel.createUnsignedExecutionPayload(slot, beaconBlockRoot);
   }
 
   public SafeFuture<SendSignedBlockResult> submitSignedBlock(

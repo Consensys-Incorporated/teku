@@ -20,7 +20,7 @@ import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfig;
-import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
+import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.MinimalBeaconBlockSummary;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
@@ -29,12 +29,10 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateAccessors;
 import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
 import tech.pegasys.teku.spec.logic.common.helpers.Predicates;
-import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
 
 public class BeaconStateUtil {
 
   private final SpecConfig specConfig;
-  private final SchemaDefinitions schemaDefinitions;
 
   private final Predicates predicates;
   private final MiscHelpers miscHelpers;
@@ -42,12 +40,10 @@ public class BeaconStateUtil {
 
   public BeaconStateUtil(
       final SpecConfig specConfig,
-      final SchemaDefinitions schemaDefinitions,
       final Predicates predicates,
       final MiscHelpers miscHelpers,
       final BeaconStateAccessors beaconStateAccessors) {
     this.specConfig = specConfig;
-    this.schemaDefinitions = schemaDefinitions;
     this.predicates = predicates;
     this.miscHelpers = miscHelpers;
     this.beaconStateAccessors = beaconStateAccessors;
@@ -213,8 +209,10 @@ public class BeaconStateUtil {
   private Bytes32 getDutyDependentRoot(final BeaconState state, final UInt64 epoch) {
     final UInt64 slot = getDutyDependentRootSlot(epoch);
     return slot.equals(state.getSlot())
-        // No previous block, use algorithm for calculating the genesis block root
-        ? BeaconBlock.fromGenesisState(schemaDefinitions, state).getRoot()
+        // The state's own slot has no entry in block_roots yet: its latest block header, with the
+        // state root filled in, is that block. At genesis this is the genesis block root, whatever
+        // the genesis fork, so no block body schema (which may belong to a later fork) is needed.
+        ? BeaconBlockHeader.fromState(state).getRoot()
         : beaconStateAccessors.getBlockRootAtSlot(state, slot);
   }
 

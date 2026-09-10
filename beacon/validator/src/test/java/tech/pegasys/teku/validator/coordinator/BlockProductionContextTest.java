@@ -38,7 +38,6 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeValidationStatus;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
-import tech.pegasys.teku.spec.schemas.ApiSchemas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.storage.client.ChainHead;
 
@@ -63,7 +62,7 @@ class BlockProductionContextTest {
     final BeaconState blockSlotState = spec.processSlots(parentBlock.getState(), proposalSlot);
     final ChainHead parentChainHead = chainHead(parentBlock, PAYLOAD_STATUS_FULL);
     final Optional<BuilderConfig> builderConfig =
-        Optional.of(ApiSchemas.BUILDER_CONFIG_SCHEMA.create(UInt64.valueOf(42)));
+        Optional.of(BuilderConfig.withBuilderBoostFactor(UInt64.valueOf(42)));
 
     final BlockProductionContext context =
         createBlockProductionContext(proposalSlot, blockSlotState, parentChainHead, builderConfig);

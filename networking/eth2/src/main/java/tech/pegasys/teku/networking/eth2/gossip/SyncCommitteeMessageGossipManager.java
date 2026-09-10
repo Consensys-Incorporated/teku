@@ -34,6 +34,9 @@ import tech.pegasys.teku.statetransition.synccommittee.SyncCommitteeStateUtils;
 public class SyncCommitteeMessageGossipManager implements GossipManager {
   private static final Logger LOG = LogManager.getLogger();
 
+  private static final String NO_PEERS_REASON = "no_peers";
+  private static final String NO_OUTBOUND_STREAM_REASON = "no_outbound_stream";
+
   private final Spec spec;
   private final SyncCommitteeStateUtils syncCommitteeStateUtils;
   private final SyncCommitteeSubnetSubscriptions subnetSubscriptions;
@@ -41,6 +44,7 @@ public class SyncCommitteeMessageGossipManager implements GossipManager {
 
   private final Counter publishSuccessCounter;
   private final Counter publishFailureCounter;
+  private final LabelledMetric<Counter> peerSearchRequestedCounter;
 
   private final GossipFailureLogger gossipFailureLogger =
       GossipFailureLogger.createSuppressing("sync_committee_message");
@@ -63,6 +67,15 @@ public class SyncCommitteeMessageGossipManager implements GossipManager {
             "result");
     publishSuccessCounter = publishedSyncCommitteeCounter.labels("success");
     publishFailureCounter = publishedSyncCommitteeCounter.labels("failure");
+    peerSearchRequestedCounter =
+        metricsSystem.createLabelledCounter(
+            TekuMetricCategory.BEACON,
+            "sync_committee_message_peer_search_requested_total",
+            "Total number of peer searches requested because a sync committee message could not be published",
+            "reason");
+    // counter initialization
+    peerSearchRequestedCounter.labels(NO_PEERS_REASON);
+    peerSearchRequestedCounter.labels(NO_OUTBOUND_STREAM_REASON);
   }
 
   public void publish(final ValidatableSyncCommitteeMessage message) {
@@ -123,10 +136,16 @@ public class SyncCommitteeMessageGossipManager implements GossipManager {
 
   private void requestPeerSearchIfRequired(final Throwable error) {
     final Throwable rootCause = Throwables.getRootCause(error);
-    if (rootCause instanceof NoPeersForOutboundMessageException
-        || rootCause instanceof SemiDuplexNoOutboundStreamException) {
-      peerSearchRequester.run();
+    final String reason;
+    if (rootCause instanceof NoPeersForOutboundMessageException) {
+      reason = NO_PEERS_REASON;
+    } else if (rootCause instanceof SemiDuplexNoOutboundStreamException) {
+      reason = NO_OUTBOUND_STREAM_REASON;
+    } else {
+      return;
     }
+    peerSearchRequestedCounter.labels(reason).inc();
+    peerSearchRequester.run();
   }
 
   public void subscribeToSubnetId(final int subnetId) {

@@ -147,6 +147,33 @@ public class GossipValidationHelperTest {
   }
 
   @TestTemplate
+  void isEpochFromFuture_shouldComputeCorrectly() {
+    final UInt64 epoch2 = UInt64.valueOf(2);
+    final UInt64 epoch2StartSlot = spec.computeStartSlotAtEpoch(epoch2);
+
+    storageSystem.chainUpdater().setCurrentSlot(UInt64.ONE);
+    assertThat(gossipValidationHelper.isEpochFromFuture(epoch2)).isTrue();
+
+    final UInt64 epoch2StartTimeMillis =
+        spec.computeTimeMillisAtSlot(
+            epoch2StartSlot,
+            secondsToMillis(
+                recentChainData.getBestState().orElseThrow().getImmediately().getGenesisTime()));
+
+    final UInt64 notYetInsideTolerance =
+        epoch2StartTimeMillis
+            .minusMinZero(gossipValidationHelper.getMaxOffsetTimeInMillis())
+            .decrement();
+    storageSystem.chainUpdater().setTimeMillis(notYetInsideTolerance);
+    assertThat(gossipValidationHelper.isEpochFromFuture(epoch2)).isTrue();
+
+    final UInt64 insideTolerance =
+        epoch2StartTimeMillis.minusMinZero(gossipValidationHelper.getMaxOffsetTimeInMillis());
+    storageSystem.chainUpdater().setTimeMillis(insideTolerance);
+    assertThat(gossipValidationHelper.isEpochFromFuture(epoch2)).isFalse();
+  }
+
+  @TestTemplate
   void isSignatureValidWithRespectToProposerIndex_shouldComputeCorrectly() {
     final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
     storageSystem.chainUpdater().setCurrentSlot(nextSlot);
@@ -590,7 +617,13 @@ public class GossipValidationHelperTest {
   @TestTemplate
   void isCurrentOrNextSlot() {
     final UInt64 currentSlot = UInt64.valueOf(10);
-    storageSystem.chainUpdater().setCurrentSlot(currentSlot);
+    // Sit well inside the slot: at a slot boundary the disparity allowance legitimately makes the
+    // adjacent slot current too, which is covered separately below.
+    storageSystem
+        .chainUpdater()
+        .setTimeMillis(
+            getSlotStartTimeMillis(currentSlot).plus(spec.getSlotDurationMillis(currentSlot) / 2));
+
     assertThat(gossipValidationHelper.isSlotCurrentOrNext(currentSlot)).isTrue();
     assertThat(gossipValidationHelper.isSlotCurrentOrNext(currentSlot.plus(ONE))).isTrue();
     assertThat(gossipValidationHelper.isSlotCurrentOrNext(currentSlot.minus(ONE))).isFalse();
@@ -598,29 +631,83 @@ public class GossipValidationHelperTest {
   }
 
   @TestTemplate
-  void isSlotInCurrentEpochWithMinSeedLookaheadTolerance_shouldComputeCorrectly() {
-    final UInt64 currentEpoch = UInt64.valueOf(3);
-    final UInt64 currentSlot = spec.computeStartSlotAtEpoch(currentEpoch);
-    storageSystem.chainUpdater().setCurrentSlot(currentSlot);
+  void isCurrentOrNextSlot_shouldAllowTheDisparityAllowanceBeforeTheSlotStarts() {
+    final UInt64 slot = UInt64.valueOf(10);
+    // The slot after next becomes acceptable once we are within the disparity allowance of the next
+    // slot starting, because by then the next slot may already be current
+    final UInt64 justBeforeNextSlot =
+        getSlotStartTimeMillis(slot.plus(ONE))
+            .minus(gossipValidationHelper.getMaxOffsetTimeInMillis());
 
-    final UInt64 lastToleratedEpoch =
-        currentEpoch.plus(spec.atSlot(currentSlot).getConfig().getMinSeedLookahead());
+    storageSystem.chainUpdater().setTimeMillis(justBeforeNextSlot.minus(ONE));
+    assertThat(gossipValidationHelper.isSlotCurrentOrNext(slot.plus(2))).isFalse();
+
+    storageSystem.chainUpdater().setTimeMillis(justBeforeNextSlot);
+    assertThat(gossipValidationHelper.isSlotCurrentOrNext(slot.plus(2))).isTrue();
+  }
+
+  @TestTemplate
+  void hasSlotStarted_shouldAllowUpToTheDisparityAllowance() {
+    final UInt64 slot = UInt64.valueOf(1000);
+    final UInt64 lastTimeBeforeStart =
+        getSlotStartTimeMillis(slot).plus(gossipValidationHelper.getMaxOffsetTimeInMillis());
+
+    storageSystem.chainUpdater().setTimeMillis(lastTimeBeforeStart);
+    assertThat(gossipValidationHelper.hasSlotStarted(slot)).isFalse();
+
+    storageSystem.chainUpdater().setTimeMillis(lastTimeBeforeStart.increment());
+    assertThat(gossipValidationHelper.hasSlotStarted(slot)).isTrue();
+  }
+
+  @TestTemplate
+  void hasSlotStarted_shouldBeFalseWellBeforeTheSlot() {
+    final UInt64 slot = UInt64.valueOf(1000);
+    storageSystem.chainUpdater().setTimeMillis(getSlotStartTimeMillis(slot.minus(10)));
+    assertThat(gossipValidationHelper.hasSlotStarted(slot)).isFalse();
+  }
+
+  @TestTemplate
+  void isPossibleDependentRoot_shouldAcceptBlockWithChildAtOrAfterEpochStart() {
+    final UInt64 epochStartSlot = spec.computeStartSlotAtEpoch(ONE);
+    final ChainUpdater chainUpdater = storageSystem.chainUpdater();
+    final SignedBlockAndState lastBlockBeforeEpoch =
+        chainUpdater.advanceChainUntil(epochStartSlot.minus(ONE));
+    // Extending into the epoch makes the preceding block the latest one before the boundary
+    chainUpdater.updateBestBlock(chainUpdater.advanceChainUntil(epochStartSlot));
 
     assertThat(
-            gossipValidationHelper.isSlotInCurrentEpochWithMinSeedLookaheadTolerance(
-                spec.computeStartSlotAtEpoch(currentEpoch.minus(ONE))))
-        .isFalse();
-    assertThat(
-            gossipValidationHelper.isSlotInCurrentEpochWithMinSeedLookaheadTolerance(currentSlot))
+            gossipValidationHelper.isPossibleDependentRoot(
+                lastBlockBeforeEpoch.getRoot(), epochStartSlot))
         .isTrue();
+  }
+
+  @TestTemplate
+  void isPossibleDependentRoot_shouldRejectBlockWhoseChildIsBeforeEpochStart() {
+    final UInt64 epochStartSlot = spec.computeStartSlotAtEpoch(ONE);
+    assumeThat(epochStartSlot).isGreaterThan(UInt64.valueOf(2));
+    final ChainUpdater chainUpdater = storageSystem.chainUpdater();
+    final SignedBlockAndState twoBlocksBeforeEpoch =
+        chainUpdater.advanceChainUntil(epochStartSlot.minus(2));
+    chainUpdater.updateBestBlock(chainUpdater.advanceChainUntil(epochStartSlot));
+
+    // Its only child sits before the boundary, so it is not the latest block before the epoch on
+    // any branch, and it is not the head either
     assertThat(
-            gossipValidationHelper.isSlotInCurrentEpochWithMinSeedLookaheadTolerance(
-                spec.computeStartSlotAtEpoch(lastToleratedEpoch)))
-        .isTrue();
-    assertThat(
-            gossipValidationHelper.isSlotInCurrentEpochWithMinSeedLookaheadTolerance(
-                spec.computeStartSlotAtEpoch(lastToleratedEpoch.plus(ONE))))
+            gossipValidationHelper.isPossibleDependentRoot(
+                twoBlocksBeforeEpoch.getRoot(), epochStartSlot))
         .isFalse();
+  }
+
+  @TestTemplate
+  void isPossibleDependentRoot_shouldAcceptHeadWithNoChildYet() {
+    final ChainUpdater chainUpdater = storageSystem.chainUpdater();
+    final SignedBlockAndState head = chainUpdater.advanceChainUntil(2);
+    chainUpdater.updateBestBlock(head);
+    // The head has no child at all yet, but the next block to extend it would land in the epoch
+    final UInt64 epochStartSlot = spec.computeStartSlotAtEpoch(UInt64.valueOf(3));
+
+    assertThat(gossipValidationHelper.isPossibleDependentRoot(head.getRoot(), epochStartSlot))
+        .isTrue();
   }
 
   @TestTemplate
@@ -762,6 +849,21 @@ public class GossipValidationHelperTest {
                 Set.of());
 
     assertThat(result.isAccept()).isTrue();
+  }
+
+  @TestTemplate
+  void isSlotCurrent_shouldRejectMaximumSlotWithoutOverflow() {
+    assertThat(gossipValidationHelper.isSlotCurrent(UInt64.MAX_VALUE)).isFalse();
+  }
+
+  @TestTemplate
+  void isSlotCurrentOrNext_shouldRejectMaximumSlotWithoutOverflow() {
+    assertThat(gossipValidationHelper.isSlotCurrentOrNext(UInt64.MAX_VALUE)).isFalse();
+  }
+
+  @TestTemplate
+  void hasSlotStarted_shouldRejectMaximumSlotWithoutOverflow() {
+    assertThat(gossipValidationHelper.hasSlotStarted(UInt64.MAX_VALUE)).isFalse();
   }
 
   private PayloadStatusFixture createPayloadStatusFixture(final boolean payloadOptimistic) {

@@ -32,7 +32,6 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.collections.LimitedSet;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
-import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
@@ -95,6 +94,18 @@ public class PayloadAttestationMessageGossipValidator {
     }
 
     /*
+     * [REJECT] The message's block data.beacon_block_root passes validation.
+     * Check this before the availability check so that a known-invalid block root is rejected
+     * immediately rather than treated as an unseen block and queued for future processing.
+     */
+    if (invalidBlockRoots.containsKey(data.getBeaconBlockRoot())) {
+      LOG.trace("Payload attestations's block with root {} is invalid", data.getBeaconBlockRoot());
+      return completedFuture(
+          reject(
+              "Payload attestations's block with root %s is invalid", data.getBeaconBlockRoot()));
+    }
+
+    /*
      * [IGNORE] The message's block data.beacon_block_root has been seen (via gossip or non-gossip sources)
      * (a client MAY queue attestation for processing once the block is retrieved.
      * Note a client might want to request payload after).
@@ -131,18 +142,11 @@ public class PayloadAttestationMessageGossipValidator {
               data.getBeaconBlockRoot(), blockSlot, data.getSlot()));
     }
 
-    /*
-     * [REJECT] The message's block data.beacon_block_root passes validation.
-     */
-    if (invalidBlockRoots.containsKey(data.getBeaconBlockRoot())) {
-      LOG.trace("Payload attestations's block with root {} is invalid", data.getBeaconBlockRoot());
-      return completedFuture(
-          reject(
-              "Payload attestations's block with root %s is invalid", data.getBeaconBlockRoot()));
-    }
-
+    // The block has just been checked to be at data.slot, so the state to validate against is its
+    // own post state. Looking it up by block root avoids the checkpoint state task queue, whose
+    // lock every message of the payload committee would otherwise contend for.
     return gossipValidationHelper
-        .getStateAtSlotAndBlockRoot(new SlotAndBlockRoot(data.getSlot(), data.getBeaconBlockRoot()))
+        .getStateAtBlockRoot(data.getBeaconBlockRoot())
         .thenApply(
             maybeState -> {
               if (maybeState.isEmpty()) {

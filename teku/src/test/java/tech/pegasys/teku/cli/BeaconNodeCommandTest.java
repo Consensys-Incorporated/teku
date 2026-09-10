@@ -74,6 +74,7 @@ import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
 import tech.pegasys.teku.infrastructure.logging.LoggingConfig;
 import tech.pegasys.teku.infrastructure.logging.LoggingConfig.LoggingConfigBuilder;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.nat.NatMethod;
 import tech.pegasys.teku.networks.Eth2NetworkConfiguration;
 import tech.pegasys.teku.spec.Spec;
@@ -477,6 +478,24 @@ public class BeaconNodeCommandTest extends AbstractBeaconNodeCommandTest {
     final Optional<String> trustedSetup =
         beaconNodeCommand.tekuConfiguration().eth2NetworkConfiguration().getTrustedSetup();
     assertThat(trustedSetup).isPresent();
+  }
+
+  @Test
+  public void shouldParseBuilderOptions() {
+    final String[] args = {
+      "--Xbuilder-min-bid",
+      "42",
+      "--Xbuilder-boost-factor",
+      "80",
+      "--Xbuilder-urls",
+      "https://foobar.com,https://plataberget.com"
+    };
+    beaconNodeCommand.parse(args);
+    final ValidatorConfig validatorConfig =
+        beaconNodeCommand.tekuConfiguration().validatorClient().getValidatorConfig();
+    assertThat(validatorConfig.getBuilderMinBid()).isEqualTo(UInt64.valueOf(42));
+    assertThat(validatorConfig.getBuilderBoostFactor()).isEqualTo(UInt64.valueOf(80));
+    assertThat(validatorConfig.getBuilderUrls()).hasSize(2);
   }
 
   @Test

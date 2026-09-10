@@ -29,6 +29,11 @@ public interface KvStoreAccessor extends AutoCloseable {
 
   <K, V> Optional<V> get(KvStoreColumn<K, V> column, K key);
 
+  /**
+   * Returns the exact number of entries in the given column by performing a full sequential scan.
+   * O(N) — may take minutes on columns with millions of entries (e.g. data column sidecars). Do not
+   * call on hot paths or in tight loops; use only for periodic metrics updates or offline tooling.
+   */
   long size(KvStoreColumn<?, ?> column);
 
   <K, V> Map<K, V> getAll(KvStoreColumn<K, V> column);

@@ -15,7 +15,6 @@ package tech.pegasys.teku.reference.phase0.gossip;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
-import static tech.pegasys.teku.reference.TestDataUtils.createAnchorFromStateAndMatchingBlock;
 import static tech.pegasys.teku.reference.TestDataUtils.loadSsz;
 import static tech.pegasys.teku.reference.TestDataUtils.loadStateFromSsz;
 import static tech.pegasys.teku.reference.TestDataUtils.loadYaml;
@@ -27,9 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
-import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
-import tech.pegasys.teku.infrastructure.async.eventthread.InlineEventThread;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.kzg.KZG;
@@ -43,31 +40,16 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecarSchema;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
-import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
-import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannelStub;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
-import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 import tech.pegasys.teku.spec.logic.versions.deneb.helpers.MiscHelpersDeneb;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsDeneb;
-import tech.pegasys.teku.statetransition.forkchoice.ForkChoice;
-import tech.pegasys.teku.statetransition.forkchoice.ForkChoiceStateProvider;
-import tech.pegasys.teku.statetransition.forkchoice.MergeTransitionBlockValidator;
-import tech.pegasys.teku.statetransition.forkchoice.NoopForkChoiceNotifier;
-import tech.pegasys.teku.statetransition.forkchoice.TickProcessor;
-import tech.pegasys.teku.statetransition.forkchoice.fastconfirmation.FastConfirmationTracker;
-import tech.pegasys.teku.statetransition.util.DebugDataDumper;
 import tech.pegasys.teku.statetransition.validation.BlobSidecarGossipValidator;
 import tech.pegasys.teku.statetransition.validation.BlockBroadcastValidator;
 import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
-import tech.pegasys.teku.statetransition.validation.ValidationResultCode;
-import tech.pegasys.teku.storage.api.LateBlockReorgPreparationHandler;
 import tech.pegasys.teku.storage.client.RecentChainData;
-import tech.pegasys.teku.storage.server.StateStorageMode;
-import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystemBuilder;
-import tech.pegasys.teku.storage.storageSystem.StorageSystem;
 import tech.pegasys.teku.storage.store.UpdatableStore;
 
 public class GossipBlobSidecarTestExecutor implements TestExecutor {
@@ -94,59 +76,30 @@ public class GossipBlobSidecarTestExecutor implements TestExecutor {
                             blockEntry.getBlock() + ".ssz_snappy",
                             spec::deserializeSignedBeaconBlock)))
             .toList();
-    final StubMetricsSystem metricsSystem = new StubMetricsSystem();
 
-    final StorageSystem storageSystem =
-        InMemoryStorageSystemBuilder.create()
-            .specProvider(spec)
-            .storageMode(StateStorageMode.ARCHIVE)
-            .build();
-    final RecentChainData recentChainData = storageSystem.recentChainData();
-
-    final AnchorPoint anchorPoint =
-        createAnchorFromStateAndMatchingBlock(
+    final GossipTestContext ctx =
+        GossipTestContext.create(
             spec,
             state,
             blocks.stream()
                 .filter(blockEntryAndBlock -> !blockEntryAndBlock.blockEntry().isFailed())
                 .map(BlockEntryAndBlock::block)
                 .toList());
-    recentChainData.initializeFromAnchorPoint(anchorPoint, UInt64.ZERO);
 
-    final InlineEventThread eventThread = new InlineEventThread();
-    final MergeTransitionBlockValidator transitionBlockValidator =
-        new MergeTransitionBlockValidator(spec, recentChainData);
-    final ForkChoice forkChoice =
-        new ForkChoice(
-            spec,
-            eventThread,
-            recentChainData,
-            new NoopForkChoiceNotifier(),
-            new ForkChoiceStateProvider(eventThread, recentChainData),
-            new TickProcessor(spec, recentChainData),
-            transitionBlockValidator,
-            FastConfirmationTracker.NOOP,
-            true,
-            LateBlockReorgPreparationHandler.NOOP,
-            DebugDataDumper.NOOP,
-            metricsSystem,
-            AsyncBLSSignatureVerifier.wrap(BLSSignatureVerifier.NOOP));
-    final ExecutionLayerChannelStub executionLayer = new ExecutionLayerChannelStub(spec, false);
-
-    forkChoice.onTick(UInt64.valueOf(metaData.getCurrentTimeMs()), Optional.empty());
+    ctx.forkChoice.onTick(UInt64.valueOf(metaData.getCurrentTimeMs()), Optional.empty());
 
     final Map<Bytes32, BlockImportResult> invalidBlockRoots = new HashMap<>();
 
     for (final BlockEntryAndBlock blockEntryAndBlock : blocks) {
       final GossipBlobSidecarMetaData.BlockEntry blockEntry = blockEntryAndBlock.blockEntry();
       final SignedBeaconBlock block = blockEntryAndBlock.block();
-      if (block.getRoot().equals(anchorPoint.getRoot())) {
+      if (block.getRoot().equals(ctx.anchorPoint.getRoot())) {
         continue;
       }
       final BlockImportResult importResult =
           safeJoin(
-              forkChoice.onBlock(
-                  block, Optional.empty(), BlockBroadcastValidator.NOOP, executionLayer));
+              ctx.forkChoice.onBlock(
+                  block, Optional.empty(), BlockBroadcastValidator.NOOP, ctx.executionLayer));
       if (blockEntry.isFailed()) {
         // The block has been seen (so it is "available" with a known slot), but is recorded as
         // invalid so blob sidecars whose parent is this block are rejected rather than deferred.
@@ -161,11 +114,11 @@ public class GossipBlobSidecarTestExecutor implements TestExecutor {
 
     Optional<Checkpoint> customFinalizedCheckpoint = Optional.empty();
     if (metaData.getFinalizedCheckpoint() != null) {
-      final GossipBlobSidecarMetaData.FinalizedCheckpoint finalizedCheckpoint =
+      final GossipTestContext.FinalizedCheckpoint finalizedCheckpoint =
           metaData.getFinalizedCheckpoint();
       if (finalizedCheckpoint.getBlock() != null) {
         final Checkpoint checkpoint = finalizedCheckpoint.toCheckpoint(testDefinition, spec);
-        final UpdatableStore.StoreTransaction tx = recentChainData.startStoreTransaction();
+        final UpdatableStore.StoreTransaction tx = ctx.recentChainData.startStoreTransaction();
         tx.setFinalizedCheckpoint(checkpoint, false);
         safeJoin(tx.commit());
       } else {
@@ -180,7 +133,7 @@ public class GossipBlobSidecarTestExecutor implements TestExecutor {
 
     final GossipValidationHelper gossipValidationHelper =
         createGossipValidationHelper(
-            spec, recentChainData, metricsSystem, customFinalizedCheckpoint);
+            spec, ctx.recentChainData, ctx.metricsSystem, customFinalizedCheckpoint);
     final MiscHelpersDeneb miscHelpersDeneb =
         MiscHelpersDeneb.required(spec.forMilestone(SpecMilestone.DENEB).miscHelpers());
     // The test spec ships with a NoOpKZG that accepts every proof. Only the invalid-kzg-proof case
@@ -205,7 +158,7 @@ public class GossipBlobSidecarTestExecutor implements TestExecutor {
     for (final GossipBlobSidecarMetaData.Message message : metaData.getMessages()) {
       final UInt64 messageTimeMs =
           UInt64.valueOf(metaData.getCurrentTimeMs()).plus(UInt64.valueOf(message.getOffsetMs()));
-      forkChoice.onTick(messageTimeMs, Optional.empty());
+      ctx.forkChoice.onTick(messageTimeMs, Optional.empty());
 
       final BlobSidecar blobSidecar =
           loadSsz(testDefinition, message.getMessage() + ".ssz_snappy", blobSidecarSchema);
@@ -218,32 +171,8 @@ public class GossipBlobSidecarTestExecutor implements TestExecutor {
       final InternalValidationResult result =
           safeJoin(processor.process(blobSidecar, Optional.empty()));
 
-      switch (message.getExpected()) {
-        case "valid" ->
-            assertThat(result.code())
-                .describedAs(
-                    "Expected blob sidecar %s to be valid but got %s: %s",
-                    message.getMessage(), result.code(), result.getDescription().orElse(""))
-                .isEqualTo(ValidationResultCode.ACCEPT);
-        case "reject" ->
-            assertThat(result.code())
-                .describedAs(
-                    "Expected blob sidecar %s to be rejected but got %s: %s",
-                    message.getMessage(), result.code(), result.getDescription().orElse(""))
-                .isEqualTo(ValidationResultCode.REJECT);
-        case "ignore" ->
-            assertThat(result.code())
-                .describedAs(
-                    "Expected blob sidecar %s to be ignored but got %s: %s",
-                    message.getMessage(), result.code(), result.getDescription().orElse(""))
-                .isIn(ValidationResultCode.IGNORE, ValidationResultCode.SAVE_FOR_FUTURE);
-        default ->
-            throw new AssertionError(
-                "Unexpected expected value: "
-                    + message.getExpected()
-                    + " for message: "
-                    + message.getMessage());
-      }
+      GossipTestContext.assertValidationResult(
+          "blob sidecar " + message.getMessage(), message.getExpected(), result);
     }
   }
 
@@ -299,7 +228,7 @@ public class GossipBlobSidecarTestExecutor implements TestExecutor {
     private int blsSetting;
 
     @JsonProperty(value = "finalized_checkpoint", required = false)
-    private FinalizedCheckpoint finalizedCheckpoint;
+    private GossipTestContext.FinalizedCheckpoint finalizedCheckpoint;
 
     public List<BlockEntry> getBlocks() {
       return blocks;
@@ -317,7 +246,7 @@ public class GossipBlobSidecarTestExecutor implements TestExecutor {
       return BlsSetting.forCode(blsSetting);
     }
 
-    public FinalizedCheckpoint getFinalizedCheckpoint() {
+    public GossipTestContext.FinalizedCheckpoint getFinalizedCheckpoint() {
       return finalizedCheckpoint;
     }
 
@@ -371,38 +300,6 @@ public class GossipBlobSidecarTestExecutor implements TestExecutor {
 
       public String getExpected() {
         return expected;
-      }
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private static class FinalizedCheckpoint {
-
-      @JsonProperty(value = "epoch", required = true)
-      private long epoch;
-
-      @JsonProperty(value = "root")
-      private String root;
-
-      @JsonProperty(value = "block")
-      private String block;
-
-      public String getBlock() {
-        return block;
-      }
-
-      public Checkpoint toCheckpoint(final TestDefinition testDefinition, final Spec spec) {
-        final Bytes32 checkpointRoot;
-        if (root != null) {
-          checkpointRoot = Bytes32.fromHexString(root);
-        } else if (block != null) {
-          final SignedBeaconBlock signedBlock =
-              loadSsz(testDefinition, block + ".ssz_snappy", spec::deserializeSignedBeaconBlock);
-          checkpointRoot = signedBlock.getRoot();
-        } else {
-          throw new IllegalStateException(
-              "finalized_checkpoint must specify either 'root' or 'block'");
-        }
-        return new Checkpoint(UInt64.valueOf(epoch), checkpointRoot);
       }
     }
   }

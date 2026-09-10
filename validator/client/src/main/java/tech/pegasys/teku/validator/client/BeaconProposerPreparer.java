@@ -21,13 +21,10 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.tuweni.bytes.Bytes32;
-import tech.pegasys.teku.api.response.ValidatorStatus;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
-import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
-import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
@@ -43,6 +40,8 @@ public class BeaconProposerPreparer implements ValidatorTimingChannel {
 
   private final AtomicBoolean firstCallDone = new AtomicBoolean(false);
   private final AtomicBoolean sentProposersAtLeastOnce = new AtomicBoolean(false);
+  // used to disable this class post-Gloas
+  private final AtomicBoolean disabled = new AtomicBoolean(false);
 
   public BeaconProposerPreparer(
       final ValidatorApiChannel validatorApiChannel,
@@ -61,20 +60,18 @@ public class BeaconProposerPreparer implements ValidatorTimingChannel {
 
   @Override
   public void onSlot(final UInt64 slot) {
-    if (validatorIndexProvider.isEmpty()) {
+    if (disabled.get() || validatorIndexProvider.isEmpty()) {
+      return;
+    }
+    // signed proposer preferences supersedes prepare_beacon_proposer
+    if (spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS)) {
+      disabled.set(true);
       return;
     }
     if (firstCallDone.compareAndSet(false, true) || isThirdSlotOfEpoch(slot)) {
       sendPreparableProposerList();
     }
   }
-
-  @Override
-  public void onHeadUpdate(
-      final UInt64 slot,
-      final Bytes32 previousDutyDependentRoot,
-      final Bytes32 currentDutyDependentRoot,
-      final Bytes32 headBlockRoot) {}
 
   @Override
   public void onPossibleMissedEvents() {
@@ -86,41 +83,12 @@ public class BeaconProposerPreparer implements ValidatorTimingChannel {
     sendPreparableProposerList();
   }
 
-  @Override
-  public void onBlockProductionDue(final UInt64 slot) {}
-
-  @Override
-  public void onAttestationCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onAttestationAggregationDue(final UInt64 slot) {}
-
-  @Override
-  public void onSyncCommitteeCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onContributionCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onPayloadAttestationCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onAttesterSlashing(final AttesterSlashing attesterSlashing) {}
-
-  @Override
-  public void onProposerSlashing(final ProposerSlashing proposerSlashing) {}
-
-  @Override
-  public void onUpdatedValidatorStatuses(
-      final Map<BLSPublicKey, ValidatorStatus> newValidatorStatuses,
-      final boolean possibleMissingEvents) {}
-
   private boolean isThirdSlotOfEpoch(final UInt64 slot) {
     return slot.mod(spec.getSlotsPerEpoch(slot)).equals(UInt64.valueOf(2));
   }
 
   private void sendPreparableProposerList() {
-    if (validatorIndexProvider.isEmpty()) {
+    if (disabled.get() || validatorIndexProvider.isEmpty()) {
       return;
     }
 

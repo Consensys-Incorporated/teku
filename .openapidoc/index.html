@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="description" content="ConsenSys Teku REST API documentation (stable)">
+    <title>ConsenSys Teku REST API documentation</title>
+
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css"
+      integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh"
+      crossorigin="anonymous">
+
+    <link href="https://fonts.googleapis.com/css?family=Montserrat:300,400,700|Roboto:300,400,700" rel="stylesheet">
+
+    <meta name="theme-color" content="#59d29f">
+
+    <style>
+      .mb-4, .my-4 {
+        margin-bottom: 0!important;
+      }
+
+      .container {
+        padding-top: 0;
+        padding-right: 0;
+        padding-left: 0;
+        max-width: max-content;
+      }
+    </style>
+  </head>
+
+  <body>
+    <nav class="navbar navbar-expand-md navbar-dark bg-dark mb-4">
+      <a class="navbar-brand" href="#">ConsenSys Teku REST API</a>
+      <button class="navbar-toggler" type="button" data-toggle="collapse"
+        data-target="#navbarCollapse" aria-controls="navbarCollapse"
+        aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+
+      <div class="collapse navbar-collapse" id="navbarsExampleDefault">
+        <ul class="navbar-nav mr-auto">
+          <li class="nav-item dropdown">
+            <button class="nav-btn btn-secondary dropdown-toggle" type="button"
+              id="dropdownMenuButton" data-toggle="dropdown"
+              aria-haspowith="true" aria-expanded="false">latest (master)</button>
+            <div class="dropdown-menu" aria-labelledby="versionDropDown" id="versionsList">
+              <a class="version-number-item dropdown-item active" href="#latest">latest</a>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </nav>
+
+    <main role="main" class="container">
+      <div id="loadingMsg" class="p-4 text-muted">Loading Teku API documentation...</div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/redoc/bundles/redoc.standalone.js"></script>
+
+    <script src="https://code.jquery.com/jquery-3.5.0.min.js"
+      integrity="sha384-LVoNJ6yst/aLxKvxwp6s2GAabqPczfWh6xzm38S/YtjUyZ+3aTKOnD/OJVGYLZDl"
+      crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.0/dist/umd/popper.min.js"
+      integrity="sha384-Q6E9RHvbIyZFJoft+2mJbHaEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo"
+      crossorigin="anonymous"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/js/bootstrap.min.js"
+      integrity="sha384-wfSDF2E50Y2D1uUdj0O3uMBJnjuUD4Ih7YwaYd1iqfktj0Uod8GCExl3Og8ifwB6"
+      crossorigin="anonymous"></script>
+
+    <script>
+      let versions = { 'latest': { 'spec': 'latest', 'source': 'master' } };
+      let defaultVersion = Object.keys(versions)[0];
+
+      function getSpecPath(version) {
+        const v = versions[version] ? versions[version].spec : versions[defaultVersion].spec;
+        if (v.startsWith('http')) return v;
+        return `teku-${v}.json`;
+      }
+
+      function isDisplayedVersion(version, displayedVersion) {
+        return displayedVersion === version || (displayedVersion === '' && version === defaultVersion);
+      }
+
+      function safeRedocInit(specUrl) {
+        const container = $("main.container");
+        if (typeof Redoc !== "undefined") {
+          container.empty();
+          const element = $(`<redoc spec-url="${specUrl}"></redoc>`);
+          container.append(element);
+          Redoc.init(`${specUrl}?ts=${Date.now()}`, { hideHostname: true });
+        } else {
+          setTimeout(() => safeRedocInit(specUrl), 300);
+        }
+      }
+
+      function updateSpec(version) {
+        const specUrl = getSpecPath(version);
+        $("#loadingMsg").text(`Loading documentation for ${version}...`);
+        safeRedocInit(specUrl);
+        updateVersionsDropDown(version);
+      }
+
+      function updateVersionsDropDown(versionFromUrl) {
+        $("#versionsList").empty();
+        $.each(versions, function (version, infos) {
+          const sourceText = (version === infos.source) ? '' : ` (${infos.source})`;
+          const item = $(`<a class="version-number-item dropdown-item" href="?version=${version}">${version}${sourceText}</a>`);
+
+          if (isDisplayedVersion(version, versionFromUrl)) {
+            item.addClass("active");
+            $('#dropdownMenuButton').text(`${version}${sourceText}`);
+            document.title = `ConsenSys Teku REST API documentation - ${version}`;
+          }
+
+          $("#versionsList").append(item);
+        });
+      }
+
+      function getVersionFromURL() {
+        const params = new URLSearchParams(window.location.search.substring(1));
+        const version = params.get("version");
+        return version != null ? version : window.location.hash.replace(/^[#]/, '');
+      }
+
+      function getVersionsFromJsonFile() {
+        $.ajaxSetup({ cache: false });
+        $.getJSON('versions.json', function (data) {
+          if (!jQuery.isEmptyObject(data)) {
+            versions = data;
+            if ('stable' in versions) {
+              defaultVersion = 'stable';
+            }
+          }
+        }).always(function () {
+          updateSpec(getVersionFromURL());
+        });
+      }
+
+      $(window).on('hashchange', function () {
+        updateSpec(getVersionFromURL());
+      });
+
+      $(function () {
+        getVersionsFromJsonFile();
+      });
+    </script>
+  </body>
+</html>

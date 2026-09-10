@@ -15,7 +15,6 @@ package tech.pegasys.teku.validator.coordinator;
 
 import java.util.List;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
-import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockAndState;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
@@ -28,7 +27,7 @@ public interface ExecutionPayloadFactory {
       new ExecutionPayloadFactory() {
         @Override
         public SafeFuture<ExecutionPayloadEnvelope> createUnsignedExecutionPayload(
-            final UInt64 builderIndex, final BeaconBlockAndState blockAndState) {
+            final BeaconBlockAndState blockAndState) {
           return SafeFuture.completedFuture(null);
         }
 
@@ -46,7 +45,7 @@ public interface ExecutionPayloadFactory {
       };
 
   SafeFuture<ExecutionPayloadEnvelope> createUnsignedExecutionPayload(
-      UInt64 builderIndex, BeaconBlockAndState blockAndState);
+      BeaconBlockAndState blockAndState);
 
   SafeFuture<List<DataColumnSidecar>> createDataColumnSidecars(
       SignedExecutionPayloadEnvelope signedExecutionPayload);

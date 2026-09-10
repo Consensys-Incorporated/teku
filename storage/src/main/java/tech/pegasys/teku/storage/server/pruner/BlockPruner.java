@@ -40,6 +40,7 @@ public class BlockPruner extends Service {
   private final SettableLabelledGauge pruningTimingsLabelledGauge;
   private final SettableLabelledGauge pruningActiveLabelledGauge;
   private final String pruningMetricsType;
+  private final Duration pruningWarnTimeout;
 
   private Optional<Cancellable> scheduledPruner = Optional.empty();
 
@@ -51,7 +52,8 @@ public class BlockPruner extends Service {
       final int pruneLimit,
       final String pruningMetricsType,
       final SettableLabelledGauge pruningTimingsLabelledGauge,
-      final SettableLabelledGauge pruningActiveLabelledGauge) {
+      final SettableLabelledGauge pruningActiveLabelledGauge,
+      final Duration pruningWarnTimeout) {
     this.spec = spec;
     this.database = database;
     this.asyncRunner = asyncRunner;
@@ -60,6 +62,7 @@ public class BlockPruner extends Service {
     this.pruningTimingsLabelledGauge = pruningTimingsLabelledGauge;
     this.pruningActiveLabelledGauge = pruningActiveLabelledGauge;
     this.pruneLimit = pruneLimit;
+    this.pruningWarnTimeout = pruningWarnTimeout;
   }
 
   @Override
@@ -71,9 +74,16 @@ public class BlockPruner extends Service {
                   pruningActiveLabelledGauge.set(1, pruningMetricsType);
                   final long start = System.currentTimeMillis();
                   pruneBlocks();
-                  pruningTimingsLabelledGauge.set(
-                      System.currentTimeMillis() - start, pruningMetricsType);
+                  final long elapsed = System.currentTimeMillis() - start;
+                  pruningTimingsLabelledGauge.set(elapsed, pruningMetricsType);
                   pruningActiveLabelledGauge.set(0, pruningMetricsType);
+                  if (elapsed > pruningWarnTimeout.toMillis()) {
+                    LOG.warn(
+                        "Pruning task for {} took {} ms, exceeding the warn threshold of {} ms",
+                        pruningMetricsType,
+                        elapsed,
+                        pruningWarnTimeout.toMillis());
+                  }
                 },
                 Duration.ZERO,
                 pruneInterval,
@@ -104,14 +114,15 @@ public class BlockPruner extends Service {
     }
     LOG.debug("Initiating pruning of finalized blocks prior to slot {}.", earliestSlotToKeep);
     try {
+      final long start = System.currentTimeMillis();
       final UInt64 lastPrunedSlot =
           database.pruneFinalizedBlocks(
               earliestSlotToKeep.decrement(), pruneLimit, checkpointEarliestSlot);
       LOG.debug(
-          "Pruned {} finalized blocks prior to slot {}, last pruned slot was {}.",
-          pruneLimit,
+          "Pruned finalized blocks prior to slot {}, last pruned slot was {}, completed in {} ms.",
           earliestSlotToKeep,
-          lastPrunedSlot);
+          lastPrunedSlot,
+          System.currentTimeMillis() - start);
     } catch (final ShuttingDownException | RejectedExecutionException ex) {
       LOG.debug("Shutting down", ex);
     }

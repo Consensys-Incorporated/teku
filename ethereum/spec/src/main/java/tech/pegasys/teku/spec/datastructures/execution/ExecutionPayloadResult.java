@@ -100,6 +100,11 @@ public class ExecutionPayloadResult {
         .orElseGet(this::getExecutionPayloadValueFutureFromBuilderFlow);
   }
 
+  public SafeFuture<UInt256> getExecutionPayloadValueFutureFromLocalFlowRequired() {
+    return getPayloadResponseFutureFromLocalFlowRequired()
+        .thenApply(GetPayloadResponse::getExecutionPayloadValue);
+  }
+
   public boolean isFromLocalFlow() {
     return getPayloadResponseFuture.isPresent();
   }

@@ -23,12 +23,6 @@ buildscript {
 		}
 		mavenCentral()
 	}
-	// JReleaser 1.23.0 uses GpgObjectSigner from JGit 5.x/6.x, which was removed in JGit 7.x.
-	// Spotless 8.7.0 pulls in JGit 7.7.0, which wins resolution and breaks jreleaserFullRelease.
-	// Spotless does not use ratchetFrom, so it never actually calls JGit at runtime.
-	configurations.classpath.resolutionStrategy {
-		force 'org.eclipse.jgit:org.eclipse.jgit:5.13.5.202508271544-r'
-	}
 	dependencies {
 		classpath 'io.consensys.protocols:license-reporter:1.2.0'
 	}
@@ -41,7 +35,6 @@ plugins {
 	id 'io.spring.dependency-management' version '1.1.7'
 	id 'net.ltgt.errorprone' version '4.3.0' apply false
 	id 'de.undercouch.download' version '5.6.0'
-	id 'org.jreleaser' version '1.23.0'
 }
 
 class ConfiguredLicenseBundleNormalizer extends LicenseBundleNormalizer {
@@ -223,7 +216,8 @@ dependencyRules {
 			allowed = [
 				":infrastructure:",
 				":ethereum:",
-				":storage"
+				":storage",
+				":builder"
 			]
 		}
 		register(":ethereum:weaksubjectivity") {
@@ -538,7 +532,7 @@ allprojects {
 }
 
 def nightly = System.getenv("NIGHTLY") != null
-def refTestVersion = nightly ? "nightly" : "v1.7.0-alpha.14"
+def refTestVersion = nightly ? "nightly" : "v1.7.0-beta.0"
 def blsRefTestVersion = 'v0.1.2'
 def slashingProtectionInterchangeRefTestVersion = 'v5.3.0'
 def refTestBaseUrl = 'https://github.com/ethereum/consensus-specs/releases/download'
@@ -1304,6 +1298,7 @@ subprojects {
 
 	if (sourceSetIsPopulated("main") || sourceSetIsPopulated("testFixtures")) {
 		apply plugin: 'maven-publish'
+		apply plugin: 'signing'
 
 		publishing {
 			repositories {
@@ -1338,11 +1333,20 @@ subprojects {
 					suppressPomMetadataWarningsFor('testFixturesRuntimeElements')
 					pom {
 						name = "Teku - ${project.name}"
+						description = "Teku Ethereum consensus client - ${project.name}"
 						url = 'https://github.com/Consensys/teku'
 						licenses {
 							license {
 								name = 'The Apache License, Version 2.0'
 								url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+							}
+						}
+						developers {
+							developer {
+								name = 'Consensys'
+								email = 'protocols@consensys.net'
+								organization = 'Consensys'
+								organizationUrl = 'https://consensys.net'
 							}
 						}
 						scm {
@@ -1362,6 +1366,16 @@ subprojects {
 						}
 					}
 				}
+			}
+		}
+
+		signing {
+			def signingKey = findProperty("signingKey")
+			def signingPassword = findProperty("signingPassword") ?: ""
+			if (signingKey) {
+				required { gradle.taskGraph.allTasks.any { it.name.contains("ToStagingRepository") } }
+				useInMemoryPgpKeys(signingKey, signingPassword)
+				sign publishing.publications.mavenJava
 			}
 		}
 	}
@@ -1733,38 +1747,6 @@ tasks.register('cloudsmithUpload') {
 		system.executor.exec {
 			executable project.file("scripts/cloudsmith-upload.sh")
 			args rootProject.version, distTar.archiveFile.get(), distZip.archiveFile.get()
-		}
-	}
-}
-
-jreleaser {
-	project {
-		java {
-			groupId = 'tech.pegasys.teku'
-		}
-	}
-	release {
-		github {
-			skipRelease = true
-			skipTag = true
-			token = "foobar"
-		}
-	}
-	signing {
-		active = 'ALWAYS'
-		armored = true
-	}
-	deploy {
-		maven {
-			mavenCentral {
-				sonatype {
-					active = 'ALWAYS'
-					url = 'https://central.sonatype.com/api/v1/publisher'
-					stagingRepository('build/staging-deploy')
-					retryDelay = 15
-					maxRetries = 100
-				}
-			}
 		}
 	}
 }

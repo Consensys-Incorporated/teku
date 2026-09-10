@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
@@ -38,6 +39,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
 import tech.pegasys.teku.spec.datastructures.execution.versions.capella.Withdrawal;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
@@ -146,10 +148,33 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
     }
   }
 
-  public void updatePreparedProposers(
-      final Collection<BeaconPreparableProposer> preparedProposers, final UInt64 currentSlot) {
+  // pre-Gloas
+  public void updatePreparedProposersFromPrepareBeaconProposer(
+      final Collection<BeaconPreparableProposer> beaconPreparableProposers,
+      final UInt64 currentSlot) {
+    final Stream<ValidatorIndexAndFeeRecipient> preparedProposers =
+        beaconPreparableProposers.stream()
+            .map(
+                proposer ->
+                    new ValidatorIndexAndFeeRecipient(
+                        proposer.validatorIndex(), proposer.feeRecipient()));
     updatePreparedProposerCache(preparedProposers, currentSlot);
   }
+
+  // post-Gloas
+  public void updatePreparedProposersFromProposerPreferences(
+      final Collection<SignedProposerPreferences> proposerPreferences, final UInt64 currentSlot) {
+    final Stream<ValidatorIndexAndFeeRecipient> preparedProposers =
+        proposerPreferences.stream()
+            .map(
+                proposerPreference ->
+                    new ValidatorIndexAndFeeRecipient(
+                        proposerPreference.getMessage().getValidatorIndex(),
+                        proposerPreference.getMessage().getFeeRecipient()));
+    updatePreparedProposerCache(preparedProposers, currentSlot);
+  }
+
+  private record ValidatorIndexAndFeeRecipient(UInt64 validatorIndex, Eth1Address feeRecipient) {}
 
   public SafeFuture<Void> updateValidatorRegistrations(
       final SszList<SignedValidatorRegistration> signedValidatorRegistrations,
@@ -185,15 +210,15 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
   }
 
   private void updatePreparedProposerCache(
-      final Collection<BeaconPreparableProposer> preparedProposers, final UInt64 currentSlot) {
+      final Stream<ValidatorIndexAndFeeRecipient> preparedProposers, final UInt64 currentSlot) {
     final UInt64 expirySlot =
         currentSlot.plus(
             spec.getSlotsPerEpoch(currentSlot) * PROPOSER_PREPARATION_EXPIRATION_EPOCHS);
     preparedProposers.forEach(
         proposer ->
             preparedProposerInfoByValidatorIndex.put(
-                proposer.validatorIndex(),
-                new PreparedProposerInfo(expirySlot, proposer.feeRecipient())));
+                proposer.validatorIndex,
+                new PreparedProposerInfo(expirySlot, proposer.feeRecipient)));
   }
 
   private void updateValidatorRegistrationCache(
@@ -350,11 +375,13 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
       final UInt64 blockSlot,
       final UInt64 proposerIndex,
       final Optional<SignedValidatorRegistration> validatorRegistration) {
+    // post-Gloas, we use signed proposer preferences
     return proposerPreferencesManager
         .getProposerPreferences(blockSlot)
         .filter(
             proposerPreferences -> proposerPreferences.getValidatorIndex().equals(proposerIndex))
         .map(ProposerPreferences::getTargetGasLimit)
+        // pre-Gloas, we use validator registrations
         .or(
             () ->
                 validatorRegistration.map(registration -> registration.getMessage().getGasLimit()))

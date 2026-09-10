@@ -49,6 +49,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.builder.ValidatorRegistration;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderRequestAuth;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
@@ -299,6 +300,12 @@ public class ExternalSigner implements Signer {
   @Override
   public SafeFuture<BLSSignature> signProposerPreferences(
       final ProposerPreferences proposerPreferences, final ForkInfo forkInfo) {
+    return SafeFuture.failedFuture(new UnsupportedOperationException("Not yet implemented"));
+  }
+
+  @Override
+  public SafeFuture<BLSSignature> signBuilderRequestAuth(
+      final BuilderRequestAuth builderRequestAuth) {
     return SafeFuture.failedFuture(new UnsupportedOperationException("Not yet implemented"));
   }
 

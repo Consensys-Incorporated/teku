@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.networking.eth2.gossip;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
@@ -20,14 +21,15 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import io.libp2p.core.SemiDuplexNoOutboundStreamException;
 import io.libp2p.pubsub.NoPeersForOutboundMessageException;
 import java.util.Optional;
 import java.util.stream.IntStream;
-import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
-import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
+import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.gossip.subnets.SyncCommitteeSubnetSubscriptions;
 import tech.pegasys.teku.spec.Spec;
@@ -40,7 +42,7 @@ import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.synccommittee.SyncCommitteeStateUtils;
 
 class SyncCommitteeMessageGossipManagerTest {
-  private final MetricsSystem metricsSystem = new NoOpMetricsSystem();
+  private final StubMetricsSystem metricsSystem = new StubMetricsSystem();
   private final DataStructureUtil dataStructureUtil =
       new DataStructureUtil(TestSpecFactory.createMinimalAltair());
 
@@ -131,6 +133,24 @@ class SyncCommitteeMessageGossipManagerTest {
     gossipManager.publish(message);
 
     verify(peerSearchRequester).run();
+    assertThat(peerSearchRequestedCount("no_peers")).isEqualTo(1);
+    assertThat(peerSearchRequestedCount("no_outbound_stream")).isZero();
+  }
+
+  @Test
+  void shouldRequestPeerSearchWhenNoOutboundStreamIsAvailableForSyncCommitteeSubnet() {
+    final int subnetId = 3;
+    final ValidatableSyncCommitteeMessage message =
+        ValidatableSyncCommitteeMessage.fromNetwork(
+            dataStructureUtil.randomSyncCommitteeMessage(), subnetId);
+    when(subnetSubscriptions.gossip(message.getMessage(), subnetId))
+        .thenReturn(SafeFuture.failedFuture(new SemiDuplexNoOutboundStreamException("no stream")));
+
+    gossipManager.publish(message);
+
+    verify(peerSearchRequester).run();
+    assertThat(peerSearchRequestedCount("no_outbound_stream")).isEqualTo(1);
+    assertThat(peerSearchRequestedCount("no_peers")).isZero();
   }
 
   @Test
@@ -145,6 +165,13 @@ class SyncCommitteeMessageGossipManagerTest {
     gossipManager.publish(message);
 
     verify(peerSearchRequester, never()).run();
+    assertThat(peerSearchRequestedCount("no_peers")).isZero();
+    assertThat(peerSearchRequestedCount("no_outbound_stream")).isZero();
+  }
+
+  private long peerSearchRequestedCount(final String reason) {
+    return metricsSystem.getLabelledCounterValue(
+        TekuMetricCategory.BEACON, "sync_committee_message_peer_search_requested_total", reason);
   }
 
   private void withApplicableSubnets(

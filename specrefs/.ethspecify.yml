@@ -1,4 +1,4 @@
-version: v1.7.0-alpha.14
+version: v1.7.0-beta.0
 style: full
 
 specrefs:
@@ -144,9 +144,9 @@ specrefs:
       - NextSyncCommitteeBranch#altair
       - NextSyncCommitteeBranch#electra
       - NextSyncCommitteeBranch#gloas
-      - PTC#gloas
-      - PTCAttestingIndices#gloas
-      - PTCBits#gloas
+      - PayloadTimelinessCommittee#gloas
+      - PayloadTimelinessCommitteeIndices#gloas
+      - PayloadTimelinessCommitteeBits#gloas
       - PayloadAttestations#gloas
       - PendingAttestations#phase0
       - PendingConsolidations#electra
@@ -260,6 +260,7 @@ specrefs:
       - verify_partial_data_column_header_inclusion_proof#fulu
       - verify_partial_data_column_sidecar_kzg_proofs#fulu
       - validate_partial_data_column_sidecar_gossip#fulu
+
 
       # Not implemented: gloas
       - get_proposer_head#gloas

@@ -72,6 +72,7 @@ import tech.pegasys.teku.spec.datastructures.operations.SignedBlsToExecutionChan
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.common.SlotCaches;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingPartialWithdrawal;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGProof;
@@ -550,18 +551,31 @@ public class BlockOperationSelectorFactory {
             false,
             Optional.empty(),
             blockProductionContext.blockProductionPerformance());
-    final SafeFuture<Void> setExecutionPayloadBid =
-        executionPayloadBidManager
-            .getBidForBlock(
-                parentRoot,
-                blockProductionContext.parentExecutionBlockHash(),
-                blockSlotState,
-                executionPayloadResult.getPayloadResponseFutureFromLocalFlowRequired(),
-                blockProductionContext.builderConfig().map(BuilderConfig::getBuilderBoostFactor),
-                blockProductionContext.blockProductionPerformance())
-            .thenAccept(bodyBuilder::signedExecutionPayloadBid);
-    return SafeFuture.allOf(
-        cacheExecutionPayloadValue(executionPayloadResult, blockSlotState), setExecutionPayloadBid);
+    // BuilderConfig is expected post-Gloas and is passed from the VC
+    final BuilderConfig builderConfig =
+        blockProductionContext
+            .builderConfig()
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "BuilderConfig is missing for production of block at slot "
+                            + blockSlotState.getSlot()));
+    return executionPayloadBidManager
+        .getBidForBlock(
+            parentRoot,
+            blockProductionContext.parentExecutionBlockHash(),
+            blockSlotState,
+            executionPayloadResult.getPayloadResponseFutureFromLocalFlowRequired(),
+            builderConfig,
+            blockProductionContext.blockProductionPerformance())
+        .thenAccept(
+            bidForBlock -> {
+              bodyBuilder.signedExecutionPayloadBid(bidForBlock.bid());
+              // cache execution payload value and builder url
+              final SlotCaches slotCaches = BeaconStateCache.getSlotCaches(blockSlotState);
+              slotCaches.setBlockExecutionValue(bidForBlock.valueInWei());
+              bidForBlock.builderUrl().ifPresent(slotCaches::setBuilderUrl);
+            });
   }
 
   public Consumer<SignedBeaconBlockUnblinder> createBlockUnblinderSelector(

@@ -93,6 +93,12 @@ public class StorageService extends Service implements StorageServiceFacade {
                       1,
                       DEFAULT_MAX_QUEUE_SIZE,
                       Thread.NORM_PRIORITY - 1);
+              final AsyncRunner storageMetricsAsyncRunner =
+                  serviceConfig.createAsyncRunner(
+                      "storageMetricsAsyncRunner",
+                      1,
+                      DEFAULT_MAX_QUEUE_SIZE,
+                      Thread.NORM_PRIORITY - 2);
               final VersionedDatabaseFactory dbFactory =
                   new VersionedDatabaseFactory(
                       serviceConfig.getMetricsSystem(),
@@ -143,7 +149,8 @@ public class StorageService extends Service implements StorageServiceFacade {
                             config.getBlockPruningLimit(),
                             "block",
                             pruningTimingsLabelledGauge,
-                            pruningActiveLabelledGauge));
+                            pruningActiveLabelledGauge,
+                            config.getPruningWarnTimeout()));
               }
               if (config.getDataStorageMode().storesFinalizedStates()
                   && config.getRetainedSlots() > 0) {
@@ -185,6 +192,7 @@ public class StorageService extends Service implements StorageServiceFacade {
                             blobSidecarsArchiver,
                             serviceConfig.getMetricsSystem(),
                             storagePrunerAsyncRunner,
+                            storageMetricsAsyncRunner,
                             serviceConfig.getTimeProvider(),
                             config.getBlobsPruningInterval(),
                             config.getBlobsPruningLimit(),
@@ -192,7 +200,8 @@ public class StorageService extends Service implements StorageServiceFacade {
                             "blob_sidecar",
                             pruningTimingsLabelledGauge,
                             pruningActiveLabelledGauge,
-                            config.isStoreNonCanonicalBlocksEnabled()));
+                            config.isStoreNonCanonicalBlocksEnabled(),
+                            config.getPruningWarnTimeout()));
               }
               if (config.getSpec().isMilestoneSupported(SpecMilestone.FULU)) {
                 dataColumnSidecarPruner =
@@ -202,13 +211,15 @@ public class StorageService extends Service implements StorageServiceFacade {
                             database,
                             serviceConfig.getMetricsSystem(),
                             storagePrunerAsyncRunner,
+                            storageMetricsAsyncRunner,
                             serviceConfig.getTimeProvider(),
                             config.getDataColumnPruningInterval(),
                             config.getDataColumnPruningLimit(),
                             dataColumnSidecarsStorageCountersEnabled,
                             "data_column_sidecar",
                             pruningTimingsLabelledGauge,
-                            pruningActiveLabelledGauge));
+                            pruningActiveLabelledGauge,
+                            config.getPruningWarnTimeout()));
               }
               chainStorage =
                   ChainStorage.create(
@@ -292,12 +303,18 @@ public class StorageService extends Service implements StorageServiceFacade {
                 config.getStatePruningLimit(),
                 "state",
                 pruningTimingsLabelledGauge,
-                pruningActiveLabelledGauge));
+                pruningActiveLabelledGauge,
+                config.getPruningWarnTimeout()));
   }
 
   @VisibleForTesting
   public Optional<StatePruner> getStatePruner() {
     return statePruner;
+  }
+
+  @VisibleForTesting
+  public Optional<DataColumnSidecarPruner> getDataColumnSidecarPruner() {
+    return dataColumnSidecarPruner;
   }
 
   @Override

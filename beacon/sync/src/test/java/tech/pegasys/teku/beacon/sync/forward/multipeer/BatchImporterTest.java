@@ -23,11 +23,13 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.FutureUtil.ignoreFuture;
+import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CancellationException;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -113,6 +115,27 @@ class BatchImporterTest {
 
     // And check we didn't touch the batch from a different thread
     verifyNoMoreInteractions(batch);
+  }
+
+  @Test
+  void shouldCancelActiveBlockImport() {
+    final SignedBeaconBlock block1 = dataStructureUtil.randomSignedBeaconBlock(1);
+    final SignedBeaconBlock block2 = dataStructureUtil.randomSignedBeaconBlock(2);
+    final SafeFuture<BlockImportResult> importResult1 = new SafeFuture<>();
+    final SafeFuture<BlockImportResult> importResult2 = new SafeFuture<>();
+    when(batch.getBlocks()).thenReturn(List.of(block1, block2));
+    when(blockImporter.importBlock(block1)).thenReturn(importResult1);
+    when(blockImporter.importBlock(block2)).thenReturn(importResult2);
+
+    final SafeFuture<BatchImportResult> result = importer.importBatch(batch);
+    asyncRunner.executeQueuedActions();
+
+    ignoreFuture(verify(blockImporter).importBlock(block1));
+    assertThat(result.cancel(true)).isTrue();
+
+    assertThat(result).isCancelled();
+    assertThat(importResult1).isCancelled();
+    verify(blockImporter, never()).importBlock(block2);
   }
 
   @Test
@@ -531,6 +554,133 @@ class BatchImporterTest {
 
     ignoreFuture(verify(blockImporter, times(1)).importBlock(block));
     assertThat(result).isCompletedWithValue(BatchImportResult.DATA_NOT_AVAILABLE);
+  }
+
+  @Test
+  void shouldFailBatchWhenParentExecutionPayloadRequestFails() {
+    final UInt64 gloasFirstSlot = spec.computeStartSlotAtEpoch(gloasForkEpoch);
+    final SignedBeaconBlock block =
+        dataStructureUtil.randomSignedBeaconBlock(gloasFirstSlot.plus(2));
+
+    when(batch.getBlocks()).thenReturn(List.of(block));
+
+    final SafeFuture<BlockImportResult> firstImport = new SafeFuture<>();
+    final SafeFuture<Optional<SignedExecutionPayloadEnvelope>> parentFetch = new SafeFuture<>();
+    when(blockImporter.importBlock(block)).thenReturn(firstImport);
+    when(syncSource.requestExecutionPayloadEnvelopeByRoot(block.getParentRoot()))
+        .thenReturn(parentFetch);
+
+    final SafeFuture<BatchImportResult> result = importer.importBatch(batch);
+    asyncRunner.executeQueuedActions();
+
+    ignoreFuture(verify(blockImporter).importBlock(block));
+    firstImport.complete(BlockImportResult.FAILED_UNKNOWN_PARENT_EXECUTION_PAYLOAD);
+
+    // The request for the parent's envelope fails: the original failure is reported and the block
+    // is not retried
+    verify(syncSource).requestExecutionPayloadEnvelopeByRoot(block.getParentRoot());
+    parentFetch.completeExceptionally(new RuntimeException("no response from peer"));
+
+    ignoreFuture(verify(blockImporter, times(1)).importBlock(block));
+    verifyNoInteractions(executionPayloadManager);
+    assertThat(result).isCompletedWithValue(BatchImportResult.IMPORT_FAILED);
+  }
+
+  @Test
+  void shouldPropagateCancellationOfParentExecutionPayloadRequest() {
+    final UInt64 gloasFirstSlot = spec.computeStartSlotAtEpoch(gloasForkEpoch);
+    final SignedBeaconBlock block =
+        dataStructureUtil.randomSignedBeaconBlock(gloasFirstSlot.plus(2));
+
+    when(batch.getBlocks()).thenReturn(List.of(block));
+
+    final SafeFuture<BlockImportResult> firstImport = new SafeFuture<>();
+    final SafeFuture<Optional<SignedExecutionPayloadEnvelope>> parentFetch = new SafeFuture<>();
+    when(blockImporter.importBlock(block)).thenReturn(firstImport);
+    when(syncSource.requestExecutionPayloadEnvelopeByRoot(block.getParentRoot()))
+        .thenReturn(parentFetch);
+
+    final SafeFuture<BatchImportResult> result = importer.importBatch(batch);
+    asyncRunner.executeQueuedActions();
+
+    ignoreFuture(verify(blockImporter).importBlock(block));
+    firstImport.complete(BlockImportResult.FAILED_UNKNOWN_PARENT_EXECUTION_PAYLOAD);
+
+    verify(syncSource).requestExecutionPayloadEnvelopeByRoot(block.getParentRoot());
+    // The batch import was cancelled while the parent's envelope was being fetched
+    parentFetch.completeExceptionally(new CancellationException("Batch import cancelled"));
+
+    ignoreFuture(verify(blockImporter, times(1)).importBlock(block));
+    verifyNoInteractions(executionPayloadManager);
+    assertThatSafeFuture(result).isCompletedExceptionallyWith(CancellationException.class);
+  }
+
+  @Test
+  void shouldNotMaskFailureOfRecoveredParentExecutionPayloadImport() {
+    final UInt64 gloasFirstSlot = spec.computeStartSlotAtEpoch(gloasForkEpoch);
+    final SignedBeaconBlock block =
+        dataStructureUtil.randomSignedBeaconBlock(gloasFirstSlot.plus(2));
+    final SignedExecutionPayloadEnvelope parentExecutionPayload =
+        dataStructureUtil.randomSignedExecutionPayloadEnvelope(gloasFirstSlot.plus(1).longValue());
+    final RuntimeException importError = new RuntimeException("payload import blew up");
+
+    when(batch.getBlocks()).thenReturn(List.of(block));
+
+    final SafeFuture<BlockImportResult> firstImport = new SafeFuture<>();
+    final SafeFuture<ExecutionPayloadImportResult> parentImport = new SafeFuture<>();
+    when(blockImporter.importBlock(block)).thenReturn(firstImport);
+    when(syncSource.requestExecutionPayloadEnvelopeByRoot(block.getParentRoot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(parentExecutionPayload)));
+    when(executionPayloadManager.importExecutionPayload(parentExecutionPayload, false))
+        .thenReturn(parentImport);
+
+    final SafeFuture<BatchImportResult> result = importer.importBatch(batch);
+    asyncRunner.executeQueuedActions();
+
+    ignoreFuture(verify(blockImporter).importBlock(block));
+    firstImport.complete(BlockImportResult.FAILED_UNKNOWN_PARENT_EXECUTION_PAYLOAD);
+
+    ignoreFuture(
+        verify(executionPayloadManager).importExecutionPayload(parentExecutionPayload, false));
+    parentImport.completeExceptionally(importError);
+
+    // The failure must not be reported as the original block import failure
+    ignoreFuture(verify(blockImporter, times(1)).importBlock(block));
+    assertThatSafeFuture(result).isCompletedExceptionallyWith(importError);
+  }
+
+  @Test
+  void shouldNotMaskFailureOfRetriedBlockImport() {
+    final UInt64 gloasFirstSlot = spec.computeStartSlotAtEpoch(gloasForkEpoch);
+    final SignedBeaconBlock block =
+        dataStructureUtil.randomSignedBeaconBlock(gloasFirstSlot.plus(2));
+    final SignedExecutionPayloadEnvelope parentExecutionPayload =
+        dataStructureUtil.randomSignedExecutionPayloadEnvelope(gloasFirstSlot.plus(1).longValue());
+    final RuntimeException retryError = new RuntimeException("block import blew up");
+
+    when(batch.getBlocks()).thenReturn(List.of(block));
+
+    final SafeFuture<BlockImportResult> firstImport = new SafeFuture<>();
+    final SafeFuture<BlockImportResult> retryImport = new SafeFuture<>();
+    when(blockImporter.importBlock(block)).thenReturn(firstImport).thenReturn(retryImport);
+    when(syncSource.requestExecutionPayloadEnvelopeByRoot(block.getParentRoot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(parentExecutionPayload)));
+    when(executionPayloadManager.importExecutionPayload(parentExecutionPayload, false))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                ExecutionPayloadImportResult.successful(parentExecutionPayload)));
+
+    final SafeFuture<BatchImportResult> result = importer.importBatch(batch);
+    asyncRunner.executeQueuedActions();
+
+    ignoreFuture(verify(blockImporter).importBlock(block));
+    firstImport.complete(BlockImportResult.FAILED_UNKNOWN_PARENT_EXECUTION_PAYLOAD);
+
+    ignoreFuture(verify(blockImporter, times(2)).importBlock(block));
+    retryImport.completeExceptionally(retryError);
+
+    // The retried import failure must not be swallowed into the original failure
+    assertThatSafeFuture(result).isCompletedExceptionallyWith(retryError);
   }
 
   private void blobSidecarsImportedSuccessfully(

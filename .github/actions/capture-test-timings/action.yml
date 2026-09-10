@@ -1,0 +1,71 @@
+---
+name: 'capture test timings'
+description: 'Composite action to capture and cache per-class test durations for timing-based shard planning'
+
+inputs:
+  stage_key:
+    type: string
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Gather junit results
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      with:
+        pattern: ${{inputs.stage_key}}-reports-*
+        path: reports/${{inputs.stage_key}}
+        merge-multiple: true
+
+    # Feeds timing-based shard planning (see planShards in matrix-tests-template.yml):
+    # restore the last cached per-class timings, overlay this run's times on top (classes
+    # missing from this run, e.g. a failed shard, keep their last known timing), and cache
+    # the merged result under a fresh key for the next run to restore.
+    - name: Restore previous test timings
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: test-timing-${{inputs.stage_key}}.json
+        key: test-timing-${{inputs.stage_key}}-nonexistent
+        restore-keys: |
+          test-timing-${{inputs.stage_key}}-
+
+    - name: Compute per-class test timings
+      shell: bash
+      env:
+        STAGE_KEY: ${{inputs.stage_key}}
+      run: |
+        python3 <<'PY'
+        import glob, json, os, xml.etree.ElementTree as ET
+
+        stage = os.environ["STAGE_KEY"]
+        timing_file = f"test-timing-{stage}.json"
+
+        timings = {}
+        if os.path.exists(timing_file):
+            with open(timing_file) as f:
+                timings = json.load(f)
+
+        new_timings = {}
+        for report in glob.glob(f"reports/{stage}/**/TEST-*.xml", recursive=True):
+            try:
+                root = ET.parse(report).getroot()
+            except ET.ParseError:
+                continue
+            for testcase in root.findall("testcase"):
+                classname = testcase.get("classname")
+                if not classname:
+                    continue
+                new_timings[classname] = new_timings.get(classname, 0.0) + float(testcase.get("time") or 0)
+
+        timings.update(new_timings)
+        with open(timing_file, "w") as f:
+            json.dump(timings, f)
+        print(f"{len(new_timings)} classes timed this run, {len(timings)} total cached")
+        PY
+
+    - name: Cache test timings for next run's shard planning
+      if: github.ref == 'refs/heads/master'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: test-timing-${{inputs.stage_key}}.json
+        key: test-timing-${{inputs.stage_key}}-${{github.run_id}}

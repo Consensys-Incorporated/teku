@@ -342,9 +342,9 @@ public class MetricRecordingValidatorApiChannel implements ValidatorApiChannel {
 
   @Override
   public SafeFuture<Optional<ExecutionPayloadEnvelope>> createUnsignedExecutionPayload(
-      final UInt64 slot, final UInt64 builderIndex) {
+      final UInt64 slot, final Bytes32 beaconBlockRoot) {
     return countOptionalDataRequest(
-        delegate.createUnsignedExecutionPayload(slot, builderIndex),
+        delegate.createUnsignedExecutionPayload(slot, beaconBlockRoot),
         BeaconNodeRequestLabels.CREATE_UNSIGNED_EXECUTION_PAYLOAD_METHOD);
   }
 

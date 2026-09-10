@@ -23,6 +23,7 @@ import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 import static tech.pegasys.teku.infrastructure.logging.Converter.gweiToEth;
 import static tech.pegasys.teku.spec.config.Constants.MAX_SLOTS_TO_TRACK_BUILDERS_BIDS;
+import static tech.pegasys.teku.spec.config.SpecConfigGloas.PAYLOAD_BUILDER_VERSION;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ignore;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.reject;
@@ -38,6 +39,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.ssz.SszMutableList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -48,6 +50,8 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloa
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
@@ -90,7 +94,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
                 randomBid.getPrevRandao(),
                 randomBid.getFeeRecipient(),
                 DEFAULT_GAS_LIMIT,
-                randomBid.getBuilderIndex(),
+                UInt64.ZERO,
                 randomBid.getSlot(),
                 randomBid.getValue(),
                 randomBid.getExecutionPayment(),
@@ -101,7 +105,25 @@ public class ExecutionPayloadBidGossipValidatorTest {
     builderIndex = bid.getBuilderIndex();
     parentBlockRoot = bid.getParentBlockRoot();
     parentBlockHash = bid.getParentBlockHash();
-    postState = dataStructureUtil.randomBeaconState();
+    // Replace the random builders so that the bid's builder index is in range and every builder
+    // carries PAYLOAD_BUILDER_VERSION; randomBuilder() assigns a random version, which the
+    // payload-builder-version rule would reject.
+    postState =
+        dataStructureUtil
+            .randomBeaconState()
+            .updated(
+                mutableState -> {
+                  final SszMutableList<Builder> builders =
+                      MutableBeaconStateGloas.required(mutableState).getBuilders();
+                  builders.clear();
+                  for (int i = 0; i < 8; i++) {
+                    builders.append(
+                        dataStructureUtil
+                            .builderBuilder()
+                            .version(PAYLOAD_BUILDER_VERSION)
+                            .build());
+                  }
+                });
 
     final ProposerPreferences proposerPreferences = mock(ProposerPreferences.class);
     when(proposerPreferences.getFeeRecipient()).thenReturn(bid.getFeeRecipient());
@@ -413,6 +435,16 @@ public class ExecutionPayloadBidGossipValidatorTest {
     assertThatSafeFuture(bidValidator.validate(signedBid))
         .isCompletedWithValue(
             rejectBid(signedBid, "slot %s is not greater than parent block slot %s", slot, slot));
+  }
+
+  @TestTemplate
+  void shouldReject_whenBlockHashEqualsParentBlockHash() {
+    final SignedExecutionPayloadBid bidWithMatchingBlockHashes =
+        signedBidWithBlockHash(parentBlockHash);
+
+    assertThatSafeFuture(bidValidator.validate(bidWithMatchingBlockHashes))
+        .isCompletedWithValue(
+            rejectBid(bidWithMatchingBlockHashes, "block hash and parent block hash are the same"));
   }
 
   @TestTemplate
@@ -766,6 +798,25 @@ public class ExecutionPayloadBidGossipValidatorTest {
                 bid.getBlobKzgCommitments(),
                 bid.getExecutionRequestsRoot());
     return dataStructureUtil.randomSignedExecutionPayloadBid(bidWithGasLimit);
+  }
+
+  private SignedExecutionPayloadBid signedBidWithBlockHash(final Bytes32 blockHash) {
+    final ExecutionPayloadBid bidWithBlockHash =
+        bid.getSchema()
+            .create(
+                bid.getParentBlockHash(),
+                bid.getParentBlockRoot(),
+                blockHash,
+                bid.getPrevRandao(),
+                bid.getFeeRecipient(),
+                bid.getGasLimit(),
+                bid.getBuilderIndex(),
+                bid.getSlot(),
+                bid.getValue(),
+                bid.getExecutionPayment(),
+                bid.getBlobKzgCommitments(),
+                bid.getExecutionRequestsRoot());
+    return dataStructureUtil.randomSignedExecutionPayloadBid(bidWithBlockHash);
   }
 
   private SignedExecutionPayloadBid signedBidForParent(

@@ -10,13 +10,16 @@ on:
       publish_version:
         required: true
         type: string
-
+      debug:
+        required: false
+        type: boolean
+        default: false
 jobs:
   publishRelease:
     runs-on: ubuntu-24.04
     permissions:
       actions: read
-      contents: write  
+      contents: write
     environment: publish
     steps:
       - name: Checkout
@@ -27,35 +30,55 @@ jobs:
       - name: Prepare
         uses: ./.github/actions/prepare
 
-      - name: Install python deps for cloudsmith 
+      - name: Install python deps for cloudsmith
         run: |
           sudo apt update
           sudo apt install python3 python3-pip python3-venv
+
+      - name: Validate signing key
+        env:
+          SIGNING_KEY: ${{ secrets.JRELEASER_GPG_SECRET_KEY }}
+        run: |
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "ERROR: JRELEASER_GPG_SECRET_KEY is not set. Cannot stage unsigned artifacts for Maven Central."
+            exit 1
+          fi
+
+      - name: Stage Maven artifacts
+        env:
+          ORG_GRADLE_PROJECT_signingKey: ${{ secrets.JRELEASER_GPG_SECRET_KEY }}
+          ORG_GRADLE_PROJECT_signingPassword: ${{ secrets.JRELEASER_GPG_PASSPHRASE }}
+        run: |
+          ./gradlew --no-daemon --parallel ${{ inputs.debug == true && '--debug' || '--info' }} publishAllPublicationsToStagingRepository
 
       - name: Publish to Cloudsmith
         env:
           CLOUDSMITH_USER: ${{ secrets.CLOUDSMITH_USER }}
           CLOUDSMITH_API_KEY: ${{ secrets.CLOUDSMITH_API_KEY }}
         run: |
-          ./gradlew --no-daemon --parallel --info cloudsmithUpload publish
+          ./gradlew --no-daemon --parallel ${{ inputs.debug == true && '--debug' || '--info' }} cloudsmithUpload publishAllPublicationsToCloudsmithRepository
 
       - name: Publish to Maven Central
         if: startsWith(github.ref, 'refs/tags/')
         env:
-          JRELEASER_MAVENCENTRAL_USERNAME: ${{ secrets.JRELEASER_MAVENCENTRAL_USERNAME }}
-          JRELEASER_MAVENCENTRAL_PASSWORD: ${{ secrets.JRELEASER_MAVENCENTRAL_PASSWORD }}
-          JRELEASER_GPG_PUBLIC_KEY: ${{ secrets.JRELEASER_GPG_PUBLIC_KEY }}
-          JRELEASER_GPG_SECRET_KEY: ${{ secrets.JRELEASER_GPG_SECRET_KEY }}
-          JRELEASER_GPG_PASSPHRASE: ${{ secrets.JRELEASER_GPG_PASSPHRASE }}
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.JRELEASER_MAVENCENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.JRELEASER_MAVENCENTRAL_PASSWORD }}
         run: |
-          ./gradlew --no-daemon jreleaserFullRelease
+          cd build/staging-deploy
+          zip -r ../../tech.pegasys.teku-${{ inputs.publish_version }}.zip .
+          cd ../..
+          BEARER=$(echo -n "${MAVEN_CENTRAL_USERNAME}:${MAVEN_CENTRAL_PASSWORD}" | base64 -w 0)
+          curl --fail --location --request POST \
+            --header "Authorization: Bearer ${BEARER}" \
+            --form bundle=@tech.pegasys.teku-${{ inputs.publish_version }}.zip \
+            "https://central.sonatype.com/api/v1/publisher/upload?publishingType=AUTOMATIC"
 
-      # this next part is only on a release from tag
+      # this next part is only on a release from tag (not snapshots)
       - name: create distributions dir
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
-          mkdir -p build/distributions/      
+          mkdir -p build/distributions/
 
       - name: Download distribution
         if: startsWith(github.ref, 'refs/tags/')
@@ -69,14 +92,14 @@ jobs:
           path: build/distributions/
 
       - name: Generate Checksum
-        if: startsWith(github.ref, 'refs/tags/')      
+        if: startsWith(github.ref, 'refs/tags/')
         working-directory: ./build/distributions
         run: |
           shasum -a 256 "teku-${{ inputs.publish_version }}.tar.gz" > "teku-${{ inputs.publish_version }}.tar.gz.sha256"
           shasum -a 256 "teku-${{ inputs.publish_version }}.zip" > "teku-${{ inputs.publish_version }}.zip.sha256"
 
       - name: Determine Prerelease
-        if: startsWith(github.ref, 'refs/tags/')      
+        if: startsWith(github.ref, 'refs/tags/')
         id: determine-prerelease
         run: |
           if [[ "${{ inputs.publish_version }}" == *-RC* ]]; then

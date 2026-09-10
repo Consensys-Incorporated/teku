@@ -63,6 +63,7 @@ import tech.pegasys.teku.beacon.sync.gossip.blocks.RecentBlocksFetcher;
 import tech.pegasys.teku.beacon.sync.gossip.executionpayloads.RecentExecutionPayloadsFetcher;
 import tech.pegasys.teku.beaconrestapi.BeaconRestApi;
 import tech.pegasys.teku.beaconrestapi.JsonTypeDefinitionBeaconRestApi;
+import tech.pegasys.teku.builder.rest.StakedBuilderClientProvider;
 import tech.pegasys.teku.dataproviders.lookup.BlindedExecutionPayloadProvider;
 import tech.pegasys.teku.dataproviders.lookup.ExecutionPayloadProvider;
 import tech.pegasys.teku.dataproviders.lookup.SingleBlockProvider;
@@ -206,12 +207,14 @@ import tech.pegasys.teku.statetransition.datacolumns.retriever.DataColumnSidecar
 import tech.pegasys.teku.statetransition.datacolumns.retriever.SimpleSidecarRetriever;
 import tech.pegasys.teku.statetransition.datacolumns.retriever.recovering.SidecarRetriever;
 import tech.pegasys.teku.statetransition.datacolumns.util.SuperNodeSupplier;
+import tech.pegasys.teku.statetransition.execution.BuilderBidFetcher;
 import tech.pegasys.teku.statetransition.execution.DefaultExecutionPayloadBidManager;
 import tech.pegasys.teku.statetransition.execution.DefaultExecutionPayloadManager;
 import tech.pegasys.teku.statetransition.execution.DefaultProposerPreferencesManager;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidCircuitBreaker;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidManager;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidManager.RemoteBidOrigin;
+import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidSelector;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadManager;
 import tech.pegasys.teku.statetransition.execution.FailedExecutionPayloadPool;
 import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
@@ -231,6 +234,7 @@ import tech.pegasys.teku.statetransition.forkchoice.ProposersDataManager;
 import tech.pegasys.teku.statetransition.forkchoice.TerminalPowBlockMonitor;
 import tech.pegasys.teku.statetransition.forkchoice.TickProcessingPerformance;
 import tech.pegasys.teku.statetransition.forkchoice.TickProcessor;
+import tech.pegasys.teku.statetransition.forkchoice.fastconfirmation.FastConfirmationEventChannel;
 import tech.pegasys.teku.statetransition.forkchoice.fastconfirmation.FastConfirmationTracker;
 import tech.pegasys.teku.statetransition.lightclient.LightClientServerService;
 import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
@@ -477,7 +481,19 @@ public class BeaconChainController extends Service implements BeaconChainControl
     // larger default size. das runner should be separate to the operation pool runner as it's a
     // bunch of tasks, not just operation pool activities
     this.dasAsyncRunner = serviceConfig.createAsyncRunner("das", 4, 20_000);
-    this.fastConfirmationTracker = FastConfirmationTracker.NOOP;
+    if (eth2NetworkConfig.isFastConfirmationEnabled()) {
+      final AsyncRunner fastConfirmationAsyncRunner =
+          serviceConfig.createAsyncRunner("fastconfirmation", 1);
+      this.fastConfirmationTracker =
+          FastConfirmationTracker.create(
+              spec,
+              Optional.of(fastConfirmationAsyncRunner),
+              serviceConfig.getEventChannels().getPublisher(FastConfirmationEventChannel.class),
+              serviceConfig.getMetricsSystem(),
+              serviceConfig.getTimeProvider());
+    } else {
+      this.fastConfirmationTracker = FastConfirmationTracker.NOOP;
+    }
     this.timeProvider = serviceConfig.getTimeProvider();
     this.eventChannels = serviceConfig.getEventChannels();
     this.metricsSystem = serviceConfig.getMetricsSystem();
@@ -566,6 +582,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
       eventChannels.subscribe(SlotEventsChannel.class, ephemerySlotValidationService);
     }
     SafeFuture.allOfFailFast(
+            forkChoice.getFastConfirmationService().start(),
             attestationManager.start(),
             p2pNetwork.start(),
             blockManager.start(),
@@ -602,6 +619,9 @@ public class BeaconChainController extends Service implements BeaconChainControl
   protected SafeFuture<?> doStop() {
     LOG.debug("Stopping {}", this.getClass().getSimpleName());
     return SafeFuture.allOf(
+            // Stopped before the fork-choice executor below, so no in-flight fast confirmation
+            // work is submitted to a stopped event thread and logged as an error.
+            forkChoice.getFastConfirmationService().stop(),
             beaconRestAPI.map(BeaconRestApi::stop).orElse(SafeFuture.completedFuture(null)),
             syncService.stop(),
             blockManager.stop(),
@@ -1005,6 +1025,14 @@ public class BeaconChainController extends Service implements BeaconChainControl
           beaconConfig
               .executionPayloadBidCircuitBreakerFactory()
               .create(recentChainData::getForkChoiceStrategy);
+      final StakedBuilderClientProvider stakedBuilderClientProvider =
+          new StakedBuilderClientProvider(spec, beaconAsyncRunner);
+      final BuilderBidFetcher builderBidFetcher =
+          new BuilderBidFetcher(spec, stakedBuilderClientProvider);
+      final ExecutionPayloadBidSelector executionPayloadBidSelector =
+          new ExecutionPayloadBidSelector(
+              beaconConfig.executionLayerConfig().getUseShouldOverrideBuilderFlag(),
+              executionPayloadBidCircuitBreaker);
       final DefaultExecutionPayloadBidManager defaultExecutionPayloadBidManager =
           new DefaultExecutionPayloadBidManager(
               spec,
@@ -1012,8 +1040,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
               executionPayloadBidCircuitBreaker,
               receivedExecutionPayloadBidEventsChannelPublisher,
               poolFactory.createPendingPoolForExecutionPayloadBids(spec),
-              beaconConfig.executionLayerConfig().getBuilderBidCompareFactor(),
-              beaconConfig.executionLayerConfig().getUseShouldOverrideBuilderFlag());
+              builderBidFetcher,
+              executionPayloadBidSelector);
       proposerPreferencesManager.subscribeOperationAdded(defaultExecutionPayloadBidManager);
       eventChannels.subscribe(SlotEventsChannel.class, defaultExecutionPayloadBidManager);
       eventChannels.subscribe(ReceivedBlockEventsChannel.class, defaultExecutionPayloadBidManager);
@@ -1131,7 +1159,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
             schemaDefinitionsFulu.getDataColumnsByRootIdentifierSchema(),
             spec);
 
-    final MetadataDasPeerCustodyTracker peerCustodyTracker = new MetadataDasPeerCustodyTracker();
+    final MetadataDasPeerCustodyTracker peerCustodyTracker =
+        new MetadataDasPeerCustodyTracker(maxGroups);
     p2pNetwork.subscribeConnect(peerCustodyTracker);
     final DasPeerCustodyCountSupplier custodyCountSupplier =
         DasPeerCustodyCountSupplier.capped(
@@ -1144,7 +1173,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
             custodyCountSupplier,
             dasRpc,
             dasAsyncRunner,
-            Duration.ofSeconds(1));
+            timeProvider,
+            beaconConfig.p2pConfig().getSidecarRetrievalOverlapFraction());
 
     simpleSidecarRetriever = Optional.of(sidecarRetriever);
 
@@ -1509,7 +1539,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
   protected void initVoluntaryExitPool() {
     LOG.debug("BeaconChainController.initVoluntaryExitPool()");
     final VoluntaryExitValidator validator =
-        new VoluntaryExitValidator(spec, recentChainData, timeProvider);
+        new VoluntaryExitValidator(spec, recentChainData, timeProvider, gossipValidationHelper);
     voluntaryExitPool =
         new MappedOperationPool<>(
             "VoluntaryExitPool",

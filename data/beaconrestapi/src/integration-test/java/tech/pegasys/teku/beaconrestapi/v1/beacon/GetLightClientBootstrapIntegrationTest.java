@@ -16,6 +16,7 @@ package tech.pegasys.teku.beaconrestapi.v1.beacon;
 import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
 
 import java.io.IOException;
 import okhttp3.Response;
@@ -47,7 +48,8 @@ public class GetLightClientBootstrapIntegrationTest
   }
 
   @TestTemplate
-  void shouldReturnResultIfCreatedSuccessfully() throws IOException {
+  void shouldReturnResultIfCreatedSuccessfully(
+      final TestSpecInvocationContextProvider.SpecContext specContext) throws IOException {
     final BeaconState state =
         safeJoin(dataProvider.getChainDataProvider().getBeaconStateAtHead())
             .orElseThrow()
@@ -60,6 +62,8 @@ public class GetLightClientBootstrapIntegrationTest
 
     final Response response = get(headBlockRoot);
     assertThat(response.code()).isEqualTo(SC_OK);
+    assertThat(response.header(HEADER_CONSENSUS_VERSION))
+        .isEqualTo(specContext.getSpecMilestone().lowerCaseName());
 
     final LightClientBootstrapSchema lightClientBootstrapSchema =
         SchemaDefinitionsAltair.required(spec.getGenesisSchemaDefinitions())

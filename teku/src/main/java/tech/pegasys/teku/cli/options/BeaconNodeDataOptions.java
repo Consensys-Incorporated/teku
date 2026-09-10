@@ -194,6 +194,18 @@ public class BeaconNodeDataOptions extends ValidatorClientDataOptions {
   private int dataColumnPruningLimit = StorageConfiguration.DEFAULT_DATA_COLUMN_PRUNING_LIMIT;
 
   @CommandLine.Option(
+      names = {"--Xdata-storage-pruning-warn-timeout"},
+      hidden = true,
+      paramLabel = "<INTEGER>",
+      description =
+          "Duration in seconds after which a pruning task will log a warning if not completed",
+      fallbackValue = "true",
+      showDefaultValue = Visibility.ALWAYS,
+      arity = "0..1")
+  private long pruningWarnTimeoutSeconds =
+      StorageConfiguration.DEFAULT_PRUNING_WARN_TIMEOUT.toSeconds();
+
+  @CommandLine.Option(
       names = {"--Xdata-storage-blobs-archive-path"},
       hidden = true,
       paramLabel = "<STRING>",
@@ -276,7 +288,8 @@ public class BeaconNodeDataOptions extends ValidatorClientDataOptions {
                 .statePruningInterval(Duration.ofSeconds(statePruningIntervalSeconds))
                 .statePruningLimit(statePruningLimit)
                 .forceClearDb(forceClearDb)
-                .rocksdbBlobDbEnabled(rocksdbBlobDbEnabled));
+                .rocksdbBlobDbEnabled(rocksdbBlobDbEnabled)
+                .pruningWarnTimeout(Duration.ofSeconds(pruningWarnTimeoutSeconds)));
     builder.sync(
         b ->
             b.fetchAllHistoricBlocks(dataStorageMode.storesAllBlocks())
