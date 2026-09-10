@@ -20,6 +20,7 @@ import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_BLOCK_VALUE;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_EXECUTION_PAYLOAD_BLINDED;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_EXECUTION_PAYLOAD_VALUE;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_INCLUDE_PAYLOAD;
@@ -131,6 +132,7 @@ public class ProduceBlockRequestTest extends AbstractTypeDefRequestTestBase {
         new MockResponse()
             .setResponseCode(SC_OK)
             .setHeader("Content-Type", MediaType.OCTET_STREAM)
+            .setHeader(HEADER_CONSENSUS_VERSION, specMilestone.lowerCaseName())
             .setBody(responseBodyBuffer);
 
     final UInt256 expectedConsensusBlockValue;
@@ -205,6 +207,7 @@ public class ProduceBlockRequestTest extends AbstractTypeDefRequestTestBase {
             .setHeader("Content-Type", MediaType.OCTET_STREAM)
             .setHeader(HEADER_CONSENSUS_BLOCK_VALUE, "123000000000")
             .setHeader(HEADER_EXECUTION_PAYLOAD_VALUE, "12345")
+            .setHeader(HEADER_CONSENSUS_VERSION, specMilestone.lowerCaseName())
             .setBody(responseBodyBuffer));
 
     final BLSSignature signature = blindedBeaconBlock.getBlock().getBody().getRandaoReveal();
@@ -255,6 +258,7 @@ public class ProduceBlockRequestTest extends AbstractTypeDefRequestTestBase {
         new MockResponse()
             .setResponseCode(SC_OK)
             .setHeader("Content-Type", MediaType.OCTET_STREAM)
+            .setHeader(HEADER_CONSENSUS_VERSION, specMilestone.lowerCaseName())
             .setBody(responseBodyBuffer));
 
     final BLSSignature signature = blockContents.getBlock().getBody().getRandaoReveal();
@@ -283,6 +287,7 @@ public class ProduceBlockRequestTest extends AbstractTypeDefRequestTestBase {
             .setHeader(HEADER_INCLUDE_PAYLOAD, "true")
             .setHeader(HEADER_CONSENSUS_BLOCK_VALUE, "123000000000")
             .setHeader(HEADER_EXECUTION_PAYLOAD_VALUE, "12345")
+            .setHeader(HEADER_CONSENSUS_VERSION, specMilestone.lowerCaseName())
             .setBody(responseBodyBuffer));
 
     final BLSSignature signature = blockContents.getBlock().getBody().getRandaoReveal();
@@ -312,6 +317,7 @@ public class ProduceBlockRequestTest extends AbstractTypeDefRequestTestBase {
             .setHeader(HEADER_INCLUDE_PAYLOAD, "false")
             .setHeader(HEADER_CONSENSUS_BLOCK_VALUE, "123000000000")
             .setHeader(HEADER_EXECUTION_PAYLOAD_VALUE, "12345")
+            .setHeader(HEADER_CONSENSUS_VERSION, specMilestone.lowerCaseName())
             .setBody(responseBodyBuffer));
 
     final BLSSignature signature = beaconBlock.getBlock().getBody().getRandaoReveal();

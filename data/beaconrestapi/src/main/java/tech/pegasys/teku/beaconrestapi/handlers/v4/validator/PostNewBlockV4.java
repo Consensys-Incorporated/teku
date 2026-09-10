@@ -186,7 +186,7 @@ public class PostNewBlockV4 extends RestApiEndpoint {
                               responseTimeMs - requestTimeMs);
                           request.header(
                               HEADER_CONSENSUS_VERSION,
-                              blockContainerAndMetaData.specMilestone().lowerCaseName());
+                              blockContainerAndMetaData.milestone().lowerCaseName());
                           request.header(
                               HEADER_CONSENSUS_BLOCK_VALUE,
                               blockContainerAndMetaData.consensusBlockValue().toDecimalString());
@@ -219,7 +219,7 @@ public class PostNewBlockV4 extends RestApiEndpoint {
 
     return SerializableTypeDefinition.<BlockContainerAndMetaData>object()
         .name("ProduceBlockV4Response")
-        .withField("version", MILESTONE_TYPE, BlockContainerAndMetaData::specMilestone)
+        .withField("version", MILESTONE_TYPE, BlockContainerAndMetaData::milestone)
         .withField(
             CONSENSUS_BLOCK_VALUE, UINT256_TYPE, BlockContainerAndMetaData::consensusBlockValue)
         .withField(

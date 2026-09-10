@@ -114,7 +114,7 @@ public class BlockFactoryGloas extends BlockFactoryPhase0 {
       final BeaconState state) {
     final SlotCaches slotCaches = BeaconStateCache.getSlotCaches(state);
     return BlockContainerAndMetaData.builder()
-        .specMilestone(spec.atSlot(state.getSlot()).getMilestone())
+        .milestone(spec.atSlot(state.getSlot()).getMilestone())
         .executionPayloadValue(slotCaches.getBlockExecutionValue())
         .consensusBlockValue(GWEI_TO_WEI.multiply(slotCaches.getBlockProposerRewards().longValue()))
         .builderUrl(slotCaches.getBuilderUrl());

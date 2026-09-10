@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.spec.datastructures.metadata;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+
 import java.util.Optional;
 import org.apache.tuweni.units.bigints.UInt256;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -20,7 +22,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.BlockContainer;
 
 public record BlockContainerAndMetaData(
     BlockContainer blockContainer,
-    SpecMilestone specMilestone,
+    SpecMilestone milestone,
     UInt256 executionPayloadValue,
     UInt256 consensusBlockValue,
     boolean payloadIncluded,
@@ -37,7 +39,7 @@ public record BlockContainerAndMetaData(
   public static class Builder {
 
     private BlockContainer blockContainer;
-    private SpecMilestone specMilestone;
+    private SpecMilestone milestone;
     private UInt256 executionPayloadValue;
     private UInt256 consensusBlockValue;
     private boolean payloadIncluded;
@@ -47,7 +49,7 @@ public record BlockContainerAndMetaData(
 
     private Builder(final BlockContainerAndMetaData source) {
       this.blockContainer = source.blockContainer;
-      this.specMilestone = source.specMilestone;
+      this.milestone = source.milestone;
       this.executionPayloadValue = source.executionPayloadValue;
       this.consensusBlockValue = source.consensusBlockValue;
       this.payloadIncluded = source.payloadIncluded;
@@ -59,8 +61,8 @@ public record BlockContainerAndMetaData(
       return this;
     }
 
-    public Builder specMilestone(final SpecMilestone specMilestone) {
-      this.specMilestone = specMilestone;
+    public Builder milestone(final SpecMilestone milestone) {
+      this.milestone = milestone;
       return this;
     }
 
@@ -85,9 +87,13 @@ public record BlockContainerAndMetaData(
     }
 
     public BlockContainerAndMetaData build() {
+      checkNotNull(blockContainer);
+      checkNotNull(milestone);
+      checkNotNull(executionPayloadValue);
+      checkNotNull(consensusBlockValue);
       return new BlockContainerAndMetaData(
           blockContainer,
-          specMilestone,
+          milestone,
           executionPayloadValue,
           consensusBlockValue,
           payloadIncluded,

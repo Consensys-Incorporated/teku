@@ -99,7 +99,7 @@ public class PostNewBlockV4Test extends AbstractMigratedBeaconHandlerTest {
 
     assertThat(request.getResponseCode()).isEqualTo(HttpStatusCodes.SC_OK);
     assertThat(request.getResponseHeaders(HEADER_CONSENSUS_VERSION))
-        .isEqualTo(blockContainerAndMetaData.specMilestone().lowerCaseName());
+        .isEqualTo(blockContainerAndMetaData.milestone().lowerCaseName());
     assertThat(request.getResponseHeaders(HEADER_INCLUDE_PAYLOAD)).isEqualTo("true");
     assertThat(request.getResponseHeaders(HEADER_CONSENSUS_BLOCK_VALUE))
         .isEqualTo(blockContainerAndMetaData.consensusBlockValue().toDecimalString());

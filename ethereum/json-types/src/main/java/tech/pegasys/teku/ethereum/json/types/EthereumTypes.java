@@ -171,7 +171,7 @@ public class EthereumTypes {
       blockContainerAndMetaDataSszResponseType() {
     return new OctetStreamResponseContentTypeDefinition<>(
         (data, out) -> data.blockContainer().sszSerialize(out),
-        value -> getSszHeaders(__ -> value.specMilestone(), value.blockContainer()));
+        value -> getSszHeaders(__ -> value.milestone(), value.blockContainer()));
   }
 
   public static ResponseContentTypeDefinition<ExecutionPayloadAndMetaData>

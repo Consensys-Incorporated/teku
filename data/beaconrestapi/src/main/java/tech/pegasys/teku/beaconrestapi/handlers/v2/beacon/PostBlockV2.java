@@ -129,6 +129,7 @@ public class PostBlockV2 extends AbstractPostBlockV2 {
             spec::deserializeSignedBlockContainer)
         .headerRequired(
             ETH_CONSENSUS_VERSION_TYPE.withDescription("Version of the block being submitted."))
+        .header(ETH_BUILDER_URL_TYPE)
         .response(SC_OK, "Block has been successfully broadcast, validated and imported.")
         .response(
             SC_ACCEPTED,

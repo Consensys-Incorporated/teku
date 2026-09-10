@@ -83,7 +83,7 @@ public class GetNewBlockV3Test extends AbstractMigratedBeaconHandlerTest {
     assertThat(request.getResponseCode()).isEqualTo(HttpStatusCodes.SC_OK);
     assertThat(request.getResponseBody()).isEqualTo(blockContainerAndMetaData);
     assertThat(request.getResponseHeaders(HEADER_CONSENSUS_VERSION))
-        .isEqualTo(blockContainerAndMetaData.specMilestone().lowerCaseName());
+        .isEqualTo(blockContainerAndMetaData.milestone().lowerCaseName());
     assertThat(request.getResponseHeaders(HEADER_EXECUTION_PAYLOAD_BLINDED))
         .isEqualTo(Boolean.toString(true));
     assertThat(request.getResponseHeaders(HEADER_EXECUTION_PAYLOAD_VALUE))
@@ -116,7 +116,7 @@ public class GetNewBlockV3Test extends AbstractMigratedBeaconHandlerTest {
     assertThat(request.getResponseCode()).isEqualTo(HttpStatusCodes.SC_OK);
     assertThat(request.getResponseBody()).isEqualTo(blockContainerAndMetaData);
     assertThat(request.getResponseHeaders(HEADER_CONSENSUS_VERSION))
-        .isEqualTo(blockContainerAndMetaData.specMilestone().lowerCaseName());
+        .isEqualTo(blockContainerAndMetaData.milestone().lowerCaseName());
     assertThat(request.getResponseHeaders(HEADER_EXECUTION_PAYLOAD_BLINDED))
         .isEqualTo(Boolean.toString(false));
     assertThat(request.getResponseHeaders(HEADER_EXECUTION_PAYLOAD_VALUE))
@@ -140,7 +140,7 @@ public class GetNewBlockV3Test extends AbstractMigratedBeaconHandlerTest {
     assertThat(request.getResponseCode()).isEqualTo(HttpStatusCodes.SC_OK);
     assertThat(request.getResponseBody()).isEqualTo(blockContainerAndMetaData);
     assertThat(request.getResponseHeaders(HEADER_CONSENSUS_VERSION))
-        .isEqualTo(blockContainerAndMetaData.specMilestone().lowerCaseName());
+        .isEqualTo(blockContainerAndMetaData.milestone().lowerCaseName());
     assertThat(request.getResponseHeaders(HEADER_EXECUTION_PAYLOAD_BLINDED)).isEqualTo("false");
     assertThat(request.getResponseHeaders(HEADER_EXECUTION_PAYLOAD_VALUE))
         .isEqualTo(blockContainerAndMetaData.executionPayloadValue().toDecimalString());

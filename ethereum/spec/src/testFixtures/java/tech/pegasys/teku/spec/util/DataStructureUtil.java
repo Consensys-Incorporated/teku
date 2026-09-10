@@ -1329,7 +1329,7 @@ public final class DataStructureUtil {
     final SpecMilestone milestone = spec.atSlot(slotNum).getMilestone();
     return BlockContainerAndMetaData.builder()
         .blockContainer(blockContainer)
-        .specMilestone(milestone)
+        .milestone(milestone)
         .executionPayloadValue(randomUInt256())
         .consensusBlockValue(randomUInt256())
         .build();
