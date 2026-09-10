@@ -82,6 +82,10 @@ public class GossipValidationHelper {
     return slot.isGreaterThan(maxCurrSlot);
   }
 
+  public boolean isEpochFromFuture(final UInt64 epoch) {
+    return isSlotFromFuture(spec.computeStartSlotAtEpoch(epoch));
+  }
+
   public boolean hasSlotStarted(final UInt64 slot) {
     // Also prevents overflow when converting an extreme future slot to milliseconds.
     if (isSlotFromFuture(slot)) {

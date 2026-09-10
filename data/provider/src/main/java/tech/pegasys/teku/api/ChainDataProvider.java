@@ -82,6 +82,7 @@ import tech.pegasys.teku.spec.datastructures.metadata.BlobsAndMetaData;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockAndMetaData;
 import tech.pegasys.teku.spec.datastructures.metadata.DataColumnSidecarsAndMetaData;
 import tech.pegasys.teku.spec.datastructures.metadata.ExecutionPayloadAndMetaData;
+import tech.pegasys.teku.spec.datastructures.metadata.LightClientUpdateWithContext;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.metadata.StateAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
@@ -168,9 +169,28 @@ public class ChainDataProvider {
     this.lightClientUpdateStore = lightClientUpdateStore;
   }
 
-  public List<LightClientUpdate> getBestLightClientUpdates(
+  public List<LightClientUpdateWithContext> getBestLightClientUpdates(
       final UInt64 startPeriod, final int count) {
-    return lightClientUpdateStore.getBestUpdatesInRange(startPeriod, count);
+    final List<LightClientUpdate> updates =
+        lightClientUpdateStore.getBestUpdatesInRange(startPeriod, count);
+
+    if (updates.isEmpty()) {
+      return List.of();
+    }
+
+    final Bytes32 genesisValidatorsRoot = getGenesisStateData().getGenesisValidatorsRoot();
+    return updates.stream()
+        .map(
+            update ->
+                new LightClientUpdateWithContext(
+                    spec.computeForkDigest(
+                        genesisValidatorsRoot, spec.computeEpochAtSlot(attestedSlot(update))),
+                    update))
+        .toList();
+  }
+
+  private static UInt64 attestedSlot(final LightClientUpdate update) {
+    return update.getAttestedHeader().getBeacon().getSlot();
   }
 
   public Optional<LightClientFinalityUpdate> getLatestLightClientFinalityUpdate() {

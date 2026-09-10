@@ -41,6 +41,7 @@ import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.signatures.LocalSigner;
+import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 import tech.pegasys.teku.statetransition.validation.ValidationResultCode;
 import tech.pegasys.teku.statetransition.validation.VoluntaryExitValidator;
@@ -94,7 +95,11 @@ class VoluntaryExitPoolIntegrationTest {
             "VoluntaryExitPool",
             metricsSystem,
             schemaSupplier,
-            new VoluntaryExitValidator(spec, recentChainData, timeProvider),
+            new VoluntaryExitValidator(
+                spec,
+                recentChainData,
+                timeProvider,
+                new GossipValidationHelper(spec, recentChainData, metricsSystem)),
             asyncRunner,
             timeProvider);
   }

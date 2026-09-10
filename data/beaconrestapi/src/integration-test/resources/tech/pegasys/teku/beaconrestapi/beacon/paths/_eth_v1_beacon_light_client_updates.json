@@ -1,9 +1,9 @@
 {
   "get" : {
-    "tags" : [ "Beacon", "Experimental" ],
+    "tags" : [ "Beacon" ],
     "operationId" : "getLightClientUpdatesByRange",
     "summary" : "Get `LightClientUpdate` instances in a requested sync committee period range",
-    "description" : "Requests the [`LightClientUpdate`](https://github.com/ethereum/consensus-specs/blob/v1.2.0-rc.3/specs/altair/light-client/sync-protocol.md#lightclientupdate) instances in the sync committee period range `[start_period, start_period + count)`, leading up to the current head sync committee period as selected by fork choice. Depending on the `Accept` header they can be returned either as JSON or SSZ-serialized bytes.",
+    "description" : "Requests the `LightClientUpdate` instances in the sync committee period range `[start_period, start_period + count)`, leading up to the current head sync committee period as selected by fork choice. Depending on the `Accept` header they can be returned either as JSON or SSZ-serialized bytes.",
     "parameters" : [ {
       "name" : "start_period",
       "required" : true,
@@ -41,7 +41,19 @@
                     "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze" ]
                   },
                   "data" : {
-                    "$ref" : "#/components/schemas/LightClientUpdateAltair"
+                    "title" : "LightClientUpdate",
+                    "type" : "object",
+                    "oneOf" : [ {
+                      "$ref" : "#/components/schemas/LightClientUpdateAltair"
+                    }, {
+                      "$ref" : "#/components/schemas/LightClientUpdateCapella"
+                    }, {
+                      "$ref" : "#/components/schemas/LightClientUpdateDeneb"
+                    }, {
+                      "$ref" : "#/components/schemas/LightClientUpdateElectra"
+                    }, {
+                      "$ref" : "#/components/schemas/LightClientUpdateGloas"
+                    } ]
                   }
                 }
               }
@@ -57,16 +69,6 @@
       },
       "406" : {
         "description" : "Not acceptable",
-        "content" : {
-          "application/json" : {
-            "schema" : {
-              "$ref" : "#/components/schemas/HttpErrorResponse"
-            }
-          }
-        }
-      },
-      "501" : {
-        "description" : "Not implemented",
         "content" : {
           "application/json" : {
             "schema" : {

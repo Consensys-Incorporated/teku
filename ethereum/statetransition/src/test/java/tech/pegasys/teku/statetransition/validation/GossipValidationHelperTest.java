@@ -147,6 +147,33 @@ public class GossipValidationHelperTest {
   }
 
   @TestTemplate
+  void isEpochFromFuture_shouldComputeCorrectly() {
+    final UInt64 epoch2 = UInt64.valueOf(2);
+    final UInt64 epoch2StartSlot = spec.computeStartSlotAtEpoch(epoch2);
+
+    storageSystem.chainUpdater().setCurrentSlot(UInt64.ONE);
+    assertThat(gossipValidationHelper.isEpochFromFuture(epoch2)).isTrue();
+
+    final UInt64 epoch2StartTimeMillis =
+        spec.computeTimeMillisAtSlot(
+            epoch2StartSlot,
+            secondsToMillis(
+                recentChainData.getBestState().orElseThrow().getImmediately().getGenesisTime()));
+
+    final UInt64 notYetInsideTolerance =
+        epoch2StartTimeMillis
+            .minusMinZero(gossipValidationHelper.getMaxOffsetTimeInMillis())
+            .decrement();
+    storageSystem.chainUpdater().setTimeMillis(notYetInsideTolerance);
+    assertThat(gossipValidationHelper.isEpochFromFuture(epoch2)).isTrue();
+
+    final UInt64 insideTolerance =
+        epoch2StartTimeMillis.minusMinZero(gossipValidationHelper.getMaxOffsetTimeInMillis());
+    storageSystem.chainUpdater().setTimeMillis(insideTolerance);
+    assertThat(gossipValidationHelper.isEpochFromFuture(epoch2)).isFalse();
+  }
+
+  @TestTemplate
   void isSignatureValidWithRespectToProposerIndex_shouldComputeCorrectly() {
     final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
     storageSystem.chainUpdater().setCurrentSlot(nextSlot);
