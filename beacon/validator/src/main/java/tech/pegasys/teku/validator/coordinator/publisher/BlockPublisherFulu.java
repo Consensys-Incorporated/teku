@@ -18,15 +18,18 @@ import java.util.List;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockPublishingPerformance;
-import tech.pegasys.teku.infrastructure.async.AsyncRunner;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.gossip.BlockGossipChannel;
 import tech.pegasys.teku.networking.eth2.gossip.DataColumnSidecarGossipChannel;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.statetransition.blobs.RemoteOrigin;
 import tech.pegasys.teku.statetransition.block.BlockImportChannel;
 import tech.pegasys.teku.statetransition.datacolumns.CustodyGroupCountManager;
@@ -36,16 +39,14 @@ import tech.pegasys.teku.validator.coordinator.DutyMetrics;
 public class BlockPublisherFulu extends BlockPublisherPhase0 {
   private static final Logger LOG = LogManager.getLogger();
 
-  private final DataColumnSidecarGossipChannel dataColumnSidecarGossipChannel;
-
-  private final OptionalInt dasPublishWithholdColumnsEverySlots;
-
   private final AtomicReference<UInt64> lastWithheldSlot = new AtomicReference<>(null);
 
+  private final DataColumnSidecarGossipChannel dataColumnSidecarGossipChannel;
   private final CustodyGroupCountManager custodyGroupCountManager;
+  private final OptionalInt dasPublishWithholdColumnsEverySlots;
+  private final boolean gossipBlobsAfterBlock;
 
   public BlockPublisherFulu(
-      final AsyncRunner asyncRunner,
       final BlockFactory blockFactory,
       final BlockImportChannel blockImportChannel,
       final BlockGossipChannel blockGossipChannel,
@@ -54,13 +55,7 @@ public class BlockPublisherFulu extends BlockPublisherPhase0 {
       final CustodyGroupCountManager custodyGroupCountManager,
       final OptionalInt dasPublishWithholdColumnsEverySlots,
       final boolean gossipBlobsAfterBlock) {
-    super(
-        asyncRunner,
-        blockFactory,
-        blockGossipChannel,
-        blockImportChannel,
-        dutyMetrics,
-        gossipBlobsAfterBlock);
+    super(blockFactory, blockGossipChannel, blockImportChannel, dutyMetrics);
     this.dataColumnSidecarGossipChannel = dataColumnSidecarGossipChannel;
     this.custodyGroupCountManager = custodyGroupCountManager;
     this.dasPublishWithholdColumnsEverySlots = dasPublishWithholdColumnsEverySlots;
@@ -71,16 +66,35 @@ public class BlockPublisherFulu extends BlockPublisherPhase0 {
                     + "Every {} slots non-custodied dataColumnSidecars will "
                     + "be withheld on block publishing",
                 withholdColumnCountValue));
+    this.gossipBlobsAfterBlock = gossipBlobsAfterBlock;
   }
 
   @Override
-  void publishBlobSidecars(
-      final List<BlobSidecar> blobSidecars,
+  SafeFuture<BlockImportChannel.BlockImportAndBroadcastValidationResults>
+      handleMissingBlockAfterUnblinding() {
+    // in Fulu, builder doesn't reveal the payload
+    return SafeFuture.completedFuture(
+        new BlockImportChannel.BlockImportAndBroadcastValidationResults(
+            SafeFuture.completedFuture(BlockImportResult.BUILDER_WITHHOLD)));
+  }
+
+  @Override
+  void publishBlockAndSidecars(
+      final SignedBeaconBlock block,
+      final Supplier<List<BlobSidecar>> blobSidecars,
+      final Supplier<List<DataColumnSidecar>> dataColumnSidecars,
       final BlockPublishingPerformance blockPublishingPerformance) {
-    throw new RuntimeException("Unexpected call to publishBlobSidecars in Fulu");
+    if (gossipBlobsAfterBlock) {
+      publishBlock(block, blockPublishingPerformance)
+          .always(
+              () ->
+                  publishDataColumnSidecars(dataColumnSidecars.get(), blockPublishingPerformance));
+    } else {
+      publishBlock(block, blockPublishingPerformance).finishStackTrace();
+      publishDataColumnSidecars(dataColumnSidecars.get(), blockPublishingPerformance);
+    }
   }
 
-  @Override
   void publishDataColumnSidecars(
       final List<DataColumnSidecar> dataColumnSidecars,
       final BlockPublishingPerformance blockPublishingPerformance) {
@@ -123,5 +137,10 @@ public class BlockPublisherFulu extends BlockPublisherPhase0 {
     }
 
     return publishAll;
+  }
+
+  @Override
+  String getPublishingType() {
+    return "block and data column sidecars";
   }
 }
