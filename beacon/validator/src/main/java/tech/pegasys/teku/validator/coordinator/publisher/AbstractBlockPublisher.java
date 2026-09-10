@@ -95,7 +95,7 @@ public abstract class AbstractBlockPublisher implements BlockPublisher {
     final UInt64 slot = block.getSlot();
 
     // prepare and import blob sidecars in parallel with block import
-    importBlobSidecarsInParallel(blobSidecars, blockPublishingPerformance, slot);
+    importBlobSidecarsAsync(blobSidecars, blockPublishingPerformance, slot);
 
     blockImportAndBroadcastValidationResults
         .thenCompose(BlockImportAndBroadcastValidationResults::broadcastValidationResult)
@@ -128,7 +128,7 @@ public abstract class AbstractBlockPublisher implements BlockPublisher {
       Supplier<List<BlobSidecar>> blobSidecars,
       BlockPublishingPerformance blockPublishingPerformance);
 
-  abstract void importBlobSidecarsInParallel(
+  abstract void importBlobSidecarsAsync(
       Supplier<List<BlobSidecar>> blobSidecars,
       BlockPublishingPerformance blockPublishingPerformance,
       UInt64 slot);

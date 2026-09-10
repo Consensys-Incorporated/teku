@@ -102,7 +102,7 @@ public class AbstractBlockPublisherTest {
     assertThatSafeFuture(sendSignedBlockResult).isNotCompleted();
     verify(blockPublisher, never()).importBlobSidecars(any(), any());
     verify(blockPublisher)
-        .importBlobSidecarsInParallel(
+        .importBlobSidecarsAsync(
             any(), eq(BlockPublishingPerformance.NOOP), eq(signedBlock.getSlot()));
 
     verify(blockPublisher)
@@ -211,7 +211,7 @@ public class AbstractBlockPublisherTest {
         final BlockPublishingPerformance blockPublishingPerformance) {}
 
     @Override
-    void importBlobSidecarsInParallel(
+    void importBlobSidecarsAsync(
         final Supplier<List<BlobSidecar>> blobSidecars,
         final BlockPublishingPerformance blockPublishingPerformance,
         final UInt64 slot) {}

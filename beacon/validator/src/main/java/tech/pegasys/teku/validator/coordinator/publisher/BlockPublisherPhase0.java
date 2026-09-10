@@ -63,7 +63,7 @@ public class BlockPublisherPhase0 extends AbstractBlockPublisher {
   }
 
   @Override
-  void importBlobSidecarsInParallel(
+  void importBlobSidecarsAsync(
       final Supplier<List<BlobSidecar>> blobSidecars,
       final BlockPublishingPerformance blockPublishingPerformance,
       final UInt64 slot) {

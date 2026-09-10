@@ -69,7 +69,7 @@ public class BlockPublisherDeneb extends BlockPublisherPhase0 {
   }
 
   @Override
-  void importBlobSidecarsInParallel(
+  void importBlobSidecarsAsync(
       final Supplier<List<BlobSidecar>> blobSidecars,
       final BlockPublishingPerformance blockPublishingPerformance,
       final UInt64 slot) {
