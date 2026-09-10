@@ -27,7 +27,10 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.google.common.io.Resources;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -35,7 +38,6 @@ import org.junit.jupiter.params.provider.EnumSource;
 import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerTest;
 import tech.pegasys.teku.infrastructure.json.JsonTestUtil;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
-import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
@@ -44,7 +46,6 @@ public class GetLightClientFinalityUpdateTest extends AbstractMigratedBeaconHand
 
   @BeforeEach
   void setup() {
-    // we need altair minimum, so update spec
     setSpec(TestSpecFactory.createMinimalAltair());
     setHandler(new GetLightClientFinalityUpdate(schemaDefinitionCache, chainDataProvider));
   }
@@ -93,19 +94,45 @@ public class GetLightClientFinalityUpdateTest extends AbstractMigratedBeaconHand
   @ParameterizedTest
   @EnumSource(
       value = SpecMilestone.class,
-      names = {"ALTAIR", "ELECTRA", "GLOAS"})
+      names = {"ALTAIR", "BELLATRIX", "CAPELLA", "DENEB", "ELECTRA", "FULU", "GLOAS"})
   void shouldSerializeForEveryMilestoneWithItsOwnSchema(final SpecMilestone milestone)
       throws Exception {
-    final Spec milestoneSpec = TestSpecFactory.createMinimal(milestone);
-    setSpec(milestoneSpec);
+    setSpec(TestSpecFactory.createMinimal(milestone));
     setHandler(new GetLightClientFinalityUpdate(schemaDefinitionCache, chainDataProvider));
 
     final LightClientFinalityUpdate lightClientFinalityUpdate =
         dataStructureUtil.randomLightClientFinalityUpdate(UInt64.ONE);
 
-    final String data = getResponseStringFromMetadata(handler, SC_OK, lightClientFinalityUpdate);
+    final Map<String, Object> response =
+        JsonTestUtil.parse(
+            getResponseStringFromMetadata(handler, SC_OK, lightClientFinalityUpdate));
 
-    assertThat(data).contains("\"version\":\"" + milestone.lowerCaseName() + "\"");
+    assertThat(response.get("version")).isEqualTo(milestone.lowerCaseName());
+
+    final Map<String, Object> data = JsonTestUtil.getObject(response, "data");
+    assertThat(JsonTestUtil.getObject(data, "attested_header").keySet())
+        .containsExactlyInAnyOrderElementsOf(expectedHeaderFields(milestone));
+    assertThat(JsonTestUtil.getObject(data, "finalized_header").keySet())
+        .containsExactlyInAnyOrderElementsOf(expectedHeaderFields(milestone));
+
+    final List<Object> finalityBranch = JsonTestUtil.getList(data, "finality_branch");
+    assertThat(finalityBranch).hasSize(expectedFinalityBranchLength(milestone));
+  }
+
+  private static Set<String> expectedHeaderFields(final SpecMilestone milestone) {
+    return switch (milestone) {
+      case ALTAIR, BELLATRIX -> Set.of("beacon");
+      case GLOAS -> Set.of("beacon", "execution_block_hash", "execution_branch");
+      default -> Set.of("beacon", "execution", "execution_branch");
+    };
+  }
+
+  private static int expectedFinalityBranchLength(final SpecMilestone milestone) {
+    return switch (milestone) {
+      case ELECTRA, FULU -> 7;
+      case GLOAS -> 9;
+      default -> 6;
+    };
   }
 
   @Test
