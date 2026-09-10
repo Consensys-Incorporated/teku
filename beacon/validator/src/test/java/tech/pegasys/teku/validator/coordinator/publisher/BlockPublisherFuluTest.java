@@ -34,10 +34,12 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
+import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult.FailureReason;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.blobs.RemoteOrigin;
 import tech.pegasys.teku.statetransition.block.BlockImportChannel;
+import tech.pegasys.teku.statetransition.block.BlockImportChannel.BlockImportAndBroadcastValidationResults;
 import tech.pegasys.teku.statetransition.datacolumns.CustodyGroupCountManager;
 import tech.pegasys.teku.validator.api.SendSignedBlockResult;
 import tech.pegasys.teku.validator.coordinator.BlockFactory;
@@ -49,11 +51,13 @@ class BlockPublisherFuluTest {
   private final CustodyGroupCountManager custodyGroupCountManager =
       mock(CustodyGroupCountManager.class);
   private final BlockFactory blockFactory = mock(BlockFactory.class);
+  private final BlockImportChannel blockImportChannel = mock(BlockImportChannel.class);
+  private final BlockGossipChannel blockGossipChannel = mock(BlockGossipChannel.class);
   private final BlockPublisherFulu blockPublisherFulu =
       new BlockPublisherFulu(
           blockFactory,
-          mock(BlockImportChannel.class),
-          mock(BlockGossipChannel.class),
+          blockImportChannel,
+          blockGossipChannel,
           dataColumnSidecarGossipChannel,
           mock(DutyMetrics.class),
           custodyGroupCountManager,
@@ -89,6 +93,31 @@ class BlockPublisherFuluTest {
                 BlockPublishingPerformance.NOOP))
         .isCompletedWithValue(
             SendSignedBlockResult.notImported(FailureReason.BUILDER_WITHHOLD.name()));
+  }
+
+  @Test
+  void sendSignedBlock_shouldPublishBlockAndDataColumnSidecars() {
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock();
+
+    when(blockFactory.unblindSignedBlockIfBlinded(block, BlockPublishingPerformance.NOOP))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(block)));
+    when(blockFactory.createDataColumnSidecars(block)).thenReturn(dataColumnSidecars);
+    when(blockGossipChannel.publishBlock(block)).thenReturn(SafeFuture.COMPLETE);
+    when(blockImportChannel.importBlock(block, BroadcastValidationLevel.NOT_REQUIRED))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                new BlockImportAndBroadcastValidationResults(
+                    SafeFuture.completedFuture(BlockImportResult.successful(block)))));
+
+    assertThatSafeFuture(
+            blockPublisherFulu.sendSignedBlock(
+                block, BroadcastValidationLevel.NOT_REQUIRED, BlockPublishingPerformance.NOOP))
+        .isCompletedWithValue(SendSignedBlockResult.success(block.getRoot()));
+
+    verify(blockGossipChannel).publishBlock(block);
+    verify(blockFactory).createDataColumnSidecars(block);
+    verify(dataColumnSidecarGossipChannel)
+        .publishDataColumnSidecars(dataColumnSidecars, RemoteOrigin.LOCAL_PROPOSAL);
   }
 
   @Test

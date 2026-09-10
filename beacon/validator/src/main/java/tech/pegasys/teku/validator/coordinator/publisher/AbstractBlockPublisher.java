@@ -92,8 +92,10 @@ public abstract class AbstractBlockPublisher implements BlockPublisher {
     final SafeFuture<BlockImportAndBroadcastValidationResults>
         blockImportAndBroadcastValidationResults = importBlock(block, broadcastValidationLevel);
 
+    final UInt64 slot = block.getSlot();
+
     // prepare and import blob sidecars in parallel with block import
-    importBlobSidecarsInParallel(blobSidecars, blockPublishingPerformance, block.getSlot());
+    importBlobSidecarsInParallel(blobSidecars, blockPublishingPerformance, slot);
 
     blockImportAndBroadcastValidationResults
         .thenCompose(BlockImportAndBroadcastValidationResults::broadcastValidationResult)
@@ -108,13 +110,11 @@ public abstract class AbstractBlockPublisher implements BlockPublisher {
                     "{} publishing skipped due to broadcast validation result {} for slot {}",
                     getPublishingType(),
                     broadcastValidationResult,
-                    block.getSlot());
+                    slot);
               }
             })
         .finish(
-            err ->
-                LOG.error(
-                    "{} publishing failed for slot {}", getPublishingType(), block.getSlot(), err));
+            err -> LOG.error("{} publishing failed for slot {}", getPublishingType(), slot, err));
 
     return blockImportAndBroadcastValidationResults;
   }
@@ -143,7 +143,7 @@ public abstract class AbstractBlockPublisher implements BlockPublisher {
   abstract String getPublishingType();
 
   private SafeFuture<SendSignedBlockResult> calculateResult(
-      final SignedBlockContainer maybeBlindedBlockContainer,
+      final SignedBlockContainer blockContainer,
       final BlockImportAndBroadcastValidationResults blockImportAndBroadcastValidationResults,
       final BlockPublishingPerformance blockPublishingPerformance) {
 
@@ -171,32 +171,31 @@ public abstract class AbstractBlockPublisher implements BlockPublisher {
                         if (importResult.isSuccessful()) {
                           LOG.trace(
                               "Successfully imported proposed block: {}",
-                              maybeBlindedBlockContainer.getSignedBlock().toLogString());
-                          dutyMetrics.onBlockPublished(maybeBlindedBlockContainer.getSlot());
-                          return SendSignedBlockResult.success(
-                              maybeBlindedBlockContainer.getRoot());
+                              blockContainer.getSignedBlock().toLogString());
+                          dutyMetrics.onBlockPublished(blockContainer.getSlot());
+                          return SendSignedBlockResult.success(blockContainer.getRoot());
                         }
                         if (importResult.getFailureReason() == FailureReason.BLOCK_IS_FROM_FUTURE) {
                           LOG.debug(
                               "Delayed processing proposed block {} because it is from the future",
-                              maybeBlindedBlockContainer.getSignedBlock().toLogString());
-                          dutyMetrics.onBlockPublished(maybeBlindedBlockContainer.getSlot());
+                              blockContainer.getSignedBlock().toLogString());
+                          dutyMetrics.onBlockPublished(blockContainer.getSlot());
                           return SendSignedBlockResult.notImported(
                               importResult.getFailureReason().name());
                         }
                         if (importResult.getFailureReason() == FailureReason.BUILDER_WITHHOLD) {
                           LOG.debug(
                               "Block was not imported because builder didn't reveal full block {}",
-                              maybeBlindedBlockContainer.getSignedBlock().toLogString());
-                          dutyMetrics.onBlockPublished(maybeBlindedBlockContainer.getSlot());
+                              blockContainer.getSignedBlock().toLogString());
+                          dutyMetrics.onBlockPublished(blockContainer.getSlot());
                           return SendSignedBlockResult.notImported(
                               importResult.getFailureReason().name());
                         }
 
                         VALIDATOR_LOGGER.proposedBlockImportFailed(
                             importResult.getFailureReason().toString(),
-                            maybeBlindedBlockContainer.getSlot(),
-                            maybeBlindedBlockContainer.getRoot(),
+                            blockContainer.getSlot(),
+                            blockContainer.getRoot(),
                             importResult.getFailureCause());
 
                         return SendSignedBlockResult.notImported(
