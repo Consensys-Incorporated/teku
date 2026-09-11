@@ -46,7 +46,7 @@ public class LightClientRestApiBuilderAddon implements RestApiBuilderAddon {
   public RestApiBuilder apply(final RestApiBuilder builder) {
     return builder
         .endpoint(new GetLightClientBootstrap(dataProvider, schemaCache))
-        .endpoint(new GetLightClientUpdatesByRange(schemaCache))
-        .endpoint(new GetLightClientFinalityUpdate(schemaCache, dataProvider));
+        .endpoint(new GetLightClientUpdatesByRange(dataProvider, schemaCache))
+        .endpoint(new GetLightClientFinalityUpdate(dataProvider, schemaCache));
   }
 }

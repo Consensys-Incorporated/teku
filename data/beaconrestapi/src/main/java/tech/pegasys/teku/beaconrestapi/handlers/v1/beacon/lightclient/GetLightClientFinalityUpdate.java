@@ -44,13 +44,13 @@ public class GetLightClientFinalityUpdate extends RestApiEndpoint {
   private final SchemaDefinitionCache schemaDefinitionCache;
 
   public GetLightClientFinalityUpdate(
-      final SchemaDefinitionCache schemaDefinitionCache, final DataProvider provider) {
-    this(schemaDefinitionCache, provider.getChainDataProvider());
+      final DataProvider dataProvider, final SchemaDefinitionCache schemaDefinitionCache) {
+    this(dataProvider.getChainDataProvider(), schemaDefinitionCache);
   }
 
   public GetLightClientFinalityUpdate(
-      final SchemaDefinitionCache schemaDefinitionCache,
-      final ChainDataProvider chainDataProvider) {
+      final ChainDataProvider chainDataProvider,
+      final SchemaDefinitionCache schemaDefinitionCache) {
     super(
         EndpointMetadata.get(ROUTE)
             .operationId("getLightClientFinalityUpdate")
