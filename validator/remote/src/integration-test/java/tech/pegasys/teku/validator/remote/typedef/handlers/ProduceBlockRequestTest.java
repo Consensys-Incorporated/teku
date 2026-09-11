@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assumptions.assumeThat;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_BUILDER_URL;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_BLOCK_VALUE;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_EXECUTION_PAYLOAD_BLINDED;
@@ -55,7 +56,6 @@ import tech.pegasys.teku.spec.datastructures.blocks.versions.gloas.BlockContents
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
-import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.validator.remote.typedef.AbstractTypeDefRequestTestBase;
 
 @TestSpecContext(allMilestones = true)
@@ -332,27 +332,12 @@ public class ProduceBlockRequestTest extends AbstractTypeDefRequestTestBase {
   }
 
   @TestTemplate
-  public void shouldGetBlockContentsAsJsonV4() throws Exception {
+  public void shouldGetBlockContentsAsJsonV4() {
     assumeThat(specMilestone).isGreaterThanOrEqualTo(GLOAS);
 
-    final SchemaDefinitionsGloas schemaDefinitionsGloas =
-        SchemaDefinitionsGloas.required(schemaDefinitions);
     final BlockContainer blockContents = dataStructureUtil.randomBlockContents(ONE);
-    assertThat(blockContents).isInstanceOf(BlockContentsGloas.class);
 
-    final String dataJson =
-        JsonUtil.serialize(
-            blockContents,
-            schemaDefinitionsGloas
-                .getBlockContentsSchema()
-                .castTypeToBlockContainer()
-                .getJsonTypeDefinition());
-    final String mockResponse =
-        String.format(
-            "{\"version\":\"gloas\",\"execution_payload_included\":true,"
-                + "\"execution_payload_value\":\"12345\",\"consensus_block_value\":\"123000000000\","
-                + "\"data\":%s}",
-            dataJson);
+    final String mockResponse = readExpectedJsonResource(specMilestone, false, true);
 
     mockWebServer.enqueue(
         new MockResponse()
@@ -367,29 +352,24 @@ public class ProduceBlockRequestTest extends AbstractTypeDefRequestTestBase {
 
     assertThat(result).isPresent();
     assertThat(result.get().blockContainer()).isEqualTo(blockContents);
+    assertThat(result.get().payloadIncluded()).isTrue();
   }
 
   @TestTemplate
-  public void shouldGetBeaconBlockAsJsonV4WhenPayloadNotIncluded() throws Exception {
+  public void shouldGetBeaconBlockAsJsonV4WhenPayloadNotIncluded() {
     assumeThat(specMilestone).isGreaterThanOrEqualTo(GLOAS);
 
     final BeaconBlock beaconBlock = dataStructureUtil.randomBeaconBlock(ONE);
 
-    final String dataJson =
-        JsonUtil.serialize(
-            beaconBlock, schemaDefinitions.getBeaconBlockSchema().getJsonTypeDefinition());
-    final String mockResponse =
-        String.format(
-            "{\"version\":\"gloas\",\"execution_payload_included\":false,"
-                + "\"execution_payload_value\":\"12345\",\"consensus_block_value\":\"123000000000\","
-                + "\"data\":%s}",
-            dataJson);
+    final String mockResponse = readExpectedJsonResource(specMilestone, false, false);
 
+    final String builderUrl = "https://foobar.com";
     mockWebServer.enqueue(
         new MockResponse()
             .setResponseCode(SC_OK)
             .setBody(mockResponse)
-            .setHeader(HEADER_INCLUDE_PAYLOAD, "false"));
+            .setHeader(HEADER_INCLUDE_PAYLOAD, "false")
+            .setHeader(HEADER_BUILDER_URL, builderUrl));
 
     final BLSSignature signature = beaconBlock.getBlock().getBody().getRandaoReveal();
 
@@ -398,6 +378,8 @@ public class ProduceBlockRequestTest extends AbstractTypeDefRequestTestBase {
 
     assertThat(result).isPresent();
     assertThat(result.get().blockContainer()).isEqualTo(beaconBlock);
+    assertThat(result.get().payloadIncluded()).isFalse();
+    assertThat(result.get().builderUrl()).hasValue(builderUrl);
   }
 
   @TestTemplate
