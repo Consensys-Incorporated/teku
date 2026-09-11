@@ -39,7 +39,9 @@ public class DefaultRpcPayloadEncoder<T extends SszData> implements RpcPayloadEn
   @Override
   public T decode(final Bytes message) throws RpcException {
     try {
-      return type.sszDeserialize(message);
+      final T decoded = type.sszDeserialize(message);
+      type.getNetworkSszValidator().ifPresent(validator -> validator.validate(decoded));
+      return decoded;
     } catch (final SszDeserializeException e) {
       if (LOG.isTraceEnabled()) {
         LOG.trace("Failed to parse network message: " + message, e);

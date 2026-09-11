@@ -15,8 +15,10 @@ package tech.pegasys.teku.spec.datastructures.epbs.versions.gloas;
 
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.EXECUTION_PAYLOAD_ENVELOPE_SCHEMA;
 
+import java.util.Optional;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema2;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszNetworkValidator;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 import tech.pegasys.teku.spec.datastructures.type.SszSignature;
 import tech.pegasys.teku.spec.datastructures.type.SszSignatureSchema;
@@ -26,11 +28,21 @@ public class SignedExecutionPayloadEnvelopeSchema
     extends ContainerSchema2<
         SignedExecutionPayloadEnvelope, ExecutionPayloadEnvelope, SszSignature> {
 
-  public SignedExecutionPayloadEnvelopeSchema(final SchemaRegistry schemaRegistry) {
+  private final Optional<SszNetworkValidator<SignedExecutionPayloadEnvelope>> networkSszValidator;
+
+  public SignedExecutionPayloadEnvelopeSchema(
+      final SchemaRegistry schemaRegistry,
+      final Optional<SszNetworkValidator<SignedExecutionPayloadEnvelope>> networkSszValidator) {
     super(
         "SignedExecutionPayloadEnvelope",
         namedSchema("message", schemaRegistry.get(EXECUTION_PAYLOAD_ENVELOPE_SCHEMA)),
         namedSchema("signature", SszSignatureSchema.INSTANCE));
+    this.networkSszValidator = networkSszValidator;
+  }
+
+  @Override
+  public Optional<SszNetworkValidator<SignedExecutionPayloadEnvelope>> getNetworkSszValidator() {
+    return networkSszValidator;
   }
 
   public SignedExecutionPayloadEnvelope create(

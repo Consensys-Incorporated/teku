@@ -16639,7 +16639,13 @@
     </spec>
 
 - name: verify_block_body_operation_limits#gloas
-  sources: []
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/datastructures/util/GloasNetworkLimits.java
+      search: public static Optional<LimitViolation> verifyBlockBodyOperationLimits(
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/datastructures/util/GloasNetworkLimits.java
+      search: public static SszNetworkValidator<SignedBeaconBlock> signedBeaconBlockNetworkValidator(
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/BlockGossipValidator.java
+      search: private Optional<InternalValidationResult> verifyBlockBodyOperationLimits(
   spec: |
     <spec fn="verify_block_body_operation_limits" fork="gloas" hash="cc23d563">
     def verify_block_body_operation_limits(body: BeaconBlockBody) -> None:
@@ -16916,7 +16922,17 @@
     </spec>
 
 - name: verify_execution_requests_limits#gloas
-  sources: []
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/datastructures/util/GloasNetworkLimits.java
+      search: public static Optional<LimitViolation> verifyExecutionRequestsLimits(
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/datastructures/util/GloasNetworkLimits.java
+      search: public static SszNetworkValidator<SignedBeaconBlock> signedBeaconBlockNetworkValidator(
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/datastructures/util/GloasNetworkLimits.java
+      search: signedExecutionPayloadEnvelopeNetworkValidator(final SpecConfigGloas config) {
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/BlockGossipValidator.java
+      search: private Optional<InternalValidationResult> verifyExecutionRequestsLimits(
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/ExecutionPayloadGossipValidator.java
+      search: private Optional<InternalValidationResult> verifyRequestAndWithdrawalLimits(
   spec: |
     <spec fn="verify_execution_requests_limits" fork="gloas" hash="a15850cf">
     def verify_execution_requests_limits(execution_requests: ExecutionRequests) -> None:

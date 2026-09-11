@@ -35,6 +35,7 @@ class SszGossipCodec {
       if (result == null) {
         throw new DecodingException("Unable to decode value");
       }
+      valueType.getNetworkSszValidator().ifPresent(validator -> validator.validate(result));
       return result;
     } catch (SSZException e) {
       throw new DecodingException("Failed to deserialize value", e);

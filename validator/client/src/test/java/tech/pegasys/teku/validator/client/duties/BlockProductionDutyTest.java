@@ -537,8 +537,8 @@ class BlockProductionDutyTest {
     final BeaconBlockBody block = dataStructureUtil.randomBeaconBlockBody();
     assertThat(duty.getBlockSummary(block))
         .containsExactly(
-            "Blobs: 7",
-            "Builder: 1125033, Bid gas limit: 4759212943510379790, Bid EL block: 5999d9..3515");
+            "Blobs: 4",
+            "Builder: 1702157, Bid gas limit: 4817049881864128048, Bid EL block: d3b102..314a");
   }
 
   public void assertDutyFails(final RuntimeException error) {

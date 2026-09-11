@@ -15,14 +15,18 @@ package tech.pegasys.teku.networking.eth2.rpc.core.encodings;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszNetworkValidator;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszSchema;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszLengthBounds;
 import tech.pegasys.teku.networking.eth2.rpc.core.RpcException.DeserializationFailedException;
 import tech.pegasys.teku.networking.eth2.rpc.core.encodings.ssz.DefaultRpcPayloadEncoder;
@@ -64,5 +68,37 @@ public class DefaultRpcPayloadEncoderTest {
 
     verify(schema).getNetworkSszLengthBounds();
     verify(schema, never()).getSszLengthBounds();
+  }
+
+  @Test
+  public void decode_shouldRunNetworkSszValidatorOnDecodedValue() throws Exception {
+    @SuppressWarnings("unchecked")
+    final SszSchema<StatusMessage> schema = mock(SszSchema.class);
+    @SuppressWarnings("unchecked")
+    final SszNetworkValidator<StatusMessage> validator = mock(SszNetworkValidator.class);
+    final StatusMessage expected = StatusMessagePhase0.createPreGenesisStatus(spec);
+    doReturn(expected).when(schema).sszDeserialize(any(Bytes.class));
+    doReturn(Optional.of(validator)).when(schema).getNetworkSszValidator();
+
+    final StatusMessage actual = new DefaultRpcPayloadEncoder<>(schema).decode(Bytes.random(8));
+
+    assertThat(actual).isSameAs(expected);
+    verify(validator).validate(expected);
+  }
+
+  @Test
+  public void decode_shouldFailWhenNetworkSszValidatorRejectsValue() {
+    @SuppressWarnings("unchecked")
+    final SszSchema<StatusMessage> schema = mock(SszSchema.class);
+    final StatusMessage decoded = StatusMessagePhase0.createPreGenesisStatus(spec);
+    doReturn(decoded).when(schema).sszDeserialize(any(Bytes.class));
+    final SszNetworkValidator<StatusMessage> validator =
+        __ -> {
+          throw new SszDeserializeException("too many things");
+        };
+    doReturn(Optional.of(validator)).when(schema).getNetworkSszValidator();
+
+    assertThatThrownBy(() -> new DefaultRpcPayloadEncoder<>(schema).decode(Bytes.random(8)))
+        .isInstanceOf(DeserializationFailedException.class);
   }
 }
