@@ -96,6 +96,7 @@ public class ProposerPreferencesGossipValidatorTest {
     lookaheadEpochStartSlot = spec.computeStartSlotAtEpoch(lookaheadEpoch);
 
     when(gossipValidationHelper.hasSlotStarted(proposalSlot)).thenReturn(false);
+    when(gossipValidationHelper.isWithinProposerLookahead(proposalSlot)).thenReturn(true);
     when(gossipValidationHelper.isSlotFromFuture(lookaheadEpochStartSlot)).thenReturn(false);
     when(gossipValidationHelper.isBlockAvailable(dependentRoot)).thenReturn(true);
     when(gossipValidationHelper.isPossibleDependentRoot(dependentRoot, lookaheadEpochStartSlot))
@@ -131,7 +132,7 @@ public class ProposerPreferencesGossipValidatorTest {
 
   @TestTemplate
   void shouldIgnore_whenLookaheadEpochHasNotStarted() {
-    when(gossipValidationHelper.isSlotFromFuture(lookaheadEpochStartSlot)).thenReturn(true);
+    when(gossipValidationHelper.isWithinProposerLookahead(proposalSlot)).thenReturn(false);
     assertThatSafeFuture(validator.validate(signedProposerPreferences))
         .isCompletedWithValue(
             ignorePreferences(

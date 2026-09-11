@@ -91,7 +91,7 @@ public class ProposerPreferencesGossipValidator {
      * [IGNORE] The proposer for the proposal slot is known -- i.e. the lookahead epoch has started,
      * so its proposer lookahead can be computed.
      */
-    if (gossipValidationHelper.isSlotFromFuture(lookaheadEpochStartSlot)) {
+    if (!gossipValidationHelper.isWithinProposerLookahead(proposalSlot)) {
       return completedFuture(
           ignorePreferences(
               proposerPreferences, "proposer for the proposal slot is not yet known"));

@@ -83,6 +83,18 @@ public class GossipValidationHelper {
     return slot.isGreaterThan(maxCurrSlot);
   }
 
+  /**
+   * Returns true when the proposer for {@code proposalSlot} is known, which happens once the
+   * lookahead epoch has started.
+   */
+  public boolean isWithinProposerLookahead(final UInt64 proposalSlot) {
+    final int minSeedLookahead = spec.atSlot(proposalSlot).getConfig().getMinSeedLookahead();
+    final UInt64 lookaheadEpoch =
+        spec.computeEpochAtSlot(proposalSlot).minusMinZero(minSeedLookahead);
+    final UInt64 lookaheadEpochStartSlot = spec.computeStartSlotAtEpoch(lookaheadEpoch);
+    return !isSlotFromFuture(lookaheadEpochStartSlot);
+  }
+
   public boolean isEpochFromFuture(final UInt64 epoch) {
     return isSlotFromFuture(spec.computeStartSlotAtEpoch(epoch));
   }
