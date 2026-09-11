@@ -99,6 +99,8 @@ public class ProposerPreferencesGossipValidatorTest {
     when(gossipValidationHelper.isWithinProposerLookahead(proposalSlot)).thenReturn(true);
     when(gossipValidationHelper.isSlotFromFuture(lookaheadEpochStartSlot)).thenReturn(false);
     when(gossipValidationHelper.isBlockAvailable(dependentRoot)).thenReturn(true);
+    when(gossipValidationHelper.getStateAtBlockRoot(dependentRoot))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(state)));
     when(gossipValidationHelper.isPossibleDependentRoot(dependentRoot, lookaheadEpochStartSlot))
         .thenReturn(true);
     when(gossipValidationHelper.isSignatureValidWithRespectToProposerIndex(
@@ -141,6 +143,23 @@ public class ProposerPreferencesGossipValidatorTest {
   }
 
   @TestTemplate
+  void shouldIgnore_whenProposalEpochIsPreGloas() {
+    final Spec preGloasSpec = mock(Spec.class);
+    when(preGloasSpec.computeEpochAtSlot(proposalSlot)).thenReturn(lookaheadEpoch);
+    when(preGloasSpec.isProposerPreferencesAvailableAtEpoch(lookaheadEpoch)).thenReturn(false);
+
+    final ProposerPreferencesGossipValidator preGloasValidator =
+        new ProposerPreferencesGossipValidator(
+            preGloasSpec, gossipValidationHelper, recentChainData);
+
+    assertThatSafeFuture(preGloasValidator.validate(signedProposerPreferences))
+        .isCompletedWithValue(
+            ignorePreferences(signedProposerPreferences, "proposal epoch is pre-gloas"));
+    verify(gossipValidationHelper, never()).getStateAtBlockRoot(any());
+    verify(recentChainData, never()).retrieveCheckpointState(any(Checkpoint.class));
+  }
+
+  @TestTemplate
   void shouldIgnore_whenDependentRootIsNotAPossibleDependentBlock() {
     when(gossipValidationHelper.isPossibleDependentRoot(dependentRoot, lookaheadEpochStartSlot))
         .thenReturn(false);
@@ -148,6 +167,18 @@ public class ProposerPreferencesGossipValidatorTest {
         .isCompletedWithValue(
             ignorePreferences(
                 signedProposerPreferences, "dependent root is not a possible dependent block"));
+    verify(recentChainData, never()).retrieveCheckpointState(any(Checkpoint.class));
+  }
+
+  @TestTemplate
+  void shouldIgnore_whenDependentBlockHasNotPassedValidation() {
+    when(gossipValidationHelper.getStateAtBlockRoot(dependentRoot))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+
+    assertThatSafeFuture(validator.validate(signedProposerPreferences))
+        .isCompletedWithValue(
+            ignorePreferences(
+                signedProposerPreferences, "dependent root has not passed validation"));
     verify(recentChainData, never()).retrieveCheckpointState(any(Checkpoint.class));
   }
 
