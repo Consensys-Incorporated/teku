@@ -73,6 +73,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
@@ -534,6 +535,28 @@ class RemoteValidatorApiHandlerTest {
         apiHandler.createPayloadAttestationData(ONE);
 
     assertThatSszData(unwrapToValue(future)).isEqualByAllMeansTo(payloadAttestationData);
+  }
+
+  @Test
+  public void createUnsignedExecutionPayloadBid_WhenNone_ReturnsEmpty() {
+    when(typeDefClient.createUnsignedExecutionPayloadBid(ONE, ONE)).thenReturn(Optional.empty());
+
+    final SafeFuture<Optional<ExecutionPayloadBid>> future =
+        apiHandler.createUnsignedExecutionPayloadBid(ONE, ONE);
+
+    assertThat(unwrapToOptional(future)).isEmpty();
+  }
+
+  @Test
+  public void createUnsignedExecutionPayloadBid_WhenFound_ReturnsBid() {
+    final ExecutionPayloadBid bid =
+        new DataStructureUtil(TestSpecFactory.createMinimalGloas()).randomExecutionPayloadBid();
+    when(typeDefClient.createUnsignedExecutionPayloadBid(ONE, ONE)).thenReturn(Optional.of(bid));
+
+    final SafeFuture<Optional<ExecutionPayloadBid>> future =
+        apiHandler.createUnsignedExecutionPayloadBid(ONE, ONE);
+
+    assertThatSszData(unwrapToValue(future)).isEqualByAllMeansTo(bid);
   }
 
   @Test
