@@ -1,0 +1,31 @@
+{
+  "title" : "LightClientFinalityUpdateCapella",
+  "type" : "object",
+  "required" : [ "attested_header", "finalized_header", "finality_branch", "sync_aggregate", "signature_slot" ],
+  "properties" : {
+    "attested_header" : {
+      "$ref" : "#/components/schemas/LightClientHeaderCapella"
+    },
+    "finalized_header" : {
+      "$ref" : "#/components/schemas/LightClientHeaderCapella"
+    },
+    "finality_branch" : {
+      "type" : "array",
+      "items" : {
+        "type" : "string",
+        "description" : "Bytes32 hexadecimal",
+        "example" : "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
+        "format" : "byte"
+      }
+    },
+    "sync_aggregate" : {
+      "$ref" : "#/components/schemas/SyncAggregate"
+    },
+    "signature_slot" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    }
+  }
+}
