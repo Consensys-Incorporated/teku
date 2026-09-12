@@ -41,6 +41,8 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
@@ -310,8 +312,8 @@ public class ExecutionPayloadBidGossipValidator {
                * [REJECT] the builder is a payload builder -- i.e.
                * state.builders[bid.builder_index].version == PAYLOAD_BUILDER_VERSION.
                */
-              final int builderVersion =
-                  builders.get(bid.getBuilderIndex().intValue()).getVersion();
+              final Builder builder = builders.get(bid.getBuilderIndex().intValue());
+              final int builderVersion = builder.getVersion();
               if (builderVersion != PAYLOAD_BUILDER_VERSION) {
                 return rejectBid(
                     bid,
@@ -328,6 +330,42 @@ public class ExecutionPayloadBidGossipValidator {
               if (!gossipValidationHelper.builderHasEnoughBalanceForBid(
                   bid.getValue(), bid.getBuilderIndex(), state, bid.getSlot())) {
                 return ignoreBid(bid, "value exceeds the builder's excess balance");
+              }
+
+              /*
+               * [IGNORE] The parent's payload does not try to exit the builder.
+               */
+              if (bid.getParentBlockHash()
+                  .equals(
+                      BeaconStateGloas.required(state)
+                          .getLatestExecutionPayloadBid()
+                          .getBlockHash())) {
+                if (spec.isExecutionPayloadEnvelopeAvailableAtSlot(parentBlockSlot)) {
+                  final Optional<SignedExecutionPayloadEnvelope> maybeParentPayload =
+                      gossipValidationHelper.getRecentlyImportedExecutionPayload(
+                          bid.getParentBlockRoot());
+                  if (maybeParentPayload.isEmpty()) {
+                    return saveBidForFuture(
+                        bid,
+                        "parent execution payload is unavailable. Saving for future processing");
+                  }
+                  final boolean parentPayloadMayExitBuilder =
+                      ExecutionRequestsGloas.required(
+                              maybeParentPayload.get().getMessage().getExecutionRequests())
+                          .getBuilderExits()
+                          .stream()
+                          .anyMatch(
+                              request ->
+                                  request.getPubkey().equals(builder.getPublicKey())
+                                      && request
+                                          .getSourceAddress()
+                                          .getWrappedBytes()
+                                          .equals(builder.getExecutionAddress().getWrappedBytes()));
+                  if (parentPayloadMayExitBuilder) {
+                    return ignoreBid(
+                        bid, "parent payload may exit builder %s", bid.getBuilderIndex());
+                  }
+                }
               }
 
               /*
