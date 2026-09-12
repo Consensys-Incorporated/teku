@@ -1,4 +1,5 @@
 dependencies {
+	implementation project(':ethereum:events')
 	implementation project(':ethereum:spec')
 	implementation project(':ethereum:statetransition')
 	implementation project(':ethereum:executionclient')
