@@ -13,7 +13,10 @@
 
 package tech.pegasys.teku.statetransition.execution;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
@@ -38,8 +41,14 @@ public interface ProposerPreferencesManager {
         }
 
         @Override
-        public Optional<ProposerPreferences> getProposerPreferences(final UInt64 slot) {
+        public Optional<ProposerPreferences> getProposerPreferences(
+            final UInt64 slot, final Bytes32 dependentRoot) {
           return Optional.empty();
+        }
+
+        @Override
+        public Collection<ProposerPreferences> getProposerPreferencesForSlot(final UInt64 slot) {
+          return List.of();
         }
 
         @Override
@@ -53,7 +62,9 @@ public interface ProposerPreferencesManager {
   SafeFuture<InternalValidationResult> addRemote(
       SignedProposerPreferences signedProposerPreferences);
 
-  Optional<ProposerPreferences> getProposerPreferences(UInt64 slot);
+  Optional<ProposerPreferences> getProposerPreferences(UInt64 slot, Bytes32 dependentRoot);
+
+  Collection<ProposerPreferences> getProposerPreferencesForSlot(UInt64 slot);
 
   void subscribeOperationAdded(OperationAddedSubscriber<SignedProposerPreferences> subscriber);
 }

@@ -18,6 +18,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
@@ -73,6 +74,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
   private UInt64 builderIndex;
   private Bytes32 parentBlockRoot;
   private Bytes32 parentBlockHash;
+  private Bytes32 dependentRoot;
   private BeaconState postState;
 
   @BeforeEach
@@ -105,6 +107,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
     builderIndex = bid.getBuilderIndex();
     parentBlockRoot = bid.getParentBlockRoot();
     parentBlockHash = bid.getParentBlockHash();
+    dependentRoot = dataStructureUtil.randomBytes32();
     // Replace the random builders so that the bid's builder index is in range and every builder
     // carries PAYLOAD_BUILDER_VERSION; randomBuilder() assigns a random version, which the
     // payload-builder-version rule would reject.
@@ -128,10 +131,12 @@ public class ExecutionPayloadBidGossipValidatorTest {
     final ProposerPreferences proposerPreferences = mock(ProposerPreferences.class);
     when(proposerPreferences.getFeeRecipient()).thenReturn(bid.getFeeRecipient());
     when(proposerPreferences.getTargetGasLimit()).thenReturn(bid.getGasLimit());
-    when(proposerPreferencesManager.getProposerPreferences(any()))
+    when(proposerPreferencesManager.getProposerPreferences(bid.getSlot(), dependentRoot))
         .thenReturn(Optional.of(proposerPreferences));
 
     when(gossipValidationHelper.isSlotCurrentOrNext(slot)).thenReturn(true);
+    when(gossipValidationHelper.getShufflingDependentRoot(parentBlockRoot, slot))
+        .thenReturn(Optional.of(dependentRoot));
     when(gossipValidationHelper.getGasLimitForExecutionPayload(parentBlockRoot, parentBlockHash))
         .thenReturn(Optional.of(bid.getGasLimit()));
     when(gossipValidationHelper.isBidCompatibleWithHead(any())).thenReturn(true);
@@ -192,7 +197,31 @@ public class ExecutionPayloadBidGossipValidatorTest {
 
   @TestTemplate
   void shouldSaveForFuture_whenProposerPreferencesNotSeen() {
-    when(proposerPreferencesManager.getProposerPreferences(slot)).thenReturn(Optional.empty());
+    when(proposerPreferencesManager.getProposerPreferences(slot, dependentRoot))
+        .thenReturn(Optional.empty());
+    assertThatSafeFuture(bidValidator.validate(signedBid))
+        .isCompletedWithValue(
+            saveBidForFuture(
+                signedBid, "no proposer preferences available; saving for future processing"));
+  }
+
+  @TestTemplate
+  void shouldSaveForFuture_whenShufflingDependentRootIsUnavailable() {
+    when(gossipValidationHelper.getShufflingDependentRoot(parentBlockRoot, slot))
+        .thenReturn(Optional.empty());
+
+    assertThatSafeFuture(bidValidator.validate(signedBid))
+        .isCompletedWithValue(
+            saveBidForFuture(
+                signedBid,
+                "shuffling dependent root is unavailable; saving for future processing"));
+  }
+
+  @TestTemplate
+  void shouldSaveForFuture_whenPreferencesDoNotMatchShufflingDependentRoot() {
+    when(proposerPreferencesManager.getProposerPreferences(slot, dependentRoot))
+        .thenReturn(Optional.empty());
+
     assertThatSafeFuture(bidValidator.validate(signedBid))
         .isCompletedWithValue(
             saveBidForFuture(
@@ -204,7 +233,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
     final ProposerPreferences mismatchedPreferences = mock(ProposerPreferences.class);
     when(mismatchedPreferences.getFeeRecipient()).thenReturn(dataStructureUtil.randomEth1Address());
     when(mismatchedPreferences.getTargetGasLimit()).thenReturn(bid.getGasLimit());
-    when(proposerPreferencesManager.getProposerPreferences(slot))
+    when(proposerPreferencesManager.getProposerPreferences(slot, dependentRoot))
         .thenReturn(Optional.of(mismatchedPreferences));
 
     assertThatSafeFuture(bidValidator.validate(signedBid))
@@ -426,6 +455,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
                 signedBid,
                 "parent block with root %s is unknown; saving for future processing",
                 parentBlockRoot));
+    verify(gossipValidationHelper, never()).getShufflingDependentRoot(any(), any());
   }
 
   @TestTemplate
@@ -579,7 +609,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .isCompletedWithValue(
             ignoreBid(
                 signedBid,
-                "another bid for parent block hash %s and parent block root %s was processed concurrently",
+                "already received for parent block hash %s and parent block root %s",
                 parentBlockHash,
                 parentBlockRoot));
   }
@@ -705,7 +735,9 @@ public class ExecutionPayloadBidGossipValidatorTest {
     final ProposerPreferences matchingPreferences = mock(ProposerPreferences.class);
     when(matchingPreferences.getFeeRecipient()).thenReturn(message.getFeeRecipient());
     when(matchingPreferences.getTargetGasLimit()).thenReturn(message.getGasLimit());
-    when(proposerPreferencesManager.getProposerPreferences(slot))
+    when(gossipValidationHelper.getShufflingDependentRoot(message.getParentBlockRoot(), slot))
+        .thenReturn(Optional.of(dependentRoot));
+    when(proposerPreferencesManager.getProposerPreferences(slot, dependentRoot))
         .thenReturn(Optional.of(matchingPreferences));
     when(gossipValidationHelper.isSlotCurrentOrNext(slot)).thenReturn(true);
     when(gossipValidationHelper.getGasLimitForExecutionPayload(
@@ -857,7 +889,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
     when(proposerPreferences.getFeeRecipient())
         .thenReturn(signedBid.getMessage().getFeeRecipient());
     when(proposerPreferences.getTargetGasLimit()).thenReturn(targetGasLimit);
-    when(proposerPreferencesManager.getProposerPreferences(signedBid.getMessage().getSlot()))
+    when(proposerPreferencesManager.getProposerPreferences(
+            signedBid.getMessage().getSlot(), dependentRoot))
         .thenReturn(Optional.of(proposerPreferences));
   }
 }

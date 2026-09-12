@@ -44,6 +44,7 @@ import tech.pegasys.teku.spec.logic.common.util.AttestationValidationResult;
 import tech.pegasys.teku.spec.logic.common.util.DataColumnSidecarUtil;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.BeaconStateAccessorsGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.PredicatesGloas;
+import tech.pegasys.teku.statetransition.util.ShufflingDependentRootUtil;
 import tech.pegasys.teku.storage.client.ChainHead;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
@@ -349,6 +350,17 @@ public class GossipValidationHelper {
     // Otherwise the root could still become the latest block before the epoch if it is the head,
     // because the next block to extend it would be at or after epochStartSlot.
     return recentChainData.getBestBlockRoot().filter(root::equals).isPresent();
+  }
+
+  public Optional<Bytes32> getShufflingDependentRoot(
+      final Bytes32 blockRoot, final UInt64 proposalSlot) {
+    final Optional<ReadOnlyForkChoiceStrategy> maybeForkChoiceStrategy =
+        recentChainData.getForkChoiceStrategy();
+    if (maybeForkChoiceStrategy == null || maybeForkChoiceStrategy.isEmpty()) {
+      return Optional.empty();
+    }
+    return ShufflingDependentRootUtil.getShufflingDependentRoot(
+        spec, maybeForkChoiceStrategy.get(), blockRoot, proposalSlot);
   }
 
   public boolean builderHasEnoughBalanceForBid(

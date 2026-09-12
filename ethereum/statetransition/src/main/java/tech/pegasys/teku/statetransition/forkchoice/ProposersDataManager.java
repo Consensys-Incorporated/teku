@@ -44,12 +44,14 @@ import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
 import tech.pegasys.teku.spec.datastructures.execution.versions.capella.Withdrawal;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannel;
 import tech.pegasys.teku.spec.executionlayer.ForkChoiceState;
 import tech.pegasys.teku.spec.executionlayer.PayloadBuildingAttributes;
 import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
+import tech.pegasys.teku.statetransition.util.ShufflingDependentRootUtil;
 import tech.pegasys.teku.storage.client.ChainHead;
 import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.storage.client.ValidatorIsConnectedProvider;
@@ -307,10 +309,12 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
     final Optional<SignedValidatorRegistration> validatorRegistration =
         Optional.ofNullable(validatorRegistrationInfoByValidatorIndex.get(proposerIndex))
             .map(RegisteredValidatorInfo::getSignedValidatorRegistration);
+    final Optional<Bytes32> dependentRoot =
+        getShufflingDependentRoot(currentHeadBlock.blockRoot(), blockSlot);
 
     final Eth1Address feeRecipient = getFeeRecipient(proposerInfo, blockSlot);
     final UInt64 targetGasLimit =
-        getTargetGasLimit(blockSlot, proposerIndex, validatorRegistration);
+        getTargetGasLimit(blockSlot, proposerIndex, dependentRoot, validatorRegistration);
 
     return getPayloadAttributeWithdrawals(currentHeadBlock, state)
         .thenApplyAsync(
@@ -374,10 +378,11 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
   UInt64 getTargetGasLimit(
       final UInt64 blockSlot,
       final UInt64 proposerIndex,
+      final Optional<Bytes32> dependentRoot,
       final Optional<SignedValidatorRegistration> validatorRegistration) {
     // post-Gloas, we use signed proposer preferences
-    return proposerPreferencesManager
-        .getProposerPreferences(blockSlot)
+    return dependentRoot
+        .flatMap(root -> proposerPreferencesManager.getProposerPreferences(blockSlot, root))
         .filter(
             proposerPreferences -> proposerPreferences.getValidatorIndex().equals(proposerIndex))
         .map(ProposerPreferences::getTargetGasLimit)
@@ -386,6 +391,17 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
             () ->
                 validatorRegistration.map(registration -> registration.getMessage().getGasLimit()))
         .orElse(UInt64.ZERO);
+  }
+
+  private Optional<Bytes32> getShufflingDependentRoot(
+      final Bytes32 blockRoot, final UInt64 proposalSlot) {
+    final Optional<ReadOnlyForkChoiceStrategy> maybeForkChoiceStrategy =
+        recentChainData.getForkChoiceStrategy();
+    if (maybeForkChoiceStrategy == null || maybeForkChoiceStrategy.isEmpty()) {
+      return Optional.empty();
+    }
+    return ShufflingDependentRootUtil.getShufflingDependentRoot(
+        spec, maybeForkChoiceStrategy.get(), blockRoot, proposalSlot);
   }
 
   // this function MUST return a fee recipient.
