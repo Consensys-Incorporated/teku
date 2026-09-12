@@ -46,6 +46,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
@@ -55,6 +56,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.bls.BLSKeyGenerator;
 import tech.pegasys.teku.bls.BLSKeyPair;
 import tech.pegasys.teku.dataproviders.lookup.BlockProvider;
@@ -3069,6 +3071,117 @@ public class DatabaseTest {
 
     assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
     assertThat(database.getDataColumnSidecarsProofs(header.getMessage().getSlot())).isEmpty();
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_dropsExtensionColumnsAndRetainsProofs(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final int halfColumns = numberOfColumns / 2;
+    final UInt64 slot = UInt64.valueOf(3);
+
+    final List<List<KZGProof>> expectedExtensionProofs = storeFullColumnSet(slot, numberOfColumns);
+
+    database.archiveSidecarsProofs(ZERO, slot);
+
+    // only the reconstructable first half of the columns is retained
+    assertThat(getStoredColumnIndices(slot))
+        .containsExactlyElementsOf(
+            Stream.iterate(ZERO, UInt64::increment).limit(halfColumns).toList());
+    // the proofs of the dropped extension columns are archived for reconstruction
+    assertThat(database.getDataColumnSidecarsProofs(slot)).contains(expectedExtensionProofs);
+    assertThat(database.getLastDataColumnSidecarsProofsSlot()).contains(slot);
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_skipsSlotWithIncompleteExtensionColumns(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final UInt64 slot = UInt64.valueOf(3);
+
+    final SignedBeaconBlockHeader header = dataStructureUtil.randomSignedBeaconBlockHeader(slot);
+    final SszList<SszKZGCommitment> kzgCommitments = randomFuluKzgCommitments();
+    // store every column except the last extension one, so the extension half is incomplete
+    Stream.iterate(ZERO, UInt64::increment)
+        .limit(numberOfColumns - 1L)
+        .map(index -> dataStructureUtil.randomDataColumnSidecar(header, kzgCommitments, index))
+        .forEach(database::addSidecar);
+
+    database.archiveSidecarsProofs(ZERO, slot);
+
+    // nothing archived and no column dropped: reconstruction from a partial half is impossible
+    assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
+    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    assertThat(getStoredColumnIndices(slot)).hasSize(numberOfColumns - 1);
+  }
+
+  @TestTemplate
+  public void pruneAllSidecars_alsoRemovesArchivedProofs(final DatabaseContext context)
+      throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final UInt64 slot = UInt64.valueOf(3);
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(KvStoreDatabase.class, Level.DEBUG)) {
+      // archive the extension columns down to proofs: slot now holds first-half sidecars + proofs
+      storeFullColumnSet(slot, numberOfColumns);
+      database.archiveSidecarsProofs(ZERO, slot);
+      assertThat(database.getDataColumnSidecarsProofs(slot)).isPresent();
+      assertThat(database.getLastDataColumnSidecarsProofsSlot()).contains(slot);
+
+      // pruning the slot must drop the retained proofs alongside the sidecars
+      database.pruneAllSidecars(slot, 10);
+
+      assertThat(getStoredColumnIndices(slot)).isEmpty();
+      assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
+      assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+
+      // both the archiving and the prune-time removal are observable in the logs at debug level
+      assertThat(logCaptor.getDebugLogs())
+          .anyMatch(log -> log.contains("Archiving data column sidecars to proofs"))
+          .anyMatch(log -> log.contains("Removing archived data column sidecar proofs"));
+    }
+  }
+
+  private List<List<KZGProof>> storeFullColumnSet(final UInt64 slot, final int numberOfColumns) {
+    final SignedBeaconBlockHeader header = dataStructureUtil.randomSignedBeaconBlockHeader(slot);
+    final SszList<SszKZGCommitment> kzgCommitments = randomFuluKzgCommitments();
+    final List<DataColumnSidecar> sidecars =
+        Stream.iterate(ZERO, UInt64::increment)
+            .limit(numberOfColumns)
+            .map(index -> dataStructureUtil.randomDataColumnSidecar(header, kzgCommitments, index))
+            .toList();
+    sidecars.forEach(database::addSidecar);
+    return sidecars.stream()
+        .skip(numberOfColumns / 2)
+        .map(sidecar -> sidecar.getKzgProofs().stream().map(SszKZGProof::getKZGProof).toList())
+        .toList();
+  }
+
+  private SszList<SszKZGCommitment> randomFuluKzgCommitments() {
+    return SchemaDefinitionsFulu.required(
+            spec.forMilestone(SpecMilestone.FULU).getSchemaDefinitions())
+        .getDataColumnSidecarSchema()
+        .getKzgCommitmentsSchema()
+        .createFromElements(
+            dataStructureUtil.randomKZGCommitments(14).stream()
+                .map(SszKZGCommitment::new)
+                .toList());
+  }
+
+  private List<UInt64> getStoredColumnIndices(final UInt64 slot) {
+    try (final Stream<DataColumnSlotAndIdentifier> identifiers =
+        database.streamDataColumnIdentifiers(slot, slot)) {
+      return identifiers.map(DataColumnSlotAndIdentifier::columnIndex).sorted().toList();
+    }
   }
 
   private List<Map.Entry<Bytes32, UInt64>> getFinalizedStateRootsList() {

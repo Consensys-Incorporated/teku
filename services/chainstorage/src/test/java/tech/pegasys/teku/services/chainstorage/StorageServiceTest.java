@@ -16,7 +16,10 @@ package tech.pegasys.teku.services.chainstorage;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyInt;
+import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
@@ -37,6 +40,8 @@ import tech.pegasys.teku.infrastructure.events.EventChannels;
 import tech.pegasys.teku.service.serviceutils.ServiceConfig;
 import tech.pegasys.teku.service.serviceutils.layout.DataDirLayout;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
+import tech.pegasys.teku.storage.api.SidecarArchivePrunableChannel;
 import tech.pegasys.teku.storage.server.DatabaseVersion;
 import tech.pegasys.teku.storage.server.StateStorageMode;
 import tech.pegasys.teku.storage.server.StorageConfiguration;
@@ -138,6 +143,37 @@ class StorageServiceTest {
     final StatePruner statePruner = maybeStatePruner.get();
     assertThat(statePruner.isRunning()).isTrue();
     assertThat(statePruner.getPruneInterval()).isEqualTo(customPruningInterval);
+  }
+
+  @Test
+  void shouldNotSetupDataColumnSidecarPrunerWhenFuluNotSupported() {
+    when(storageConfiguration.getDataStorageMode()).thenReturn(StateStorageMode.PRUNE);
+    when(spec.isMilestoneSupported(SpecMilestone.FULU)).thenReturn(false);
+
+    final SafeFuture<?> future = storageService.doStart();
+
+    assertThat(future).isCompleted();
+    // without Fulu there is no data column sidecar pruner, so archiveSidecarsProofs can never run
+    assertThat(storageService.getDataColumnSidecarPruner()).isEmpty();
+    verify(eventChannels, never()).subscribe(eq(SidecarArchivePrunableChannel.class), any());
+  }
+
+  @Test
+  void shouldSetupDataColumnSidecarPrunerWhenFuluSupported() {
+    when(storageConfiguration.getDataStorageMode()).thenReturn(StateStorageMode.PRUNE);
+    when(spec.isMilestoneSupported(SpecMilestone.FULU)).thenReturn(true);
+    when(storageConfiguration.getDataColumnPruningInterval()).thenReturn(Duration.ofSeconds(60));
+    when(storageConfiguration.getDataColumnPruningLimit()).thenReturn(10);
+
+    final SafeFuture<?> future = storageService.doStart();
+
+    assertThat(future).isCompleted();
+    assertThat(storageService.getDataColumnSidecarPruner()).isPresent();
+    // the pruner is wired to receive archive-prunable slot signals
+    verify(eventChannels)
+        .subscribe(
+            eq(SidecarArchivePrunableChannel.class),
+            eq(storageService.getDataColumnSidecarPruner().get()));
   }
 
   @Test

@@ -331,4 +331,17 @@ public interface Database extends AutoCloseable {
   // Triggers a full, blocking compaction of the underlying storage to physically reclaim the disk
   // space left behind by pruning. Expensive and I/O-heavy; intended for offline/CLI use.
   void compactStorage();
+
+  /**
+   * Archives the reconstructable extension data column sidecars (column indices >=
+   * NUMBER_OF_COLUMNS / 2) in [startSlot, tillSlotInclusive]: for each fully populated slot it
+   * persists their KZG proofs and drops the sidecars themselves, retaining only enough data to
+   * reconstruct them on demand.
+   *
+   * <p><b>Callers must submit small ranges.</b> There is no internal limit; the entire range is
+   * scanned in a single pass. Use {@link
+   * tech.pegasys.teku.storage.server.pruner.DataColumnSidecarPruner} which breaks the work into
+   * fixed-size chunks.
+   */
+  void archiveSidecarsProofs(UInt64 startSlot, UInt64 tillSlotInclusive);
 }

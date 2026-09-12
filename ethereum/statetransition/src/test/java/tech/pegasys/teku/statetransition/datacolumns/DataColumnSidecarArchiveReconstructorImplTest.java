@@ -28,6 +28,7 @@ import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ZERO;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,6 +36,7 @@ import org.junit.jupiter.api.TestTemplate;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.SyncAsyncRunner;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
+import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.kzg.KZGProof;
@@ -110,6 +112,17 @@ public class DataColumnSidecarArchiveReconstructorImplTest {
             .join();
 
     assertThat(result).isEmpty();
+    // an unsuccessful reconstruction is recorded as a failure and never as a success
+    assertThat(
+            metricsSystem.getCounterValue(
+                TekuMetricCategory.BEACON,
+                "data_column_sidecar_archive_reconstruction_failures_total"))
+        .isEqualTo(1);
+    assertThat(
+            metricsSystem.getCounterValue(
+                TekuMetricCategory.BEACON,
+                "data_column_sidecar_archive_reconstruction_successes_total"))
+        .isZero();
   }
 
   @TestTemplate
@@ -225,8 +238,39 @@ public class DataColumnSidecarArchiveReconstructorImplTest {
   }
 
   @TestTemplate
+  public void shouldReuseReconstructionAcrossRequests() {
+    final SignedBeaconBlock block = createBlockWithBlobs(UInt64.ONE);
+    final List<DataColumnSidecar> firstHalfSidecars = createFirstHalfSidecars(block);
+    final List<List<KZGProof>> secondHalfProofs = createSecondHalfProofs(block);
+
+    when(chainDataClient.getDataColumnSidecars(any(UInt64.class), anyList()))
+        .thenReturn(SafeFuture.completedFuture(firstHalfSidecars));
+    when(chainDataClient.getDataColumnSidecarProofs(any()))
+        .thenReturn(SafeFuture.completedFuture(secondHalfProofs));
+
+    final int firstRequest = reconstructor.onRequest();
+    final Optional<DataColumnSidecar> result1 =
+        reconstructor
+            .reconstructDataColumnSidecar(block, UInt64.valueOf(halfColumns), firstRequest)
+            .join();
+    reconstructor.onRequestCompleted(firstRequest);
+
+    // a separate, later request for the same block reuses the cached result
+    final int secondRequest = reconstructor.onRequest();
+    final Optional<DataColumnSidecar> result2 =
+        reconstructor
+            .reconstructDataColumnSidecar(block, UInt64.valueOf(halfColumns + 1), secondRequest)
+            .join();
+
+    assertThat(result1).isPresent();
+    assertThat(result2).isPresent();
+    // reconstruction ran only once despite two independent requests
+    verify(chainDataClient).getDataColumnSidecars(any(UInt64.class), anyList());
+  }
+
+  @TestTemplate
   @SuppressWarnings("FutureReturnValueIgnored")
-  public void shouldCleanupOnRequestCompleted() {
+  public void shouldRetryReconstructionAfterEmptyResult() {
     final SignedBeaconBlock block = createBlockWithBlobs(UInt64.ONE);
     when(chainDataClient.getDataColumnSidecars(any(UInt64.class), anyList()))
         .thenReturn(SafeFuture.completedFuture(List.of()));
@@ -236,11 +280,35 @@ public class DataColumnSidecarArchiveReconstructorImplTest {
     final int requestId = reconstructor.onRequest();
     reconstructor.reconstructDataColumnSidecar(block, UInt64.valueOf(halfColumns), requestId);
 
-    reconstructor.onRequestCompleted(requestId);
-    // Second call with new requestId should create a new task
+    // an empty (failed) reconstruction is not cached, so a later request retries it
     final int newRequestId = reconstructor.onRequest();
     reconstructor.reconstructDataColumnSidecar(block, UInt64.valueOf(halfColumns), newRequestId);
 
+    verify(chainDataClient, times(2)).getDataColumnSidecars(any(UInt64.class), anyList());
+  }
+
+  @TestTemplate
+  public void shouldReuseWithinRetentionWindowThenReconstructAfterExpiry() {
+    final SignedBeaconBlock block = createBlockWithBlobs(UInt64.ONE);
+    final List<DataColumnSidecar> firstHalfSidecars = createFirstHalfSidecars(block);
+    final List<List<KZGProof>> secondHalfProofs = createSecondHalfProofs(block);
+
+    when(chainDataClient.getDataColumnSidecars(any(UInt64.class), anyList()))
+        .thenReturn(SafeFuture.completedFuture(firstHalfSidecars));
+    when(chainDataClient.getDataColumnSidecarProofs(any()))
+        .thenReturn(SafeFuture.completedFuture(secondHalfProofs));
+
+    final UInt64 index = UInt64.valueOf(halfColumns);
+    reconstructor.reconstructDataColumnSidecar(block, index, reconstructor.onRequest()).join();
+
+    // 25s later, still within the 30s retention window: the cached result is reused
+    timeProvider.advanceTimeBySeconds(25);
+    reconstructor.reconstructDataColumnSidecar(block, index, reconstructor.onRequest()).join();
+    verify(chainDataClient, times(1)).getDataColumnSidecars(any(UInt64.class), anyList());
+
+    // 10s more (35s total, past retention): the cached result is pruned and reconstruction reruns
+    timeProvider.advanceTimeBySeconds(10);
+    reconstructor.reconstructDataColumnSidecar(block, index, reconstructor.onRequest()).join();
     verify(chainDataClient, times(2)).getDataColumnSidecars(any(UInt64.class), anyList());
   }
 
@@ -297,6 +365,116 @@ public class DataColumnSidecarArchiveReconstructorImplTest {
     final UInt64 expectedLastPrunableSlot =
         spec.computeStartSlotAtEpoch(currentEpoch.minus(retentionEpochs)).minusMinZero(1);
     verify(sidecarArchivePrunableChannel).onSidecarArchivePrunableSlot(expectedLastPrunableSlot);
+  }
+
+  @TestTemplate
+  public void shouldNotSignalPrunableSlotWithDefaultRetentionEpochs() {
+    // Integer.MAX_VALUE is DEFAULT_DATA_COLUMN_SIDECAR_EXTENSION_RETENTION_EPOCHS: all extension
+    // columns are retained forever, so archiving is disabled by default even on a supernode.
+    final DataColumnSidecarArchiveReconstructorImpl defaultRetention =
+        newReconstructor(spec, () -> true, Integer.MAX_VALUE);
+    when(store.getTimeSeconds()).thenReturn(UInt64.valueOf(10000));
+
+    defaultRetention.onNewFinalizedCheckpoint(
+        new Checkpoint(UInt64.valueOf(10), dataStructureUtil.randomBytes32()), false);
+
+    verify(sidecarArchivePrunableChannel, never()).onSidecarArchivePrunableSlot(any());
+  }
+
+  @TestTemplate
+  public void shouldNotSignalPrunableSlotWhenNotSuperNode() {
+    // a default (non-supernode) node never archives extension columns
+    final DataColumnSidecarArchiveReconstructorImpl nonSuperNode =
+        newReconstructor(spec, () -> false, 0);
+    when(store.getTimeSeconds()).thenReturn(UInt64.valueOf(10000));
+
+    nonSuperNode.onNewFinalizedCheckpoint(
+        new Checkpoint(UInt64.valueOf(10), dataStructureUtil.randomBytes32()), false);
+
+    verify(sidecarArchivePrunableChannel, never()).onSidecarArchivePrunableSlot(any());
+  }
+
+  @TestTemplate
+  public void isSidecarPruned_falseWhenNotSuperNode() {
+    final DataColumnSidecarArchiveReconstructorImpl nonSuperNode =
+        newReconstructor(spec, () -> false, 0);
+
+    assertThat(nonSuperNode.isSidecarPruned(UInt64.valueOf(8), UInt64.valueOf(halfColumns)))
+        .isFalse();
+  }
+
+  @TestTemplate
+  public void isSidecarPruned_falseForFirstHalfIndex() {
+    assertThat(reconstructor.isSidecarPruned(UInt64.valueOf(8), UInt64.valueOf(halfColumns - 1)))
+        .isFalse();
+  }
+
+  @TestTemplate
+  public void isSidecarPruned_falseWhenAvailabilityNotRequired() {
+    final Spec spiedSpec = spy(spec);
+    doReturn(false).when(spiedSpec).isAvailabilityOfDataColumnSidecarsRequiredAtEpoch(any(), any());
+    final DataColumnSidecarArchiveReconstructorImpl spiedReconstructor =
+        newReconstructor(spiedSpec, () -> true, 0);
+
+    assertThat(spiedReconstructor.isSidecarPruned(UInt64.valueOf(8), UInt64.valueOf(halfColumns)))
+        .isFalse();
+  }
+
+  @TestTemplate
+  public void isSidecarPruned_falseWhenNoFinalizedBlock() {
+    final Spec spiedSpec = spy(spec);
+    doReturn(true).when(spiedSpec).isAvailabilityOfDataColumnSidecarsRequiredAtEpoch(any(), any());
+    when(chainDataClient.getFinalizedBlockSlot()).thenReturn(Optional.empty());
+    final DataColumnSidecarArchiveReconstructorImpl spiedReconstructor =
+        newReconstructor(spiedSpec, () -> true, 0);
+
+    assertThat(spiedReconstructor.isSidecarPruned(UInt64.valueOf(8), UInt64.valueOf(halfColumns)))
+        .isFalse();
+  }
+
+  @TestTemplate
+  public void isSidecarPruned_trueWhenSlotBeforePruningBoundary() {
+    final Spec spiedSpec = spy(spec);
+    doReturn(true).when(spiedSpec).isAvailabilityOfDataColumnSidecarsRequiredAtEpoch(any(), any());
+    final UInt64 currentEpoch = spec.getCurrentEpoch(store);
+    // finalized at the current epoch, so the pruning boundary is well above epoch 0
+    when(chainDataClient.getFinalizedBlockSlot())
+        .thenReturn(Optional.of(spec.computeStartSlotAtEpoch(currentEpoch)));
+    final DataColumnSidecarArchiveReconstructorImpl spiedReconstructor =
+        newReconstructor(spiedSpec, () -> true, 0);
+
+    assertThat(spiedReconstructor.isSidecarPruned(ZERO, UInt64.valueOf(halfColumns))).isTrue();
+  }
+
+  @TestTemplate
+  public void isSidecarPruned_falseWhenSlotAtOrAfterPruningBoundary() {
+    final Spec spiedSpec = spy(spec);
+    doReturn(true).when(spiedSpec).isAvailabilityOfDataColumnSidecarsRequiredAtEpoch(any(), any());
+    final UInt64 currentEpoch = spec.getCurrentEpoch(store);
+    when(chainDataClient.getFinalizedBlockSlot())
+        .thenReturn(Optional.of(spec.computeStartSlotAtEpoch(currentEpoch)));
+    final DataColumnSidecarArchiveReconstructorImpl spiedReconstructor =
+        newReconstructor(spiedSpec, () -> true, 0);
+
+    // a slot in the current epoch is at/after the boundary and therefore not pruned
+    final UInt64 recentSlot = spec.computeStartSlotAtEpoch(currentEpoch);
+    assertThat(spiedReconstructor.isSidecarPruned(recentSlot, UInt64.valueOf(halfColumns)))
+        .isFalse();
+  }
+
+  private DataColumnSidecarArchiveReconstructorImpl newReconstructor(
+      final Spec reconstructorSpec,
+      final Supplier<Boolean> isSuperNodeSupplier,
+      final int retentionEpochs) {
+    return new DataColumnSidecarArchiveReconstructorImpl(
+        chainDataClient,
+        asyncRunner,
+        isSuperNodeSupplier,
+        reconstructorSpec,
+        retentionEpochs,
+        sidecarArchivePrunableChannel,
+        metricsSystem,
+        timeProvider);
   }
 
   private List<UInt64> firstHalfIndices() {
