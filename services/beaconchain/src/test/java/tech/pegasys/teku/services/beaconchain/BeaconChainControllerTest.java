@@ -14,15 +14,31 @@
 package tech.pegasys.teku.services.beaconchain;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.doCallRealMethod;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
+import tech.pegasys.teku.ethereum.events.SlotEventsChannel;
+import tech.pegasys.teku.infrastructure.events.EventChannels;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
+import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidManager;
+import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
+import tech.pegasys.teku.statetransition.execution.ReceivedExecutionPayloadEventsChannel;
+import tech.pegasys.teku.statetransition.util.PoolFactory;
+import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
 class BeaconChainControllerTest {
@@ -100,6 +116,54 @@ class BeaconChainControllerTest {
     when(recentChainData.getCurrentEpoch()).thenReturn(Optional.of(currentEpoch));
 
     assertThat(controller.isSafeToDeactivateDenebFeatures()).isTrue();
+  }
+
+  @Test
+  void initExecutionPayloadBidManager_subscribesToEventChannelsWhenGloasSupported() {
+    final BeaconChainController controller = createController(TestSpecFactory.createMinimalGloas());
+    final EventChannels eventChannels = mock(EventChannels.class);
+
+    controller.gossipValidationHelper = mock(GossipValidationHelper.class);
+    controller.proposerPreferencesManager = mock(ProposerPreferencesManager.class);
+    controller.beaconConfig = mock(BeaconChainConfiguration.class, RETURNS_DEEP_STUBS);
+    controller.poolFactory = mock(PoolFactory.class);
+    controller.eventChannels = eventChannels;
+
+    controller.initExecutionPayloadBidManager();
+
+    verify(eventChannels).subscribe(eq(SlotEventsChannel.class), any());
+    verify(eventChannels).subscribe(eq(ReceivedBlockEventsChannel.class), any());
+    verify(eventChannels).subscribe(eq(ReceivedExecutionPayloadEventsChannel.class), any());
+    verify(controller.proposerPreferencesManager).subscribeOperationAdded(any());
+    assertThat(controller.executionPayloadBidManager).isNotEqualTo(ExecutionPayloadBidManager.NOOP);
+  }
+
+  @Test
+  void initExecutionPayloadBidManager_doesNothingWhenGloasNotSupported() {
+    final BeaconChainController controller = createController(TestSpecFactory.createMinimalFulu());
+    final EventChannels eventChannels = mock(EventChannels.class);
+    controller.eventChannels = eventChannels;
+
+    controller.initExecutionPayloadBidManager();
+
+    verifyNoInteractions(eventChannels);
+    assertThat(controller.executionPayloadBidManager).isEqualTo(ExecutionPayloadBidManager.NOOP);
+  }
+
+  @Test
+  void initAll_initialisesExecutionPayloadBidManagerBeforeValidatorApiHandlerConsumesIt() {
+    // initValidatorApiHandler() builds the block factory (BlockOperationSelectorFactory) and the
+    // ValidatorApiHandler, both consuming executionPayloadBidManager. It must therefore run after
+    // initExecutionPayloadBidManager(), otherwise those consumers capture a null manager. This
+    // pins that ordering in initAll(): reordering the two calls fails the test.
+    final BeaconChainController controller = mock(BeaconChainController.class);
+    doCallRealMethod().when(controller).initAll();
+
+    controller.initAll();
+
+    final InOrder inOrder = inOrder(controller);
+    inOrder.verify(controller).initExecutionPayloadBidManager();
+    inOrder.verify(controller).initValidatorApiHandler();
   }
 
   private Spec createFuluSpecWithRetentionPeriod(
