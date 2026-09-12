@@ -172,13 +172,13 @@ public final class ForkChoiceFastConfirmation extends Service {
    *
    * <p>Relaxed to {@link #WARM_UP_SEGMENT_TIMEOUT_SLOTS} slots while the tracker is warming up. The
    * update that ends the warm-up advances {@code confirmed_root} across every block accumulated
-   * while it was pinned to finality — up to two epochs — and {@code
-   * find_latest_confirmed_descendant} scores each of those blocks over the whole active validator
-   * set, so that single slot can exceed a one-slot budget on a large network. It is a one-off: in
-   * steady state the walk covers a single block. Timing out here would not stop the work (the
-   * timeout does not cancel it) but would log it as a failure and send the slot's fcU late, so the
-   * bound is widened for the catch-up instead. A stopgap — the real fix is to score the whole chain
-   * segment in one pass over the validator set.
+   * while it was pinned to finality — up to two epochs. {@code find_latest_confirmed_descendant}
+   * scores that whole chain in a single pass over the active validator set (see {@code
+   * FastConfirmationCalculator#computeChainAttestationScores}), but the catch-up slot remains the
+   * heaviest one on a large network, so the widened bound is kept as a safety margin. It is a
+   * one-off: in steady state the walk covers a single block. Timing out here would not stop the
+   * work (the timeout does not cancel it) but would log it as a failure and send the slot's fcU
+   * late.
    */
   private Duration segmentTimeout(final UInt64 slot) {
     final long slotDurationMillis = spec.getSlotDurationMillis(slot);
