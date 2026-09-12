@@ -190,6 +190,23 @@ class ForkChoiceUtilReorgTest {
   }
 
   @Test
+  void getProposerHeadReturnsParentForConfirmedEquivocationAgainstWeakHead() {
+    final ReorgTestSetup setup = new ReorgTestSetup();
+    setup.withHeadBlock();
+    setup.context.setBlockTimeliness(setup.signedBlockAndState.getRoot(), true);
+    setup.context.proposerEquivocation = true;
+    setup.harness.headWeak = true;
+
+    final ForkChoiceNode head = ForkChoiceNode.createBase(setup.signedBlockAndState.getRoot());
+    final ForkChoiceNode parent =
+        ForkChoiceNode.createBase(setup.signedBlockAndState.getParentRoot());
+    when(setup.forkChoiceStrategy.getParentBeaconBlockNode(head)).thenReturn(Optional.of(parent));
+
+    assertThat(setup.harness.getProposerHead(setup.context, head, UInt64.valueOf(2)))
+        .isEqualTo(parent);
+  }
+
+  @Test
   void getProposerHeadReturnsHeadWhenHeadIsStrong() {
     final ReorgTestSetup setup = new ReorgTestSetup();
     setup.withHeadBlock();
@@ -631,6 +648,7 @@ class ForkChoiceUtilReorgTest {
     private final ReadOnlyStore store;
     private final Map<Bytes32, ForkChoiceUtil.BlockTimeliness> blockTimeliness = new HashMap<>();
     private boolean validatorConnected = true;
+    private boolean proposerEquivocation = false;
 
     private TestForkChoiceReorgContext(final ReadOnlyStore store) {
       this.store = store;
@@ -649,6 +667,12 @@ class ForkChoiceUtilReorgTest {
     @Override
     public boolean isValidatorConnected(final int validatorIndex, final UInt64 slot) {
       return validatorConnected;
+    }
+
+    @Override
+    public boolean isProposerEquivocation(
+        final UInt64 slot, final UInt64 proposerIndex, final Bytes32 blockRoot) {
+      return proposerEquivocation;
     }
 
     @Override

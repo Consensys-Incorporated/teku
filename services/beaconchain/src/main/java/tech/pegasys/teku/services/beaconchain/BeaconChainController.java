@@ -2350,7 +2350,11 @@ public class BeaconChainController extends Service implements BeaconChainControl
     final FutureItems<SignedBeaconBlock> futureBlocks =
         FutureItems.create(SignedBeaconBlock::getSlot, futureItemsMetric, "blocks");
     blockGossipValidator =
-        new BlockGossipValidator(spec, gossipValidationHelper, receivedBlockEventsChannelPublisher);
+        new BlockGossipValidator(
+            spec,
+            gossipValidationHelper,
+            receivedBlockEventsChannelPublisher,
+            recentChainData.getProposerEquivocationTracker());
     final BlockValidator blockValidator = new BlockValidator(blockGossipValidator);
     final Optional<BlockImportMetrics> importMetrics =
         beaconConfig.getMetricsConfig().isBlockPerformanceEnabled()

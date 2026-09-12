@@ -42,6 +42,7 @@ import tech.pegasys.teku.spec.config.SpecConfigCapella;
 import tech.pegasys.teku.spec.config.SpecConfigElectra;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
+import tech.pegasys.teku.spec.datastructures.blocks.Eth1Data;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBody;
@@ -115,7 +116,8 @@ public class BlockGossipValidatorTest {
         new BlockGossipValidator(
             spec,
             new GossipValidationHelper(spec, recentChainData, storageSystem.getMetricsSystem()),
-            receivedBlockEventsChannelPublisher);
+            receivedBlockEventsChannelPublisher,
+            recentChainData.getProposerEquivocationTracker());
   }
 
   private void seedGenesisExecutionPayloadForGloas() {
@@ -150,6 +152,35 @@ public class BlockGossipValidatorTest {
     storageSystem.chainUpdater().setCurrentSlot(nextSlot);
 
     assertResultIsAccept(block, blockGossipValidator.validate(block, true));
+    assertThat(
+            recentChainData
+                .getProposerEquivocationTracker()
+                .isProposerEquivocation(block.getSlot(), block.getProposerIndex(), Bytes32.ZERO))
+        .isTrue();
+  }
+
+  @TestTemplate
+  void shouldRecordValidConflictingGossipBlockAfterSignatureValidation() {
+    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
+    final ChainBuilder forkBuilder = storageSystem.chainBuilder().fork();
+    final SignedBeaconBlock firstBlock =
+        storageSystem.chainBuilder().generateBlockAtSlot(nextSlot).getBlock();
+    final SignedBeaconBlock conflictingBlock =
+        forkBuilder
+            .generateBlockAtSlot(
+                nextSlot,
+                BlockOptions.create()
+                    .setEth1Data(new Eth1Data(Bytes32.ZERO, UInt64.ONE, Bytes32.ZERO)))
+            .getBlock();
+    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
+
+    assertResultIsAccept(firstBlock, blockGossipValidator.validate(firstBlock, true));
+    assertThat(blockGossipValidator.validate(conflictingBlock, true))
+        .isCompletedWithValueMatching(InternalValidationResult::isIgnore);
+    assertThat(
+            recentChainData.isProposerEquivocation(
+                firstBlock.getSlot(), firstBlock.getProposerIndex(), firstBlock.getRoot()))
+        .isTrue();
   }
 
   @TestTemplate
@@ -279,18 +310,30 @@ public class BlockGossipValidatorTest {
   void shouldReturnInvalidForBlockWithWrongSignature() {
     final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
     storageSystem.chainUpdater().setCurrentSlot(nextSlot);
-
-    final SignedBeaconBlock block =
+    final ChainBuilder forkBuilder = storageSystem.chainBuilder().fork();
+    final SignedBeaconBlock firstBlock =
+        storageSystem.chainBuilder().generateBlockAtSlot(nextSlot).getBlock();
+    final SignedBeaconBlock conflictingBlock =
+        forkBuilder
+            .generateBlockAtSlot(
+                nextSlot,
+                BlockOptions.create()
+                    .setEth1Data(new Eth1Data(Bytes32.ZERO, UInt64.ONE, Bytes32.ZERO)))
+            .getBlock();
+    final SignedBeaconBlock blockWithInvalidSignature =
         SignedBeaconBlock.create(
-            spec,
-            storageSystem.chainBuilder().generateBlockAtSlot(nextSlot).getBlock().getMessage(),
-            BLSTestUtil.randomSignature(0));
+            spec, conflictingBlock.getMessage(), BLSTestUtil.randomSignature(0));
 
-    assertThat(blockGossipValidator.validate(block, true))
+    assertResultIsAccept(firstBlock, blockGossipValidator.validate(firstBlock, true));
+    assertThat(blockGossipValidator.validate(blockWithInvalidSignature, true))
         .isCompletedWithValueMatching(
             internalValidationResult ->
                 internalValidationResult.equals(
                     InternalValidationResult.reject("Block signature is invalid")));
+    assertThat(
+            recentChainData.isProposerEquivocation(
+                firstBlock.getSlot(), firstBlock.getProposerIndex(), firstBlock.getRoot()))
+        .isFalse();
   }
 
   @TestTemplate
@@ -306,7 +349,8 @@ public class BlockGossipValidatorTest {
             spec,
             new GossipValidationHelper(
                 spec, localRecentChainData, storageSystem.getMetricsSystem()),
-            receivedBlockEventsChannelPublisher);
+            receivedBlockEventsChannelPublisher,
+            localRecentChainData.getProposerEquivocationTracker());
     chainUpdater.initializeGenesis();
 
     chainUpdater.updateBestBlock(chainUpdater.advanceChainUntil(1));
@@ -349,7 +393,8 @@ public class BlockGossipValidatorTest {
         new BlockGossipValidator(
             spec,
             new GossipValidationHelper(spec, recentChainData, storageSystem.getMetricsSystem()),
-            receivedBlockEventsChannelPublisher);
+            receivedBlockEventsChannelPublisher,
+            recentChainData.getProposerEquivocationTracker());
 
     final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
     storageSystem.chainUpdater().setCurrentSlot(nextSlot);
@@ -374,7 +419,8 @@ public class BlockGossipValidatorTest {
         new BlockGossipValidator(
             spec,
             new GossipValidationHelper(spec, recentChainData, storageSystem.getMetricsSystem()),
-            receivedBlockEventsChannelPublisher);
+            receivedBlockEventsChannelPublisher,
+            recentChainData.getProposerEquivocationTracker());
 
     final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
     storageSystem.chainUpdater().setCurrentSlot(nextSlot);
@@ -424,7 +470,8 @@ public class BlockGossipValidatorTest {
         new BlockGossipValidator(
             spec,
             new GossipValidationHelper(spec, recentChainData, storageSystem.getMetricsSystem()),
-            receivedBlockEventsChannelPublisher);
+            receivedBlockEventsChannelPublisher,
+            recentChainData.getProposerEquivocationTracker());
 
     final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
     storageSystem.chainUpdater().setCurrentSlot(nextSlot);
@@ -511,7 +558,8 @@ public class BlockGossipValidatorTest {
         new BlockGossipValidator(
             forkTransitionSpec,
             forkTransitionGossipValidationHelper,
-            forkTransitionReceivedBlockEventsChannelPublisher);
+            forkTransitionReceivedBlockEventsChannelPublisher,
+            forkTransitionStorageSystem.recentChainData().getProposerEquivocationTracker());
 
     final UInt64 firstGloasSlot = forkTransitionSpec.computeStartSlotAtEpoch(ONE);
     final UInt64 preGloasParentSlot = firstGloasSlot.minus(ONE);

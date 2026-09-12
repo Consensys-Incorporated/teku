@@ -14,6 +14,7 @@
 package tech.pegasys.teku.storage.client;
 
 import static tech.pegasys.teku.infrastructure.time.TimeUtilities.secondsToMillis;
+import static tech.pegasys.teku.spec.config.Constants.VALID_BLOCK_SET_SIZE;
 
 import com.google.common.annotations.VisibleForTesting;
 import java.util.Collections;
@@ -126,6 +127,7 @@ public abstract class RecentChainData
   private final SingleBlobSidecarProvider validatedBlobSidecarProvider;
   private final RecentlyValidatedDataColumnSlotProvider validatedSlotProvider;
   private final BlockTimelinessTracker blockTimelinessTracker;
+  private final ProposerEquivocationTracker proposerEquivocationTracker;
 
   private final ValidatorIsConnectedProvider validatorIsConnectedProvider;
 
@@ -177,6 +179,11 @@ public abstract class RecentChainData
             this::getGenesisTimeMillis,
             LimitedMap.createSynchronizedNatural(
                 spec.getGenesisSpec().getSlotsPerEpoch() * epochsForTimeliness));
+    this.proposerEquivocationTracker =
+        new ProposerEquivocationTracker(
+            VALID_BLOCK_SET_SIZE,
+            spec.getGenesisSpec().getSlotsPerEpoch() * epochsForTimeliness,
+            blockTimelinessTracker::getBlockTimeliness);
   }
 
   public void subscribeStoreInitialized(final Runnable runnable) {
@@ -879,6 +886,50 @@ public abstract class RecentChainData
   @Override
   public Optional<BlockTimeliness> getBlockTimeliness(final Bytes32 root) {
     return blockTimelinessTracker.getBlockTimeliness(root);
+  }
+
+  public ProposerEquivocationTracker getProposerEquivocationTracker() {
+    return proposerEquivocationTracker;
+  }
+
+  @Override
+  public boolean isProposerEquivocation(
+      final UInt64 slot, final UInt64 proposerIndex, final Bytes32 blockRoot) {
+    return isProposerEquivocation(slot, proposerIndex, blockRoot, false);
+  }
+
+  @Override
+  public boolean isPtcTimelyProposerEquivocation(
+      final UInt64 slot, final UInt64 proposerIndex, final Bytes32 blockRoot) {
+    return isProposerEquivocation(slot, proposerIndex, blockRoot, true);
+  }
+
+  private boolean isProposerEquivocation(
+      final UInt64 slot,
+      final UInt64 proposerIndex,
+      final Bytes32 blockRoot,
+      final boolean requirePtcTimely) {
+    final boolean hasGossipEvidence =
+        requirePtcTimely
+            ? proposerEquivocationTracker.isPtcTimelyProposerEquivocation(
+                slot, proposerIndex, blockRoot)
+            : proposerEquivocationTracker.isProposerEquivocation(slot, proposerIndex, blockRoot);
+    if (hasGossipEvidence || store == null) {
+      return hasGossipEvidence;
+    }
+
+    return store.getForkChoiceStrategy().getBlockRootsAtSlot(slot).stream()
+        .filter(root -> !root.equals(blockRoot))
+        .filter(
+            root ->
+                !requirePtcTimely
+                    || blockTimelinessTracker
+                        .getBlockTimeliness(root)
+                        .filter(BlockTimeliness::isTimelyPtc)
+                        .isPresent())
+        .map(store::getBlockIfAvailable)
+        .flatMap(Optional::stream)
+        .anyMatch(block -> block.getProposerIndex().equals(proposerIndex));
   }
 
   public boolean isBlockLate(final Bytes32 root) {
