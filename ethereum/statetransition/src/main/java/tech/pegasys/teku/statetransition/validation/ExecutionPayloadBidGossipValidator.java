@@ -489,7 +489,7 @@ public class ExecutionPayloadBidGossipValidator {
         state);
   }
 
-  static boolean isGasLimitTargetCompatible(
+  public static boolean isGasLimitTargetCompatible(
       final UInt64 parentGasLimit, final UInt64 gasLimit, final UInt64 targetGasLimit) {
     final UInt64 maxGasLimitDifference =
         parentGasLimit.dividedBy(1024).max(UInt64.ONE).minus(UInt64.ONE);

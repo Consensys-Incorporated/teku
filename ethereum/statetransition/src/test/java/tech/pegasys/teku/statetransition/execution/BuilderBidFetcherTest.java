@@ -15,11 +15,13 @@ package tech.pegasys.teku.statetransition.execution;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.builder.rest.StakedBuilderClient;
 import tech.pegasys.teku.builder.rest.StakedBuilderClientProvider;
@@ -41,9 +43,15 @@ public class BuilderBidFetcherTest {
   private final StakedBuilderClientProvider stakedBuilderClientProvider =
       mock(StakedBuilderClientProvider.class);
   private final StakedBuilderClient builderClient = mock(StakedBuilderClient.class);
+  private final BuilderBidValidator bidValidator = mock(BuilderBidValidator.class);
 
   private final BuilderBidFetcher fetcher =
-      new BuilderBidFetcher(spec, stakedBuilderClientProvider);
+      new BuilderBidFetcher(spec, stakedBuilderClientProvider, bidValidator);
+
+  @BeforeEach
+  void setUp() {
+    when(bidValidator.validateBid(any(), any())).thenReturn(true);
+  }
 
   @Test
   void returnsEmptyListWhenNoBuildersDefined() {
@@ -87,6 +95,31 @@ public class BuilderBidFetcherTest {
         .containsExactly(
             Optional.of(builderConfig.getBuilders().get(0).getUrl()),
             Optional.of(builderConfig.getBuilders().get(1).getUrl()));
+  }
+
+  @Test
+  void excludesBuilderBidWhenValidationFails() {
+    final BeaconState state = dataStructureUtil.randomBeaconState();
+    final SignedExecutionPayloadBid validBid = dataStructureUtil.randomSignedExecutionPayloadBid();
+    final SignedExecutionPayloadBid invalidBid =
+        dataStructureUtil.randomSignedExecutionPayloadBid();
+    final BuilderConfig builderConfig = dataStructureUtil.randomBuilderConfig(2);
+    when(stakedBuilderClientProvider.getClient(any())).thenReturn(builderClient);
+    when(builderClient.getExecutionPayloadBid(any(), any(), any(), any(), any()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(validBid)))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(invalidBid)));
+    when(bidValidator.validateBid(eq(invalidBid), any())).thenReturn(false);
+
+    final List<RemoteBid> result =
+        SafeFutureAssert.safeJoin(
+            fetcher.getBuilderBids(
+                state,
+                state.getSlot(),
+                builderConfig,
+                dataStructureUtil.randomBytes32(),
+                dataStructureUtil.randomBytes32()));
+
+    assertThat(result).map(RemoteBid::bid).containsExactly(validBid);
   }
 
   @Test

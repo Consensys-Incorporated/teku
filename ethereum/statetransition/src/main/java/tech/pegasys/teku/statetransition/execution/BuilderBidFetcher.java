@@ -15,6 +15,7 @@ package tech.pegasys.teku.statetransition.execution;
 
 import static tech.pegasys.teku.infrastructure.logging.Converter.gweiToEth;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -24,6 +25,7 @@ import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.builder.rest.StakedBuilderClientProvider;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
@@ -38,11 +40,15 @@ public class BuilderBidFetcher {
 
   private final Spec spec;
   private final StakedBuilderClientProvider stakedBuilderClientProvider;
+  private final BuilderBidValidator bidValidator;
 
   public BuilderBidFetcher(
-      final Spec spec, final StakedBuilderClientProvider stakedBuilderClientProvider) {
+      final Spec spec,
+      final StakedBuilderClientProvider stakedBuilderClientProvider,
+      final BuilderBidValidator bidValidator) {
     this.spec = spec;
     this.stakedBuilderClientProvider = stakedBuilderClientProvider;
+    this.bidValidator = bidValidator;
   }
 
   public SafeFuture<List<RemoteBid>> getBuilderBids(
@@ -51,12 +57,16 @@ public class BuilderBidFetcher {
       final BuilderConfig builderConfig,
       final Bytes32 parentHash,
       final Bytes32 parentRoot) {
+    final SszList<BuilderEntry> configuredBuilders = builderConfig.getBuilders();
+    if (configuredBuilders.isEmpty()) {
+      return SafeFuture.completedFuture(Collections.emptyList());
+    }
     final int proposerIndex =
         spec.atSlot(slot).beaconStateAccessors().getBeaconProposerIndex(state, slot);
     final BLSPublicKey proposerPubkey =
         spec.getValidatorPubKey(state, UInt64.valueOf(proposerIndex)).orElseThrow();
     final Stream<SafeFuture<Optional<RemoteBid>>> builderBids =
-        builderConfig.getBuilders().stream()
+        configuredBuilders.stream()
             .map(
                 builderEntry ->
                     stakedBuilderClientProvider
@@ -66,8 +76,7 @@ public class BuilderBidFetcher {
                         .thenApply(
                             maybeBid ->
                                 maybeBid
-                                    // TODO-GLOAS: validate the builder bids
-                                    // https://github.com/Consensys/teku/issues/11191
+                                    .filter(bid -> validateBid(bid, state))
                                     .map(bid -> createRemoteBid(bid, builderEntry)))
                         .whenComplete(
                             (maybeBid, exception) -> {
@@ -95,6 +104,18 @@ public class BuilderBidFetcher {
     // Remove empty responses and return only the successfully retrieved bids
     return SafeFuture.collectAllSuccessful(builderBids)
         .thenApply(bids -> bids.stream().flatMap(Optional::stream).toList());
+  }
+
+  private boolean validateBid(final SignedExecutionPayloadBid bid, final BeaconState state) {
+    try {
+      return bidValidator.validateBid(bid, state);
+    } catch (final Exception ex) {
+      LOG.warn(
+          "Exception occurred while validating a bid from builder {}",
+          bid.getMessage().getBuilderIndex(),
+          ex);
+      return false;
+    }
   }
 
   private RemoteBid createRemoteBid(

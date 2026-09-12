@@ -21,6 +21,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
@@ -53,9 +54,9 @@ public class ExecutionPayloadBidSelector {
 
   /**
    * Selects the highest-value bid from p2p and builder bids. P2P bids are filtered by parent root,
-   * parent block hash, min bid, and {@code isBuilderAllowed}; builder bids are filtered by {@code
-   * isBuilderAllowed} only because all validation is done during fetching the bids. On equal value,
-   * the builder bid is preferred.
+   * parent block hash, min bid, and {@code isBuilderAllowed}; builder bids are filtered by min bid
+   * and {@code isBuilderAllowed} only because all validation is done during fetching the bids. On
+   * equal value, the builder bid is preferred.
    */
   public Optional<RemoteBid> selectBestRemoteBid(
       final Set<RemoteBid> p2pBids,
@@ -64,6 +65,9 @@ public class ExecutionPayloadBidSelector {
       final Bytes32 parentBlockHash,
       final BeaconState state,
       final BuilderConfig builderConfig) {
+    // A remote bid is eligible only if `bid_score >= min_bid
+    final Predicate<RemoteBid> minBidPredicate =
+        bid -> bid.valueInGwei().isGreaterThanOrEqualTo(builderConfig.getMinBid());
     final Optional<RemoteBid> bestP2PBid =
         p2pBids.stream()
             .filter(bid -> bid.bid().getMessage().getParentBlockRoot().equals(parentRoot))
@@ -71,8 +75,7 @@ public class ExecutionPayloadBidSelector {
             .filter(
                 bid ->
                     executionPayloadBidCircuitBreaker.isBuilderAllowed(bid.builderIndex(), state))
-            // A bid is eligible only if `bid_score >= min_bid
-            .filter(bid -> bid.valueInGwei().isGreaterThanOrEqualTo(builderConfig.getMinBid()))
+            .filter(minBidPredicate)
             .max(REMOTE_BID_BY_VALUE_ASCENDING);
 
     final Optional<RemoteBid> bestBuilderBid =
@@ -80,6 +83,7 @@ public class ExecutionPayloadBidSelector {
             .filter(
                 bid ->
                     executionPayloadBidCircuitBreaker.isBuilderAllowed(bid.builderIndex(), state))
+            .filter(minBidPredicate)
             .max(REMOTE_BID_BY_VALUE_ASCENDING);
 
     if (bestBuilderBid.isEmpty()) {
