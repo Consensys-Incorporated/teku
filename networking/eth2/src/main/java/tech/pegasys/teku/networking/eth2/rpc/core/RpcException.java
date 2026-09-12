@@ -36,23 +36,32 @@ public class RpcException extends Exception {
     }
   }
 
+  /**
+   * Raised locally when data received from a peer cannot be decoded as the protocol requires. As
+   * opposed to an error response sent by the peer, this indicates the peer is misbehaving.
+   */
+  public abstract static class MalformedDataException extends RpcException {
+    protected MalformedDataException(final String errorMessage) {
+      super(INVALID_REQUEST_CODE, errorMessage);
+    }
+  }
+
   // Malformed data
-  public static class DeserializationFailedException extends RpcException {
+  public static class DeserializationFailedException extends MalformedDataException {
     public DeserializationFailedException() {
-      super(INVALID_REQUEST_CODE, "Failed to deserialize payload");
+      super("Failed to deserialize payload");
     }
   }
 
-  public static class DecompressFailedException extends RpcException {
+  public static class DecompressFailedException extends MalformedDataException {
     public DecompressFailedException() {
-      super(INVALID_REQUEST_CODE, "Failed to uncompress message");
+      super("Failed to uncompress message");
     }
   }
 
-  public static class UnrecognizedContextBytesException extends RpcException {
+  public static class UnrecognizedContextBytesException extends MalformedDataException {
     public UnrecognizedContextBytesException(final String context) {
       super(
-          INVALID_REQUEST_CODE,
           "Failed to recognize context bytes: "
               + context
               + ". Must request blocks with compatible fork.");
@@ -60,38 +69,38 @@ public class RpcException extends Exception {
   }
 
   // Unexpected message length
-  public static class ExtraDataAppendedException extends RpcException {
+  public static class ExtraDataAppendedException extends MalformedDataException {
     public ExtraDataAppendedException() {
-      super(INVALID_REQUEST_CODE, "Extra data appended to end of message");
+      super("Extra data appended to end of message");
     }
 
     public ExtraDataAppendedException(final String details) {
-      super(INVALID_REQUEST_CODE, "Extra data appended to end of message: " + details);
+      super("Extra data appended to end of message: " + details);
     }
   }
 
-  public static class MessageTruncatedException extends RpcException {
+  public static class MessageTruncatedException extends MalformedDataException {
     public MessageTruncatedException() {
-      super(INVALID_REQUEST_CODE, "Message was truncated");
+      super("Message was truncated");
     }
   }
 
-  public static class PayloadTruncatedException extends RpcException {
+  public static class PayloadTruncatedException extends MalformedDataException {
     public PayloadTruncatedException() {
-      super(INVALID_REQUEST_CODE, "Message payload smaller than expected");
+      super("Message payload smaller than expected");
     }
   }
 
-  public static class AdditionalDataReceivedException extends RpcException {
+  public static class AdditionalDataReceivedException extends MalformedDataException {
     public AdditionalDataReceivedException() {
-      super(INVALID_REQUEST_CODE, "Received additional response after request completed");
+      super("Received additional response after request completed");
     }
   }
 
   // Constraint violation
-  public static class ChunkTooLongException extends RpcException {
+  public static class ChunkTooLongException extends MalformedDataException {
     public ChunkTooLongException() {
-      super(INVALID_REQUEST_CODE, "Chunk exceeds maximum allowed length");
+      super("Chunk exceeds maximum allowed length");
     }
   }
 
@@ -111,9 +120,9 @@ public class RpcException extends Exception {
 
   // Custom errors
 
-  public static class LengthOutOfBoundsException extends RpcException {
+  public static class LengthOutOfBoundsException extends MalformedDataException {
     public LengthOutOfBoundsException() {
-      super(INVALID_REQUEST_CODE, "Chunk length is not within bounds for expected type");
+      super("Chunk length is not within bounds for expected type");
     }
   }
 

@@ -84,6 +84,17 @@ public interface SszSchema<SszDataT extends SszData> extends SszType {
     return sszDeserialize(SszReader.fromBytes(ssz));
   }
 
+  /**
+   * Validation applied by the gossip and RPC decoders after {@link #sszDeserialize(Bytes)}. Empty
+   * means there is nothing to check beyond SSZ itself.
+   *
+   * <p>Only schemas decoded directly from the network declare a validator; nested schemas must not,
+   * since nothing consults them.
+   */
+  default Optional<SszNetworkValidator<SszDataT>> getNetworkSszValidator() {
+    return Optional.empty();
+  }
+
   DeserializableTypeDefinition<SszDataT> getJsonTypeDefinition();
 
   default void jsonSerialize(final SszDataT view, final JsonGenerator gen) throws IOException {

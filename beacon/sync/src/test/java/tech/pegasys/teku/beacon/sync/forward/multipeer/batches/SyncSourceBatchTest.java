@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -25,6 +26,7 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.beacon.sync.forward.multipeer.batches.BatchAssert.assertThatBatch;
 import static tech.pegasys.teku.beacon.sync.forward.multipeer.chains.TargetChainTestUtil.chainWith;
+import static tech.pegasys.teku.networking.eth2.rpc.core.RpcResponseStatus.SERVER_ERROR_CODE;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -44,6 +46,8 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.peers.StubSyncSource;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.BlocksByRangeResponseInvalidResponseException;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.BlocksByRangeResponseInvalidResponseException.InvalidResponseType;
+import tech.pegasys.teku.networking.eth2.rpc.core.RpcException;
+import tech.pegasys.teku.networking.eth2.rpc.core.RpcException.DeserializationFailedException;
 import tech.pegasys.teku.networking.p2p.peer.PeerDisconnectedException;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -205,6 +209,34 @@ public class SyncSourceBatchTest {
     verify(conflictResolutionStrategy).reportInvalidBatch(batch, getSyncSource(batch));
     verify(callback).run();
     // Invalid blocks are discarded
+    assertThatBatch(batch).isEmpty();
+    assertThatBatch(batch).isNotComplete();
+  }
+
+  @Test
+  void shouldBeInvalidWhenMalformedResponseReceived() {
+    final Runnable callback = mock(Runnable.class);
+    final Batch batch = createBatch(10, 10);
+    batch.requestMoreBlocks(callback);
+
+    requestError(batch, new DeserializationFailedException());
+
+    verify(conflictResolutionStrategy).reportInvalidBatch(batch, getSyncSource(batch));
+    verify(callback).run();
+    assertThatBatch(batch).isEmpty();
+    assertThatBatch(batch).isNotComplete();
+  }
+
+  @Test
+  void shouldNotBeInvalidWhenPeerRespondsWithError() {
+    final Runnable callback = mock(Runnable.class);
+    final Batch batch = createBatch(10, 10);
+    batch.requestMoreBlocks(callback);
+
+    requestError(batch, new RpcException(SERVER_ERROR_CODE, "peer failed"));
+
+    verify(conflictResolutionStrategy, never()).reportInvalidBatch(any(), any());
+    verify(callback).run();
     assertThatBatch(batch).isEmpty();
     assertThatBatch(batch).isNotComplete();
   }

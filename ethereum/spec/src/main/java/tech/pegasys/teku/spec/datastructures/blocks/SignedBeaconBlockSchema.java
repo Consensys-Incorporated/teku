@@ -14,9 +14,11 @@
 package tech.pegasys.teku.spec.datastructures.blocks;
 
 import it.unimi.dsi.fastutil.longs.LongList;
+import java.util.Optional;
 import java.util.OptionalLong;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema2;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszNetworkValidator;
 import tech.pegasys.teku.infrastructure.ssz.tree.GIndexUtil;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 import tech.pegasys.teku.spec.datastructures.type.SszSignature;
@@ -27,27 +29,35 @@ public class SignedBeaconBlockSchema
     implements SignedBlockContainerSchema<SignedBeaconBlock> {
 
   private final OptionalLong networkSszLengthBytesUpperBound;
+  private final Optional<SszNetworkValidator<SignedBeaconBlock>> networkSszValidator;
 
   public SignedBeaconBlockSchema(
       final BeaconBlockSchema beaconBlockSchema, final String containerName) {
-    this(beaconBlockSchema, containerName, OptionalLong.empty());
+    this(beaconBlockSchema, containerName, OptionalLong.empty(), Optional.empty());
   }
 
   public SignedBeaconBlockSchema(
       final BeaconBlockSchema beaconBlockSchema,
       final String containerName,
-      final OptionalLong networkSszLengthBytesUpperBound) {
+      final OptionalLong networkSszLengthBytesUpperBound,
+      final Optional<SszNetworkValidator<SignedBeaconBlock>> networkSszValidator) {
     super(
         containerName,
         namedSchema(SignedBeaconBlockFields.MESSAGE, beaconBlockSchema),
         namedSchema(SignedBeaconBlockFields.SIGNATURE, SszSignatureSchema.INSTANCE));
     this.networkSszLengthBytesUpperBound = networkSszLengthBytesUpperBound;
+    this.networkSszValidator = networkSszValidator;
     validateNetworkSszLengthBytesUpperBound();
   }
 
   @Override
   public OptionalLong getNetworkSszLengthBytesUpperBound() {
     return networkSszLengthBytesUpperBound;
+  }
+
+  @Override
+  public Optional<SszNetworkValidator<SignedBeaconBlock>> getNetworkSszValidator() {
+    return networkSszValidator;
   }
 
   public SignedBeaconBlock create(final BeaconBlock message, final BLSSignature signature) {

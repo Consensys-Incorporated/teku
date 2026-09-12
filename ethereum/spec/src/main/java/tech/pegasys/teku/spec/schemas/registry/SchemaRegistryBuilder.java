@@ -118,6 +118,7 @@ import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.WITHDRAWAL_SCH
 
 import com.google.common.annotations.VisibleForTesting;
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
@@ -263,6 +264,7 @@ import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingParti
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPaymentSchema;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingWithdrawalSchema;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.PtcWindowSchema;
+import tech.pegasys.teku.spec.datastructures.util.GloasNetworkLimits;
 import tech.pegasys.teku.spec.schemas.registry.SchemaTypes.SchemaId;
 
 // TODO Error Prone's JavaCase check doesn't yet recognize Java 25 unnamed lambda parameters.
@@ -693,7 +695,10 @@ public class SchemaRegistryBuilder {
                 new SignedBeaconBlockSchema(
                     registry.get(BEACON_BLOCK_SCHEMA),
                     schemaName,
-                    OptionalLong.of(specConfig.getMaxPayloadSize())))
+                    OptionalLong.of(specConfig.getMaxPayloadSize()),
+                    Optional.of(
+                        GloasNetworkLimits.signedBeaconBlockNetworkValidator(
+                            SpecConfigGloas.required(specConfig)))))
         .build();
   }
 
@@ -1374,7 +1379,11 @@ public class SchemaRegistryBuilder {
         .withCreator(
             GLOAS,
             (registry, specConfig, schemaName) ->
-                new SignedExecutionPayloadEnvelopeSchema(registry))
+                new SignedExecutionPayloadEnvelopeSchema(
+                    registry,
+                    Optional.of(
+                        GloasNetworkLimits.signedExecutionPayloadEnvelopeNetworkValidator(
+                            SpecConfigGloas.required(specConfig)))))
         .build();
   }
 

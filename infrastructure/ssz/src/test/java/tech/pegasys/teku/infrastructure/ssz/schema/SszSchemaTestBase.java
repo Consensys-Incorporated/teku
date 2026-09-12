@@ -45,6 +45,12 @@ public abstract class SszSchemaTestBase extends SszTypeTestBase {
 
   @MethodSource("testSchemaArguments")
   @ParameterizedTest
+  void getNetworkSszValidator_shouldBeEmptyByDefault(final SszSchema<SszData> schema) {
+    assertThat(schema.getNetworkSszValidator()).isEmpty();
+  }
+
+  @MethodSource("testSchemaArguments")
+  @ParameterizedTest
   void sszDeserialize_tooLongSszShouldFailFastWithoutReadingWholeInput(
       final SszSchema<SszData> schema) {
     long maxSszLength = schema.getSszLengthBounds().getMaxBytes();

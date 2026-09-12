@@ -35,21 +35,17 @@ import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
-import tech.pegasys.teku.spec.config.SpecConfig;
-import tech.pegasys.teku.spec.config.SpecConfigCapella;
-import tech.pegasys.teku.spec.config.SpecConfigElectra;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
-import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBody;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodyGloas;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
-import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
+import tech.pegasys.teku.spec.datastructures.util.GloasNetworkLimits;
 import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
@@ -320,150 +316,37 @@ public class BlockGossipValidator {
   }
 
   /**
-   * Verifies that each Gloas block body operation count is within its limit and that the block
-   * contains no deposits. This rule is Gloas-only: EIP-7688 turned these operation lists into
-   * unbounded progressive lists, so SSZ no longer enforces the limits and this must be checked
-   * during gossip validation instead. Pre-Gloas blocks are unaffected, since their operation lists
-   * are still bounded at the SSZ level.
+   * Spec {@code verify_block_body_operation_limits}. Gloas-only: EIP-7688 turned the operation
+   * lists into unbounded progressive lists, so SSZ no longer enforces the limits. Network-decoded
+   * blocks are already checked by the schema's network validator; this also covers locally
+   * published blocks.
    */
   private Optional<InternalValidationResult> verifyBlockBodyOperationLimits(
       final SignedBeaconBlock block) {
     if (!spec.atSlot(block.getSlot()).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS)) {
       return Optional.empty();
     }
-
-    final BeaconBlockBody body = block.getMessage().getBody();
-    final SszList<PayloadAttestation> payloadAttestations =
-        body.getOptionalPayloadAttestations().orElseThrow();
-
-    final SpecConfig specConfig = spec.atSlot(block.getSlot()).getConfig();
-
-    final int maxProposerSlashings = specConfig.getMaxProposerSlashings();
-    final int proposerSlashingsCount = body.getProposerSlashings().size();
-    if (proposerSlashingsCount > maxProposerSlashings) {
-      return Optional.of(
-          reject(
-              "Block has %d proposer slashings, max allowed %d",
-              proposerSlashingsCount, maxProposerSlashings));
-    }
-
-    final int maxAttesterSlashings =
-        SpecConfigElectra.required(specConfig).getMaxAttesterSlashingsElectra();
-    final int attesterSlashingsCount = body.getAttesterSlashings().size();
-    if (attesterSlashingsCount > maxAttesterSlashings) {
-      return Optional.of(
-          reject(
-              "Block has %d attester slashings, max allowed %d",
-              attesterSlashingsCount, maxAttesterSlashings));
-    }
-
-    final int maxAttestations = SpecConfigElectra.required(specConfig).getMaxAttestationsElectra();
-    final int attestationsCount = body.getAttestations().size();
-    if (attestationsCount > maxAttestations) {
-      return Optional.of(
-          reject("Block has %d attestations, max allowed %d", attestationsCount, maxAttestations));
-    }
-
-    final int depositsCount = body.getDeposits().size();
-    if (depositsCount != 0) {
-      return Optional.of(reject("Block must not contain deposits, found %d", depositsCount));
-    }
-
-    final int maxVoluntaryExits = specConfig.getMaxVoluntaryExits();
-    final int voluntaryExitsCount = body.getVoluntaryExits().size();
-    if (voluntaryExitsCount > maxVoluntaryExits) {
-      return Optional.of(
-          reject(
-              "Block has %d voluntary exits, max allowed %d",
-              voluntaryExitsCount, maxVoluntaryExits));
-    }
-
-    final int maxBlsToExecutionChanges =
-        SpecConfigCapella.required(specConfig).getMaxBlsToExecutionChanges();
-    final int blsToExecutionChangesCount =
-        body.getOptionalBlsToExecutionChanges().orElseThrow().size();
-    if (blsToExecutionChangesCount > maxBlsToExecutionChanges) {
-      return Optional.of(
-          reject(
-              "Block has %d bls to execution changes, max allowed %d",
-              blsToExecutionChangesCount, maxBlsToExecutionChanges));
-    }
-
-    final int maxPayloadAttestations =
-        SpecConfigGloas.required(specConfig).getMaxPayloadAttestations();
-    final int payloadAttestationsCount = payloadAttestations.size();
-    if (payloadAttestationsCount > maxPayloadAttestations) {
-      return Optional.of(
-          reject(
-              "Block has %d payload attestations, max allowed %d",
-              payloadAttestationsCount, maxPayloadAttestations));
-    }
-
-    return Optional.empty();
+    return GloasNetworkLimits.verifyBlockBodyOperationLimits(
+            BeaconBlockBodyGloas.required(block.getMessage().getBody()),
+            SpecConfigGloas.required(spec.atSlot(block.getSlot()).getConfig()))
+        .map(violation -> reject("%s", violation.describe()));
   }
 
   /**
-   * Verifies that each Gloas parent execution request count is within its limit. This rule is
-   * Gloas-only: EIP-7688 turned these request lists into unbounded progressive lists, so SSZ no
-   * longer enforces the limits and this must be checked during gossip validation instead. Pre-Gloas
-   * blocks are unaffected, since they don't carry parent execution requests at all.
+   * Spec {@code verify_execution_requests_limits} applied to the parent execution requests.
+   * Gloas-only, see {@link #verifyBlockBodyOperationLimits}.
    */
   private Optional<InternalValidationResult> verifyExecutionRequestsLimits(
       final SignedBeaconBlock block) {
     if (!spec.atSlot(block.getSlot()).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS)) {
       return Optional.empty();
     }
-
-    final BeaconBlockBody body = block.getMessage().getBody();
-    final ExecutionRequests parentExecutionRequests =
-        body.getOptionalParentExecutionRequests().orElseThrow();
-    final ExecutionRequestsGloas parentExecutionRequestsGloas =
-        ExecutionRequestsGloas.required(parentExecutionRequests);
-
-    final SpecConfig specConfig = spec.atSlot(block.getSlot()).getConfig();
-
-    final int maxWithdrawalRequests =
-        SpecConfigElectra.required(specConfig).getMaxWithdrawalRequestsPerPayload();
-    final int withdrawalRequestsCount = parentExecutionRequests.getWithdrawals().size();
-    if (withdrawalRequestsCount > maxWithdrawalRequests) {
-      return Optional.of(
-          reject(
-              "Parent execution requests has %d withdrawal requests, max allowed %d",
-              withdrawalRequestsCount, maxWithdrawalRequests));
-    }
-
-    final int maxConsolidationRequests =
-        SpecConfigElectra.required(specConfig).getMaxConsolidationRequestsPerPayload();
-    final int consolidationRequestsCount = parentExecutionRequests.getConsolidations().size();
-    if (consolidationRequestsCount > maxConsolidationRequests) {
-      return Optional.of(
-          reject(
-              "Parent execution requests has %d consolidation requests, max allowed %d",
-              consolidationRequestsCount, maxConsolidationRequests));
-    }
-
-    final int maxBuilderDepositRequests =
-        SpecConfigGloas.required(specConfig).getMaxBuilderDepositRequestsPerPayload();
-    final int builderDepositRequestsCount =
-        parentExecutionRequestsGloas.getBuilderDeposits().size();
-    if (builderDepositRequestsCount > maxBuilderDepositRequests) {
-      return Optional.of(
-          reject(
-              "Parent execution requests has %d builder deposit requests, max allowed %d",
-              builderDepositRequestsCount, maxBuilderDepositRequests));
-    }
-
-    final int maxBuilderExitRequests =
-        SpecConfigGloas.required(specConfig).getMaxBuilderExitRequestsPerPayload();
-    final int builderExitRequestsCount = parentExecutionRequestsGloas.getBuilderExits().size();
-    if (builderExitRequestsCount > maxBuilderExitRequests) {
-      return Optional.of(
-          reject(
-              "Parent execution requests has %d builder exit requests, max allowed %d",
-              builderExitRequestsCount, maxBuilderExitRequests));
-    }
-
-    return Optional.empty();
+    final BeaconBlockBodyGloas body = BeaconBlockBodyGloas.required(block.getMessage().getBody());
+    return GloasNetworkLimits.verifyExecutionRequestsLimits(
+            GloasNetworkLimits.PARENT_EXECUTION_REQUESTS_SUBJECT,
+            ExecutionRequestsGloas.required(body.getParentExecutionRequests()),
+            SpecConfigGloas.required(spec.atSlot(block.getSlot()).getConfig()))
+        .map(violation -> reject("%s", violation.describe()));
   }
 
   /**

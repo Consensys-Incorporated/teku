@@ -23,7 +23,6 @@ import static tech.pegasys.teku.statetransition.validation.InternalValidationRes
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
@@ -40,9 +39,9 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloa
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
-import tech.pegasys.teku.spec.datastructures.execution.versions.capella.ExecutionPayloadCapella;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.util.GloasNetworkLimits;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
@@ -296,62 +295,29 @@ public class ExecutionPayloadGossipValidator {
   }
 
   /**
-   * [REJECT] Each execution request count, and the withdrawal count, is within its configured limit
-   * -- i.e. spec {@code verify_execution_requests_limits} plus the MAX_WITHDRAWALS_PER_PAYLOAD
-   * check. These bound the work an envelope can impose before it is propagated, so they are checked
-   * ahead of the expensive state lookup and signature verification.
+   * Spec {@code verify_execution_requests_limits} plus the MAX_WITHDRAWALS_PER_PAYLOAD check.
+   * Network-decoded envelopes are already checked by the schema's network validator; this also
+   * covers locally built envelopes validated before broadcast.
    */
   private Optional<InternalValidationResult> verifyRequestAndWithdrawalLimits(
       final ExecutionPayloadEnvelope envelope) {
     final SpecConfigGloas config =
         SpecConfigGloas.required(spec.atSlot(envelope.getSlot()).getConfig());
-    final ExecutionRequestsGloas executionRequests =
-        ExecutionRequestsGloas.required(envelope.getExecutionRequests());
-
-    final Optional<InternalValidationResult> requestLimitResult =
-        Stream.of(
-                rejectIfOverLimit(
-                    "withdrawal requests",
-                    executionRequests.getWithdrawals().size(),
-                    config.getMaxWithdrawalRequestsPerPayload()),
-                rejectIfOverLimit(
-                    "consolidation requests",
-                    executionRequests.getConsolidations().size(),
-                    config.getMaxConsolidationRequestsPerPayload()),
-                rejectIfOverLimit(
-                    "builder deposit requests",
-                    executionRequests.getBuilderDeposits().size(),
-                    config.getMaxBuilderDepositRequestsPerPayload()),
-                rejectIfOverLimit(
-                    "builder exit requests",
-                    executionRequests.getBuilderExits().size(),
-                    config.getMaxBuilderExitRequestsPerPayload()))
-            .flatMap(Optional::stream)
-            .findFirst();
-    if (requestLimitResult.isPresent()) {
-      return requestLimitResult;
-    }
-
-    return rejectIfOverLimit(
-        "withdrawals",
-        ExecutionPayloadCapella.required(envelope.getPayload()).getWithdrawals().size(),
-        config.getMaxWithdrawalsPerPayload());
-  }
-
-  private Optional<InternalValidationResult> rejectIfOverLimit(
-      final String description, final int count, final int limit) {
-    if (count <= limit) {
-      return Optional.empty();
-    }
-    LOG.trace(
-        "Execution payload envelope has {} {} which exceeds the limit of {}. Rejecting the execution payload envelope",
-        count,
-        description,
-        limit);
-    return Optional.of(
-        reject(
-            "Execution payload envelope has %s %s which exceeds the limit of %s",
-            count, description, limit));
+    return GloasNetworkLimits.verifyExecutionRequestsLimits(
+            GloasNetworkLimits.EXECUTION_PAYLOAD_ENVELOPE_SUBJECT,
+            ExecutionRequestsGloas.required(envelope.getExecutionRequests()),
+            config)
+        .or(
+            () ->
+                GloasNetworkLimits.verifyWithdrawalsLimit(
+                    GloasNetworkLimits.EXECUTION_PAYLOAD_ENVELOPE_SUBJECT,
+                    envelope.getPayload(),
+                    config))
+        .map(
+            violation -> {
+              LOG.trace("{}. Rejecting the execution payload envelope", violation.describe());
+              return reject("%s", violation.describe());
+            });
   }
 
   /**

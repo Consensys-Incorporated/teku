@@ -1527,8 +1527,7 @@ public final class DataStructureUtil {
                           schema.getAttesterSlashingsSchema(), this::randomAttesterSlashing, 1))
                   .attestations(
                       randomSszList(schema.getAttestationsSchema(), this::randomAttestation, 3))
-                  .deposits(
-                      randomSszList(schema.getDepositsSchema(), this::randomDepositWithoutIndex, 1))
+                  .deposits(randomBlockBodyDeposits(slot, schema))
                   .voluntaryExits(
                       randomSszList(
                           schema.getVoluntaryExitsSchema(), this::randomSignedVoluntaryExit, 1));
@@ -1658,6 +1657,15 @@ public final class DataStructureUtil {
     return randomBeaconBlockBody(randomUInt64(), builderModifier);
   }
 
+  /** Gloas blocks must not contain deposits (they are sourced from execution requests). */
+  private SszList<Deposit> randomBlockBodyDeposits(
+      final UInt64 slot, final BeaconBlockBodySchema<?> schema) {
+    if (spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS)) {
+      return schema.getDepositsSchema().getDefault();
+    }
+    return randomSszList(schema.getDepositsSchema(), this::randomDepositWithoutIndex, 1);
+  }
+
   public BeaconBlockBody randomBeaconBlockBody(
       final UInt64 slot, final Consumer<BeaconBlockBodyBuilder> builderModifier) {
     final BeaconBlockBodySchema<?> schema =
@@ -1680,8 +1688,7 @@ public final class DataStructureUtil {
                   .attestations(
                       randomSszList(
                           schema.getAttestationsSchema(), () -> randomAttestation(slot), 3))
-                  .deposits(
-                      randomSszList(schema.getDepositsSchema(), this::randomDepositWithoutIndex, 1))
+                  .deposits(randomBlockBodyDeposits(slot, schema))
                   .voluntaryExits(
                       randomSszList(
                           schema.getVoluntaryExitsSchema(), this::randomSignedVoluntaryExit, 1));

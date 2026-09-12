@@ -26,6 +26,7 @@ import static tech.pegasys.teku.statetransition.validation.InternalValidationRes
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.IntStream;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
@@ -36,14 +37,18 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
+import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
+import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 @TestSpecContext(milestone = {SpecMilestone.GLOAS})
@@ -54,6 +59,7 @@ public class ExecutionPayloadGossipValidatorTest {
   private final Map<Bytes32, BlockImportResult> invalidBlockRoots = new HashMap<>();
   private ExecutionPayloadGossipValidator validator;
   private DataStructureUtil dataStructureUtil;
+  private Spec specContextSpec;
 
   private SignedExecutionPayloadEnvelope signedEnvelope;
   private ExecutionPayloadEnvelope envelope;
@@ -65,6 +71,7 @@ public class ExecutionPayloadGossipValidatorTest {
   @BeforeEach
   void setUp(final SpecContext specContext) {
     dataStructureUtil = specContext.getDataStructureUtil();
+    specContextSpec = specContext.getSpec();
     validator =
         new ExecutionPayloadGossipValidator(
             spec, gossipValidationHelper, blockGossipValidator, invalidBlockRoots);
@@ -228,6 +235,65 @@ public class ExecutionPayloadGossipValidatorTest {
                 "Invalid execution requests. Execution Payload Envelope had execution requests root of %s but ExecutionPayload Bid had %s",
                 envelope.getExecutionRequests().hashTreeRoot(),
                 mismatchedBid.getMessage().getExecutionRequestsRoot()));
+  }
+
+  @TestTemplate
+  void shouldRejectTooManyWithdrawals() {
+    final int limit =
+        SpecConfigGloas.required(spec.atSlot(slot).getConfig()).getMaxWithdrawalsPerPayload();
+    final ExecutionPayload payload =
+        dataStructureUtil.randomExecutionPayload(
+            slot,
+            builder ->
+                builder.withdrawals(
+                    () ->
+                        IntStream.range(0, limit + 1)
+                            .mapToObj(__ -> dataStructureUtil.randomWithdrawal())
+                            .toList()));
+
+    assertThatSafeFuture(validator.validate(envelopeWith(payload, envelope.getExecutionRequests())))
+        .isCompletedWithValue(
+            reject(
+                "Execution payload envelope has %d withdrawals, max allowed %d", limit + 1, limit));
+  }
+
+  @TestTemplate
+  void shouldRejectTooManyWithdrawalRequests() {
+    final int limit =
+        SpecConfigGloas.required(spec.atSlot(slot).getConfig())
+            .getMaxWithdrawalRequestsPerPayload();
+    final ExecutionRequests requests =
+        dataStructureUtil
+            .randomExecutionRequestsBuilder(slot)
+            .withdrawals(
+                IntStream.range(0, limit + 1)
+                    .mapToObj(__ -> dataStructureUtil.randomWithdrawalRequest())
+                    .toList())
+            .build();
+
+    assertThatSafeFuture(validator.validate(envelopeWith(envelope.getPayload(), requests)))
+        .isCompletedWithValue(
+            reject(
+                "Execution payload envelope has %d withdrawal requests, max allowed %d",
+                limit + 1, limit));
+  }
+
+  private SignedExecutionPayloadEnvelope envelopeWith(
+      final ExecutionPayload payload, final ExecutionRequests requests) {
+    final SchemaDefinitionsGloas schemaDefinitions =
+        SchemaDefinitionsGloas.required(specContextSpec.atSlot(slot).getSchemaDefinitions());
+    return schemaDefinitions
+        .getSignedExecutionPayloadEnvelopeSchema()
+        .create(
+            schemaDefinitions
+                .getExecutionPayloadEnvelopeSchema()
+                .create(
+                    payload,
+                    requests,
+                    envelope.getBuilderIndex(),
+                    envelope.getBeaconBlockRoot(),
+                    envelope.getParentBeaconBlockRoot()),
+            signedEnvelope.getSignature());
   }
 
   @TestTemplate
