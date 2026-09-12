@@ -55,7 +55,7 @@ public class PostBlockV2Test extends PostBlockTest {
     assertThat(request.getResponseBody()).isNull();
 
     verify(validatorDataProvider)
-        .submitSignedBlock(eq(block), eq(BroadcastValidationLevel.GOSSIP), Optional.empty());
+        .submitSignedBlock(eq(block), eq(BroadcastValidationLevel.GOSSIP), eq(Optional.empty()));
   }
 
   @Test
@@ -75,7 +75,7 @@ public class PostBlockV2Test extends PostBlockTest {
     assertThat(request.getResponseBody()).isNull();
 
     verify(validatorDataProvider)
-        .submitSignedBlock(eq(block), eq(BroadcastValidationLevel.CONSENSUS), Optional.empty());
+        .submitSignedBlock(eq(block), eq(BroadcastValidationLevel.CONSENSUS), eq(Optional.empty()));
   }
 
   @Test
