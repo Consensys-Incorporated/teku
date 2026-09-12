@@ -123,6 +123,7 @@ import tech.pegasys.teku.statetransition.util.DebugDataDumper;
 import tech.pegasys.teku.statetransition.validation.BlockBroadcastValidator;
 import tech.pegasys.teku.statetransition.validation.BlockBroadcastValidator.BroadcastValidationResult;
 import tech.pegasys.teku.storage.api.LateBlockReorgPreparationHandler;
+import tech.pegasys.teku.storage.api.TrackingChainHeadChannel.HeadEvent;
 import tech.pegasys.teku.storage.api.TrackingChainHeadChannel.ReorgEvent;
 import tech.pegasys.teku.storage.client.ChainHead;
 import tech.pegasys.teku.storage.client.ChainUpdater;
@@ -1788,6 +1789,42 @@ class ForkChoiceTest {
                 .orElseThrow()
                 .getWeight())
         .isEqualTo(ZERO);
+  }
+
+  /**
+   * beacon-APIs requires (`should`) a second head event for the same beacon block and slot when the
+   * head's payload status changes from empty to full. See
+   * https://github.com/ethereum/beacon-APIs/pull/628.
+   */
+  @Test
+  void onExecutionPayloadEnvelope_shouldUpdateHeadWhenPayloadStatusChangesFromEmptyToFull() {
+    setupWithSpec(
+        TestSpecFactory.createMinimalGloas(
+            builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
+    assertThat(forkChoice.applyGenesisExecutionPayloadForGloas()).isCompleted();
+
+    final SignedBlockAndState block = chainBuilder.generateBlockAtSlot(ONE);
+    importBlock(block);
+
+    // The payload hasn't been revealed yet, so the head is the EMPTY node of the new block.
+    final List<HeadEvent> headEvents = storageSystem.chainHeadChannel().getHeadEvents();
+    assertThat(headEvents).isNotEmpty();
+    final HeadEvent emptyHeadEvent = headEvents.getLast();
+    assertThat(emptyHeadEvent.getSlot()).isEqualTo(block.getSlot());
+    assertThat(emptyHeadEvent.getBestBlockRoot()).isEqualTo(block.getRoot());
+    assertThat(emptyHeadEvent.getPayloadStatus())
+        .contains(ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY);
+    headEvents.clear();
+
+    importPayload(block);
+
+    // A second head event for the same block and slot, now reporting the FULL payload status.
+    assertThat(headEvents).hasSize(1);
+    final HeadEvent fullHeadEvent = headEvents.getFirst();
+    assertThat(fullHeadEvent.getSlot()).isEqualTo(block.getSlot());
+    assertThat(fullHeadEvent.getBestBlockRoot()).isEqualTo(block.getRoot());
+    assertThat(fullHeadEvent.getPayloadStatus())
+        .contains(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
   }
 
   @Test
