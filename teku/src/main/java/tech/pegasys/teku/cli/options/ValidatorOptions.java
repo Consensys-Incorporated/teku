@@ -17,6 +17,7 @@ import static tech.pegasys.teku.networks.Eth2NetworkConfiguration.DEFAULT_VALIDA
 import static tech.pegasys.teku.validator.api.ValidatorConfig.DEFAULT_DOPPELGANGER_DETECTION_ENABLED;
 import static tech.pegasys.teku.validator.api.ValidatorConfig.DEFAULT_SHUTDOWN_WHEN_VALIDATOR_SLASHED_ENABLED;
 import static tech.pegasys.teku.validator.api.ValidatorConfig.DEFAULT_VALIDATOR_IS_LOCAL_SLASHING_PROTECTION_SYNCHRONIZED_ENABLED;
+import static tech.pegasys.teku.validator.api.ValidatorConfig.DEFAULT_VALIDATOR_SLASHING_PROTECTION_STRICT_MODE_ENABLED;
 
 import java.nio.file.Path;
 import java.util.Optional;
@@ -191,6 +192,17 @@ public class ValidatorOptions {
       fallbackValue = "true")
   private boolean shutdownWhenValidatorSlashed = DEFAULT_SHUTDOWN_WHEN_VALIDATOR_SLASHED_ENABLED;
 
+  @Option(
+      names = {"--slashing-protection-strict-mode-enabled"},
+      paramLabel = "<BOOLEAN>",
+      description =
+          "If enabled, Teku will refuse to sign if slashing protection data for a validator is not found.",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS,
+      arity = "0..1",
+      fallbackValue = "true")
+  private boolean slashingProtectionStrictModeEnabled =
+      DEFAULT_VALIDATOR_SLASHING_PROTECTION_STRICT_MODE_ENABLED;
+
   public void configure(final TekuConfiguration.Builder builder) {
     builder.validator(
         config ->
@@ -210,6 +222,7 @@ public class ValidatorOptions {
                 .executorThreads(executorThreads)
                 .exitWhenNoValidatorKeysEnabled(exitWhenNoValidatorKeysEnabled)
                 .shutdownWhenValidatorSlashedEnabled(shutdownWhenValidatorSlashed)
+                .slashingProtectionStrictModeEnabled(slashingProtectionStrictModeEnabled)
                 .executorMaxQueueSize(executorMaxQueueSize)
                 .beaconApiExecutorThreads(beaconApiExecutorThreads)
                 .beaconApiReadinessExecutorThreads(beaconApiReadinessExecutorThreads));

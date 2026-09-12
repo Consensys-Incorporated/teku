@@ -432,9 +432,13 @@ public class ValidatorClientService extends Service {
     final SlashingProtector slashingProtector =
         config.getValidatorConfig().isLocalSlashingProtectionSynchronizedModeEnabled()
             ? new LocalSlashingProtector(
-                SyncDataAccessor.create(slashingProtectionPath), slashingProtectionPath)
+                SyncDataAccessor.create(slashingProtectionPath),
+                slashingProtectionPath,
+                config.getValidatorConfig().isSlashingProtectionStrictModeEnabled())
             : new LocalSlashingProtectorConcurrentAccess(
-                SyncDataAccessor.create(slashingProtectionPath), slashingProtectionPath);
+                SyncDataAccessor.create(slashingProtectionPath),
+                slashingProtectionPath,
+                config.getValidatorConfig().isSlashingProtectionStrictModeEnabled());
     final SlashingProtectionLogger slashingProtectionLogger =
         new SlashingProtectionLogger(
             slashingProtector, config.getSpec(), asyncRunner, VALIDATOR_LOGGER);

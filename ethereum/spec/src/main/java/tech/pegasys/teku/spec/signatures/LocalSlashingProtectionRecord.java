@@ -28,15 +28,18 @@ class LocalSlashingProtectionRecord {
   private final Path slashingProtectedPath;
   // In the same way as the MAP in LocalSlashingProtector, signingRecord gets maintained over time
   private ValidatorSigningRecord signingRecord;
+  private final boolean isNew;
 
   private final ReentrantLock lock;
 
   LocalSlashingProtectionRecord(
       final Path slashingProtectedPath,
       final ValidatorSigningRecord signingRecord,
+      final boolean isNew,
       final ReentrantLock lock) {
     this.slashingProtectedPath = slashingProtectedPath;
     this.signingRecord = signingRecord;
+    this.isNew = isNew;
     this.lock = lock;
   }
 
@@ -55,6 +58,10 @@ class LocalSlashingProtectionRecord {
 
   ValidatorSigningRecord getSigningRecord() {
     return signingRecord;
+  }
+
+  boolean isNew() {
+    return isNew;
   }
 
   boolean writeSigningRecord(
