@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.ethereum.json.types;
 
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_BUILDER_URL;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_BLOCK_VALUE;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_EXECUTION_PAYLOAD_BLINDED;
@@ -147,6 +148,18 @@ public class EthereumTypes {
                           execution payload envelope, blobs, and KZG proofs. When `false`, the `data`
                           field contains only a `BeaconBlock`.""");
 
+  public static final StringBasedHeaderTypeDefinition<String> ETH_HEADER_BUILDER_URL_TYPE =
+      new StringBasedHeaderTypeDefinition.Builder<String>()
+          .title(HEADER_BUILDER_URL)
+          .description(
+              """
+                The url of a winning builder when the bid was retrieved via the builder-API.
+                The validator client MUST echo this value in the Eth-Builder-Url request header when publishing the signed block,
+                so the beacon node can forward the block to the same builder via submitSignedBeaconBlock. Absent for a self-built block or a bid won over p2p.""")
+          .formatter(Function.identity())
+          .parser(Function.identity())
+          .build();
+
   public static <X extends SszData, T extends ObjectAndMetaData<X>>
       ResponseContentTypeDefinition<? extends T> sszResponseType() {
     return new OctetStreamResponseContentTypeDefinition<>(
@@ -158,7 +171,7 @@ public class EthereumTypes {
       blockContainerAndMetaDataSszResponseType() {
     return new OctetStreamResponseContentTypeDefinition<>(
         (data, out) -> data.blockContainer().sszSerialize(out),
-        value -> getSszHeaders(__ -> value.specMilestone(), value.blockContainer()));
+        value -> getSszHeaders(__ -> value.milestone(), value.blockContainer()));
   }
 
   public static ResponseContentTypeDefinition<ExecutionPayloadAndMetaData>

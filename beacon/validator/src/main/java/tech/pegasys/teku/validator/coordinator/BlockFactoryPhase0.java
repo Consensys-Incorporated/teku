@@ -46,27 +46,35 @@ public class BlockFactoryPhase0 implements BlockFactory {
   @Override
   public SafeFuture<BlockContainerAndMetaData> createUnsignedBlock(
       final BlockProductionContext blockProductionContext) {
-    final BeaconState blockSlotState = blockProductionContext.blockSlotState();
-    final UInt64 proposalSlot = blockProductionContext.proposalSlot();
-
-    return spec.createNewUnsignedBlock(
-            proposalSlot,
-            spec.getBeaconProposerIndex(blockSlotState, proposalSlot),
-            blockSlotState,
-            blockProductionContext.parentRoot(),
-            operationSelector.createSelector(blockProductionContext),
-            blockProductionContext.blockProductionPerformance())
-        .thenApply(this::blockAndStateToBlockContainerAndMetaData);
+    return createNewUnsignedBlock(blockProductionContext)
+        .thenApply(
+            blockAndState ->
+                createBlockContainerAndMetaDataBuilder(blockAndState.getState())
+                    .blockContainer(blockAndState.getBlock())
+                    .build());
   }
 
-  private BlockContainerAndMetaData blockAndStateToBlockContainerAndMetaData(
-      final BeaconBlockAndState blockAndState) {
-    final SlotCaches slotCaches = BeaconStateCache.getSlotCaches(blockAndState.getState());
-    return new BlockContainerAndMetaData(
-        blockAndState.getBlock(),
-        spec.atSlot(blockAndState.getSlot()).getMilestone(),
-        slotCaches.getBlockExecutionValue(),
-        GWEI_TO_WEI.multiply(slotCaches.getBlockProposerRewards().longValue()));
+  protected SafeFuture<BeaconBlockAndState> createNewUnsignedBlock(
+      final BlockProductionContext blockProductionContext) {
+    final BeaconState blockSlotState = blockProductionContext.blockSlotState();
+    final UInt64 proposalSlot = blockProductionContext.proposalSlot();
+    return spec.createNewUnsignedBlock(
+        proposalSlot,
+        spec.getBeaconProposerIndex(blockSlotState, proposalSlot),
+        blockSlotState,
+        blockProductionContext.parentRoot(),
+        operationSelector.createSelector(blockProductionContext),
+        blockProductionContext.blockProductionPerformance());
+  }
+
+  protected BlockContainerAndMetaData.Builder createBlockContainerAndMetaDataBuilder(
+      final BeaconState state) {
+    final SlotCaches slotCaches = BeaconStateCache.getSlotCaches(state);
+    return BlockContainerAndMetaData.builder()
+        .milestone(spec.atSlot(state.getSlot()).getMilestone())
+        .executionPayloadValue(slotCaches.getBlockExecutionValue())
+        .consensusBlockValue(
+            GWEI_TO_WEI.multiply(slotCaches.getBlockProposerRewards().longValue()));
   }
 
   @Override

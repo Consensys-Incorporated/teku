@@ -144,8 +144,7 @@ public abstract class AbstractPostBlockTest extends AbstractMigratedBeaconHandle
     if (isBlinded()) {
       when(validatorDataProvider.submitSignedBlindedBlock(any(), any())).thenReturn(future);
     } else {
-      when(validatorDataProvider.submitSignedBlock((SignedBeaconBlock) any(), any()))
-          .thenReturn(future);
+      when(validatorDataProvider.submitSignedBlock(any(), any(), any())).thenReturn(future);
     }
   }
 

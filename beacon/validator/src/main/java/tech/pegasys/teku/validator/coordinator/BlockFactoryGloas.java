@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.validator.coordinator;
 
+import static tech.pegasys.teku.spec.constants.EthConstants.GWEI_TO_WEI;
+
 import com.google.common.base.Preconditions;
 import java.util.Optional;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockPublishingPerformance;
@@ -28,6 +30,9 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloa
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.execution.BlobsBundle;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.common.SlotCaches;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 
 // Gloas is more similar to BlockFactoryPhase0 than BlockFactoryFulu
@@ -50,17 +55,22 @@ public class BlockFactoryGloas extends BlockFactoryPhase0 {
   @Override
   public SafeFuture<BlockContainerAndMetaData> createUnsignedBlock(
       final BlockProductionContext blockProductionContext) {
-    return super.createUnsignedBlock(blockProductionContext)
+    return createNewUnsignedBlock(blockProductionContext)
         .thenCompose(
-            blockContainerAndMetaData -> {
-              final BeaconBlock block = (BeaconBlock) blockContainerAndMetaData.blockContainer();
+            blockAndState -> {
+              final BeaconBlock block = blockAndState.getBlock();
+              final BeaconState state = blockAndState.getState();
               final SignedExecutionPayloadBid bid =
                   BeaconBlockBodyGloas.required(block.getBody()).getSignedExecutionPayloadBid();
               // G2-point-at-infinity signature means we self-built the payload
               final boolean selfBuilt = bid.getSignature().isInfinity();
               // include_payload=false or builder bid → return beacon block only
               if (!blockProductionContext.includePayload() || !selfBuilt) {
-                return SafeFuture.completedFuture(blockContainerAndMetaData);
+                return SafeFuture.completedFuture(
+                    createBlockContainerAndMetaDataBuilder(state)
+                        .blockContainer(block)
+                        .payloadIncluded(false)
+                        .build());
               }
               // include_payload=true and self-built → include full contents
               final UInt64 slot = block.getSlot();
@@ -91,9 +101,23 @@ public class BlockFactoryGloas extends BlockFactoryPhase0 {
                                     blobsBundle.getProofs(),
                                     blobsBundle.getBlobs(),
                                     Optional.of(envelope));
-                        return blockContainerAndMetaData.withBlockContents(blockContents);
+                        return createBlockContainerAndMetaDataBuilder(state)
+                            .blockContainer(blockContents)
+                            .payloadIncluded(true)
+                            .build();
                       });
             });
+  }
+
+  @Override
+  protected BlockContainerAndMetaData.Builder createBlockContainerAndMetaDataBuilder(
+      final BeaconState state) {
+    final SlotCaches slotCaches = BeaconStateCache.getSlotCaches(state);
+    return BlockContainerAndMetaData.builder()
+        .milestone(spec.atSlot(state.getSlot()).getMilestone())
+        .executionPayloadValue(slotCaches.getBlockExecutionValue())
+        .consensusBlockValue(GWEI_TO_WEI.multiply(slotCaches.getBlockProposerRewards().longValue()))
+        .builderUrl(slotCaches.getBuilderUrl());
   }
 
   // blocks in ePBS are all unblinded

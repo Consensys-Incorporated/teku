@@ -23,6 +23,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.BlockContainer;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.execution.BlobsBundle;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsDeneb;
 
 public class BlockFactoryDeneb extends BlockFactoryPhase0 {
@@ -34,15 +35,21 @@ public class BlockFactoryDeneb extends BlockFactoryPhase0 {
   @Override
   public SafeFuture<BlockContainerAndMetaData> createUnsignedBlock(
       final BlockProductionContext blockProductionContext) {
-    return super.createUnsignedBlock(blockProductionContext)
+    return createNewUnsignedBlock(blockProductionContext)
         .thenCompose(
-            blockContainerAndMetaData -> {
-              final BeaconBlock block = blockContainerAndMetaData.blockContainer().getBlock();
+            blockAndState -> {
+              final BeaconBlock block = blockAndState.getBlock();
+              final BeaconState state = blockAndState.getState();
               if (block.isBlinded()) {
-                return SafeFuture.completedFuture(blockContainerAndMetaData);
+                return SafeFuture.completedFuture(
+                    createBlockContainerAndMetaDataBuilder(state).blockContainer(block).build());
               }
               return createBlockContents(block)
-                  .thenApply(blockContainerAndMetaData::withBlockContents);
+                  .thenApply(
+                      blockContents ->
+                          createBlockContainerAndMetaDataBuilder(state)
+                              .blockContainer(blockContents)
+                              .build());
             });
   }
 

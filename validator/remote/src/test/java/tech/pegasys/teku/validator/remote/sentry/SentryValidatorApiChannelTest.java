@@ -330,10 +330,11 @@ class SentryValidatorApiChannelTest {
   void sendSignedBlockShouldUseBlockHandlerChannelWhenAvailable() {
     final SignedBeaconBlock signedBeaconBlock = mock(SignedBeaconBlock.class);
     sentryValidatorApiChannel.sendSignedBlock(
-        signedBeaconBlock, BroadcastValidationLevel.NOT_REQUIRED);
+        signedBeaconBlock, BroadcastValidationLevel.NOT_REQUIRED, Optional.empty());
 
     verify(blockHandlerChannel)
-        .sendSignedBlock(eq(signedBeaconBlock), eq(BroadcastValidationLevel.NOT_REQUIRED));
+        .sendSignedBlock(
+            eq(signedBeaconBlock), eq(BroadcastValidationLevel.NOT_REQUIRED), eq(Optional.empty()));
     verifyNoInteractions(dutiesProviderChannel);
     verifyNoInteractions(attestationPublisherChannel);
   }
@@ -346,10 +347,11 @@ class SentryValidatorApiChannelTest {
             dutiesProviderChannel, Optional.empty(), Optional.of(attestationPublisherChannel));
 
     sentryValidatorApiChannel.sendSignedBlock(
-        signedBeaconBlock, BroadcastValidationLevel.NOT_REQUIRED);
+        signedBeaconBlock, BroadcastValidationLevel.NOT_REQUIRED, Optional.empty());
 
     verify(dutiesProviderChannel)
-        .sendSignedBlock(eq(signedBeaconBlock), eq(BroadcastValidationLevel.NOT_REQUIRED));
+        .sendSignedBlock(
+            eq(signedBeaconBlock), eq(BroadcastValidationLevel.NOT_REQUIRED), eq(Optional.empty()));
     verifyNoInteractions(blockHandlerChannel);
     verifyNoInteractions(attestationPublisherChannel);
   }

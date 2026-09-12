@@ -99,6 +99,7 @@ public class BlockProductionDuty implements Duty {
 
   private SafeFuture<DutyResult> produceBlock(final ForkInfo forkInfo) {
     return createRandaoReveal(forkInfo)
+        // create unsigned block
         .thenComposeCombined(
             builderConfigProvider.getBuilderConfig(validator, slot),
             (randaoReveal, builderConfig) ->
@@ -108,17 +109,26 @@ public class BlockProductionDuty implements Duty {
                     ValidatorDutyMetricsSteps.CREATE))
         .thenCompose(this::validateBlock)
         .thenCompose(
-            blockContainer ->
-                validatorDutyMetrics.record(
-                    () -> signBlockContainer(forkInfo, blockContainer),
-                    this,
-                    ValidatorDutyMetricsSteps.SIGN))
-        .thenCompose(
-            signedBlockContainer ->
-                validatorDutyMetrics.record(
-                    () -> sendBlock(signedBlockContainer, forkInfo),
-                    this,
-                    ValidatorDutyMetricsSteps.SEND));
+            blockContainerAndMetaData ->
+                // sign block
+                validatorDutyMetrics
+                    .record(
+                        () ->
+                            signBlockContainer(
+                                forkInfo, blockContainerAndMetaData.blockContainer()),
+                        this,
+                        ValidatorDutyMetricsSteps.SIGN)
+                    // send block
+                    .thenCompose(
+                        signedBlockContainer ->
+                            validatorDutyMetrics.record(
+                                () ->
+                                    sendBlock(
+                                        signedBlockContainer,
+                                        blockContainerAndMetaData.builderUrl(),
+                                        forkInfo),
+                                this,
+                                ValidatorDutyMetricsSteps.SEND)));
   }
 
   private DutyResult handleBlockProductionError(final Throwable error) {
@@ -140,16 +150,15 @@ public class BlockProductionDuty implements Duty {
         slot, randaoReveal, validator.getGraffiti(), false, builderConfig);
   }
 
-  private SafeFuture<BlockContainer> validateBlock(
+  private SafeFuture<BlockContainerAndMetaData> validateBlock(
       final Optional<BlockContainerAndMetaData> maybeBlockContainer) {
     final BlockContainerAndMetaData blockContainerAndMetaData =
         maybeBlockContainer.orElseThrow(
             () -> new IllegalStateException("Node was not syncing but could not create block"));
-    final BlockContainer unsignedBlockContainer = blockContainerAndMetaData.blockContainer();
     checkArgument(
-        unsignedBlockContainer.getSlot().equals(slot),
+        blockContainerAndMetaData.blockContainer().getSlot().equals(slot),
         "Unsigned block slot (%s) does not match expected slot %s",
-        unsignedBlockContainer.getSlot(),
+        blockContainerAndMetaData.blockContainer().getSlot(),
         slot);
 
     if (!blockContainerAndMetaData.consensusBlockValue().isZero()) {
@@ -159,7 +168,7 @@ public class BlockProductionDuty implements Duty {
           weiToEth(blockContainerAndMetaData.consensusBlockValue()),
           weiToEth(blockContainerAndMetaData.executionPayloadValue()));
     }
-    return SafeFuture.completedFuture(unsignedBlockContainer);
+    return SafeFuture.completedFuture(blockContainerAndMetaData);
   }
 
   private SafeFuture<SignedBlockContainer> signBlockContainer(
@@ -168,9 +177,11 @@ public class BlockProductionDuty implements Duty {
   }
 
   private SafeFuture<DutyResult> sendBlock(
-      final SignedBlockContainer signedBlockContainer, final ForkInfo forkInfo) {
+      final SignedBlockContainer signedBlockContainer,
+      final Optional<String> builderUrl,
+      final ForkInfo forkInfo) {
     return validatorApiChannel
-        .sendSignedBlock(signedBlockContainer, BroadcastValidationLevel.GOSSIP)
+        .sendSignedBlock(signedBlockContainer, BroadcastValidationLevel.GOSSIP, builderUrl)
         .thenApply(
             result -> {
               if (result.isPublished()) {

@@ -180,15 +180,17 @@ public class ValidatorDataProvider {
 
   public SafeFuture<SendSignedBlockResult> submitSignedBlock(
       final SignedBlockContainer signedBlockContainer,
-      final BroadcastValidationLevel broadcastValidationLevel) {
-    return validatorApiChannel.sendSignedBlock(signedBlockContainer, broadcastValidationLevel);
+      final BroadcastValidationLevel broadcastValidationLevel,
+      final Optional<String> builderUrl) {
+    return validatorApiChannel.sendSignedBlock(
+        signedBlockContainer, broadcastValidationLevel, builderUrl);
   }
 
   public SafeFuture<SendSignedBlockResult> submitSignedBlindedBlock(
       final SignedBlockContainer signedBlindedBlockContainer,
       final BroadcastValidationLevel broadcastValidationLevel) {
     return validatorApiChannel.sendSignedBlock(
-        signedBlindedBlockContainer, broadcastValidationLevel);
+        signedBlindedBlockContainer, broadcastValidationLevel, Optional.empty());
   }
 
   public SafeFuture<Void> publishSignedExecutionPayloadBid(

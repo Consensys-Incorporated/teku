@@ -21,6 +21,7 @@ import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUE
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_ACCEPTABLE;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_SERVICE_UNAVAILABLE;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_BUILDER_URL;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_BLOCK_VALUE;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_EXECUTION_PAYLOAD_VALUE;
@@ -79,12 +80,15 @@ public class PostNewBlockV4Test extends AbstractMigratedBeaconHandlerTest {
   }
 
   @TestTemplate
-  void shouldHandleWhenBlockContentsAreProduced() throws Exception {
+  void shouldHandleWhenBlockContainerAndMetaDataIsProduced() throws Exception {
     assumeThat(specMilestone).isGreaterThanOrEqualTo(GLOAS);
     request.setQueryParameter(INCLUDE_PAYLOAD, "true");
+    final String builderUrl = "https://example.com";
     final BlockContainerAndMetaData blockContainerAndMetaData =
-        dataStructureUtil.randomBlockContainerAndMetaData(
-            dataStructureUtil.randomBlockContents(ONE), ONE);
+        dataStructureUtil.randomBlockContainerAndMetaData(ONE).toBuilder()
+            .payloadIncluded(true)
+            .builderUrl(Optional.of(builderUrl))
+            .build();
     request.setRequestBody(BuilderConfig.NO_OP);
 
     doReturn(SafeFuture.completedFuture(Optional.of(blockContainerAndMetaData)))
@@ -95,30 +99,13 @@ public class PostNewBlockV4Test extends AbstractMigratedBeaconHandlerTest {
 
     assertThat(request.getResponseCode()).isEqualTo(HttpStatusCodes.SC_OK);
     assertThat(request.getResponseHeaders(HEADER_CONSENSUS_VERSION))
-        .isEqualTo(blockContainerAndMetaData.specMilestone().lowerCaseName());
+        .isEqualTo(blockContainerAndMetaData.milestone().lowerCaseName());
     assertThat(request.getResponseHeaders(HEADER_INCLUDE_PAYLOAD)).isEqualTo("true");
     assertThat(request.getResponseHeaders(HEADER_CONSENSUS_BLOCK_VALUE))
         .isEqualTo(blockContainerAndMetaData.consensusBlockValue().toDecimalString());
     assertThat(request.getResponseHeaders(HEADER_EXECUTION_PAYLOAD_VALUE))
         .isEqualTo(blockContainerAndMetaData.executionPayloadValue().toDecimalString());
-  }
-
-  @TestTemplate
-  void shouldHandleWhenBeaconBlockIsProduced() throws Exception {
-    assumeThat(specMilestone).isGreaterThanOrEqualTo(GLOAS);
-    request.setQueryParameter(INCLUDE_PAYLOAD, "false");
-    final BlockContainerAndMetaData blockContainerAndMetaData =
-        dataStructureUtil.randomBlockContainerAndMetaData(ONE);
-    request.setRequestBody(BuilderConfig.NO_OP);
-
-    doReturn(SafeFuture.completedFuture(Optional.of(blockContainerAndMetaData)))
-        .when(validatorDataProvider)
-        .produceBlock(ONE, signature, Optional.empty(), false, BuilderConfig.NO_OP);
-
-    handler.handleRequest(request);
-
-    assertThat(request.getResponseCode()).isEqualTo(HttpStatusCodes.SC_OK);
-    assertThat(request.getResponseHeaders(HEADER_INCLUDE_PAYLOAD)).isEqualTo("false");
+    assertThat(request.getResponseHeaders(HEADER_BUILDER_URL)).isEqualTo(builderUrl);
   }
 
   @TestTemplate

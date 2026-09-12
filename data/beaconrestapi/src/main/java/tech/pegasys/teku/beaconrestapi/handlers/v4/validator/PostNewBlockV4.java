@@ -20,6 +20,7 @@ import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.SKIP_RANDAO_VER
 import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.SLOT_PARAMETER;
 import static tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.MilestoneDependentTypesUtil.getMultipleSchemaDefinitionFromMilestone;
 import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.ETH_CONSENSUS_HEADER_TYPE;
+import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.ETH_HEADER_BUILDER_URL_TYPE;
 import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.ETH_HEADER_CONSENSUS_BLOCK_VALUE_TYPE;
 import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.ETH_HEADER_EXECUTION_PAYLOAD_INCLUDED_TYPE;
 import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.ETH_HEADER_EXECUTION_PAYLOAD_VALUE_TYPE;
@@ -30,6 +31,7 @@ import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.CONSENSUS_BLOCK_VALUE;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.EXECUTION_PAYLOAD_VALUE;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_BUILDER_URL;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_BLOCK_VALUE;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_EXECUTION_PAYLOAD_VALUE;
@@ -173,20 +175,18 @@ public class PostNewBlockV4 extends RestApiEndpoint {
                     .map(
                         blockContainerAndMetaData -> {
                           final long responseTimeMs = System.currentTimeMillis();
-                          final boolean executionPayloadIncluded =
-                              blockContainerAndMetaData.blockContainer()
-                                  instanceof BlockContentsGloas;
                           LOG.debug(
-                              "produceBlockV4 response: slot={}, execution_payload_included={}, consensus_block_value={}, execution_payload_value={}, timestampMs={}, elapsedMs={}",
+                              "produceBlockV4 response: slot={}, execution_payload_included={}, consensus_block_value={}, execution_payload_value={}, builder_url={}, timestampMs={}, elapsedMs={}",
                               slot,
-                              executionPayloadIncluded,
+                              blockContainerAndMetaData.payloadIncluded(),
                               blockContainerAndMetaData.consensusBlockValue().toDecimalString(),
                               blockContainerAndMetaData.executionPayloadValue().toDecimalString(),
+                              blockContainerAndMetaData.builderUrl(),
                               responseTimeMs,
                               responseTimeMs - requestTimeMs);
                           request.header(
                               HEADER_CONSENSUS_VERSION,
-                              blockContainerAndMetaData.specMilestone().lowerCaseName());
+                              blockContainerAndMetaData.milestone().lowerCaseName());
                           request.header(
                               HEADER_CONSENSUS_BLOCK_VALUE,
                               blockContainerAndMetaData.consensusBlockValue().toDecimalString());
@@ -194,7 +194,12 @@ public class PostNewBlockV4 extends RestApiEndpoint {
                               HEADER_EXECUTION_PAYLOAD_VALUE,
                               blockContainerAndMetaData.executionPayloadValue().toDecimalString());
                           request.header(
-                              HEADER_INCLUDE_PAYLOAD, Boolean.toString(executionPayloadIncluded));
+                              HEADER_INCLUDE_PAYLOAD,
+                              Boolean.toString(blockContainerAndMetaData.payloadIncluded()));
+                          blockContainerAndMetaData
+                              .builderUrl()
+                              .ifPresent(
+                                  builderUrl -> request.header(HEADER_BUILDER_URL, builderUrl));
                           return AsyncApiResponse.respondOk(blockContainerAndMetaData);
                         })
                     .orElseGet(
@@ -214,16 +219,13 @@ public class PostNewBlockV4 extends RestApiEndpoint {
 
     return SerializableTypeDefinition.<BlockContainerAndMetaData>object()
         .name("ProduceBlockV4Response")
-        .withField("version", MILESTONE_TYPE, BlockContainerAndMetaData::specMilestone)
+        .withField("version", MILESTONE_TYPE, BlockContainerAndMetaData::milestone)
         .withField(
             CONSENSUS_BLOCK_VALUE, UINT256_TYPE, BlockContainerAndMetaData::consensusBlockValue)
         .withField(
             EXECUTION_PAYLOAD_VALUE, UINT256_TYPE, BlockContainerAndMetaData::executionPayloadValue)
         .withField(
-            INCLUDE_EXECUTION_PAYLOAD,
-            BOOLEAN_TYPE,
-            blockContainerAndMetaData ->
-                blockContainerAndMetaData.blockContainer() instanceof BlockContentsGloas)
+            INCLUDE_EXECUTION_PAYLOAD, BOOLEAN_TYPE, BlockContainerAndMetaData::payloadIncluded)
         .withField("data", blockContainerType, BlockContainerAndMetaData::blockContainer)
         .build();
   }
@@ -262,6 +264,7 @@ public class PostNewBlockV4 extends RestApiEndpoint {
     headers.add(ETH_HEADER_CONSENSUS_BLOCK_VALUE_TYPE);
     headers.add(ETH_HEADER_EXECUTION_PAYLOAD_VALUE_TYPE);
     headers.add(ETH_HEADER_EXECUTION_PAYLOAD_INCLUDED_TYPE);
+    headers.add(ETH_HEADER_BUILDER_URL_TYPE);
     return headers;
   }
 }

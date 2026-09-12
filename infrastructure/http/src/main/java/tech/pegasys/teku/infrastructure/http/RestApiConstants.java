@@ -249,6 +249,7 @@ public class RestApiConstants {
   public static final String HEADER_CONTENT_DISPOSITION = "Content-Disposition";
   public static final String HEADER_CONTENT_ENCODING = "Content-Encoding";
   public static final String HEADER_INCLUDE_PAYLOAD = "Eth-Execution-Payload-Included";
+  public static final String HEADER_BUILDER_URL = "Eth-Builder-Url";
 
   public static final String CACHE_NONE = "max-age=0";
 

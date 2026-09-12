@@ -71,7 +71,7 @@ public class PostBlock extends AbstractPostBlock {
 
     request.respondAsync(
         validatorDataProvider
-            .submitSignedBlock(requestBody, BroadcastValidationLevel.GOSSIP)
+            .submitSignedBlock(requestBody, BroadcastValidationLevel.GOSSIP, Optional.empty())
             .thenApply(this::processSendSignedBlockResult));
   }
 
