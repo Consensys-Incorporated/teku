@@ -178,7 +178,13 @@ public class BlockManager extends Service
             // block failed gossip validation, let's drop it from the pool, so it won't be served
             // via RPC anymore. This should not be done on ignore result (i.e. duplicate blocks
             // could cause an unwanted drop)
-            case REJECT -> blockEventsListener.removeAllForBlock(block.getSlotAndBlockRoot());
+            case REJECT -> {
+              blockEventsListener.removeAllForBlock(block.getSlotAndBlockRoot());
+              // This attempt never reached import, so any timeliness recorded from its raw
+              // arrival shouldn't stick around to affect a later, separate import attempt for
+              // the same block (e.g. if it's subsequently re-fetched by root).
+              recentChainData.invalidateUnconfirmedBlockTimeliness(block);
+            }
             case IGNORE -> {}
           }
         });
@@ -313,7 +319,16 @@ public class BlockManager extends Service
             result -> {
               if (result.isSuccessful()) {
                 LOG.trace("Imported block: {}", block);
+                // Successful import confirms (and, if necessary, refreshes) the block's
+                // timeliness recording, so it no longer matters whether an earlier attempt for
+                // this block was premature or otherwise didn't succeed.
+                recentChainData.confirmBlockTimeliness(block);
               } else {
+                // This attempt didn't result in a successful import. Discard any unconfirmed
+                // timeliness recording tied to it so a later, successful attempt (e.g. a retry
+                // from the pending/future block pool) can record fresh, accurate timeliness
+                // instead of being stuck with this attempt's possibly premature/invalid value.
+                recentChainData.invalidateUnconfirmedBlockTimeliness(block);
                 switch (result.getFailureReason()) {
                   case UNKNOWN_PARENT -> {
                     // Add to the pending pool so it is triggered once the parent is imported

@@ -56,9 +56,29 @@ class BlockTimelinessTrackerTest {
   }
 
   @Test
-  void shouldKeepFirstTimelyObservation() {
+  void shouldRefreshUnconfirmedObservationWithLaterArrival() {
+    // A block observation isn't confirmed until the block is actually, successfully imported, so
+    // a later observation (e.g. from a later import attempt) refreshes an earlier one rather than
+    // being stuck with it - this stops a premature or ultimately unsuccessful first arrival from
+    // permanently pinning an incorrect timeliness value.
     tracker.setBlockTimelinessFromArrivalTime(
         signedBlockAndState.getBlock(), computeTime(slot, 500));
+    tracker.setBlockTimelinessFromArrivalTime(
+        signedBlockAndState.getBlock(), computeTime(slot, 3000));
+
+    assertThat(tracker.getBlockTimeliness(signedBlockAndState.getRoot()))
+        .isPresent()
+        .hasValueSatisfying(timeliness -> assertThat(timeliness.isTimelyAttestation()).isFalse());
+  }
+
+  @Test
+  void shouldKeepConfirmedObservationEvenAfterLaterArrival() {
+    tracker.setBlockTimelinessFromArrivalTime(
+        signedBlockAndState.getBlock(), computeTime(slot, 500));
+    tracker.confirmBlockTimeliness(signedBlockAndState.getBlock(), computeTime(slot, 500));
+
+    // Once confirmed (i.e. the block was successfully imported), the recording is final and a
+    // later, unrelated arrival observation must not be able to change it.
     tracker.setBlockTimelinessFromArrivalTime(
         signedBlockAndState.getBlock(), computeTime(slot, 3000));
 
@@ -68,15 +88,83 @@ class BlockTimelinessTrackerTest {
   }
 
   @Test
-  void shouldKeepFirstLateObservation() {
-    tracker.setBlockTimelinessFromArrivalTime(
-        signedBlockAndState.getBlock(), computeTime(slot, 2100));
+  void confirmBlockTimelinessShouldPromoteExistingUnconfirmedObservation() {
     tracker.setBlockTimelinessFromArrivalTime(
         signedBlockAndState.getBlock(), computeTime(slot, 500));
 
+    tracker.confirmBlockTimeliness(signedBlockAndState.getBlock(), computeTime(slot, 3000));
+
+    // The unconfirmed (timely) observation is promoted as-is; the fallback time passed to
+    // confirmBlockTimeliness is ignored since an observation was already present.
     assertThat(tracker.getBlockTimeliness(signedBlockAndState.getRoot()))
         .isPresent()
-        .hasValueSatisfying(timeliness -> assertThat(timeliness.isTimelyAttestation()).isFalse());
+        .hasValueSatisfying(timeliness -> assertThat(timeliness.isTimelyAttestation()).isTrue());
+  }
+
+  @Test
+  void confirmBlockTimelinessShouldComputeFreshWhenNoPriorObservationExists() {
+    // e.g. a block imported directly via RPC with no prior gossip arrival ever recorded.
+    tracker.confirmBlockTimeliness(signedBlockAndState.getBlock(), computeTime(slot, 500));
+
+    assertThat(tracker.getBlockTimeliness(signedBlockAndState.getRoot()))
+        .isPresent()
+        .hasValueSatisfying(timeliness -> assertThat(timeliness.isTimelyAttestation()).isTrue());
+  }
+
+  @Test
+  void invalidateUnconfirmedTimelinessShouldDiscardUnconfirmedObservation() {
+    tracker.setBlockTimelinessFromArrivalTime(
+        signedBlockAndState.getBlock(), computeTime(slot, 500));
+
+    tracker.invalidateUnconfirmedTimeliness(signedBlockAndState.getRoot());
+
+    assertThat(tracker.getBlockTimeliness(signedBlockAndState.getRoot())).isEmpty();
+  }
+
+  @Test
+  void invalidateUnconfirmedTimelinessShouldNotDiscardConfirmedObservation() {
+    tracker.setBlockTimelinessFromArrivalTime(
+        signedBlockAndState.getBlock(), computeTime(slot, 500));
+    tracker.confirmBlockTimeliness(signedBlockAndState.getBlock(), computeTime(slot, 500));
+
+    tracker.invalidateUnconfirmedTimeliness(signedBlockAndState.getRoot());
+
+    assertThat(tracker.getBlockTimeliness(signedBlockAndState.getRoot()))
+        .isPresent()
+        .hasValueSatisfying(timeliness -> assertThat(timeliness.isTimelyAttestation()).isTrue());
+  }
+
+  @Test
+  void invalidateThenRetryShouldAllowFreshTimelinessToBeRecorded() {
+    // Simulates a block gossiped prematurely (e.g. just before its slot, within clock disparity
+    // tolerance), deferred, and then later retried once its slot has genuinely started.
+    tracker.setBlockTimelinessFromArrivalTime(
+        signedBlockAndState.getBlock(), computeTime(slot, 2100));
+    tracker.invalidateUnconfirmedTimeliness(signedBlockAndState.getRoot());
+
+    // The retried attempt records a fresh, timely observation instead of being stuck with the
+    // stale, late-looking premature one.
+    tracker.setBlockTimelinessFromArrivalTime(
+        signedBlockAndState.getBlock(), computeTime(slot, 500));
+    tracker.confirmBlockTimeliness(signedBlockAndState.getBlock(), computeTime(slot, 500));
+
+    assertThat(tracker.getBlockTimeliness(signedBlockAndState.getRoot()))
+        .isPresent()
+        .hasValueSatisfying(timeliness -> assertThat(timeliness.isTimelyAttestation()).isTrue());
+  }
+
+  @Test
+  void setBlockTimelinessIfAbsentShouldNotOverwriteExistingConfirmedObservation() {
+    tracker.setBlockTimelinessFromArrivalTime(
+        signedBlockAndState.getBlock(), computeTime(slot, 500));
+    tracker.confirmBlockTimeliness(signedBlockAndState.getBlock(), computeTime(slot, 500));
+
+    tracker.setBlockTimelinessFromArrivalTime(
+        signedBlockAndState.getBlock(), computeTime(slot, 3000));
+
+    assertThat(tracker.getBlockTimeliness(signedBlockAndState.getRoot()))
+        .isPresent()
+        .hasValueSatisfying(timeliness -> assertThat(timeliness.isTimelyAttestation()).isTrue());
   }
 
   @Test

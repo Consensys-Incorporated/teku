@@ -541,6 +541,7 @@ def slashingProtectionInterchangeRefTestBaseUrl = 'https://github.com/eth-client
 def refTestDownloadDir = "${buildDir}/refTests/${refTestVersion}"
 def blsRefTestDownloadDir = "${buildDir}/blsRefTests/${blsRefTestVersion}"
 def slashingProtectionInterchangeRefTestDownloadDir = "${buildDir}/slashingProtectionInterchangeRefTests/${slashingProtectionInterchangeRefTestVersion}"
+def compTestDownloadDir = "${buildDir}/compRefTests/${refTestVersion}"
 def refTestExpandDir = "${project.rootDir}/eth-reference-tests/src/referenceTest/resources/consensus-spec-tests/"
 
 def downloadFile(String url, String token, File outputFile) {
@@ -657,8 +658,19 @@ tasks.register('downloadSlashingProtectionInterchangeRefTests', Download) {
 	overwrite false
 }
 
+// comptests.tar.gz is only published alongside tagged consensus-specs releases (not the nightly
+// vector-generation workflow), so it is skipped for nightly builds.
+tasks.register('downloadCompTests', Download) {
+	onlyIf { !nightly }
+	src([
+		"${refTestBaseUrl}/${refTestVersion}/comptests.tar.gz"
+	])
+	dest "${compTestDownloadDir}/comptests.tar.gz"
+	overwrite false
+}
+
 tasks.register('downloadRefTests') {
-	dependsOn downloadEthRefTests, downloadBlsRefTests, downloadSlashingProtectionInterchangeRefTests
+	dependsOn downloadEthRefTests, downloadBlsRefTests, downloadSlashingProtectionInterchangeRefTests, downloadCompTests
 }
 
 tasks.register('cleanRefTestsGeneral', Delete) {
@@ -719,11 +731,31 @@ tasks.register('expandRefTestsSlashingProtectionInterchange', Copy) {
 	into "${refTestExpandDir}/tests/slashing-protection-interchange"
 }
 
+// comptests.tar.gz bundles the whole consensus-specs tests/ tree (pyspec source included, not
+// just vectors), so only the fork_choice_compliance subtree is extracted here rather than the
+// full ~3GB archive.
+tasks.register('cleanRefTestsForkChoiceCompliance', Delete) {
+	delete fileTree(refTestExpandDir) {
+		include "tests/**/fork_choice_compliance/**"
+	}
+}
+
+tasks.register('expandRefTestsForkChoiceCompliance', Copy) {
+	dependsOn cleanRefTestsForkChoiceCompliance, downloadCompTests
+	onlyIf { !nightly }
+	from {
+		tarTree("${compTestDownloadDir}/comptests.tar.gz").matching {
+			include "tests/**/fork_choice_compliance/**"
+		}
+	}
+	into refTestExpandDir
+}
+
 tasks.register('expandRefTests') {
-	dependsOn expandRefTestsGeneral, expandRefTestsMainnet, expandRefTestsMinimal, expandRefTestsBls, expandRefTestsSlashingProtectionInterchange
+	dependsOn expandRefTestsGeneral, expandRefTestsMainnet, expandRefTestsMinimal, expandRefTestsBls, expandRefTestsSlashingProtectionInterchange, expandRefTestsForkChoiceCompliance
 }
 tasks.register('cleanRefTests') {
-	dependsOn cleanRefTestsGeneral, cleanRefTestsMainnet, cleanRefTestsMinimal, cleanRefTestsBls, cleanRefTestsSlashingProtectionInterchange
+	dependsOn cleanRefTestsGeneral, cleanRefTestsMainnet, cleanRefTestsMinimal, cleanRefTestsBls, cleanRefTestsSlashingProtectionInterchange, cleanRefTestsForkChoiceCompliance
 }
 
 tasks.register('deploy') {}

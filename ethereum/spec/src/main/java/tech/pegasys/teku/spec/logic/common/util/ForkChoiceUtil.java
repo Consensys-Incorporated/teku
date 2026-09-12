@@ -28,6 +28,7 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.config.SpecConfigAltair;
 import tech.pegasys.teku.spec.config.SpecConfigBellatrix;
+import tech.pegasys.teku.spec.datastructures.attestation.AttestationSource;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
@@ -536,13 +537,15 @@ public class ForkChoiceUtil {
     UInt64 currentEpoch = miscHelpers.computeEpochAtSlot(getCurrentSlot(store));
     final ReadOnlyForkChoiceStrategy forkChoiceStrategy = store.getForkChoiceStrategy();
 
-    return validateOnAttestation(forkChoiceStrategy, currentEpoch, attestationData);
+    return validateOnAttestation(
+        forkChoiceStrategy, currentEpoch, attestationData, AttestationSource.GOSSIP);
   }
 
   public AttestationProcessingResult validateOnAttestation(
       final ReadOnlyForkChoiceStrategy forkChoiceStrategy,
       final UInt64 currentEpoch,
-      final AttestationData attestationData) {
+      final AttestationData attestationData,
+      final AttestationSource attestationSource) {
     final Checkpoint target = attestationData.getTarget();
 
     // Use GENESIS_EPOCH for previous when genesis to avoid underflow
@@ -551,9 +554,11 @@ public class ForkChoiceUtil {
             ? currentEpoch.minus(UInt64.ONE)
             : SpecConfig.GENESIS_EPOCH;
 
-    if (!target.getEpoch().equals(previousEpoch) && !target.getEpoch().equals(currentEpoch)) {
-      return AttestationProcessingResult.invalid(
-          "Attestations must be from the current or previous epoch");
+    if (attestationSource == AttestationSource.GOSSIP) {
+      if (!target.getEpoch().equals(previousEpoch) && !target.getEpoch().equals(currentEpoch)) {
+        return AttestationProcessingResult.invalid(
+            "Attestations must be from the current or previous epoch");
+      }
     }
 
     if (!target.getEpoch().equals(miscHelpers.computeEpochAtSlot(attestationData.getSlot()))) {
@@ -923,10 +928,10 @@ public class ForkChoiceUtil {
   }
 
   public boolean shouldApplyProposerBoost(
+      final ForkChoiceReorgContext context,
       final Bytes32 proposerBoostRoot,
       final ReadOnlyForkChoiceStrategy forkChoiceStrategy,
-      final UInt64 reorgThreshold,
-      final BeaconState justifiedState) {
+      final UInt64 reorgThreshold) {
     return true;
   }
 
