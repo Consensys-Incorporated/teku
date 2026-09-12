@@ -283,19 +283,42 @@ class FastConfirmationTrackerTest {
   }
 
   @Test
+  void shouldPrefetchNextEpochBalanceSourceOnLastSlotOfEpoch() {
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner();
+    when(store.getFinalizedCheckpoint()).thenReturn(finalizedCheckpoint);
+    // Reconstructing the greatest unrealized justified checkpoint starts from the justified
+    // checkpoint and scans the (empty here) block data.
+    final Checkpoint justified = new Checkpoint(UInt64.valueOf(13), Bytes32.random());
+    when(store.getJustifiedCheckpoint()).thenReturn(justified);
+    when(forkChoice.getBlockData()).thenReturn(List.of());
+    final FastConfirmationTracker tracker =
+        FastConfirmationTracker.create(
+            spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
+    tracker.initialize(store);
+
+    // Slot 15 is the last slot of epoch 1 (minimal SLOTS_PER_EPOCH == 8): the checkpoint that
+    // rotates into the next epoch's current balance source is prefetched.
+    applyUpdate(tracker, asyncRunner, UInt64.valueOf(15), Bytes32.random());
+
+    verify(store).retrieveCheckpointState(justified);
+  }
+
+  @Test
   void shouldNotBlockRunnerWhileSourceStateLoadIsPending() {
     final StubAsyncRunner asyncRunner = new StubAsyncRunner();
     when(store.getFinalizedCheckpoint()).thenReturn(finalizedCheckpoint);
-    // The head-state load hangs; the checkpoint-state loads resolve immediately (empty, from
-    // setUp). A blocking join() on this would monopolize the single-thread runner; composing does
-    // not.
-    final SafeFuture<Optional<BeaconState>> pendingHeadState = new SafeFuture<>();
-    when(store.retrieveBlockState(any(Bytes32.class))).thenReturn(pendingHeadState);
     final FastConfirmationTracker tracker =
         FastConfirmationTracker.create(
             spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
     tracker.initialize(store);
     final Bytes32 headRoot = Bytes32.random();
+    // The pulled-up-head-state load hangs (the head lags the current epoch, so it is fetched as
+    // the (current epoch, head) checkpoint state); the balance-source loads resolve immediately
+    // (empty, from setUp). A blocking join() on this would monopolize the single-thread runner;
+    // composing does not.
+    final SafeFuture<Optional<BeaconState>> pendingHeadState = new SafeFuture<>();
+    when(store.retrieveCheckpointState(new Checkpoint(UInt64.valueOf(2), headRoot)))
+        .thenReturn(pendingHeadState);
 
     // Head block slot 12 (epoch 1); slot 17 is epoch 2 — one epoch behind, so the full rule runs.
     final SafeFuture<Void> result = tracker.onSlot(UInt64.valueOf(17), headRoot);
@@ -321,17 +344,18 @@ class FastConfirmationTrackerTest {
   void shouldCommitRotationButAbandonConfirmationWhenSourceStateLoadFails() {
     final StubAsyncRunner asyncRunner = new StubAsyncRunner();
     when(store.getFinalizedCheckpoint()).thenReturn(finalizedCheckpoint);
-    // The head-state load fails, which takes the same abandon branch as a load timeout. The slot's
-    // rotation must still be committed in order (so the next slot reads correctly rotated FCR
-    // variables), while the confirmation is abandoned: confirmed_root is left unchanged and no
-    // event is emitted for this slot.
-    when(store.retrieveBlockState(any(Bytes32.class)))
-        .thenReturn(SafeFuture.failedFuture(new IllegalStateException("boom")));
     final FastConfirmationTracker tracker =
         FastConfirmationTracker.create(
             spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
     tracker.initialize(store);
     final Bytes32 headRoot = Bytes32.random();
+    // The pulled-up-head-state load fails (the head lags the current epoch, so it is fetched as
+    // the (current epoch, head) checkpoint state), which takes the same abandon branch as a load
+    // timeout. The slot's rotation must still be committed in order (so the next slot reads
+    // correctly rotated FCR variables), while the confirmation is abandoned: confirmed_root is
+    // left unchanged and no event is emitted for this slot.
+    when(store.retrieveCheckpointState(new Checkpoint(UInt64.valueOf(2), headRoot)))
+        .thenReturn(SafeFuture.failedFuture(new IllegalStateException("boom")));
 
     // Head block slot 12 (epoch 1); slot 17 is epoch 2 — one epoch behind, so the full rule runs.
     applyUpdate(tracker, asyncRunner, UInt64.valueOf(17), headRoot);

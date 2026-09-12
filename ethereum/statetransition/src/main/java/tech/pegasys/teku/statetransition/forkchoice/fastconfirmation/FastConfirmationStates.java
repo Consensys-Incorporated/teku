@@ -29,17 +29,15 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
  *   <li>{@code currentBalanceSource} — {@code get_current_balance_source}: {@code
  *       store.checkpoint_states[current_epoch_observed_justified_checkpoint]}, used for
  *       current-epoch weights.
- *   <li>{@code headBlockState} — {@code store.block_states[get_head(store).root]}, the raw head
- *       state. It is the basis for the committee shuffling source in {@code get_slot_committee}
- *       (via {@code get_pulled_up_head_state}) and for current-epoch weights.
+ *   <li>{@code pulledUpHeadState} — {@code get_pulled_up_head_state}: the head state advanced to
+ *       the current epoch start when the head block lags behind, otherwise the head block state
+ *       as-is. The committee shuffling source in {@code get_slot_committee} and the FFG weight
+ *       source. When the head lags, the loader retrieves it through the store's checkpoint-state
+ *       cache (shared with attestation target-state processing) instead of replaying the epoch
+ *       transition on the fast confirmation runner.
  * </ul>
- *
- * <p>The fourth source, {@code get_pulled_up_head_state}, is derived from {@code headBlockState}
- * (by advancing it to the current epoch if it lags), so it is computed downstream rather than
- * loaded. {@code get_slot_committee} shuffles from it so that a head lagging more than one epoch
- * behind does not trip Teku's committee-query staleness guard.
  */
 record FastConfirmationStates(
     Optional<BeaconState> previousBalanceSource,
     BeaconState currentBalanceSource,
-    BeaconState headBlockState) {}
+    BeaconState pulledUpHeadState) {}
