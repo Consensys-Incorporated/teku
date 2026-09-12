@@ -22,6 +22,7 @@ import java.io.EOFException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.infrastructure.exceptions.ExceptionUtil;
+import tech.pegasys.teku.infrastructure.exceptions.FatalErrorHandler;
 import tech.pegasys.teku.infrastructure.http.HttpErrorResponse;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
 
@@ -30,6 +31,9 @@ public class DefaultExceptionHandler<T extends Exception> implements ExceptionHa
 
   @Override
   public void handle(final T throwable, final Context context) {
+    // Requests must not be able to swallow a fatal error and leave the node running
+    FatalErrorHandler.shutdownIfFatalError(throwable, "REST API request");
+
     if (ExceptionUtil.hasCause(throwable, EOFException.class)) {
       LOG.trace("Connection closed before response could be completed.", throwable);
       return;

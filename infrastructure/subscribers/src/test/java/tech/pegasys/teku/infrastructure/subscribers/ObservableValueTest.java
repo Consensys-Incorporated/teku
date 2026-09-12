@@ -20,9 +20,50 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import org.assertj.core.api.Assertions;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.infrastructure.exceptions.ExitConstants;
+import tech.pegasys.teku.infrastructure.exceptions.FatalErrorHandler;
 
 public class ObservableValueTest {
+
+  @AfterEach
+  void restoreFatalErrorHandler() {
+    FatalErrorHandler.restoreDefaultProcessTerminator();
+  }
+
+  // Suppressing exceptions must not hide the node running out of memory
+  @Test
+  public void shouldShutdownWhenASuppressedCallbackFailsFatally() {
+    final List<Integer> exitCodes = new ArrayList<>();
+    FatalErrorHandler.overrideProcessTerminator(
+        (exitCode, gracefulTimeout) -> exitCodes.add(exitCode));
+    final ObservableValue<String> observableValue = new ObservableValue<>(true);
+    observableValue.subscribe(
+        value -> {
+          throw new IllegalStateException("whoops", new OutOfMemoryError());
+        });
+
+    observableValue.set("value");
+
+    Assertions.assertThat(exitCodes).containsExactly(ExitConstants.ERROR_EXIT_CODE);
+  }
+
+  @Test
+  public void shouldNotShutdownWhenASuppressedCallbackFailsWithAnOrdinaryException() {
+    final List<Integer> exitCodes = new ArrayList<>();
+    FatalErrorHandler.overrideProcessTerminator(
+        (exitCode, gracefulTimeout) -> exitCodes.add(exitCode));
+    final ObservableValue<String> observableValue = new ObservableValue<>(true);
+    observableValue.subscribe(
+        value -> {
+          throw new IllegalStateException("whoops");
+        });
+
+    observableValue.set("value");
+
+    Assertions.assertThat(exitCodes).isEmpty();
+  }
 
   @Test
   public void testConcurrentSubscribersNotifications() throws InterruptedException {

@@ -20,6 +20,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import tech.pegasys.teku.infrastructure.exceptions.FatalErrorHandler;
 
 /**
  * Tracks subscribers that should be notified when some event occurred. This class is safe to use
@@ -98,7 +99,10 @@ public class Subscribers<T> {
                 action.accept(subscriber);
               } catch (Throwable throwable) {
                 if (suppressCallbackExceptions) {
-                  LOG.error("Error in callback: ", throwable);
+                  // A fatal error must shut the node down rather than just being logged
+                  if (!FatalErrorHandler.shutdownIfFatalError(throwable, "subscriber callback")) {
+                    LOG.error("Error in callback: ", throwable);
+                  }
                 } else {
                   throw throwable;
                 }

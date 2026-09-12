@@ -20,13 +20,32 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.infrastructure.exceptions.ExitConstants;
+import tech.pegasys.teku.infrastructure.exceptions.FatalErrorHandler;
 
 public class SubscribersTest {
+
   private final Runnable subscriber1 = mock(Runnable.class);
   private final Runnable subscriber2 = mock(Runnable.class);
   private final Subscribers<Runnable> subscribers = Subscribers.create(false);
+  private final List<Integer> exitCodes = new ArrayList<>();
+
+  @BeforeEach
+  void setUpFatalErrorHandler() {
+    FatalErrorHandler.overrideProcessTerminator(
+        (exitCode, gracefulTimeout) -> exitCodes.add(exitCode));
+  }
+
+  @AfterEach
+  void restoreFatalErrorHandler() {
+    FatalErrorHandler.restoreDefaultProcessTerminator();
+  }
 
   @Test
   public void shouldAddSubscriber() {
@@ -85,6 +104,21 @@ public class SubscribersTest {
 
     // No Exception should be thrown
     subscribers.forEach(Runnable::run);
+
+    assertThat(exitCodes).isEmpty();
+  }
+
+  // Suppressing exceptions must not hide the node running out of memory
+  @Test
+  public void suppressCallbackExceptions_shouldStillShutdownOnFatalError() {
+    final Subscribers<Runnable> subscribers = Subscribers.create(true);
+
+    doThrow(new IllegalStateException("whoops", new OutOfMemoryError())).when(subscriber1).run();
+    subscribers.subscribe(subscriber1);
+
+    subscribers.forEach(Runnable::run);
+
+    assertThat(exitCodes).containsExactly(ExitConstants.ERROR_EXIT_CODE);
   }
 
   @SuppressWarnings("unchecked")
