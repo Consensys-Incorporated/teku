@@ -5295,6 +5295,8 @@
   sources:
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/util/ForkChoiceUtil.java
       search: public ForkChoiceNode getProposerHead(
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/fulu/util/ForkChoiceUtilFulu.java
+      search: protected boolean isProposerStable(
   spec: |
     <spec fn="get_proposer_head" fork="fulu" hash="b8612966">
     def get_proposer_head(store: Store, head_node: ForkChoiceNode, slot: Slot) -> ForkChoiceNode:
@@ -7569,8 +7571,8 @@
 
 - name: is_past_slot#gloas
   sources:
-    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/ProposerPreferencesGossipValidator.java
-      search: proposal slot has already started
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/GossipValidationHelper.java
+      search: public boolean hasSlotStarted(
   spec: |
     <spec fn="is_past_slot" fork="gloas" hash="4bd9aba5">
     def is_past_slot(

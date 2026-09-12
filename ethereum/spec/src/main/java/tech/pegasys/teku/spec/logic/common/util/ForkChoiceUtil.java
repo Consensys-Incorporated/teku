@@ -213,20 +213,22 @@ public class ForkChoiceUtil {
     LOG.debug("start getProposerHead");
     final ReadOnlyStore store = context.getStore();
     final boolean isProposerBoostActive = isProposerBoostActive(store, headNode.blockRoot());
-    final boolean isShufflingStableAndForkChoiceOk =
-        isForkChoiceStableAndFinalizationOk(store, slot);
+    final boolean isProposerStable = isProposerStable(slot);
+    final boolean isFinalizationOk = isFinalizationOk(store, slot);
     final boolean isProposingOnTime = isProposingOnTime(store, slot);
     final boolean isHeadLate = isHeadLate(context.getBlockTimeliness(headNode.blockRoot()));
     final Optional<SignedBeaconBlock> maybeHead = store.getBlockIfAvailable(headNode.blockRoot());
     if (!isHeadLate
-        || !isShufflingStableAndForkChoiceOk
+        || !isProposerStable
+        || !isFinalizationOk
         || !isProposingOnTime
         || isProposerBoostActive
         || maybeHead.isEmpty()) {
       LOG.debug(
-          "getProposerHead - return headRoot - isHeadLate {}, isForkChoiceStableAndFinalizationOk {}, isProposingOnTime {}, isProposerBoostActive {}, head.isEmpty {}",
+          "getProposerHead - return headRoot - isHeadLate {}, isProposerStable {}, isFinalizationOk {}, isProposingOnTime {}, isProposerBoostActive {}, head.isEmpty {}",
           isHeadLate,
-          isShufflingStableAndForkChoiceOk,
+          isProposerStable,
+          isFinalizationOk,
           isProposingOnTime,
           isProposerBoostActive,
           maybeHead.isEmpty());
@@ -282,15 +284,19 @@ public class ForkChoiceUtil {
     final SignedBeaconBlock head = maybeHead.orElseThrow();
     final UInt64 currentSlot = getCurrentSlot(store);
     final UInt64 proposalSlot = headSlot.increment();
-    final boolean isShufflingStableAndForkChoiceOk =
-        isForkChoiceStableAndFinalizationOk(store, proposalSlot);
+    // Unlike getProposerHead, this Teku-only optimization keeps the shuffling stability check at
+    // every milestone: preparing a payload on the parent is only a latency win, so it stays
+    // conservative at epoch boundaries.
+    final boolean isShufflingStable = isShufflingStable(proposalSlot);
+    final boolean isFinalizationOk = isFinalizationOk(store, proposalSlot);
     final boolean isFfgCompetitive = isFfgCompetitive(store, headRoot, head.getParentRoot());
     final Optional<UInt64> maybeParentSlot =
         store.getForkChoiceStrategy().blockSlot(head.getParentRoot());
-    if (!isShufflingStableAndForkChoiceOk || !isFfgCompetitive || maybeParentSlot.isEmpty()) {
+    if (!isShufflingStable || !isFinalizationOk || !isFfgCompetitive || maybeParentSlot.isEmpty()) {
       LOG.debug(
-          "shouldOverrideForkChoiceUpdate isShufflingStableAndForkChoiceOk {}, isFfgCompetitive {}, maybeParentSlot {}",
-          isShufflingStableAndForkChoiceOk,
+          "shouldOverrideForkChoiceUpdate isShufflingStable {}, isFinalizationOk {}, isFfgCompetitive {}, maybeParentSlot {}",
+          isShufflingStable,
+          isFinalizationOk,
           isFfgCompetitive,
           maybeParentSlot);
       return false;
@@ -374,8 +380,15 @@ public class ForkChoiceUtil {
     return proposalSlot.equals(head.getSlot().increment());
   }
 
-  boolean isForkChoiceStableAndFinalizationOk(final ReadOnlyStore store, final UInt64 slot) {
-    return isShufflingStable(slot) && isFinalizationOk(store, slot);
+  /**
+   * Whether the proposer for {@code slot} is already fixed, so that re-orging the previous block
+   * cannot change it.
+   *
+   * <p>Before Fulu the proposer is only known to be stable away from an epoch boundary, so this
+   * falls back to {@code is_shuffling_stable}.
+   */
+  protected boolean isProposerStable(final UInt64 slot) {
+    return isShufflingStable(slot);
   }
 
   boolean isProposerBoostActive(final ReadOnlyStore store, final Bytes32 headRoot) {
