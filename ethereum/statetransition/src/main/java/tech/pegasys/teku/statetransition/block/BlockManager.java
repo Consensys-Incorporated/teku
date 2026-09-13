@@ -17,15 +17,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.bls.impl.BlsException;
 import tech.pegasys.teku.ethereum.events.SlotEventsChannel;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.exceptions.ExceptionUtil;
 import tech.pegasys.teku.infrastructure.logging.EventLogger;
+import tech.pegasys.teku.infrastructure.ssz.InvalidValueSchemaException;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
 import tech.pegasys.teku.infrastructure.subscribers.Subscribers;
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -35,6 +37,8 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloa
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadSummary;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
+import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.BlockProcessingException;
+import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.StateTransitionException;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult.FailureReason;
 import tech.pegasys.teku.statetransition.blobs.BlockEventsListener;
@@ -54,6 +58,28 @@ public class BlockManager extends Service
         ReceivedBlockEventsChannel,
         ReceivedExecutionPayloadEventsChannel {
   private static final Logger LOG = LogManager.getLogger();
+
+  /**
+   * An internal error is, by default, not a proof that a block is invalid: it is most likely caused
+   * by a local failure (resource exhaustion, a transient infrastructure issue or a bug). Marking
+   * the block as invalid in those cases makes us reject the canonical chain, along with all its
+   * descendants, until the entry is evicted from the invalid blocks cache.
+   *
+   * <p>So only errors which can exclusively be attributed to the content of the block itself are
+   * considered as a proof of invalidity.
+   */
+  private static final List<Class<? extends Throwable>> INVALID_BLOCK_INTERNAL_ERRORS =
+      List.of(
+          // the state transition rejected the block
+          StateTransitionException.class,
+          BlockProcessingException.class,
+          // the block contains malformed SSZ data or makes the post state violate its schema
+          SszDeserializeException.class,
+          InvalidValueSchemaException.class,
+          // the block contains a malformed BLS public key or signature
+          BlsException.class,
+          // a value in the block caused an overflow or underflow while processing it
+          ArithmeticException.class);
 
   private final RecentChainData recentChainData;
   private final BlockImporter blockImporter;
@@ -380,7 +406,7 @@ public class BlockManager extends Service
                     logFailedBlockImport(block, result.getFailureReason());
                     if (result
                         .getFailureCause()
-                        .map(this::internalErrorToBeConsiderAsInvalidBlock)
+                        .map(BlockManager::internalErrorToBeConsiderAsInvalidBlock)
                         .orElse(false)) {
                       dropInvalidBlock(block, result);
                     }
@@ -447,12 +473,10 @@ public class BlockManager extends Service
     return pendingBlockPool.removeBlocksWaitingForParentExecutionPayload(parentRoot);
   }
 
-  private boolean internalErrorToBeConsiderAsInvalidBlock(final Throwable internalError) {
-    if (internalError instanceof RejectedExecutionException
-        || ExceptionUtil.hasCause(internalError, RejectedExecutionException.class)) {
-      return false;
-    }
-    return true;
+  private static boolean internalErrorToBeConsiderAsInvalidBlock(final Throwable internalError) {
+    // hasCause also checks the exception itself
+    return INVALID_BLOCK_INTERNAL_ERRORS.stream()
+        .anyMatch(errorType -> ExceptionUtil.hasCause(internalError, errorType));
   }
 
   private void logFailedBlockImport(

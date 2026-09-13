@@ -55,12 +55,17 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
+import tech.pegasys.teku.bls.impl.BlsException;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.ExceptionThrowingFutureSupplier;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -70,9 +75,12 @@ import tech.pegasys.teku.infrastructure.collections.LimitedMap;
 import tech.pegasys.teku.infrastructure.logging.EventLogger;
 import tech.pegasys.teku.infrastructure.metrics.SettableLabelledGauge;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
+import tech.pegasys.teku.infrastructure.ssz.InvalidValueSchemaException;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
 import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.kzg.NoOpKZG;
+import tech.pegasys.teku.service.serviceutils.ServiceCapacityExceededException;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
@@ -87,6 +95,8 @@ import tech.pegasys.teku.spec.executionlayer.PayloadStatus;
 import tech.pegasys.teku.spec.generator.ChainBuilder.BlockOptions;
 import tech.pegasys.teku.spec.logic.common.statetransition.availability.AvailabilityChecker;
 import tech.pegasys.teku.spec.logic.common.statetransition.availability.DataAndValidationResult;
+import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.BlockProcessingException;
+import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.StateTransitionException;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult.FailureReason;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
@@ -479,26 +489,46 @@ public class BlockManagerTest {
     assertThat(pendingBlocks.contains(nextNextBlock)).isTrue();
   }
 
-  @Test
-  public void onGossipedBlock_onKnownInternalErrorsShouldNotMarkAsInvalid() {
-    final RecentChainData localRecentChainData = mock(RecentChainData.class);
-    blockManager = setupBlockManagerWithMockRecentChainData(localRecentChainData, false);
+  static Stream<Arguments> internalErrorsNotProvingBlockIsInvalid() {
+    return Stream.of(
+        Arguments.of(new RejectedExecutionException("full")),
+        Arguments.of(new RuntimeException("wrapped", new RejectedExecutionException("full"))),
+        Arguments.of(new OutOfMemoryError("Java heap space")),
+        Arguments.of(new ServiceCapacityExceededException("queue is full")),
+        Arguments.of(new IllegalStateException("unexpected")),
+        Arguments.of(new RuntimeException("unknown")));
+  }
 
-    final UInt64 nextSlot = GENESIS_SLOT.plus(UInt64.ONE);
-    final SignedBeaconBlock nextBlock =
-        localChain.chainBuilder().generateBlockAtSlot(nextSlot).getBlock();
-    incrementSlot();
+  static Stream<Arguments> internalErrorsProvingBlockIsInvalid() {
+    return Stream.of(
+        Arguments.of(new StateTransitionException("state transition failed")),
+        Arguments.of(new BlockProcessingException("block processing failed")),
+        Arguments.of(new SszDeserializeException("malformed ssz")),
+        Arguments.of(new InvalidValueSchemaException("value doesn't match the schema")),
+        Arguments.of(new BlsException("invalid public key")),
+        Arguments.of(new ArithmeticException("uint64 overflow")),
+        Arguments.of(new RuntimeException("wrapped", new BlockProcessingException("invalid"))));
+  }
 
-    doAnswer(invocation -> SafeFuture.failedFuture(new RejectedExecutionException("full")))
-        .when(asyncRunner)
-        .runAsync((ExceptionThrowingFutureSupplier<?>) any());
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("internalErrorsNotProvingBlockIsInvalid")
+  public void onGossipedBlock_onInternalErrorShouldNotMarkAsInvalid(final Throwable internalError) {
+    final SignedBeaconBlock nextBlock = setupBlockFailingImportWith(internalError);
 
     assertThatBlockImport(nextBlock).isCompletedWithValueMatching(result -> !result.isSuccessful());
     assertThat(invalidBlockRoots).isEmpty();
   }
 
-  @Test
-  public void onGossipedBlock_onInternalErrorsShouldMarkAsInvalid() {
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("internalErrorsProvingBlockIsInvalid")
+  public void onGossipedBlock_onInternalErrorShouldMarkAsInvalid(final Throwable internalError) {
+    final SignedBeaconBlock nextBlock = setupBlockFailingImportWith(internalError);
+
+    assertThatBlockImport(nextBlock).isCompletedWithValueMatching(result -> !result.isSuccessful());
+    assertThat(invalidBlockRoots).containsOnlyKeys(nextBlock.getRoot());
+  }
+
+  private SignedBeaconBlock setupBlockFailingImportWith(final Throwable internalError) {
     final RecentChainData localRecentChainData = mock(RecentChainData.class);
     blockManager = setupBlockManagerWithMockRecentChainData(localRecentChainData, false);
 
@@ -507,12 +537,11 @@ public class BlockManagerTest {
         localChain.chainBuilder().generateBlockAtSlot(nextSlot).getBlock();
     incrementSlot();
 
-    doAnswer(invocation -> SafeFuture.failedFuture(new RuntimeException("unknown")))
+    doAnswer(invocation -> SafeFuture.failedFuture(internalError))
         .when(asyncRunner)
         .runAsync((ExceptionThrowingFutureSupplier<?>) any());
 
-    assertThatBlockImport(nextBlock).isCompletedWithValueMatching(result -> !result.isSuccessful());
-    assertThat(invalidBlockRoots).containsOnlyKeys(nextBlock.getRoot());
+    return nextBlock;
   }
 
   @Test
