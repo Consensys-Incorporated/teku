@@ -28,6 +28,16 @@ public interface ForkChoiceReorgContext {
 
   Optional<BlockTimeliness> getBlockTimeliness(Bytes32 root);
 
+  default boolean isProposerEquivocation(
+      final UInt64 slot, final UInt64 proposerIndex, final Bytes32 blockRoot) {
+    return false;
+  }
+
+  default boolean isPtcTimelyProposerEquivocation(
+      final UInt64 slot, final UInt64 proposerIndex, final Bytes32 blockRoot) {
+    return false;
+  }
+
   boolean isValidatorConnected(int validatorIndex, UInt64 slot);
 
   BeaconState processSlots(BeaconState state, UInt64 slot)

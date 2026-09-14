@@ -17,8 +17,11 @@ import static com.google.common.base.Preconditions.checkState;
 
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Predicate;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -34,6 +37,7 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 public class BlockNodeVariantsIndex {
 
   private final Map<Bytes32, BlockNodeVariants> variantsByRoot = new HashMap<>();
+  private final Map<UInt64, Set<Bytes32>> blockRootsBySlot = new HashMap<>();
 
   static BlockNodeVariantsIndex fromProtoArray(final ProtoArray protoArray) {
     final BlockNodeVariantsIndex blockNodeVariantsIndex = new BlockNodeVariantsIndex();
@@ -89,9 +93,16 @@ public class BlockNodeVariantsIndex {
 
   void putBaseNode(
       final Bytes32 blockRoot, final UInt64 slot, final ForkChoiceNode baseNodeIdentity) {
+    Optional.ofNullable(variantsByRoot.get(blockRoot))
+        .ifPresent(variants -> removeBlockRootFromSlot(variants.slot(), blockRoot));
     variantsByRoot.put(
         blockRoot,
         new BlockNodeVariants(slot, baseNodeIdentity, Optional.empty(), Optional.empty()));
+    blockRootsBySlot.computeIfAbsent(slot, __ -> new LinkedHashSet<>()).add(blockRoot);
+  }
+
+  List<Bytes32> getBlockRootsAtSlot(final UInt64 slot) {
+    return List.copyOf(blockRootsBySlot.getOrDefault(slot, Set.of()));
   }
 
   void attachEmptyNode(final Bytes32 blockRoot, final ForkChoiceNode emptyNodeIdentity) {
@@ -119,14 +130,26 @@ public class BlockNodeVariantsIndex {
   }
 
   void remove(final Bytes32 blockRoot) {
-    variantsByRoot.remove(blockRoot);
+    Optional.ofNullable(variantsByRoot.remove(blockRoot))
+        .ifPresent(variants -> removeBlockRootFromSlot(variants.slot(), blockRoot));
   }
 
   void removeIf(final Predicate<Bytes32> removeBlockRoot) {
-    variantsByRoot.keySet().removeIf(removeBlockRoot);
+    variantsByRoot.keySet().stream().filter(removeBlockRoot).toList().forEach(this::remove);
   }
 
   Collection<BlockNodeVariants> variants() {
     return variantsByRoot.values();
+  }
+
+  private void removeBlockRootFromSlot(final UInt64 slot, final Bytes32 blockRoot) {
+    Optional.ofNullable(blockRootsBySlot.get(slot))
+        .ifPresent(
+            roots -> {
+              roots.remove(blockRoot);
+              if (roots.isEmpty()) {
+                blockRootsBySlot.remove(slot);
+              }
+            });
   }
 }

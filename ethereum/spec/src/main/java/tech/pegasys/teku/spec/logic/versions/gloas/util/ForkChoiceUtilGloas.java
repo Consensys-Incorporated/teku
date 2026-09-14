@@ -270,24 +270,20 @@ public class ForkChoiceUtilGloas extends ForkChoiceUtilFulu {
    * If the boosted block's parent was weak and from the previous slot, boost only applies if there
    * are no timely equivocations from the same proposer.
    *
-   * <p>Implementation note: the proposer-equivocation branch is intentionally not implemented yet.
-   * The current code records both block timeliness flags, but it does not yet consume the PTC
-   * timeliness bit here to suppress proposer boost on same-proposer equivocations. Because that
-   * branch is still deferred, the weak-parent check has no effect on the return value and is
-   * intentionally skipped here.
-   *
    * @param proposerBoostRoot the current proposer boost root, empty if none
-   * @param forkChoiceStrategy the fork choice strategy for looking up block data
+   * @param context the runtime context for fork choice and equivocation evidence
    * @param reorgThreshold the threshold for the head weakness check
-   * @param justifiedState unused until the proposer-equivocation branch is implemented
+   * @param justifiedState the state used to calculate fork-choice weights
    * @return true if proposer boost should be applied
    */
   @Override
   public boolean shouldApplyProposerBoost(
       final Bytes32 proposerBoostRoot,
-      final ReadOnlyForkChoiceStrategy forkChoiceStrategy,
+      final ForkChoiceReorgContext context,
       final UInt64 reorgThreshold,
       final BeaconState justifiedState) {
+    final ReadOnlyStore store = context.getStore();
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy = store.getForkChoiceStrategy();
     final Optional<Bytes32> maybeParentRoot = forkChoiceStrategy.blockParentRoot(proposerBoostRoot);
     final Optional<UInt64> maybeBlockSlot = forkChoiceStrategy.blockSlot(proposerBoostRoot);
     if (maybeParentRoot.isEmpty() || maybeBlockSlot.isEmpty()) {
@@ -300,20 +296,20 @@ public class ForkChoiceUtilGloas extends ForkChoiceUtilFulu {
       return true;
     }
     // Apply proposer boost if parent is not from the previous slot
-    if (maybeParentSlot.get().increment().isLessThan(blockSlot)) {
+    if (!maybeParentSlot.get().increment().equals(blockSlot)) {
       return true;
     }
-    // TODO-GLOAS: implement the Gloas equivocation suppression branch from
-    // should_apply_proposer_boost
-    // using recorded PTC timeliness instead of routing a predicate through ForkChoice.
-    // The complication is that we need to have a good interaction with gossip datastructures to
-    // detect equivocations. Spec should probably be updated.
-    // NOTE: there is no point in implementing the following check without implementing
-    // equivocation.
-    // # Apply proposer boost if `parent` is not weak
-    //    if not is_head_weak(store, parent_root):
-    //        return True
-    return true;
+    if (!isHeadWeak(store, parentRoot, reorgThreshold)) {
+      return true;
+    }
+
+    return store
+        .getBlockIfAvailable(parentRoot)
+        .map(
+            parent ->
+                !context.isPtcTimelyProposerEquivocation(
+                    parent.getSlot(), parent.getProposerIndex(), parentRoot))
+        .orElse(true);
   }
 
   /**

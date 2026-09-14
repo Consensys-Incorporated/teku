@@ -14,7 +14,9 @@
 package tech.pegasys.teku.spec.logic.versions.gloas.util;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
@@ -363,10 +365,14 @@ class ForkChoiceUtilGloasTest {
   void shouldApplyProposerBoost_returnsTrue_whenProposerBoostRootIsUnknown() {
     final Bytes32 boostRoot = dataStructureUtil.randomBytes32();
     final ReadOnlyForkChoiceStrategy strategy = mock(ReadOnlyForkChoiceStrategy.class);
+    final ReadOnlyStore store = mock(ReadOnlyStore.class);
+    final ForkChoiceReorgContext context = mock(ForkChoiceReorgContext.class);
+    when(context.getStore()).thenReturn(store);
+    when(store.getForkChoiceStrategy()).thenReturn(strategy);
     when(strategy.blockParentRoot(boostRoot)).thenReturn(Optional.empty());
     assertThat(
             forkChoiceUtil.shouldApplyProposerBoost(
-                boostRoot, strategy, UInt64.valueOf(100), justifiedState))
+                boostRoot, context, UInt64.valueOf(100), justifiedState))
         .isTrue();
   }
 
@@ -375,13 +381,36 @@ class ForkChoiceUtilGloasTest {
     final Bytes32 boostRoot = dataStructureUtil.randomBytes32();
     final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
     final ReadOnlyForkChoiceStrategy strategy = mock(ReadOnlyForkChoiceStrategy.class);
+    final ReadOnlyStore store = mock(ReadOnlyStore.class);
+    final ForkChoiceReorgContext context = mock(ForkChoiceReorgContext.class);
+    when(context.getStore()).thenReturn(store);
+    when(store.getForkChoiceStrategy()).thenReturn(strategy);
     when(strategy.blockParentRoot(boostRoot)).thenReturn(Optional.of(parentRoot));
     when(strategy.blockSlot(boostRoot)).thenReturn(Optional.of(UInt64.valueOf(5)));
     when(strategy.blockSlot(parentRoot)).thenReturn(Optional.of(UInt64.valueOf(3))); // gap > 1
 
     assertThat(
             forkChoiceUtil.shouldApplyProposerBoost(
-                boostRoot, strategy, UInt64.valueOf(100), justifiedState))
+                boostRoot, context, UInt64.valueOf(100), justifiedState))
+        .isTrue();
+  }
+
+  @Test
+  void shouldApplyProposerBoost_returnsTrue_whenParentIsFromSameSlot() {
+    final Bytes32 boostRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
+    final ReadOnlyForkChoiceStrategy strategy = mock(ReadOnlyForkChoiceStrategy.class);
+    final ReadOnlyStore store = mock(ReadOnlyStore.class);
+    final ForkChoiceReorgContext context = mock(ForkChoiceReorgContext.class);
+    when(context.getStore()).thenReturn(store);
+    when(store.getForkChoiceStrategy()).thenReturn(strategy);
+    when(strategy.blockParentRoot(boostRoot)).thenReturn(Optional.of(parentRoot));
+    when(strategy.blockSlot(boostRoot)).thenReturn(Optional.of(gloasSlot));
+    when(strategy.blockSlot(parentRoot)).thenReturn(Optional.of(gloasSlot));
+
+    assertThat(
+            forkChoiceUtil.shouldApplyProposerBoost(
+                boostRoot, context, UInt64.valueOf(100), justifiedState))
         .isTrue();
   }
 
@@ -390,29 +419,70 @@ class ForkChoiceUtilGloasTest {
     final Bytes32 boostRoot = dataStructureUtil.randomBytes32();
     final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
     final ReadOnlyForkChoiceStrategy strategy = mock(ReadOnlyForkChoiceStrategy.class);
+    final ReadOnlyStore store = mock(ReadOnlyStore.class);
+    final ForkChoiceReorgContext context = mock(ForkChoiceReorgContext.class);
+    final ForkChoiceUtilGloas forkChoiceUtilSpy = spy(forkChoiceUtil);
+    when(context.getStore()).thenReturn(store);
+    when(store.getForkChoiceStrategy()).thenReturn(strategy);
     when(strategy.blockParentRoot(boostRoot)).thenReturn(Optional.of(parentRoot));
     when(strategy.blockSlot(boostRoot)).thenReturn(Optional.of(gloasSlot.plus(1)));
     when(strategy.blockSlot(parentRoot)).thenReturn(Optional.of(gloasSlot)); // consecutive
-    // The weak-parent branch is currently deferred together with proposer equivocation handling.
+    doReturn(false).when(forkChoiceUtilSpy).isHeadWeak(store, parentRoot, UInt64.ZERO);
     assertThat(
-            forkChoiceUtil.shouldApplyProposerBoost(
-                boostRoot, strategy, UInt64.ZERO, justifiedState))
+            forkChoiceUtilSpy.shouldApplyProposerBoost(
+                boostRoot, context, UInt64.ZERO, justifiedState))
         .isTrue();
   }
 
   @Test
-  void shouldApplyProposerBoost_returnsTrue_whenParentIsWeakAndEquivocationBranchIsDeferred() {
+  void shouldApplyProposerBoost_returnsTrue_whenParentIsWeakWithoutPtcTimelyEquivocation() {
     final Bytes32 boostRoot = dataStructureUtil.randomBytes32();
     final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
     final ReadOnlyForkChoiceStrategy strategy = mock(ReadOnlyForkChoiceStrategy.class);
+    final ReadOnlyStore store = mock(ReadOnlyStore.class);
+    final ForkChoiceReorgContext context = mock(ForkChoiceReorgContext.class);
+    final ForkChoiceUtilGloas forkChoiceUtilSpy = spy(forkChoiceUtil);
+    final SignedBeaconBlock parent = mock(SignedBeaconBlock.class);
+    when(context.getStore()).thenReturn(store);
+    when(store.getForkChoiceStrategy()).thenReturn(strategy);
     when(strategy.blockParentRoot(boostRoot)).thenReturn(Optional.of(parentRoot));
     when(strategy.blockSlot(boostRoot)).thenReturn(Optional.of(gloasSlot.plus(1)));
     when(strategy.blockSlot(parentRoot)).thenReturn(Optional.of(gloasSlot)); // consecutive
-    // The equivocation suppression branch is intentionally not implemented yet.
+    when(store.getBlockIfAvailable(parentRoot)).thenReturn(Optional.of(parent));
+    when(parent.getSlot()).thenReturn(gloasSlot);
+    when(parent.getProposerIndex()).thenReturn(UInt64.ONE);
+    doReturn(true).when(forkChoiceUtilSpy).isHeadWeak(store, parentRoot, UInt64.valueOf(100));
     assertThat(
-            forkChoiceUtil.shouldApplyProposerBoost(
-                boostRoot, strategy, UInt64.valueOf(100), justifiedState))
+            forkChoiceUtilSpy.shouldApplyProposerBoost(
+                boostRoot, context, UInt64.valueOf(100), justifiedState))
         .isTrue();
+  }
+
+  @Test
+  void shouldApplyProposerBoost_returnsFalse_whenParentIsWeakWithPtcTimelyEquivocation() {
+    final Bytes32 boostRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
+    final ReadOnlyForkChoiceStrategy strategy = mock(ReadOnlyForkChoiceStrategy.class);
+    final ReadOnlyStore store = mock(ReadOnlyStore.class);
+    final ForkChoiceReorgContext context = mock(ForkChoiceReorgContext.class);
+    final ForkChoiceUtilGloas forkChoiceUtilSpy = spy(forkChoiceUtil);
+    final SignedBeaconBlock parent = mock(SignedBeaconBlock.class);
+    when(context.getStore()).thenReturn(store);
+    when(store.getForkChoiceStrategy()).thenReturn(strategy);
+    when(strategy.blockParentRoot(boostRoot)).thenReturn(Optional.of(parentRoot));
+    when(strategy.blockSlot(boostRoot)).thenReturn(Optional.of(gloasSlot.plus(1)));
+    when(strategy.blockSlot(parentRoot)).thenReturn(Optional.of(gloasSlot));
+    when(store.getBlockIfAvailable(parentRoot)).thenReturn(Optional.of(parent));
+    when(parent.getSlot()).thenReturn(gloasSlot);
+    when(parent.getProposerIndex()).thenReturn(UInt64.ONE);
+    when(context.isPtcTimelyProposerEquivocation(gloasSlot, UInt64.ONE, parentRoot))
+        .thenReturn(true);
+    doReturn(true).when(forkChoiceUtilSpy).isHeadWeak(store, parentRoot, UInt64.valueOf(100));
+
+    assertThat(
+            forkChoiceUtilSpy.shouldApplyProposerBoost(
+                boostRoot, context, UInt64.valueOf(100), justifiedState))
+        .isFalse();
   }
 
   @Test

@@ -23,8 +23,10 @@ import static tech.pegasys.teku.statetransition.validation.InternalValidationRes
 import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.ValidationResultSubCode.IGNORE_ALREADY_SEEN;
 import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.ValidationResultSubCode.IGNORE_EQUIVOCATION_DETECTED;
 
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
@@ -54,23 +56,30 @@ import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
+import tech.pegasys.teku.storage.client.ProposerEquivocationTracker;
 
 public class BlockGossipValidator {
   private static final Logger LOG = LogManager.getLogger();
+  private static final int MAX_EQUIVOCATION_SIGNATURE_ATTEMPTS = 2;
   private final Spec spec;
   private final GossipValidationHelper gossipValidationHelper;
   private final ReceivedBlockEventsChannel receivedBlockEventsChannelPublisher;
+  private final ProposerEquivocationTracker proposerEquivocationTracker;
   private final SigningRootUtil signingRootUtil;
   private final Map<SlotAndProposer, Bytes32> receivedValidBlockRoots =
+      LimitedMap.createNonSynchronized(VALID_BLOCK_SET_SIZE);
+  private final Map<SlotAndProposer, Set<Bytes32>> attemptedEquivocationRoots =
       LimitedMap.createNonSynchronized(VALID_BLOCK_SET_SIZE);
 
   public BlockGossipValidator(
       final Spec spec,
       final GossipValidationHelper gossipValidationHelper,
-      final ReceivedBlockEventsChannel receivedBlockEventsChannelPublisher) {
+      final ReceivedBlockEventsChannel receivedBlockEventsChannelPublisher,
+      final ProposerEquivocationTracker proposerEquivocationTracker) {
     this.spec = spec;
     this.gossipValidationHelper = gossipValidationHelper;
     this.receivedBlockEventsChannelPublisher = receivedBlockEventsChannelPublisher;
+    this.proposerEquivocationTracker = proposerEquivocationTracker;
     signingRootUtil = new SigningRootUtil(spec);
   }
 
@@ -104,16 +113,6 @@ public class BlockGossipValidator {
     if (gossipValidationHelper.isSlotFinalized(block.getSlot())) {
       LOG.trace("BlockValidator: Block slot {} is finalized. Dropping.", block.getSlot());
       return completedFuture(InternalValidationResult.IGNORE);
-    }
-
-    // Intermediate equivocation check without marking the block as received to avoid rejecting
-    // other blocks that could still come from gossip
-    final InternalValidationResult intermediateValidationResult =
-        equivocationCheckResultToInternalValidationResult(
-            performBlockEquivocationCheck(false, block));
-
-    if (!intermediateValidationResult.isAccept()) {
-      return completedFuture(intermediateValidationResult);
     }
 
     /*
@@ -291,11 +290,24 @@ public class BlockGossipValidator {
       }
     }
 
+    final EquivocationCheckResult preliminaryEquivocationCheckResult =
+        performBlockEquivocationCheck(false, block);
+    if (preliminaryEquivocationCheckResult == BLOCK_ALREADY_SEEN_FOR_SLOT_PROPOSER) {
+      return equivocationCheckResultToInternalValidationResult(preliminaryEquivocationCheckResult);
+    }
+    if (preliminaryEquivocationCheckResult == EQUIVOCATING_BLOCK_FOR_SLOT_PROPOSER
+        && (!markAsReceived || !reserveEquivocationSignatureAttempt(block))) {
+      return equivocationCheckResultToInternalValidationResult(preliminaryEquivocationCheckResult);
+    }
+
     /*
      * [REJECT] The proposer signature, signed_beacon_block.signature, is valid with respect to the proposer_index pubkey.
      */
     if (!blockSignatureIsValidWithRespectToProposerIndex(block, parentState)) {
       return reject("Block signature is invalid");
+    }
+    if (markAsReceived) {
+      proposerEquivocationTracker.onBlockValidated(block);
     }
     final EquivocationCheckResult secondEquivocationCheckResult =
         performBlockEquivocationCheck(markAsReceived, block);
@@ -518,6 +530,18 @@ public class BlockGossipValidator {
               }
               return FIRST_BLOCK_FOR_SLOT_PROPOSER;
             });
+  }
+
+  private synchronized boolean reserveEquivocationSignatureAttempt(final SignedBeaconBlock block) {
+    final Set<Bytes32> attemptedRoots =
+        attemptedEquivocationRoots.computeIfAbsent(
+            new SlotAndProposer(block), __ -> new LinkedHashSet<>());
+    if (attemptedRoots.contains(block.getRoot())
+        || attemptedRoots.size() >= MAX_EQUIVOCATION_SIGNATURE_ATTEMPTS) {
+      return false;
+    }
+    attemptedRoots.add(block.getRoot());
+    return true;
   }
 
   public enum EquivocationCheckResult {

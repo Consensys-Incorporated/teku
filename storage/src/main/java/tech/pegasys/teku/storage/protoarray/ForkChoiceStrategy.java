@@ -721,13 +721,7 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
   public List<Bytes32> getBlockRootsAtSlot(final UInt64 slot) {
     protoArrayLock.readLock().lock();
     try {
-      final List<Bytes32> blockRoots = new ArrayList<>();
-      for (final ProtoNode node : protoArray.getNodes()) {
-        if (node.getBlockSlot().equals(slot) && isBaseNode(node)) {
-          blockRoots.add(node.getBlockRoot());
-        }
-      }
-      return blockRoots;
+      return blockNodeIndex.getBlockRootsAtSlot(slot);
     } finally {
       protoArrayLock.readLock().unlock();
     }

@@ -513,6 +513,21 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
     final List<UInt64> justifiedEffectiveBalances =
         spec.getBeaconStateUtil(justifiedState.getSlot())
             .getEffectiveActiveUnslashedBalances(justifiedState);
+    final UInt64 currentSlot = recentChainData.getCurrentSlot().orElseThrow();
+    final Optional<Bytes32> proposerBoostRoot = recentChainData.getStore().getProposerBoostRoot();
+    final ForkChoiceUtil forkChoiceUtil = spec.atSlot(currentSlot).getForkChoiceUtil();
+    final boolean shouldApplyProposerBoost =
+        proposerBoostRoot
+            .map(
+                root ->
+                    forkChoiceUtil.shouldApplyProposerBoost(
+                        root,
+                        recentChainData,
+                        recentChainData.getStore().getReorgThreshold(),
+                        justifiedState))
+            .orElse(true);
+    final UInt64 proposerBoostAmount =
+        shouldApplyProposerBoost ? spec.getProposerBoostAmount(justifiedState) : UInt64.ZERO;
 
     // If a runtime exception occurs while updating protoarray, we could skip the transaction
     // commit.
@@ -521,13 +536,13 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
     // update to protoarray, so it is correct to skip the transaction commit.
     final SlotAndForkChoiceNode headNode =
         transaction.applyForkChoiceScoreChanges(
-            recentChainData.getCurrentSlot().orElseThrow(),
+            currentSlot,
             recentChainData.getCurrentEpoch().orElseThrow(),
             finalizedCheckpoint,
             justifiedCheckpoint,
             justifiedEffectiveBalances,
-            recentChainData.getStore().getProposerBoostRoot(),
-            spec.getProposerBoostAmount(justifiedState));
+            proposerBoostRoot,
+            proposerBoostAmount);
 
     try {
       recentChainData.updateHead(headNode.node(), nodeSlot.orElse(headNode.slot()));

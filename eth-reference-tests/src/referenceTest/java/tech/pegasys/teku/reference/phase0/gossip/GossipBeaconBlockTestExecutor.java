@@ -204,7 +204,8 @@ public class GossipBeaconBlockTestExecutor implements TestExecutor {
               @Override
               public void onBlockImported(
                   final SignedBeaconBlock block, final boolean executionOptimistic) {}
-            });
+            },
+            recentChainData.getProposerEquivocationTracker());
 
     for (final GossipBeaconBlockMetaData.Message message : metaData.getMessages()) {
       // Advance clock to message arrival time

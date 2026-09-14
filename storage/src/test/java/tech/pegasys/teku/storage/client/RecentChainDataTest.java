@@ -43,6 +43,7 @@ import tech.pegasys.teku.spec.config.BlobScheduleEntry;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
+import tech.pegasys.teku.spec.datastructures.blocks.Eth1Data;
 import tech.pegasys.teku.spec.datastructures.blocks.MinimalBeaconBlockSummary;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
@@ -754,6 +755,30 @@ class RecentChainDataTest {
     final SignedBlockAndState block = advanceChain(recentChainData);
     assertThat(recentChainData.getStore().retrieveBlockAndState(block.getRoot()))
         .isCompletedWithValue(Optional.of(block));
+  }
+
+  @Test
+  void detectsProposerEquivocationFromImportedForkChoiceBlocks() {
+    initPostGenesis();
+    advanceChain(recentChainData);
+    final ChainBuilder forkBuilder = chainBuilder.fork();
+    final SignedBlockAndState canonicalBlock = chainBuilder.generateNextBlock();
+    final SignedBlockAndState conflictingBlock =
+        forkBuilder.generateBlockAtSlot(
+            canonicalBlock.getSlot(),
+            BlockOptions.create()
+                .setEth1Data(new Eth1Data(Bytes32.ZERO, UInt64.ONE, Bytes32.ZERO)));
+    saveBlock(recentChainData, canonicalBlock);
+    saveBlock(recentChainData, conflictingBlock);
+
+    assertThat(conflictingBlock.getRoot()).isNotEqualTo(canonicalBlock.getRoot());
+    assertThat(conflictingBlock.getProposerIndex()).isEqualTo(canonicalBlock.getProposerIndex());
+    assertThat(
+            recentChainData.isProposerEquivocation(
+                canonicalBlock.getSlot(),
+                canonicalBlock.getProposerIndex(),
+                canonicalBlock.getRoot()))
+        .isTrue();
   }
 
   @Test

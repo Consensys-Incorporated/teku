@@ -151,7 +151,8 @@ public class SyncingNodeManager {
         new BlockGossipValidator(
             spec,
             new GossipValidationHelper(spec, recentChainData, metricsSystem),
-            receivedBlockEventsChannelPublisher);
+            receivedBlockEventsChannelPublisher,
+            recentChainData.getProposerEquivocationTracker());
     final BlockValidator blockValidator = new BlockValidator(blockGossipValidator);
 
     final TimeProvider timeProvider = new SystemTimeProvider();

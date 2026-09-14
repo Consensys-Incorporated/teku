@@ -103,4 +103,25 @@ class BlockNodeVariantsIndexTest {
     assertThat(rebuiltIndex.getEmptyNode(blockRoot)).contains(emptyNode);
     assertThat(rebuiltIndex.getFullNode(blockRoot)).contains(fullNode);
   }
+
+  @Test
+  void indexesBaseBlockRootsBySlotWithoutDuplicatingPayloadVariants() {
+    final UInt64 slot = UInt64.ONE;
+    final Bytes32 firstRoot = Bytes32.fromHexStringLenient("0x03");
+    final Bytes32 secondRoot = Bytes32.fromHexStringLenient("0x04");
+    final BlockNodeVariantsIndex index = new BlockNodeVariantsIndex();
+
+    index.putBaseNode(firstRoot, slot, ForkChoiceNode.createBase(firstRoot));
+    index.attachEmptyNode(firstRoot, ForkChoiceNode.createEmpty(firstRoot));
+    index.attachFullNode(firstRoot, ForkChoiceNode.createFull(firstRoot));
+    index.putBaseNode(secondRoot, slot, ForkChoiceNode.createBase(secondRoot));
+
+    assertThat(index.getBlockRootsAtSlot(slot)).containsExactly(firstRoot, secondRoot);
+
+    index.remove(firstRoot);
+    assertThat(index.getBlockRootsAtSlot(slot)).containsExactly(secondRoot);
+
+    index.removeIf(root -> root.equals(secondRoot));
+    assertThat(index.getBlockRootsAtSlot(slot)).isEmpty();
+  }
 }
