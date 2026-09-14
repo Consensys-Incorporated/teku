@@ -711,6 +711,47 @@ public class GossipValidationHelperTest {
   }
 
   @TestTemplate
+  void getShufflingDependentRoot_shouldUseAncestorAtDependentSlot() {
+    final UInt64 minSeedLookahead =
+        UInt64.valueOf(spec.getGenesisSpecConfig().getMinSeedLookahead());
+    final UInt64 proposalEpoch = minSeedLookahead.plus(2);
+    final UInt64 proposalSlot = spec.computeStartSlotAtEpoch(proposalEpoch);
+    final UInt64 dependentSlot =
+        spec.computeStartSlotAtEpoch(proposalEpoch.minus(minSeedLookahead)).minus(ONE);
+    final Bytes32 parentBlockRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 dependentRoot = dataStructureUtil.randomBytes32();
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy = mock(ReadOnlyForkChoiceStrategy.class);
+    final RecentChainData recentChainData = mock(RecentChainData.class);
+    when(recentChainData.getForkChoiceStrategy()).thenReturn(Optional.of(forkChoiceStrategy));
+    when(forkChoiceStrategy.getAncestor(parentBlockRoot, dependentSlot))
+        .thenReturn(Optional.of(dependentRoot));
+    final GossipValidationHelper helper =
+        new GossipValidationHelper(spec, recentChainData, storageSystem.getMetricsSystem());
+
+    assertThat(helper.getShufflingDependentRoot(parentBlockRoot, proposalSlot))
+        .contains(dependentRoot);
+  }
+
+  @TestTemplate
+  void getShufflingDependentRoot_shouldUseGenesisSlotDuringSeedLookahead() {
+    final UInt64 minSeedLookahead =
+        UInt64.valueOf(spec.getGenesisSpecConfig().getMinSeedLookahead());
+    final UInt64 proposalSlot = spec.computeStartSlotAtEpoch(minSeedLookahead);
+    final Bytes32 parentBlockRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 genesisRoot = dataStructureUtil.randomBytes32();
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy = mock(ReadOnlyForkChoiceStrategy.class);
+    final RecentChainData recentChainData = mock(RecentChainData.class);
+    when(recentChainData.getForkChoiceStrategy()).thenReturn(Optional.of(forkChoiceStrategy));
+    when(forkChoiceStrategy.getAncestor(parentBlockRoot, ZERO))
+        .thenReturn(Optional.of(genesisRoot));
+    final GossipValidationHelper helper =
+        new GossipValidationHelper(spec, recentChainData, storageSystem.getMetricsSystem());
+
+    assertThat(helper.getShufflingDependentRoot(parentBlockRoot, proposalSlot))
+        .contains(genesisRoot);
+  }
+
+  @TestTemplate
   void isValidBuilder_shouldReturnTrueForActiveBuilder(final SpecContext specContext) {
     specContext.assumeGloasActive();
     final UInt64 finalizedEpoch = UInt64.valueOf(4);

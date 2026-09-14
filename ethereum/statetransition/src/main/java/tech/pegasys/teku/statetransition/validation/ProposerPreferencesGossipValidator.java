@@ -110,12 +110,12 @@ public class ProposerPreferencesGossipValidator {
 
     /*
      * [IGNORE] The signed_proposer_preferences is the first valid message for the tuple
-     * (preferences.dependent_root, preferences.proposal_slot). The validator index is deliberately
+     * (preferences.proposal_slot, preferences.dependent_root). The validator index is deliberately
      * excluded: only one validator can be the proposer for that pair, so keying on it as well would
      * let a peer force full validation of arbitrarily many messages for the same slot.
      */
     final ProposerPreferencesDedupKey dedupKey =
-        new ProposerPreferencesDedupKey(dependentRoot, proposalSlot);
+        new ProposerPreferencesDedupKey(proposalSlot, dependentRoot);
     if (seenProposerPreferences.contains(dedupKey)) {
       return completedFuture(ignoreAlreadySeen(proposerPreferences));
     }
@@ -289,5 +289,5 @@ public class ProposerPreferencesGossipValidator {
     return ignorePreferences(proposerPreferences, "already received");
   }
 
-  private record ProposerPreferencesDedupKey(Bytes32 dependentRoot, UInt64 proposalSlot) {}
+  private record ProposerPreferencesDedupKey(UInt64 proposalSlot, Bytes32 dependentRoot) {}
 }

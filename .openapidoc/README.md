@@ -4,7 +4,7 @@ This directory contains NodeJS project which publishes Teku OpenAPI specificatio
 [`gh-pages`](https://github.com/Consensys/teku/tree/gh-pages) branch via CI job after tests are green.
 See `publishOpenApiSpec` job in `.circleci/config.yml`.
 
-The actual up-to-date generated doc is available at https://consensys.github.io/teku/
+The actual up-to-date generated doc is available at https://docs.teku.consensys.io/reference/rest
 
 ## Procedure
 
