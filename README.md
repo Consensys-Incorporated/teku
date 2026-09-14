@@ -15,7 +15,7 @@ See the [Changelog](https://github.com/Consensys/teku/releases) for details of t
 
 * [Ethereum Beacon Chain specification](https://github.com/ethereum/consensus-specs/blob/master/specs/phase0/beacon-chain.md)
 * [Teku user documentation](https://docs.teku.consensys.io/)
-* [Teku REST API reference documentation](https://consensys.github.io/teku/)
+* [Teku REST API reference documentation](https://docs.teku.consensys.io/reference/rest)
 * [Teku issues](https://github.com/Consensys/teku/issues)
 * [Contribution guidelines](CONTRIBUTING.md)
 * [Teku Changelog](https://github.com/Consensys/teku/releases)

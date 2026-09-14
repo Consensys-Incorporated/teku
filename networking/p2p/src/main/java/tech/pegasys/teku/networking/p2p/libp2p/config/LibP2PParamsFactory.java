@@ -36,10 +36,7 @@ public class LibP2PParamsFactory {
   public static final int MAX_SUBSCRIPTIONS_PER_MESSAGE = 200;
   private static final int MAX_PUBLISHED_MESSAGES = 1000;
   private static final int MAX_TOPICS_PER_PUBLISHED_MESSAGE = 1;
-  private static final int MAX_GRAFT_MESSAGES = 200;
-  private static final int MAX_PRUNE_MESSAGES = 200;
   private static final int MAX_IHAVE_MESSAGE_IDS = 5000;
-  private static final int MAX_IWANT_MESSAGE_IDS = 5000;
   private static final int MAX_IDONTWANT_MESSAGE_IDS = 5000;
 
   public static GossipParams createGossipParams(
@@ -90,13 +87,12 @@ public class LibP2PParamsFactory {
         .maxGossipMessageSize(maxMessageSize(maxPayloadSize))
         .maxPublishedMessages(MAX_PUBLISHED_MESSAGES)
         .maxTopicsPerPublishedMessage(MAX_TOPICS_PER_PUBLISHED_MESSAGE)
-        .maxSubscriptions(MAX_SUBSCRIPTIONS_PER_MESSAGE)
-        .maxGraftMessages(MAX_GRAFT_MESSAGES)
-        .maxPruneMessages(MAX_PRUNE_MESSAGES)
+        // Keeps our outbound subscription batches within what our own
+        // MaxCountTopicSubscriptionFilter accepts inbound.
+        .maxSubscriptionsPerRpc(MAX_SUBSCRIPTIONS_PER_MESSAGE)
         .maxPeersSentInPruneMsg(0)
         .maxPeersAcceptedInPruneMsg(0)
         .maxIHaveLength(MAX_IHAVE_MESSAGE_IDS)
-        .maxIWantMessageIds(MAX_IWANT_MESSAGE_IDS)
         .maxIDontWantMessageIds(MAX_IDONTWANT_MESSAGE_IDS);
   }
 
