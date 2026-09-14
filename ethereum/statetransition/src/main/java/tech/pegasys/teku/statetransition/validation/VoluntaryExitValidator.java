@@ -40,15 +40,20 @@ public class VoluntaryExitValidator implements OperationValidator<SignedVoluntar
 
   private final Spec spec;
   private final RecentChainData recentChainData;
+  private final GossipValidationHelper gossipValidationHelper;
   private final Map<UInt64, UInt64> receivedValidators =
       LimitedMap.createSynchronizedNatural(VALID_VALIDATOR_SET_SIZE);
   private final TimeProvider timeProvider;
 
   public VoluntaryExitValidator(
-      final Spec spec, final RecentChainData recentChainData, final TimeProvider timeProvider) {
+      final Spec spec,
+      final RecentChainData recentChainData,
+      final TimeProvider timeProvider,
+      final GossipValidationHelper gossipValidationHelper) {
     this.spec = spec;
     this.recentChainData = recentChainData;
     this.timeProvider = timeProvider;
+    this.gossipValidationHelper = gossipValidationHelper;
   }
 
   @Override
@@ -62,6 +67,16 @@ public class VoluntaryExitValidator implements OperationValidator<SignedVoluntar
               IGNORE,
               String.format(
                   "Exit is not the first one for validator %s.",
+                  exit.getMessage().getValidatorIndex())));
+    }
+
+    // [IGNORE] The voluntary exit epoch is not in the future
+    if (gossipValidationHelper.isEpochFromFuture(exit.getMessage().getEpoch())) {
+      return SafeFuture.completedFuture(
+          InternalValidationResult.create(
+              IGNORE,
+              String.format(
+                  "Voluntary exit for validator %s is from a future epoch.",
                   exit.getMessage().getValidatorIndex())));
     }
 

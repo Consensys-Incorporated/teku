@@ -14,11 +14,17 @@
 package tech.pegasys.teku.validator.coordinator.publisher;
 
 import java.util.List;
+import java.util.function.Supplier;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockPublishingPerformance;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.gossip.BlobSidecarGossipChannel;
 import tech.pegasys.teku.networking.eth2.gossip.BlockGossipChannel;
+import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.statetransition.blobs.BlockBlobSidecarsTrackersPool;
 import tech.pegasys.teku.statetransition.blobs.RemoteOrigin;
 import tech.pegasys.teku.statetransition.block.BlockImportChannel;
@@ -26,9 +32,12 @@ import tech.pegasys.teku.validator.coordinator.BlockFactory;
 import tech.pegasys.teku.validator.coordinator.DutyMetrics;
 
 public class BlockPublisherDeneb extends BlockPublisherPhase0 {
+  private static final Logger LOG = LogManager.getLogger();
 
-  protected final BlockBlobSidecarsTrackersPool blockBlobSidecarsTrackersPool;
-  protected final BlobSidecarGossipChannel blobSidecarGossipChannel;
+  private final AsyncRunner asyncRunner;
+  private final BlockBlobSidecarsTrackersPool blockBlobSidecarsTrackersPool;
+  private final BlobSidecarGossipChannel blobSidecarGossipChannel;
+  private final boolean gossipBlobsAfterBlock;
 
   public BlockPublisherDeneb(
       final AsyncRunner asyncRunner,
@@ -39,33 +48,60 @@ public class BlockPublisherDeneb extends BlockPublisherPhase0 {
       final BlobSidecarGossipChannel blobSidecarGossipChannel,
       final DutyMetrics dutyMetrics,
       final boolean gossipBlobsAfterBlock) {
-    super(
-        asyncRunner,
-        blockFactory,
-        blockGossipChannel,
-        blockImportChannel,
-        dutyMetrics,
-        gossipBlobsAfterBlock);
+    super(blockFactory, blockGossipChannel, blockImportChannel, dutyMetrics);
+    this.asyncRunner = asyncRunner;
     this.blockBlobSidecarsTrackersPool = blockBlobSidecarsTrackersPool;
     this.blobSidecarGossipChannel = blobSidecarGossipChannel;
+    this.gossipBlobsAfterBlock = gossipBlobsAfterBlock;
   }
 
   @Override
   void importBlobSidecars(
-      final List<BlobSidecar> blobSidecars,
+      final Supplier<List<BlobSidecar>> blobSidecars,
       final BlockPublishingPerformance blockPublishingPerformance) {
-    blobSidecars.forEach(
-        blobSidecar ->
-            blockBlobSidecarsTrackersPool.onNewBlobSidecar(
-                blobSidecar, RemoteOrigin.LOCAL_PROPOSAL));
+    blobSidecars
+        .get()
+        .forEach(
+            blobSidecar ->
+                blockBlobSidecarsTrackersPool.onNewBlobSidecar(
+                    blobSidecar, RemoteOrigin.LOCAL_PROPOSAL));
     blockPublishingPerformance.blobSidecarsImportCompleted();
   }
 
   @Override
+  void importBlobSidecarsAsync(
+      final Supplier<List<BlobSidecar>> blobSidecars,
+      final BlockPublishingPerformance blockPublishingPerformance,
+      final UInt64 slot) {
+    asyncRunner
+        .runAsync(() -> importBlobSidecars(blobSidecars, blockPublishingPerformance))
+        .finish(error -> LOG.error("Failed to import blob sidecars for slot {}", slot, error));
+  }
+
+  @Override
+  void publishBlockAndSidecars(
+      final SignedBeaconBlock block,
+      final Supplier<List<BlobSidecar>> blobSidecars,
+      final Supplier<List<DataColumnSidecar>> dataColumnSidecars,
+      final BlockPublishingPerformance blockPublishingPerformance) {
+    if (gossipBlobsAfterBlock) {
+      publishBlock(block, blockPublishingPerformance)
+          .always(() -> publishBlobSidecars(blobSidecars.get(), blockPublishingPerformance));
+    } else {
+      publishBlock(block, blockPublishingPerformance).finishStackTrace();
+      publishBlobSidecars(blobSidecars.get(), blockPublishingPerformance);
+    }
+  }
+
   void publishBlobSidecars(
       final List<BlobSidecar> blobSidecars,
       final BlockPublishingPerformance blockPublishingPerformance) {
     blockPublishingPerformance.blobSidecarsPublishingInitiated();
     blobSidecarGossipChannel.publishBlobSidecars(blobSidecars).finishStackTrace();
+  }
+
+  @Override
+  String getPublishingType() {
+    return "block and blob sidecars";
   }
 }

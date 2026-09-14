@@ -11,17 +11,9 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package tech.pegasys.teku.spec.constants;
+package tech.pegasys.teku.spec.datastructures.metadata;
 
-public class NetworkConstants {
+import tech.pegasys.teku.infrastructure.bytes.Bytes4;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 
-  public static final int SYNC_COMMITTEE_SUBNET_COUNT = 4;
-  public static final int DEFAULT_SAFE_SLOTS_TO_IMPORT_OPTIMISTICALLY = 128;
-
-  public static final int NODE_ID_BITS = 256;
-
-  // https://github.com/ethereum/consensus-specs/pull/3767
-  public static final int MAX_CONCURRENT_REQUESTS = 2;
-
-  public static final int MAX_REQUEST_LIGHT_CLIENT_UPDATES = 128;
-}
+public record LightClientUpdateWithContext(Bytes4 context, LightClientUpdate update) {}

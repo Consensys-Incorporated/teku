@@ -60,13 +60,13 @@ class ForkChoiceUtilReorgTest {
 
   @ParameterizedTest
   @MethodSource("forkChoiceStabilityCases")
-  void isForkChoiceStableAndFinalizationOkHandlesBoundaryConditions(
+  void isProposerStableAndFinalizationOkHandlesBoundaryConditions(
       final int slot, final boolean expectedResult) {
     final ReorgTestSetup setup = new ReorgTestSetup();
 
     assertThat(
-            setup.baseForkChoiceUtil.isForkChoiceStableAndFinalizationOk(
-                setup.store, UInt64.valueOf(slot)))
+            setup.baseForkChoiceUtil.isProposerStable(UInt64.valueOf(slot))
+                && setup.baseForkChoiceUtil.isFinalizationOk(setup.store, UInt64.valueOf(slot)))
         .isEqualTo(expectedResult);
   }
 

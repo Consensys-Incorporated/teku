@@ -253,7 +253,7 @@ jobs:
   prDistributions:
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-latest-128
+    runs-on: ubuntu-latest-32
     steps:
       - name: Checkout PR head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -386,7 +386,7 @@ jobs:
       gradle_task: test
       src_pattern: "*/src/test/java/*"
       src_root: "src/test/java"
-      runner: "gha-runner-scale-set-ubuntu-24-amd64-large"
+      runner: "ubuntu-latest-128"
       gradle_args: ${{ (inputs.gradle_log_level == 'info' && '--info') || (inputs.gradle_log_level == 'debug' && '--debug') || '' }}
 
   unitTestsResult:
@@ -455,7 +455,7 @@ jobs:
       gradle_task: integrationTest
       src_pattern: "*/src/integration-test/java/*"
       src_root: "src/integration-test/java"
-      runner: "gha-runner-scale-set-ubuntu-24-amd64-large"
+      runner: "ubuntu-latest-128"
       gradle_args: ${{ (inputs.gradle_log_level == 'info' && '--info') || (inputs.gradle_log_level == 'debug' && '--debug') || '' }}
 
   integrationTestsResult:
@@ -520,7 +520,7 @@ jobs:
       gradle_task: propertyTest
       src_pattern: "*/src/property-test/java/*"
       src_root: "src/property-test/java"
-      runner: "gha-runner-scale-set-ubuntu-24-amd64-xl"
+      runner: "ubuntu-latest-128"
       gradle_args: ${{ (inputs.gradle_log_level == 'info' && '--info') || (inputs.gradle_log_level == 'debug' && '--debug') || '' }}
 
   propertyTestsResult:
@@ -639,7 +639,7 @@ jobs:
 
   referenceTestsPrep:
     needs: assemble
-    runs-on: ubuntu-latest-128
+    runs-on: ubuntu-latest-32
     outputs:
       cache-key: ${{ steps.ref-cache-key.outputs.key }}
     steps:
@@ -707,7 +707,7 @@ jobs:
 
   referenceTests:
     needs: referenceTestsPrep
-    runs-on: "gha-runner-scale-set-ubuntu-24-amd64-xxl"
+    runs-on: "ubuntu-latest-128"
     strategy:
       fail-fast: false
       matrix:

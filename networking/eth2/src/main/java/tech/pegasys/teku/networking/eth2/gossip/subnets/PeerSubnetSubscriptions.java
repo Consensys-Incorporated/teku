@@ -79,7 +79,8 @@ public class PeerSubnetSubscriptions {
       final DataColumnSidecarSubnetTopicProvider dataColumnSidecarSubnetTopicProvider,
       final SubnetSubscriptionService dataColumnSidecarSubnetService,
       final int targetSubnetSubscriberCount,
-      final SettableLabelledGauge subnetPeerCountGauge) {
+      final SettableLabelledGauge subnetPeerCountGauge,
+      final SyncCommitteeSubnetPeerCountLogger syncCommitteeSubnetPeerCountLogger) {
     final Map<String, Collection<NodeId>> subscribersByTopic = network.getSubscribersByTopic();
     // Peers without a derivable discovery node id (e.g. non-secp256k1 identities) cannot be mapped
     // to DAS custody columns, so they provide no data column sidecar value and are excluded from
@@ -164,6 +165,8 @@ public class PeerSubnetSubscriptions {
         subnetPeerCountGauge,
         subscriptions,
         dataColumnSidecarSubnetCount);
+    syncCommitteeSubnetPeerCountLogger.onSubscriptionsUpdated(
+        subscriptions, network.getPeerCount());
     return subscriptions;
   }
 

@@ -68,6 +68,7 @@ import tech.pegasys.teku.networking.eth2.gossip.subnets.AttestationSubnetTopicPr
 import tech.pegasys.teku.networking.eth2.gossip.subnets.DataColumnSidecarSubnetTopicProvider;
 import tech.pegasys.teku.networking.eth2.gossip.subnets.NodeIdToDataColumnSidecarSubnetsCalculator;
 import tech.pegasys.teku.networking.eth2.gossip.subnets.PeerSubnetSubscriptions;
+import tech.pegasys.teku.networking.eth2.gossip.subnets.SyncCommitteeSubnetPeerCountLogger;
 import tech.pegasys.teku.networking.eth2.gossip.subnets.SyncCommitteeSubnetTopicProvider;
 import tech.pegasys.teku.networking.eth2.gossip.topics.Eth2GossipTopicFilter;
 import tech.pegasys.teku.networking.eth2.gossip.topics.OperationProcessor;
@@ -390,6 +391,9 @@ public class Eth2P2PNetworkFactory {
                 "subnet_peer_count",
                 "Number of currently connected peers subscribed to each subnet",
                 "subnet");
+        final SyncCommitteeSubnetPeerCountLogger syncCommitteeSubnetPeerCountLogger =
+            new SyncCommitteeSubnetPeerCountLogger(
+                timeProvider, config.getTargetSubnetSubscriberCount());
         final DiscoveryNetwork<?> network =
             DiscoveryNetworkBuilder.create()
                 .metricsSystem(metricsSystem)
@@ -428,7 +432,8 @@ public class Eth2P2PNetworkFactory {
                                 dataColumnSidecarSubnetTopicProvider,
                                 dataColumnSidecarSubnetService,
                                 config.getTargetSubnetSubscriberCount(),
-                                subnetPeerCountGauge),
+                                subnetPeerCountGauge,
+                                syncCommitteeSubnetPeerCountLogger),
                         reputationManager,
                         Collections::shuffle))
                 .discoveryConfig(config.getDiscoveryConfig())

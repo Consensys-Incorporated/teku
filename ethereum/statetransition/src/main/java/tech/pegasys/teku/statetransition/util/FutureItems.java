@@ -74,20 +74,22 @@ public class FutureItems<T> implements SlotEventsChannel {
   }
 
   /**
-   * Add a item to the future items set
+   * Add an item to the future items set.
    *
-   * @param item The item to add
+   * @param item the item to add
+   * @return true if the item was accepted for future processing, even if it was already queued
    */
-  public void add(final T item) {
+  public boolean add(final T item) {
     final UInt64 slot = slotFunction.apply(item);
     if (slot.isGreaterThan(currentSlot.plus(futureSlotTolerance))) {
       // Item is too far in the future
-      return;
+      return false;
     }
 
     LOG.trace("Save future item at slot {} for later import: {}", slot, item);
     queuedFutureItems.computeIfAbsent(slot, key -> createNewSet()).add(item);
     futureItemsCounter.set(size(), type);
+    return true;
   }
 
   /**
