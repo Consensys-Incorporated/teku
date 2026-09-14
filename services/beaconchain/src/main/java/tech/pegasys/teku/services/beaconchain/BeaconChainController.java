@@ -804,7 +804,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
     initStoredLatestCanonicalBlockUpdater();
   }
 
-  private void initKeyValueStore() {
+  protected void initKeyValueStore() {
     keyValueStore =
         new FileKeyValueStore(beaconDataDirectory.resolve(KEY_VALUE_STORE_SUBDIRECTORY));
   }
@@ -965,7 +965,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
     }
   }
 
-  private void initDasSamplerManager() {
+  protected void initDasSamplerManager() {
     if (spec.isMilestoneSupported(SpecMilestone.FULU)) {
       LOG.info("Activated DAS Sampler Manager for Fulu");
       this.dasSamplerManager =
