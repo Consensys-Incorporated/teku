@@ -81,13 +81,6 @@ public class ExecutionPayloadBidGossipValidator {
     final ExecutionPayloadBid bid = signedExecutionPayloadBid.getMessage();
 
     /*
-     * [IGNORE] The bid's slot is within the parent's proposer lookahead
-     */
-    if (!gossipValidationHelper.isWithinProposerLookahead(bid.getSlot())) {
-      return completedFuture(ignoreBid(bid, "proposer for the proposal slot is not yet known"));
-    }
-
-    /*
      * [REJECT] The bid's execution payment is zero
      */
     final UInt64 executionPayment = bid.getExecutionPayment();
@@ -143,6 +136,13 @@ public class ExecutionPayloadBidGossipValidator {
               bid.getParentBlockRoot()));
     }
     final UInt64 parentBlockSlot = maybeParentBlockSlot.get();
+
+    /*
+     * [IGNORE] The bid's slot is within the parent's proposer lookahead
+     */
+    if (!gossipValidationHelper.isWithinParentProposerLookahead(bid.getSlot(), parentBlockSlot)) {
+      return completedFuture(ignoreBid(bid, "bid's slot is past the parent's proposer lookahead"));
+    }
 
     /*
      * [REJECT] The bid is for a higher slot than its parent block

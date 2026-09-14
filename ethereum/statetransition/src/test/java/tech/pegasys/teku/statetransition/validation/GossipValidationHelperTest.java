@@ -174,6 +174,26 @@ public class GossipValidationHelperTest {
   }
 
   @TestTemplate
+  void isWithinParentProposerLookahead_shouldUseParentEpoch() {
+    final UInt64 parentEpoch = UInt64.valueOf(2);
+    final UInt64 parentBlockSlot = spec.computeStartSlotAtEpoch(parentEpoch);
+    final int minSeedLookahead = spec.getSpecConfig(parentEpoch).getMinSeedLookahead();
+    final UInt64 lastAllowedEpoch = parentEpoch.plus(minSeedLookahead);
+    final UInt64 lastAllowedProposalSlot = spec.computeStartSlotAtEpoch(lastAllowedEpoch);
+    final UInt64 outsideLookaheadProposalSlot =
+        spec.computeStartSlotAtEpoch(lastAllowedEpoch.plus(1));
+
+    assertThat(
+            gossipValidationHelper.isWithinParentProposerLookahead(
+                lastAllowedProposalSlot, parentBlockSlot))
+        .isTrue();
+    assertThat(
+            gossipValidationHelper.isWithinParentProposerLookahead(
+                outsideLookaheadProposalSlot, parentBlockSlot))
+        .isFalse();
+  }
+
+  @TestTemplate
   void isEpochFromFuture_shouldComputeCorrectly() {
     final UInt64 epoch2 = UInt64.valueOf(2);
     final UInt64 epoch2StartSlot = spec.computeStartSlotAtEpoch(epoch2);

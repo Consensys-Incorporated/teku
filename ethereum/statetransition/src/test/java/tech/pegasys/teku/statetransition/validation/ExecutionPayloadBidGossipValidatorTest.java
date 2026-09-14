@@ -144,7 +144,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .thenReturn(Optional.of(proposerPreferences));
 
     when(gossipValidationHelper.isSlotCurrentOrNext(slot)).thenReturn(true);
-    when(gossipValidationHelper.isWithinProposerLookahead(any())).thenReturn(true);
+    when(gossipValidationHelper.isWithinParentProposerLookahead(any(), any())).thenReturn(true);
     when(gossipValidationHelper.getShufflingDependentRoot(parentBlockRoot, slot))
         .thenReturn(Optional.of(dependentRoot));
     when(gossipValidationHelper.getGasLimitForExecutionPayload(parentBlockRoot, parentBlockHash))
@@ -207,11 +207,14 @@ public class ExecutionPayloadBidGossipValidatorTest {
   }
 
   @TestTemplate
-  void shouldIgnore_whenProposerForSlotIsNotYetKnown() {
-    when(gossipValidationHelper.isWithinProposerLookahead(slot)).thenReturn(false);
+  void shouldIgnore_whenBidSlotIsPastParentProposerLookahead() {
+    final UInt64 parentBlockSlot = slot.decrement();
+    when(gossipValidationHelper.isWithinParentProposerLookahead(slot, parentBlockSlot))
+        .thenReturn(false);
+
     assertThatSafeFuture(bidValidator.validate(signedBid))
         .isCompletedWithValue(
-            ignoreBid(signedBid, "proposer for the proposal slot is not yet known"));
+            ignoreBid(signedBid, "bid's slot is past the parent's proposer lookahead"));
   }
 
   @TestTemplate

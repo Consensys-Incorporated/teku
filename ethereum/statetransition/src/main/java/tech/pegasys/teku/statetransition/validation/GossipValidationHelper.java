@@ -95,6 +95,15 @@ public class GossipValidationHelper {
     return !isSlotFromFuture(lookaheadEpochStartSlot);
   }
 
+  /** Returns true when the proposal slot is within the parent block's proposer lookahead. */
+  public boolean isWithinParentProposerLookahead(
+      final UInt64 proposalSlot, final UInt64 parentBlockSlot) {
+    final UInt64 proposalEpoch = spec.computeEpochAtSlot(proposalSlot);
+    final UInt64 parentEpoch = spec.computeEpochAtSlot(parentBlockSlot);
+    final int minSeedLookahead = spec.getSpecConfig(proposalEpoch).getMinSeedLookahead();
+    return proposalEpoch.isLessThanOrEqualTo(parentEpoch.plus(minSeedLookahead));
+  }
+
   public boolean isEpochFromFuture(final UInt64 epoch) {
     return isSlotFromFuture(spec.computeStartSlotAtEpoch(epoch));
   }
