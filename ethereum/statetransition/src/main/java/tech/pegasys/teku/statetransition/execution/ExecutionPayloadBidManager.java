@@ -85,6 +85,14 @@ public interface ExecutionPayloadBidManager {
     public UInt64 builderIndex() {
       return bid.getMessage().getBuilderIndex();
     }
+
+    public UInt64 builderBoostFactor(final BuilderConfig builderConfig) {
+      // if Builder API is used, use the configured builder_boost_factor
+      return builderEntry
+          .map(BuilderEntry::getBuilderBoostFactor)
+          // fallback to top-level builder_boost_factor (applies to P2P bids)
+          .orElse(builderConfig.getBuilderBoostFactor());
+    }
   }
 
   // The best bid determined for the block proposal after evaluating local bids, P2P bids, and
