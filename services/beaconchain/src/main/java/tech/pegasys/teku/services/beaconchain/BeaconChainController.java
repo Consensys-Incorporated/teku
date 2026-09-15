@@ -208,6 +208,7 @@ import tech.pegasys.teku.statetransition.datacolumns.retriever.SimpleSidecarRetr
 import tech.pegasys.teku.statetransition.datacolumns.retriever.recovering.SidecarRetriever;
 import tech.pegasys.teku.statetransition.datacolumns.util.SuperNodeSupplier;
 import tech.pegasys.teku.statetransition.execution.BuilderBidFetcher;
+import tech.pegasys.teku.statetransition.execution.BuilderBidValidator;
 import tech.pegasys.teku.statetransition.execution.DefaultExecutionPayloadBidManager;
 import tech.pegasys.teku.statetransition.execution.DefaultExecutionPayloadManager;
 import tech.pegasys.teku.statetransition.execution.DefaultProposerPreferencesManager;
@@ -1027,8 +1028,10 @@ public class BeaconChainController extends Service implements BeaconChainControl
               .create(recentChainData::getForkChoiceStrategy);
       final StakedBuilderClientProvider stakedBuilderClientProvider =
           new StakedBuilderClientProvider(spec, beaconAsyncRunner);
+      final BuilderBidValidator bidValidator =
+          new BuilderBidValidator(spec, proposerPreferencesManager, recentChainData);
       final BuilderBidFetcher builderBidFetcher =
-          new BuilderBidFetcher(spec, stakedBuilderClientProvider);
+          new BuilderBidFetcher(spec, stakedBuilderClientProvider, bidValidator);
       final ExecutionPayloadBidSelector executionPayloadBidSelector =
           new ExecutionPayloadBidSelector(
               beaconConfig.executionLayerConfig().getUseShouldOverrideBuilderFlag(),

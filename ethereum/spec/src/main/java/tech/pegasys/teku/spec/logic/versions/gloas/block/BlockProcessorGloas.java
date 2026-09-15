@@ -22,7 +22,6 @@ import java.util.OptionalInt;
 import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.cache.IndexedAttestationCache;
@@ -293,7 +292,7 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
         throw new BlockProcessingException("Builder doesn't have funds to cover the bid");
       }
       if (!operationSignatureVerifier.verifyExecutionPayloadBidSignature(
-          state, signedBid, BLSSignatureVerifier.SIMPLE)) {
+          state, signedBid, specConfig.getBLSSignatureVerifier())) {
         throw new BlockProcessingException("Signature for the signed bind was invalid");
       }
     }
