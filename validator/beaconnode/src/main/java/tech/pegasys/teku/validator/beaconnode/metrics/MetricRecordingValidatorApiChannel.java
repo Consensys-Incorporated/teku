@@ -48,6 +48,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
@@ -282,6 +283,14 @@ public class MetricRecordingValidatorApiChannel implements ValidatorApiChannel {
     return countSendRequest(
         delegate.sendSignedProposerPreferences(signedProposerPreferences),
         BeaconNodeRequestLabels.SEND_PROPOSER_PREFERENCES_METHOD);
+  }
+
+  @Override
+  public SafeFuture<List<SubmitDataError>> sendBuilderPreferences(
+      final SszList<BuilderPreferencesEntry> builderPreferences) {
+    return countSendRequest(
+        delegate.sendBuilderPreferences(builderPreferences),
+        BeaconNodeRequestLabels.SEND_BUILDER_PREFERENCES_METHOD);
   }
 
   @Override

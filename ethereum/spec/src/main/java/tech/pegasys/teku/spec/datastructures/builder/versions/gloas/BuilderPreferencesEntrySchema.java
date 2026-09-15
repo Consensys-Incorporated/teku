@@ -13,14 +13,11 @@
 
 package tech.pegasys.teku.spec.datastructures.builder.versions.gloas;
 
-import java.util.List;
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.bls.BLSPublicKey;
-import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszByteList;
-import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema6;
+import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema4;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
-import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszPrimitiveSchemas;
 import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszByteListSchema;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
@@ -28,54 +25,34 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.type.SszPublicKey;
 import tech.pegasys.teku.spec.datastructures.type.SszPublicKeySchema;
 
-public class BuilderEntrySchema
-    extends ContainerSchema6<
-        BuilderEntry,
-        SszByteList,
-        SignedBuilderRequestAuth,
-        SszList<SszPublicKey>,
-        SszUInt64,
-        SszUInt64,
-        SszUInt64> {
+public class BuilderPreferencesEntrySchema
+    extends ContainerSchema4<
+        BuilderPreferencesEntry, SszPublicKey, SszByteList, SignedBuilderRequestAuth, SszUInt64> {
 
-  private static final long MAX_BUILDER_PUBKEYS = 64;
-
-  public BuilderEntrySchema(
+  public BuilderPreferencesEntrySchema(
       final long maxBuilderUrlSize, final SignedBuilderRequestAuthSchema authSchema) {
     super(
-        "BuilderEntry",
+        "BuilderPreferencesEntry",
+        namedSchema("proposer_pubkey", SszPublicKeySchema.INSTANCE),
         namedSchema("url", SszByteListSchema.create(maxBuilderUrlSize)),
         namedSchema("auth", authSchema),
-        namedSchema(
-            "builder_pubkeys",
-            SszListSchema.create(SszPublicKeySchema.INSTANCE, MAX_BUILDER_PUBKEYS)),
-        namedSchema("max_execution_payment", SszPrimitiveSchemas.UINT64_SCHEMA),
-        namedSchema("min_bid", SszPrimitiveSchemas.UINT64_SCHEMA),
-        namedSchema("builder_boost_factor", SszPrimitiveSchemas.UINT64_SCHEMA));
+        namedSchema("max_execution_payment", SszPrimitiveSchemas.UINT64_SCHEMA));
   }
 
-  public BuilderEntry create(
+  public BuilderPreferencesEntry create(
+      final BLSPublicKey proposerPubkey,
       final Bytes url,
       final SignedBuilderRequestAuth auth,
-      final List<BLSPublicKey> builderPubkeys,
-      final UInt64 maxExecutionPayment,
-      final UInt64 minBid,
-      final UInt64 builderBoostFactor) {
-    return new BuilderEntry(
-        this, url, auth, builderPubkeys, maxExecutionPayment, minBid, builderBoostFactor);
+      final UInt64 maxExecutionPayment) {
+    return new BuilderPreferencesEntry(this, proposerPubkey, url, auth, maxExecutionPayment);
   }
 
   @Override
-  public BuilderEntry createFromBackingNode(final TreeNode node) {
-    return new BuilderEntry(this, node);
+  public BuilderPreferencesEntry createFromBackingNode(final TreeNode node) {
+    return new BuilderPreferencesEntry(this, node);
   }
 
   public SszByteListSchema<?> getUrlSchema() {
     return (SszByteListSchema<?>) getChildSchema(getFieldIndex("url"));
-  }
-
-  @SuppressWarnings("unchecked")
-  public SszListSchema<SszPublicKey, ?> getBuilderPubkeysSchema() {
-    return (SszListSchema<SszPublicKey, ?>) getChildSchema(getFieldIndex("builder_pubkeys"));
   }
 }

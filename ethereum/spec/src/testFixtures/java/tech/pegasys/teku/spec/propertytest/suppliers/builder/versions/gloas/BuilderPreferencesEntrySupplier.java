@@ -11,11 +11,16 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package tech.pegasys.teku.builder.rest;
+package tech.pegasys.teku.spec.propertytest.suppliers.builder.versions.gloas;
 
-public interface StakedBuilderClientProvider {
+import tech.pegasys.teku.spec.SpecMilestone;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
+import tech.pegasys.teku.spec.propertytest.suppliers.DataStructureUtilSupplier;
+import tech.pegasys.teku.spec.util.DataStructureUtil;
 
-  StakedBuilderClientProvider NOOP = __ -> StakedBuilderClient.NOOP;
-
-  StakedBuilderClient getClient(final String url);
+public class BuilderPreferencesEntrySupplier
+    extends DataStructureUtilSupplier<BuilderPreferencesEntry> {
+  public BuilderPreferencesEntrySupplier() {
+    super(DataStructureUtil::randomBuilderPreferencesEntry, SpecMilestone.GLOAS);
+  }
 }

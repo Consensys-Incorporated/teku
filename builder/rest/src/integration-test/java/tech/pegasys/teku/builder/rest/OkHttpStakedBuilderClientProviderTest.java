@@ -20,13 +20,13 @@ import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.spec.Spec;
 
-class StakedBuilderClientProviderTest {
+class OkHttpStakedBuilderClientProviderTest {
 
   private final Spec spec = mock(Spec.class);
   private final AsyncRunner asyncRunner = mock(AsyncRunner.class);
 
-  private final StakedBuilderClientProvider provider =
-      new StakedBuilderClientProvider(spec, asyncRunner);
+  private final OkHttpStakedBuilderClientProvider provider =
+      new OkHttpStakedBuilderClientProvider(spec, asyncRunner);
 
   @Test
   void returnsSameInstanceForSameUrl() {

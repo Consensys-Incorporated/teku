@@ -1,0 +1,72 @@
+{
+  "post" : {
+    "tags" : [ "Validator" ],
+    "operationId" : "submitBuilderPreferences",
+    "summary" : "Submit builder preferences",
+    "description" : "Submits per-builder preferences for one or more proposers. The request body is a flat list of\n`BuilderPreferencesEntry` objects, each naming the proposer in `proposer_pubkey`; the beacon\nnode submits each to the builder-API `submitBuilderPreferences` endpoint at the entry's `url`.\nApplicable from the Gloas fork onwards.\n\nNotes:\n- Each entry targets one builder `url`, to which the beacon node makes one submission.\n- Entries are identified by `proposer_pubkey`, so several proposers MAY submit to the same `url`.\n- The beacon node routes each entry by its `url` and submits to that builder's\n  `submitBuilderPreferences` for the entry's `proposer_pubkey`, forwarding the `auth` and\n  `max_execution_payment`.\n- Validators MAY submit in the epoch prior to proposing (from `state.proposer_lookahead`), so\n  builders hold the preferences before the bid request arrives.",
+    "requestBody" : {
+      "content" : {
+        "application/octet-stream" : {
+          "schema" : {
+            "type" : "string",
+            "format" : "binary"
+          }
+        },
+        "application/json" : {
+          "schema" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/BuilderPreferencesEntry"
+            }
+          }
+        }
+      }
+    },
+    "responses" : {
+      "415" : {
+        "description" : "Unsupported media type",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "200" : {
+        "description" : "Every entry was submitted and its builder accepted it",
+        "content" : { }
+      },
+      "400" : {
+        "description" : "Errors with one or more builder preferences entries",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/ErrorListBadRequest"
+            }
+          }
+        }
+      },
+      "500" : {
+        "description" : "Internal server error",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "503" : {
+        "description" : "Beacon node is currently syncing and not serving requests.",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      }
+    }
+  }
+}

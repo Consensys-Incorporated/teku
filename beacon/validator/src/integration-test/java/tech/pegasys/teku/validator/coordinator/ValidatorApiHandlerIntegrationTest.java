@@ -36,6 +36,8 @@ import tech.pegasys.teku.api.NodeDataProvider;
 import tech.pegasys.teku.beacon.sync.events.SyncState;
 import tech.pegasys.teku.beacon.sync.events.SyncStateProvider;
 import tech.pegasys.teku.beacon.sync.events.SyncStateTracker;
+import tech.pegasys.teku.builder.rest.StakedBuilderClient;
+import tech.pegasys.teku.builder.rest.StakedBuilderClientProvider;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionAndPublishingPerformanceFactory;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.DelayedExecutorAsyncRunner;
@@ -59,12 +61,14 @@ import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.Blob;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGProof;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.spec.logic.versions.deneb.helpers.MiscHelpersDeneb;
+import tech.pegasys.teku.spec.schemas.ApiSchemas;
 import tech.pegasys.teku.statetransition.attestation.AggregatingAttestationPool;
 import tech.pegasys.teku.statetransition.attestation.AttestationManager;
 import tech.pegasys.teku.statetransition.blobs.BlockBlobSidecarsTrackersPool;
@@ -146,6 +150,9 @@ public class ValidatorApiHandlerIntegrationTest {
   private final PayloadAttestationPool payloadAttestationPool = mock(PayloadAttestationPool.class);
 
   private final DutyMetrics dutyMetrics = mock(DutyMetrics.class);
+  private final StakedBuilderClientProvider stakedBuilderClientProvider =
+      mock(StakedBuilderClientProvider.class);
+  private final StakedBuilderClient stakedBuilderClient = mock(StakedBuilderClient.class);
 
   private ValidatorApiHandler handler;
 
@@ -163,6 +170,8 @@ public class ValidatorApiHandlerIntegrationTest {
     doAnswer(invocation -> SafeFuture.completedFuture(Optional.of(invocation.getArgument(0))))
         .when(blockFactory)
         .unblindSignedBlockIfBlinded(any(), any());
+
+    when(stakedBuilderClientProvider.getClient(any())).thenReturn(stakedBuilderClient);
 
     // BlobSidecar builder
     doAnswer(
@@ -239,7 +248,8 @@ public class ValidatorApiHandlerIntegrationTest {
             executionPayloadPublisher,
             executionPayloadBidManager,
             proposerPreferencesManager,
-            ExecutionProofManager.NOOP);
+            ExecutionProofManager.NOOP,
+            stakedBuilderClientProvider);
   }
 
   @TestTemplate
@@ -373,6 +383,48 @@ public class ValidatorApiHandlerIntegrationTest {
     verify(proposerPreferencesManager).addLocal(savedForFuture);
     verify(proposersDataManager)
         .updatePreparedProposersFromProposerPreferences(signedProposerPreferences, UInt64.ZERO);
+  }
+
+  @TestTemplate
+  void sendBuilderPreferences_shouldReturnEmptyListWhenAllSucceed(final SpecContext specContext) {
+    specContext.assumeGloasActive();
+    final BuilderPreferencesEntry entry1 =
+        specContext.getDataStructureUtil().randomBuilderPreferencesEntry();
+    final BuilderPreferencesEntry entry2 =
+        specContext.getDataStructureUtil().randomBuilderPreferencesEntry();
+
+    when(stakedBuilderClient.submitBuilderPreferences(any(), any()))
+        .thenReturn(SafeFuture.COMPLETE);
+
+    final SafeFuture<List<SubmitDataError>> result =
+        handler.sendBuilderPreferences(
+            ApiSchemas.BUILDER_PREFERENCES_ENTRIES_SCHEMA.createFromElements(
+                List.of(entry1, entry2)));
+
+    assertThatSafeFuture(result).isCompletedWithValue(List.of());
+  }
+
+  @TestTemplate
+  void sendBuilderPreferences_shouldReturnIndexedErrorsForFailedSubmissions(
+      final SpecContext specContext) {
+    specContext.assumeGloasActive();
+    final BuilderPreferencesEntry accepted =
+        specContext.getDataStructureUtil().randomBuilderPreferencesEntry();
+    final BuilderPreferencesEntry failed =
+        specContext.getDataStructureUtil().randomBuilderPreferencesEntry();
+    final String errorMessage = "Builder rejected preferences";
+
+    when(stakedBuilderClient.submitBuilderPreferences(any(), any()))
+        .thenReturn(SafeFuture.COMPLETE)
+        .thenReturn(SafeFuture.failedFuture(new RuntimeException(errorMessage)));
+
+    final SafeFuture<List<SubmitDataError>> result =
+        handler.sendBuilderPreferences(
+            ApiSchemas.BUILDER_PREFERENCES_ENTRIES_SCHEMA.createFromElements(
+                List.of(accepted, failed)));
+
+    assertThatSafeFuture(result)
+        .isCompletedWithValue(List.of(new SubmitDataError(ONE, errorMessage)));
   }
 
   private SafeFuture<BlockImportAndBroadcastValidationResults> prepareBlockImportResult(

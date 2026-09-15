@@ -56,6 +56,7 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
@@ -298,6 +299,12 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
       final List<SignedProposerPreferences> signedProposerPreferences) {
     return sendRequest(
         () -> typeDefClient.sendSignedProposerPreferences(signedProposerPreferences));
+  }
+
+  @Override
+  public SafeFuture<List<SubmitDataError>> sendBuilderPreferences(
+      final SszList<BuilderPreferencesEntry> builderPreferences) {
+    return sendRequest(() -> typeDefClient.sendBuilderPreferences(builderPreferences));
   }
 
   @Override

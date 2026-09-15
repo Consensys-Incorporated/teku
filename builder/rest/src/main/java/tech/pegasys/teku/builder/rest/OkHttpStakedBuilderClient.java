@@ -66,10 +66,10 @@ class OkHttpStakedBuilderClient implements StakedBuilderClient {
 
   @Override
   public SafeFuture<Void> submitBuilderPreferences(
-      final BLSPublicKey validatorPubkey,
+      final BLSPublicKey proposerPubkey,
       final BuilderPreferencesRequest builderPreferencesRequest) {
     return asyncRunner.runAsync(
-        () -> submitBuilderPreferencesRequest.submit(validatorPubkey, builderPreferencesRequest));
+        () -> submitBuilderPreferencesRequest.submit(proposerPubkey, builderPreferencesRequest));
   }
 
   @Override

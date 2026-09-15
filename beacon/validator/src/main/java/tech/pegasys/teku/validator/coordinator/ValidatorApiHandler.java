@@ -23,6 +23,7 @@ import static tech.pegasys.teku.infrastructure.metrics.Validator.ValidatorDutyMe
 import static tech.pegasys.teku.spec.config.SpecConfig.GENESIS_SLOT;
 import static tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel.EQUIVOCATION;
 import static tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel.GOSSIP;
+import static tech.pegasys.teku.spec.schemas.ApiSchemas.BUILDER_PREFERENCES_REQUEST_SCHEMA;
 
 import com.google.common.annotations.VisibleForTesting;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
@@ -51,6 +52,7 @@ import tech.pegasys.teku.api.migrated.ValidatorLivenessAtEpoch;
 import tech.pegasys.teku.beacon.sync.events.SyncStateProvider;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.builder.rest.StakedBuilderClientProvider;
 import tech.pegasys.teku.ethereum.events.SlotEventsChannel;
 import tech.pegasys.teku.ethereum.json.types.beacon.StateValidatorData;
 import tech.pegasys.teku.ethereum.json.types.node.PeerCount;
@@ -68,6 +70,7 @@ import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionAndPublish
 import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionPerformance;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockPublishingPerformance;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.exceptions.ExceptionUtil;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.gossip.subnets.AttestationTopicSubscriber;
@@ -83,6 +86,8 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesRequest;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
@@ -179,6 +184,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
   private final ExecutionPayloadBidManager executionPayloadBidManager;
   private final ProposerPreferencesManager proposerPreferencesManager;
   private final ExecutionProofManager executionProofManager;
+  private final StakedBuilderClientProvider stakedBuilderClientProvider;
 
   private final AttesterDutiesGenerator attesterDutiesGenerator;
 
@@ -211,7 +217,8 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
       final ExecutionPayloadPublisher executionPayloadPublisher,
       final ExecutionPayloadBidManager executionPayloadBidManager,
       final ProposerPreferencesManager proposerPreferencesManager,
-      final ExecutionProofManager executionProofManager) {
+      final ExecutionProofManager executionProofManager,
+      final StakedBuilderClientProvider stakedBuilderClientProvider) {
     this.blockProductionAndPublishingPerformanceFactory =
         blockProductionAndPublishingPerformanceFactory;
     this.chainDataProvider = chainDataProvider;
@@ -241,6 +248,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
     this.executionPayloadBidManager = executionPayloadBidManager;
     this.proposerPreferencesManager = proposerPreferencesManager;
     this.executionProofManager = executionProofManager;
+    this.stakedBuilderClientProvider = stakedBuilderClientProvider;
     this.attesterDutiesGenerator = new AttesterDutiesGenerator(spec);
   }
 
@@ -936,6 +944,41 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
             __ ->
                 proposersDataManager.updatePreparedProposersFromProposerPreferences(
                     signedProposerPreferences, combinedChainDataClient.getCurrentSlot()));
+  }
+
+  @Override
+  public SafeFuture<List<SubmitDataError>> sendBuilderPreferences(
+      final SszList<BuilderPreferencesEntry> builderPreferences) {
+    final List<SafeFuture<Optional<SubmitDataError>>> futureResults = new ArrayList<>();
+    for (int index = 0; index < builderPreferences.size(); index++) {
+      final BuilderPreferencesEntry builderPreferencesEntry = builderPreferences.get(index);
+      final BuilderPreferencesRequest builderPreferencesRequest =
+          BUILDER_PREFERENCES_REQUEST_SCHEMA.create(builderPreferencesEntry);
+      futureResults.add(
+          submitBuilderPreferences(
+              index,
+              builderPreferencesEntry.getUrl(),
+              builderPreferencesEntry.getProposerPubkey(),
+              builderPreferencesRequest));
+    }
+    return SafeFuture.collectAllSuccessful(futureResults.stream())
+        .thenApply(results -> results.stream().flatMap(Optional::stream).toList());
+  }
+
+  private SafeFuture<Optional<SubmitDataError>> submitBuilderPreferences(
+      final int index,
+      final String url,
+      final BLSPublicKey proposerPubkey,
+      final BuilderPreferencesRequest builderPreferencesRequest) {
+    return stakedBuilderClientProvider
+        .getClient(url)
+        .submitBuilderPreferences(proposerPubkey, builderPreferencesRequest)
+        .thenApply(__ -> Optional.<SubmitDataError>empty())
+        .exceptionally(
+            err ->
+                Optional.of(
+                    new SubmitDataError(
+                        UInt64.valueOf(index), ExceptionUtil.getRootCauseMessage(err))));
   }
 
   @Override

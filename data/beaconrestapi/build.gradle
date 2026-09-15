@@ -21,6 +21,7 @@ dependencies {
 	implementation project(':storage:api')
 	implementation project(':beacon:sync')
 	implementation project(':validator:api')
+	implementation project(':builder:rest')
 
 	implementation 'com.google.guava:guava'
 	implementation 'io.swagger.core.v3:swagger-annotations'

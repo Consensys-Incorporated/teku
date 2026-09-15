@@ -1,0 +1,28 @@
+{
+  "title" : "BuilderPreferencesEntry",
+  "type" : "object",
+  "required" : [ "proposer_pubkey", "url", "auth", "max_execution_payment" ],
+  "properties" : {
+    "proposer_pubkey" : {
+      "type" : "string",
+      "pattern" : "^0x[a-fA-F0-9]{2,}$",
+      "description" : "Bytes48 hexadecimal",
+      "format" : "bytes"
+    },
+    "url" : {
+      "type" : "string",
+      "pattern" : "^0x[a-fA-F0-9]{2,}$",
+      "description" : "SSZ encoded byte list",
+      "format" : "bytes"
+    },
+    "auth" : {
+      "$ref" : "#/components/schemas/SignedBuilderRequestAuth"
+    },
+    "max_execution_payment" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    }
+  }
+}

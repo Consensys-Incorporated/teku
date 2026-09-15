@@ -63,6 +63,7 @@ import tech.pegasys.teku.beacon.sync.gossip.blocks.RecentBlocksFetcher;
 import tech.pegasys.teku.beacon.sync.gossip.executionpayloads.RecentExecutionPayloadsFetcher;
 import tech.pegasys.teku.beaconrestapi.BeaconRestApi;
 import tech.pegasys.teku.beaconrestapi.JsonTypeDefinitionBeaconRestApi;
+import tech.pegasys.teku.builder.rest.OkHttpStakedBuilderClientProvider;
 import tech.pegasys.teku.builder.rest.StakedBuilderClientProvider;
 import tech.pegasys.teku.dataproviders.lookup.BlindedExecutionPayloadProvider;
 import tech.pegasys.teku.dataproviders.lookup.ExecutionPayloadProvider;
@@ -416,6 +417,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
   protected volatile DataColumnSidecarGossipValidator dataColumnSidecarGossipValidator;
   protected volatile DataColumnSidecarManager dataColumnSidecarManager;
   protected volatile ProposerPreferencesManager proposerPreferencesManager;
+  protected volatile StakedBuilderClientProvider stakedBuilderClientProvider;
   protected volatile ExecutionPayloadBidManager executionPayloadBidManager;
   protected volatile ExecutionPayloadManager executionPayloadManager;
   protected volatile ExecutionProofManager executionProofManager;
@@ -1025,8 +1027,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
           beaconConfig
               .executionPayloadBidCircuitBreakerFactory()
               .create(recentChainData::getForkChoiceStrategy);
-      final StakedBuilderClientProvider stakedBuilderClientProvider =
-          new StakedBuilderClientProvider(spec, beaconAsyncRunner);
+      stakedBuilderClientProvider = new OkHttpStakedBuilderClientProvider(spec, beaconAsyncRunner);
       final BuilderBidFetcher builderBidFetcher =
           new BuilderBidFetcher(spec, stakedBuilderClientProvider);
       final ExecutionPayloadBidSelector executionPayloadBidSelector =
@@ -1049,6 +1050,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
           ReceivedExecutionPayloadEventsChannel.class, defaultExecutionPayloadBidManager);
       executionPayloadBidManager = defaultExecutionPayloadBidManager;
     } else {
+      stakedBuilderClientProvider = StakedBuilderClientProvider.NOOP;
       executionPayloadBidManager = ExecutionPayloadBidManager.NOOP;
     }
   }
@@ -1986,7 +1988,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
             executionPayloadPublisher,
             executionPayloadBidManager,
             proposerPreferencesManager,
-            executionProofManager);
+            executionProofManager,
+            stakedBuilderClientProvider);
 
     eventChannels
         .subscribe(SlotEventsChannel.class, activeValidatorTracker)

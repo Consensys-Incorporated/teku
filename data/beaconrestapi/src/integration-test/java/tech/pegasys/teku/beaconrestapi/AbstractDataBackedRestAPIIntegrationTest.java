@@ -48,6 +48,7 @@ import tech.pegasys.teku.beacon.sync.SyncService;
 import tech.pegasys.teku.beacon.sync.events.SyncStateProvider;
 import tech.pegasys.teku.bls.BLSKeyGenerator;
 import tech.pegasys.teku.bls.BLSKeyPair;
+import tech.pegasys.teku.builder.rest.StakedBuilderClientProvider;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionAndPublishingPerformanceFactory;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
@@ -351,7 +352,8 @@ public abstract class AbstractDataBackedRestAPIIntegrationTest {
             executionPayloadPublisher,
             executionPayloadBidManager,
             proposerPreferencesManager,
-            executionProofManager);
+            executionProofManager,
+            StakedBuilderClientProvider.NOOP);
     validatorApiChannel = validatorApiHandler;
     chainUpdater.initializeGenesis();
     setupAndStartRestAPI();

@@ -42,6 +42,7 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
@@ -84,6 +85,7 @@ import tech.pegasys.teku.validator.remote.typedef.handlers.ProduceBlockRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.PublishSignedExecutionPayloadRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.RegisterValidatorsRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.SendAggregateAndProofsRequest;
+import tech.pegasys.teku.validator.remote.typedef.handlers.SendBuilderPreferencesRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.SendContributionAndProofsRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.SendPayloadAttestationMessagesRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.SendSignedAttestationsRequest;
@@ -356,6 +358,13 @@ public class OkHttpValidatorTypeDefClient extends OkHttpValidatorMinimalTypeDefC
     final SendSignedProposerPreferencesRequest sendSignedProposerPreferencesRequest =
         new SendSignedProposerPreferencesRequest(getBaseEndpoint(), getOkHttpClient());
     return sendSignedProposerPreferencesRequest.submit(signedProposerPreferences);
+  }
+
+  public List<SubmitDataError> sendBuilderPreferences(
+      final SszList<BuilderPreferencesEntry> builderPreferences) {
+    final SendBuilderPreferencesRequest sendBuilderPreferencesRequest =
+        new SendBuilderPreferencesRequest(getBaseEndpoint(), getOkHttpClient());
+    return sendBuilderPreferencesRequest.submit(builderPreferences);
   }
 
   public PublishSignedExecutionPayloadResult publishSignedExecutionPayload(

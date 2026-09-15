@@ -53,6 +53,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.BlockRootAndBuilderIndex;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
@@ -355,6 +356,14 @@ public class FailoverValidatorApiHandler implements ValidatorApiChannel {
     return relayRequest(
         apiChannel -> apiChannel.sendSignedProposerPreferences(signedProposerPreferences),
         BeaconNodeRequestLabels.SEND_PROPOSER_PREFERENCES_METHOD);
+  }
+
+  @Override
+  public SafeFuture<List<SubmitDataError>> sendBuilderPreferences(
+      final SszList<BuilderPreferencesEntry> builderPreferences) {
+    return relayRequest(
+        apiChannel -> apiChannel.sendBuilderPreferences(builderPreferences),
+        BeaconNodeRequestLabels.SEND_BUILDER_PREFERENCES_METHOD);
   }
 
   @Override

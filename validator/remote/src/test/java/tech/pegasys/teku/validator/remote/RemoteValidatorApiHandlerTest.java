@@ -73,6 +73,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
@@ -85,6 +86,7 @@ import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.datastructures.validator.SubnetSubscription;
+import tech.pegasys.teku.spec.schemas.ApiSchemas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.api.CommitteeSubscriptionRequest;
 import tech.pegasys.teku.validator.api.SendSignedBlockResult;
@@ -603,6 +605,26 @@ class RemoteValidatorApiHandlerTest {
 
     assertThat(result).isCompletedWithValue(expectedErrors);
     verify(typeDefClient).sendSignedProposerPreferences(signedProposerPreferencesList);
+  }
+
+  @Test
+  public void sendBuilderPreferences_InvokeApiWithCorrectRequest() {
+    final DataStructureUtil dataStructureUtil =
+        new DataStructureUtil(TestSpecFactory.createMinimalGloas());
+    final SszList<BuilderPreferencesEntry> builderPreferences =
+        ApiSchemas.BUILDER_PREFERENCES_ENTRIES_SCHEMA.createFromElements(
+            List.of(dataStructureUtil.randomBuilderPreferencesEntry()));
+    final List<SubmitDataError> expectedErrors =
+        List.of(new SubmitDataError(UInt64.valueOf(3), "invalid builder preferences"));
+
+    when(typeDefClient.sendBuilderPreferences(builderPreferences)).thenReturn(expectedErrors);
+
+    final SafeFuture<List<SubmitDataError>> result =
+        apiHandler.sendBuilderPreferences(builderPreferences);
+    asyncRunner.executeQueuedActions();
+
+    assertThat(result).isCompletedWithValue(expectedErrors);
+    verify(typeDefClient).sendBuilderPreferences(builderPreferences);
   }
 
   @Test

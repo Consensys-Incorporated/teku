@@ -36,7 +36,9 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
+import tech.pegasys.teku.spec.schemas.ApiSchemas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 
@@ -465,6 +467,33 @@ class SentryValidatorApiChannelTest {
     sentryValidatorApiChannel.sendSignedProposerPreferences(Collections.emptyList());
 
     verify(dutiesProviderChannel).sendSignedProposerPreferences(eq(Collections.emptyList()));
+    verifyNoInteractions(blockHandlerChannel);
+    verifyNoInteractions(attestationPublisherChannel);
+  }
+
+  @Test
+  void sendBuilderPreferencesShouldUseBlockHandlerChannelWhenAvailable() {
+    final SszList<BuilderPreferencesEntry> entries =
+        ApiSchemas.BUILDER_PREFERENCES_ENTRIES_SCHEMA.createFromElements(Collections.emptyList());
+
+    sentryValidatorApiChannel.sendBuilderPreferences(entries);
+
+    verify(blockHandlerChannel).sendBuilderPreferences(eq(entries));
+    verifyNoInteractions(dutiesProviderChannel);
+    verifyNoInteractions(attestationPublisherChannel);
+  }
+
+  @Test
+  void sendBuilderPreferencesShouldFallbackToDutiesProviderChannel() {
+    sentryValidatorApiChannel =
+        new SentryValidatorApiChannel(
+            dutiesProviderChannel, Optional.empty(), Optional.of(attestationPublisherChannel));
+    final SszList<BuilderPreferencesEntry> entries =
+        ApiSchemas.BUILDER_PREFERENCES_ENTRIES_SCHEMA.createFromElements(Collections.emptyList());
+
+    sentryValidatorApiChannel.sendBuilderPreferences(entries);
+
+    verify(dutiesProviderChannel).sendBuilderPreferences(eq(entries));
     verifyNoInteractions(blockHandlerChannel);
     verifyNoInteractions(attestationPublisherChannel);
   }
