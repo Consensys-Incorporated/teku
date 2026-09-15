@@ -30,6 +30,7 @@ public enum ValidatorApiMethod {
   GET_PAYLOAD_ATTESTATION_DATA("eth/v1/validator/payload_attestation_data"),
   GET_EXECUTION_PAYLOAD_ENVELOPE(
       "eth/v1/validator/execution_payload_envelopes/:slot/:beacon_block_root"),
+  GET_EXECUTION_PAYLOAD_BID("eth/v1/validator/execution_payload_bids/:slot/:builder_index"),
   SEND_SIGNED_ATTESTATION("eth/v1/beacon/pool/attestations"),
   SEND_SIGNED_ATTESTATION_V2("eth/v2/beacon/pool/attestations"),
   SEND_PAYLOAD_ATTESTATION_MESSAGES("eth/v1/beacon/pool/payload_attestations"),
