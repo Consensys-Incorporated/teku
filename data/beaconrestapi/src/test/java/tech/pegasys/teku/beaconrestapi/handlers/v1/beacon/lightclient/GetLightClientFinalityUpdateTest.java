@@ -44,6 +44,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
+import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 
 public class GetLightClientFinalityUpdateTest extends AbstractMigratedBeaconHandlerTest {
 
@@ -64,7 +65,8 @@ public class GetLightClientFinalityUpdateTest extends AbstractMigratedBeaconHand
     handler.handleRequest(request);
 
     assertThat(request.getResponseCode()).isEqualTo(SC_OK);
-    assertThat(request.getResponseBody()).isEqualTo(lightClientFinalityUpdate);
+    assertThat(request.getResponseBody())
+        .isEqualTo(withMilestone(lightClientFinalityUpdate, SpecMilestone.ALTAIR));
     assertThat(request.getResponseHeaders(HEADER_CONSENSUS_VERSION))
         .isEqualTo(SpecMilestone.ALTAIR.lowerCaseName());
   }
@@ -83,7 +85,9 @@ public class GetLightClientFinalityUpdateTest extends AbstractMigratedBeaconHand
     final LightClientFinalityUpdate lightClientFinalityUpdate =
         dataStructureUtil.randomLightClientFinalityUpdate(UInt64.ONE);
 
-    final String data = getResponseStringFromMetadata(handler, SC_OK, lightClientFinalityUpdate);
+    final String data =
+        getResponseStringFromMetadata(
+            handler, SC_OK, withMilestone(lightClientFinalityUpdate, SpecMilestone.ALTAIR));
     final JsonNode responseDataAsJsonNode = JsonTestUtil.parseAsJsonNode(data);
     final String expected =
         Resources.toString(
@@ -95,16 +99,14 @@ public class GetLightClientFinalityUpdateTest extends AbstractMigratedBeaconHand
   }
 
   @ParameterizedTest
-  @EnumSource(
-      value = SpecMilestone.class,
-      names = {"ALTAIR", "BELLATRIX", "CAPELLA", "DENEB", "ELECTRA", "FULU", "GLOAS"})
+  @EnumSource(value = SpecMilestone.class, mode = EnumSource.Mode.EXCLUDE, names = "PHASE0")
   void shouldSerializeForEveryMilestoneWithItsOwnSchema(final SpecMilestone milestone)
       throws Exception {
     setSpec(TestSpecFactory.createMinimal(milestone));
     setHandler(new GetLightClientFinalityUpdate(chainDataProvider, schemaDefinitionCache));
 
-    final LightClientFinalityUpdate lightClientFinalityUpdate =
-        dataStructureUtil.randomLightClientFinalityUpdate(UInt64.ONE);
+    final ObjectAndMetaData<LightClientFinalityUpdate> lightClientFinalityUpdate =
+        withMilestone(dataStructureUtil.randomLightClientFinalityUpdate(UInt64.ONE), milestone);
 
     final Map<String, Object> response =
         JsonTestUtil.parse(
@@ -127,7 +129,7 @@ public class GetLightClientFinalityUpdateTest extends AbstractMigratedBeaconHand
   private static Set<String> expectedHeaderFields(final SpecMilestone milestone) {
     return switch (milestone) {
       case ALTAIR, BELLATRIX -> Set.of("beacon");
-      case GLOAS -> Set.of("beacon", "execution_block_hash", "execution_branch");
+      case GLOAS, HEZE -> Set.of("beacon", "execution_block_hash", "execution_branch");
       default -> Set.of("beacon", "execution", "execution_branch");
     };
   }
@@ -135,7 +137,7 @@ public class GetLightClientFinalityUpdateTest extends AbstractMigratedBeaconHand
   private static int expectedFinalityBranchLength(final SpecMilestone milestone) {
     return switch (milestone) {
       case ELECTRA, FULU -> 7;
-      case GLOAS -> 9;
+      case GLOAS, HEZE -> 9;
       default -> 6;
     };
   }
@@ -145,15 +147,22 @@ public class GetLightClientFinalityUpdateTest extends AbstractMigratedBeaconHand
     final LightClientFinalityUpdate lightClientFinalityUpdate =
         dataStructureUtil.randomLightClientFinalityUpdate(UInt64.ONE);
 
-    assertThat(getResponseSszFromMetadata(handler, SC_OK, lightClientFinalityUpdate))
+    assertThat(
+            getResponseSszFromMetadata(
+                handler, SC_OK, withMilestone(lightClientFinalityUpdate, SpecMilestone.ALTAIR)))
         .isEqualTo(lightClientFinalityUpdate.sszSerialize().toArray());
+  }
+
+  private static ObjectAndMetaData<LightClientFinalityUpdate> withMilestone(
+      final LightClientFinalityUpdate lightClientFinalityUpdate, final SpecMilestone milestone) {
+    return new ObjectAndMetaData<>(lightClientFinalityUpdate, milestone, false, false, false);
   }
 
   @SuppressWarnings("unchecked")
   private String sszConsensusVersionHeader(
-      final LightClientFinalityUpdate lightClientFinalityUpdate) {
-    final ResponseContentTypeDefinition<LightClientFinalityUpdate> sszType =
-        (ResponseContentTypeDefinition<LightClientFinalityUpdate>)
+      final ObjectAndMetaData<LightClientFinalityUpdate> lightClientFinalityUpdate) {
+    final ResponseContentTypeDefinition<ObjectAndMetaData<LightClientFinalityUpdate>> sszType =
+        (ResponseContentTypeDefinition<ObjectAndMetaData<LightClientFinalityUpdate>>)
             handler.getMetadata().getResponseType(SC_OK, ContentTypes.OCTET_STREAM);
     return sszType.getAdditionalHeaders(lightClientFinalityUpdate).get(HEADER_CONSENSUS_VERSION);
   }

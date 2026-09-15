@@ -25,7 +25,6 @@ import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_BEACON;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Function;
 import tech.pegasys.teku.api.ChainDataProvider;
 import tech.pegasys.teku.api.DataProvider;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.MilestoneDependentTypesUtil;
@@ -35,6 +34,7 @@ import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
+import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
 
@@ -62,9 +62,7 @@ public class GetLightClientFinalityUpdate extends RestApiEndpoint {
                 SC_OK,
                 "Request successful",
                 getResponseType(schemaDefinitionCache),
-                sszResponseType(
-                    (final LightClientFinalityUpdate finalityUpdate) ->
-                        milestoneAtFinalityUpdateSlot(schemaDefinitionCache, finalityUpdate)),
+                sszResponseType(),
                 ETH_CONSENSUS_HEADER_TYPE)
             .withNotFoundResponse()
             .withNotAcceptableResponse()
@@ -84,14 +82,14 @@ public class GetLightClientFinalityUpdate extends RestApiEndpoint {
     }
 
     final LightClientFinalityUpdate finalityUpdate = maybeFinalityUpdate.get();
-    request.header(
-        HEADER_CONSENSUS_VERSION,
-        milestoneAtFinalityUpdateSlot(schemaDefinitionCache, finalityUpdate).lowerCaseName());
-    request.respondOk(finalityUpdate);
+    final SpecMilestone milestone =
+        milestoneAtFinalityUpdateSlot(schemaDefinitionCache, finalityUpdate);
+    request.header(HEADER_CONSENSUS_VERSION, milestone.lowerCaseName());
+    request.respondOk(new ObjectAndMetaData<>(finalityUpdate, milestone, false, false, false));
   }
 
-  private static SerializableTypeDefinition<LightClientFinalityUpdate> getResponseType(
-      final SchemaDefinitionCache schemaDefinitionCache) {
+  private static SerializableTypeDefinition<ObjectAndMetaData<LightClientFinalityUpdate>>
+      getResponseType(final SchemaDefinitionCache schemaDefinitionCache) {
     final SerializableTypeDefinition<LightClientFinalityUpdate> lightClientFinalityUpdateType =
         getMultipleSchemaDefinitionFromMilestone(
             schemaDefinitionCache,
@@ -100,19 +98,17 @@ public class GetLightClientFinalityUpdate extends RestApiEndpoint {
                 new MilestoneDependentTypesUtil.ConditionalSchemaGetter<>(
                     (finalityUpdate, milestone) ->
                         milestoneAtFinalityUpdateSlot(schemaDefinitionCache, finalityUpdate)
-                            .equals(milestone),
+                                .equals(milestone)
+                            && milestone.isGreaterThan(SpecMilestone.PHASE0),
                     SpecMilestone.ALTAIR,
                     schemaDefinitions ->
                         SchemaDefinitionsAltair.required(schemaDefinitions)
                             .getLightClientFinalityUpdateSchema())));
 
-    return SerializableTypeDefinition.<LightClientFinalityUpdate>object()
+    return SerializableTypeDefinition.<ObjectAndMetaData<LightClientFinalityUpdate>>object()
         .name("GetLightClientFinalityUpdateResponse")
-        .withField(
-            "version",
-            MILESTONE_TYPE,
-            finalityUpdate -> milestoneAtFinalityUpdateSlot(schemaDefinitionCache, finalityUpdate))
-        .withField("data", lightClientFinalityUpdateType, Function.identity())
+        .withField("version", MILESTONE_TYPE, ObjectAndMetaData::getMilestone)
+        .withField("data", lightClientFinalityUpdateType, ObjectAndMetaData::getData)
         .build();
   }
 

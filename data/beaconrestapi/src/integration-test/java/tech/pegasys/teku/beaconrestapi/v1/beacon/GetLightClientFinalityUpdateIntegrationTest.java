@@ -34,7 +34,16 @@ import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpda
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
-@TestSpecContext(milestone = {SpecMilestone.ALTAIR, SpecMilestone.ELECTRA})
+@TestSpecContext(
+    milestone = {
+      SpecMilestone.ALTAIR,
+      SpecMilestone.CAPELLA,
+      SpecMilestone.DENEB,
+      SpecMilestone.ELECTRA,
+      SpecMilestone.FULU,
+      SpecMilestone.GLOAS,
+      SpecMilestone.HEZE
+    })
 public class GetLightClientFinalityUpdateIntegrationTest
     extends AbstractDataBackedRestAPIIntegrationTest {
 
