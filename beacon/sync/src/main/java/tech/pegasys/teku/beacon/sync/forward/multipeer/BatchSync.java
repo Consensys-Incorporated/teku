@@ -357,8 +357,11 @@ public class BatchSync implements Sync {
       return;
     }
 
+    // firstBatch is complete and non-empty (it came from previousNonEmptyBatch /
+    // nextNonEmptyBatch), so its blocks are internally verified; exclude it from the
+    // contested set to avoid penalising its peer for a chain break it did not cause.
     final NavigableSet<Batch> contestedBatches =
-        activeBatches.batchesBetweenInclusive(firstBatch, secondBatch);
+        activeBatches.batchesBetweenExclusiveStart(firstBatch, secondBatch);
     LOG.debug(
         "Marking {} batches as contested because {} and {} do not form a chain",
         contestedBatches.size(),

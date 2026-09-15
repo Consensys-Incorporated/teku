@@ -565,14 +565,45 @@ class BatchSyncTest {
     batches.receiveBlocks(batch1, dataStructureUtil.randomSignedBeaconBlock(BATCH_SIZE.plus(1)));
 
     assertNoBatchesImported();
-    batches.assertMarkedContested(batch0);
+    // batch0 is complete and non-empty: its peer must not be penalised for a chain break
+    // it did not cause; only batch1 (whose first block did not chain) is contested.
+    assertThatBatch(batch0).isNotContested();
+    assertThatBatch(batch0).isComplete();
     batches.assertMarkedContested(batch1);
 
-    // Both batches now request the same range from a different peer
-    batches.receiveBlocks(batch0, batch0Block); // Batch 0 is unchanged
+    // Only batch1 re-downloads from a different peer; batch0 is untouched
     batches.receiveBlocks(batch1, batch1Block); // Batch 1 now gives us valid data
 
     assertThatBatch(batch0).isConfirmed();
+  }
+
+  @Test
+  void shouldNotContestFirstBatchWhenSecondBatchDoesNotChainFromItWithIntermediateBatches() {
+    // Regression: when intermediate empty batches sit between two non-empty batches and
+    // the second does not chain from the first, only the intermediate batches and the
+    // second batch should be contested — the first batch's peer is innocent.
+    assertThat(sync.syncToChain(targetChain)).isNotDone();
+
+    final Batch batch0 = batches.get(0);
+    final Batch batch1 = batches.get(1);
+    final Batch batch2 = batches.get(2);
+
+    final SignedBeaconBlock batch0Block =
+        chainBuilder.generateBlockAtSlot(batch0.getLastSlot()).getBlock();
+    // batch2 block with a random parent — does not chain from batch0's last block
+    final SignedBeaconBlock batch2MaliciousBlock =
+        dataStructureUtil.randomSignedBeaconBlock(batch2.getFirstSlot().plus(1));
+
+    batches.receiveBlocks(batch0, batch0Block);
+    batches.receiveBlocks(batch1); // empty — batch1 claims no blocks
+    batches.receiveBlocks(batch2, batch2MaliciousBlock);
+
+    assertNoBatchesImported();
+    // batch0's peer served correct, internally-consistent blocks — must not be contested
+    assertThatBatch(batch0).isNotContested();
+    // batch1 and batch2 are both contested (one of them is hiding the linking block)
+    batches.assertMarkedContested(batch1);
+    batches.assertMarkedContested(batch2);
   }
 
   @Test
