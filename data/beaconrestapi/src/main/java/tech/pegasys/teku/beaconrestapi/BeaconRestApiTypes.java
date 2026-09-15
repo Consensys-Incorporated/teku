@@ -27,6 +27,7 @@ import static tech.pegasys.teku.infrastructure.http.RestApiConstants.EPOCH;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.EPOCH_QUERY_DESCRIPTION;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.GRAFFITI;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_BLOB_DATA_INCLUDED;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_BUILDER_URL;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.INCLUDE_PAYLOAD;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.INCLUDE_PAYLOAD_PARAM_DESCRIPTION;
@@ -285,6 +286,12 @@ public class BeaconRestApiTypes {
 
   public static final ParameterMetadata<Boolean> ETH_BLOB_DATA_INCLUDED_TYPE =
       new ParameterMetadata<>(HEADER_BLOB_DATA_INCLUDED, BOOLEAN_TYPE);
+
+  public static final ParameterMetadata<String> ETH_BUILDER_URL_TYPE =
+      new ParameterMetadata<>(
+          HEADER_BUILDER_URL,
+          STRING_TYPE.withDescription(
+              "The url of a winning builder when the bid was retrieved via the builder-API."));
 
   public static DeserializableTypeDefinition<Attestation> electraAttestationTypeDef(
       final SchemaDefinitionCache schemaDefinitionCache) {
