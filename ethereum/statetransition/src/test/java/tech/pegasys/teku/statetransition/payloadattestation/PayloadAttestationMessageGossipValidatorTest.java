@@ -72,11 +72,19 @@ public class PayloadAttestationMessageGossipValidatorTest {
         new PayloadAttestationMessageGossipValidator(
             spec, gossipValidationHelper, invalidBlockRoots);
 
-    payloadAttestationMessage = dataStructureUtil.randomPayloadAttestationMessage();
-    slot = payloadAttestationMessage.getData().getSlot();
-    validatorIndex = payloadAttestationMessage.getValidatorIndex();
-    blockRoot = payloadAttestationMessage.getData().getBeaconBlockRoot();
+    final PayloadAttestationMessage randomPayloadAttestationMessage =
+        dataStructureUtil.randomPayloadAttestationMessage();
     postState = dataStructureUtil.randomBeaconState();
+    validatorIndex = UInt64.ZERO;
+    payloadAttestationMessage =
+        randomPayloadAttestationMessage
+            .getSchema()
+            .create(
+                validatorIndex,
+                randomPayloadAttestationMessage.getData(),
+                randomPayloadAttestationMessage.getSignature());
+    slot = payloadAttestationMessage.getData().getSlot();
+    blockRoot = payloadAttestationMessage.getData().getBeaconBlockRoot();
 
     when(gossipValidationHelper.isSlotCurrent(slot)).thenReturn(true);
     when(gossipValidationHelper.isBlockAvailable(blockRoot)).thenReturn(true);
@@ -218,6 +226,26 @@ public class PayloadAttestationMessageGossipValidatorTest {
             payloadAttestationMessageGossipValidator.validate(
                 validatablePayloadAttestationMessage()))
         .isCompletedWithValue(SAVE_FOR_FUTURE);
+  }
+
+  @TestTemplate
+  void shouldReject_whenValidatorIndexIsOutOfRange() {
+    validatorIndex = UInt64.valueOf(postState.getValidators().size());
+    payloadAttestationMessage =
+        payloadAttestationMessage
+            .getSchema()
+            .create(
+                validatorIndex,
+                payloadAttestationMessage.getData(),
+                payloadAttestationMessage.getSignature());
+
+    assertThatSafeFuture(
+            payloadAttestationMessageGossipValidator.validate(
+                validatablePayloadAttestationMessage()))
+        .isCompletedWithValue(
+            reject(
+                "Payload attestation's validator index %s is out of range for the %s validators in the state",
+                validatorIndex, postState.getValidators().size()));
   }
 
   @TestTemplate
