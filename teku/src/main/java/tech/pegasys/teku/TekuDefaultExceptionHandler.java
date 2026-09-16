@@ -27,6 +27,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.infrastructure.events.ChannelExceptionHandler;
 import tech.pegasys.teku.infrastructure.exceptions.ExceptionUtil;
+import tech.pegasys.teku.infrastructure.exceptions.FatalErrorHandler;
 import tech.pegasys.teku.infrastructure.exceptions.FatalServiceFailureException;
 import tech.pegasys.teku.infrastructure.logging.StatusLogger;
 import tech.pegasys.teku.services.beaconchain.EphemeryLifecycleException;
@@ -76,19 +77,21 @@ public final class TekuDefaultExceptionHandler
 
     if (fatalServiceError.isPresent()) {
       final String failedService = fatalServiceError.get().getService();
-      statusLog.fatalError(failedService, exception);
-      System.exit(FATAL_EXIT_CODE);
+      tryLog(() -> statusLog.fatalError(failedService, exception));
+      FatalErrorHandler.terminate(FATAL_EXIT_CODE);
     } else if (ExceptionUtil.getCause(exception, DatabaseStorageException.class)
         .filter(DatabaseStorageException::isUnrecoverable)
         .isPresent()) {
-      statusLog.fatalError(subscriberDescription, exception);
-      System.exit(FATAL_EXIT_CODE);
-    } else if (exception instanceof OutOfMemoryError) {
-      statusLog.fatalError(subscriberDescription, exception);
-      System.exit(ERROR_EXIT_CODE);
+      tryLog(() -> statusLog.fatalError(subscriberDescription, exception));
+      FatalErrorHandler.terminate(FATAL_EXIT_CODE);
+    } else if (FatalErrorHandler.isFatalError(exception)) {
+      // An out of memory error is frequently wrapped, so all causes are checked. Exits with
+      // ERROR_EXIT_CODE because restarting is expected to recover.
+      tryLog(() -> statusLog.fatalError(subscriberDescription, exception));
+      FatalErrorHandler.terminate(ERROR_EXIT_CODE);
     } else if (exception instanceof EphemeryLifecycleException) {
-      statusLog.fatalError(subscriberDescription, exception);
-      System.exit(ERROR_EXIT_CODE);
+      tryLog(() -> statusLog.fatalError(subscriberDescription, exception));
+      FatalErrorHandler.terminate(ERROR_EXIT_CODE);
     } else if (exception instanceof ShuttingDownException) {
       LOG.debug("Shutting down", exception);
     } else if (isExpectedNettyError(exception)) {
@@ -100,6 +103,15 @@ public final class TekuDefaultExceptionHandler
       statusLog.specificationFailure(subscriberDescription, exception);
     } else {
       statusLog.unexpectedFailure(subscriberDescription, exception);
+    }
+  }
+
+  @SuppressWarnings("unused")
+  private static void tryLog(final Runnable logAction) {
+    try {
+      logAction.run();
+    } catch (final Throwable ignored) {
+      // Logging may itself throw when resources (e.g. memory) are exhausted; proceed to terminate.
     }
   }
 

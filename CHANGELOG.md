@@ -27,3 +27,4 @@
  - Trigger an immediate peer search when publishing sync committee messages fails because there are no peers available on the required gossip topic.
  - Fixed gossip wire validator to reject inbound messages containing the `key` field.
  - Fixed the gossip message size gate comparing the compressed payload size against the uncompressed `MAX_PAYLOAD_SIZE`.
+ - Teku now reliably shuts down after an `OutOfMemoryError` instead of continuing to run in a broken state. Out of memory errors wrapped in another exception and async errors are now detected.

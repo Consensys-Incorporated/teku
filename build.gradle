@@ -180,12 +180,19 @@ var baseInfrastructureProjects = [
 	':infrastructure:bytes',
 	':infrastructure:collections',
 	':infrastructure:exceptions',
-	':infrastructure:subscribers',
 	':infrastructure:unsigned',
 ]
 dependencyRules {
 	rules {
 		baseInfrastructureProjects.each { register(it) { allowed = [] }}
+		register(":infrastructure:subscribers") {
+			// unsigned and logging are the dependencies every non base module gets implicitly
+			allowed = [
+				":infrastructure:exceptions",
+				":infrastructure:logging",
+				":infrastructure:unsigned"
+			]
+		}
 		register(":infrastructure:") {
 			allowed = [":infrastructure:"]
 		}
