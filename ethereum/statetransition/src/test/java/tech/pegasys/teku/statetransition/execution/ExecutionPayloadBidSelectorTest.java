@@ -21,10 +21,13 @@ import static tech.pegasys.teku.spec.executionlayer.BuilderBoostFactorEvaluator.
 import static tech.pegasys.teku.spec.executionlayer.BuilderBoostFactorEvaluator.BUILDER_BOOST_FACTOR_PREFER_BUILDER;
 import static tech.pegasys.teku.spec.executionlayer.BuilderBoostFactorEvaluator.BUILDER_BOOST_FACTOR_PREFER_EXECUTION;
 import static tech.pegasys.teku.spec.schemas.ApiSchemas.BUILDER_CONFIG_SCHEMA;
+import static tech.pegasys.teku.spec.schemas.ApiSchemas.BUILDER_ENTRY_SCHEMA;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.Test;
@@ -34,6 +37,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBidSchema;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
@@ -452,6 +456,65 @@ public class ExecutionPayloadBidSelectorTest {
     }
   }
 
+  @Test
+  void selectBestRemoteBidFiltersBuilderApiBidsBelowEntryMinBid() {
+    final UInt64 slot = UInt64.valueOf(10);
+    final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 parentBlockHash = dataStructureUtil.randomBytes32();
+    // top-level minBid is 50 but the builder entry's minBid is 100
+    final BuilderConfig builderConfig =
+        BUILDER_CONFIG_SCHEMA.create(UInt64.valueOf(50), UInt64.valueOf(100), List.of());
+    final BuilderEntry builderEntry = createBuilderEntry(UInt64.valueOf(100), UInt64.valueOf(100));
+    // bid value (75) is above top-level min but below entry-level min
+    final SignedExecutionPayloadBid belowEntryMinBid =
+        createBid(slot, parentRoot, parentBlockHash, UInt64.valueOf(75));
+    final SignedExecutionPayloadBid atEntryMinBid =
+        createBid(slot, parentRoot, parentBlockHash, UInt64.valueOf(100));
+    when(circuitBreaker.isBuilderAllowed(any(), any())).thenReturn(true);
+
+    assertThat(
+            selector.selectBestRemoteBid(
+                Set.of(),
+                List.of(toBuilderApiBid(belowEntryMinBid, builderEntry)),
+                parentRoot,
+                parentBlockHash,
+                state,
+                builderConfig))
+        .isEmpty();
+    assertThat(
+            selector.selectBestRemoteBid(
+                Set.of(),
+                List.of(toBuilderApiBid(atEntryMinBid, builderEntry)),
+                parentRoot,
+                parentBlockHash,
+                state,
+                builderConfig))
+        .contains(toBuilderApiBid(atEntryMinBid, builderEntry));
+  }
+
+  @Test
+  void builderBoostFactorFromBuilderEntryOverridesTopLevelConfig() {
+    final UInt64 slot = UInt64.valueOf(10);
+    final SignedExecutionPayloadBid remoteBid =
+        createBid(
+            slot, dataStructureUtil.randomBytes32(), dataStructureUtil.randomBytes32(), UInt64.ONE);
+    // top-level config would prefer execution, but entry-level should prefer builder
+    final BuilderEntry builderEntry =
+        createBuilderEntry(UInt64.ZERO, BUILDER_BOOST_FACTOR_PREFER_BUILDER);
+    final BuilderConfig builderConfig =
+        BuilderConfig.withBuilderBoostFactor(BUILDER_BOOST_FACTOR_PREFER_EXECUTION);
+
+    final LocalBid localBid = new LocalBid(randomLocalSelfBuiltBid(slot), UInt256.MAX_VALUE, false);
+    final BidForBlock selectedBid =
+        selector.selectBestBidForBlock(
+            Optional.of(localBid),
+            Optional.of(toBuilderApiBid(remoteBid, builderEntry)),
+            builderConfig,
+            slot);
+
+    assertThat(selectedBid.bid()).isEqualTo(remoteBid);
+  }
+
   private BidForBlock selectBestBidForBlock(
       final SignedExecutionPayloadBid remoteBid,
       final UInt256 localValue,
@@ -466,6 +529,21 @@ public class ExecutionPayloadBidSelectorTest {
 
   private RemoteBid toRemoteBid(final SignedExecutionPayloadBid bid) {
     return new RemoteBid(bid, bid.getMessage().getValue(), Optional.empty());
+  }
+
+  private RemoteBid toBuilderApiBid(
+      final SignedExecutionPayloadBid bid, final BuilderEntry builderEntry) {
+    return new RemoteBid(bid, bid.getMessage().getValue(), Optional.of(builderEntry));
+  }
+
+  private BuilderEntry createBuilderEntry(final UInt64 minBid, final UInt64 builderBoostFactor) {
+    return BUILDER_ENTRY_SCHEMA.create(
+        Bytes.of("https://builder.example.com".getBytes(StandardCharsets.UTF_8)),
+        dataStructureUtil.randomSignedBuilderRequestAuth(),
+        List.of(),
+        UInt64.MAX_VALUE,
+        minBid,
+        builderBoostFactor);
   }
 
   private SignedExecutionPayloadBid randomLocalSelfBuiltBid(final UInt64 slot) {

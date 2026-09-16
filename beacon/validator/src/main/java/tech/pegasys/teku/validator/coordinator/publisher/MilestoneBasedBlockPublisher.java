@@ -56,13 +56,7 @@ public class MilestoneBasedBlockPublisher implements BlockPublisher {
       final boolean gossipBlobsAfterBlock) {
     this.spec = spec;
     final BlockPublisherPhase0 blockPublisherPhase0 =
-        new BlockPublisherPhase0(
-            asyncRunner,
-            blockFactory,
-            blockGossipChannel,
-            blockImportChannel,
-            dutyMetrics,
-            gossipBlobsAfterBlock);
+        new BlockPublisherPhase0(blockFactory, blockGossipChannel, blockImportChannel, dutyMetrics);
 
     // Not needed for all milestones
     final Supplier<BlockPublisherDeneb> blockAndBlobSidecarsPublisherSupplier =
@@ -81,7 +75,6 @@ public class MilestoneBasedBlockPublisher implements BlockPublisher {
         Suppliers.memoize(
             () ->
                 new BlockPublisherFulu(
-                    asyncRunner,
                     blockFactory,
                     blockImportChannel,
                     blockGossipChannel,

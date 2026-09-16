@@ -40,10 +40,11 @@ on:
           - info
           - debug
 
-# if a new commit is made, cancel this run
+# if a new commit is made on a PR, cancel this run; master/tag pushes queue instead so
+# in-flight publish jobs (Docker push, Cloudsmith/Maven upload) never get killed mid-way
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   JAVA_TOOL_OPTIONS: -Xmx4096m
