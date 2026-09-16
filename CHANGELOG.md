@@ -27,3 +27,4 @@
  - Trigger an immediate peer search when publishing sync committee messages fails because there are no peers available on the required gossip topic.
  - Fixed gossip wire validator to reject inbound messages containing the `key` field.
  - Fixed the gossip message size gate comparing the compressed payload size against the uncompressed `MAX_PAYLOAD_SIZE`.
+ - Fixed an out of memory error when a sync stopped while the chain head was still far behind. The node no longer reports itself as in sync in that case.
