@@ -38,6 +38,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.BlockCheckpoints;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreSerializer;
@@ -64,6 +65,7 @@ public abstract class V6SchemaCombined implements SchemaCombined {
   private static final KvStoreColumn<Bytes32, BlockCheckpoints>
       HOT_BLOCK_CHECKPOINT_EPOCHS_BY_ROOT =
           KvStoreColumn.create(7, BYTES32_SERIALIZER, CHECKPOINT_EPOCHS_SERIALIZER);
+  private final KvStoreColumn<UInt64, LightClientUpdate> lightClientUpdatesByPeriod;
 
   // Variables
   private static final KvStoreVariable<UInt64> GENESIS_TIME =
@@ -108,6 +110,8 @@ public abstract class V6SchemaCombined implements SchemaCombined {
     checkpointStates = KvStoreColumn.create(2, CHECKPOINT_SERIALIZER, stateSerializer);
     hotStatesByRoot = KvStoreColumn.create(6, BYTES32_SERIALIZER, stateSerializer);
     latestFinalizedState = KvStoreVariable.create(5, stateSerializer);
+    final KvStoreSerializer<LightClientUpdate> lightClientUpdateSerializer = KvStoreSerializer.createLightClientUpdateSerializer(spec);
+    lightClientUpdatesByPeriod = KvStoreColumn.create(8, UINT64_SERIALIZER, lightClientUpdateSerializer);
 
     votes =
         KvStoreColumn.create(
@@ -154,6 +158,11 @@ public abstract class V6SchemaCombined implements SchemaCombined {
   @Override
   public KvStoreColumn<Bytes32, SlotAndBlockRoot> getColumnStateRootToSlotAndBlockRoot() {
     return STATE_ROOT_TO_SLOT_AND_BLOCK_ROOT;
+  }
+
+  @Override
+  public KvStoreColumn<UInt64, LightClientUpdate> getBestLightClientUpdatesByPeriod() {
+  return lightClientUpdatesByPeriod;
   }
 
   @Override
@@ -267,6 +276,7 @@ public abstract class V6SchemaCombined implements SchemaCombined {
         .put(
             "BLOB_SIDECAR_BY_SLOT_AND_BLOCK_ROOT_AND_BLOB_INDEX",
             getColumnBlobSidecarBySlotRootBlobIndex())
+            .put("LIGHT_CLIENT_UPDATES_BY_PERIOD", getBestLightClientUpdatesByPeriod())
         .build();
   }
 
