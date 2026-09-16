@@ -42,7 +42,7 @@ public class OkHttpStakedBuilderClientProvider implements StakedBuilderClientPro
   public StakedBuilderClient getClient(final String url) {
     return clients.get(
         url,
-        _ ->
+        __ ->
             new OkHttpStakedBuilderClient(
                 asyncRunner,
                 spec,
