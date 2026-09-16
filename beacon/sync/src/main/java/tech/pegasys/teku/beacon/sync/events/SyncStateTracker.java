@@ -127,7 +127,7 @@ public class SyncStateTracker extends Service
   }
 
   @Override
-  public void onOptimisticHeadChanged(final boolean active) {
+  public synchronized void onOptimisticHeadChanged(final boolean active) {
     logSyncStateOnOptimisticHeadChanged(headIsOptimistic, active);
     headIsOptimistic = active;
     updateCurrentState();
