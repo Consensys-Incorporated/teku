@@ -272,7 +272,7 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
       final BroadcastValidationLevel broadcastValidationLevel,
       final Optional<String> builderUrl) {
     return sendRequest(
-        () -> typeDefClient.sendSignedBlock(blockContainer, broadcastValidationLevel));
+        () -> typeDefClient.sendSignedBlock(blockContainer, broadcastValidationLevel, builderUrl));
   }
 
   @Override

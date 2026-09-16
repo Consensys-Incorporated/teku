@@ -18,6 +18,7 @@ import static tech.pegasys.teku.spec.logic.common.statetransition.results.BlockI
 
 import com.google.common.base.Suppliers;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -51,7 +52,8 @@ public abstract class AbstractBlockPublisher implements BlockPublisher {
   public SafeFuture<SendSignedBlockResult> sendSignedBlock(
       final SignedBlockContainer blockContainer,
       final BroadcastValidationLevel broadcastValidationLevel,
-      final BlockPublishingPerformance blockPublishingPerformance) {
+      final BlockPublishingPerformance blockPublishingPerformance,
+      final Optional<String> builderUrl) {
     return blockFactory
         .unblindSignedBlockIfBlinded(blockContainer.getSignedBlock(), blockPublishingPerformance)
         // creating sidecars after unblinding the block to ensure in the blinded flow we will have
@@ -66,29 +68,31 @@ public abstract class AbstractBlockPublisher implements BlockPublisher {
                   Suppliers.memoize(() -> blockFactory.createBlobSidecars(blockContainer)),
                   Suppliers.memoize(() -> blockFactory.createDataColumnSidecars(blockContainer)),
                   broadcastValidationLevel,
-                  blockPublishingPerformance);
+                  blockPublishingPerformance,
+                  builderUrl);
             })
         .thenCompose(result -> calculateResult(blockContainer, result, blockPublishingPerformance));
   }
 
-  private SafeFuture<BlockImportAndBroadcastValidationResults>
+  protected SafeFuture<BlockImportAndBroadcastValidationResults>
       gossipAndImportUnblindedSignedBlockAndSidecars(
           final SignedBeaconBlock block,
           final Supplier<List<BlobSidecar>> blobSidecars,
           final Supplier<List<DataColumnSidecar>> dataColumnSidecars,
           final BroadcastValidationLevel broadcastValidationLevel,
-          final BlockPublishingPerformance blockPublishingPerformance) {
+          final BlockPublishingPerformance blockPublishingPerformance,
+          final Optional<String> builderUrl) {
     if (broadcastValidationLevel == BroadcastValidationLevel.NOT_REQUIRED) {
       // when broadcast validation is disabled, we can publish the block (and sidecars) immediately
       // and then import
-      publishBlockAndSidecars(block, blobSidecars, dataColumnSidecars, blockPublishingPerformance);
+      publishBlockAndSidecars(
+          block, blobSidecars, dataColumnSidecars, blockPublishingPerformance, builderUrl);
       importBlobSidecars(blobSidecars, blockPublishingPerformance);
       return importBlock(block, broadcastValidationLevel);
     }
 
     // when broadcast validation is enabled, we need to wait for the validation to complete before
     // publishing the block (and sidecars)
-
     final SafeFuture<BlockImportAndBroadcastValidationResults>
         blockImportAndBroadcastValidationResults = importBlock(block, broadcastValidationLevel);
 
@@ -103,7 +107,11 @@ public abstract class AbstractBlockPublisher implements BlockPublisher {
             broadcastValidationResult -> {
               if (broadcastValidationResult == BroadcastValidationResult.SUCCESS) {
                 publishBlockAndSidecars(
-                    block, blobSidecars, dataColumnSidecars, blockPublishingPerformance);
+                    block,
+                    blobSidecars,
+                    dataColumnSidecars,
+                    blockPublishingPerformance,
+                    builderUrl);
                 LOG.debug("{} publishing initiated", getPublishingType());
               } else {
                 LOG.warn(
@@ -137,12 +145,13 @@ public abstract class AbstractBlockPublisher implements BlockPublisher {
       SignedBeaconBlock block,
       Supplier<List<BlobSidecar>> blobSidecars,
       Supplier<List<DataColumnSidecar>> dataColumnSidecars,
-      BlockPublishingPerformance blockPublishingPerformance);
+      BlockPublishingPerformance blockPublishingPerformance,
+      Optional<String> builderUrl);
 
   // Used exclusively for logging
   abstract String getPublishingType();
 
-  private SafeFuture<SendSignedBlockResult> calculateResult(
+  protected SafeFuture<SendSignedBlockResult> calculateResult(
       final SignedBlockContainer blockContainer,
       final BlockImportAndBroadcastValidationResults blockImportAndBroadcastValidationResults,
       final BlockPublishingPerformance blockPublishingPerformance) {

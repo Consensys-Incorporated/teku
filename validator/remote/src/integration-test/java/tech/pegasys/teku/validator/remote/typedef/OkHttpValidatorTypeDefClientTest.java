@@ -202,7 +202,7 @@ class OkHttpValidatorTypeDefClientTest extends AbstractTypeDefRequestTestBase {
     final BroadcastValidationLevel broadcastValidationLevel = BroadcastValidationLevel.GOSSIP;
     final SendSignedBlockResult result =
         okHttpValidatorTypeDefClientWithPreferredSsz.sendSignedBlock(
-            signedBeaconBlock, broadcastValidationLevel);
+            signedBeaconBlock, broadcastValidationLevel, Optional.empty());
 
     assertThat(result.isPublished()).isTrue();
 
@@ -230,7 +230,8 @@ class OkHttpValidatorTypeDefClientTest extends AbstractTypeDefRequestTestBase {
     final SignedBeaconBlock signedBeaconBlock = dataStructureUtil.randomSignedBlindedBeaconBlock();
 
     final SendSignedBlockResult result =
-        typeDefClient.sendSignedBlock(signedBeaconBlock, BroadcastValidationLevel.GOSSIP);
+        typeDefClient.sendSignedBlock(
+            signedBeaconBlock, BroadcastValidationLevel.GOSSIP, Optional.empty());
 
     assertThat(result.isPublished()).isTrue();
 
@@ -264,14 +265,14 @@ class OkHttpValidatorTypeDefClientTest extends AbstractTypeDefRequestTestBase {
             .setResponseCode(200)
             .setBody(
                 """
-                            {
-                              "data": {
-                                "head_slot": "1",
-                                "sync_distance": "1",
-                                "is_syncing": true,
-                                "is_optimistic": true
-                              }
-                            }"""));
+                                            {
+                                              "data": {
+                                                "head_slot": "1",
+                                                "sync_distance": "1",
+                                                "is_syncing": true,
+                                                "is_optimistic": true
+                                              }
+                                            }"""));
 
     final SyncingStatus result = typeDefClient.getSyncingStatus();
 

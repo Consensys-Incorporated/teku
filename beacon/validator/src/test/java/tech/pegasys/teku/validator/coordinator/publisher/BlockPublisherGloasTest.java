@@ -15,13 +15,14 @@ package tech.pegasys.teku.validator.coordinator.publisher;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
-import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 
 import java.util.Optional;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.builder.rest.StakedBuilderClient;
+import tech.pegasys.teku.builder.rest.StakedBuilderClientProvider;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockPublishingPerformance;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.networking.eth2.gossip.BlockGossipChannel;
@@ -37,63 +38,28 @@ import tech.pegasys.teku.validator.api.SendSignedBlockResult;
 import tech.pegasys.teku.validator.coordinator.BlockFactory;
 import tech.pegasys.teku.validator.coordinator.DutyMetrics;
 
-class BlockPublisherPhase0Test {
+class BlockPublisherGloasTest {
 
   private final BlockGossipChannel blockGossipChannel = mock(BlockGossipChannel.class);
   private final BlockImportChannel blockImportChannel = mock(BlockImportChannel.class);
-  private final BlockFactory blockFactory = mock(BlockFactory.class);
+  private final StakedBuilderClientProvider stakedBuilderClientProvider =
+      mock(StakedBuilderClientProvider.class);
 
-  private final BlockPublisherPhase0 blockPublisherPhase0 =
-      new BlockPublisherPhase0(
-          blockFactory, blockGossipChannel, blockImportChannel, mock(DutyMetrics.class));
+  private final BlockPublisherGloas blockPublisherGloas =
+      new BlockPublisherGloas(
+          mock(BlockFactory.class),
+          blockGossipChannel,
+          blockImportChannel,
+          mock(DutyMetrics.class),
+          stakedBuilderClientProvider);
 
-  private final Spec spec = TestSpecFactory.createMinimalPhase0();
+  private final Spec spec = TestSpecFactory.createMinimalGloas();
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
-  private final SignedBeaconBlock signedBlock = mock(SignedBeaconBlock.class);
-
-  @BeforeEach
-  void setUp() {
-    when(blockGossipChannel.publishBlock(signedBlock)).thenReturn(SafeFuture.COMPLETE);
-    when(blockImportChannel.importBlock(signedBlock, BroadcastValidationLevel.NOT_REQUIRED))
-        .thenReturn(SafeFuture.completedFuture(null));
-  }
-
-  @Test
-  void importBlock_shouldImportBlock() {
-    safeJoin(blockPublisherPhase0.importBlock(signedBlock, BroadcastValidationLevel.NOT_REQUIRED));
-
-    verify(blockImportChannel).importBlock(signedBlock, BroadcastValidationLevel.NOT_REQUIRED);
-  }
-
-  @Test
-  void publishBlock_shouldPublishBlock() {
-    safeJoin(blockPublisherPhase0.publishBlock(signedBlock, BlockPublishingPerformance.NOOP));
-
-    verify(blockGossipChannel).publishBlock(signedBlock);
-  }
-
-  @Test
-  void missingBlockAfterUnblinding_shouldThrowIllegalStateException() {
-    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock();
-
-    when(blockFactory.unblindSignedBlockIfBlinded(block, BlockPublishingPerformance.NOOP))
-        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
-
-    assertThatSafeFuture(
-            blockPublisherPhase0.sendSignedBlock(
-                block,
-                BroadcastValidationLevel.NOT_REQUIRED,
-                BlockPublishingPerformance.NOOP,
-                Optional.empty()))
-        .isCompletedExceptionallyWith(IllegalStateException.class);
-  }
 
   @Test
   void sendSignedBlock_shouldPublishBlock() {
     final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock();
 
-    when(blockFactory.unblindSignedBlockIfBlinded(block, BlockPublishingPerformance.NOOP))
-        .thenReturn(SafeFuture.completedFuture(Optional.of(block)));
     when(blockGossipChannel.publishBlock(block)).thenReturn(SafeFuture.COMPLETE);
     when(blockImportChannel.importBlock(block, BroadcastValidationLevel.NOT_REQUIRED))
         .thenReturn(
@@ -102,7 +68,7 @@ class BlockPublisherPhase0Test {
                     SafeFuture.completedFuture(BlockImportResult.successful(block)))));
 
     assertThatSafeFuture(
-            blockPublisherPhase0.sendSignedBlock(
+            blockPublisherGloas.sendSignedBlock(
                 block,
                 BroadcastValidationLevel.NOT_REQUIRED,
                 BlockPublishingPerformance.NOOP,
@@ -110,5 +76,34 @@ class BlockPublisherPhase0Test {
         .isCompletedWithValue(SendSignedBlockResult.success(block.getRoot()));
 
     verify(blockGossipChannel).publishBlock(block);
+    verifyNoInteractions(stakedBuilderClientProvider);
+  }
+
+  @Test
+  void sendSignedBlock_withBuilderUrl_shouldSendBlockToBuilder() {
+    final String builderUrl = "http://builder.example.com";
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock();
+    final StakedBuilderClient builderClient = mock(StakedBuilderClient.class);
+
+    when(stakedBuilderClientProvider.getClient(builderUrl)).thenReturn(builderClient);
+    when(builderClient.submitSignedBeaconBlock(block)).thenReturn(SafeFuture.COMPLETE);
+    when(blockGossipChannel.publishBlock(block)).thenReturn(SafeFuture.COMPLETE);
+    when(blockImportChannel.importBlock(block, BroadcastValidationLevel.NOT_REQUIRED))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                new BlockImportAndBroadcastValidationResults(
+                    SafeFuture.completedFuture(BlockImportResult.successful(block)))));
+
+    assertThatSafeFuture(
+            blockPublisherGloas.sendSignedBlock(
+                block,
+                BroadcastValidationLevel.NOT_REQUIRED,
+                BlockPublishingPerformance.NOOP,
+                Optional.of(builderUrl)))
+        .isCompletedWithValue(SendSignedBlockResult.success(block.getRoot()));
+
+    verify(blockGossipChannel).publishBlock(block);
+    verify(stakedBuilderClientProvider).getClient(builderUrl);
+    verify(builderClient).submitSignedBeaconBlock(block);
   }
 }
