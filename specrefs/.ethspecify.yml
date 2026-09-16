@@ -307,8 +307,11 @@ specrefs:
     presets:
       # Not implemented yet: EIP-7688 progressive SSZ sizing work
       - MAX_ATTESTER_SLASHING_SIZE#gloas
-      - MAX_DATA_COLUMN_SIDECAR_SIZE#gloas
       - MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE#gloas
+      # Removed by consensus-specs#5613: computed by compute_max_data_column_sidecar_size
+      # (DataColumnSidecarSchemaGloas) from the blob schedule
+      - MAX_DATA_COLUMN_SIDECAR_SIZE#gloas
+      - MAX_PARTIAL_DATA_COLUMN_SIDECAR_SIZE#gloas
       - MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE#gloas
       - MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE_HEZE#heze
       - MAX_SIGNED_INCLUSION_LIST_SIZE#heze

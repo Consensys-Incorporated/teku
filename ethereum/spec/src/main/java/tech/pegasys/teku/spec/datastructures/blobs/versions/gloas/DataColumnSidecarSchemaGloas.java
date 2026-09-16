@@ -13,8 +13,10 @@
 
 package tech.pegasys.teku.spec.datastructures.blobs.versions.gloas;
 
+import java.util.Collections;
 import java.util.OptionalLong;
 import java.util.function.Consumer;
+import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema5;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBytes32;
@@ -23,6 +25,9 @@ import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszPrimitiveSchemas;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszProgressiveListSchema;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.spec.config.BlobScheduleEntry;
+import tech.pegasys.teku.spec.config.SpecConfigFulu;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSchema;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecarBuilder;
@@ -39,12 +44,8 @@ public class DataColumnSidecarSchemaGloas
 
   private final OptionalLong networkSszLengthBytesUpperBound;
 
-  public DataColumnSidecarSchemaGloas(final DataColumnSchema dataColumnSchema) {
-    this(dataColumnSchema, OptionalLong.empty());
-  }
-
   public DataColumnSidecarSchemaGloas(
-      final DataColumnSchema dataColumnSchema, final OptionalLong networkSszLengthBytesUpperBound) {
+      final DataColumnSchema dataColumnSchema, final SpecConfigFulu specConfig) {
     super(
         "DataColumnSidecarGloas",
         namedSchema(FIELD_INDEX, SszPrimitiveSchemas.UINT64_SCHEMA),
@@ -52,8 +53,40 @@ public class DataColumnSidecarSchemaGloas
         namedSchema(FIELD_KZG_PROOFS, SszProgressiveListSchema.create(SszKZGProofSchema.INSTANCE)),
         namedSchema(FIELD_SLOT, SszPrimitiveSchemas.UINT64_SCHEMA),
         namedSchema(FIELD_BEACON_BLOCK_ROOT, SszPrimitiveSchemas.BYTES32_SCHEMA));
-    this.networkSszLengthBytesUpperBound = networkSszLengthBytesUpperBound;
+    this.networkSszLengthBytesUpperBound =
+        OptionalLong.of(computeMaxDataColumnSidecarSize(dataColumnSchema, specConfig));
     validateNetworkSszLengthBytesUpperBound();
+  }
+
+  /**
+   * Spec {@code compute_max_data_column_sidecar_size}: the serialized size of a sidecar holding the
+   * largest {@code max_blobs_per_block} of the blob schedule, regardless of whether that is the
+   * current value. It bounds the sidecar on gossip and RPC in place of the type-level SSZ bound,
+   * which is far larger since the lists are only limited by {@code MAX_BLOB_COMMITMENTS_PER_BLOCK}.
+   */
+  private long computeMaxDataColumnSidecarSize(
+      final DataColumnSchema dataColumnSchema, final SpecConfigFulu specConfig) {
+    final int maxBlobs =
+        specConfig.getBlobSchedule().stream()
+            .mapToInt(BlobScheduleEntry::maxBlobsPerBlock)
+            .reduce(specConfig.getMaxBlobsPerBlock(), Math::max);
+    final DataColumnSidecar sidecar =
+        create(
+            builder ->
+                builder
+                    .index(UInt64.ZERO)
+                    .column(
+                        dataColumnSchema.create(
+                            Collections.nCopies(
+                                maxBlobs, dataColumnSchema.getElementSchema().getDefault())))
+                    .kzgProofs(
+                        getKzgProofsSchema()
+                            .createFromElements(
+                                Collections.nCopies(
+                                    maxBlobs, SszKZGProofSchema.INSTANCE.getDefault())))
+                    .slot(UInt64.ZERO)
+                    .beaconBlockRoot(Bytes32.ZERO));
+    return sidecar.sszSerialize().size();
   }
 
   @Override
@@ -62,7 +95,6 @@ public class DataColumnSidecarSchemaGloas
   }
 
   @Override
-  @SuppressWarnings("unchecked")
   public SszListSchema<SszKZGCommitment, ?> getKzgCommitmentsSchema() {
     throw new UnsupportedOperationException("blob_kzg_commitments field was removed in Gloas");
   }
