@@ -67,8 +67,8 @@ public class GetLightClientOptimisticUpdate extends RestApiEndpoint {
             .withNotFoundResponse()
             .withNotAcceptableResponse()
             .build());
-    this.schemaDefinitionCache = schemaDefinitionCache;
     this.chainDataProvider = chainDataProvider;
+    this.schemaDefinitionCache = schemaDefinitionCache;
   }
 
   @Override
@@ -83,7 +83,7 @@ public class GetLightClientOptimisticUpdate extends RestApiEndpoint {
 
     final LightClientOptimisticUpdate optimisticUpdate = maybeOptimisticUpdate.get();
     final SpecMilestone milestone =
-        milestoneAtOptimisticSlot(schemaDefinitionCache, optimisticUpdate);
+        milestoneAtOptimisticUpdateSlot(schemaDefinitionCache, optimisticUpdate);
     request.header(HEADER_CONSENSUS_VERSION, milestone.lowerCaseName());
     request.respondOk(new ObjectAndMetaData<>(optimisticUpdate, milestone, false, false, false));
   }
@@ -97,7 +97,7 @@ public class GetLightClientOptimisticUpdate extends RestApiEndpoint {
             List.of(
                 new MilestoneDependentTypesUtil.ConditionalSchemaGetter<>(
                     (optimisticUpdate, milestone) ->
-                        milestoneAtOptimisticSlot(schemaDefinitionCache, optimisticUpdate)
+                        milestoneAtOptimisticUpdateSlot(schemaDefinitionCache, optimisticUpdate)
                                 .equals(milestone)
                             && milestone.isGreaterThan(SpecMilestone.PHASE0),
                     SpecMilestone.ALTAIR,
@@ -112,7 +112,7 @@ public class GetLightClientOptimisticUpdate extends RestApiEndpoint {
         .build();
   }
 
-  private static SpecMilestone milestoneAtOptimisticSlot(
+  private static SpecMilestone milestoneAtOptimisticUpdateSlot(
       final SchemaDefinitionCache schemaDefinitionCache,
       final LightClientOptimisticUpdate optimisticUpdate) {
     return schemaDefinitionCache.milestoneAtSlot(

@@ -28,7 +28,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.google.common.io.Resources;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -105,7 +104,7 @@ public class GetLightClientOptimisticUpdateTest extends AbstractMigratedBeaconHa
     setSpec(TestSpecFactory.createMinimal(milestone));
     setHandler(new GetLightClientOptimisticUpdate(chainDataProvider, schemaDefinitionCache));
 
-    final LightClientOptimisticUpdate lightClientOptimisticUpdate =
+    final ObjectAndMetaData<LightClientOptimisticUpdate> lightClientOptimisticUpdate =
         withMilestone(dataStructureUtil.randomLightClientOptimisticUpdate(UInt64.ONE), milestone);
 
     final Map<String, Object> response =
@@ -119,11 +118,7 @@ public class GetLightClientOptimisticUpdateTest extends AbstractMigratedBeaconHa
     final Map<String, Object> data = JsonTestUtil.getObject(response, "data");
     assertThat(JsonTestUtil.getObject(data, "attested_header").keySet())
         .containsExactlyInAnyOrderElementsOf(expectedHeaderFields(milestone));
-    assertThat(JsonTestUtil.getObject(data, "finalized_header").keySet())
-        .containsExactlyInAnyOrderElementsOf(expectedHeaderFields(milestone));
-
-    final List<Object> optimisticBranch = JsonTestUtil.getList(data, "optimistic_branch");
-    assertThat(optimisticBranch).hasSize(expectedOptimisticBranchLength(milestone));
+    assertThat(data).containsKeys("sync_aggregate", "signature_slot");
   }
 
   private static Set<String> expectedHeaderFields(final SpecMilestone milestone) {
@@ -131,14 +126,6 @@ public class GetLightClientOptimisticUpdateTest extends AbstractMigratedBeaconHa
       case ALTAIR, BELLATRIX -> Set.of("beacon");
       case GLOAS, HEZE -> Set.of("beacon", "execution_block_hash", "execution_branch");
       default -> Set.of("beacon", "execution", "execution_branch");
-    };
-  }
-
-  private static int expectedOptimisticBranchLength(final SpecMilestone milestone) {
-    return switch (milestone) {
-      case ELECTRA, FULU -> 7;
-      case GLOAS, HEZE -> 9;
-      default -> 6;
     };
   }
 
