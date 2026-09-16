@@ -62,6 +62,7 @@ public class ValidatorConfig {
   public static final int MAXIMUM_VALIDATOR_EXTERNAL_SIGNER_CONCURRENT_REQUEST_LIMIT = 1024;
   public static final boolean DEFAULT_VALIDATOR_KEYSTORE_LOCKING_ENABLED = true;
   public static final boolean DEFAULT_VALIDATOR_EXTERNAL_SIGNER_SLASHING_PROTECTION_ENABLED = true;
+  public static final boolean DEFAULT_VALIDATOR_SLASHING_PROTECTION_STRICT_MODE_ENABLED = false;
   public static final boolean DEFAULT_GENERATE_EARLY_ATTESTATIONS = true;
   public static final Optional<Bytes32> DEFAULT_GRAFFITI = Optional.empty();
   public static final ClientGraffitiAppendFormat DEFAULT_CLIENT_GRAFFITI_APPEND_FORMAT =
@@ -117,6 +118,7 @@ public class ValidatorConfig {
   private final OptionalInt beaconApiReadinessExecutorThreads;
 
   private final boolean isLocalSlashingProtectionSynchronizedModeEnabled;
+  private final boolean slashingProtectionStrictModeEnabled;
   private final boolean dvtSelectionsEndpointEnabled;
   private final boolean attestationsV2ApisEnabled;
 
@@ -164,6 +166,7 @@ public class ValidatorConfig {
       final OptionalInt beaconApiReadinessExecutorThreads,
       final Optional<String> sentryNodeConfigurationFile,
       final boolean isLocalSlashingProtectionSynchronizedModeEnabled,
+      final boolean slashingProtectionStrictModeEnabled,
       final boolean dvtSelectionsEndpointEnabled,
       final boolean attestationsV2ApisEnabled,
       final UInt64 builderMinBid,
@@ -212,6 +215,7 @@ public class ValidatorConfig {
     this.sentryNodeConfigurationFile = sentryNodeConfigurationFile;
     this.isLocalSlashingProtectionSynchronizedModeEnabled =
         isLocalSlashingProtectionSynchronizedModeEnabled;
+    this.slashingProtectionStrictModeEnabled = slashingProtectionStrictModeEnabled;
     this.dvtSelectionsEndpointEnabled = dvtSelectionsEndpointEnabled;
     this.attestationsV2ApisEnabled = attestationsV2ApisEnabled;
     this.builderMinBid = builderMinBid;
@@ -391,6 +395,10 @@ public class ValidatorConfig {
     return isLocalSlashingProtectionSynchronizedModeEnabled;
   }
 
+  public boolean isSlashingProtectionStrictModeEnabled() {
+    return slashingProtectionStrictModeEnabled;
+  }
+
   public boolean isDvtSelectionsEndpointEnabled() {
     return dvtSelectionsEndpointEnabled;
   }
@@ -463,6 +471,8 @@ public class ValidatorConfig {
     private int executorThreads = DEFAULT_VALIDATOR_EXECUTOR_THREADS;
     private boolean isLocalSlashingProtectionSynchronizedModeEnabled =
         DEFAULT_VALIDATOR_IS_LOCAL_SLASHING_PROTECTION_SYNCHRONIZED_ENABLED;
+    private boolean slashingProtectionStrictModeEnabled =
+        DEFAULT_VALIDATOR_SLASHING_PROTECTION_STRICT_MODE_ENABLED;
     private boolean dvtSelectionsEndpointEnabled = DEFAULT_OBOL_DVT_SELECTIONS_ENDPOINT_ENABLED;
     private boolean attestationsV2ApisEnabled = DEFAULT_ATTESTATIONS_V2_APIS_ENABLED;
     private UInt64 builderMinBid = DEFAULT_BUILDER_MIN_BID;
@@ -731,6 +741,12 @@ public class ValidatorConfig {
       return this;
     }
 
+    public Builder slashingProtectionStrictModeEnabled(
+        final boolean slashingProtectionStrictModeEnabled) {
+      this.slashingProtectionStrictModeEnabled = slashingProtectionStrictModeEnabled;
+      return this;
+    }
+
     public Builder obolDvtSelectionsEndpointEnabled(final boolean dvtSelectionsEndpointEnabled) {
       this.dvtSelectionsEndpointEnabled = dvtSelectionsEndpointEnabled;
       return this;
@@ -800,6 +816,7 @@ public class ValidatorConfig {
           beaconApiReadinessExecutorThreads,
           sentryNodeConfigurationFile,
           isLocalSlashingProtectionSynchronizedModeEnabled,
+          slashingProtectionStrictModeEnabled,
           dvtSelectionsEndpointEnabled,
           attestationsV2ApisEnabled,
           builderMinBid,
