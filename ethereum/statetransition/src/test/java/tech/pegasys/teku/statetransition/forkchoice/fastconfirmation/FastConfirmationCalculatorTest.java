@@ -16,6 +16,7 @@ package tech.pegasys.teku.statetransition.forkchoice.fastconfirmation;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -26,6 +27,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.LongStream;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -53,12 +55,18 @@ class FastConfirmationCalculatorTest {
   private final ReadOnlyStore store = mock(ReadOnlyStore.class);
   private final ReadOnlyForkChoiceStrategy forkChoice = mock(ReadOnlyForkChoiceStrategy.class);
 
-  // A canonical linear chain where block at index i has slot i and parent = chain(i - 1).
+  // A canonical linear chain where block at index i has parent = chain(i - 1); slots are
+  // ascending but not necessarily consecutive (see buildLinearChainAtSlots).
   private final List<Bytes32> chain = new ArrayList<>();
-  private final Map<Bytes32, Integer> slotByRoot = new HashMap<>();
+  private final List<UInt64> chainSlots = new ArrayList<>();
+  private final Map<Bytes32, Integer> indexByRoot = new HashMap<>();
 
   @BeforeEach
   void setUp() {
+    chain.clear();
+    chainSlots.clear();
+    indexByRoot.clear();
+
     when(store.getForkChoiceStrategy()).thenReturn(forkChoice);
     // Default to no votes; the weight tests re-stub with specific votes before building a
     // calculator.
@@ -182,8 +190,9 @@ class FastConfirmationCalculatorTest {
     final FastConfirmationCalculator calculator = calculatorWithHeadState(headState, 0);
 
     final IntSet allCommitteeMembers = new IntOpenHashSet();
-    for (int slot = 0; slot < spec.getSlotsPerEpoch(UInt64.ZERO); slot++) {
-      allCommitteeMembers.addAll(calculator.getSlotCommittee(UInt64.valueOf(slot)));
+    final UInt64 slotsPerEpoch = UInt64.valueOf(spec.getSlotsPerEpoch(UInt64.ZERO));
+    for (UInt64 slot = UInt64.ZERO; slot.isLessThan(slotsPerEpoch); slot = slot.increment()) {
+      allCommitteeMembers.addAll(calculator.getSlotCommittee(slot));
     }
 
     // Every active validator is assigned to exactly one committee per epoch, so the union of all
@@ -229,6 +238,200 @@ class FastConfirmationCalculatorTest {
   }
 
   @Test
+  void shouldComputeChainAttestationScoresInOnePassMatchingPerBlockScores() {
+    buildLinearChain(8);
+    // Validator 5 votes for a descendant of the whole chain but is slashed -> excluded everywhere.
+    final BeaconState balanceSource = withSlashedValidator(genesisState(), 5);
+    final Bytes32 offChainRoot = Bytes32.random();
+    when(store.getVoteSnapshot())
+        .thenReturn(
+            voteSnapshot(
+                Map.of(
+                    0, vote(chain.get(7)), // supports every scored block
+                    1, vote(chain.get(4)), // supports chain[3..4] only
+                    2, vote(chain.get(2)), // below the scored chain -> supports none of it
+                    3, equivocatingVote(chain.get(7)), // equivocating -> excluded
+                    4, vote(offChainRoot), // unknown to fork choice -> supports none
+                    5, vote(chain.get(7))))); // slashed -> excluded
+    final FastConfirmationCalculator calculator = calculator(chain.get(7), 7);
+
+    final List<Bytes32> scoredChain =
+        List.of(chain.get(3), chain.get(4), chain.get(5), chain.get(6), chain.get(7));
+    final Map<Bytes32, UInt64> batchScores =
+        calculator.computeChainAttestationScores(scoredChain, balanceSource);
+
+    assertThat(batchScores).containsOnlyKeys(scoredChain);
+    for (final Bytes32 root : scoredChain) {
+      assertThat(batchScores.get(root))
+          .isEqualTo(calculator.getAttestationScore(root, balanceSource));
+    }
+  }
+
+  @Test
+  void shouldPrefixSumChainScoresFromVotesBucketedAtTheirLatestSupportedBlock() {
+    buildLinearChain(6);
+    final BeaconState balanceSource = genesisState();
+    when(store.getVoteSnapshot())
+        .thenReturn(
+            voteSnapshot(
+                Map.of(
+                    0, vote(chain.get(5)), // latest supported: chain[5] -> last bucket
+                    1, vote(chain.get(3)), // latest supported: chain[3]
+                    2, vote(chain.get(2)), // latest supported: chain[2] -> first scored block
+                    3, vote(chain.get(0))))); // below the scored chain -> supports none
+    final FastConfirmationCalculator calculator = calculator(chain.get(5), 5);
+
+    final List<Bytes32> scoredChain =
+        List.of(chain.get(2), chain.get(3), chain.get(4), chain.get(5));
+    final Map<Bytes32, UInt64> scores =
+        calculator.computeChainAttestationScores(scoredChain, balanceSource);
+
+    // score(block) = sum of the buckets at the block and every later chain block.
+    final UInt64 b0 = effectiveBalance(balanceSource, 0);
+    final UInt64 b1 = effectiveBalance(balanceSource, 1);
+    final UInt64 b2 = effectiveBalance(balanceSource, 2);
+    assertThat(scores.get(chain.get(5))).isEqualTo(b0);
+    assertThat(scores.get(chain.get(4))).isEqualTo(b0);
+    assertThat(scores.get(chain.get(3))).isEqualTo(b0.plus(b1));
+    assertThat(scores.get(chain.get(2))).isEqualTo(b0.plus(b1).plus(b2));
+  }
+
+  @Test
+  void shouldReturnNoChainScoresForAnEmptyChain() {
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(genesisState(), 0);
+
+    assertThat(calculator.computeChainAttestationScores(List.of(), genesisState())).isEmpty();
+  }
+
+  @Test
+  void shouldScoreSingleBlockChainLikePerBlockScoring() {
+    buildLinearChain(4);
+    final BeaconState balanceSource = genesisState();
+    when(store.getVoteSnapshot())
+        .thenReturn(
+            voteSnapshot(
+                Map.of(
+                    0, vote(chain.get(3)), // descendant -> counts
+                    1, vote(chain.get(1))))); // ancestor -> excluded
+    final FastConfirmationCalculator calculator = calculator(chain.get(3), 3);
+
+    final Map<Bytes32, UInt64> scores =
+        calculator.computeChainAttestationScores(List.of(chain.get(2)), balanceSource);
+
+    assertThat(scores)
+        .containsExactly(
+            Map.entry(chain.get(2), calculator.getAttestationScore(chain.get(2), balanceSource)));
+  }
+
+  @Test
+  void shouldExcludeChainScoreVoteWhoseSupportedNodeCannotBeResolved() {
+    buildLinearChain(4);
+    final BeaconState balanceSource = genesisState();
+    final Bytes32 unresolvableRoot = Bytes32.random();
+    when(store.getVoteSnapshot())
+        .thenReturn(voteSnapshot(Map.of(0, vote(unresolvableRoot), 1, vote(chain.get(3)))));
+    // get_supported_node cannot resolve the vote (e.g. the voted block was pruned).
+    when(forkChoice.getSupportedNode(any(), eq(unresolvableRoot), any(), anyBoolean()))
+        .thenReturn(Optional.empty());
+    final FastConfirmationCalculator calculator = calculator(chain.get(3), 3);
+
+    final Map<Bytes32, UInt64> scores =
+        calculator.computeChainAttestationScores(
+            List.of(chain.get(2), chain.get(3)), balanceSource);
+
+    assertThat(scores.get(chain.get(2))).isEqualTo(effectiveBalance(balanceSource, 1));
+    assertThat(scores.get(chain.get(3))).isEqualTo(effectiveBalance(balanceSource, 1));
+  }
+
+  @Test
+  void shouldFindLatestSupportedChainIndexAtEveryPrefixBoundary() {
+    buildLinearChain(7);
+    final FastConfirmationCalculator calculator = calculator(chain.get(6), 6);
+    // Scored chain: blocks 1..6 as base nodes (list index i holds block i + 1).
+    final List<ForkChoiceNode> chainNodes =
+        chain.subList(1, 7).stream().map(ForkChoiceNode::createBase).toList();
+
+    // A vote for block p supports exactly the chain prefix up to block p: list index p - 1, and
+    // no block at all for p == 0. Walking every position covers the whole-chain fast path
+    // (p == 6) and every binary-search boundary in between.
+    for (int votedBlock = 0; votedBlock < 7; votedBlock++) {
+      final ForkChoiceNode votedNode = ForkChoiceNode.createBase(chain.get(votedBlock));
+      assertThat(calculator.findLatestSupportedChainIndex(chainNodes, votedNode))
+          .isEqualTo(votedBlock - 1);
+    }
+  }
+
+  @Test
+  void shouldFindLatestSupportedChainIndexAcrossEmptySlotGaps() {
+    // Consecutive chain blocks separated by runs of empty slots.
+    buildLinearChainAtSlots(0, 1, 4, 8, 11);
+    final FastConfirmationCalculator calculator = calculator(chain.get(4), 11);
+    final List<ForkChoiceNode> chainNodes =
+        chain.subList(1, 5).stream().map(ForkChoiceNode::createBase).toList();
+
+    // Same prefix-boundary sweep as the gap-free test: the search must follow block ancestry,
+    // with the empty slots skipped by the get_ancestor resolution.
+    for (int votedBlock = 0; votedBlock < 5; votedBlock++) {
+      final ForkChoiceNode votedNode = ForkChoiceNode.createBase(chain.get(votedBlock));
+      assertThat(calculator.findLatestSupportedChainIndex(chainNodes, votedNode))
+          .isEqualTo(votedBlock - 1);
+    }
+  }
+
+  @Test
+  void shouldFindNoSupportedChainIndexForAVoteOutsideTheChain() {
+    buildLinearChain(4);
+    final FastConfirmationCalculator calculator = calculator(chain.get(3), 3);
+    final List<ForkChoiceNode> chainNodes =
+        chain.subList(1, 4).stream().map(ForkChoiceNode::createBase).toList();
+
+    final ForkChoiceNode unknownNode = ForkChoiceNode.createBase(Bytes32.random());
+    assertThat(calculator.findLatestSupportedChainIndex(chainNodes, unknownNode)).isEqualTo(-1);
+  }
+
+  @Test
+  void shouldFindSupportedChainIndexOnSingleBlockChain() {
+    buildLinearChain(4);
+    final FastConfirmationCalculator calculator = calculator(chain.get(3), 3);
+    final List<ForkChoiceNode> chainNodes = List.of(ForkChoiceNode.createBase(chain.get(2)));
+
+    // Descendant (and the block itself) support it; an ancestor does not.
+    assertThat(
+            calculator.findLatestSupportedChainIndex(
+                chainNodes, ForkChoiceNode.createBase(chain.get(3))))
+        .isEqualTo(0);
+    assertThat(
+            calculator.findLatestSupportedChainIndex(
+                chainNodes, ForkChoiceNode.createBase(chain.get(2))))
+        .isEqualTo(0);
+    assertThat(
+            calculator.findLatestSupportedChainIndex(
+                chainNodes, ForkChoiceNode.createBase(chain.get(1))))
+        .isEqualTo(-1);
+  }
+
+  @Test
+  void shouldMemoizeSlotCommitteesWithinTheSlotRun() {
+    final BeaconState headState = genesisState();
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(headState, 0);
+
+    assertThat(calculator.getSlotCommittee(UInt64.ZERO))
+        .isSameAs(calculator.getSlotCommittee(UInt64.ZERO));
+  }
+
+  @Test
+  void shouldSkipCommitteeComputationEntirelyWhenNoValidatorIsEquivocating() {
+    // No equivocating votes: the score is zero by definition and no slot committee is materialized
+    // — a committee query this far beyond the head state's epoch would otherwise throw.
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(genesisState(), 0);
+
+    assertThat(
+            calculator.getEquivocationScore(
+                genesisState(), UInt64.valueOf(1_000_000), UInt64.valueOf(1_000_001)))
+        .isEqualTo(UInt64.ZERO);
+  }
+
+  @Test
   void shouldResolveGloasVoteToSupportedNodeBeforeCheckingAncestry() {
     buildLinearChain(6);
     final BeaconState balanceSource = gloasGenesisState();
@@ -262,6 +465,60 @@ class FastConfirmationCalculatorTest {
         gloasCalculator(balanceSource, votedRoot, voteSlot.longValue());
 
     assertThat(calculator.getAttestationScore(chain.get(3), balanceSource)).isEqualTo(UInt64.ZERO);
+  }
+
+  @Test
+  void shouldBatchScoreGloasFullPayloadVoteMatchingPerBlockScores() {
+    buildLinearChain(7);
+    final BeaconState balanceSource = gloasGenesisState();
+    final UInt64 voteSlot = UInt64.valueOf(6);
+    final Bytes32 votedRoot = chain.get(6);
+    // Validator 0's vote resolves to a FULL node; validator 1's resolves to the base node.
+    final ForkChoiceNode fullNode =
+        new ForkChoiceNode(votedRoot, ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+    when(store.getVoteSnapshot())
+        .thenReturn(
+            voteSnapshot(
+                Map.of(
+                    0,
+                    new VoteTracker(
+                        Bytes32.ZERO, votedRoot, false, false, voteSlot, true, UInt64.ZERO, false),
+                    1,
+                    vote(votedRoot))));
+    when(forkChoice.getSupportedNode(voteSlot, votedRoot, voteSlot, true))
+        .thenReturn(Optional.of(fullNode));
+    // The FULL path follows the chain up to block 3 and diverges above it. Scored chain nodes are
+    // always base nodes, so ancestry holds only where getAncestorNode returns exactly the base
+    // node — making the FULL vote support chain[1..3] and nothing above.
+    for (int i = 0; i <= 3; i++) {
+      when(forkChoice.getAncestorNode(fullNode, UInt64.valueOf(i)))
+          .thenReturn(Optional.of(ForkChoiceNode.createBase(chain.get(i))));
+    }
+    final ForkChoiceNode divergentNode =
+        new ForkChoiceNode(Bytes32.random(), ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+    for (int i = 4; i <= 6; i++) {
+      when(forkChoice.getAncestorNode(fullNode, UInt64.valueOf(i)))
+          .thenReturn(Optional.of(divergentNode));
+    }
+    final FastConfirmationCalculator calculator =
+        gloasCalculator(balanceSource, chain.get(6), voteSlot.longValue());
+
+    final List<Bytes32> scoredChain = List.copyOf(chain.subList(1, 7));
+    final Map<Bytes32, UInt64> batchScores =
+        calculator.computeChainAttestationScores(scoredChain, balanceSource);
+
+    // The batch binary search must agree with per-block scoring on the FULL-vote/base-node
+    // combination: a divergent FULL path at the chain tip forces the search past its whole-chain
+    // fast path and through every prefix boundary.
+    for (final Bytes32 root : scoredChain) {
+      assertThat(batchScores.get(root))
+          .isEqualTo(calculator.getAttestationScore(root, balanceSource));
+    }
+    // The FULL vote counts for exactly the prefix its payload path supports, the base vote for all.
+    final UInt64 fullVoterBalance = effectiveBalance(balanceSource, 0);
+    final UInt64 baseVoterBalance = effectiveBalance(balanceSource, 1);
+    assertThat(batchScores.get(chain.get(3))).isEqualTo(fullVoterBalance.plus(baseVoterBalance));
+    assertThat(batchScores.get(chain.get(4))).isEqualTo(baseVoterBalance);
   }
 
   @Test
@@ -354,6 +611,43 @@ class FastConfirmationCalculatorTest {
             .computeAdversarialWeight(balanceSource, UInt64.valueOf(3), UInt64.valueOf(6));
 
     assertThat(withEquivocation).isLessThan(withoutEquivocation);
+  }
+
+  @Test
+  void shouldMemoizeAdversarialWeightPerSlotRange() {
+    buildLinearChain(11);
+    final BeaconState balanceSource = genesisState();
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(balanceSource, 10);
+
+    // Identity, not just equality: the second call must return the memoized instance.
+    assertThat(
+            calculator.computeAdversarialWeight(
+                balanceSource, UInt64.valueOf(3), UInt64.valueOf(6)))
+        .isSameAs(
+            calculator.computeAdversarialWeight(
+                balanceSource, UInt64.valueOf(3), UInt64.valueOf(6)));
+  }
+
+  @Test
+  void shouldMemoizeSafetyThresholdPerBlock() {
+    buildLinearChain(11);
+    final BeaconState balanceSource = genesisState();
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(balanceSource, 5);
+
+    // Identity, not just equality: the second call must return the memoized instance.
+    assertThat(calculator.computeSafetyThreshold(chain.get(3), balanceSource))
+        .isSameAs(calculator.computeSafetyThreshold(chain.get(3), balanceSource));
+  }
+
+  @Test
+  void shouldMemoizeHonestFfgSupportForCurrentTarget() {
+    buildLinearChain(11);
+    final BeaconState balanceSource = genesisState();
+    final FastConfirmationCalculator calculator = calculator(balanceSource, chain.get(10), 12);
+
+    // Identity, not just equality: the second call must return the memoized instance.
+    assertThat(calculator.computeHonestFfgSupportForCurrentTarget())
+        .isSameAs(calculator.computeHonestFfgSupportForCurrentTarget());
   }
 
   @Test
@@ -787,16 +1081,22 @@ class FastConfirmationCalculatorTest {
   }
 
   private void buildLinearChain(final int length) {
-    for (int slot = 0; slot < length; slot++) {
+    buildLinearChainAtSlots(LongStream.range(0, length).toArray());
+  }
+
+  /** A canonical linear chain with one block per given (ascending) slot; gaps are empty slots. */
+  private void buildLinearChainAtSlots(final long... slots) {
+    for (final long slot : slots) {
       final Bytes32 root = Bytes32.random();
+      indexByRoot.put(root, chain.size());
       chain.add(root);
-      slotByRoot.put(root, slot);
+      chainSlots.add(UInt64.valueOf(slot));
     }
-    for (int slot = 0; slot < length; slot++) {
-      final Bytes32 root = chain.get(slot);
-      when(forkChoice.blockSlot(root)).thenReturn(Optional.of(UInt64.valueOf(slot)));
+    for (int i = 0; i < chain.size(); i++) {
+      final Bytes32 root = chain.get(i);
+      when(forkChoice.blockSlot(root)).thenReturn(Optional.of(chainSlots.get(i)));
       when(forkChoice.contains(root)).thenReturn(true);
-      final Bytes32 parent = slot > 0 ? chain.get(slot - 1) : Bytes32.ZERO;
+      final Bytes32 parent = i > 0 ? chain.get(i - 1) : Bytes32.ZERO;
       when(forkChoice.blockParentRoot(root)).thenReturn(Optional.of(parent));
     }
     // get_ancestor(root, slot): walk up the parent chain until reaching a block at or before slot.
@@ -820,13 +1120,16 @@ class FastConfirmationCalculatorTest {
   }
 
   private Optional<Integer> ancestorIndex(final Bytes32 root, final UInt64 targetSlot) {
-    final Integer index = slotByRoot.get(root);
+    final Integer index = indexByRoot.get(root);
     if (index == null) {
       return Optional.empty();
     }
     int i = index;
-    while (UInt64.valueOf(i).isGreaterThan(targetSlot)) {
+    while (chainSlots.get(i).isGreaterThan(targetSlot)) {
       i--;
+      if (i < 0) {
+        return Optional.empty();
+      }
     }
     return Optional.of(i);
   }

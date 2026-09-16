@@ -22,4 +22,6 @@ public class NetworkConstants {
 
   // https://github.com/ethereum/consensus-specs/pull/3767
   public static final int MAX_CONCURRENT_REQUESTS = 2;
+
+  public static final int MAX_REQUEST_LIGHT_CLIENT_UPDATES = 128;
 }

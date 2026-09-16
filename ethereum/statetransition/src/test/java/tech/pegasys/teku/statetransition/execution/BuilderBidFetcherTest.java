@@ -83,10 +83,10 @@ public class BuilderBidFetcherTest {
 
     assertThat(result).map(RemoteBid::bid).containsExactly(firstBid, secondBid);
     assertThat(result)
-        .map(RemoteBid::builderUrl)
+        .map(RemoteBid::builderEntry)
         .containsExactly(
-            Optional.of(builderConfig.getBuilders().get(0).getUrl()),
-            Optional.of(builderConfig.getBuilders().get(1).getUrl()));
+            Optional.of(builderConfig.getBuilders().get(0)),
+            Optional.of(builderConfig.getBuilders().get(1)));
   }
 
   @Test

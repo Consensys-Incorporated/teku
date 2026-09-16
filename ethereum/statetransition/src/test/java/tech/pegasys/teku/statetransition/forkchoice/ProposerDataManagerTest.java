@@ -25,6 +25,7 @@ import static tech.pegasys.teku.spec.schemas.ApiSchemas.VALIDATOR_REGISTRATION_S
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalDouble;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -150,16 +151,21 @@ public class ProposerDataManagerTest {
     final UInt64 blockSlot = UInt64.valueOf(12);
     final UInt64 proposerIndex = UInt64.ONE;
     final UInt64 targetGasLimit = UInt64.valueOf(45_000_000);
+    final Bytes32 dependentRoot = dataStructureUtil.randomBytes32();
     final SignedValidatorRegistration validatorRegistration =
         validatorRegistrationWithGasLimit(UInt64.valueOf(30_000_000));
     final ProposerPreferencesManager proposerPreferencesManager =
         mock(ProposerPreferencesManager.class);
     final ProposersDataManager manager = createProposersDataManager(proposerPreferencesManager);
-    when(proposerPreferencesManager.getProposerPreferences(blockSlot))
-        .thenReturn(Optional.of(proposerPreferences(proposerIndex, targetGasLimit)));
+    when(proposerPreferencesManager.getProposerPreferences(blockSlot, dependentRoot))
+        .thenReturn(Optional.of(proposerPreferences(dependentRoot, proposerIndex, targetGasLimit)));
 
     assertThat(
-            manager.getTargetGasLimit(blockSlot, proposerIndex, Optional.of(validatorRegistration)))
+            manager.getTargetGasLimit(
+                blockSlot,
+                proposerIndex,
+                Optional.of(dependentRoot),
+                Optional.of(validatorRegistration)))
         .isEqualTo(targetGasLimit);
   }
 
@@ -173,7 +179,7 @@ public class ProposerDataManagerTest {
 
     assertThat(
             proposersDataManager.getTargetGasLimit(
-                blockSlot, proposerIndex, Optional.of(validatorRegistration)))
+                blockSlot, proposerIndex, Optional.empty(), Optional.of(validatorRegistration)))
         .isEqualTo(registrationGasLimit);
   }
 
@@ -182,18 +188,24 @@ public class ProposerDataManagerTest {
     final UInt64 blockSlot = UInt64.valueOf(12);
     final UInt64 proposerIndex = UInt64.ONE;
     final UInt64 registrationGasLimit = UInt64.valueOf(30_000_000);
+    final Bytes32 dependentRoot = dataStructureUtil.randomBytes32();
     final ProposerPreferencesManager proposerPreferencesManager =
         mock(ProposerPreferencesManager.class);
     final ProposersDataManager manager = createProposersDataManager(proposerPreferencesManager);
     final SignedValidatorRegistration validatorRegistration =
         validatorRegistrationWithGasLimit(registrationGasLimit);
 
-    when(proposerPreferencesManager.getProposerPreferences(blockSlot))
+    when(proposerPreferencesManager.getProposerPreferences(blockSlot, dependentRoot))
         .thenReturn(
-            Optional.of(proposerPreferences(UInt64.valueOf(2), UInt64.valueOf(45_000_000))));
+            Optional.of(
+                proposerPreferences(dependentRoot, UInt64.valueOf(2), UInt64.valueOf(45_000_000))));
 
     assertThat(
-            manager.getTargetGasLimit(blockSlot, proposerIndex, Optional.of(validatorRegistration)))
+            manager.getTargetGasLimit(
+                blockSlot,
+                proposerIndex,
+                Optional.of(dependentRoot),
+                Optional.of(validatorRegistration)))
         .isEqualTo(registrationGasLimit);
   }
 
@@ -201,7 +213,7 @@ public class ProposerDataManagerTest {
   void shouldUseZeroTargetGasLimitWithoutProposerPreferencesOrValidatorRegistration() {
     assertThat(
             proposersDataManager.getTargetGasLimit(
-                UInt64.valueOf(12), UInt64.ONE, Optional.empty()))
+                UInt64.valueOf(12), UInt64.ONE, Optional.empty(), Optional.empty()))
         .isEqualTo(UInt64.ZERO);
   }
 
@@ -231,10 +243,10 @@ public class ProposerDataManagerTest {
   }
 
   private ProposerPreferences proposerPreferences(
-      final UInt64 validatorIndex, final UInt64 gasLimit) {
+      final Bytes32 dependentRoot, final UInt64 validatorIndex, final UInt64 gasLimit) {
     return new ProposerPreferencesSchema()
         .create(
-            dataStructureUtil.randomBytes32(),
+            dependentRoot,
             dataStructureUtil.randomSlot(),
             validatorIndex,
             dataStructureUtil.randomEth1Address(),

@@ -77,7 +77,6 @@ import tech.pegasys.teku.infrastructure.ssz.collections.SszUInt64List;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszUInt64Vector;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszByte;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBytes32;
-import tech.pegasys.teku.infrastructure.ssz.primitive.SszBytes4;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszVectorSchema;
@@ -198,12 +197,11 @@ import tech.pegasys.teku.spec.datastructures.lightclient.LightClientHeaderSchema
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdateSchema;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
-import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdateResponse;
-import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdateResponseSchema;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdateSchema;
 import tech.pegasys.teku.spec.datastructures.lightclient.versions.capella.LightClientHeaderSchemaCapella;
 import tech.pegasys.teku.spec.datastructures.lightclient.versions.gloas.LightClientHeaderSchemaGloas;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
+import tech.pegasys.teku.spec.datastructures.metadata.LightClientUpdateWithContext;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.BlobIdentifier;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.EnrForkId;
 import tech.pegasys.teku.spec.datastructures.operations.AggregateAndProof;
@@ -356,6 +354,10 @@ public final class DataStructureUtil {
 
   public UInt256 randomUInt256() {
     return UInt256.fromBytes(randomBytes(32));
+  }
+
+  public UInt256 randomUInt256(final long bound) {
+    return UInt256.valueOf(randomPositiveLong(bound));
   }
 
   public Eth1Address randomEth1Address() {
@@ -1313,25 +1315,24 @@ public final class DataStructureUtil {
   }
 
   public BlockContainerAndMetaData randomBlockContainerAndMetaData(final UInt64 slotNum) {
-    return new BlockContainerAndMetaData(
-        randomBeaconBlock(slotNum),
-        spec.atSlot(slotNum).getMilestone(),
-        randomUInt256(),
-        randomUInt256());
+    final BeaconBlock block = randomBeaconBlock(slotNum);
+    return randomBlockContainerAndMetaData(block, slotNum);
   }
 
   public BlockContainerAndMetaData randomBlindedBlockContainerAndMetaData(final UInt64 slotNum) {
-    return new BlockContainerAndMetaData(
-        randomBlindedBeaconBlock(slotNum),
-        spec.atSlot(slotNum).getMilestone(),
-        randomUInt256(),
-        randomUInt256());
+    final BeaconBlock blindedBlock = randomBlindedBeaconBlock(slotNum);
+    return randomBlockContainerAndMetaData(blindedBlock, slotNum);
   }
 
   public BlockContainerAndMetaData randomBlockContainerAndMetaData(
       final BlockContainer blockContainer, final UInt64 slotNum) {
-    return new BlockContainerAndMetaData(
-        blockContainer, spec.atSlot(slotNum).getMilestone(), randomUInt256(), randomUInt256());
+    final SpecMilestone milestone = spec.atSlot(slotNum).getMilestone();
+    return BlockContainerAndMetaData.builder()
+        .blockContainer(blockContainer)
+        .milestone(milestone)
+        .executionPayloadValue(randomUInt256())
+        .consensusBlockValue(randomUInt256())
+        .build();
   }
 
   public BeaconBlock randomBlindedBeaconBlock(final UInt64 slot) {
@@ -2546,12 +2547,8 @@ public final class DataStructureUtil {
         .create(randomBeaconBlockHeader(slot, UInt64.ZERO));
   }
 
-  public LightClientUpdateResponse randomLightClientUpdateResponse(final UInt64 slot) {
-    final LightClientUpdateResponseSchema schema =
-        getAltairSchemaDefinitions(slot).getLightClientUpdateResponseSchema();
-
-    return schema.create(
-        SszUInt64.of(randomUInt64()), SszBytes4.of(randomBytes4()), randomLightClientUpdate(slot));
+  public LightClientUpdateWithContext randomLightClientUpdateWithContext(final UInt64 slot) {
+    return new LightClientUpdateWithContext(randomBytes4(), randomLightClientUpdate(slot));
   }
 
   public Withdrawal randomWithdrawal() {

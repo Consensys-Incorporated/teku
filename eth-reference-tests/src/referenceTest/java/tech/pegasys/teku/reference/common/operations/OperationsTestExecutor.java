@@ -26,6 +26,7 @@ import com.google.common.collect.ImmutableMap;
 import java.util.List;
 import java.util.Optional;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
+import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
@@ -73,11 +74,13 @@ import tech.pegasys.teku.statetransition.attestation.PooledAttestationWithData;
 import tech.pegasys.teku.statetransition.attestation.utils.RewardBasedAttestationSorter;
 import tech.pegasys.teku.statetransition.attestation.utils.RewardBasedAttestationSorter.PooledAttestationWithRewardInfo;
 import tech.pegasys.teku.statetransition.validation.AttesterSlashingValidator;
+import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
 import tech.pegasys.teku.statetransition.validation.OperationValidator;
 import tech.pegasys.teku.statetransition.validation.ProposerSlashingValidator;
 import tech.pegasys.teku.statetransition.validation.SignedBlsToExecutionChangeValidator;
 import tech.pegasys.teku.statetransition.validation.VoluntaryExitValidator;
 import tech.pegasys.teku.statetransition.validation.signatures.SimpleSignatureVerificationService;
+import tech.pegasys.teku.storage.client.MemoryOnlyRecentChainData;
 
 public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
 
@@ -563,7 +566,12 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
       case VOLUNTARY_EXIT -> {
         final SignedVoluntaryExit voluntaryExit = loadVoluntaryExit(testDefinition);
         final VoluntaryExitValidator voluntaryExitValidator =
-            new VoluntaryExitValidator(spec, null, timeProvider);
+            new VoluntaryExitValidator(
+                spec,
+                null,
+                timeProvider,
+                new GossipValidationHelper(
+                    spec, MemoryOnlyRecentChainData.create(spec), new StubMetricsSystem()));
         checkValidationForBlockInclusion(
             voluntaryExitValidator, state, voluntaryExit, expectInclusion);
       }

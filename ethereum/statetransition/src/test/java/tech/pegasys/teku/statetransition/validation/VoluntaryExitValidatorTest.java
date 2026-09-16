@@ -63,6 +63,7 @@ public class VoluntaryExitValidatorTest {
       new MockStartValidatorKeyPairFactory().generateKeyPairs(0, 25);
   private final Spec spec = TestSpecFactory.createMinimalPhase0();
   private final Spec mockSpec = mock(Spec.class);
+  private final GossipValidationHelper gossipValidationHelper = mock(GossipValidationHelper.class);
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
 
   private RecentChainData recentChainData;
@@ -77,7 +78,8 @@ public class VoluntaryExitValidatorTest {
     final ChainBuilder chainBuilder = ChainBuilder.create(spec, VALIDATOR_KEYS);
     chainUpdater = new ChainUpdater(recentChainData, chainBuilder, spec);
     chainUpdater.initializeGenesis();
-    voluntaryExitValidator = new VoluntaryExitValidator(mockSpec, recentChainData, timeProvider);
+    voluntaryExitValidator =
+        new VoluntaryExitValidator(mockSpec, recentChainData, timeProvider, gossipValidationHelper);
   }
 
   @Test
@@ -113,7 +115,8 @@ public class VoluntaryExitValidatorTest {
     chainUpdater.initializeGenesis();
     // cannot exit before epoch 64
     advanceChainAndUpdateBestBlock(spec.slotsPerEpoch(UInt64.ZERO) * 64L);
-    this.voluntaryExitValidator = new VoluntaryExitValidator(spec, recentChainData, timeProvider);
+    this.voluntaryExitValidator =
+        new VoluntaryExitValidator(spec, recentChainData, timeProvider, gossipValidationHelper);
 
     final UInt64 currentEpoch = spec.getCurrentEpoch(getBestState());
     assertThat(spec.atEpoch(currentEpoch).getMilestone()).isEqualTo(specMilestone);
@@ -208,7 +211,8 @@ public class VoluntaryExitValidatorTest {
     chainUpdater.initializeGenesis();
     // a validator cannot exit until SHARD_COMMITTEE_PERIOD (64 epochs on minimal) has elapsed
     advanceChainAndUpdateBestBlock(spec.slotsPerEpoch(UInt64.ZERO) * 65L);
-    voluntaryExitValidator = new VoluntaryExitValidator(spec, recentChainData, timeProvider);
+    voluntaryExitValidator =
+        new VoluntaryExitValidator(spec, recentChainData, timeProvider, gossipValidationHelper);
     return spec;
   }
 
@@ -263,6 +267,27 @@ public class VoluntaryExitValidatorTest {
     assertValidationResult(exit1, ACCEPT);
     assertValidationResult(exit2, IGNORE, "Exit is not the first one");
     assertValidationResult(exit3, IGNORE, "Exit is not the first one");
+  }
+
+  @Test
+  public void shouldIgnoreExitWhenEpochIsInFuture() {
+    advanceChainAndUpdateBestBlock(6);
+    SignedVoluntaryExit exit = dataStructureUtil.randomSignedVoluntaryExit();
+    when(gossipValidationHelper.isEpochFromFuture(exit.getMessage().getEpoch())).thenReturn(true);
+
+    assertValidationResult(exit, IGNORE, "future epoch");
+  }
+
+  @Test
+  public void shouldNotIgnoreExitWhenEpochIsNotInFuture() {
+    advanceChainAndUpdateBestBlock(6);
+    SignedVoluntaryExit exit = dataStructureUtil.randomSignedVoluntaryExit();
+    when(gossipValidationHelper.isEpochFromFuture(exit.getMessage().getEpoch())).thenReturn(false);
+    when(mockSpec.validateVoluntaryExit(getBestState(), exit)).thenReturn(Optional.empty());
+    when(mockSpec.verifyVoluntaryExitSignature(getBestState(), exit, BLSSignatureVerifier.SIMPLE))
+        .thenReturn(true);
+
+    assertValidationResult(exit, ACCEPT);
   }
 
   @Test

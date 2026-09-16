@@ -26,7 +26,7 @@ on:
       runner:
         type: string
         required: false
-        default: gha-runner-scale-set-ubuntu-24-amd64-xxl
+        default: ubuntu-latest-128
       gradle_args:
         type: string
         required: false

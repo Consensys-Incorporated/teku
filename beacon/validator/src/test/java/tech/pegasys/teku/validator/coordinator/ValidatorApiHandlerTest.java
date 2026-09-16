@@ -1010,7 +1010,7 @@ class ValidatorApiHandlerTest {
     when(blockPublisher.sendSignedBlock(eq(block), eq(NOT_REQUIRED), any()))
         .thenReturn(SafeFuture.completedFuture(SendSignedBlockResult.success(block.getRoot())));
     final SafeFuture<SendSignedBlockResult> result =
-        validatorApiHandler.sendSignedBlock(block, NOT_REQUIRED);
+        validatorApiHandler.sendSignedBlock(block, NOT_REQUIRED, Optional.empty());
 
     assertThat(result).isCompletedWithValue(SendSignedBlockResult.success(block.getRoot()));
   }
@@ -1022,7 +1022,7 @@ class ValidatorApiHandlerTest {
         .thenReturn(SafeFuture.failedFuture(new RuntimeException("Failed to publish block")));
 
     final SafeFuture<SendSignedBlockResult> result =
-        validatorApiHandler.sendSignedBlock(block, NOT_REQUIRED);
+        validatorApiHandler.sendSignedBlock(block, NOT_REQUIRED, Optional.empty());
 
     assertThat(result)
         .isCompletedWithValue(SendSignedBlockResult.rejected("Failed to publish block"));
@@ -1062,7 +1062,7 @@ class ValidatorApiHandlerTest {
 
     // require GOSSIP validation
     final SafeFuture<SendSignedBlockResult> result =
-        validatorApiHandler.sendSignedBlock(block, GOSSIP);
+        validatorApiHandler.sendSignedBlock(block, GOSSIP, Optional.empty());
 
     assertThat(result).isCompletedWithValue(SendSignedBlockResult.success(block.getRoot()));
 
