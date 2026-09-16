@@ -55,6 +55,7 @@ public class SendSignedBlockRequestTest extends AbstractTypeDefRequestTestBase {
     request = new SendSignedBlockRequest(spec, mockWebServer.url("/"), okHttpClient, true);
     this.block =
         specMilestone.isGreaterThanOrEqualTo(SpecMilestone.DENEB)
+                && specMilestone.isLessThan(SpecMilestone.GLOAS)
             ? dataStructureUtil.randomSignedBlockContents()
             : dataStructureUtil.randomSignedBeaconBlock();
   }
