@@ -242,6 +242,90 @@ public class EventSubscriptionManagerTest {
     assertThat(outputStream.getString()).contains("\"next_epoch_dependent_root\"");
   }
 
+  /**
+   * beacon-APIs requires (`should`) a second head_v2 event for the same beacon block and slot when
+   * the payload status changes from empty to full. See
+   * https://github.com/ethereum/beacon-APIs/pull/628.
+   */
+  @Test
+  void shouldPropagateSecondHeadV2EventWhenPayloadStatusChangesFromEmptyToFull() {
+    when(req.getQueryString()).thenReturn("&topics=head_v2");
+    manager.registerClient(client1);
+
+    triggerHeadV2Event(ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY);
+    triggerHeadV2Event(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+
+    final String eventString = outputStream.getString();
+    assertThat(countOccurrences(eventString, "event: head_v2\n")).isEqualTo(2);
+    assertThat(eventString.indexOf("\"payload_status\":\"empty\""))
+        .isLessThan(eventString.indexOf("\"payload_status\":\"full\""));
+  }
+
+  /**
+   * Emission on payload status transitions other than empty -> full is optional and
+   * implementation-defined (https://github.com/ethereum/beacon-APIs/pull/629). Teku emits them,
+   * because fork choice treats a payload status change as a new head.
+   */
+  @Test
+  void shouldPropagateHeadV2EventWhenPayloadStatusChangesFromFullToEmpty() {
+    when(req.getQueryString()).thenReturn("&topics=head_v2");
+    manager.registerClient(client1);
+
+    triggerHeadV2Event(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+    triggerHeadV2Event(ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY);
+
+    final String eventString = outputStream.getString();
+    assertThat(countOccurrences(eventString, "event: head_v2\n")).isEqualTo(2);
+    assertThat(eventString.indexOf("\"payload_status\":\"full\""))
+        .isLessThan(eventString.indexOf("\"payload_status\":\"empty\""));
+  }
+
+  /**
+   * The second emission is a head_v2 concern only: the v1 head event carries no payload status, so
+   * re-emitting it for the same head would be a byte identical duplicate.
+   */
+  @Test
+  void shouldNotPropagateDuplicateHeadV1EventWhenOnlyPayloadStatusChanges() {
+    when(req.getQueryString()).thenReturn("&topics=head");
+    manager.registerClient(client1);
+
+    triggerHeadV2Event(ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY);
+    triggerHeadV2Event(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+
+    assertThat(countOccurrences(outputStream.getString(), "event: head\n")).isEqualTo(1);
+  }
+
+  /**
+   * Duplicate suppression must only consider the immediately preceding head event: re-orging back
+   * to a head that was already reported is a genuine head change and has to be re-emitted.
+   */
+  @Test
+  void shouldPropagateHeadEventWhenReorgingBackToAPreviouslyReportedHead() {
+    when(req.getQueryString()).thenReturn("&topics=head");
+    manager.registerClient(client1);
+
+    final Bytes32 originalBlockRoot = headEvent.getData().getBlock();
+    final Bytes32 forkBlockRoot = data.randomBytes32();
+
+    triggerHeadEvent(originalBlockRoot, ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY);
+    // The payload arrives: head_v2 emits again, the v1 head event is a duplicate.
+    triggerHeadEvent(originalBlockRoot, ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+    triggerHeadEvent(forkBlockRoot, ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+    triggerHeadEvent(originalBlockRoot, ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+
+    assertThat(countOccurrences(outputStream.getString(), "event: head\n")).isEqualTo(3);
+  }
+
+  private int countOccurrences(final String haystack, final String needle) {
+    int count = 0;
+    int index = haystack.indexOf(needle);
+    while (index >= 0) {
+      count++;
+      index = haystack.indexOf(needle, index + needle.length());
+    }
+    return count;
+  }
+
   @Test
   void shouldPropagateContributions() {
     when(req.getQueryString()).thenReturn("&topics=contribution_and_proof");
@@ -722,6 +806,25 @@ public class EventSubscriptionManagerTest {
   }
 
   private void triggerHeadV2Event() {
+    triggerHeadV2Event(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+  }
+
+  private void triggerHeadEvent(
+      final Bytes32 bestBlockRoot, final ForkChoicePayloadStatus payloadStatus) {
+    manager.chainHeadUpdated(
+        headEvent.getData().getSlot(),
+        headEvent.getData().getState(),
+        bestBlockRoot,
+        false,
+        true,
+        headEvent.getData().getPreviousDutyDependentRoot(),
+        headEvent.getData().getCurrentDutyDependentRoot(),
+        Optional.of(payloadStatus),
+        Optional.empty());
+    asyncRunner.executeQueuedActions();
+  }
+
+  private void triggerHeadV2Event(final ForkChoicePayloadStatus payloadStatus) {
     manager.chainHeadUpdated(
         headV2Event.getData().data().slot(),
         headV2Event.getData().data().state(),
@@ -730,7 +833,7 @@ public class EventSubscriptionManagerTest {
         true,
         headV2Event.getData().data().currentEpochDependentRoot(),
         headV2Event.getData().data().nextEpochDependentRoot(),
-        Optional.of(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL),
+        Optional.of(payloadStatus),
         Optional.empty());
     asyncRunner.executeQueuedActions();
   }
