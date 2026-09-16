@@ -25,7 +25,6 @@ import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_BEACON;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Function;
 import tech.pegasys.teku.api.ChainDataProvider;
 import tech.pegasys.teku.api.DataProvider;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.MilestoneDependentTypesUtil;
@@ -35,6 +34,7 @@ import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
+import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
 
@@ -62,9 +62,7 @@ public class GetLightClientOptimisticUpdate extends RestApiEndpoint {
                 SC_OK,
                 "Request successful",
                 getResponseType(schemaDefinitionCache),
-                sszResponseType(
-                    (final LightClientOptimisticUpdate optimisticUpdate) ->
-                        milestoneAtOptimisticSlot(schemaDefinitionCache, optimisticUpdate)),
+                sszResponseType(),
                 ETH_CONSENSUS_HEADER_TYPE)
             .withNotFoundResponse()
             .withNotAcceptableResponse()
@@ -84,14 +82,14 @@ public class GetLightClientOptimisticUpdate extends RestApiEndpoint {
     }
 
     final LightClientOptimisticUpdate optimisticUpdate = maybeOptimisticUpdate.get();
-    request.header(
-        HEADER_CONSENSUS_VERSION,
-        milestoneAtOptimisticSlot(schemaDefinitionCache, optimisticUpdate).lowerCaseName());
-    request.respondOk(optimisticUpdate);
+    final SpecMilestone milestone =
+        milestoneAtOptimisticSlot(schemaDefinitionCache, optimisticUpdate);
+    request.header(HEADER_CONSENSUS_VERSION, milestone.lowerCaseName());
+    request.respondOk(new ObjectAndMetaData<>(optimisticUpdate, milestone, false, false, false));
   }
 
-  private static SerializableTypeDefinition<LightClientOptimisticUpdate> getResponseType(
-      final SchemaDefinitionCache schemaDefinitionCache) {
+  private static SerializableTypeDefinition<ObjectAndMetaData<LightClientOptimisticUpdate>>
+      getResponseType(final SchemaDefinitionCache schemaDefinitionCache) {
     final SerializableTypeDefinition<LightClientOptimisticUpdate> lightClientOptimisticUpdateType =
         getMultipleSchemaDefinitionFromMilestone(
             schemaDefinitionCache,
@@ -100,19 +98,17 @@ public class GetLightClientOptimisticUpdate extends RestApiEndpoint {
                 new MilestoneDependentTypesUtil.ConditionalSchemaGetter<>(
                     (optimisticUpdate, milestone) ->
                         milestoneAtOptimisticSlot(schemaDefinitionCache, optimisticUpdate)
-                            .equals(milestone),
+                                .equals(milestone)
+                            && milestone.isGreaterThan(SpecMilestone.PHASE0),
                     SpecMilestone.ALTAIR,
                     schemaDefinitions ->
                         SchemaDefinitionsAltair.required(schemaDefinitions)
                             .getLightClientOptimisticUpdateSchema())));
 
-    return SerializableTypeDefinition.<LightClientOptimisticUpdate>object()
+    return SerializableTypeDefinition.<ObjectAndMetaData<LightClientOptimisticUpdate>>object()
         .name("GetLightClientOptimisticUpdateResponse")
-        .withField(
-            "version",
-            MILESTONE_TYPE,
-            optimisticUpdate -> milestoneAtOptimisticSlot(schemaDefinitionCache, optimisticUpdate))
-        .withField("data", lightClientOptimisticUpdateType, Function.identity())
+        .withField("version", MILESTONE_TYPE, ObjectAndMetaData::getMilestone)
+        .withField("data", lightClientOptimisticUpdateType, ObjectAndMetaData::getData)
         .build();
   }
 

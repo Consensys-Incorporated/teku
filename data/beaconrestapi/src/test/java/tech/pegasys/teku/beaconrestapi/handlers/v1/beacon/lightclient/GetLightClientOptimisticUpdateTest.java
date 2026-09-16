@@ -28,6 +28,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.google.common.io.Resources;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -43,6 +44,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
+import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 
 public class GetLightClientOptimisticUpdateTest extends AbstractMigratedBeaconHandlerTest {
 
@@ -63,13 +65,14 @@ public class GetLightClientOptimisticUpdateTest extends AbstractMigratedBeaconHa
     handler.handleRequest(request);
 
     assertThat(request.getResponseCode()).isEqualTo(SC_OK);
-    assertThat(request.getResponseBody()).isEqualTo(lightClientOptimisticUpdate);
+    assertThat(request.getResponseBody())
+        .isEqualTo(withMilestone(lightClientOptimisticUpdate, SpecMilestone.ALTAIR));
     assertThat(request.getResponseHeaders(HEADER_CONSENSUS_VERSION))
         .isEqualTo(SpecMilestone.ALTAIR.lowerCaseName());
   }
 
   @Test
-  void shouldReturnNotFoundWhenNoOptimisticUpdate() throws Exception {
+  void shouldReturnNotFoundWhenNoOptimisticUpdateAvailable() throws Exception {
     when(chainDataProvider.getLatestLightClientOptimisticUpdate()).thenReturn(Optional.empty());
 
     handler.handleRequest(request);
@@ -82,7 +85,9 @@ public class GetLightClientOptimisticUpdateTest extends AbstractMigratedBeaconHa
     final LightClientOptimisticUpdate lightClientOptimisticUpdate =
         dataStructureUtil.randomLightClientOptimisticUpdate(UInt64.ONE);
 
-    final String data = getResponseStringFromMetadata(handler, SC_OK, lightClientOptimisticUpdate);
+    final String data =
+        getResponseStringFromMetadata(
+            handler, SC_OK, withMilestone(lightClientOptimisticUpdate, SpecMilestone.ALTAIR));
     final JsonNode responseDataAsJsonNode = JsonTestUtil.parseAsJsonNode(data);
     final String expected =
         Resources.toString(
@@ -94,16 +99,14 @@ public class GetLightClientOptimisticUpdateTest extends AbstractMigratedBeaconHa
   }
 
   @ParameterizedTest
-  @EnumSource(
-      value = SpecMilestone.class,
-      names = {"ALTAIR", "BELLATRIX", "CAPELLA", "DENEB", "ELECTRA", "FULU", "GLOAS"})
+  @EnumSource(value = SpecMilestone.class, mode = EnumSource.Mode.EXCLUDE, names = "PHASE0")
   void shouldSerializeForEveryMilestoneWithItsOwnSchema(final SpecMilestone milestone)
       throws Exception {
     setSpec(TestSpecFactory.createMinimal(milestone));
     setHandler(new GetLightClientOptimisticUpdate(chainDataProvider, schemaDefinitionCache));
 
     final LightClientOptimisticUpdate lightClientOptimisticUpdate =
-        dataStructureUtil.randomLightClientOptimisticUpdate(UInt64.ONE);
+        withMilestone(dataStructureUtil.randomLightClientOptimisticUpdate(UInt64.ONE), milestone);
 
     final Map<String, Object> response =
         JsonTestUtil.parse(
@@ -112,15 +115,30 @@ public class GetLightClientOptimisticUpdateTest extends AbstractMigratedBeaconHa
     assertThat(response.get("version")).isEqualTo(milestone.lowerCaseName());
     assertThat(sszConsensusVersionHeader(lightClientOptimisticUpdate))
         .isEqualTo(milestone.lowerCaseName());
-    assertThat(JsonTestUtil.getObject(response, "data", "attested_header").keySet())
+
+    final Map<String, Object> data = JsonTestUtil.getObject(response, "data");
+    assertThat(JsonTestUtil.getObject(data, "attested_header").keySet())
         .containsExactlyInAnyOrderElementsOf(expectedHeaderFields(milestone));
+    assertThat(JsonTestUtil.getObject(data, "finalized_header").keySet())
+        .containsExactlyInAnyOrderElementsOf(expectedHeaderFields(milestone));
+
+    final List<Object> optimisticBranch = JsonTestUtil.getList(data, "optimistic_branch");
+    assertThat(optimisticBranch).hasSize(expectedOptimisticBranchLength(milestone));
   }
 
   private static Set<String> expectedHeaderFields(final SpecMilestone milestone) {
     return switch (milestone) {
       case ALTAIR, BELLATRIX -> Set.of("beacon");
-      case GLOAS -> Set.of("beacon", "execution_block_hash", "execution_branch");
+      case GLOAS, HEZE -> Set.of("beacon", "execution_block_hash", "execution_branch");
       default -> Set.of("beacon", "execution", "execution_branch");
+    };
+  }
+
+  private static int expectedOptimisticBranchLength(final SpecMilestone milestone) {
+    return switch (milestone) {
+      case ELECTRA, FULU -> 7;
+      case GLOAS, HEZE -> 9;
+      default -> 6;
     };
   }
 
@@ -129,15 +147,23 @@ public class GetLightClientOptimisticUpdateTest extends AbstractMigratedBeaconHa
     final LightClientOptimisticUpdate lightClientOptimisticUpdate =
         dataStructureUtil.randomLightClientOptimisticUpdate(UInt64.ONE);
 
-    assertThat(getResponseSszFromMetadata(handler, SC_OK, lightClientOptimisticUpdate))
+    assertThat(
+            getResponseSszFromMetadata(
+                handler, SC_OK, withMilestone(lightClientOptimisticUpdate, SpecMilestone.ALTAIR)))
         .isEqualTo(lightClientOptimisticUpdate.sszSerialize().toArray());
+  }
+
+  private static ObjectAndMetaData<LightClientOptimisticUpdate> withMilestone(
+      final LightClientOptimisticUpdate lightClientOptimisticUpdate,
+      final SpecMilestone milestone) {
+    return new ObjectAndMetaData<>(lightClientOptimisticUpdate, milestone, false, false, false);
   }
 
   @SuppressWarnings("unchecked")
   private String sszConsensusVersionHeader(
-      final LightClientOptimisticUpdate lightClientOptimisticUpdate) {
-    final ResponseContentTypeDefinition<LightClientOptimisticUpdate> sszType =
-        (ResponseContentTypeDefinition<LightClientOptimisticUpdate>)
+      final ObjectAndMetaData<LightClientOptimisticUpdate> lightClientOptimisticUpdate) {
+    final ResponseContentTypeDefinition<ObjectAndMetaData<LightClientOptimisticUpdate>> sszType =
+        (ResponseContentTypeDefinition<ObjectAndMetaData<LightClientOptimisticUpdate>>)
             handler.getMetadata().getResponseType(SC_OK, ContentTypes.OCTET_STREAM);
     return sszType.getAdditionalHeaders(lightClientOptimisticUpdate).get(HEADER_CONSENSUS_VERSION);
   }
