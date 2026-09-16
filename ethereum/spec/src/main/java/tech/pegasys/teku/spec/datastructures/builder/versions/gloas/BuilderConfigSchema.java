@@ -25,7 +25,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 public class BuilderConfigSchema
     extends ContainerSchema3<BuilderConfig, SszUInt64, SszUInt64, SszList<BuilderEntry>> {
 
-  private static final long MAX_BUILDER_ENTRIES = 64;
+  public static final long MAX_BUILDER_ENTRIES = 64;
 
   public BuilderConfigSchema(final BuilderEntrySchema builderEntrySchema) {
     super(
