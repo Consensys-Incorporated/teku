@@ -50,6 +50,15 @@ public class VoluntaryExitValidatorElectra extends VoluntaryExitValidator {
         () -> validateElectraConditions(stateElectra, signedExit));
   }
 
+  @Override
+  public Optional<OperationInvalidReason> validateForGossip(
+      final Fork fork, final BeaconState state, final SignedVoluntaryExit signedExit) {
+    final BeaconStateElectra stateElectra = BeaconStateElectra.required(state);
+    return firstOf(
+        () -> super.validateForGossip(fork, state, signedExit),
+        () -> validateElectraConditions(stateElectra, signedExit));
+  }
+
   @VisibleForTesting
   Optional<OperationInvalidReason> validateElectraConditions(
       final BeaconStateElectra stateElectra, final SignedVoluntaryExit exit) {

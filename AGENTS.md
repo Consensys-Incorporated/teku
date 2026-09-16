@@ -341,6 +341,7 @@ Each module has its own test suite under `src/test/java` and test fixtures under
   - Bad: `tech.pegasys.teku.spec.logic.common.util.DataColumnSidecarValidationHelper helper = ...`
 - **Async operations**: Use `SafeFuture` and `AsyncRunner` instead of raw CompletableFuture. Never use `.join()` or `.get()` to block on futures — these block threads and defeat the purpose of async programming. Instead, compose futures using `thenApply`, `thenCompose`, `thenCombine`, `thenComposeCombined`, etc.
 - **Immutability**: Prefer immutable data structures (record types, SszData implementations)
+- **Final variables**: Declare method parameters and local variables as `final`. Declare fields as `final` unless they are intentionally mutable or populated by serialization frameworks.
 - **Error handling**: Use checked exceptions for recoverable errors, unchecked for programming errors
 - **Testing**: All code must have automated test coverage (no manual tests)
 - **Commit messages**: Imperative mood, present tense ("Add feature" not "Added feature")

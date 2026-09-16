@@ -221,6 +221,11 @@ public class GossipValidationHelperTest {
   }
 
   @TestTemplate
+  void isEpochFromFuture_shouldHandleMaximumEpoch() {
+    assertThat(gossipValidationHelper.isEpochFromFuture(UInt64.MAX_VALUE)).isTrue();
+  }
+
+  @TestTemplate
   void isSignatureValidWithRespectToProposerIndex_shouldComputeCorrectly() {
     final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
     storageSystem.chainUpdater().setCurrentSlot(nextSlot);

@@ -13,26 +13,23 @@
 
 package tech.pegasys.teku.reference.phase0.gossip;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import static tech.pegasys.teku.reference.BlsSetting.IGNORED;
 import static tech.pegasys.teku.reference.TestDataUtils.loadSsz;
 import static tech.pegasys.teku.reference.TestDataUtils.loadStateFromSsz;
 import static tech.pegasys.teku.reference.TestDataUtils.loadYaml;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
-import java.util.Set;
-import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
-import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.reference.BlsSetting;
 import tech.pegasys.teku.reference.TestExecutor;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
-import tech.pegasys.teku.spec.logic.common.operations.validation.OperationInvalidReason;
+import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
+import tech.pegasys.teku.statetransition.validation.ProposerSlashingValidator;
 
 public class GossipProposerSlashingTestExecutor implements TestExecutor {
 
@@ -40,52 +37,23 @@ public class GossipProposerSlashingTestExecutor implements TestExecutor {
   public void runTest(final TestDefinition testDefinition) throws Throwable {
     final GossipProposerSlashingMetaData metaData =
         loadYaml(testDefinition, "meta.yaml", GossipProposerSlashingMetaData.class);
-    final Spec spec = testDefinition.getSpec();
+    final boolean signatureVerificationDisabled = metaData.getBlsSetting() == IGNORED;
+    final Spec spec = testDefinition.getSpec(!signatureVerificationDisabled);
     final BeaconState state = loadStateFromSsz(testDefinition, "state.ssz_snappy");
-    final BLSSignatureVerifier signatureVerifier =
-        metaData.getBlsSetting() == IGNORED
-            ? BLSSignatureVerifier.NOOP
-            : BLSSignatureVerifier.SIMPLE;
-
-    final Set<UInt64> seenProposers = new HashSet<>();
+    final List<SignedBeaconBlock> blocks =
+        GossipTestContext.loadBlocks(testDefinition, spec, metaData.getBlocks());
+    final GossipTestContext ctx = GossipTestContext.create(spec, state, blocks);
+    final ProposerSlashingValidator validator =
+        new ProposerSlashingValidator(spec, ctx.recentChainData);
 
     for (final GossipProposerSlashingMetaData.Message message : metaData.getMessages()) {
       final ProposerSlashing slashing =
           loadSsz(
               testDefinition, message.getMessage() + ".ssz_snappy", ProposerSlashing.SSZ_SCHEMA);
-      final UInt64 proposerIndex = slashing.getHeader1().getMessage().getProposerIndex();
+      final InternalValidationResult result = safeJoin(validator.validateForGossip(slashing));
 
-      if (seenProposers.contains(proposerIndex)) {
-        assertThat(message.getExpected())
-            .describedAs("Expected ignore for already-seen proposer %s", proposerIndex)
-            .isEqualTo("ignore");
-      } else {
-        final Optional<OperationInvalidReason> invalidReason =
-            spec.validateProposerSlashing(state, slashing);
-        final boolean signatureValid =
-            invalidReason.isEmpty()
-                && spec.verifyProposerSlashingSignature(state, slashing, signatureVerifier);
-        final boolean rejected = invalidReason.isPresent() || !signatureValid;
-
-        switch (message.getExpected()) {
-          case "valid" -> {
-            assertThat(invalidReason)
-                .describedAs("Expected valid slashing for proposer %s", proposerIndex)
-                .isEmpty();
-            assertThat(signatureValid)
-                .describedAs("Expected valid signature for proposer %s", proposerIndex)
-                .isTrue();
-            seenProposers.add(proposerIndex);
-          }
-          case "reject" ->
-              assertThat(rejected)
-                  .describedAs("Expected reject for proposer %s", proposerIndex)
-                  .isTrue();
-          default ->
-              throw new AssertionError(
-                  "Unexpected expected value: " + message.getExpected() + " for unseen proposer");
-        }
-      }
+      GossipTestContext.assertValidationResult(
+          "proposer slashing " + message.getMessage(), message.getExpected(), result);
     }
   }
 
@@ -98,11 +66,18 @@ public class GossipProposerSlashingTestExecutor implements TestExecutor {
     @JsonProperty(value = "messages", required = true)
     private List<Message> messages;
 
+    @JsonProperty(value = "blocks", required = true)
+    private List<GossipTestContext.BlockEntry> blocks;
+
     @JsonProperty(value = "bls_setting", required = false, defaultValue = "0")
     private int blsSetting;
 
     public List<Message> getMessages() {
       return messages;
+    }
+
+    public List<GossipTestContext.BlockEntry> getBlocks() {
+      return blocks;
     }
 
     public BlsSetting getBlsSetting() {
