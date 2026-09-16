@@ -30,6 +30,35 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
  */
 public interface StakedBuilderClient {
 
+  StakedBuilderClient NOOP =
+      new StakedBuilderClient() {
+
+        @Override
+        public SafeFuture<Optional<SignedExecutionPayloadBid>> getExecutionPayloadBid(
+            final UInt64 slot,
+            final Bytes32 parentHash,
+            final Bytes32 parentRoot,
+            final BLSPublicKey proposerPubkey,
+            final SignedBuilderRequestAuth auth)
+            throws BuilderClientException {
+          return SafeFuture.completedFuture(Optional.empty());
+        }
+
+        @Override
+        public SafeFuture<Void> submitBuilderPreferences(
+            final BLSPublicKey validatorPubkey,
+            final BuilderPreferencesRequest builderPreferencesRequest)
+            throws BuilderClientException {
+          return SafeFuture.COMPLETE;
+        }
+
+        @Override
+        public SafeFuture<Void> submitSignedBeaconBlock(final SignedBeaconBlock signedBeaconBlock)
+            throws BuilderClientException {
+          return SafeFuture.COMPLETE;
+        }
+      };
+
   SafeFuture<Optional<SignedExecutionPayloadBid>> getExecutionPayloadBid(
       UInt64 slot,
       Bytes32 parentHash,

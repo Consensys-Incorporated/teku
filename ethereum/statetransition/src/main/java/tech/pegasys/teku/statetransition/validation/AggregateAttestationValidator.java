@@ -188,6 +188,10 @@ public class AggregateAttestationValidator {
                     reject(
                         "Rejecting aggregate because selection proof does not select validator as aggregator"));
               }
+
+              /*
+               * [REJECT] The aggregator is a member of the committee
+               */
               if (!beaconCommittee.contains(aggregateAndProof.getIndex().intValue())) {
                 return SafeFuture.completedFuture(
                     reject(

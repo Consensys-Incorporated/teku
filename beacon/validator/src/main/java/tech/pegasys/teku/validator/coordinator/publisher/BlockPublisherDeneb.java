@@ -14,6 +14,7 @@
 package tech.pegasys.teku.validator.coordinator.publisher;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -83,7 +84,8 @@ public class BlockPublisherDeneb extends BlockPublisherPhase0 {
       final SignedBeaconBlock block,
       final Supplier<List<BlobSidecar>> blobSidecars,
       final Supplier<List<DataColumnSidecar>> dataColumnSidecars,
-      final BlockPublishingPerformance blockPublishingPerformance) {
+      final BlockPublishingPerformance blockPublishingPerformance,
+      final Optional<String> builderUrl) {
     if (gossipBlobsAfterBlock) {
       publishBlock(block, blockPublishingPerformance)
           .always(() -> publishBlobSidecars(blobSidecars.get(), blockPublishingPerformance));

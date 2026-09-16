@@ -16,8 +16,10 @@ package tech.pegasys.teku.validator.coordinator.publisher;
 import com.google.common.base.Suppliers;
 import java.util.EnumMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.Supplier;
+import tech.pegasys.teku.builder.rest.StakedBuilderClientProvider;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockPublishingPerformance;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -53,7 +55,8 @@ public class MilestoneBasedBlockPublisher implements BlockPublisher {
       final DutyMetrics dutyMetrics,
       final CustodyGroupCountManager custodyGroupCountManager,
       final OptionalInt dasPublishWithholdColumnsEverySlots,
-      final boolean gossipBlobsAfterBlock) {
+      final boolean gossipBlobsAfterBlock,
+      final StakedBuilderClientProvider stakedBuilderClientProvider) {
     this.spec = spec;
     final BlockPublisherPhase0 blockPublisherPhase0 =
         new BlockPublisherPhase0(blockFactory, blockGossipChannel, blockImportChannel, dutyMetrics);
@@ -83,6 +86,15 @@ public class MilestoneBasedBlockPublisher implements BlockPublisher {
                     custodyGroupCountManager,
                     dasPublishWithholdColumnsEverySlots,
                     gossipBlobsAfterBlock));
+    final Supplier<BlockPublisherGloas> blockPublisherGloas =
+        Suppliers.memoize(
+            () ->
+                new BlockPublisherGloas(
+                    blockFactory,
+                    blockGossipChannel,
+                    blockImportChannel,
+                    dutyMetrics,
+                    stakedBuilderClientProvider));
 
     // Populate forks publishers
     spec.getEnabledMilestones()
@@ -90,8 +102,7 @@ public class MilestoneBasedBlockPublisher implements BlockPublisher {
             forkAndSpecMilestone -> {
               final SpecMilestone milestone = forkAndSpecMilestone.getSpecMilestone();
               if (milestone.isGreaterThanOrEqualTo(SpecMilestone.GLOAS)) {
-                // in Gloas, phase0 can be reused
-                registeredPublishers.put(milestone, blockPublisherPhase0);
+                registeredPublishers.put(milestone, blockPublisherGloas.get());
               } else if (milestone.isGreaterThanOrEqualTo(SpecMilestone.FULU)) {
                 registeredPublishers.put(
                     milestone, blockAndDataColumnSidecarsPublisherSupplier.get());
@@ -107,10 +118,12 @@ public class MilestoneBasedBlockPublisher implements BlockPublisher {
   public SafeFuture<SendSignedBlockResult> sendSignedBlock(
       final SignedBlockContainer blockContainer,
       final BroadcastValidationLevel broadcastValidationLevel,
-      final BlockPublishingPerformance blockPublishingPerformance) {
+      final BlockPublishingPerformance blockPublishingPerformance,
+      final Optional<String> builderUrl) {
     final SpecMilestone blockMilestone = spec.atSlot(blockContainer.getSlot()).getMilestone();
     return registeredPublishers
         .get(blockMilestone)
-        .sendSignedBlock(blockContainer, broadcastValidationLevel, blockPublishingPerformance);
+        .sendSignedBlock(
+            blockContainer, broadcastValidationLevel, blockPublishingPerformance, builderUrl);
   }
 }

@@ -16,59 +16,52 @@ package tech.pegasys.teku.validator.coordinator.publisher;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import tech.pegasys.teku.builder.rest.StakedBuilderClientProvider;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockPublishingPerformance;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
-import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.gossip.BlockGossipChannel;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.statetransition.block.BlockImportChannel;
-import tech.pegasys.teku.statetransition.block.BlockImportChannel.BlockImportAndBroadcastValidationResults;
+import tech.pegasys.teku.validator.api.SendSignedBlockResult;
 import tech.pegasys.teku.validator.coordinator.BlockFactory;
 import tech.pegasys.teku.validator.coordinator.DutyMetrics;
 
-public class BlockPublisherPhase0 extends AbstractBlockPublisher {
+public class BlockPublisherGloas extends BlockPublisherPhase0 {
+  private static final Logger LOG = LogManager.getLogger();
 
-  private final BlockGossipChannel blockGossipChannel;
-  private final BlockImportChannel blockImportChannel;
+  private final StakedBuilderClientProvider stakedBuilderClientProvider;
 
-  public BlockPublisherPhase0(
+  public BlockPublisherGloas(
       final BlockFactory blockFactory,
       final BlockGossipChannel blockGossipChannel,
       final BlockImportChannel blockImportChannel,
-      final DutyMetrics dutyMetrics) {
-    super(blockFactory, dutyMetrics);
-    this.blockGossipChannel = blockGossipChannel;
-    this.blockImportChannel = blockImportChannel;
+      final DutyMetrics dutyMetrics,
+      final StakedBuilderClientProvider stakedBuilderClientProvider) {
+    super(blockFactory, blockGossipChannel, blockImportChannel, dutyMetrics);
+    this.stakedBuilderClientProvider = stakedBuilderClientProvider;
   }
 
+  // no need for unblinding in Gloas, so this method can be simplified
   @Override
-  SafeFuture<BlockImportAndBroadcastValidationResults> handleMissingBlockAfterUnblinding() {
-    return SafeFuture.failedFuture(
-        new IllegalStateException("Block must be present after unblinding"));
-  }
-
-  @Override
-  SafeFuture<BlockImportAndBroadcastValidationResults> importBlock(
-      final SignedBeaconBlock block, final BroadcastValidationLevel broadcastValidationLevel) {
-    return blockImportChannel.importBlock(block, broadcastValidationLevel);
-  }
-
-  @Override
-  void importBlobSidecars(
-      final Supplier<List<BlobSidecar>> blobSidecars,
-      final BlockPublishingPerformance blockPublishingPerformance) {
-    // NOOP for Phase 0
-  }
-
-  @Override
-  void importBlobSidecarsAsync(
-      final Supplier<List<BlobSidecar>> blobSidecars,
+  public SafeFuture<SendSignedBlockResult> sendSignedBlock(
+      final SignedBlockContainer blockContainer,
+      final BroadcastValidationLevel broadcastValidationLevel,
       final BlockPublishingPerformance blockPublishingPerformance,
-      final UInt64 slot) {
-    // NOOP for Phase 0
+      final Optional<String> builderUrl) {
+    return gossipAndImportUnblindedSignedBlockAndSidecars(
+            blockContainer.getSignedBlock(),
+            List::of,
+            List::of,
+            broadcastValidationLevel,
+            blockPublishingPerformance,
+            builderUrl)
+        .thenCompose(result -> calculateResult(blockContainer, result, blockPublishingPerformance));
   }
 
   @Override
@@ -79,16 +72,12 @@ public class BlockPublisherPhase0 extends AbstractBlockPublisher {
       final BlockPublishingPerformance blockPublishingPerformance,
       final Optional<String> builderUrl) {
     publishBlock(block, blockPublishingPerformance).finishStackTrace();
+    builderUrl.ifPresent(url -> sendBlockToBuilder(url, block));
   }
 
-  protected SafeFuture<Void> publishBlock(
-      final SignedBeaconBlock block, final BlockPublishingPerformance blockPublishingPerformance) {
-    blockPublishingPerformance.blockPublishingInitiated();
-    return blockGossipChannel.publishBlock(block);
-  }
-
-  @Override
-  String getPublishingType() {
-    return "block";
+  // The builder SHOULD help disseminate the block, we just log a warning in case of exceptions
+  // because it is not critical
+  private void sendBlockToBuilder(final String url, final SignedBeaconBlock block) {
+    stakedBuilderClientProvider.getClient(url).submitSignedBeaconBlock(block).finishWarn(LOG);
   }
 }
