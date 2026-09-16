@@ -14,7 +14,7 @@
 package tech.pegasys.teku.reference.phase0.sanity;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static tech.pegasys.teku.reference.BlsSetting.IGNORED;
 import static tech.pegasys.teku.reference.TestDataUtils.loadSsz;
 import static tech.pegasys.teku.reference.TestDataUtils.loadStateFromSsz;
@@ -24,13 +24,11 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.nio.file.Files;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.assertj.core.api.AbstractThrowableAssert;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
-import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
 import tech.pegasys.teku.reference.BlsSetting;
 import tech.pegasys.teku.reference.TestExecutor;
 import tech.pegasys.teku.spec.Spec;
@@ -55,17 +53,15 @@ public class SanityBlocksTestExecutor implements TestExecutor {
     final SanityBlocksMetaData metaData =
         loadYaml(testDefinition, "meta.yaml", SanityBlocksMetaData.class);
     final BeaconState preState = loadStateFromSsz(testDefinition, "pre.ssz_snappy");
-    // loaded lazily: an invalid block may already be rejected by the SSZ schemas
-    final Supplier<List<SignedBeaconBlock>> blocks =
-        () ->
-            IntStream.range(0, metaData.getBlocksCount())
-                .mapToObj(
-                    index ->
-                        loadSsz(
-                            testDefinition,
-                            "blocks_" + index + ".ssz_snappy",
-                            testDefinition.getSpec()::deserializeSignedBeaconBlock))
-                .collect(Collectors.toList());
+    final List<SignedBeaconBlock> blocks =
+        IntStream.range(0, metaData.getBlocksCount())
+            .mapToObj(
+                index ->
+                    loadSsz(
+                        testDefinition,
+                        "blocks_" + index + ".ssz_snappy",
+                        testDefinition.getSpec()::deserializeSignedBeaconBlock))
+            .collect(Collectors.toList());
 
     final Optional<BeaconState> expectedState;
     if (Files.exists(testDefinition.getTestDirectory().resolve(EXPECTED_STATE_FILENAME))) {
@@ -82,22 +78,16 @@ public class SanityBlocksTestExecutor implements TestExecutor {
       final TestDefinition testDefinition,
       final SanityBlocksMetaData metaData,
       final BeaconState preState,
-      final Supplier<List<SignedBeaconBlock>> blocks,
+      final List<SignedBeaconBlock> blocks,
       final Optional<BeaconState> expectedState) {
     final Spec spec = testDefinition.getSpec();
     expectedState.ifPresentOrElse(
         (state) ->
-            assertThat(processor.processBlocks(spec, metaData, preState, blocks.get()))
-                .isEqualTo(state),
+            assertThat(processor.processBlocks(spec, metaData, preState, blocks)).isEqualTo(state),
         () -> {
-          final Throwable failure =
-              catchThrowable(() -> processor.processBlocks(spec, metaData, preState, blocks.get()));
-          if (failure instanceof SszDeserializeException) {
-            // rejected by the SSZ schemas (e.g. operation count limits) before processing
-            return;
-          }
           final AbstractThrowableAssert<?, ? extends Throwable> throwableAssert =
-              assertThat(failure).hasCauseInstanceOf(StateTransitionException.class);
+              assertThatThrownBy(() -> processor.processBlocks(spec, metaData, preState, blocks))
+                  .hasCauseInstanceOf(StateTransitionException.class);
           /*
            We don't have a better way to know if the test case cares about a state root mismatch until this
            issue is resolved: https://github.com/ethereum/consensus-specs/issues/3122

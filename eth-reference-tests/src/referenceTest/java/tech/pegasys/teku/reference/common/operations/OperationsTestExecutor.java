@@ -14,7 +14,7 @@
 package tech.pegasys.teku.reference.common.operations;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static tech.pegasys.teku.reference.TestDataUtils.loadSsz;
 import static tech.pegasys.teku.reference.TestDataUtils.loadStateFromSsz;
 import static tech.pegasys.teku.reference.TestDataUtils.loadYaml;
@@ -31,7 +31,7 @@ import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
-import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszMaxLengthExceededException;
 import tech.pegasys.teku.infrastructure.time.SystemTimeProvider;
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -298,9 +298,13 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
       final TestDefinition testDefinition,
       final OperationProcessor processor,
       final BeaconState preState) {
-    // an invalid operation may already be rejected by the SSZ schemas (e.g. count limits)
-    assertThatThrownBy(() -> applyOperation(testDefinition, processor, preState))
-        .isInstanceOfAny(BlockProcessingException.class, SszDeserializeException.class);
+    final Throwable failure =
+        catchThrowable(() -> applyOperation(testDefinition, processor, preState));
+    if (failure instanceof SszMaxLengthExceededException) {
+      // let it reach the SszMaxLengthFixtures interception instead of wrapping it in an assertion
+      throw (SszMaxLengthExceededException) failure;
+    }
+    assertThat(failure).isInstanceOf(BlockProcessingException.class);
   }
 
   private BeaconState applyOperation(
