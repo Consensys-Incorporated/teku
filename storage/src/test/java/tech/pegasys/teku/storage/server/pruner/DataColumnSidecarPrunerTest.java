@@ -24,8 +24,10 @@ import static org.mockito.Mockito.when;
 
 import java.time.Duration;
 import java.util.Optional;
+import org.apache.logging.log4j.Level;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.metrics.SettableLabelledGauge;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
@@ -83,6 +85,101 @@ public class DataColumnSidecarPrunerTest {
 
     verify(database).getGenesisTime();
     verify(database, never()).pruneAllSidecars(any(), anyInt());
+  }
+
+  @Test
+  void shouldNotArchiveSidecarsProofsWhenNoPrunableSlotReceived() {
+    asyncRunner.executeDueActions();
+
+    verify(database, never()).archiveSidecarsProofs(any(), any());
+  }
+
+  @Test
+  void shouldArchiveMostRecentChunkOnFirstRun() {
+    final UInt64 prunableSlot = UInt64.valueOf(20);
+    when(database.getEarliestDataColumnSidecarSlot()).thenReturn(Optional.of(UInt64.ZERO));
+
+    dataColumnSidecarPruner.onSidecarArchivePrunableSlot(prunableSlot);
+
+    try (final LogCaptor logCaptor =
+        LogCaptor.forClass(DataColumnSidecarPruner.class, Level.DEBUG)) {
+      asyncRunner.executeDueActions();
+
+      // archives the most recent PRUNE_LIMIT slots: [prunableSlot - PRUNE_LIMIT, prunableSlot]
+      assertThat(logCaptor.getDebugLogs())
+          .anySatisfy(
+              log ->
+                  assertThat(log)
+                      .contains("Archiving data column sidecars to proofs")
+                      .contains("from slot " + (prunableSlot.longValue() - PRUNE_LIMIT))
+                      .contains("up to slot " + prunableSlot));
+    }
+
+    verify(database)
+        .archiveSidecarsProofs(
+            UInt64.valueOf(prunableSlot.longValue() - PRUNE_LIMIT), prunableSlot);
+  }
+
+  @Test
+  void shouldArchiveNextChunkBackwardsOnSubsequentRun() {
+    final UInt64 prunableSlot = UInt64.valueOf(20);
+    when(database.getEarliestDataColumnSidecarSlot()).thenReturn(Optional.of(UInt64.ZERO));
+
+    dataColumnSidecarPruner.onSidecarArchivePrunableSlot(prunableSlot);
+    asyncRunner.executeDueActions(); // run 1: archives [10, 20]
+    asyncRunner.executeQueuedActions(); // run 2: archives [0, 9]
+
+    verify(database).archiveSidecarsProofs(UInt64.valueOf(10), prunableSlot);
+    verify(database).archiveSidecarsProofs(UInt64.ZERO, UInt64.valueOf(9));
+  }
+
+  @Test
+  void shouldClampLowerBoundToEarliestDataColumnSidecarSlot() {
+    final UInt64 prunableSlot = UInt64.valueOf(20);
+    final UInt64 earliestSlot = UInt64.valueOf(15);
+    when(database.getEarliestDataColumnSidecarSlot()).thenReturn(Optional.of(earliestSlot));
+
+    dataColumnSidecarPruner.onSidecarArchivePrunableSlot(prunableSlot);
+    asyncRunner.executeDueActions();
+
+    // lower bound clamped to earliestSlot even though PRUNE_LIMIT would go further back
+    verify(database).archiveSidecarsProofs(earliestSlot, prunableSlot);
+  }
+
+  @Test
+  void shouldSkipArchivingWhenEarliestSlotIsAfterTillSlot() {
+    // Common on checkpoint-synced nodes: prunable boundary is before the earliest stored sidecar.
+    final UInt64 prunableSlot = UInt64.valueOf(100);
+    final UInt64 earliestStoredSlot = UInt64.valueOf(500);
+    when(database.getEarliestDataColumnSidecarSlot()).thenReturn(Optional.of(earliestStoredSlot));
+
+    dataColumnSidecarPruner.onSidecarArchivePrunableSlot(prunableSlot);
+    asyncRunner.executeDueActions();
+
+    verify(database, never()).archiveSidecarsProofs(any(), any());
+  }
+
+  @Test
+  void shouldPrioritiseNewDeltaAfterTillSlotBump() {
+    final UInt64 initialPrunableSlot = UInt64.valueOf(30);
+    final UInt64 bumpedPrunableSlot = UInt64.valueOf(50);
+    when(database.getEarliestDataColumnSidecarSlot()).thenReturn(Optional.of(UInt64.ZERO));
+
+    dataColumnSidecarPruner.onSidecarArchivePrunableSlot(initialPrunableSlot);
+    asyncRunner.executeDueActions(); // run 1: archives [20, 30]
+    asyncRunner.executeQueuedActions(); // run 2: archives [9, 19]
+    asyncRunner.executeQueuedActions(); // run 3: archives [0, 8]
+
+    dataColumnSidecarPruner.onSidecarArchivePrunableSlot(bumpedPrunableSlot);
+
+    asyncRunner.executeQueuedActions(); // run 4: prioritises new delta [40, 50]
+    asyncRunner.executeQueuedActions(); // run 5: fills gap between old and new [31, 39]
+
+    verify(database).archiveSidecarsProofs(UInt64.valueOf(20), UInt64.valueOf(30));
+    verify(database).archiveSidecarsProofs(UInt64.valueOf(9), UInt64.valueOf(19));
+    verify(database).archiveSidecarsProofs(UInt64.ZERO, UInt64.valueOf(8));
+    verify(database).archiveSidecarsProofs(UInt64.valueOf(40), UInt64.valueOf(50));
+    verify(database).archiveSidecarsProofs(UInt64.valueOf(31), UInt64.valueOf(39));
   }
 
   @Test

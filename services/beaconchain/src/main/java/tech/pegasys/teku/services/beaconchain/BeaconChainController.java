@@ -2151,8 +2151,9 @@ public class BeaconChainController extends Service implements BeaconChainControl
               eventChannels.getPublisher(SidecarArchivePrunableChannel.class),
               metricsSystem,
               timeProvider);
-      eventChannels.subscribe(
-          FinalizedCheckpointChannel.class, dataColumnSidecarArchiveReconstructor);
+      eventChannels
+          .subscribe(FinalizedCheckpointChannel.class, dataColumnSidecarArchiveReconstructor)
+          .subscribe(SlotEventsChannel.class, dataColumnSidecarArchiveReconstructor);
     } else {
       dataColumnSidecarArchiveReconstructor = DataColumnSidecarArchiveReconstructor.NOOP;
     }
