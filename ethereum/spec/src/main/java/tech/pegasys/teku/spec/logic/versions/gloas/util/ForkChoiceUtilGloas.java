@@ -270,24 +270,20 @@ public class ForkChoiceUtilGloas extends ForkChoiceUtilFulu {
    * If the boosted block's parent was weak and from the previous slot, boost only applies if there
    * are no timely equivocations from the same proposer.
    *
-   * <p>Implementation note: the proposer-equivocation branch is intentionally not implemented yet.
-   * The current code records both block timeliness flags, but it does not yet consume the PTC
-   * timeliness bit here to suppress proposer boost on same-proposer equivocations. Because that
-   * branch is still deferred, the weak-parent check has no effect on the return value and is
-   * intentionally skipped here.
+   * <p>Spec mapping: {@code should_apply_proposer_boost(store)}.
    *
+   * @param context the fork choice reorg context, used to look up blocks and PTC timeliness
    * @param proposerBoostRoot the current proposer boost root, empty if none
    * @param forkChoiceStrategy the fork choice strategy for looking up block data
    * @param reorgThreshold the threshold for the head weakness check
-   * @param justifiedState unused until the proposer-equivocation branch is implemented
    * @return true if proposer boost should be applied
    */
   @Override
   public boolean shouldApplyProposerBoost(
+      final ForkChoiceReorgContext context,
       final Bytes32 proposerBoostRoot,
       final ReadOnlyForkChoiceStrategy forkChoiceStrategy,
-      final UInt64 reorgThreshold,
-      final BeaconState justifiedState) {
+      final UInt64 reorgThreshold) {
     final Optional<Bytes32> maybeParentRoot = forkChoiceStrategy.blockParentRoot(proposerBoostRoot);
     final Optional<UInt64> maybeBlockSlot = forkChoiceStrategy.blockSlot(proposerBoostRoot);
     if (maybeParentRoot.isEmpty() || maybeBlockSlot.isEmpty()) {
@@ -299,21 +295,57 @@ public class ForkChoiceUtilGloas extends ForkChoiceUtilFulu {
     if (maybeParentSlot.isEmpty()) {
       return true;
     }
+    final UInt64 parentSlot = maybeParentSlot.get();
     // Apply proposer boost if parent is not from the previous slot
-    if (maybeParentSlot.get().increment().isLessThan(blockSlot)) {
+    if (parentSlot.increment().isLessThan(blockSlot)) {
       return true;
     }
-    // TODO-GLOAS: implement the Gloas equivocation suppression branch from
-    // should_apply_proposer_boost
-    // using recorded PTC timeliness instead of routing a predicate through ForkChoice.
-    // The complication is that we need to have a good interaction with gossip datastructures to
-    // detect equivocations. Spec should probably be updated.
-    // NOTE: there is no point in implementing the following check without implementing
-    // equivocation.
-    // # Apply proposer boost if `parent` is not weak
-    //    if not is_head_weak(store, parent_root):
-    //        return True
-    return true;
+    final ReadOnlyStore store = context.getStore();
+    // Apply proposer boost if `parent` is not weak
+    if (!isHeadWeak(store, parentRoot, reorgThreshold)) {
+      return true;
+    }
+    // If `parent` is weak and from the previous slot, apply
+    // proposer boost if there are no early equivocations
+    return !hasTimelyEquivocatingSiblingProposal(
+        context, forkChoiceStrategy, parentRoot, parentSlot);
+  }
+
+  /**
+   * Spec mapping: the {@code equivocations} list comprehension inside {@code
+   * should_apply_proposer_boost}.
+   *
+   * <p>Looks for another block proposed at the same slot as {@code parentRoot}, by the same
+   * proposer, whose PTC-timeliness bit is set. Finding one means the parent's proposer equivocated
+   * in a way that was seen in time by the PTC, which should suppress proposer boost on an
+   * otherwise-weak parent.
+   */
+  private boolean hasTimelyEquivocatingSiblingProposal(
+      final ForkChoiceReorgContext context,
+      final ReadOnlyForkChoiceStrategy forkChoiceStrategy,
+      final Bytes32 parentRoot,
+      final UInt64 parentSlot) {
+    final ReadOnlyStore store = context.getStore();
+    final Optional<UInt64> maybeParentProposerIndex =
+        store.getBlockIfAvailable(parentRoot).map(block -> block.getMessage().getProposerIndex());
+    if (maybeParentProposerIndex.isEmpty()) {
+      return false;
+    }
+    final UInt64 parentProposerIndex = maybeParentProposerIndex.get();
+    return forkChoiceStrategy.getBlockRootsAtSlot(parentSlot).stream()
+        .filter(siblingRoot -> !siblingRoot.equals(parentRoot))
+        .anyMatch(
+            siblingRoot ->
+                context
+                        .getBlockTimeliness(siblingRoot)
+                        .map(BlockTimeliness::isTimelyPtc)
+                        .orElse(false)
+                    && store
+                        .getBlockIfAvailable(siblingRoot)
+                        .map(
+                            block ->
+                                block.getMessage().getProposerIndex().equals(parentProposerIndex))
+                        .orElse(false));
   }
 
   /**

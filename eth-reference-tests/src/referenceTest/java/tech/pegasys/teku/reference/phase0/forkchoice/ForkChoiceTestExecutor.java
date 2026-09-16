@@ -26,6 +26,7 @@ import com.google.common.collect.ImmutableMap;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -40,6 +41,7 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.ssz.SSZ;
 import org.assertj.core.api.Condition;
+import org.junit.jupiter.api.Assertions;
 import org.opentest4j.TestAbortedException;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
@@ -75,7 +77,6 @@ import tech.pegasys.teku.spec.datastructures.execution.PowBlock;
 import tech.pegasys.teku.spec.datastructures.forkchoice.FastConfirmationStore;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
-import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteUpdater;
@@ -536,15 +537,12 @@ public class ForkChoiceTestExecutor implements TestExecutor {
         forkChoice.onAttestation(validatableAttestation);
     assertThat(result).isCompleted();
     final AttestationProcessingResult processingResult = safeJoin(result);
-    // A current-slot attestation is valid but deferred by fork choice (stored and applied on the
-    // next tick). The fast confirmation vectors apply such attestations, so treat deferral as an
-    // accepted outcome.
-    final boolean acceptedByForkChoice =
-        processingResult.isSuccessful()
-            || processingResult.getStatus()
-                == AttestationProcessingResult.Status.DEFER_FORK_CHOICE_PROCESSING;
-    assertThat(acceptedByForkChoice)
-        .withFailMessage(processingResult.getInvalidReason())
+    // If a current-slot attestation is valid but deferred by fork choice (stored and applied on the
+    // next tick), reference tests seem to expect it to be considered invalid, so we will not
+    // consider
+    // it a successful attestation
+    assertThat(processingResult.isSuccessful())
+        .withFailMessage("%s failed with processing result: %s", attestationName, processingResult)
         .isEqualTo(valid);
   }
 
@@ -847,27 +845,53 @@ public class ForkChoiceTestExecutor implements TestExecutor {
 
           case "viable_for_head_roots_and_weights" -> {
             final List<Map<String, Object>> viableHeadRootsAndWeightsData = get(checks, checkType);
-            final Map<Bytes32, UInt64> viableHeadRootsAndWeights =
+
+            final Set<HeadRootAndWeight> viableHeadRootsAndWeights =
                 viableHeadRootsAndWeightsData.stream()
-                    .collect(
-                        Collectors.toMap(
-                            entry -> Bytes32.fromHexString((String) entry.get("root")),
-                            entry -> UInt64.valueOf(entry.get("weight").toString())));
-            final Map<Bytes32, UInt64> chainHeadRootsAndWeights =
+                    .map(
+                        entry ->
+                            new HeadRootAndWeight(
+                                Bytes32.fromHexString((String) entry.get("root")),
+                                UInt64.valueOf(entry.get("weight").toString()),
+                                Optional.ofNullable((Integer) entry.get("payload_status"))
+                                    .map(this::convertToPayloadStatus)))
+                    .collect(Collectors.toSet());
+            final Set<HeadRootAndWeight> chainHeadRootsAndWeights =
                 recentChainData
                     .getForkChoiceStrategy()
                     .map(ReadOnlyForkChoiceStrategy::getChainHeads)
                     .orElse(Collections.emptyList())
                     .stream()
-                    .collect(Collectors.toMap(ProtoNodeData::getRoot, ProtoNodeData::getWeight));
+                    .map(
+                        protoNodeData ->
+                            new HeadRootAndWeight(
+                                protoNodeData.getRoot(),
+                                protoNodeData.getWeight(),
+                                Optional.ofNullable(protoNodeData.getPayloadStatus())))
+                    .collect(Collectors.toSet());
 
-            assertThat(chainHeadRootsAndWeights.keySet())
-                .containsAll(viableHeadRootsAndWeights.keySet());
-
-            for (Bytes32 root : viableHeadRootsAndWeights.keySet()) {
-              UInt64 weight = viableHeadRootsAndWeights.get(root);
-              UInt64 actualWeight = chainHeadRootsAndWeights.get(root);
-              assertThat(actualWeight).describedAs("block %s's weight", root).isEqualTo(weight);
+            for (HeadRootAndWeight headRootAndWeight : viableHeadRootsAndWeights) {
+              boolean notPresent =
+                  chainHeadRootsAndWeights.stream()
+                      .noneMatch(
+                          (chainHeadRootAndWeight) -> {
+                            if (headRootAndWeight.root.equals(chainHeadRootAndWeight.root)
+                                && headRootAndWeight.weight.equals(chainHeadRootAndWeight.weight)) {
+                              // an unset payload status means we don't need to check if payload
+                              // status is correct
+                              if (headRootAndWeight.payloadStatus.isPresent()) {
+                                return headRootAndWeight.payloadStatus.equals(
+                                    chainHeadRootAndWeight.payloadStatus);
+                              } else {
+                                return true;
+                              }
+                            }
+                            return false;
+                          });
+              Assertions.assertFalse(
+                  notPresent,
+                  String.format(
+                      "Unable to find %s in %s", headRootAndWeight, chainHeadRootsAndWeights));
             }
           }
 
@@ -1142,4 +1166,14 @@ public class ForkChoiceTestExecutor implements TestExecutor {
       return BlsSetting.forCode(blsSetting);
     }
   }
+
+  private ForkChoicePayloadStatus convertToPayloadStatus(final int payloadStatus) {
+    return Arrays.stream(ForkChoicePayloadStatus.values())
+        .filter(fcps -> fcps.getValue() == payloadStatus)
+        .findAny()
+        .get();
+  }
+
+  private record HeadRootAndWeight(
+      Bytes32 root, UInt64 weight, Optional<ForkChoicePayloadStatus> payloadStatus) {}
 }
