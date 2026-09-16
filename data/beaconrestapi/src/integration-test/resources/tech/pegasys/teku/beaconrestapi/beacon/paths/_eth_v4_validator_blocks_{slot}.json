@@ -112,6 +112,12 @@
             "schema" : {
               "type" : "boolean"
             }
+          },
+          "Eth-Builder-Url" : {
+            "description" : "The url of a winning builder when the bid was retrieved via the builder-API.\nThe validator client MUST echo this value in the Eth-Builder-Url request header when publishing the signed block,\nso the beacon node can forward the block to the same builder via submitSignedBeaconBlock. Absent for a self-built block or a bid won over p2p.",
+            "schema" : {
+              "type" : "string"
+            }
           }
         },
         "content" : {

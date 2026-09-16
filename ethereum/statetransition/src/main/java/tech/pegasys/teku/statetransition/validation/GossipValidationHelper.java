@@ -44,6 +44,7 @@ import tech.pegasys.teku.spec.logic.common.util.AttestationValidationResult;
 import tech.pegasys.teku.spec.logic.common.util.DataColumnSidecarUtil;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.BeaconStateAccessorsGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.PredicatesGloas;
+import tech.pegasys.teku.statetransition.util.ShufflingDependentRootUtil;
 import tech.pegasys.teku.storage.client.ChainHead;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
@@ -80,6 +81,27 @@ public class GossipValidationHelper {
     final UInt64 maxCurrSlot =
         spec.getCurrentSlotFromTimeMillis(maxTime, recentChainData.getGenesisTimeMillis());
     return slot.isGreaterThan(maxCurrSlot);
+  }
+
+  /**
+   * Returns true when the proposer for {@code proposalSlot} is known, which happens once the
+   * lookahead epoch has started.
+   */
+  public boolean isWithinProposerLookahead(final UInt64 proposalSlot) {
+    final int minSeedLookahead = spec.atSlot(proposalSlot).getConfig().getMinSeedLookahead();
+    final UInt64 lookaheadEpoch =
+        spec.computeEpochAtSlot(proposalSlot).minusMinZero(minSeedLookahead);
+    final UInt64 lookaheadEpochStartSlot = spec.computeStartSlotAtEpoch(lookaheadEpoch);
+    return !isSlotFromFuture(lookaheadEpochStartSlot);
+  }
+
+  /** Returns true when the proposal slot is within the parent block's proposer lookahead. */
+  public boolean isWithinParentProposerLookahead(
+      final UInt64 proposalSlot, final UInt64 parentBlockSlot) {
+    final UInt64 proposalEpoch = spec.computeEpochAtSlot(proposalSlot);
+    final UInt64 parentEpoch = spec.computeEpochAtSlot(parentBlockSlot);
+    final int minSeedLookahead = spec.getSpecConfig(proposalEpoch).getMinSeedLookahead();
+    return proposalEpoch.isLessThanOrEqualTo(parentEpoch.plus(minSeedLookahead));
   }
 
   public boolean isEpochFromFuture(final UInt64 epoch) {
@@ -349,6 +371,17 @@ public class GossipValidationHelper {
     // Otherwise the root could still become the latest block before the epoch if it is the head,
     // because the next block to extend it would be at or after epochStartSlot.
     return recentChainData.getBestBlockRoot().filter(root::equals).isPresent();
+  }
+
+  public Optional<Bytes32> getShufflingDependentRoot(
+      final Bytes32 blockRoot, final UInt64 proposalSlot) {
+    final Optional<ReadOnlyForkChoiceStrategy> maybeForkChoiceStrategy =
+        recentChainData.getForkChoiceStrategy();
+    if (maybeForkChoiceStrategy == null || maybeForkChoiceStrategy.isEmpty()) {
+      return Optional.empty();
+    }
+    return ShufflingDependentRootUtil.getShufflingDependentRoot(
+        spec, maybeForkChoiceStrategy.get(), blockRoot, proposalSlot);
   }
 
   public boolean builderHasEnoughBalanceForBid(

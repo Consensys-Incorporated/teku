@@ -77,7 +77,11 @@ public class SpecConfigReader {
           "MAX_CHUNK_SIZE",
           // Deprecated networking fields not used by Teku
           "RESP_TIMEOUT",
-          "TTFB_TIMEOUT");
+          "TTFB_TIMEOUT",
+          // Removed by consensus-specs#5613: the DataColumnSidecar bound is computed from the
+          // blob schedule (compute_max_data_column_sidecar_size)
+          "MAX_DATA_COLUMN_SIDECAR_SIZE",
+          "MAX_PARTIAL_DATA_COLUMN_SIDECAR_SIZE");
   private static final ImmutableSet<String> CONSTANT_KEYS =
       ImmutableSet.of(
           // Phase0 constants which may exist in legacy config files, but should now be ignored

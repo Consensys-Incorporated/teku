@@ -17,6 +17,7 @@ import tech.pegasys.teku.api.DataProvider;
 import tech.pegasys.teku.beaconrestapi.BeaconRestApiConfig;
 import tech.pegasys.teku.beaconrestapi.RestApiBuilderAddon;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.lightclient.GetLightClientBootstrap;
+import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.lightclient.GetLightClientFinalityUpdate;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.lightclient.GetLightClientOptimisticUpdate;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.lightclient.GetLightClientUpdatesByRange;
 import tech.pegasys.teku.infrastructure.restapi.RestApiBuilder;
@@ -46,7 +47,8 @@ public class LightClientRestApiBuilderAddon implements RestApiBuilderAddon {
   public RestApiBuilder apply(final RestApiBuilder builder) {
     return builder
         .endpoint(new GetLightClientBootstrap(dataProvider, schemaCache))
-        .endpoint(new GetLightClientOptimisticUpdate(dataProvider, schemaCache))
-        .endpoint(new GetLightClientUpdatesByRange(dataProvider, schemaCache));
+        .endpoint(new GetLightClientUpdatesByRange(dataProvider, schemaCache))
+        .endpoint(new GetLightClientFinalityUpdate(dataProvider, schemaCache))
+        .endpoint(new GetLightClientOptimisticUpdate(dataProvider, schemaCache));
   }
 }

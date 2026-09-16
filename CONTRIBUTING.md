@@ -37,11 +37,23 @@ Please reach out in discord if you're looking to help out, and we can assist you
 
 We have a [Teku](https://discord.gg/teku) channel, and also a [Teku Contributors](https://discord.gg/teku) channel.
 
-Due to the prevalence of 'airdrop farming' type practices, this unfortunately puts heightened scrutiny on first time contributors, but if you're genuinely looking to help out, we'd really love to assist you in any way we can.
-This does mean however that we will generally reject 'random' fixes such as 'TODO' fixes, typos, and generally things that add no value that we haven't identified as something we need. These are likely to be rejected with 'due to contribution guidelines' type responses.
-This includes but is not limited to
-* code replacement of TODO's that are not well tested or justified by performance and regression tests to prove their worth.
-* typos, even if valid, will be worked into other PRs or just ignored completely if they're from first time contributors with no substantative value.
+#### Scope of accepted pull requests
+
+To keep review effort sustainable, **we only accept pull requests that are tied to an issue that is either labelled `good first issue`/`help wanted`, or has been explicitly assigned to you by a maintainer.**
+
+If you have an idea for a fix or improvement that isn't already covered by one of those issues:
+1. Open an issue describing the problem or idea (not the PR itself).
+2. Wait for a maintainer to triage it. If we agree it's worth doing, we'll label it appropriately or assign it to you.
+3. Only then open the pull request.
+
+PRs that aren't tied to a qualifying issue will be closed with a link to this section, regardless of the quality of the change itself. This isn't a judgment on the contribution; it's about keeping our review queue tied to work we've already agreed is worth doing.
+
+#### Airdrop Farming
+
+Due to the prevalence of 'airdrop farming' type practices, this unfortunately puts heightened scrutiny on first-time contributors, but if you're genuinely looking to help out, we'd really love to assist you in any way we can.
+Examples of contributions we will generally reject outright, even if opened as an issue first, since they add no value we've identified as needed:
+* code replacement of TODOs that are not well tested or justified by performance and regression tests to prove their worth.
+* typos, even if valid, will be worked into other PRs or just ignored completely if they're from first-time contributors with no substantive value.
 * things like replacing RuntimeException with a new exception type that's not well tested and adding value.
 * rewording of comments
 

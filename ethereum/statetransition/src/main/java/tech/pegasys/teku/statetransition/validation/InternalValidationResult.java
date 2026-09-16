@@ -141,6 +141,13 @@ public class InternalValidationResult {
             .orElse(false);
   }
 
+  public boolean isIgnoreEquivocationDetected() {
+    return isIgnore()
+        && this.validationResultSubCode
+            .map(subCode -> subCode.equals(ValidationResultSubCode.IGNORE_EQUIVOCATION_DETECTED))
+            .orElse(false);
+  }
+
   public boolean isReject() {
     return this.validationResultCode.equals(ValidationResultCode.REJECT);
   }

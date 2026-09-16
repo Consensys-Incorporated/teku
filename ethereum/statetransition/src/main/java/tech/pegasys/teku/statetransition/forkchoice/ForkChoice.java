@@ -100,6 +100,7 @@ import tech.pegasys.teku.statetransition.forkchoice.fastconfirmation.FastConfirm
 import tech.pegasys.teku.statetransition.forkchoice.fastconfirmation.ForkChoiceFastConfirmation;
 import tech.pegasys.teku.statetransition.payloadattestation.ValidatablePayloadAttestationMessage;
 import tech.pegasys.teku.statetransition.util.DebugDataDumper;
+import tech.pegasys.teku.statetransition.util.ShufflingDependentRootUtil;
 import tech.pegasys.teku.statetransition.validation.AttestationStateSelector;
 import tech.pegasys.teku.statetransition.validation.BlockBroadcastValidator;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
@@ -1014,11 +1015,7 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
   }
 
   private Optional<UInt64> getShufflingDependentSlot(final UInt64 epoch) {
-    final int minSeedLookahead = spec.getSpecConfig(epoch).getMinSeedLookahead();
-    if (epoch.isLessThanOrEqualTo(UInt64.valueOf(minSeedLookahead))) {
-      return Optional.empty();
-    }
-    return Optional.of(spec.computeStartSlotAtEpoch(epoch.minus(minSeedLookahead)).minus(1));
+    return ShufflingDependentRootUtil.getShufflingDependentSlotForEpoch(spec, epoch);
   }
 
   private Optional<List<BlobSidecar>> extractBlobSidecarsFromValidationResults(

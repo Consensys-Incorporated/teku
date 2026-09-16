@@ -34,7 +34,9 @@ class NetworkSszLengthBoundsTest {
         spec.getNetworkingConfig().getMaxPayloadSize());
     assertNetworkBound(schemaDefinitions.getSignedAggregateAndProofSchema(), 16_829);
     assertNetworkBound(schemaDefinitions.getAttesterSlashingSchema(), 2_097_616);
-    assertNetworkBound(schemaDefinitions.getDataColumnSidecarSchema(), 8_585_272);
+    // compute_max_data_column_sidecar_size for the minimal blob schedule (9 blobs):
+    // 56 fixed bytes + 9 * (2048 cell + 48 proof)
+    assertNetworkBound(schemaDefinitions.getDataColumnSidecarSchema(), 18_920);
     assertNetworkBound(schemaDefinitions.getSignedExecutionPayloadBidSchema(), 196_932);
   }
 
