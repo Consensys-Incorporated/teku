@@ -49,5 +49,5 @@ dependencies {
 	integrationTestImplementation 'org.jsoup:jsoup'
 	integrationTestImplementation testFixtures(project(':ethereum:statetransition'))
 	integrationTestImplementation testFixtures(project(':infrastructure:metrics'))
-    integrationTestImplementation project(':builder:rest')
+	integrationTestImplementation project(':builder:rest')
 }

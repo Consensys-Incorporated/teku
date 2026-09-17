@@ -4,6 +4,16 @@
     "operationId" : "submitBuilderPreferences",
     "summary" : "Submit builder preferences",
     "description" : "Submits per-builder preferences for one or more proposers. The request body is a flat list of\n`BuilderPreferencesEntry` objects, each naming the proposer in `proposer_pubkey`; the beacon\nnode submits each to the builder-API `submitBuilderPreferences` endpoint at the entry's `url`.\nApplicable from the Gloas fork onwards.\n\nNotes:\n- Each entry targets one builder `url`, to which the beacon node makes one submission.\n- Entries are identified by `proposer_pubkey`, so several proposers MAY submit to the same `url`.\n- The beacon node routes each entry by its `url` and submits to that builder's\n  `submitBuilderPreferences` for the entry's `proposer_pubkey`, forwarding the `auth` and\n  `max_execution_payment`.\n- Validators MAY submit in the epoch prior to proposing (from `state.proposer_lookahead`), so\n  builders hold the preferences before the bid request arrives.",
+    "parameters" : [ {
+      "name" : "Eth-Consensus-Version",
+      "required" : true,
+      "in" : "header",
+      "schema" : {
+        "type" : "string",
+        "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze" ],
+        "description" : "The active consensus version to which the builder preferences being submitted belongs."
+      }
+    } ],
     "requestBody" : {
       "content" : {
         "application/octet-stream" : {
