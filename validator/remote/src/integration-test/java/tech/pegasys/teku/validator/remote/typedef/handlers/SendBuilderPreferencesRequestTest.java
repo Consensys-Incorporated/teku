@@ -27,6 +27,7 @@ import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import tech.pegasys.teku.api.exceptions.RemoteServiceNotAvailableException;
+import tech.pegasys.teku.infrastructure.http.RestApiConstants;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -46,7 +47,7 @@ public class SendBuilderPreferencesRequestTest extends AbstractTypeDefRequestTes
 
   @BeforeEach
   public void setup() {
-    request = new SendBuilderPreferencesRequest(mockWebServer.url("/"), okHttpClient);
+    request = new SendBuilderPreferencesRequest(spec, mockWebServer.url("/"), okHttpClient);
     builderPreferences =
         ApiSchemas.BUILDER_PREFERENCES_ENTRIES_SCHEMA.createFromElements(
             List.of(dataStructureUtil.randomBuilderPreferencesEntry()));
@@ -66,6 +67,8 @@ public class SendBuilderPreferencesRequestTest extends AbstractTypeDefRequestTes
     assertThat(recordedRequest.getMethod()).isEqualTo("POST");
     assertThat(recordedRequest.getPath())
         .contains(ValidatorApiMethod.SEND_BUILDER_PREFERENCES.getPath(emptyMap()));
+    assertThat(recordedRequest.getHeader(RestApiConstants.HEADER_CONSENSUS_VERSION))
+        .isEqualTo(specMilestone.lowerCaseName());
   }
 
   @TestTemplate

@@ -14,6 +14,7 @@
 package tech.pegasys.teku.beaconrestapi.handlers.v1.validator;
 
 import static tech.pegasys.teku.api.ValidatorDataProvider.PARTIAL_PUBLISH_FAILURE_MESSAGE;
+import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.ETH_CONSENSUS_VERSION_TYPE;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_VALIDATOR;
@@ -78,6 +79,9 @@ public class PostBuilderPreferences extends RestApiEndpoint {
                - Validators MAY submit in the epoch prior to proposing (from `state.proposer_lookahead`), so
                  builders hold the preferences before the bid request arrives.""")
         .tags(TAG_VALIDATOR)
+        .headerRequired(
+            ETH_CONSENSUS_VERSION_TYPE.withDescription(
+                "The active consensus version to which the builder preferences being submitted belongs."))
         .requestBodyType(
             ApiSchemas.BUILDER_PREFERENCES_ENTRIES_SCHEMA.getJsonTypeDefinition(),
             ApiSchemas.BUILDER_PREFERENCES_ENTRIES_SCHEMA::sszDeserialize)

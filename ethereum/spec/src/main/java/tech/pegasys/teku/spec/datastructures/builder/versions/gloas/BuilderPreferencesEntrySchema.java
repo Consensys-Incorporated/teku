@@ -19,7 +19,6 @@ import tech.pegasys.teku.infrastructure.ssz.collections.SszByteList;
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema4;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszPrimitiveSchemas;
-import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszByteListSchema;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.type.SszPublicKey;
@@ -34,7 +33,7 @@ public class BuilderPreferencesEntrySchema
     super(
         "BuilderPreferencesEntry",
         namedSchema("proposer_pubkey", SszPublicKeySchema.INSTANCE),
-        namedSchema("url", SszByteListSchema.create(maxBuilderUrlSize)),
+        namedSchema("url", new UrlSchema(maxBuilderUrlSize)),
         namedSchema("auth", authSchema),
         namedSchema("max_execution_payment", SszPrimitiveSchemas.UINT64_SCHEMA));
   }
@@ -52,7 +51,7 @@ public class BuilderPreferencesEntrySchema
     return new BuilderPreferencesEntry(this, node);
   }
 
-  public SszByteListSchema<?> getUrlSchema() {
-    return (SszByteListSchema<?>) getChildSchema(getFieldIndex("url"));
+  public UrlSchema getUrlSchema() {
+    return (UrlSchema) getChildSchema(getFieldIndex("url"));
   }
 }

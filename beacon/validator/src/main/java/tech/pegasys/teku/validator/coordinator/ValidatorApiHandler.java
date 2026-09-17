@@ -951,6 +951,9 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
   @Override
   public SafeFuture<List<SubmitDataError>> sendBuilderPreferences(
       final SszList<BuilderPreferencesEntry> builderPreferences) {
+    if (isSyncActive()) {
+      return NodeSyncingException.failedFuture();
+    }
     final List<SafeFuture<Optional<SubmitDataError>>> futureResults = new ArrayList<>();
     for (int index = 0; index < builderPreferences.size(); index++) {
       final BuilderPreferencesEntry builderPreferencesEntry = builderPreferences.get(index);

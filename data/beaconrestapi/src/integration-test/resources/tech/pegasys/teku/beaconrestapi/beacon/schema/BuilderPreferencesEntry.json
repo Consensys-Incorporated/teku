@@ -11,9 +11,9 @@
     },
     "url" : {
       "type" : "string",
-      "pattern" : "^0x[a-fA-F0-9]{2,}$",
-      "description" : "SSZ encoded byte list",
-      "format" : "bytes"
+      "description" : "URL",
+      "example" : "https://example.com",
+      "format" : "uri"
     },
     "auth" : {
       "$ref" : "#/components/schemas/SignedBuilderRequestAuth"

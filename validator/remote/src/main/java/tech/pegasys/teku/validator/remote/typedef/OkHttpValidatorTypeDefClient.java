@@ -364,7 +364,7 @@ public class OkHttpValidatorTypeDefClient extends OkHttpValidatorMinimalTypeDefC
   public List<SubmitDataError> sendBuilderPreferences(
       final SszList<BuilderPreferencesEntry> builderPreferences) {
     final SendBuilderPreferencesRequest sendBuilderPreferencesRequest =
-        new SendBuilderPreferencesRequest(getBaseEndpoint(), getOkHttpClient());
+        new SendBuilderPreferencesRequest(spec, getBaseEndpoint(), getOkHttpClient());
     return sendBuilderPreferencesRequest.submit(builderPreferences);
   }
 
