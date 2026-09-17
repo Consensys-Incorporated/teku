@@ -15,7 +15,7 @@ package tech.pegasys.teku.beaconrestapi.handlers.v1.validator;
 
 import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.EPOCH_PARAMETER;
 import static tech.pegasys.teku.ethereum.json.types.SharedApiTypes.BODY_INTEGER_LIST;
-import static tech.pegasys.teku.ethereum.json.types.validator.PtcDuties.PTC_DUTIES_TYPE_DEFINITION;
+import static tech.pegasys.teku.ethereum.json.types.validator.PayloadTimelinessCommitteeDuties.PTC_DUTIES_TYPE_DEFINITION;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NO_CONTENT;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
@@ -31,7 +31,7 @@ import java.util.Optional;
 import tech.pegasys.teku.api.DataProvider;
 import tech.pegasys.teku.api.SyncDataProvider;
 import tech.pegasys.teku.api.ValidatorDataProvider;
-import tech.pegasys.teku.ethereum.json.types.validator.PtcDuties;
+import tech.pegasys.teku.ethereum.json.types.validator.PayloadTimelinessCommitteeDuties;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.AsyncApiResponse;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.EndpointMetadata;
@@ -41,17 +41,17 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 
-public class PostPtcDuties extends RestApiEndpoint {
+public class PostPayloadTimelinessCommitteeDuties extends RestApiEndpoint {
   public static final String ROUTE = "/eth/v1/validator/duties/ptc/{epoch}";
   private final ValidatorDataProvider validatorDataProvider;
   private final SyncDataProvider syncDataProvider;
   private final Spec spec;
 
-  public PostPtcDuties(final DataProvider dataProvider, final Spec spec) {
+  public PostPayloadTimelinessCommitteeDuties(final DataProvider dataProvider, final Spec spec) {
     this(dataProvider.getSyncDataProvider(), spec, dataProvider.getValidatorDataProvider());
   }
 
-  PostPtcDuties(
+  PostPayloadTimelinessCommitteeDuties(
       final SyncDataProvider syncDataProvider,
       final Spec spec,
       final ValidatorDataProvider validatorDataProvider) {
@@ -101,8 +101,8 @@ public class PostPtcDuties extends RestApiEndpoint {
     final List<Integer> requestBody = request.getRequestBody();
     final IntList indices = IntArrayList.toList(requestBody.stream().mapToInt(Integer::intValue));
 
-    final SafeFuture<Optional<PtcDuties>> future =
-        validatorDataProvider.getPtcDuties(epoch, indices);
+    final SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> future =
+        validatorDataProvider.getPayloadTimelinessCommitteeDuties(epoch, indices);
 
     request.respondAsync(
         future.thenApply(

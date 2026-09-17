@@ -74,9 +74,9 @@ import tech.pegasys.teku.builder.rest.StakedBuilderClientProvider;
 import tech.pegasys.teku.ethereum.json.types.beacon.StateValidatorData;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuty;
+import tech.pegasys.teku.ethereum.json.types.validator.PayloadTimelinessCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuty;
-import tech.pegasys.teku.ethereum.json.types.validator.PtcDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.PtcDuty;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeSubnetSubscription;
@@ -1461,8 +1461,8 @@ class ValidatorApiHandlerTest {
   @Test
   public void getPtcDuties_shouldFailWhenNodeIsSyncing() {
     nodeIsSyncing();
-    final SafeFuture<Optional<PtcDuties>> duties =
-        validatorApiHandler.getPtcDuties(EPOCH, IntList.of(1));
+    final SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> duties =
+        validatorApiHandler.getPayloadTimelinessCommitteeDuties(EPOCH, IntList.of(1));
     assertThat(duties).isCompletedExceptionally();
     assertThatThrownBy(duties::get).hasRootCauseInstanceOf(NodeSyncingException.class);
   }
@@ -1471,8 +1471,8 @@ class ValidatorApiHandlerTest {
   public void getPtcDuties_shouldFailForEpochTooFarAhead() {
     when(chainDataClient.getCurrentEpoch()).thenReturn(EPOCH.minus(3));
 
-    final SafeFuture<Optional<PtcDuties>> result =
-        validatorApiHandler.getPtcDuties(EPOCH, IntList.of(3, 8));
+    final SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> result =
+        validatorApiHandler.getPayloadTimelinessCommitteeDuties(EPOCH, IntList.of(3, 8));
     assertThat(result).isCompletedExceptionally();
     assertThatThrownBy(result::get).hasRootCauseInstanceOf(IllegalArgumentException.class);
   }
@@ -1484,9 +1484,9 @@ class ValidatorApiHandlerTest {
         .thenReturn(completedFuture(Optional.of(state)));
     when(chainDataClient.getCurrentEpoch()).thenReturn(EPOCH.minus(ONE));
 
-    final SafeFuture<Optional<PtcDuties>> result =
-        validatorApiHandler.getPtcDuties(EPOCH, IntList.of(3, 8, 42));
-    final Optional<PtcDuties> duties = assertCompletedSuccessfully(result);
+    final SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> result =
+        validatorApiHandler.getPayloadTimelinessCommitteeDuties(EPOCH, IntList.of(3, 8, 42));
+    final Optional<PayloadTimelinessCommitteeDuties> duties = assertCompletedSuccessfully(result);
     assertThat(duties.orElseThrow().duties())
         .containsExactly(
             new PtcDuty(

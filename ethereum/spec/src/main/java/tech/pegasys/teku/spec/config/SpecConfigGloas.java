@@ -45,7 +45,7 @@ public interface SpecConfigGloas extends SpecConfigFulu, NetworkingSpecConfigGlo
 
   int getPayloadDueBps();
 
-  int getPtcSize();
+  int getPayloadTimelinessCommitteeSize();
 
   int getMaxPayloadAttestations();
 
@@ -70,11 +70,11 @@ public interface SpecConfigGloas extends SpecConfigFulu, NetworkingSpecConfigGlo
   List<GasLimitScheduleEntry> getGasLimitSchedule();
 
   default int getPayloadTimelyThreshold() {
-    return getPtcSize() / 2;
+    return getPayloadTimelinessCommitteeSize() / 2;
   }
 
   default int getDataAvailabilityTimelyThreshold() {
-    return getPtcSize() / 2;
+    return getPayloadTimelinessCommitteeSize() / 2;
   }
 
   @Override

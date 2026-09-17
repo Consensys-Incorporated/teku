@@ -24,12 +24,12 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 
-public class PtcDutyScheduler extends AbstractDutyScheduler {
+public class PayloadTimelinessCommitteeDutyScheduler extends AbstractDutyScheduler {
 
   private static final Logger LOG = LogManager.getLogger();
   private static final int LOOKAHEAD_EPOCHS = 1;
 
-  public PtcDutyScheduler(
+  public PayloadTimelinessCommitteeDutyScheduler(
       final MetricsSystem metricsSystem, final DutyLoader<?> dutyLoader, final Spec spec) {
     super(metricsSystem, "payload_attestation", dutyLoader, spec);
 
