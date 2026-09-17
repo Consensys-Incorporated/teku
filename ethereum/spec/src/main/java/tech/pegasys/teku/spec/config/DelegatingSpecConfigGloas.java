@@ -76,8 +76,8 @@ public class DelegatingSpecConfigGloas extends DelegatingSpecConfigFulu implemen
   }
 
   @Override
-  public int getPtcSize() {
-    return delegate.getPtcSize();
+  public int getPayloadTimelinessCommitteeSize() {
+    return delegate.getPayloadTimelinessCommitteeSize();
   }
 
   @Override

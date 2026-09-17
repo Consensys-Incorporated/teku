@@ -3821,7 +3821,7 @@ public final class DataStructureUtil {
     return getConstant(
         specConfig ->
             SpecConfigGloas.required(spec.forMilestone(SpecMilestone.GLOAS).getConfig())
-                .getPtcSize());
+                .getPayloadTimelinessCommitteeSize());
   }
 
   int getKzgCommitmentsInclusionProofDepth() {

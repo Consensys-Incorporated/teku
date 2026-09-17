@@ -57,9 +57,9 @@ import tech.pegasys.teku.ethereum.json.types.node.PeerCountBuilder;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuty;
 import tech.pegasys.teku.ethereum.json.types.validator.BeaconCommitteeSelectionProof;
+import tech.pegasys.teku.ethereum.json.types.validator.PayloadTimelinessCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuty;
-import tech.pegasys.teku.ethereum.json.types.validator.PtcDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.PtcDuty;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeSelectionProof;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -406,14 +406,16 @@ class RemoteValidatorApiHandlerTest {
     final UInt64 validatorIndex = UInt64.valueOf(472);
     final PtcDuty expectedValidatorDuties =
         new PtcDuty(dataStructureUtil.randomPublicKey(), validatorIndex, UInt64.ZERO);
-    final PtcDuties response =
-        new PtcDuties(false, dataStructureUtil.randomBytes32(), List.of(expectedValidatorDuties));
+    final PayloadTimelinessCommitteeDuties response =
+        new PayloadTimelinessCommitteeDuties(
+            false, dataStructureUtil.randomBytes32(), List.of(expectedValidatorDuties));
 
-    when(typeDefClient.postPtcDuties(ONE, IntList.of(validatorIndex.intValue())))
+    when(typeDefClient.postPayloadTimelinessCommitteeDuties(
+            ONE, IntList.of(validatorIndex.intValue())))
         .thenReturn(Optional.of(response));
 
-    final SafeFuture<Optional<PtcDuties>> future =
-        apiHandler.getPtcDuties(ONE, IntList.of(validatorIndex.intValue()));
+    final SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> future =
+        apiHandler.getPayloadTimelinessCommitteeDuties(ONE, IntList.of(validatorIndex.intValue()));
 
     assertThat(unwrapToValue(future)).isEqualTo(response);
   }

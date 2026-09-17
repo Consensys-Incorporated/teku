@@ -70,14 +70,15 @@ class MatchingDataPayloadAttestationGroup {
         == null;
   }
 
-  PayloadAttestation createAggregatedPayloadAttestation(final IntList ptc) {
+  PayloadAttestation createAggregatedPayloadAttestation(final IntList payloadTimelinessCommittee) {
     checkArgument(!payloadAttestationMessages.isEmpty(), "Nothing to aggregate");
-    // relative positions of the validator indices with respect to the PTC
+    // relative positions of the validator indices with respect to the Payload Timeliness Committee
     final IntList setBitIndices = new IntArrayList();
     final List<BLSSignature> signatures = new ArrayList<>();
-    for (int ptcPosition = 0; ptcPosition < ptc.size(); ptcPosition++) {
-      final int validatorIndex = ptc.getInt(ptcPosition);
-      // check if we have received a payload attestation message for the validator in the PTC
+    for (int ptcPosition = 0; ptcPosition < payloadTimelinessCommittee.size(); ptcPosition++) {
+      final int validatorIndex = payloadTimelinessCommittee.getInt(ptcPosition);
+      // check if we have received a payload attestation message for the validator in the Payload
+      // Timeliness Committee
       final PayloadAttestationMessage payloadAttestationMessage =
           payloadAttestationMessages.get(validatorIndex);
       if (payloadAttestationMessage != null) {

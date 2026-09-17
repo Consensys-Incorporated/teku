@@ -129,7 +129,7 @@ public class PayloadAttestationMessageGossipValidatorTest {
             payloadAttestationMessageGossipValidator.validate(validatablePayloadAttestationMessage))
         .isCompletedWithValue(ACCEPT);
 
-    assertThat(validatablePayloadAttestationMessage.getPtcPositions())
+    assertThat(validatablePayloadAttestationMessage.getPayloadTimelinessCommitteePositions())
         .hasValueSatisfying(ptcPositions -> assertThat(ptcPositions).isEqualTo(IntSet.of(0, 2, 4)));
   }
 

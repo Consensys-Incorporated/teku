@@ -602,7 +602,7 @@ public class ValidatorClientService extends Service {
           new RetryingDutyLoader<>(
               asyncRunner,
               timeProvider,
-              new PtcDutyLoader(
+              new PayloadTimelinessCommitteeDutyLoader(
                   validatorApiChannel,
                   dependentRoot ->
                       new SlotBasedScheduledDuties<>(
@@ -611,7 +611,8 @@ public class ValidatorClientService extends Service {
                           validatorDutyMetrics::performDutyWithMetrics),
                   validators,
                   validatorIndexProvider));
-      validatorTimingChannels.add(new PtcDutyScheduler(metricsSystem, payloadDutyLoader, spec));
+      validatorTimingChannels.add(
+          new PayloadTimelinessCommitteeDutyScheduler(metricsSystem, payloadDutyLoader, spec));
     }
 
     addValidatorCountMetric(metricsSystem, validators);
