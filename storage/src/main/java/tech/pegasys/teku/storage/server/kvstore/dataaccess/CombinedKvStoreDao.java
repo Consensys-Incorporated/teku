@@ -51,6 +51,7 @@ import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
 import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 import tech.pegasys.teku.storage.server.kvstore.ColumnEntry;
 import tech.pegasys.teku.storage.server.kvstore.KvStoreAccessor;
 import tech.pegasys.teku.storage.server.kvstore.KvStoreAccessor.KvStoreTransaction;
@@ -752,6 +753,18 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
     }
   }
 
+  @Override
+  @MustBeClosed
+  public Stream<ColumnEntry<UInt64, StoredLightClientUpdate>> streamBestLightClientUpdates() {
+    return db.stream(schema.getBestLightClientUpdatesByPeriod());
+  }
+
+  @Override
+  @MustBeClosed
+  public Stream<UInt64> streamBestLightClientUpdatePeriods() {
+    return db.streamKeys(schema.getBestLightClientUpdatesByPeriod());
+  }
+
   static class V4CombinedUpdater<S extends SchemaCombined> implements CombinedUpdater {
     private final KvStoreTransaction transaction;
 
@@ -1112,6 +1125,17 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
     @Override
     public void removeDataColumnSidecarsProofs(final UInt64 slot) {
       transaction.delete(schema.getColumnDataColumnSidecarsProofsBySlot(), slot);
+    }
+
+    @Override
+    public void addBestLightClientUpdate(
+        final UInt64 period, final StoredLightClientUpdate update) {
+      transaction.put(schema.getBestLightClientUpdatesByPeriod(), period, update);
+    }
+
+    @Override
+    public void removeBestLightClientUpdate(final UInt64 period) {
+      transaction.delete(schema.getBestLightClientUpdatesByPeriod(), period);
     }
   }
 }

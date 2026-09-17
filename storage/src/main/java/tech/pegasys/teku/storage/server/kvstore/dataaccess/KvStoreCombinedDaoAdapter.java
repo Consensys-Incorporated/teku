@@ -41,6 +41,7 @@ import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
 import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 import tech.pegasys.teku.storage.server.kvstore.ColumnEntry;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.V4FinalizedKvStoreDao.V4FinalizedUpdater;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.V4HotKvStoreDao.V4HotUpdater;
@@ -389,6 +390,18 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
   }
 
   @Override
+  @MustBeClosed
+  public Stream<ColumnEntry<UInt64, StoredLightClientUpdate>> streamBestLightClientUpdates() {
+    return hotDao.streamBestLightClientUpdates();
+  }
+
+  @Override
+  @MustBeClosed
+  public Stream<UInt64> streamBestLightClientUpdatePeriods() {
+    return hotDao.streamBestLightClientUpdatePeriods();
+  }
+
+  @Override
   public Optional<List<List<KZGProof>>> getDataColumnSidecarsProofs(final UInt64 slot) {
     return finalizedDao.getDataColumnSidecarProofs(slot);
   }
@@ -528,6 +541,17 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
     @Override
     public void setCustodyGroupCount(final UInt64 custodyGroupCount) {
       hotUpdater.setCustodyGroupCount(custodyGroupCount);
+    }
+
+    @Override
+    public void addBestLightClientUpdate(
+        final UInt64 period, final StoredLightClientUpdate update) {
+      hotUpdater.addBestLightClientUpdate(period, update);
+    }
+
+    @Override
+    public void removeBestLightClientUpdate(final UInt64 period) {
+      hotUpdater.removeBestLightClientUpdate(period);
     }
 
     @Override

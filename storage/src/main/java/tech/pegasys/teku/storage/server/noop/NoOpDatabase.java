@@ -44,6 +44,7 @@ import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
 import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
 import tech.pegasys.teku.storage.api.OnDiskStoreData;
 import tech.pegasys.teku.storage.api.StorageUpdate;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 import tech.pegasys.teku.storage.api.UpdateResult;
 import tech.pegasys.teku.storage.api.WeakSubjectivityState;
 import tech.pegasys.teku.storage.api.WeakSubjectivityUpdate;
@@ -432,6 +433,18 @@ public class NoOpDatabase implements Database {
   public Optional<List<List<KZGProof>>> getDataColumnSidecarsProofs(final UInt64 slot) {
     return Optional.empty();
   }
+
+  @Override
+  public void storeBestLightClientUpdate(
+      final UInt64 period, final StoredLightClientUpdate update) {}
+
+  @Override
+  public Stream<Map.Entry<UInt64, StoredLightClientUpdate>> streamBestLightClientUpdates() {
+    return Stream.empty();
+  }
+
+  @Override
+  public void pruneBestLightClientUpdatesBefore(final UInt64 period) {}
 
   @Override
   public void setFirstCustodyIncompleteSlot(final UInt64 slot) {}

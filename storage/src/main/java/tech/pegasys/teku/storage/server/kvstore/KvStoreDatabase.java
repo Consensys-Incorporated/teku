@@ -75,6 +75,7 @@ import tech.pegasys.teku.storage.api.GloasForkChoiceRebuildData;
 import tech.pegasys.teku.storage.api.OnDiskStoreData;
 import tech.pegasys.teku.storage.api.StorageUpdate;
 import tech.pegasys.teku.storage.api.StoredBlockMetadata;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 import tech.pegasys.teku.storage.api.UpdateResult;
 import tech.pegasys.teku.storage.api.WeakSubjectivityState;
 import tech.pegasys.teku.storage.api.WeakSubjectivityUpdate;
@@ -1350,6 +1351,36 @@ public class KvStoreDatabase implements Database {
   @Override
   public Optional<List<List<KZGProof>>> getDataColumnSidecarsProofs(final UInt64 slot) {
     return dao.getDataColumnSidecarsProofs(slot);
+  }
+
+  @Override
+  public void storeBestLightClientUpdate(
+      final UInt64 period, final StoredLightClientUpdate update) {
+    try (final HotUpdater updater = hotUpdater()) {
+      updater.addBestLightClientUpdate(period, update);
+      updater.commit();
+    }
+  }
+
+  @Override
+  @MustBeClosed
+  public Stream<Map.Entry<UInt64, StoredLightClientUpdate>> streamBestLightClientUpdates() {
+    return dao.streamBestLightClientUpdates().map(entry -> entry);
+  }
+
+  @Override
+  public void pruneBestLightClientUpdatesBefore(final UInt64 period) {
+    final List<UInt64> periodsToDelete;
+    try (final Stream<UInt64> periods = dao.streamBestLightClientUpdatePeriods()) {
+      periodsToDelete = periods.filter(storedPeriod -> storedPeriod.isLessThan(period)).toList();
+    }
+    if (periodsToDelete.isEmpty()) {
+      return;
+    }
+    try (final HotUpdater updater = hotUpdater()) {
+      periodsToDelete.forEach(updater::removeBestLightClientUpdate);
+      updater.commit();
+    }
   }
 
   @Override

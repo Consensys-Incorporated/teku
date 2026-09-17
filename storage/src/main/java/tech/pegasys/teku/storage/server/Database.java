@@ -41,6 +41,7 @@ import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
 import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
 import tech.pegasys.teku.storage.api.OnDiskStoreData;
 import tech.pegasys.teku.storage.api.StorageUpdate;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 import tech.pegasys.teku.storage.api.UpdateResult;
 import tech.pegasys.teku.storage.api.WeakSubjectivityState;
 import tech.pegasys.teku.storage.api.WeakSubjectivityUpdate;
@@ -314,6 +315,13 @@ public interface Database extends AutoCloseable {
   Optional<UInt64> getLastDataColumnSidecarsProofsSlot();
 
   Optional<List<List<KZGProof>>> getDataColumnSidecarsProofs(UInt64 slot);
+
+  void storeBestLightClientUpdate(UInt64 period, StoredLightClientUpdate update);
+
+  @MustBeClosed
+  Stream<Map.Entry<UInt64, StoredLightClientUpdate>> streamBestLightClientUpdates();
+
+  void pruneBestLightClientUpdatesBefore(UInt64 period);
 
   void setEarliestAvailableDataColumnSlot(UInt64 slot);
 

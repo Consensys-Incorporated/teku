@@ -33,6 +33,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 import tech.pegasys.teku.storage.server.kvstore.ColumnEntry;
 import tech.pegasys.teku.storage.server.kvstore.KvStoreAccessor;
 import tech.pegasys.teku.storage.server.kvstore.KvStoreAccessor.KvStoreTransaction;
@@ -98,6 +99,16 @@ public class V4HotKvStoreDao {
   @MustBeClosed
   public Stream<SignedBeaconBlock> streamHotBlocks() {
     return db.stream(schema.getColumnHotBlocksByRoot()).map(ColumnEntry::getValue);
+  }
+
+  @MustBeClosed
+  public Stream<ColumnEntry<UInt64, StoredLightClientUpdate>> streamBestLightClientUpdates() {
+    return db.stream(schema.getLightClientUpdatesByPeriod());
+  }
+
+  @MustBeClosed
+  public Stream<UInt64> streamBestLightClientUpdatePeriods() {
+    return db.streamKeys(schema.getLightClientUpdatesByPeriod());
   }
 
   @MustBeClosed
@@ -242,6 +253,17 @@ public class V4HotKvStoreDao {
     @Override
     public void setCustodyGroupCount(final UInt64 custodyGroupCount) {
       transaction.put(schema.getVariableCustodyGroupCount(), custodyGroupCount);
+    }
+
+    @Override
+    public void addBestLightClientUpdate(
+        final UInt64 period, final StoredLightClientUpdate update) {
+      transaction.put(schema.getLightClientUpdatesByPeriod(), period, update);
+    }
+
+    @Override
+    public void removeBestLightClientUpdate(final UInt64 period) {
+      transaction.delete(schema.getLightClientUpdatesByPeriod(), period);
     }
 
     @Override

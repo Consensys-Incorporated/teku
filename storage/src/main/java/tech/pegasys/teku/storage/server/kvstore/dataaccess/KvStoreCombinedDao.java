@@ -39,6 +39,8 @@ import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
 import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
+import tech.pegasys.teku.storage.server.kvstore.ColumnEntry;
 
 public interface KvStoreCombinedDao extends AutoCloseable {
 
@@ -200,6 +202,12 @@ public interface KvStoreCombinedDao extends AutoCloseable {
 
   Optional<List<List<KZGProof>>> getDataColumnSidecarsProofs(UInt64 slot);
 
+  @MustBeClosed
+  Stream<ColumnEntry<UInt64, StoredLightClientUpdate>> streamBestLightClientUpdates();
+
+  @MustBeClosed
+  Stream<UInt64> streamBestLightClientUpdatePeriods();
+
   /** Triggers a full, blocking compaction of the underlying storage to reclaim freed space. */
   void compact();
 
@@ -229,6 +237,10 @@ public interface KvStoreCombinedDao extends AutoCloseable {
     void setLatestCanonicalBlockRoot(Bytes32 canonicalBlockRoot);
 
     void setCustodyGroupCount(UInt64 custodyGroupCount);
+
+    void addBestLightClientUpdate(UInt64 period, StoredLightClientUpdate update);
+
+    void removeBestLightClientUpdate(UInt64 period);
 
     void setWeakSubjectivityCheckpoint(Checkpoint checkpoint);
 
