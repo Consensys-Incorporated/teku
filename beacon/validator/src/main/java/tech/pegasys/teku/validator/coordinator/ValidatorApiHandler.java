@@ -58,9 +58,9 @@ import tech.pegasys.teku.ethereum.json.types.beacon.StateValidatorData;
 import tech.pegasys.teku.ethereum.json.types.node.PeerCount;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.BeaconCommitteeSelectionProof;
+import tech.pegasys.teku.ethereum.json.types.validator.PayloadTimelinessCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuty;
-import tech.pegasys.teku.ethereum.json.types.validator.PtcDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.PtcDuty;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeDuty;
@@ -372,7 +372,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
   }
 
   @Override
-  public SafeFuture<Optional<PtcDuties>> getPtcDuties(
+  public SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> getPayloadTimelinessCommitteeDuties(
       final UInt64 epoch, final IntCollection validatorIndices) {
     if (isSyncActive()) {
       return NodeSyncingException.failedFuture();
@@ -384,12 +384,15 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
       return SafeFuture.failedFuture(
           new IllegalArgumentException(
               String.format(
-                  "Ptc duties were requested %s epochs ahead, PTC committee selection is only stable "
+                  "Payload Timeliness Committee duties were requested %s epochs ahead, Payload Timeliness Committee selection is only stable "
                       + "within the context of the current and next epochs in the lookahead.",
                   epoch.minus(combinedChainDataClient.getCurrentEpoch()).toString())));
     }
     final UInt64 slot = spec.computeStartSlotAtEpoch(epoch.minusMinZero(1));
-    LOG.trace("Retrieving ptc duties from epoch {} using state at slot {}", epoch, slot);
+    LOG.trace(
+        "Retrieving Payload Timeliness Committee duties from epoch {} using state at slot {}",
+        epoch,
+        slot);
     return combinedChainDataClient
         .getStateAtSlotExact(slot)
         .thenApply(
@@ -398,26 +401,31 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
                     state -> getPtcDutiesFromIndicesAndState(state, epoch, validatorIndices)));
   }
 
-  private PtcDuties getPtcDutiesFromIndicesAndState(
+  private PayloadTimelinessCommitteeDuties getPtcDutiesFromIndicesAndState(
       final BeaconState state, final UInt64 epoch, final IntCollection validatorIndices) {
     final Bytes32 dependentRoot =
         epoch.isGreaterThan(spec.getCurrentEpoch(state))
             ? spec.atEpoch(epoch).getBeaconStateUtil().getCurrentDutyDependentRoot(state)
             : spec.atEpoch(epoch).getBeaconStateUtil().getPreviousDutyDependentRoot(state);
     final List<PtcDuty> duties = new ArrayList<>();
-    final Int2ObjectMap<UInt64> validatorIndexToPtcAssignmentMap =
+    final Int2ObjectMap<UInt64> validatorIndexToPayloadTimelinessCommitteeAssignmentMap =
         spec.getValidatorIndexToPtcAssignmentMap(state, epoch);
     validatorIndices.forEach(
         i -> {
-          final UInt64 ptcDutySlot = validatorIndexToPtcAssignmentMap.get(i);
+          final UInt64 payloadTimelinessCommitteeDutySlot =
+              validatorIndexToPayloadTimelinessCommitteeAssignmentMap.get(i);
           final UInt64 validatorIndex = UInt64.valueOf(i);
-          if (ptcDutySlot != null) {
+          if (payloadTimelinessCommitteeDutySlot != null) {
             spec.getValidatorPubKey(state, validatorIndex)
                 .ifPresent(
-                    publicKey -> duties.add(new PtcDuty(publicKey, validatorIndex, ptcDutySlot)));
+                    publicKey ->
+                        duties.add(
+                            new PtcDuty(
+                                publicKey, validatorIndex, payloadTimelinessCommitteeDutySlot)));
           }
         });
-    return new PtcDuties(combinedChainDataClient.isChainHeadOptimistic(), dependentRoot, duties);
+    return new PayloadTimelinessCommitteeDuties(
+        combinedChainDataClient.isChainHeadOptimistic(), dependentRoot, duties);
   }
 
   @Override

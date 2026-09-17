@@ -199,10 +199,14 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
 
     assertThat(shouldBuildOnFull(fixture, ForkChoiceNode.createFull(blockRoot))).isTrue();
 
-    fixture.strategy().onPtcVote(blockRoot, ptcPositions(threshold), true, false);
+    fixture
+        .strategy()
+        .onPayloadTimelinessCommitteeVote(blockRoot, ptcPositions(threshold), true, false);
     assertThat(shouldBuildOnFull(fixture, ForkChoiceNode.createFull(blockRoot))).isTrue();
 
-    fixture.strategy().onPtcVote(blockRoot, IntSet.of(threshold), true, false);
+    fixture
+        .strategy()
+        .onPayloadTimelinessCommitteeVote(blockRoot, IntSet.of(threshold), true, false);
     assertThat(shouldBuildOnFull(fixture, ForkChoiceNode.createFull(blockRoot))).isFalse();
     assertThat(shouldBuildOnFull(fixture, ForkChoiceNode.createEmpty(blockRoot))).isFalse();
   }
@@ -232,10 +236,14 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
 
     assertThat(shouldBuildOnFull(fixture, ForkChoiceNode.createFull(blockRoot))).isTrue();
 
-    fixture.strategy().onPtcVote(blockRoot, ptcPositions(threshold), false, true);
+    fixture
+        .strategy()
+        .onPayloadTimelinessCommitteeVote(blockRoot, ptcPositions(threshold), false, true);
     assertThat(shouldBuildOnFull(fixture, ForkChoiceNode.createFull(blockRoot))).isTrue();
 
-    fixture.strategy().onPtcVote(blockRoot, IntSet.of(threshold), false, true);
+    fixture
+        .strategy()
+        .onPayloadTimelinessCommitteeVote(blockRoot, IntSet.of(threshold), false, true);
     assertThat(shouldBuildOnFull(fixture, ForkChoiceNode.createFull(blockRoot))).isFalse();
   }
 
@@ -247,7 +255,9 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
         SpecConfigGloas.required(fixture.spec().atSlot(fixture.block().getSlot()).getConfig())
             .getDataAvailabilityTimelyThreshold();
 
-    fixture.strategy().onPtcVote(blockRoot, ptcPositions(threshold + 1), true, false);
+    fixture
+        .strategy()
+        .onPayloadTimelinessCommitteeVote(blockRoot, ptcPositions(threshold + 1), true, false);
 
     assertThat(shouldBuildOnFull(fixture, UInt64.valueOf(3), ForkChoiceNode.createFull(blockRoot)))
         .isTrue();
@@ -288,7 +298,9 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
         SpecConfigGloas.required(fixture.spec().atSlot(fixture.block().getSlot()).getConfig())
             .getDataAvailabilityTimelyThreshold();
 
-    fixture.strategy().onPtcVote(otherRoot, ptcPositions(threshold + 1), true, false);
+    fixture
+        .strategy()
+        .onPayloadTimelinessCommitteeVote(otherRoot, ptcPositions(threshold + 1), true, false);
 
     assertThat(shouldBuildOnFull(fixture, ForkChoiceNode.createFull(blockRoot))).isTrue();
   }
@@ -298,10 +310,10 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
     final GloasPayloadDecisionFixture fixture = createGloasPayloadDecisionFixture();
     final Bytes32 blockRoot = fixture.block().getRoot();
 
-    fixture.strategy().onPtcVote(blockRoot, IntSet.of(0, 1), true, true);
-    fixture.strategy().onPtcVote(blockRoot, IntSet.of(2), true, false);
-    fixture.strategy().onPtcVote(blockRoot, IntSet.of(3), false, true);
-    fixture.strategy().onPtcVote(blockRoot, IntSet.of(1), false, false);
+    fixture.strategy().onPayloadTimelinessCommitteeVote(blockRoot, IntSet.of(0, 1), true, true);
+    fixture.strategy().onPayloadTimelinessCommitteeVote(blockRoot, IntSet.of(2), true, false);
+    fixture.strategy().onPayloadTimelinessCommitteeVote(blockRoot, IntSet.of(3), false, true);
+    fixture.strategy().onPayloadTimelinessCommitteeVote(blockRoot, IntSet.of(1), false, false);
 
     assertThat(fixture.strategy().getPayloadAttesterCount(blockRoot)).isEqualTo(UInt64.valueOf(4));
     assertThat(fixture.strategy().getPayloadAvailabilityYesCount(blockRoot))
