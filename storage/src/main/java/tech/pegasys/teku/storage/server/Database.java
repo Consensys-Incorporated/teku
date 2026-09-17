@@ -34,6 +34,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
@@ -41,7 +42,6 @@ import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
 import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
 import tech.pegasys.teku.storage.api.OnDiskStoreData;
 import tech.pegasys.teku.storage.api.StorageUpdate;
-import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 import tech.pegasys.teku.storage.api.UpdateResult;
 import tech.pegasys.teku.storage.api.WeakSubjectivityState;
 import tech.pegasys.teku.storage.api.WeakSubjectivityUpdate;
@@ -316,10 +316,13 @@ public interface Database extends AutoCloseable {
 
   Optional<List<List<KZGProof>>> getDataColumnSidecarsProofs(UInt64 slot);
 
-  void storeBestLightClientUpdate(UInt64 period, StoredLightClientUpdate update);
+  void storeBestLightClientUpdate(
+      UInt64 period, LightClientUpdate update, Bytes32 signatureBlockRoot);
 
   @MustBeClosed
-  Stream<Map.Entry<UInt64, StoredLightClientUpdate>> streamBestLightClientUpdates();
+  Stream<Map.Entry<UInt64, LightClientUpdate>> streamBestLightClientUpdates();
+
+  Optional<Bytes32> getBestLightClientUpdateSignatureBlockRoot(UInt64 period);
 
   void pruneBestLightClientUpdatesBefore(UInt64 period);
 

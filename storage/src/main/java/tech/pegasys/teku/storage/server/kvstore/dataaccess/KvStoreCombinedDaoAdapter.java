@@ -37,11 +37,11 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
 import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
-import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 import tech.pegasys.teku.storage.server.kvstore.ColumnEntry;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.V4FinalizedKvStoreDao.V4FinalizedUpdater;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.V4HotKvStoreDao.V4HotUpdater;
@@ -391,7 +391,7 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
 
   @Override
   @MustBeClosed
-  public Stream<ColumnEntry<UInt64, StoredLightClientUpdate>> streamBestLightClientUpdates() {
+  public Stream<ColumnEntry<UInt64, LightClientUpdate>> streamBestLightClientUpdates() {
     return hotDao.streamBestLightClientUpdates();
   }
 
@@ -399,6 +399,11 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
   @MustBeClosed
   public Stream<UInt64> streamBestLightClientUpdatePeriods() {
     return hotDao.streamBestLightClientUpdatePeriods();
+  }
+
+  @Override
+  public Optional<Bytes32> getBestLightClientUpdateSignatureBlockRoot(final UInt64 period) {
+    return hotDao.getBestLightClientUpdateSignatureBlockRoot(period);
   }
 
   @Override
@@ -545,8 +550,8 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
 
     @Override
     public void addBestLightClientUpdate(
-        final UInt64 period, final StoredLightClientUpdate update) {
-      hotUpdater.addBestLightClientUpdate(period, update);
+        final UInt64 period, final LightClientUpdate update, final Bytes32 signatureBlockRoot) {
+      hotUpdater.addBestLightClientUpdate(period, update, signatureBlockRoot);
     }
 
     @Override

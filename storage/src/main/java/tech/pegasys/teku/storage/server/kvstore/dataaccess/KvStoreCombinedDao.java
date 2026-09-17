@@ -35,11 +35,11 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
 import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
-import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 import tech.pegasys.teku.storage.server.kvstore.ColumnEntry;
 
 public interface KvStoreCombinedDao extends AutoCloseable {
@@ -203,10 +203,12 @@ public interface KvStoreCombinedDao extends AutoCloseable {
   Optional<List<List<KZGProof>>> getDataColumnSidecarsProofs(UInt64 slot);
 
   @MustBeClosed
-  Stream<ColumnEntry<UInt64, StoredLightClientUpdate>> streamBestLightClientUpdates();
+  Stream<ColumnEntry<UInt64, LightClientUpdate>> streamBestLightClientUpdates();
 
   @MustBeClosed
   Stream<UInt64> streamBestLightClientUpdatePeriods();
+
+  Optional<Bytes32> getBestLightClientUpdateSignatureBlockRoot(UInt64 period);
 
   /** Triggers a full, blocking compaction of the underlying storage to reclaim freed space. */
   void compact();
@@ -238,7 +240,8 @@ public interface KvStoreCombinedDao extends AutoCloseable {
 
     void setCustodyGroupCount(UInt64 custodyGroupCount);
 
-    void addBestLightClientUpdate(UInt64 period, StoredLightClientUpdate update);
+    void addBestLightClientUpdate(
+        UInt64 period, LightClientUpdate update, Bytes32 signatureBlockRoot);
 
     void removeBestLightClientUpdate(UInt64 period);
 

@@ -31,9 +31,9 @@ import tech.pegasys.teku.spec.datastructures.blocks.BlockCheckpoints;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
-import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 import tech.pegasys.teku.storage.server.kvstore.ColumnEntry;
 import tech.pegasys.teku.storage.server.kvstore.KvStoreAccessor;
 import tech.pegasys.teku.storage.server.kvstore.KvStoreAccessor.KvStoreTransaction;
@@ -102,13 +102,17 @@ public class V4HotKvStoreDao {
   }
 
   @MustBeClosed
-  public Stream<ColumnEntry<UInt64, StoredLightClientUpdate>> streamBestLightClientUpdates() {
+  public Stream<ColumnEntry<UInt64, LightClientUpdate>> streamBestLightClientUpdates() {
     return db.stream(schema.getLightClientUpdatesByPeriod());
   }
 
   @MustBeClosed
   public Stream<UInt64> streamBestLightClientUpdatePeriods() {
     return db.streamKeys(schema.getLightClientUpdatesByPeriod());
+  }
+
+  public Optional<Bytes32> getBestLightClientUpdateSignatureBlockRoot(final UInt64 period) {
+    return db.get(schema.getLightClientUpdateSignatureBlockRootsByPeriod(), period);
   }
 
   @MustBeClosed
@@ -257,13 +261,16 @@ public class V4HotKvStoreDao {
 
     @Override
     public void addBestLightClientUpdate(
-        final UInt64 period, final StoredLightClientUpdate update) {
+        final UInt64 period, final LightClientUpdate update, final Bytes32 signatureBlockRoot) {
       transaction.put(schema.getLightClientUpdatesByPeriod(), period, update);
+      transaction.put(
+          schema.getLightClientUpdateSignatureBlockRootsByPeriod(), period, signatureBlockRoot);
     }
 
     @Override
     public void removeBestLightClientUpdate(final UInt64 period) {
       transaction.delete(schema.getLightClientUpdatesByPeriod(), period);
+      transaction.delete(schema.getLightClientUpdateSignatureBlockRootsByPeriod(), period);
     }
 
     @Override

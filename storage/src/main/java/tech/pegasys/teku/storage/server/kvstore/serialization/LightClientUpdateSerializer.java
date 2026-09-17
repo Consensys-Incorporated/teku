@@ -15,16 +15,13 @@ package tech.pegasys.teku.storage.server.kvstore.serialization;
 
 import java.util.Objects;
 import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
-import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 
-class LightClientUpdateSerializer implements KvStoreSerializer<StoredLightClientUpdate> {
+class LightClientUpdateSerializer implements KvStoreSerializer<LightClientUpdate> {
 
   private static final int SLOT_SIZE = Long.BYTES;
-  private static final int ROOT_SIZE = Bytes32.SIZE;
-  private static final int PREFIX_SIZE = SLOT_SIZE + ROOT_SIZE;
 
   private final Spec spec;
 
@@ -33,21 +30,16 @@ class LightClientUpdateSerializer implements KvStoreSerializer<StoredLightClient
   }
 
   @Override
-  public StoredLightClientUpdate deserialize(final byte[] data) {
+  public LightClientUpdate deserialize(final byte[] data) {
     final Bytes bytes = Bytes.wrap(data);
     final UInt64 attestedSlot = UInt64.fromLongBits(bytes.getLong(0));
-    final Bytes32 signatureBlockRoot = Bytes32.wrap(bytes.slice(SLOT_SIZE, ROOT_SIZE));
-    return new StoredLightClientUpdate(
-        spec.deserializeUpdate(bytes.slice(PREFIX_SIZE), attestedSlot), signatureBlockRoot);
+    return spec.deserializeUpdate(bytes.slice(SLOT_SIZE), attestedSlot);
   }
 
   @Override
-  public byte[] serialize(final StoredLightClientUpdate value) {
-    final UInt64 attestedSlot = value.update().getAttestedHeader().getBeacon().getSlot();
-    return Bytes.concatenate(
-            Bytes.ofUnsignedLong(attestedSlot.longValue()),
-            value.signatureBlockRoot(),
-            value.update().sszSerialize())
+  public byte[] serialize(final LightClientUpdate value) {
+    final UInt64 attestedSlot = value.getAttestedHeader().getBeacon().getSlot();
+    return Bytes.concatenate(Bytes.ofUnsignedLong(attestedSlot.longValue()), value.sszSerialize())
         .toArrayUnsafe();
   }
 
