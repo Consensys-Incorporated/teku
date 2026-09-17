@@ -1938,7 +1938,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
             dutyMetrics,
             custodyGroupCountManager,
             beaconConfig.p2pConfig().getDasPublishWithholdColumnsEverySlots(),
-            beaconConfig.p2pConfig().isGossipBlobsAfterBlockEnabled());
+            beaconConfig.p2pConfig().isGossipBlobsAfterBlockEnabled(),
+            stakedBuilderClientProvider);
 
     final ExecutionPayloadFactory executionPayloadFactory;
     final ExecutionPayloadPublisher executionPayloadPublisher;

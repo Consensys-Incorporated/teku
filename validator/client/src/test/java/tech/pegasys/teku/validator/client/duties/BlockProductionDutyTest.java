@@ -221,12 +221,14 @@ class BlockProductionDutyTest {
     when(signer.signBlock(unsignedBlock, fork)).thenReturn(completedFuture(blockSignature));
     final SignedBeaconBlock signedBlock =
         dataStructureUtil.signedBlock(unsignedBlock, blockSignature);
-    when(validatorApiChannel.sendSignedBlock(signedBlock, BroadcastValidationLevel.GOSSIP))
+    when(validatorApiChannel.sendSignedBlock(
+            signedBlock, BroadcastValidationLevel.GOSSIP, Optional.empty()))
         .thenReturn(completedFuture(SendSignedBlockResult.success(signedBlock.getRoot())));
 
     performAndReportDuty();
 
-    verify(validatorApiChannel).sendSignedBlock(signedBlock, BroadcastValidationLevel.GOSSIP);
+    verify(validatorApiChannel)
+        .sendSignedBlock(signedBlock, BroadcastValidationLevel.GOSSIP, Optional.empty());
     verify(validatorLogger)
         .dutyCompleted(
             eq(TYPE),
@@ -266,7 +268,7 @@ class BlockProductionDutyTest {
     when(validatorApiChannel.createUnsignedBlock(
             denebSlot, randaoReveal, Optional.of(graffiti), false, Optional.empty()))
         .thenReturn(completedFuture(Optional.of(blockContainerAndMetaData)));
-    when(validatorApiChannel.sendSignedBlock(any(), any()))
+    when(validatorApiChannel.sendSignedBlock(any(), any(), any()))
         .thenReturn(completedFuture(SendSignedBlockResult.success(unsignedBlock.getRoot())));
 
     performAndReportDuty(denebSlot);
@@ -275,7 +277,7 @@ class BlockProductionDutyTest {
         ArgumentCaptor.forClass(SignedBlockContainer.class);
 
     verify(validatorApiChannel)
-        .sendSignedBlock(signedBlockContainerArgumentCaptor.capture(), any());
+        .sendSignedBlock(signedBlockContainerArgumentCaptor.capture(), any(), any());
     verify(validatorLogger)
         .dutyCompleted(
             eq(TYPE),
@@ -341,7 +343,7 @@ class BlockProductionDutyTest {
     when(validatorApiChannel.createUnsignedBlock(
             denebSlot, randaoReveal, Optional.of(graffiti), false, Optional.empty()))
         .thenReturn(completedFuture(Optional.of(blockContainerAndMetaData)));
-    when(validatorApiChannel.sendSignedBlock(any(), any()))
+    when(validatorApiChannel.sendSignedBlock(any(), any(), any()))
         .thenReturn(completedFuture(SendSignedBlockResult.success(unsignedBlindedBlock.getRoot())));
 
     performAndReportDuty(denebSlot);
@@ -350,7 +352,7 @@ class BlockProductionDutyTest {
         ArgumentCaptor.forClass(SignedBlockContainer.class);
 
     verify(validatorApiChannel)
-        .sendSignedBlock(signedBlindedBlockContainerArgumentCaptor.capture(), any());
+        .sendSignedBlock(signedBlindedBlockContainerArgumentCaptor.capture(), any(), any());
     verify(validatorLogger)
         .dutyCompleted(
             eq(TYPE),
@@ -402,7 +404,7 @@ class BlockProductionDutyTest {
     when(validatorApiChannel.createUnsignedBlock(
             denebSlot, randaoReveal, Optional.of(graffiti), false, Optional.empty()))
         .thenReturn(completedFuture(Optional.of(blockContainerAndMetaData)));
-    when(validatorApiChannel.sendSignedBlock(any(), any()))
+    when(validatorApiChannel.sendSignedBlock(any(), any(), any()))
         .thenReturn(completedFuture(SendSignedBlockResult.success(blockRoot)));
 
     final RuntimeException error =
@@ -438,7 +440,7 @@ class BlockProductionDutyTest {
     when(validatorApiChannel.createUnsignedBlock(
             denebSlot, randaoReveal, Optional.of(graffiti), false, Optional.empty()))
         .thenReturn(completedFuture(Optional.of(blockContainerAndMetaData)));
-    when(validatorApiChannel.sendSignedBlock(any(), any()))
+    when(validatorApiChannel.sendSignedBlock(any(), any(), any()))
         .thenReturn(completedFuture(SendSignedBlockResult.success(blockRoot)));
 
     final RuntimeException error =
@@ -481,8 +483,13 @@ class BlockProductionDutyTest {
                         .create(bid, dataStructureUtil.randomSignature())));
 
     final BlockContainerAndMetaData blockContainerAndMetaData =
-        dataStructureUtil.randomBlockContainerAndMetaData(
-            dataStructureUtil.randomBeaconBlock(slot, blockBody), slot);
+        dataStructureUtil
+            .randomBlockContainerAndMetaData(
+                dataStructureUtil.randomBeaconBlock(slot, blockBody), slot)
+            .toBuilder()
+            // testing passing the builder URL when we send the block
+            .builderUrl(Optional.of("https://foobar.com"))
+            .build();
 
     final BeaconBlock unsignedBlock = blockContainerAndMetaData.blockContainer().getBlock();
 
@@ -496,7 +503,8 @@ class BlockProductionDutyTest {
     when(signer.signBlock(unsignedBlock, fork)).thenReturn(completedFuture(blockSignature));
     final SignedBeaconBlock signedBlock =
         dataStructureUtil.signedBlock(unsignedBlock, blockSignature);
-    when(validatorApiChannel.sendSignedBlock(signedBlock, BroadcastValidationLevel.GOSSIP))
+    when(validatorApiChannel.sendSignedBlock(
+            signedBlock, BroadcastValidationLevel.GOSSIP, Optional.of("https://foobar.com")))
         .thenReturn(completedFuture(SendSignedBlockResult.success(signedBlock.getRoot())));
 
     performAndReportDuty(slot);

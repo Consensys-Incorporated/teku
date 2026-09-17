@@ -20,7 +20,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_BUILDER_URL;
 
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.beacon.sync.events.SyncState;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.PostBlockTest;
@@ -52,7 +54,8 @@ public class PostBlockV2Test extends PostBlockTest {
     assertThat(request.getResponseCode()).isEqualTo(SC_OK);
     assertThat(request.getResponseBody()).isNull();
 
-    verify(validatorDataProvider).submitSignedBlock(eq(block), eq(BroadcastValidationLevel.GOSSIP));
+    verify(validatorDataProvider)
+        .submitSignedBlock(eq(block), eq(BroadcastValidationLevel.GOSSIP), eq(Optional.empty()));
   }
 
   @Test
@@ -72,7 +75,28 @@ public class PostBlockV2Test extends PostBlockTest {
     assertThat(request.getResponseBody()).isNull();
 
     verify(validatorDataProvider)
-        .submitSignedBlock(eq(block), eq(BroadcastValidationLevel.CONSENSUS));
+        .submitSignedBlock(eq(block), eq(BroadcastValidationLevel.CONSENSUS), eq(Optional.empty()));
+  }
+
+  @Test
+  void shouldGetTheBuilderUrlFromTheHeaderAndPassItWhenSubmittingTheBlock() throws Exception {
+
+    final SignedBeaconBlock block = getRandomSignedBeaconBlock();
+    when(syncService.getCurrentSyncState()).thenReturn(SyncState.IN_SYNC);
+    request.setRequestBody(block);
+    request.setRequestHeader(HEADER_BUILDER_URL, "https://foobar.com");
+
+    setupValidatorDataProviderSubmit(
+        SafeFuture.completedFuture(SendSignedBlockResult.success(block.getRoot())));
+
+    handler.handleRequest(request);
+
+    assertThat(request.getResponseCode()).isEqualTo(SC_OK);
+    assertThat(request.getResponseBody()).isNull();
+
+    verify(validatorDataProvider)
+        .submitSignedBlock(
+            eq(block), eq(BroadcastValidationLevel.GOSSIP), eq(Optional.of("https://foobar.com")));
   }
 
   @Test

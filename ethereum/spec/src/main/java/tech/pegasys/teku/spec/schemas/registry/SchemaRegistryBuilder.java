@@ -1187,9 +1187,7 @@ public class SchemaRegistryBuilder {
             GLOAS,
             (registry, specConfig, schemaName) ->
                 new DataColumnSidecarSchemaGloas(
-                    registry.get(DATA_COLUMN_SCHEMA),
-                    OptionalLong.of(
-                        SpecConfigGloas.required(specConfig).getMaxDataColumnSidecarSize())))
+                    registry.get(DATA_COLUMN_SCHEMA), SpecConfigFulu.required(specConfig)))
         .build();
   }
 

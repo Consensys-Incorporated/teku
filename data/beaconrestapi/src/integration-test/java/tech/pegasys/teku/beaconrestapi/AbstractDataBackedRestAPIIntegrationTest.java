@@ -90,6 +90,7 @@ import tech.pegasys.teku.statetransition.forkchoice.ForkChoiceTrigger;
 import tech.pegasys.teku.statetransition.forkchoice.MergeTransitionBlockValidator;
 import tech.pegasys.teku.statetransition.forkchoice.NoopForkChoiceNotifier;
 import tech.pegasys.teku.statetransition.forkchoice.ProposersDataManager;
+import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
 import tech.pegasys.teku.statetransition.payloadattestation.PayloadAttestationPool;
 import tech.pegasys.teku.statetransition.synccommittee.SyncCommitteeContributionPool;
 import tech.pegasys.teku.statetransition.synccommittee.SyncCommitteeMessagePool;
@@ -208,6 +209,7 @@ public abstract class AbstractDataBackedRestAPIIntegrationTest {
 
   // Update utils
   protected ChainBuilder chainBuilder;
+  protected LightClientUpdateStore lightClientUpdateStore;
   protected ChainUpdater chainUpdater;
 
   protected static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -270,6 +272,7 @@ public abstract class AbstractDataBackedRestAPIIntegrationTest {
   }
 
   private void setupAndStartRestAPI(final BeaconRestApiConfig config) {
+    lightClientUpdateStore = new LightClientUpdateStore(spec);
     combinedChainDataClient = storageSystem.combinedChainDataClient();
     dataProvider =
         DataProvider.builder()
@@ -295,6 +298,7 @@ public abstract class AbstractDataBackedRestAPIIntegrationTest {
             .dataColumnSidecarManager(dataColumnSidecarManager)
             .payloadAttestationPool(payloadAttestationPool)
             .proposerPreferencesManager(proposerPreferencesManager)
+            .lightClientUpdateStore(lightClientUpdateStore)
             .build();
 
     beaconRestApi =

@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.beaconrestapi.handlers.v2.beacon;
 
+import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.ETH_BUILDER_URL_TYPE;
 import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.ETH_CONSENSUS_VERSION_TYPE;
 import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.PARAMETER_BROADCAST_VALIDATION;
 import static tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.MilestoneDependentTypesUtil.getSchemaDefinitionForAllSupportedMilestones;
@@ -78,11 +79,13 @@ public class PostBlockV2 extends AbstractPostBlockV2 {
             .map(BroadcastValidationParameter::toInternal)
             .orElse(BroadcastValidationLevel.GOSSIP);
 
+    final Optional<String> builderUrl = request.getOptionalRequestHeader(ETH_BUILDER_URL_TYPE);
+
     final SignedBlockContainer requestBody = request.getRequestBody();
 
     request.respondAsync(
         validatorDataProvider
-            .submitSignedBlock(requestBody, broadcastValidationLevel)
+            .submitSignedBlock(requestBody, broadcastValidationLevel, builderUrl)
             .thenApply(this::processSendSignedBlockResult));
   }
 
@@ -126,6 +129,7 @@ public class PostBlockV2 extends AbstractPostBlockV2 {
             spec::deserializeSignedBlockContainer)
         .headerRequired(
             ETH_CONSENSUS_VERSION_TYPE.withDescription("Version of the block being submitted."))
+        .header(ETH_BUILDER_URL_TYPE)
         .response(SC_OK, "Block has been successfully broadcast, validated and imported.")
         .response(
             SC_ACCEPTED,

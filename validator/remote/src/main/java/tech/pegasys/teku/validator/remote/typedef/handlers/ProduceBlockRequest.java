@@ -20,6 +20,7 @@ import static tech.pegasys.teku.infrastructure.http.RestApiConstants.CONSENSUS_B
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.EXECUTION_PAYLOAD_BLINDED;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.EXECUTION_PAYLOAD_VALUE;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.GRAFFITI;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_BUILDER_URL;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_BLOCK_VALUE;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_EXECUTION_PAYLOAD_BLINDED;
@@ -68,15 +69,18 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
 
   private final UInt64 slot;
   private final boolean preferSszBlockEncoding;
+
   private final BlockContainerSchema<BlockContainer> blockContainerSchema;
   private final BlockContainerSchema<BlockContainer> blindedBlockContainerSchema;
-  private final BlockContainerSchema<BlockContainer> beaconBlockSchemaForV4;
-  private final ResponseHandler<ProduceBlockResponse> responseHandler;
-  private final ResponseHandler<ProduceBlockResponse> responseHandlerV4;
+  private final BlockContainerSchema<BlockContainer> beaconBlockSchema;
 
-  private final DeserializableOneOfTypeDefinition<ProduceBlockResponse> produceBlockTypeDefinition;
+  private final DeserializableOneOfTypeDefinition<ProduceBlockResponse>
+      produceBlockV3TypeDefinition;
+  private final ResponseHandler<ProduceBlockResponse> responseHandlerV3;
+
   private final DeserializableOneOfTypeDefinition<ProduceBlockResponse>
       produceBlockV4TypeDefinition;
+  private final ResponseHandler<ProduceBlockResponse> responseHandlerV4;
 
   public ProduceBlockRequest(
       final HttpUrl baseEndpoint,
@@ -87,10 +91,11 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
     super(baseEndpoint, okHttpClient);
     this.slot = slot;
     this.preferSszBlockEncoding = preferSszBlockEncoding;
+
     this.blockContainerSchema = schemaDefinitionCache.atSlot(slot).getBlockContainerSchema();
     this.blindedBlockContainerSchema =
         schemaDefinitionCache.atSlot(slot).getBlindedBlockContainerSchema();
-    this.beaconBlockSchemaForV4 =
+    this.beaconBlockSchema =
         schemaDefinitionCache.atSlot(slot).getBeaconBlockSchema().castTypeToBlockContainer();
 
     final DeserializableTypeDefinition<ProduceBlockResponse> produceBlockResponseDefinition =
@@ -98,38 +103,41 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
     final DeserializableTypeDefinition<ProduceBlockResponse> produceBlindedBlockResponseDefinition =
         buildDeserializableTypeDefinition(blindedBlockContainerSchema.getJsonTypeDefinition());
 
-    this.produceBlockTypeDefinition =
+    // V3: blinded=true → blindedBlockContainerSchema, false → blockContainerSchema
+    this.produceBlockV3TypeDefinition =
         DeserializableOneOfTypeDefinition.object(ProduceBlockResponse.class)
             .withType(
-                x -> true,
+                __ -> true,
                 executionPayloadBlindedHeader ->
                     !Boolean.parseBoolean(executionPayloadBlindedHeader),
                 produceBlockResponseDefinition)
-            .withType(x -> true, Boolean::parseBoolean, produceBlindedBlockResponseDefinition)
+            .withType(__ -> true, Boolean::parseBoolean, produceBlindedBlockResponseDefinition)
             .build();
 
-    this.responseHandler =
-        new ResponseHandler<>(produceBlockTypeDefinition)
-            .withHandler(SC_OK, this::handleBlockContainerResult);
+    this.responseHandlerV3 =
+        new ResponseHandler<>(produceBlockV3TypeDefinition)
+            .withHandler(SC_OK, this::handleBlockV3Result);
 
     final DeserializableTypeDefinition<ProduceBlockResponse>
-        produceBlockV4ContentsResponseDefinition =
+        produceV4BlockContentsResponseDefinition =
             buildV4DeserializableTypeDefinition(blockContainerSchema.getJsonTypeDefinition());
-    final DeserializableTypeDefinition<ProduceBlockResponse> produceBlockV4BlockResponseDefinition =
-        buildV4DeserializableTypeDefinition(beaconBlockSchemaForV4.getJsonTypeDefinition());
+    final DeserializableTypeDefinition<ProduceBlockResponse> produceV4BlockResponseDefinition =
+        buildV4DeserializableTypeDefinition(beaconBlockSchema.getJsonTypeDefinition());
 
+    // V4: payload_included=true → blockContainerSchema, false → beaconBlockSchema
     this.produceBlockV4TypeDefinition =
         DeserializableOneOfTypeDefinition.object(ProduceBlockResponse.class)
-            .withType(x -> true, Boolean::parseBoolean, produceBlockV4ContentsResponseDefinition)
+            .withType(__ -> true, Boolean::parseBoolean, produceV4BlockContentsResponseDefinition)
             .withType(
-                x -> true,
-                header -> !Boolean.parseBoolean(header),
-                produceBlockV4BlockResponseDefinition)
+                __ -> true,
+                executionPayloadIncludedHeader ->
+                    !Boolean.parseBoolean(executionPayloadIncludedHeader),
+                produceV4BlockResponseDefinition)
             .build();
 
     this.responseHandlerV4 =
         new ResponseHandler<>(produceBlockV4TypeDefinition)
-            .withHandler(SC_OK, this::handleV4BlockContainerResult);
+            .withHandler(SC_OK, this::handleBlockV4Result);
   }
 
   public Optional<BlockContainerAndMetaData> submitV3(
@@ -145,8 +153,8 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
             queryParams,
             emptyMap(),
             headers,
-            this.responseHandler)
-        .map(this::toMetaData);
+            this.responseHandlerV3)
+        .map(this::toMetaDataV3);
   }
 
   public Optional<BlockContainerAndMetaData> submitV4(
@@ -168,7 +176,7 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
             builderConfig,
             ApiSchemas.BUILDER_CONFIG_SCHEMA.getJsonTypeDefinition(),
             this.responseHandlerV4)
-        .map(this::toMetaData);
+        .map(this::toMetaDataV4);
   }
 
   private Map<String, String> buildQueryParamsV3(
@@ -207,33 +215,43 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
     return headers;
   }
 
-  private BlockContainerAndMetaData toMetaData(final ProduceBlockResponse response) {
-    return new BlockContainerAndMetaData(
-        response.getData(),
-        response.getSpecMilestone(),
-        response.executionPayloadValue,
-        response.consensusBlockValue);
+  private BlockContainerAndMetaData toMetaDataV3(final ProduceBlockResponse response) {
+    return BlockContainerAndMetaData.builder()
+        .blockContainer(response.data)
+        .milestone(response.milestone)
+        .executionPayloadValue(response.executionPayloadValue)
+        .consensusBlockValue(response.consensusBlockValue)
+        .build();
   }
 
-  private Optional<ProduceBlockResponse> handleBlockContainerResult(
+  private BlockContainerAndMetaData toMetaDataV4(final ProduceBlockResponse response) {
+    return BlockContainerAndMetaData.builder()
+        .blockContainer(response.data)
+        .milestone(response.milestone)
+        .executionPayloadValue(response.executionPayloadValue)
+        .consensusBlockValue(response.consensusBlockValue)
+        .payloadIncluded(response.executionPayloadIncluded)
+        .builderUrl(response.builderUrl)
+        .build();
+  }
+
+  private Optional<ProduceBlockResponse> handleBlockV3Result(
       final Request request, final Response response) {
-    // V3: blinded=true → blindedBlockContainerSchema, false → blockContainerSchema
     return parseResponse(
         response,
         HEADER_EXECUTION_PAYLOAD_BLINDED,
         blindedBlockContainerSchema,
         blockContainerSchema,
-        produceBlockTypeDefinition);
+        produceBlockV3TypeDefinition);
   }
 
-  private Optional<ProduceBlockResponse> handleV4BlockContainerResult(
+  private Optional<ProduceBlockResponse> handleBlockV4Result(
       final Request request, final Response response) {
-    // V4: included=true → blockContainerSchema (full contents), false → beaconBlockSchemaForV4
     return parseResponse(
         response,
         HEADER_INCLUDE_PAYLOAD,
         blockContainerSchema,
-        beaconBlockSchemaForV4,
+        beaconBlockSchema,
         produceBlockV4TypeDefinition);
   }
 
@@ -245,25 +263,35 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
       final DeserializableOneOfTypeDefinition<ProduceBlockResponse> jsonTypeDefinition) {
     try {
       final String responseContentType = response.header("Content-Type");
+      // builderUrl only in v4
+      final Optional<String> builderUrl = Optional.ofNullable(response.header(HEADER_BUILDER_URL));
       if (responseContentType != null
           && MediaType.parse(responseContentType).is(MediaType.OCTET_STREAM)) {
+        final SpecMilestone milestone =
+            SpecMilestone.forName(response.header(HEADER_CONSENSUS_VERSION));
         final UInt256 executionPayloadValue =
             parseUInt256Header(response, HEADER_EXECUTION_PAYLOAD_VALUE);
         final UInt256 consensusBlockValue =
             parseUInt256Header(response, HEADER_CONSENSUS_BLOCK_VALUE);
+        // executionPayloadIncluded only in v4
+        final Optional<Boolean> executionPayloadIncluded =
+            Optional.ofNullable(response.header(HEADER_INCLUDE_PAYLOAD)).map(Boolean::parseBoolean);
         final BlockContainerSchema<BlockContainer> schema =
             Boolean.parseBoolean(response.header(discriminatorHeader)) ? trueSchema : falseSchema;
-        return Optional.of(
-            new ProduceBlockResponse(
-                schema.sszDeserialize(Bytes.of(response.body().bytes())),
-                executionPayloadValue,
-                consensusBlockValue));
+        final ProduceBlockResponse produceBlockResponse = new ProduceBlockResponse();
+        produceBlockResponse.setData(schema.sszDeserialize(Bytes.of(response.body().bytes())));
+        produceBlockResponse.setMilestone(milestone);
+        produceBlockResponse.setExecutionPayloadValue(executionPayloadValue);
+        produceBlockResponse.setConsensusBlockValue(consensusBlockValue);
+        produceBlockResponse.setBuilderUrl(builderUrl);
+        executionPayloadIncluded.ifPresent(produceBlockResponse::setExecutionPayloadIncluded);
+        return Optional.of(produceBlockResponse);
       } else {
-        return Optional.of(
+        final ProduceBlockResponse produceBlockResponse =
             JsonUtil.parseBasedOnHeader(
-                response.header(discriminatorHeader),
-                response.body().string(),
-                jsonTypeDefinition));
+                response.header(discriminatorHeader), response.body().string(), jsonTypeDefinition);
+        produceBlockResponse.setBuilderUrl(builderUrl);
+        return Optional.of(produceBlockResponse);
       }
     } catch (final IOException ex) {
       LOG.error("Failed to parse response object creating block", ex);
@@ -313,8 +341,8 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
         .withField(
             "version",
             DeserializableTypeDefinition.enumOf(SpecMilestone.class),
-            ProduceBlockResponse::getSpecMilestone,
-            ProduceBlockResponse::setSpecMilestone)
+            ProduceBlockResponse::getMilestone,
+            ProduceBlockResponse::setMilestone)
         .build();
   }
 
@@ -345,8 +373,8 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
         .withField(
             "version",
             DeserializableTypeDefinition.enumOf(SpecMilestone.class),
-            ProduceBlockResponse::getSpecMilestone,
-            ProduceBlockResponse::setSpecMilestone)
+            ProduceBlockResponse::getMilestone,
+            ProduceBlockResponse::setMilestone)
         .build();
   }
 
@@ -356,65 +384,61 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
     private Boolean executionPayloadIncluded;
     private UInt256 executionPayloadValue;
     private UInt256 consensusBlockValue;
-    private SpecMilestone specMilestone;
+    private SpecMilestone milestone;
+    private Optional<String> builderUrl = Optional.empty();
 
-    public ProduceBlockResponse() {}
+    ProduceBlockResponse() {}
 
-    public ProduceBlockResponse(
-        final BlockContainer data,
-        final UInt256 executionPayloadValue,
-        final UInt256 consensusBlockValue) {
-      this.data = data;
-      this.executionPayloadValue = executionPayloadValue;
-      this.consensusBlockValue = consensusBlockValue;
-    }
-
-    public BlockContainer getData() {
+    BlockContainer getData() {
       return data;
     }
 
-    public void setData(final BlockContainer data) {
+    void setData(final BlockContainer data) {
       this.data = data;
     }
 
-    public Boolean getExecutionPayloadBlinded() {
+    Boolean getExecutionPayloadBlinded() {
       return executionPayloadBlinded;
     }
 
-    public void setExecutionPayloadBlinded(final Boolean executionPayloadBlinded) {
+    void setExecutionPayloadBlinded(final Boolean executionPayloadBlinded) {
       this.executionPayloadBlinded = executionPayloadBlinded;
     }
 
-    public Boolean getExecutionPayloadIncluded() {
+    Boolean getExecutionPayloadIncluded() {
       return executionPayloadIncluded;
     }
 
-    public void setExecutionPayloadIncluded(final Boolean executionPayloadIncluded) {
+    void setExecutionPayloadIncluded(final Boolean executionPayloadIncluded) {
       this.executionPayloadIncluded = executionPayloadIncluded;
     }
 
-    public UInt256 getConsensusBlockValue() {
+    UInt256 getConsensusBlockValue() {
       return consensusBlockValue;
     }
 
-    public void setConsensusBlockValue(final UInt256 consensusBlockValue) {
+    void setConsensusBlockValue(final UInt256 consensusBlockValue) {
       this.consensusBlockValue = consensusBlockValue;
     }
 
-    public UInt256 getExecutionPayloadValue() {
+    UInt256 getExecutionPayloadValue() {
       return executionPayloadValue;
     }
 
-    public void setExecutionPayloadValue(final UInt256 executionPayloadValue) {
+    void setExecutionPayloadValue(final UInt256 executionPayloadValue) {
       this.executionPayloadValue = executionPayloadValue;
     }
 
-    public SpecMilestone getSpecMilestone() {
-      return specMilestone;
+    SpecMilestone getMilestone() {
+      return milestone;
     }
 
-    public void setSpecMilestone(final SpecMilestone specMilestone) {
-      this.specMilestone = specMilestone;
+    void setMilestone(final SpecMilestone milestone) {
+      this.milestone = milestone;
+    }
+
+    void setBuilderUrl(final Optional<String> builderUrl) {
+      this.builderUrl = builderUrl;
     }
   }
 }

@@ -606,7 +606,8 @@ class FailoverValidatorApiHandlerTest {
 
     final ValidatorApiChannelRequest<SendSignedBlockResult> publishingRequest =
         apiChannel ->
-            apiChannel.sendSignedBlock(blindedSignedBlock, BroadcastValidationLevel.NOT_REQUIRED);
+            apiChannel.sendSignedBlock(
+                blindedSignedBlock, BroadcastValidationLevel.NOT_REQUIRED, Optional.empty());
 
     setupSuccesses(
         publishingRequest,
@@ -618,12 +619,15 @@ class FailoverValidatorApiHandlerTest {
     SafeFutureAssert.assertThatSafeFuture(publishingRequest.run(failoverApiHandler)).isCompleted();
 
     verify(failoverApiChannel1)
-        .sendSignedBlock(blindedSignedBlock, BroadcastValidationLevel.NOT_REQUIRED);
+        .sendSignedBlock(
+            blindedSignedBlock, BroadcastValidationLevel.NOT_REQUIRED, Optional.empty());
 
     verify(primaryApiChannel, never())
-        .sendSignedBlock(blindedSignedBlock, BroadcastValidationLevel.NOT_REQUIRED);
+        .sendSignedBlock(
+            blindedSignedBlock, BroadcastValidationLevel.NOT_REQUIRED, Optional.empty());
     verify(failoverApiChannel2, never())
-        .sendSignedBlock(blindedSignedBlock, BroadcastValidationLevel.NOT_REQUIRED);
+        .sendSignedBlock(
+            blindedSignedBlock, BroadcastValidationLevel.NOT_REQUIRED, Optional.empty());
   }
 
   @Test
@@ -899,10 +903,11 @@ class FailoverValidatorApiHandlerTest {
             "sendSignedBlock",
             apiChannel ->
                 apiChannel.sendSignedBlock(
-                    signedBeaconBlock, BroadcastValidationLevel.NOT_REQUIRED),
+                    signedBeaconBlock, BroadcastValidationLevel.NOT_REQUIRED, Optional.empty()),
             apiChannel ->
                 verify(apiChannel)
-                    .sendSignedBlock(signedBeaconBlock, BroadcastValidationLevel.NOT_REQUIRED),
+                    .sendSignedBlock(
+                        signedBeaconBlock, BroadcastValidationLevel.NOT_REQUIRED, Optional.empty()),
             BeaconNodeRequestLabels.PUBLISH_BLOCK_METHOD,
             mock(SendSignedBlockResult.class)),
         getArguments(

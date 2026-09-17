@@ -32,6 +32,7 @@ public interface StakedBuilderClient {
 
   StakedBuilderClient NOOP =
       new StakedBuilderClient() {
+
         @Override
         public SafeFuture<Optional<SignedExecutionPayloadBid>> getExecutionPayloadBid(
             final UInt64 slot,

@@ -15,12 +15,12 @@ package tech.pegasys.teku.builder.rest;
 
 import static tech.pegasys.teku.spec.config.Constants.BUILDER_CALL_TIMEOUT;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
+import tech.pegasys.teku.infrastructure.collections.cache.LRUCache;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfigSchema;
 
 public class OkHttpStakedBuilderClientProvider implements StakedBuilderClientProvider {
 
@@ -29,7 +29,9 @@ public class OkHttpStakedBuilderClientProvider implements StakedBuilderClientPro
 
   private final OkHttpClient okHttpClient =
       new OkHttpClient.Builder().callTimeout(BUILDER_CALL_TIMEOUT).build();
-  private final Map<String, StakedBuilderClient> clients = new ConcurrentHashMap<>();
+  private final LRUCache<String, StakedBuilderClient> clients =
+      // reuse MAX_BUILDER_ENTRIES for the clients cache capacity
+      LRUCache.create((int) BuilderConfigSchema.MAX_BUILDER_ENTRIES);
 
   public OkHttpStakedBuilderClientProvider(final Spec spec, final AsyncRunner asyncRunner) {
     this.spec = spec;
@@ -38,7 +40,7 @@ public class OkHttpStakedBuilderClientProvider implements StakedBuilderClientPro
 
   @Override
   public StakedBuilderClient getClient(final String url) {
-    return clients.computeIfAbsent(
+    return clients.get(
         url,
         __ ->
             new OkHttpStakedBuilderClient(

@@ -129,8 +129,11 @@ public class BlockRewardCalculatorUtilTest {
     final UInt64 blockSlot = parentSlot.plus(2);
     final int parentSlotIndex =
         parentSlot.mod(gloasSpec.getSlotsPerHistoricalRoot(parentSlot)).intValue();
+    // Bid slot is deliberately one behind the header slot — isBidBuildingOnFullParent only checks
+    // blockHash, so this verifies availability is indexed by the header slot, not the bid slot.
+    final UInt64 staleBidSlot = parentSlot.minus(1);
     final ExecutionPayloadBid parentBid =
-        gloasData.randomExecutionPayloadBid(parentSlot, UInt64.ZERO);
+        gloasData.randomExecutionPayloadBid(staleBidSlot, UInt64.ZERO);
     final BeaconStateGloas preState =
         BeaconStateGloas.required(
             gloasData
@@ -139,6 +142,8 @@ public class BlockRewardCalculatorUtilTest {
                     mutableState -> {
                       final MutableBeaconStateGloas stateGloas =
                           MutableBeaconStateGloas.required(mutableState);
+                      stateGloas.setLatestBlockHeader(
+                          gloasData.randomBeaconBlockHeader(parentSlot, UInt64.ZERO));
                       stateGloas.setLatestExecutionPayloadBid(parentBid);
                       stateGloas.setExecutionPayloadAvailability(
                           schemaDefinitions.getExecutionPayloadAvailabilitySchema().getDefault());
