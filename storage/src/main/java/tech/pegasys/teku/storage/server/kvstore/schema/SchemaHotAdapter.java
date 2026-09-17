@@ -27,10 +27,10 @@ import tech.pegasys.teku.spec.datastructures.blocks.BlockCheckpoints;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
-import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 
 public class SchemaHotAdapter implements Schema {
   private final SchemaCombined delegate;
@@ -72,7 +72,7 @@ public class SchemaHotAdapter implements Schema {
     return delegate.getColumnBlobSidecarBySlotRootBlobIndex();
   }
 
-  public KvStoreColumn<UInt64, LightClientUpdate> getLightClientUpdatesByPeriod() {
+  public KvStoreColumn<UInt64, StoredLightClientUpdate> getLightClientUpdatesByPeriod() {
     return delegate.getBestLightClientUpdatesByPeriod();
   }
 
@@ -132,7 +132,7 @@ public class SchemaHotAdapter implements Schema {
         .put(
             "BLOB_SIDECAR_BY_SLOT_AND_BLOCK_ROOT_AND_BLOB_INDEX",
             getColumnBlobSidecarBySlotRootBlobIndex())
-            .put("LIGHT_CLIENT_UPDATES_BY_PERIOD", getLightClientUpdatesByPeriod())
+        .put("LIGHT_CLIENT_UPDATES_BY_PERIOD", getLightClientUpdatesByPeriod())
         .build();
   }
 

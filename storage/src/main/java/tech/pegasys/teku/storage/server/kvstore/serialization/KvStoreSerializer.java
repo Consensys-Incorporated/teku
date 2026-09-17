@@ -29,11 +29,11 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
-import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
 import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 
 public interface KvStoreSerializer<T> {
   KvStoreSerializer<UInt64> UINT64_SERIALIZER = new UInt64Serializer();
@@ -82,7 +82,8 @@ public interface KvStoreSerializer<T> {
     return new SignedBlindedExecutionPayloadEnvelopeSerializer(spec);
   }
 
-  static KvStoreSerializer<LightClientUpdate> createLightClientUpdateSerializer(final Spec spec) {
+  static KvStoreSerializer<StoredLightClientUpdate> createLightClientUpdateSerializer(
+      final Spec spec) {
     return new LightClientUpdateSerializer(spec);
   }
 
