@@ -147,6 +147,53 @@ public class GossipValidationHelperTest {
   }
 
   @TestTemplate
+  void isWithinProposerLookahead_shouldComputeCorrectly() {
+    final UInt64 proposalSlot = UInt64.valueOf(100);
+    final int minSeedLookahead = spec.atSlot(proposalSlot).getConfig().getMinSeedLookahead();
+    final UInt64 lookaheadEpoch =
+        spec.computeEpochAtSlot(proposalSlot).minusMinZero(minSeedLookahead);
+    final UInt64 lookaheadEpochStartSlot = spec.computeStartSlotAtEpoch(lookaheadEpoch);
+    final UInt64 lookaheadEpochStartTimeMillis =
+        spec.computeTimeMillisAtSlot(
+            lookaheadEpochStartSlot,
+            secondsToMillis(
+                recentChainData.getBestState().orElseThrow().getImmediately().getGenesisTime()));
+
+    final UInt64 notYetInsideTolerance =
+        lookaheadEpochStartTimeMillis
+            .minusMinZero(gossipValidationHelper.getMaxOffsetTimeInMillis())
+            .decrement();
+    storageSystem.chainUpdater().setTimeMillis(notYetInsideTolerance);
+    assertThat(gossipValidationHelper.isWithinProposerLookahead(proposalSlot)).isFalse();
+
+    final UInt64 insideTolerance =
+        lookaheadEpochStartTimeMillis.minusMinZero(
+            gossipValidationHelper.getMaxOffsetTimeInMillis());
+    storageSystem.chainUpdater().setTimeMillis(insideTolerance);
+    assertThat(gossipValidationHelper.isWithinProposerLookahead(proposalSlot)).isTrue();
+  }
+
+  @TestTemplate
+  void isWithinParentProposerLookahead_shouldUseParentEpoch() {
+    final UInt64 parentEpoch = UInt64.valueOf(2);
+    final UInt64 parentBlockSlot = spec.computeStartSlotAtEpoch(parentEpoch);
+    final int minSeedLookahead = spec.getSpecConfig(parentEpoch).getMinSeedLookahead();
+    final UInt64 lastAllowedEpoch = parentEpoch.plus(minSeedLookahead);
+    final UInt64 lastAllowedProposalSlot = spec.computeStartSlotAtEpoch(lastAllowedEpoch);
+    final UInt64 outsideLookaheadProposalSlot =
+        spec.computeStartSlotAtEpoch(lastAllowedEpoch.plus(1));
+
+    assertThat(
+            gossipValidationHelper.isWithinParentProposerLookahead(
+                lastAllowedProposalSlot, parentBlockSlot))
+        .isTrue();
+    assertThat(
+            gossipValidationHelper.isWithinParentProposerLookahead(
+                outsideLookaheadProposalSlot, parentBlockSlot))
+        .isFalse();
+  }
+
+  @TestTemplate
   void isEpochFromFuture_shouldComputeCorrectly() {
     final UInt64 epoch2 = UInt64.valueOf(2);
     final UInt64 epoch2StartSlot = spec.computeStartSlotAtEpoch(epoch2);

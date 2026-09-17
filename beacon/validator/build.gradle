@@ -31,6 +31,7 @@ dependencies {
 	implementation project(':infrastructure:metrics')
 	implementation project(':infrastructure:version')
 	implementation project(':ethereum:json-types')
+	implementation project(':builder:rest')
 
 	implementation 'it.unimi.dsi:fastutil'
 	implementation 'io.consensys.tuweni:tuweni-bytes'

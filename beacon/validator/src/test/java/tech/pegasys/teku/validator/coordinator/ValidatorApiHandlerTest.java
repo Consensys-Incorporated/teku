@@ -1007,10 +1007,12 @@ class ValidatorApiHandlerTest {
   @Test
   public void sendSignedBlock_shouldPublish() {
     final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(5);
-    when(blockPublisher.sendSignedBlock(eq(block), eq(NOT_REQUIRED), any()))
+    final String builderUrl = "https://test-builder.com";
+    when(blockPublisher.sendSignedBlock(
+            eq(block), eq(NOT_REQUIRED), any(), eq(Optional.of(builderUrl))))
         .thenReturn(SafeFuture.completedFuture(SendSignedBlockResult.success(block.getRoot())));
     final SafeFuture<SendSignedBlockResult> result =
-        validatorApiHandler.sendSignedBlock(block, NOT_REQUIRED);
+        validatorApiHandler.sendSignedBlock(block, NOT_REQUIRED, Optional.of(builderUrl));
 
     assertThat(result).isCompletedWithValue(SendSignedBlockResult.success(block.getRoot()));
   }
@@ -1018,11 +1020,11 @@ class ValidatorApiHandlerTest {
   @Test
   public void sendSignedBlock_shouldCatchPublishFailure() {
     final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(5);
-    when(blockPublisher.sendSignedBlock(eq(block), eq(NOT_REQUIRED), any()))
+    when(blockPublisher.sendSignedBlock(eq(block), eq(NOT_REQUIRED), any(), any()))
         .thenReturn(SafeFuture.failedFuture(new RuntimeException("Failed to publish block")));
 
     final SafeFuture<SendSignedBlockResult> result =
-        validatorApiHandler.sendSignedBlock(block, NOT_REQUIRED);
+        validatorApiHandler.sendSignedBlock(block, NOT_REQUIRED, Optional.empty());
 
     assertThat(result)
         .isCompletedWithValue(SendSignedBlockResult.rejected("Failed to publish block"));
@@ -1057,17 +1059,17 @@ class ValidatorApiHandlerTest {
                 blockContainerAndMetaData.blockContainer().getBlock(),
                 dataStructureUtil.randomSignature());
 
-    when(blockPublisher.sendSignedBlock(eq(block), eq(EQUIVOCATION), any()))
+    when(blockPublisher.sendSignedBlock(eq(block), eq(EQUIVOCATION), any(), any()))
         .thenReturn(SafeFuture.completedFuture(SendSignedBlockResult.success(block.getRoot())));
 
     // require GOSSIP validation
     final SafeFuture<SendSignedBlockResult> result =
-        validatorApiHandler.sendSignedBlock(block, GOSSIP);
+        validatorApiHandler.sendSignedBlock(block, GOSSIP, Optional.empty());
 
     assertThat(result).isCompletedWithValue(SendSignedBlockResult.success(block.getRoot()));
 
     // for locally created blocks, the validation level should have been changed to EQUIVOCATION
-    verify(blockPublisher).sendSignedBlock(eq(block), eq(EQUIVOCATION), any());
+    verify(blockPublisher).sendSignedBlock(eq(block), eq(EQUIVOCATION), any(), any());
   }
 
   @Test

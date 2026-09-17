@@ -356,6 +356,10 @@ public final class DataStructureUtil {
     return UInt256.fromBytes(randomBytes(32));
   }
 
+  public UInt256 randomUInt256(final long bound) {
+    return UInt256.valueOf(randomPositiveLong(bound));
+  }
+
   public Eth1Address randomEth1Address() {
     return Eth1Address.fromHexString(randomBytes32().slice(0, 20).toHexString());
   }
@@ -1311,25 +1315,24 @@ public final class DataStructureUtil {
   }
 
   public BlockContainerAndMetaData randomBlockContainerAndMetaData(final UInt64 slotNum) {
-    return new BlockContainerAndMetaData(
-        randomBeaconBlock(slotNum),
-        spec.atSlot(slotNum).getMilestone(),
-        randomUInt256(),
-        randomUInt256());
+    final BeaconBlock block = randomBeaconBlock(slotNum);
+    return randomBlockContainerAndMetaData(block, slotNum);
   }
 
   public BlockContainerAndMetaData randomBlindedBlockContainerAndMetaData(final UInt64 slotNum) {
-    return new BlockContainerAndMetaData(
-        randomBlindedBeaconBlock(slotNum),
-        spec.atSlot(slotNum).getMilestone(),
-        randomUInt256(),
-        randomUInt256());
+    final BeaconBlock blindedBlock = randomBlindedBeaconBlock(slotNum);
+    return randomBlockContainerAndMetaData(blindedBlock, slotNum);
   }
 
   public BlockContainerAndMetaData randomBlockContainerAndMetaData(
       final BlockContainer blockContainer, final UInt64 slotNum) {
-    return new BlockContainerAndMetaData(
-        blockContainer, spec.atSlot(slotNum).getMilestone(), randomUInt256(), randomUInt256());
+    final SpecMilestone milestone = spec.atSlot(slotNum).getMilestone();
+    return BlockContainerAndMetaData.builder()
+        .blockContainer(blockContainer)
+        .milestone(milestone)
+        .executionPayloadValue(randomUInt256())
+        .consensusBlockValue(randomUInt256())
+        .build();
   }
 
   public BeaconBlock randomBlindedBeaconBlock(final UInt64 slot) {

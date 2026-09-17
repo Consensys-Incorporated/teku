@@ -144,6 +144,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .thenReturn(Optional.of(proposerPreferences));
 
     when(gossipValidationHelper.isSlotCurrentOrNext(slot)).thenReturn(true);
+    when(gossipValidationHelper.isWithinParentProposerLookahead(any(), any())).thenReturn(true);
     when(gossipValidationHelper.getShufflingDependentRoot(parentBlockRoot, slot))
         .thenReturn(Optional.of(dependentRoot));
     when(gossipValidationHelper.getGasLimitForExecutionPayload(parentBlockRoot, parentBlockHash))
@@ -203,6 +204,69 @@ public class ExecutionPayloadBidGossipValidatorTest {
     assertThatSafeFuture(bidValidator.validate(signedBid))
         .isCompletedWithValue(
             ignoreBid(signedBid, "must be for current or next slot but was for slot %s", slot));
+  }
+
+  @TestTemplate
+  void shouldIgnore_whenBidSlotIsPastParentProposerLookahead() {
+    final UInt64 parentBlockSlot = slot.decrement();
+    when(gossipValidationHelper.isWithinParentProposerLookahead(slot, parentBlockSlot))
+        .thenReturn(false);
+
+    assertThatSafeFuture(bidValidator.validate(signedBid))
+        .isCompletedWithValue(
+            ignoreBid(signedBid, "bid's slot is past the parent's proposer lookahead"));
+  }
+
+  @TestTemplate
+  void shouldReject_whenBlobKzgCommitmentCountExceedsLimit() {
+    final int maxBlobsPerBlock = 0;
+    when(spec.getMaxBlobsPerBlockAtSlot(slot)).thenReturn(Optional.of(maxBlobsPerBlock));
+    final SignedExecutionPayloadBid bidWithTooManyBlobCommitments =
+        signedBidWithBlobKzgCommitments(maxBlobsPerBlock + 1);
+
+    assertThatSafeFuture(bidValidator.validate(bidWithTooManyBlobCommitments))
+        .isCompletedWithValue(
+            rejectBid(
+                bidWithTooManyBlobCommitments,
+                "has %s blob kzg commitments which exceeds the maximum of %s for the slot",
+                maxBlobsPerBlock + 1,
+                maxBlobsPerBlock));
+  }
+
+  @TestTemplate
+  void shouldReject_whenBuilderIndexIsOutOfRange() {
+    final UInt64 invalidBuilderIndex = UInt64.valueOf(8);
+    final SignedExecutionPayloadBid bidWithInvalidBuilderIndex =
+        signedBidForParent(parentBlockHash, parentBlockRoot, invalidBuilderIndex, bid.getValue());
+
+    assertThatSafeFuture(bidValidator.validate(bidWithInvalidBuilderIndex))
+        .isCompletedWithValue(
+            rejectBid(
+                bidWithInvalidBuilderIndex,
+                "builder index %s is out of range for the %s builders in the state",
+                invalidBuilderIndex,
+                8));
+  }
+
+  @TestTemplate
+  void shouldReject_whenBuilderIsNotPayloadBuilder() {
+    final BeaconState stateWithNonPayloadBuilder =
+        stateWithBuilderVersion(PAYLOAD_BUILDER_VERSION + 1);
+    when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(stateWithNonPayloadBuilder)));
+    when(gossipValidationHelper.isActiveBuilder(builderIndex, stateWithNonPayloadBuilder, slot))
+        .thenReturn(true);
+    when(gossipValidationHelper.getRandaoMixForCurrentEpoch(stateWithNonPayloadBuilder, slot))
+        .thenReturn(bid.getPrevRandao());
+
+    assertThatSafeFuture(bidValidator.validate(signedBid))
+        .isCompletedWithValue(
+            rejectBid(
+                signedBid,
+                "builder index %s has version %s but only payload builder version %s may bid",
+                builderIndex,
+                PAYLOAD_BUILDER_VERSION + 1,
+                PAYLOAD_BUILDER_VERSION));
   }
 
   @TestTemplate
@@ -346,9 +410,11 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .isCompletedWithValue(
             ignoreBid(
                 signedBid,
-                "already received for parent block hash %s and parent block root %s",
+                "already received valid bid for slot %s, parent block hash %s, parent block root %s, and builder index %s",
+                slot,
                 parentBlockHash,
-                parentBlockRoot));
+                parentBlockRoot,
+                builderIndex));
   }
 
   @TestTemplate
@@ -652,9 +718,11 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .isCompletedWithValue(
             ignoreBid(
                 signedBid,
-                "already received for parent block hash %s and parent block root %s",
+                "already received valid bid for slot %s, parent block hash %s, parent block root %s, and builder index %s",
+                slot,
                 parentBlockHash,
-                parentBlockRoot));
+                parentBlockRoot,
+                builderIndex));
   }
 
   @TestTemplate
@@ -707,9 +775,11 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .isCompletedWithValue(
             ignoreBid(
                 signedBid,
-                "already received for parent block hash %s and parent block root %s",
+                "already received valid bid for slot %s, parent block hash %s, parent block root %s, and builder index %s",
+                slot,
                 parentBlockHash,
-                parentBlockRoot));
+                parentBlockRoot,
+                builderIndex));
   }
 
   @TestTemplate
@@ -751,9 +821,11 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .isCompletedWithValue(
             ignoreBid(
                 bidForCachedSlot,
-                "already received for parent block hash %s and parent block root %s",
+                "already received valid bid for slot %s, parent block hash %s, parent block root %s, and builder index %s",
+                cachedSlot,
                 parentBlockHash,
-                parentBlockRoot));
+                parentBlockRoot,
+                sameBuilder));
   }
 
   @TestTemplate
@@ -949,6 +1021,32 @@ public class ExecutionPayloadBidGossipValidatorTest {
     return dataStructureUtil.randomSignedExecutionPayloadBid(bidWithBlockHash);
   }
 
+  private SignedExecutionPayloadBid signedBidWithBlobKzgCommitments(
+      final int blobKzgCommitmentsCount) {
+    final var bidBlobKzgCommitments =
+        schemaDefinitions
+            .getExecutionPayloadBidSchema()
+            .getBlobKzgCommitmentsSchema()
+            .createFromElements(
+                dataStructureUtil.randomBlobKzgCommitments(blobKzgCommitmentsCount).asList());
+    final ExecutionPayloadBid bidWithBlobKzgCommitments =
+        bid.getSchema()
+            .create(
+                bid.getParentBlockHash(),
+                bid.getParentBlockRoot(),
+                bid.getBlockHash(),
+                bid.getPrevRandao(),
+                bid.getFeeRecipient(),
+                bid.getGasLimit(),
+                bid.getBuilderIndex(),
+                bid.getSlot(),
+                bid.getValue(),
+                bid.getExecutionPayment(),
+                bidBlobKzgCommitments,
+                bid.getExecutionRequestsRoot());
+    return dataStructureUtil.randomSignedExecutionPayloadBid(bidWithBlobKzgCommitments);
+  }
+
   private SignedExecutionPayloadBid signedBidForParent(
       final Bytes32 parentHash,
       final Bytes32 parentRoot,
@@ -979,6 +1077,17 @@ public class ExecutionPayloadBidGossipValidatorTest {
                 bid.getBlobKzgCommitments(),
                 bid.getExecutionRequestsRoot());
     return dataStructureUtil.randomSignedExecutionPayloadBid(bidForParent);
+  }
+
+  private BeaconState stateWithBuilderVersion(final int builderVersion) {
+    return postState.updated(
+        mutableState -> {
+          final SszMutableList<Builder> builders =
+              MutableBeaconStateGloas.required(mutableState).getBuilders();
+          builders.set(
+              builderIndex.intValue(),
+              dataStructureUtil.builderBuilder().version(builderVersion).build());
+        });
   }
 
   private void mockProposerPreferences(

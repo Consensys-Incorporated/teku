@@ -113,8 +113,8 @@ public class OkHttpValidatorTypeDefClient extends OkHttpValidatorMinimalTypeDefC
       final boolean attestationsV2ApisEnabled) {
     super(baseEndpoint, okHttpClient);
     this.spec = spec;
-    schemaDefinitionCache = new SchemaDefinitionCache(spec);
     this.preferSszBlockEncoding = preferSszBlockEncoding;
+    schemaDefinitionCache = new SchemaDefinitionCache(spec);
     this.attestationsV2ApisEnabled = attestationsV2ApisEnabled;
   }
 
@@ -171,11 +171,12 @@ public class OkHttpValidatorTypeDefClient extends OkHttpValidatorMinimalTypeDefC
 
   public SendSignedBlockResult sendSignedBlock(
       final SignedBlockContainer blockContainer,
-      final BroadcastValidationLevel broadcastValidationLevel) {
+      final BroadcastValidationLevel broadcastValidationLevel,
+      final Optional<String> builderUrl) {
     final SendSignedBlockRequest sendSignedBlockRequest =
         new SendSignedBlockRequest(
             spec, getBaseEndpoint(), getOkHttpClient(), preferSszBlockEncoding);
-    return sendSignedBlockRequest.submit(blockContainer, broadcastValidationLevel);
+    return sendSignedBlockRequest.submit(blockContainer, broadcastValidationLevel, builderUrl);
   }
 
   public Optional<BlockContainerAndMetaData> createUnsignedBlock(

@@ -70,17 +70,24 @@ public class ProposerPreferencesGossipValidator {
     final Bytes32 dependentRoot = proposerPreferences.getDependentRoot();
 
     /*
-     * The proposer lookahead for proposal_slot is fixed as of the start of
-     * compute_epoch_at_slot(proposal_slot) - MIN_SEED_LOOKAHEAD, so that epoch and its start slot
-     * anchor the remaining rules.
+     * [IGNORE] These are the first valid preferences seen for this dependent root and slot
      */
-    final int minSeedLookahead = spec.atSlot(proposalSlot).getConfig().getMinSeedLookahead();
-    final UInt64 lookaheadEpoch =
-        spec.computeEpochAtSlot(proposalSlot).minusMinZero(minSeedLookahead);
-    final UInt64 lookaheadEpochStartSlot = spec.computeStartSlotAtEpoch(lookaheadEpoch);
+    final ProposerPreferencesDedupKey dedupKey =
+        new ProposerPreferencesDedupKey(proposalSlot, dependentRoot);
+    if (seenProposerPreferences.contains(dedupKey)) {
+      return completedFuture(ignoreAlreadySeen(proposerPreferences));
+    }
+
+    final UInt64 proposalEpoch = spec.computeEpochAtSlot(proposalSlot);
+    /*
+     * [IGNORE] The proposal epoch is after the Gloas upgrade
+     */
+    if (!spec.isProposerPreferencesAvailableAtEpoch(proposalEpoch)) {
+      return completedFuture(ignorePreferences(proposerPreferences, "proposal epoch is pre-gloas"));
+    }
 
     /*
-     * [IGNORE] The proposal slot has not started yet.
+     * [IGNORE] The proposal slot has not started yet
      */
     if (gossipValidationHelper.hasSlotStarted(proposalSlot)) {
       return completedFuture(
@@ -88,18 +95,17 @@ public class ProposerPreferencesGossipValidator {
     }
 
     /*
-     * [IGNORE] The proposer for the proposal slot is known -- i.e. the lookahead epoch has started,
-     * so its proposer lookahead can be computed.
+     * [IGNORE] The proposer for the proposal slot is known
      */
-    if (gossipValidationHelper.isSlotFromFuture(lookaheadEpochStartSlot)) {
+    if (!gossipValidationHelper.isWithinProposerLookahead(proposalSlot)) {
       return completedFuture(
           ignorePreferences(
               proposerPreferences, "proposer for the proposal slot is not yet known"));
     }
 
     /*
-     * [IGNORE] The block with root preferences.dependent_root has been seen
-     * (a client MAY queue preferences for processing once the block is retrieved).
+     * [IGNORE] The dependent block has been seen (via gossip or non-gossip sources)
+     * (MAY be queued until block is retrieved)
      */
     if (!gossipValidationHelper.isBlockAvailable(dependentRoot)) {
       return completedFuture(
@@ -108,21 +114,12 @@ public class ProposerPreferencesGossipValidator {
               "dependent root has not been seen; saving for future processing"));
     }
 
-    /*
-     * [IGNORE] The signed_proposer_preferences is the first valid message for the tuple
-     * (preferences.proposal_slot, preferences.dependent_root). The validator index is deliberately
-     * excluded: only one validator can be the proposer for that pair, so keying on it as well would
-     * let a peer force full validation of arbitrarily many messages for the same slot.
-     */
-    final ProposerPreferencesDedupKey dedupKey =
-        new ProposerPreferencesDedupKey(proposalSlot, dependentRoot);
-    if (seenProposerPreferences.contains(dedupKey)) {
-      return completedFuture(ignoreAlreadySeen(proposerPreferences));
-    }
+    final int minSeedLookahead = spec.atSlot(proposalSlot).getConfig().getMinSeedLookahead();
+    final UInt64 lookaheadEpoch = proposalEpoch.minusMinZero(minSeedLookahead);
+    final UInt64 lookaheadEpochStartSlot = spec.computeStartSlotAtEpoch(lookaheadEpoch);
 
     /*
-     * [REJECT] The dependent root is before the proposer lookahead epoch. A dependent root at or
-     * after that boundary cannot be the latest block preceding the epoch.
+     * [REJECT] The dependent block's slot is not after the shuffling dependent slot
      */
     final Optional<UInt64> maybeDependentRootSlot =
         recentChainData.getSlotForBlockRoot(dependentRoot);
@@ -139,9 +136,7 @@ public class ProposerPreferencesGossipValidator {
     }
 
     /*
-     * [IGNORE] The dependent root is a possible dependent block for the lookahead epoch. Without
-     * this the checkpoint state below would be built by skipping slots that already contain blocks,
-     * yielding a proposer lookahead that no branch actually agrees with.
+     * [IGNORE] The dependent block is a possible dependent block for the proposer lookahead
      */
     if (!gossipValidationHelper.isPossibleDependentRoot(dependentRoot, lookaheadEpochStartSlot)) {
       return completedFuture(
@@ -149,55 +144,69 @@ public class ProposerPreferencesGossipValidator {
               proposerPreferences, "dependent root is not a possible dependent block"));
     }
 
-    return recentChainData
-        .retrieveCheckpointState(new Checkpoint(lookaheadEpoch, dependentRoot))
-        .thenApply(
-            maybeState -> {
-              if (maybeState.isEmpty()) {
-                return savePreferencesForFuture(
-                    proposerPreferences,
-                    "checkpoint state for lookahead epoch %s is unavailable; saving for future processing",
-                    lookaheadEpoch);
-              }
-              final BeaconState state = maybeState.get();
-
+    return gossipValidationHelper
+        .getStateAtBlockRoot(dependentRoot)
+        .thenCompose(
+            maybeDependentState -> {
               /*
-               * [REJECT] The validator is the proposer for the given slot in the proposer lookahead
-               * of the checkpoint state at (lookahead_epoch, preferences.dependent_root).
+               * [IGNORE] The dependent block passes validation
                */
-              final int lookaheadIndex =
-                  proposalSlot.minusMinZero(lookaheadEpochStartSlot).intValue();
-              final UInt64 expectedValidatorIndex =
-                  BeaconStateFulu.required(state).getProposerLookahead().getElement(lookaheadIndex);
-              if (!expectedValidatorIndex.equals(proposerPreferences.getValidatorIndex())) {
-                return rejectPreferences(
-                    proposerPreferences,
-                    "validator index does not match expected proposer %s",
-                    expectedValidatorIndex);
+              if (maybeDependentState.isEmpty()) {
+                return completedFuture(
+                    ignorePreferences(
+                        proposerPreferences, "dependent root has not passed validation"));
               }
 
-              /*
-               * [REJECT] signed_proposer_preferences.signature is valid with respect to
-               * the validator's public key
-               */
-              if (!isSignatureValid(signedProposerPreferences, state)) {
-                return rejectPreferences(proposerPreferences, "invalid signature");
-              }
+              return recentChainData
+                  .retrieveCheckpointState(new Checkpoint(lookaheadEpoch, dependentRoot))
+                  .thenApply(
+                      maybeState -> {
+                        if (maybeState.isEmpty()) {
+                          return savePreferencesForFuture(
+                              proposerPreferences,
+                              "checkpoint state for lookahead epoch %s is unavailable; saving for future processing",
+                              lookaheadEpoch);
+                        }
+                        final BeaconState state = maybeState.get();
 
-              if (!seenProposerPreferences.add(dedupKey)) {
-                return ignoreAlreadySeen(proposerPreferences);
-              }
+                        /*
+                         * [REJECT] The validator is the proposer for the given slot in the proposer lookahead
+                         */
+                        final int lookaheadIndex =
+                            proposalSlot.minusMinZero(lookaheadEpochStartSlot).intValue();
+                        final UInt64 expectedValidatorIndex =
+                            BeaconStateFulu.required(state)
+                                .getProposerLookahead()
+                                .getElement(lookaheadIndex);
+                        if (!expectedValidatorIndex.equals(
+                            proposerPreferences.getValidatorIndex())) {
+                          return rejectPreferences(
+                              proposerPreferences,
+                              "validator index does not match expected proposer %s",
+                              expectedValidatorIndex);
+                        }
 
-              return acceptPreferences(proposerPreferences);
+                        /*
+                         * [REJECT] The signature is valid
+                         */
+                        if (!isSignatureValid(signedProposerPreferences, state)) {
+                          return rejectPreferences(proposerPreferences, "invalid signature");
+                        }
+
+                        if (!seenProposerPreferences.add(dedupKey)) {
+                          return ignoreAlreadySeen(proposerPreferences);
+                        }
+
+                        return acceptPreferences(proposerPreferences);
+                      });
             })
         .exceptionally(
-            error -> {
-              return rejectPreferencesWithError(
-                  proposerPreferences,
-                  error,
-                  "unable to generate checkpoint state for lookahead epoch %s",
-                  lookaheadEpoch);
-            });
+            error ->
+                rejectPreferencesWithError(
+                    proposerPreferences,
+                    error,
+                    "unable to generate checkpoint state for lookahead epoch %s",
+                    lookaheadEpoch));
   }
 
   private InternalValidationResult acceptPreferences(

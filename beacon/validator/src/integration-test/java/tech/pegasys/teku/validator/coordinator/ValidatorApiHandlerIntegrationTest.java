@@ -36,6 +36,7 @@ import tech.pegasys.teku.api.NodeDataProvider;
 import tech.pegasys.teku.beacon.sync.events.SyncState;
 import tech.pegasys.teku.beacon.sync.events.SyncStateProvider;
 import tech.pegasys.teku.beacon.sync.events.SyncStateTracker;
+import tech.pegasys.teku.builder.rest.StakedBuilderClientProvider;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionAndPublishingPerformanceFactory;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.DelayedExecutorAsyncRunner;
@@ -209,7 +210,8 @@ public class ValidatorApiHandlerIntegrationTest {
             dutyMetrics,
             CustodyGroupCountManager.NOOP,
             OptionalInt.empty(),
-            P2PConfig.DEFAULT_GOSSIP_BLOBS_AFTER_BLOCK_ENABLED);
+            P2PConfig.DEFAULT_GOSSIP_BLOBS_AFTER_BLOCK_ENABLED,
+            StakedBuilderClientProvider.NOOP);
     handler =
         new ValidatorApiHandler(
             chainDataProvider,
@@ -313,7 +315,8 @@ public class ValidatorApiHandlerIntegrationTest {
 
     when(blockImportChannel.importBlock(block, NOT_REQUIRED))
         .thenReturn(prepareBlockImportResult(BlockImportResult.successful(block)));
-    final SafeFuture<SendSignedBlockResult> result = handler.sendSignedBlock(block, NOT_REQUIRED);
+    final SafeFuture<SendSignedBlockResult> result =
+        handler.sendSignedBlock(block, NOT_REQUIRED, Optional.empty());
     assertThat(result).isCompletedWithValue(SendSignedBlockResult.success(block.getRoot()));
 
     if (specContext.getSpecMilestone() == SpecMilestone.DENEB) {

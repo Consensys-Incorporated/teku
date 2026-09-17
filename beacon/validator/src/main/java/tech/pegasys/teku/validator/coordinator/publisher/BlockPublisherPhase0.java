@@ -14,6 +14,7 @@
 package tech.pegasys.teku.validator.coordinator.publisher;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Supplier;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockPublishingPerformance;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -75,7 +76,8 @@ public class BlockPublisherPhase0 extends AbstractBlockPublisher {
       final SignedBeaconBlock block,
       final Supplier<List<BlobSidecar>> blobSidecars,
       final Supplier<List<DataColumnSidecar>> dataColumnSidecars,
-      final BlockPublishingPerformance blockPublishingPerformance) {
+      final BlockPublishingPerformance blockPublishingPerformance,
+      final Optional<String> builderUrl) {
     publishBlock(block, blockPublishingPerformance).finishStackTrace();
   }
 

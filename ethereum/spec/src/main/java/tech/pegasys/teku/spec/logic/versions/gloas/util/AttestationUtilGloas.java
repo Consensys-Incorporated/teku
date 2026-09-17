@@ -60,7 +60,7 @@ public class AttestationUtilGloas extends AttestationUtilElectra {
     final BeaconStateGloas stateGloas = BeaconStateGloas.required(state);
     final int parentSlotIndex =
         stateGloas
-            .getLatestExecutionPayloadBid()
+            .getLatestBlockHeader()
             .getSlot()
             .mod(specConfig.getSlotsPerHistoricalRoot())
             .intValue();

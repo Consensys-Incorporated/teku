@@ -101,7 +101,7 @@ public class BuilderBidFetcher {
       final SignedExecutionPayloadBid bid, final BuilderEntry builderEntry) {
     final UInt64 valueInGwei =
         getBidValueInGwei(bid, builderEntry.getMaxExecutionPayment(), builderEntry.getUrl());
-    return new RemoteBid(bid, valueInGwei, Optional.of(builderEntry.getUrl()));
+    return new RemoteBid(bid, valueInGwei, Optional.of(builderEntry));
   }
 
   // For bids received via the builder API, the total bid
