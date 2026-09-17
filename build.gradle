@@ -662,7 +662,7 @@ tasks.register('downloadSlashingProtectionInterchangeRefTests', Download) {
 tasks.register('downloadCompTests', Download) {
 	onlyIf { !nightly }
 	src([
-			"${refTestBaseUrl}/${refTestVersion}/comptests.tar.gz"
+		"${refTestBaseUrl}/${refTestVersion}/comptests.tar.gz"
 	])
 	dest "${refTestDownloadDir}/comptests.tar.gz"
 	overwrite false
