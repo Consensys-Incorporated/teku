@@ -30,6 +30,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import tech.pegasys.teku.infrastructure.ssz.SszContainer;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBitlist;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszMutablePrimitiveList;
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema2;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBit;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
@@ -133,6 +134,25 @@ public class SszProgressiveBitlistSchemaTest {
     assertThatThrownBy(() -> limited.sszDeserialize(tooLong))
         .isInstanceOf(SszMaxLengthExceededException.class)
         .hasMessage("Bitlist length 5 exceeds max length 4");
+  }
+
+  @Test
+  void maxLength_shouldBeEnforcedOnMutation() {
+    final SszProgressiveBitlistSchema limited = new SszProgressiveBitlistSchema(4);
+    final SszMutablePrimitiveList<Boolean, SszBit> writable =
+        limited.ofBits(4, 1).createWritableCopy();
+
+    assertThatThrownBy(() -> writable.append(SszBit.of(true)))
+        .isInstanceOf(IndexOutOfBoundsException.class);
+    assertThatThrownBy(() -> writable.set(4, SszBit.of(true)))
+        .isInstanceOf(IndexOutOfBoundsException.class);
+    writable.set(3, SszBit.of(true));
+    assertThat(writable.commitChanges().get(3).get()).isTrue();
+
+    final SszMutablePrimitiveList<Boolean, SszBit> growable =
+        limited.ofBits(3, 1).createWritableCopy();
+    growable.append(SszBit.of(true));
+    assertThat(growable.commitChanges().size()).isEqualTo(4);
   }
 
   @Test
