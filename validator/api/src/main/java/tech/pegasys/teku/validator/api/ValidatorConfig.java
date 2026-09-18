@@ -75,6 +75,7 @@ public class ValidatorConfig {
   // Builder default options
   public static final UInt64 DEFAULT_BUILDER_MIN_BID = UInt64.ZERO;
   public static final UInt64 DEFAULT_BUILDER_BOOST_FACTOR = UInt64.valueOf(90);
+  // leave the bid valued at its trustless value alone
   public static final UInt64 DEFAULT_BUILDER_MAX_EXECUTION_PAYMENT = UInt64.ZERO;
 
   private final List<String> validatorKeys;

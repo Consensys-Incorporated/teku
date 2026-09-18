@@ -60,7 +60,10 @@ public class BuilderOptions {
       paramLabel = "<uint64>",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS,
       description =
-          "The maximum execution layer payment (in Gwei) that counts when a builder's bid is valued",
+          """
+            The maximum execution layer payment (in Gwei) that counts when a builder's bid is valued.
+            `0` is the default which counts no execution payment, leaving the bid valued at its trustless value alone.
+            This parameter may be adjusted based on the level of trust in the builder's reliability and reputation.""",
       arity = "1",
       hidden = true,
       converter = UInt64Converter.class)

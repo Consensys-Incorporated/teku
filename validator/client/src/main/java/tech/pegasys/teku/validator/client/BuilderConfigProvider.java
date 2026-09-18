@@ -15,6 +15,8 @@ package tech.pegasys.teku.validator.client;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.net.InetAddresses;
+import java.net.IDN;
+import java.net.MalformedURLException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -100,12 +102,18 @@ public class BuilderConfigProvider {
   // Spec: hostname lowercased, IPv6 in compressed form (RFC 5952) inside brackets
   @VisibleForTesting
   String getDefaultAuthData(final URI builderUrl) {
-    final String host = builderUrl.getHost(); // RFC 2732: IPv6 addresses returned with brackets
-    if (host.startsWith("[") && host.endsWith("]")) {
-      final String ipv6 = host.substring(1, host.length() - 1);
-      // toAddrString from Guava follows RFC 5952
-      return "[" + InetAddresses.toAddrString(InetAddresses.forString(ipv6)) + "]";
+    try {
+      // java.net.URL handles raw Unicode hostnames without leaving getHost() null
+      final String host = builderUrl.toURL().getHost();
+      // Handle IPv6 inside brackets
+      if (host.startsWith("[") && host.endsWith("]")) {
+        final String ipv6 = host.substring(1, host.length() - 1);
+        return "[" + InetAddresses.toAddrString(InetAddresses.forString(ipv6)) + "]";
+      }
+      // IDN.toASCII automatically converts Unicode -> Punycode (and lowercases)
+      return IDN.toASCII(host).toLowerCase(Locale.ROOT);
+    } catch (MalformedURLException ex) {
+      throw new IllegalArgumentException("Invalid URL: " + builderUrl, ex);
     }
-    return host.toLowerCase(Locale.ROOT);
   }
 }

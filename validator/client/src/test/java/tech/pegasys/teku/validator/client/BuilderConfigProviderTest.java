@@ -18,6 +18,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFuture.completedFuture;
 
+import java.net.MalformedURLException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -104,7 +105,8 @@ class BuilderConfigProviderTest {
 
   @ParameterizedTest
   @MethodSource("authDataTestCases")
-  void shouldGetDefaultAuthData(final String builderUrl, final String expectedAuthData) {
+  void shouldGetDefaultAuthData(final String builderUrl, final String expectedAuthData)
+      throws MalformedURLException {
     final BuilderConfigProvider provider =
         new BuilderConfigProvider(spec, ValidatorConfig.builder().build());
     assertThat(provider.getDefaultAuthData(URI.create(builderUrl))).isEqualTo(expectedAuthData);
@@ -118,6 +120,8 @@ class BuilderConfigProviderTest {
         Arguments.of("https://user:pw@builder.example.com/", "builder.example.com"),
         Arguments.of("https://10.0.0.5:18550/eth/v1/builder", "10.0.0.5"),
         Arguments.of("https://[0:0:0:0:0:0:0:1]:8443/", "[::1]"),
-        Arguments.of("https://[2001:db8::192.0.2.1]/", "[2001:db8::c000:201]"));
+        Arguments.of("https://[2001:db8::192.0.2.1]/", "[2001:db8::c000:201]"),
+        Arguments.of("https://bücher.example.org/bids", "xn--bcher-kva.example.org"),
+        Arguments.of("https://platåberget.dev", "xn--platberget-45a.dev"));
   }
 }
