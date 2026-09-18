@@ -83,7 +83,8 @@ class SszProgressiveListSchemaMaxLengthTest {
   void sszDeserialize_shouldRejectTooManyPackedByteListElements() {
     final Bytes ssz = byteLists(UNLIMITED_BYTE_LISTS, 3).sszSerialize();
     assertThatThrownBy(() -> LIMITED_PACKED_BYTE_LISTS.sszDeserialize(ssz))
-        .isInstanceOf(SszDeserializeException.class);
+        .isInstanceOf(SszDeserializeException.class)
+        .hasMessage("List length 3 exceeds max length 2");
     assertThat(
             LIMITED_PACKED_BYTE_LISTS.sszDeserialize(
                 byteLists(UNLIMITED_BYTE_LISTS, 2).sszSerialize()))

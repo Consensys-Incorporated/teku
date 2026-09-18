@@ -31,8 +31,9 @@ public final class PackedByteListsUtil {
 
   /// Parses and validates the offset table of a serialized list-of-byte-lists variable part.
   /// Structural checks always apply (truncation, alignment, zero first offset, monotonicity);
-  /// pass {@code Long.MAX_VALUE} to disable either limit check (progressive lists are
-  /// unbounded). Returns offsets with the end sentinel ({@code offsets[count] == bytes.size()}).
+  /// pass {@code Long.MAX_VALUE} to disable either limit check. The element count is checked
+  /// before the offset table is allocated. Returns offsets with the end sentinel ({@code
+  /// offsets[count] == bytes.size()}).
   public static int[] parsePackedOffsets(
       final Bytes bytes, final long maxElementCount, final long maxElementSize) {
     final int endOffset = bytes.size();
@@ -45,7 +46,10 @@ public final class PackedByteListsUtil {
     checkSsz(firstElementOffset > 0, "Invalid first element offset");
     checkSsz(firstElementOffset <= endOffset, "Invalid first element offset");
     final int elementsCount = firstElementOffset / SszType.SSZ_LENGTH_SIZE;
-    checkSsz(elementsCount <= maxElementCount, "SSZ sequence length exceeds max type length");
+    if (elementsCount > maxElementCount) {
+      throw new SszDeserializeException(
+          "List length " + elementsCount + " exceeds max length " + maxElementCount);
+    }
     final int[] offsets = new int[elementsCount + 1];
     offsets[0] = firstElementOffset;
     for (int i = 1; i < elementsCount; i++) {
@@ -60,10 +64,6 @@ public final class PackedByteListsUtil {
       checkSsz(size <= maxElementSize, "SSZ element length exceeds max element type length");
     }
     return offsets;
-  }
-
-  public static int[] parseUnboundedPackedOffsets(final Bytes bytes) {
-    return parsePackedOffsets(bytes, Long.MAX_VALUE, Long.MAX_VALUE);
   }
 
   /// Serializes elements into a packed variable part (offset table + concatenated element

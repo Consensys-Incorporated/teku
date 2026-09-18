@@ -342,10 +342,10 @@ public abstract class AbstractSszProgressiveListSchema<
       return defaultTree;
     }
     final Bytes bytes = reader.read(endOffset);
-    final int[] offsets = PackedByteListsUtil.parseUnboundedPackedOffsets(bytes);
+    // maxLength is enforced by the offset parser before the offset table is allocated
+    final int[] offsets = PackedByteListsUtil.parsePackedOffsets(bytes, maxLength, Long.MAX_VALUE);
     final SszPackedProgressiveByteListsNode packedNode =
         new SszPackedProgressiveByteListsNode(bytes, offsets, this::materializePackedElement);
-    checkDeserializedLength(packedNode.getElementCount());
     return BranchNode.create(packedNode, toLengthNode(packedNode.getElementCount()));
   }
 
