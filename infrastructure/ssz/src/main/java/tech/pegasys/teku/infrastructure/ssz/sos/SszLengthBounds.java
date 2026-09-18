@@ -65,7 +65,10 @@ public class SszLengthBounds {
   }
 
   /**
-   * Caps the maximum size with a network-level bound. The override must be at least as tight as the
+   * Caps the maximum size with a network-level bound. The raw bound may already be finite: the
+   * Gloas {@code DataColumnSidecar} lists are limited by {@code MAX_BLOB_COMMITMENTS_PER_BLOCK},
+   * yet {@code compute_max_data_column_sidecar_size} caps the message far lower, at the blob
+   * schedule's largest {@code max_blobs_per_block}. The override must be at least as tight as the
    * raw SSZ bound: a looser one is a misconfiguration and is rejected rather than ignored.
    */
   public SszLengthBounds withMaxBytesUpperBound(final long maxBytes) {
