@@ -23,7 +23,7 @@ public class BuilderPreferencesSchema extends ContainerSchema1<BuilderPreference
 
   public BuilderPreferencesSchema() {
     super(
-        "BuilderPreferencesV1",
+        "BuilderPreferences",
         namedSchema("max_execution_payment", SszPrimitiveSchemas.UINT64_SCHEMA));
   }
 

@@ -56,16 +56,6 @@ public class DelegatingSpecConfigGloas extends DelegatingSpecConfigFulu implemen
   }
 
   @Override
-  public int getMaxDataColumnSidecarSize() {
-    return delegate.getMaxDataColumnSidecarSize();
-  }
-
-  @Override
-  public int getMaxPartialDataColumnSidecarSize() {
-    return delegate.getMaxPartialDataColumnSidecarSize();
-  }
-
-  @Override
   public int getMaxSignedExecutionPayloadBidSize() {
     return delegate.getMaxSignedExecutionPayloadBidSize();
   }
@@ -86,8 +76,8 @@ public class DelegatingSpecConfigGloas extends DelegatingSpecConfigFulu implemen
   }
 
   @Override
-  public int getPtcSize() {
-    return delegate.getPtcSize();
+  public int getPayloadTimelinessCommitteeSize() {
+    return delegate.getPayloadTimelinessCommitteeSize();
   }
 
   @Override

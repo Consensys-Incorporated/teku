@@ -1276,18 +1276,22 @@ class ProtoArrayTest {
       final Bytes32 blockRoot,
       final int payloadPresentVoteCount,
       final int dataAvailableVoteCount) {
-    final PtcVoteTracker ptcVoteTracker = new PtcVoteTracker();
+    final PayloadTimelinessCommitteeVoteTracker payloadTimelinessCommitteeVoteTracker =
+        new PayloadTimelinessCommitteeVoteTracker();
     for (int validatorIndex = 0;
         validatorIndex < Math.max(payloadPresentVoteCount, dataAvailableVoteCount);
         validatorIndex++) {
-      ptcVoteTracker.recordVote(
+      payloadTimelinessCommitteeVoteTracker.recordVote(
           blockRoot,
           IntSet.of(validatorIndex),
           validatorIndex < payloadPresentVoteCount,
           validatorIndex < dataAvailableVoteCount);
     }
     return new ForkChoiceModelGloas(
-        gloasSpecConfig, payloadTimelyThreshold, dataAvailabilityTimelyThreshold, ptcVoteTracker);
+        gloasSpecConfig,
+        payloadTimelyThreshold,
+        dataAvailabilityTimelyThreshold,
+        payloadTimelinessCommitteeVoteTracker);
   }
 
   private void addValidBlock(final long slot, final Bytes32 blockRoot, final Bytes32 parentRoot) {

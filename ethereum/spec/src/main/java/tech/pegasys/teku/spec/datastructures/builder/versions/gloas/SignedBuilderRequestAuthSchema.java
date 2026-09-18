@@ -22,10 +22,10 @@ import tech.pegasys.teku.spec.datastructures.type.SszSignatureSchema;
 public class SignedBuilderRequestAuthSchema
     extends ContainerSchema2<SignedBuilderRequestAuth, BuilderRequestAuth, SszSignature> {
 
-  public SignedBuilderRequestAuthSchema(final BuilderRequestAuthSchema builderRequestAuthSchema) {
+  public SignedBuilderRequestAuthSchema(final BuilderRequestAuthSchema authSchema) {
     super(
         "SignedBuilderRequestAuth",
-        namedSchema("message", builderRequestAuthSchema),
+        namedSchema("message", authSchema),
         namedSchema("signature", SszSignatureSchema.INSTANCE));
   }
 

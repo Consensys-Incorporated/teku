@@ -20,7 +20,6 @@ import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.IntStream;
-import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
@@ -28,20 +27,16 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
-import tech.pegasys.teku.spec.constants.ParticipationFlags;
-import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationSchema;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.IndexedPayloadAttestationLight;
 import tech.pegasys.teku.spec.datastructures.state.BeaconStateTestBuilder;
-import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.BeaconStateElectra;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
-import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
@@ -115,61 +110,6 @@ public class BeaconStateAccessorsGloasTest {
                 beaconStateAccessors.computeIsMatchingHead(false, false, data, state, UInt64.ZERO))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("Index must be set to zero");
-  }
-
-  @Test
-  void getAttestationParticipationFlagIndices_shouldUseExplicitBidParentSlot() {
-    final UInt64 bidParentSlot = UInt64.valueOf(8);
-    final UInt64 dataSlot = bidParentSlot.plus(1);
-    final UInt64 stateSlot = dataSlot.plus(1);
-    final Bytes32 blockRoot = dataStructureUtil.randomBytes32();
-    final UInt64 slotsPerHistoricalRoot = UInt64.valueOf(configGloas().getSlotsPerHistoricalRoot());
-    final BeaconState state =
-        dataStructureUtil
-            .randomBeaconState(stateSlot)
-            .updated(
-                mutableState -> {
-                  mutableState.setLatestBlockHeader(
-                      new BeaconBlockHeader(
-                          dataSlot, UInt64.ZERO, Bytes32.ZERO, Bytes32.ZERO, Bytes32.ZERO));
-                  mutableState
-                      .getBlockRoots()
-                      .setElement(bidParentSlot.mod(slotsPerHistoricalRoot).intValue(), blockRoot);
-                  mutableState
-                      .getBlockRoots()
-                      .setElement(dataSlot.mod(slotsPerHistoricalRoot).intValue(), blockRoot);
-                  mutableState.setCurrentJustifiedCheckpoint(
-                      new Checkpoint(spec.computeEpochAtSlot(dataSlot), blockRoot));
-                  final MutableBeaconStateGloas gloasState =
-                      MutableBeaconStateGloas.required(mutableState);
-                  gloasState.setLatestExecutionPayloadBid(
-                      dataStructureUtil.randomExecutionPayloadBid(bidParentSlot, UInt64.ZERO));
-                  gloasState.setExecutionPayloadAvailability(
-                      SchemaDefinitionsGloas.required(spec.getGenesisSchemaDefinitions())
-                          .getExecutionPayloadAvailabilitySchema()
-                          .ofBits(bidParentSlot.mod(slotsPerHistoricalRoot).intValue()));
-                });
-    final UInt64 targetEpoch = spec.computeEpochAtSlot(dataSlot);
-    final AttestationData data =
-        new AttestationData(
-            dataSlot,
-            UInt64.ONE,
-            blockRoot,
-            new Checkpoint(targetEpoch, blockRoot),
-            new Checkpoint(targetEpoch, blockRoot));
-
-    assertThat(
-            beaconStateAccessors.getAttestationParticipationFlagIndices(
-                state, data, UInt64.ONE, bidParentSlot))
-        .contains(ParticipationFlags.TIMELY_HEAD_FLAG_INDEX);
-
-    assertThat(
-            beaconStateAccessors.getAttestationParticipationFlagIndices(
-                state, data, UInt64.ONE, dataSlot))
-        .doesNotContain(ParticipationFlags.TIMELY_HEAD_FLAG_INDEX);
-
-    assertThat(beaconStateAccessors.getAttestationParticipationFlagIndices(state, data, UInt64.ONE))
-        .contains(ParticipationFlags.TIMELY_HEAD_FLAG_INDEX);
   }
 
   // EIP-8061 churn limit coverage --------------------------------------------------------------

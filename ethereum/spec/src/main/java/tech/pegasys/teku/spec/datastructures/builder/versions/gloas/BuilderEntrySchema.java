@@ -22,12 +22,10 @@ import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema6;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszPrimitiveSchemas;
-import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszByteListSchema;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.type.SszPublicKey;
 import tech.pegasys.teku.spec.datastructures.type.SszPublicKeySchema;
-import tech.pegasys.teku.spec.schemas.ApiSchemas;
 
 public class BuilderEntrySchema
     extends ContainerSchema6<
@@ -39,14 +37,14 @@ public class BuilderEntrySchema
         SszUInt64,
         SszUInt64> {
 
-  private static final long MAX_BUILDER_URL_SIZE = 2048;
   private static final long MAX_BUILDER_PUBKEYS = 64;
 
-  public BuilderEntrySchema() {
+  public BuilderEntrySchema(
+      final long maxBuilderUrlSize, final SignedBuilderRequestAuthSchema authSchema) {
     super(
         "BuilderEntry",
-        namedSchema("url", SszByteListSchema.create(MAX_BUILDER_URL_SIZE)),
-        namedSchema("auth", ApiSchemas.SIGNED_BUILDER_REQUEST_AUTH_SCHEMA),
+        namedSchema("url", new UrlSchema(maxBuilderUrlSize)),
+        namedSchema("auth", authSchema),
         namedSchema(
             "builder_pubkeys",
             SszListSchema.create(SszPublicKeySchema.INSTANCE, MAX_BUILDER_PUBKEYS)),
@@ -71,8 +69,8 @@ public class BuilderEntrySchema
     return new BuilderEntry(this, node);
   }
 
-  public SszByteListSchema<?> getUrlSchema() {
-    return (SszByteListSchema<?>) getChildSchema(getFieldIndex("url"));
+  public UrlSchema getUrlSchema() {
+    return (UrlSchema) getChildSchema(getFieldIndex("url"));
   }
 
   @SuppressWarnings("unchecked")

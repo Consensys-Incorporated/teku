@@ -16,6 +16,7 @@ package tech.pegasys.teku.builder.rest.handlers;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static tech.pegasys.teku.ethereum.json.types.SharedApiTypes.withDataWrapper;
+import static tech.pegasys.teku.infrastructure.async.Waiter.waitFor;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NO_CONTENT;
@@ -71,7 +72,7 @@ class GetExecutionPayloadBidRequestTest extends AbstractBuilderRequestTestBase {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_OK).setBody(body));
 
     final Optional<SignedExecutionPayloadBid> result =
-        request.submit(slot, parentHash, parentRoot, proposerPubkey, auth);
+        waitFor(request.submit(slot, parentHash, parentRoot, proposerPubkey, auth));
 
     assertThat(result).isPresent();
     assertThat(result.get()).isEqualTo(expected);
@@ -94,11 +95,11 @@ class GetExecutionPayloadBidRequestTest extends AbstractBuilderRequestTestBase {
   }
 
   @TestTemplate
-  void shouldReturnEmptyOn204() {
+  void shouldReturnEmptyOn204() throws Exception {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_NO_CONTENT));
 
     final Optional<SignedExecutionPayloadBid> result =
-        request.submit(slot, parentHash, parentRoot, proposerPubkey, auth);
+        waitFor(request.submit(slot, parentHash, parentRoot, proposerPubkey, auth));
 
     assertThat(result).isEmpty();
   }
@@ -107,8 +108,9 @@ class GetExecutionPayloadBidRequestTest extends AbstractBuilderRequestTestBase {
   void shouldThrowBuilderClientExceptionOn400() {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_BAD_REQUEST));
 
-    assertThatThrownBy(() -> request.submit(slot, parentHash, parentRoot, proposerPubkey, auth))
-        .isInstanceOf(BuilderClientException.class)
+    assertThatThrownBy(
+            () -> waitFor(request.submit(slot, parentHash, parentRoot, proposerPubkey, auth)))
+        .hasCauseInstanceOf(BuilderClientException.class)
         .hasMessageContaining("Bad request");
   }
 
@@ -116,8 +118,9 @@ class GetExecutionPayloadBidRequestTest extends AbstractBuilderRequestTestBase {
   void shouldThrowBuilderClientExceptionOn401() {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_UNAUTHORIZED));
 
-    assertThatThrownBy(() -> request.submit(slot, parentHash, parentRoot, proposerPubkey, auth))
-        .isInstanceOf(BuilderClientException.class)
+    assertThatThrownBy(
+            () -> waitFor(request.submit(slot, parentHash, parentRoot, proposerPubkey, auth)))
+        .hasCauseInstanceOf(BuilderClientException.class)
         .hasMessageContaining("Unauthorized");
   }
 
@@ -125,7 +128,8 @@ class GetExecutionPayloadBidRequestTest extends AbstractBuilderRequestTestBase {
   void shouldThrowBuilderClientExceptionOn500() {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_INTERNAL_SERVER_ERROR));
 
-    assertThatThrownBy(() -> request.submit(slot, parentHash, parentRoot, proposerPubkey, auth))
-        .isInstanceOf(BuilderClientException.class);
+    assertThatThrownBy(
+            () -> waitFor(request.submit(slot, parentHash, parentRoot, proposerPubkey, auth)))
+        .hasCauseInstanceOf(BuilderClientException.class);
   }
 }

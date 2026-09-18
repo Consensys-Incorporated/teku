@@ -174,7 +174,7 @@ public final class BlockProcessorPhase0 extends AbstractBlockProcessor {
   }
 
   @Override
-  public UInt64 processExecutionPayloadBid(
+  public void processExecutionPayloadBid(
       final MutableBeaconState state, final SignedExecutionPayloadBid signedBid) {
     throw new UnsupportedOperationException("No process_execution_payload_bid until Gloas");
   }

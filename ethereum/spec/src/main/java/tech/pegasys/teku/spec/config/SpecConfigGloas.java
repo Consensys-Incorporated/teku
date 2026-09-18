@@ -27,7 +27,7 @@ public interface SpecConfigGloas extends SpecConfigFulu, NetworkingSpecConfigGlo
   int PAYLOAD_BUILDER_VERSION = 0;
   // builder-specs
   UInt64 MAX_EXECUTION_PAYMENT = UInt64.MAX_VALUE; // 2**64 - 1
-  long MAX_DATA_SIZE = 4096;
+  long MAX_BUILDER_AUTH_DATA_SIZE = 4096;
 
   static SpecConfigGloas required(final SpecConfig specConfig) {
     return specConfig
@@ -45,7 +45,7 @@ public interface SpecConfigGloas extends SpecConfigFulu, NetworkingSpecConfigGlo
 
   int getPayloadDueBps();
 
-  int getPtcSize();
+  int getPayloadTimelinessCommitteeSize();
 
   int getMaxPayloadAttestations();
 
@@ -70,11 +70,11 @@ public interface SpecConfigGloas extends SpecConfigFulu, NetworkingSpecConfigGlo
   List<GasLimitScheduleEntry> getGasLimitSchedule();
 
   default int getPayloadTimelyThreshold() {
-    return getPtcSize() / 2;
+    return getPayloadTimelinessCommitteeSize() / 2;
   }
 
   default int getDataAvailabilityTimelyThreshold() {
-    return getPtcSize() / 2;
+    return getPayloadTimelinessCommitteeSize() / 2;
   }
 
   @Override

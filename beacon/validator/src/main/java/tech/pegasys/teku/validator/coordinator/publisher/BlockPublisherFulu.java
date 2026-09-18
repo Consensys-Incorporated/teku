@@ -15,6 +15,7 @@ package tech.pegasys.teku.validator.coordinator.publisher;
 
 import com.google.common.annotations.VisibleForTesting;
 import java.util.List;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
@@ -83,7 +84,8 @@ public class BlockPublisherFulu extends BlockPublisherPhase0 {
       final SignedBeaconBlock block,
       final Supplier<List<BlobSidecar>> blobSidecars,
       final Supplier<List<DataColumnSidecar>> dataColumnSidecars,
-      final BlockPublishingPerformance blockPublishingPerformance) {
+      final BlockPublishingPerformance blockPublishingPerformance,
+      final Optional<String> builderUrl) {
     if (gossipBlobsAfterBlock) {
       publishBlock(block, blockPublishingPerformance)
           .always(
