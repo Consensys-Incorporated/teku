@@ -27,7 +27,7 @@ import tech.pegasys.teku.infrastructure.ssz.collections.SszByteList;
 import tech.pegasys.teku.infrastructure.ssz.impl.SszContainerImpl;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
 import tech.pegasys.teku.infrastructure.ssz.schema.impl.AbstractSszContainerSchema;
-import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszMaxLengthExceededException;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszReader;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -65,7 +65,7 @@ class SszProgressiveListSchemaMaxLengthTest {
   void sszDeserialize_shouldRejectTooManyFixedSizeElements() {
     final Bytes ssz = uint64s(UNLIMITED_UINT64_LIST, 3).sszSerialize();
     assertThatThrownBy(() -> LIMITED_UINT64_LIST.sszDeserialize(ssz))
-        .isInstanceOf(SszDeserializeException.class)
+        .isInstanceOf(SszMaxLengthExceededException.class)
         .hasMessageContaining("3")
         .hasMessageContaining("2");
   }
@@ -74,7 +74,7 @@ class SszProgressiveListSchemaMaxLengthTest {
   void sszDeserialize_shouldRejectTooManyVariableSizeElements() {
     final Bytes ssz = byteLists(UNLIMITED_BYTE_LISTS, 3).sszSerialize();
     assertThatThrownBy(() -> LIMITED_BYTE_LISTS.sszDeserialize(ssz))
-        .isInstanceOf(SszDeserializeException.class);
+        .isInstanceOf(SszMaxLengthExceededException.class);
     assertThat(LIMITED_BYTE_LISTS.sszDeserialize(byteLists(UNLIMITED_BYTE_LISTS, 2).sszSerialize()))
         .hasSize(2);
   }
@@ -83,7 +83,7 @@ class SszProgressiveListSchemaMaxLengthTest {
   void sszDeserialize_shouldRejectTooManyPackedByteListElements() {
     final Bytes ssz = byteLists(UNLIMITED_BYTE_LISTS, 3).sszSerialize();
     assertThatThrownBy(() -> LIMITED_PACKED_BYTE_LISTS.sszDeserialize(ssz))
-        .isInstanceOf(SszDeserializeException.class)
+        .isInstanceOf(SszMaxLengthExceededException.class)
         .hasMessage("List length 3 exceeds max length 2");
     assertThat(
             LIMITED_PACKED_BYTE_LISTS.sszDeserialize(
@@ -119,7 +119,7 @@ class SszProgressiveListSchemaMaxLengthTest {
             .sszSerialize();
 
     assertThatThrownBy(() -> limited.sszDeserialize(ssz))
-        .isInstanceOf(SszDeserializeException.class);
+        .isInstanceOf(SszMaxLengthExceededException.class);
     assertThat(elementDeserializations).hasValue(0);
   }
 
@@ -129,7 +129,7 @@ class SszProgressiveListSchemaMaxLengthTest {
     assertThat(limited.getMaxLength()).isEqualTo(2);
     final Bytes ssz = uint64s(UNLIMITED_UINT64_LIST, 3).sszSerialize();
     assertThatThrownBy(() -> limited.sszDeserialize(ssz))
-        .isInstanceOf(SszDeserializeException.class);
+        .isInstanceOf(SszMaxLengthExceededException.class);
     assertThat(limited).isNotEqualTo(SszProgressiveUInt64ListSchema.create());
   }
 

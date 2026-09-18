@@ -39,6 +39,7 @@ import tech.pegasys.teku.infrastructure.ssz.schema.impl.StoringUtil;
 import tech.pegasys.teku.infrastructure.ssz.schema.json.SszPrimitiveTypeDefinitions;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszLengthBounds;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszMaxLengthExceededException;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszReader;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszWriter;
 import tech.pegasys.teku.infrastructure.ssz.tree.BranchNode;
@@ -256,8 +257,7 @@ public class SszProgressiveBitlistSchema implements SszBitlistSchema<SszBitlist>
 
     final int length = sszGetLengthAndValidate(bytes);
     if (length > maxLength) {
-      throw new SszDeserializeException(
-          "Bitlist length " + length + " exceeds max length " + maxLength);
+      throw new SszMaxLengthExceededException("Bitlist", length, maxLength);
     }
     final Bytes treeBytes = sszTruncateLeadingBit(bytes, length);
     return createPackedProgressiveListTree(treeBytes, length);

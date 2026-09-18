@@ -44,6 +44,7 @@ import tech.pegasys.teku.infrastructure.ssz.schema.impl.PackedByteListsUtil;
 import tech.pegasys.teku.infrastructure.ssz.schema.impl.StoringUtil;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszLengthBounds;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszMaxLengthExceededException;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszReader;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszWriter;
 import tech.pegasys.teku.infrastructure.ssz.tree.BranchNode;
@@ -175,8 +176,7 @@ public abstract class AbstractSszProgressiveListSchema<
 
   private void checkDeserializedLength(final long elementsCount) {
     if (elementsCount > maxLength) {
-      throw new SszDeserializeException(
-          "List length " + elementsCount + " exceeds max length " + maxLength);
+      throw new SszMaxLengthExceededException("List", elementsCount, maxLength);
     }
   }
 

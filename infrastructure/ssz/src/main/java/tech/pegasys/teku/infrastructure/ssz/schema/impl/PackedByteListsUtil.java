@@ -18,6 +18,7 @@ import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszType;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszMaxLengthExceededException;
 
 /// Offset-table parsing and element-buffer building shared by the packed byte-lists
 /// representations of fixed ({@code AbstractSszListSchema}) and progressive
@@ -47,8 +48,7 @@ public final class PackedByteListsUtil {
     checkSsz(firstElementOffset <= endOffset, "Invalid first element offset");
     final int elementsCount = firstElementOffset / SszType.SSZ_LENGTH_SIZE;
     if (elementsCount > maxElementCount) {
-      throw new SszDeserializeException(
-          "List length " + elementsCount + " exceeds max length " + maxElementCount);
+      throw new SszMaxLengthExceededException("List", elementsCount, maxElementCount);
     }
     final int[] offsets = new int[elementsCount + 1];
     offsets[0] = firstElementOffset;

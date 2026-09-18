@@ -33,8 +33,8 @@ import tech.pegasys.teku.infrastructure.ssz.collections.SszBitlist;
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema2;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBit;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
-import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszLengthBounds;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszMaxLengthExceededException;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszReader;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 
@@ -131,7 +131,8 @@ public class SszProgressiveBitlistSchemaTest {
 
     assertThat(limited.sszDeserialize(atLimit).size()).isEqualTo(4);
     assertThatThrownBy(() -> limited.sszDeserialize(tooLong))
-        .isInstanceOf(SszDeserializeException.class);
+        .isInstanceOf(SszMaxLengthExceededException.class)
+        .hasMessage("Bitlist length 5 exceeds max length 4");
   }
 
   @Test

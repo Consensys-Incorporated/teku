@@ -28,7 +28,7 @@ import tech.pegasys.teku.infrastructure.ssz.collections.SszByteList;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszMutablePrimitiveList;
 import tech.pegasys.teku.infrastructure.ssz.collections.impl.SszProgressiveByteListImpl;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszByte;
-import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszMaxLengthExceededException;
 
 class SszProgressiveByteListSchemaTest {
 
@@ -170,13 +170,13 @@ class SszProgressiveByteListSchemaTest {
     assertThat(LIMITED_SCHEMA.getMaxLength()).isEqualTo(4);
     assertThat(LIMITED_SCHEMA.fromBytes(Bytes.fromHexString("0x01020304")).size()).isEqualTo(4);
     assertThatThrownBy(() -> LIMITED_SCHEMA.fromBytes(Bytes.fromHexString("0x0102030405")))
-        .isInstanceOf(SszDeserializeException.class)
+        .isInstanceOf(SszMaxLengthExceededException.class)
         .hasMessage("List length 5 exceeds max length 4");
     assertThatThrownBy(() -> LIMITED_SCHEMA.sszDeserialize(Bytes.fromHexString("0x0102030405")))
-        .isInstanceOf(SszDeserializeException.class);
+        .isInstanceOf(SszMaxLengthExceededException.class);
     assertThatThrownBy(
             () -> JsonUtil.parse("\"0x0102030405\"", LIMITED_SCHEMA.getJsonTypeDefinition()))
-        .hasRootCauseInstanceOf(SszDeserializeException.class);
+        .hasRootCauseInstanceOf(SszMaxLengthExceededException.class);
   }
 
   @Test
