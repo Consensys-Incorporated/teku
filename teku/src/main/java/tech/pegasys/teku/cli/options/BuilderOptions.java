@@ -91,7 +91,11 @@ public class BuilderOptions {
 
   private URI parseBuilderUrl(final String builderUrl) {
     try {
-      return URI.create(builderUrl);
+      final URI parsedBuilderUrl = URI.create(builderUrl);
+      if (parsedBuilderUrl.getHost() == null) {
+        throw new IllegalArgumentException("Host is undefined or invalid");
+      }
+      return parsedBuilderUrl;
     } catch (IllegalArgumentException e) {
       throw new InvalidConfigurationException(
           "Invalid configuration. Builder URL (" + builderUrl + ") has invalid syntax", e);
