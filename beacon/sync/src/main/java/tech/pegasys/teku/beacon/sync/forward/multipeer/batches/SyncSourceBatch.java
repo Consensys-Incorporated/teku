@@ -38,6 +38,7 @@ import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.peers.SyncSource;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.BlocksByRangeResponseInvalidResponseException;
+import tech.pegasys.teku.networking.eth2.rpc.core.RpcException.MalformedDataException;
 import tech.pegasys.teku.networking.p2p.peer.PeerDisconnectedException;
 import tech.pegasys.teku.networking.p2p.rpc.RpcResponseListener;
 import tech.pegasys.teku.spec.Spec;
@@ -327,6 +328,9 @@ public class SyncSourceBatch implements Batch {
       markAsInvalid();
     } else if (rootCause instanceof BlocksByRangeResponseInvalidResponseException) {
       LOG.debug("Inconsistent blocks returned from blocks by range request", error);
+      markAsInvalid();
+    } else if (rootCause instanceof MalformedDataException) {
+      LOG.debug("Malformed response received while requesting batch data", error);
       markAsInvalid();
     } else {
       LOG.debug("Error while requesting blocks", error);

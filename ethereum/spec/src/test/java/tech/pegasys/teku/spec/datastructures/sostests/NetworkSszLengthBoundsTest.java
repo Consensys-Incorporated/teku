@@ -28,16 +28,27 @@ class NetworkSszLengthBoundsTest {
       SchemaDefinitionsGloas.required(spec.getGenesisSchemaDefinitions());
 
   @Test
-  void gloasTopLevelNetworkSchemasApplyConfiguredNetworkBounds() {
-    assertNetworkBound(
-        schemaDefinitions.getSignedBeaconBlockSchema(),
-        spec.getNetworkingConfig().getMaxPayloadSize());
-    assertNetworkBound(schemaDefinitions.getSignedAggregateAndProofSchema(), 16_829);
-    assertNetworkBound(schemaDefinitions.getAttesterSlashingSchema(), 2_097_616);
+  void dataColumnSidecarAppliesComputedNetworkBound() {
     // compute_max_data_column_sidecar_size for the minimal blob schedule (9 blobs):
-    // 56 fixed bytes + 9 * (2048 cell + 48 proof)
+    // 56 fixed bytes + 9 * (2048 cell + 48 proof), far below the type-level bound
     assertNetworkBound(schemaDefinitions.getDataColumnSidecarSchema(), 18_920);
-    assertNetworkBound(schemaDefinitions.getSignedExecutionPayloadBidSchema(), 196_932);
+  }
+
+  @Test
+  void gloasSchemasWithLimitedListsHaveFiniteRawBounds() {
+    // once every progressive list declares its limit, no hand-set network bound is needed
+    assertFiniteRawBound(schemaDefinitions.getSignedBeaconBlockSchema());
+    assertFiniteRawBound(schemaDefinitions.getSignedAggregateAndProofSchema());
+    assertFiniteRawBound(schemaDefinitions.getAttesterSlashingSchema());
+    assertFiniteRawBound(schemaDefinitions.getSignedExecutionPayloadBidSchema());
+    assertThat(schemaDefinitions.getSignedBeaconBlockSchema().getSszLengthBounds().getMaxBytes())
+        .isLessThanOrEqualTo(spec.getNetworkingConfig().getMaxPayloadSize());
+  }
+
+  private void assertFiniteRawBound(final SszType schema) {
+    assertThat(schema.getNetworkSszLengthBytesUpperBound()).isEmpty();
+    assertThat(schema.getSszLengthBounds().isUnbounded()).isFalse();
+    assertThat(schema.getNetworkSszLengthBounds()).isEqualTo(schema.getSszLengthBounds());
   }
 
   @Test
@@ -50,7 +61,7 @@ class NetworkSszLengthBoundsTest {
   }
 
   private void assertNetworkBound(final SszType schema, final long expectedMaxBytes) {
-    assertThat(schema.getSszLengthBounds().isUnbounded()).isTrue();
+    assertThat(schema.getSszLengthBounds().getMaxBytes()).isGreaterThanOrEqualTo(expectedMaxBytes);
     assertThat(schema.getNetworkSszLengthBytesUpperBound().orElseThrow())
         .isEqualTo(expectedMaxBytes);
     assertThat(schema.getNetworkSszLengthBounds().getMinBytes())

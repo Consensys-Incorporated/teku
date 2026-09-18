@@ -13,7 +13,6 @@
 
 package tech.pegasys.teku.spec.logic.versions.gloas.block;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static tech.pegasys.teku.spec.config.SpecConfigGloas.BUILDER_INDEX_SELF_BUILD;
 import static tech.pegasys.teku.spec.config.SpecConfigGloas.PAYLOAD_BUILDER_VERSION;
 
@@ -70,7 +69,6 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
   private static final Logger LOG = LogManager.getLogger();
 
   private final PredicatesGloas predicatesGloas;
-  private final SpecConfigGloas specConfigGloas;
   private final SchemaDefinitionsGloas schemaDefinitionsGloas;
   private final MiscHelpersGloas miscHelpersGloas;
   private final BeaconStateAccessorsGloas beaconStateAccessorsGloas;
@@ -111,7 +109,6 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
         executionRequestsDataCodec,
         executionRequestsProcessor);
     this.predicatesGloas = predicates;
-    this.specConfigGloas = specConfig;
     this.schemaDefinitionsGloas = schemaDefinitions;
     this.miscHelpersGloas = miscHelpers;
     this.beaconStateAccessorsGloas = beaconStateAccessors;
@@ -171,21 +168,6 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
       final ExecutionRequests requests,
       final Supplier<ValidatorExitContext> validatorExitContextSupplier) {
     final ExecutionRequestsGloas requestsGloas = ExecutionRequestsGloas.required(requests);
-    checkArgument(
-        requests.getWithdrawals().size() <= specConfigGloas.getMaxWithdrawalRequestsPerPayload(),
-        "Too many withdrawal requests");
-    checkArgument(
-        requests.getConsolidations().size()
-            <= specConfigGloas.getMaxConsolidationRequestsPerPayload(),
-        "Too many consolidation requests");
-    checkArgument(
-        requestsGloas.getBuilderDeposits().size()
-            <= specConfigGloas.getMaxBuilderDepositRequestsPerPayload(),
-        "Too many builder deposit requests");
-    checkArgument(
-        requestsGloas.getBuilderExits().size()
-            <= specConfigGloas.getMaxBuilderExitRequestsPerPayload(),
-        "Too many builder exit requests");
 
     final ExecutionPayloadBid parentBid = state.getLatestExecutionPayloadBid();
     final UInt64 parentSlot = state.getLatestBlockHeader().getSlot();
@@ -449,32 +431,7 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
       final Supplier<ValidatorExitContext> validatorExitContextSupplier,
       final UInt64 parentSlot)
       throws BlockProcessingException {
-    final BeaconBlockBodyGloas bodyGloas = BeaconBlockBodyGloas.required(body);
-    safelyProcess(
-        () -> {
-          checkArgument(
-              body.getProposerSlashings().size() <= specConfigGloas.getMaxProposerSlashings(),
-              "Too many proposer slashings");
-          checkArgument(
-              body.getAttesterSlashings().size()
-                  <= specConfigGloas.getMaxAttesterSlashingsElectra(),
-              "Too many attester slashings");
-          checkArgument(
-              body.getAttestations().size() <= specConfigGloas.getMaxAttestationsElectra(),
-              "Too many attestations");
-          checkArgument(
-              body.getVoluntaryExits().size() <= specConfigGloas.getMaxVoluntaryExits(),
-              "Too many voluntary exits");
-          checkArgument(
-              bodyGloas.getBlsToExecutionChanges().size()
-                  <= specConfigGloas.getMaxBlsToExecutionChanges(),
-              "Too many BLS to execution changes");
-          checkArgument(
-              bodyGloas.getPayloadAttestations().size()
-                  <= specConfigGloas.getMaxPayloadAttestations(),
-              "Too many payload attestations");
-        });
-
+    // The operation count limits are enforced by the progressive list schemas.
     super.processOperationsNoValidation(
         state, body, indexedAttestationCache, validatorExitContextSupplier, parentSlot);
 

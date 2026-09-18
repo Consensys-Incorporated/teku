@@ -16641,7 +16641,9 @@
     </spec>
 
 - name: verify_block_body_operation_limits#gloas
-  sources: []
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/datastructures/blocks/blockbody/versions/gloas/BeaconBlockBodySchemaGloasImpl.java
+      search: public static BeaconBlockBodySchemaGloasImpl create(
   spec: |
     <spec fn="verify_block_body_operation_limits" fork="gloas" hash="cc23d563">
     def verify_block_body_operation_limits(body: BeaconBlockBody) -> None:
@@ -16918,7 +16920,15 @@
     </spec>
 
 - name: verify_execution_requests_limits#gloas
-  sources: []
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/schemas/registry/SchemaRegistryBuilder.java
+      search: private static SchemaProvider<?> createWithdrawalRequestsSchemaProvider() {
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/schemas/registry/SchemaRegistryBuilder.java
+      search: private static SchemaProvider<?> createConsolidationRequestsSchemaProvider() {
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/schemas/registry/SchemaRegistryBuilder.java
+      search: private static SchemaProvider<?> createBuilderDepositRequestsSchemaProvider() {
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/schemas/registry/SchemaRegistryBuilder.java
+      search: private static SchemaProvider<?> createBuilderExitRequestsSchemaProvider() {
   spec: |
     <spec fn="verify_execution_requests_limits" fork="gloas" hash="a15850cf">
     def verify_execution_requests_limits(execution_requests: ExecutionRequests) -> None:
