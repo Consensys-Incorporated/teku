@@ -17,7 +17,7 @@ import it.unimi.dsi.fastutil.ints.IntCollection;
 import java.util.Optional;
 import java.util.function.Function;
 import org.apache.tuweni.bytes.Bytes32;
-import tech.pegasys.teku.ethereum.json.types.validator.PtcDuties;
+import tech.pegasys.teku.ethereum.json.types.validator.PayloadTimelinessCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.PtcDuty;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -27,13 +27,14 @@ import tech.pegasys.teku.validator.client.duties.SlotBasedScheduledDuties;
 import tech.pegasys.teku.validator.client.duties.payloadattestations.PayloadAttestationProductionDuty;
 import tech.pegasys.teku.validator.client.loader.OwnedValidators;
 
-public class PtcDutyLoader extends AbstractDutyLoader<PtcDuties, SlotBasedScheduledDuties<?, ?>> {
+public class PayloadTimelinessCommitteeDutyLoader
+    extends AbstractDutyLoader<PayloadTimelinessCommitteeDuties, SlotBasedScheduledDuties<?, ?>> {
 
   private final ValidatorApiChannel validatorApiChannel;
   private final Function<Bytes32, SlotBasedScheduledDuties<PayloadAttestationProductionDuty, Duty>>
       scheduledDutiesFactory;
 
-  public PtcDutyLoader(
+  public PayloadTimelinessCommitteeDutyLoader(
       final ValidatorApiChannel validatorApiChannel,
       final Function<Bytes32, SlotBasedScheduledDuties<PayloadAttestationProductionDuty, Duty>>
           scheduledDutiesFactory,
@@ -45,17 +46,17 @@ public class PtcDutyLoader extends AbstractDutyLoader<PtcDuties, SlotBasedSchedu
   }
 
   @Override
-  protected SafeFuture<Optional<PtcDuties>> requestDuties(
+  protected SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> requestDuties(
       final UInt64 epoch, final IntCollection validatorIndices) {
     if (validatorIndices.isEmpty()) {
       return SafeFuture.completedFuture(Optional.empty());
     }
-    return validatorApiChannel.getPtcDuties(epoch, validatorIndices);
+    return validatorApiChannel.getPayloadTimelinessCommitteeDuties(epoch, validatorIndices);
   }
 
   @Override
   protected SafeFuture<SlotBasedScheduledDuties<?, ?>> scheduleAllDuties(
-      final UInt64 epoch, final PtcDuties duties) {
+      final UInt64 epoch, final PayloadTimelinessCommitteeDuties duties) {
     final SlotBasedScheduledDuties<PayloadAttestationProductionDuty, Duty> scheduledDuties =
         scheduledDutiesFactory.apply(duties.dependentRoot());
 
@@ -82,6 +83,6 @@ public class PtcDutyLoader extends AbstractDutyLoader<PtcDuties, SlotBasedSchedu
 
   @Override
   public String getDutyType() {
-    return "PTC";
+    return "PayloadTimelinessCommitteeDuties";
   }
 }

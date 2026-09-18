@@ -81,7 +81,10 @@ class BlockPublisherPhase0Test {
 
     assertThatSafeFuture(
             blockPublisherPhase0.sendSignedBlock(
-                block, BroadcastValidationLevel.NOT_REQUIRED, BlockPublishingPerformance.NOOP))
+                block,
+                BroadcastValidationLevel.NOT_REQUIRED,
+                BlockPublishingPerformance.NOOP,
+                Optional.empty()))
         .isCompletedExceptionallyWith(IllegalStateException.class);
   }
 
@@ -100,7 +103,10 @@ class BlockPublisherPhase0Test {
 
     assertThatSafeFuture(
             blockPublisherPhase0.sendSignedBlock(
-                block, BroadcastValidationLevel.NOT_REQUIRED, BlockPublishingPerformance.NOOP))
+                block,
+                BroadcastValidationLevel.NOT_REQUIRED,
+                BlockPublishingPerformance.NOOP,
+                Optional.empty()))
         .isCompletedWithValue(SendSignedBlockResult.success(block.getRoot()));
 
     verify(blockGossipChannel).publishBlock(block);

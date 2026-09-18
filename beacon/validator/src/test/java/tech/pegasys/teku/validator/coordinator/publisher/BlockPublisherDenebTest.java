@@ -94,7 +94,7 @@ class BlockPublisherDenebTest {
     when(blockGossipChannel.publishBlock(block)).thenReturn(publishBlockFuture);
 
     blockPublisherDeneb.publishBlockAndSidecars(
-        block, () -> blobSidecars, List::of, BlockPublishingPerformance.NOOP);
+        block, () -> blobSidecars, List::of, BlockPublishingPerformance.NOOP, Optional.empty());
 
     verify(blockGossipChannel).publishBlock(block);
     verify(blobSidecarGossipChannel, never()).publishBlobSidecars(any());
@@ -125,7 +125,8 @@ class BlockPublisherDenebTest {
             blockPublisherDeneb.sendSignedBlock(
                 blockContainer,
                 BroadcastValidationLevel.NOT_REQUIRED,
-                BlockPublishingPerformance.NOOP))
+                BlockPublishingPerformance.NOOP,
+                Optional.empty()))
         .isCompletedWithValue(SendSignedBlockResult.success(blockContainer.getRoot()));
 
     verify(blockGossipChannel).publishBlock(block);

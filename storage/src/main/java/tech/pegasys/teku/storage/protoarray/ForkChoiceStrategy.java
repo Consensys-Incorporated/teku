@@ -557,7 +557,7 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
    * https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/fork-choice.md#new-on_payload_attestation_message
    * https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/fork-choice.md#new-notify_ptc_messages
    */
-  public void onPtcVote(
+  public void onPayloadTimelinessCommitteeVote(
       final Bytes32 blockRoot,
       final IntSet ptcPositions,
       final boolean payloadPresent,

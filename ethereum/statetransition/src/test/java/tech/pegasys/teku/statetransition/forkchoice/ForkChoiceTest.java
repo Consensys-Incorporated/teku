@@ -717,7 +717,8 @@ class ForkChoiceTest {
 
     assertThat(messages).hasSize(1);
     assertThat(messages.get(0).getValidatorIndex()).isEqualTo(UInt64.valueOf(42));
-    assertThat(messages.get(0).calculatePtcPositions(spec, attestedBlockState))
+    assertThat(
+            messages.get(0).calculatePayloadTimelinessCommitteePositions(spec, attestedBlockState))
         .isEqualTo(IntSet.of(0, 2, 4));
   }
 
@@ -732,7 +733,8 @@ class ForkChoiceTest {
     final int threshold =
         SpecConfigGloas.required(spec.atSlot(parentSlot).getConfig())
             .getDataAvailabilityTimelyThreshold();
-    strategy.onPtcVote(parentBlock.getRoot(), ptcPositions(threshold + 1), true, false);
+    strategy.onPayloadTimelinessCommitteeVote(
+        parentBlock.getRoot(), ptcPositions(threshold + 1), true, false);
     storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(proposalSlot);
 
     final ChainHead blockProductionHead =
@@ -754,7 +756,8 @@ class ForkChoiceTest {
     final ForkChoiceStrategy strategy = recentChainData.getStore().getForkChoiceStrategy();
     final int threshold =
         SpecConfigGloas.required(spec.atSlot(parentSlot).getConfig()).getPayloadTimelyThreshold();
-    strategy.onPtcVote(parentBlock.getRoot(), ptcPositions(threshold + 1), false, true);
+    strategy.onPayloadTimelinessCommitteeVote(
+        parentBlock.getRoot(), ptcPositions(threshold + 1), false, true);
     storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(proposalSlot);
 
     final ChainHead blockProductionHead =

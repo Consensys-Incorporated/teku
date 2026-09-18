@@ -29,7 +29,7 @@ public class ValidatablePayloadAttestationMessage {
 
   private final PayloadAttestationMessage message;
 
-  private volatile Optional<IntSet> ptcPositions = Optional.empty();
+  private volatile Optional<IntSet> payloadTimelinessCommitteePositions = Optional.empty();
 
   private ValidatablePayloadAttestationMessage(final PayloadAttestationMessage message) {
     this.message = message;
@@ -62,32 +62,34 @@ public class ValidatablePayloadAttestationMessage {
     return message.getValidatorIndex();
   }
 
-  public Optional<IntSet> getPtcPositions() {
-    return ptcPositions;
+  public Optional<IntSet> getPayloadTimelinessCommitteePositions() {
+    return payloadTimelinessCommitteePositions;
   }
 
-  public IntSet calculatePtcPositions(final Spec spec, final BeaconState state) {
-    final Optional<IntSet> currentValue = ptcPositions;
+  public IntSet calculatePayloadTimelinessCommitteePositions(
+      final Spec spec, final BeaconState state) {
+    final Optional<IntSet> currentValue = payloadTimelinessCommitteePositions;
     if (currentValue.isPresent()) {
       return currentValue.get();
     }
 
     final int validatorIndex = getValidatorIndex().intValue();
-    final IntList ptc = spec.getPtc(state, getData().getSlot());
+    final IntList payloadTimelinessCommittee = spec.getPtc(state, getData().getSlot());
     final IntSet positions = new IntOpenHashSet();
-    for (int i = 0; i < ptc.size(); i++) {
-      if (ptc.getInt(i) == validatorIndex) {
+    for (int i = 0; i < payloadTimelinessCommittee.size(); i++) {
+      if (payloadTimelinessCommittee.getInt(i) == validatorIndex) {
         positions.add(i);
       }
     }
 
     final IntSet immutablePositions = IntSets.unmodifiable(positions);
-    this.ptcPositions = Optional.of(immutablePositions);
+    this.payloadTimelinessCommitteePositions = Optional.of(immutablePositions);
     return immutablePositions;
   }
 
   @VisibleForTesting
-  void setPtcPositions(final IntSet ptcPositions) {
-    this.ptcPositions = Optional.of(IntSets.unmodifiable(new IntOpenHashSet(ptcPositions)));
+  void setPayloadTimelinessCommitteePositions(final IntSet payloadTimelinessCommitteePositions) {
+    this.payloadTimelinessCommitteePositions =
+        Optional.of(IntSets.unmodifiable(new IntOpenHashSet(payloadTimelinessCommitteePositions)));
   }
 }

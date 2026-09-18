@@ -21,16 +21,16 @@ import tech.pegasys.teku.infrastructure.ssz.schema.impl.AbstractSszVectorSchema;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 
-public class PtcWindowSchema
+public class PayloadTimelinessCommitteeWindowSchema
     extends AbstractSszVectorSchema<SszUInt64Vector, SszVector<SszUInt64Vector>> {
 
-  public PtcWindowSchema(final SpecConfigGloas config) {
+  public PayloadTimelinessCommitteeWindowSchema(final SpecConfigGloas config) {
     super(
-        SszUInt64VectorSchema.create(config.getPtcSize()),
+        SszUInt64VectorSchema.create(config.getPayloadTimelinessCommitteeSize()),
         (long) (2 + config.getMinSeedLookahead()) * config.getSlotsPerEpoch());
   }
 
-  public SszUInt64VectorSchema<?> getPtcSchema() {
+  public SszUInt64VectorSchema<?> getPayloadTimelinessCommitteeSchema() {
     return (SszUInt64VectorSchema<?>) getElementSchema();
   }
 

@@ -37,11 +37,11 @@ public class SubmitBuilderPreferencesRequest extends AbstractBuilderRequest {
   }
 
   public void submit(
-      final BLSPublicKey validatorPubkey,
+      final BLSPublicKey proposerPubkey,
       final BuilderPreferencesRequest builderPreferencesRequest) {
     postJson(
         SUBMIT_BUILDER_PREFERENCES,
-        Map.of("validator_pubkey", validatorPubkey.toString()),
+        Map.of("proposer_pubkey", proposerPubkey.toString()),
         Map.of(
             HEADER_CONSENSUS_VERSION,
             spec.atSlot(builderPreferencesRequest.getAuth().getMessage().getSlot())
