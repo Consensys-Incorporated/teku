@@ -565,14 +565,109 @@ class BatchSyncTest {
     batches.receiveBlocks(batch1, dataStructureUtil.randomSignedBeaconBlock(BATCH_SIZE.plus(1)));
 
     assertNoBatchesImported();
-    batches.assertMarkedContested(batch0);
+    // batch0 is complete and non-empty: its peer must not be penalised for a chain break
+    // it did not cause; only batch1 (whose first block did not chain) is contested.
+    assertThatBatch(batch0).isNotContested();
+    assertThatBatch(batch0).isComplete();
     batches.assertMarkedContested(batch1);
 
-    // Both batches now request the same range from a different peer
-    batches.receiveBlocks(batch0, batch0Block); // Batch 0 is unchanged
+    // Only batch1 re-downloads from a different peer; batch0 is untouched
     batches.receiveBlocks(batch1, batch1Block); // Batch 1 now gives us valid data
 
     assertThatBatch(batch0).isConfirmed();
+  }
+
+  @Test
+  void shouldNotContestFirstBatchWhenSecondBatchDoesNotChainFromItWithIntermediateBatches() {
+    // Regression: when intermediate empty batches sit between two non-empty batches and
+    // the second does not chain from the first, only the intermediate batches and the
+    // second batch should be contested — the first batch's peer is innocent.
+    assertThat(sync.syncToChain(targetChain)).isNotDone();
+
+    final Batch batch0 = batches.get(0);
+    final Batch batch1 = batches.get(1);
+    final Batch batch2 = batches.get(2);
+
+    final SignedBeaconBlock batch0Block =
+        chainBuilder.generateBlockAtSlot(batch0.getLastSlot()).getBlock();
+    // batch2 block with a random parent — does not chain from batch0's last block
+    final SignedBeaconBlock batch2MaliciousBlock =
+        dataStructureUtil.randomSignedBeaconBlock(batch2.getFirstSlot().plus(1));
+
+    batches.receiveBlocks(batch0, batch0Block);
+    batches.receiveBlocks(batch1); // empty — batch1 claims no blocks
+    batches.receiveBlocks(batch2, batch2MaliciousBlock);
+
+    assertNoBatchesImported();
+    // batch0's peer served correct, internally-consistent blocks — must not be contested
+    assertThatBatch(batch0).isNotContested();
+    // batch1 and batch2 are both contested (one of them is hiding the linking block)
+    batches.assertMarkedContested(batch1);
+    batches.assertMarkedContested(batch2);
+  }
+
+  @Test
+  void shouldContestEmptyBatchThatHidesChainBreakFromLaterNonEmptyBatch() {
+    // Reviewer-supplied test (lucassaldanha): batch2's block genuinely chains from a block
+    // in batch1's range that batch1 hides by claiming to be empty.
+    assertThat(sync.syncToChain(targetChain)).isNotDone();
+
+    final Batch batch0 = batches.get(0);
+    final Batch batch1 = batches.get(1);
+    final Batch batch2 = batches.get(2);
+
+    final SignedBeaconBlock batch0Block =
+        chainBuilder.generateBlockAtSlot(batch0.getLastSlot()).getBlock();
+    // A real block within batch1's range — the link batch1's peer is about to hide by
+    // claiming its range is empty.
+    chainBuilder.generateBlockAtSlot(batch1.getLastSlot());
+    // batch2's block genuinely continues the chain from the hidden block above, so it does
+    // not chain directly from batch0.
+    final SignedBeaconBlock batch2Block =
+        chainBuilder.generateBlockAtSlot(batch2.getLastSlot()).getBlock();
+
+    // batch0 arrives first (honest)
+    batches.receiveBlocks(batch0, batch0Block);
+    // batch2 arrives next, before batch1 - its first block doesn't chain from batch0
+    // because the real link was in batch1's range
+    batches.receiveBlocks(batch2, batch2Block);
+    // batch1 arrives last, falsely claiming its range is empty - hiding the real link block
+    batches.receiveBlocks(batch1);
+
+    assertNoBatchesImported();
+    // batch1 is the one that lied about being empty; it must be contested and re-requested
+    batches.assertMarkedContested(batch1);
+  }
+
+  @Test
+  void shouldContestEmptyFirstBatchWhenLaterBatchArrivesFirstAndDoesNotChain() {
+    // Regression: when batch2 arrives before the empty batch1, the chain-check fires as
+    // checkBatchesFormChain(batch1, batch2) via the nextNonEmptyBatch call-site, with an empty
+    // firstBatch. An empty firstBatch may be hiding the linking block so it must remain contested,
+    // not silently exonerated by the non-empty-firstBatch exclusion.
+    assertThat(sync.syncToChain(targetChain)).isNotDone();
+
+    final Batch batch0 = batches.get(0);
+    final Batch batch1 = batches.get(1);
+    final Batch batch2 = batches.get(2);
+
+    final SignedBeaconBlock batch0Block =
+        chainBuilder.generateBlockAtSlot(batch0.getLastSlot()).getBlock();
+    // batch2 block does not chain from batch0 because the real link is in batch1's range
+    final SignedBeaconBlock batch2MaliciousBlock =
+        dataStructureUtil.randomSignedBeaconBlock(batch2.getFirstSlot().plus(1));
+
+    batches.receiveBlocks(batch0, batch0Block);
+    // batch2 arrives before batch1; the chain-check is deferred until batch1 completes
+    batches.receiveBlocks(batch2, batch2MaliciousBlock);
+    // batch1 arrives last, falsely claiming its range is empty
+    batches.receiveBlocks(batch1);
+
+    assertNoBatchesImported();
+    // batch0's peer served correct blocks — must not be contested
+    assertThatBatch(batch0).isNotContested();
+    // batch1 lied about being empty and must be contested and re-downloaded
+    batches.assertMarkedContested(batch1);
   }
 
   @Test
