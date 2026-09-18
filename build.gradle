@@ -887,6 +887,16 @@ application {
 		"--sun-misc-unsafe-memory-access=allow",
 		// avoids JDK 26+ warning due to picocli
 		// "--enable-final-field-mutation=ALL-UNNAMED"
+
+		// Terminate rather than carry on in a broken state after running out of memory. Handling
+		// this in Java is unreliable: the error is usually swallowed by a catch(Throwable) on the
+		// way out, and the graceful System.exit has deadlocked in a shutdown hook before (#7166).
+		// The JVM aborts at the point the error is thrown, with exit code 3: no catch blocks and
+		// no shutdown hooks run, so the database is left unclosed and recovers from its write
+		// ahead log on the next start. Only covers errors raised by the VM, so the out of memory
+		// errors thrown by Java code (direct buffer memory) are handled in
+		// TekuDefaultExceptionHandler.
+		"-XX:+ExitOnOutOfMemoryError",
 	]
 }
 

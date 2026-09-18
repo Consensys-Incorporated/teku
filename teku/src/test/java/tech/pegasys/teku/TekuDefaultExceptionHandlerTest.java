@@ -13,19 +13,29 @@
 
 package tech.pegasys.teku;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletionException;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.infrastructure.exceptions.ExitConstants;
 import tech.pegasys.teku.infrastructure.logging.StatusLogger;
 
 class TekuDefaultExceptionHandlerTest {
 
   private final StatusLogger log = mock(StatusLogger.class);
-  private final TekuDefaultExceptionHandler exceptionHandler = new TekuDefaultExceptionHandler(log);
+  private final List<Integer> haltedWith = new ArrayList<>();
+  private final TekuDefaultExceptionHandler exceptionHandler =
+      new TekuDefaultExceptionHandler(log, haltedWith::add);
 
   @Test
   void logWarningIfAssertFails() {
@@ -33,6 +43,7 @@ class TekuDefaultExceptionHandlerTest {
     exceptionHandler.uncaughtException(Thread.currentThread(), exception);
 
     verify(log).specificationFailure(any(), eq(exception));
+    assertThat(haltedWith).isEmpty();
   }
 
   @Test
@@ -42,5 +53,49 @@ class TekuDefaultExceptionHandlerTest {
     exceptionHandler.uncaughtException(Thread.currentThread(), exception);
 
     verify(log).unexpectedFailure(anyString(), eq(exception));
+    assertThat(haltedWith).isEmpty();
   }
+
+  @Test
+  void shouldHaltOnDirectBufferMemoryError() {
+    // The form NIO uses when the direct memory limit is reached. Not covered by
+    // -XX:+ExitOnOutOfMemoryError because it is thrown by Java code rather than raised by the VM.
+    final OutOfMemoryError error =
+        new OutOfMemoryError("Cannot reserve 1048576 bytes of direct buffer memory");
+
+    exceptionHandler.uncaughtException(Thread.currentThread(), error);
+
+    verify(log).fatalError(anyString(), eq(error));
+    // ERROR_EXIT_CODE because restarting is expected to recover
+    assertThat(haltedWith).containsExactly(ExitConstants.ERROR_EXIT_CODE);
+  }
+
+  @Test
+  void shouldHaltWhenOutOfMemoryErrorIsWrappedInAnotherException() {
+    // How RpcHandler reports a failure from a Netty channel, via a failed future
+    final Throwable error =
+        new CompletionException(
+            new IllegalStateException("Channel exception", new OutOfDirectMemoryError()));
+
+    exceptionHandler.uncaughtException(Thread.currentThread(), error);
+
+    verify(log).fatalError(anyString(), eq(error));
+    verify(log, never()).unexpectedFailure(anyString(), any());
+    assertThat(haltedWith).containsExactly(ExitConstants.ERROR_EXIT_CODE);
+  }
+
+  @Test
+  void shouldHaltEvenWhenReportingTheErrorFails() {
+    final OutOfMemoryError error = new OutOfMemoryError("direct buffer memory");
+    doThrow(new OutOfMemoryError("failed to log")).when(log).fatalError(anyString(), any());
+
+    assertThatThrownBy(() -> exceptionHandler.uncaughtException(Thread.currentThread(), error))
+        .isInstanceOf(OutOfMemoryError.class);
+
+    assertThat(haltedWith).containsExactly(ExitConstants.ERROR_EXIT_CODE);
+  }
+
+  // Stands in for Netty's OutOfDirectMemoryError, which is not a dependency of this module.
+  // Static so that this Serializable class doesn't reference the non serializable test class.
+  private static class OutOfDirectMemoryError extends OutOfMemoryError {}
 }

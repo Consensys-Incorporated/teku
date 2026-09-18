@@ -23,6 +23,7 @@ import java.lang.reflect.Method;
 import java.nio.channels.ClosedChannelException;
 import java.util.Optional;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.IntConsumer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.infrastructure.events.ChannelExceptionHandler;
@@ -38,14 +39,16 @@ public final class TekuDefaultExceptionHandler
   private static final Logger LOG = LogManager.getLogger();
 
   private final StatusLogger statusLog;
+  private final IntConsumer haltAction;
 
   public TekuDefaultExceptionHandler() {
-    this(StatusLogger.STATUS_LOG);
+    this(StatusLogger.STATUS_LOG, exitCode -> Runtime.getRuntime().halt(exitCode));
   }
 
   @VisibleForTesting
-  TekuDefaultExceptionHandler(final StatusLogger statusLog) {
+  TekuDefaultExceptionHandler(final StatusLogger statusLog, final IntConsumer haltAction) {
     this.statusLog = statusLog;
+    this.haltAction = haltAction;
   }
 
   @Override
@@ -83,9 +86,14 @@ public final class TekuDefaultExceptionHandler
         .isPresent()) {
       statusLog.fatalError(subscriberDescription, exception);
       System.exit(FATAL_EXIT_CODE);
-    } else if (exception instanceof OutOfMemoryError) {
-      statusLog.fatalError(subscriberDescription, exception);
-      System.exit(ERROR_EXIT_CODE);
+    } else if (exception instanceof OutOfMemoryError
+        || ExceptionUtil.hasCause(exception, OutOfMemoryError.class)) {
+      // Heap exhaustion is handled by -XX:+ExitOnOutOfMemoryError, which terminates the JVM before
+      // this handler runs. What reaches here are the out of memory errors thrown by Java code,
+      // which that flag does not cover: Netty's OutOfDirectMemoryError and the NIO "Cannot reserve
+      // ... direct buffer memory" error. Causes are checked because they arrive wrapped, for
+      // example in a CompletionException.
+      haltImmediately(subscriberDescription, exception);
     } else if (exception instanceof EphemeryLifecycleException) {
       statusLog.fatalError(subscriberDescription, exception);
       System.exit(ERROR_EXIT_CODE);
@@ -100,6 +108,20 @@ public final class TekuDefaultExceptionHandler
       statusLog.specificationFailure(subscriberDescription, exception);
     } else {
       statusLog.unexpectedFailure(subscriberDescription, exception);
+    }
+  }
+
+  /**
+   * Terminates the process without running shutdown hooks. {@link System#exit(int)} is not used
+   * because it runs the hooks, which stop services and have blocked forever doing so, leaving a
+   * process that is alive but useless. The database recovers from its write ahead log on the next
+   * start. Logging is in a try/finally so that failing to log cannot prevent the shutdown.
+   */
+  private void haltImmediately(final String subscriberDescription, final Throwable exception) {
+    try {
+      statusLog.fatalError(subscriberDescription, exception);
+    } finally {
+      haltAction.accept(ERROR_EXIT_CODE);
     }
   }
 
