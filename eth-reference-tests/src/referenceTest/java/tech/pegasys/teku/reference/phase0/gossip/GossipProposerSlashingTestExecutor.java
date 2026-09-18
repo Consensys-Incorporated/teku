@@ -14,7 +14,6 @@
 package tech.pegasys.teku.reference.phase0.gossip;
 
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
-import static tech.pegasys.teku.reference.BlsSetting.IGNORED;
 import static tech.pegasys.teku.reference.TestDataUtils.loadSsz;
 import static tech.pegasys.teku.reference.TestDataUtils.loadStateFromSsz;
 import static tech.pegasys.teku.reference.TestDataUtils.loadYaml;
@@ -22,7 +21,6 @@ import static tech.pegasys.teku.reference.TestDataUtils.loadYaml;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
-import tech.pegasys.teku.reference.BlsSetting;
 import tech.pegasys.teku.reference.TestExecutor;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
@@ -37,8 +35,7 @@ public class GossipProposerSlashingTestExecutor implements TestExecutor {
   public void runTest(final TestDefinition testDefinition) throws Throwable {
     final GossipProposerSlashingMetaData metaData =
         loadYaml(testDefinition, "meta.yaml", GossipProposerSlashingMetaData.class);
-    final boolean signatureVerificationDisabled = metaData.getBlsSetting() == IGNORED;
-    final Spec spec = testDefinition.getSpec(!signatureVerificationDisabled);
+    final Spec spec = testDefinition.getSpec();
     final BeaconState state = loadStateFromSsz(testDefinition, "state.ssz_snappy");
     final List<SignedBeaconBlock> blocks =
         GossipTestContext.loadBlocks(testDefinition, spec, metaData.getBlocks());
@@ -78,10 +75,6 @@ public class GossipProposerSlashingTestExecutor implements TestExecutor {
 
     public List<GossipTestContext.BlockEntry> getBlocks() {
       return blocks;
-    }
-
-    public BlsSetting getBlsSetting() {
-      return BlsSetting.forCode(blsSetting);
     }
 
     private static class Message {
