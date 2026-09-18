@@ -31,6 +31,7 @@ import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
 import tech.pegasys.teku.infrastructure.time.SystemTimeProvider;
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -297,8 +298,9 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
       final TestDefinition testDefinition,
       final OperationProcessor processor,
       final BeaconState preState) {
+    // an invalid operation may already be rejected by the SSZ schemas (e.g. count limits)
     assertThatThrownBy(() -> applyOperation(testDefinition, processor, preState))
-        .isInstanceOf(BlockProcessingException.class);
+        .isInstanceOfAny(BlockProcessingException.class, SszDeserializeException.class);
   }
 
   private BeaconState applyOperation(
