@@ -16,6 +16,7 @@ package tech.pegasys.teku.builder.rest.handlers;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static tech.pegasys.teku.infrastructure.async.Waiter.waitFor;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_ACCEPTED;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
@@ -56,7 +57,7 @@ class SubmitSignedBeaconBlockRequestTest extends AbstractBuilderRequestTestBase 
   void shouldPostToCorrectUrl() throws Exception {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_ACCEPTED));
 
-    request.submit(signedBeaconBlock);
+    waitFor(request.submit(signedBeaconBlock));
 
     final RecordedRequest recorded = mockWebServer.takeRequest();
     assertThat(recorded.getMethod()).isEqualTo("POST");
@@ -68,7 +69,7 @@ class SubmitSignedBeaconBlockRequestTest extends AbstractBuilderRequestTestBase 
   void shouldSubmitSszEncodedBody() throws Exception {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_ACCEPTED));
 
-    request.submit(signedBeaconBlock);
+    waitFor(request.submit(signedBeaconBlock));
 
     final RecordedRequest recorded = mockWebServer.takeRequest();
     assertThat(recorded.getHeader("Content-Type")).isEqualTo("application/octet-stream");
@@ -80,7 +81,7 @@ class SubmitSignedBeaconBlockRequestTest extends AbstractBuilderRequestTestBase 
   void shouldIncludeConsensusVersionHeader() throws Exception {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_ACCEPTED));
 
-    request.submit(signedBeaconBlock);
+    waitFor(request.submit(signedBeaconBlock));
 
     final RecordedRequest recorded = mockWebServer.takeRequest();
     final String expectedMilestone =
@@ -92,8 +93,8 @@ class SubmitSignedBeaconBlockRequestTest extends AbstractBuilderRequestTestBase 
   void shouldThrowBuilderClientExceptionOn400() {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_BAD_REQUEST));
 
-    assertThatThrownBy(() -> request.submit(signedBeaconBlock))
-        .isInstanceOf(BuilderClientException.class)
+    assertThatThrownBy(() -> waitFor(request.submit(signedBeaconBlock)))
+        .hasCauseInstanceOf(BuilderClientException.class)
         .hasMessageContaining("Bad request");
   }
 
@@ -101,7 +102,7 @@ class SubmitSignedBeaconBlockRequestTest extends AbstractBuilderRequestTestBase 
   void shouldThrowBuilderClientExceptionOn500() {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_INTERNAL_SERVER_ERROR));
 
-    assertThatThrownBy(() -> request.submit(signedBeaconBlock))
-        .isInstanceOf(BuilderClientException.class);
+    assertThatThrownBy(() -> waitFor(request.submit(signedBeaconBlock)))
+        .hasCauseInstanceOf(BuilderClientException.class);
   }
 }

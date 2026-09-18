@@ -16,6 +16,7 @@ package tech.pegasys.teku.builder.rest.handlers;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static tech.pegasys.teku.infrastructure.async.Waiter.waitFor;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_ACCEPTED;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
@@ -61,7 +62,7 @@ class SubmitBuilderPreferencesRequestTest extends AbstractBuilderRequestTestBase
   void shouldVerifyCorrectUrlMethodAndHeaders() throws Exception {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_ACCEPTED));
 
-    request.submit(proposerPubkey, builderPreferencesRequest);
+    waitFor(request.submit(proposerPubkey, builderPreferencesRequest));
 
     final RecordedRequest recorded = mockWebServer.takeRequest();
     assertThat(recorded.getMethod()).isEqualTo("POST");
@@ -83,7 +84,7 @@ class SubmitBuilderPreferencesRequestTest extends AbstractBuilderRequestTestBase
   void shouldVerifyRequestBodyIsNotEmpty() throws Exception {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_ACCEPTED));
 
-    request.submit(proposerPubkey, builderPreferencesRequest);
+    waitFor(request.submit(proposerPubkey, builderPreferencesRequest));
 
     final RecordedRequest recorded = mockWebServer.takeRequest();
     assertThat(recorded.getBody().size()).isGreaterThan(0);
@@ -93,8 +94,8 @@ class SubmitBuilderPreferencesRequestTest extends AbstractBuilderRequestTestBase
   void shouldThrowBuilderClientExceptionOn400() {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_BAD_REQUEST));
 
-    assertThatThrownBy(() -> request.submit(proposerPubkey, builderPreferencesRequest))
-        .isInstanceOf(BuilderClientException.class)
+    assertThatThrownBy(() -> waitFor(request.submit(proposerPubkey, builderPreferencesRequest)))
+        .hasCauseInstanceOf(BuilderClientException.class)
         .hasMessageContaining("Bad request");
   }
 
@@ -102,8 +103,8 @@ class SubmitBuilderPreferencesRequestTest extends AbstractBuilderRequestTestBase
   void shouldThrowBuilderClientExceptionOn401() {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_UNAUTHORIZED));
 
-    assertThatThrownBy(() -> request.submit(proposerPubkey, builderPreferencesRequest))
-        .isInstanceOf(BuilderClientException.class)
+    assertThatThrownBy(() -> waitFor(request.submit(proposerPubkey, builderPreferencesRequest)))
+        .hasCauseInstanceOf(BuilderClientException.class)
         .hasMessageContaining("Unauthorized");
   }
 
@@ -111,7 +112,7 @@ class SubmitBuilderPreferencesRequestTest extends AbstractBuilderRequestTestBase
   void shouldThrowBuilderClientExceptionOn500() {
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_INTERNAL_SERVER_ERROR));
 
-    assertThatThrownBy(() -> request.submit(proposerPubkey, builderPreferencesRequest))
-        .isInstanceOf(BuilderClientException.class);
+    assertThatThrownBy(() -> waitFor(request.submit(proposerPubkey, builderPreferencesRequest)))
+        .hasCauseInstanceOf(BuilderClientException.class);
   }
 }

@@ -21,8 +21,7 @@ public class GossipTests {
 
   public static final ImmutableMap<String, TestExecutor> GOSSIP_TEST_TYPES =
       ImmutableMap.<String, TestExecutor>builder()
-          // TODO: https://github.com/Consensys-Incorporated/teku/issues/11229
-          .put("networking/gossip_attester_slashing", TestExecutor.IGNORE_TESTS)
+          .put("networking/gossip_attester_slashing", new GossipAttesterSlashingTestExecutor())
           .put(
               "networking/gossip_beacon_aggregate_and_proof",
               new GossipBeaconAggregateAndProofTestExecutor(
@@ -49,10 +48,8 @@ public class GossipTests {
           .put(
               "networking/gossip_sync_committee_message",
               new GossipSyncCommitteeMessageTestExecutor())
-          // TODO: https://github.com/Consensys-Incorporated/teku/issues/11229
-          .put("networking/gossip_proposer_slashing", TestExecutor.IGNORE_TESTS)
-          // TODO: https://github.com/Consensys-Incorporated/teku/issues/11229
-          .put("networking/gossip_voluntary_exit", TestExecutor.IGNORE_TESTS)
+          .put("networking/gossip_proposer_slashing", new GossipProposerSlashingTestExecutor())
+          .put("networking/gossip_voluntary_exit", new GossipVoluntaryExitTestExecutor())
           .put(
               "networking/gossip_payload_attestation_message",
               new GossipPayloadAttestationMessageTestExecutor())
