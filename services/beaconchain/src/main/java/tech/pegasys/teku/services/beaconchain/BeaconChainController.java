@@ -1027,7 +1027,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
           beaconConfig
               .executionPayloadBidCircuitBreakerFactory()
               .create(recentChainData::getForkChoiceStrategy);
-      stakedBuilderClientProvider = new OkHttpStakedBuilderClientProvider(spec, beaconAsyncRunner);
+      stakedBuilderClientProvider = new OkHttpStakedBuilderClientProvider(spec);
       final BuilderBidFetcher builderBidFetcher =
           new BuilderBidFetcher(spec, stakedBuilderClientProvider);
       final ExecutionPayloadBidSelector executionPayloadBidSelector =
