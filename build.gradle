@@ -751,10 +751,10 @@ tasks.register('expandRefTestsForkChoiceCompliance', Copy) {
 }
 
 tasks.register('expandRefTests') {
-	dependsOn expandRefTestsGeneral, expandRefTestsMainnet, expandRefTestsMinimal, expandRefTestsBls, expandRefTestsSlashingProtectionInterchange, cleanRefTestsForkChoiceCompliance
+	dependsOn expandRefTestsGeneral, expandRefTestsMainnet, expandRefTestsMinimal, expandRefTestsBls, expandRefTestsSlashingProtectionInterchange, expandRefTestsForkChoiceCompliance
 }
 tasks.register('cleanRefTests') {
-	dependsOn cleanRefTestsGeneral, cleanRefTestsMainnet, cleanRefTestsMinimal, cleanRefTestsBls, cleanRefTestsSlashingProtectionInterchange, expandRefTestsForkChoiceCompliance
+	dependsOn cleanRefTestsGeneral, cleanRefTestsMainnet, cleanRefTestsMinimal, cleanRefTestsBls, cleanRefTestsSlashingProtectionInterchange, cleanRefTestsForkChoiceCompliance
 }
 
 tasks.register('deploy') {}
