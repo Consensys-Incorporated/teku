@@ -52,18 +52,22 @@ class OkHttpStakedBuilderClient implements StakedBuilderClient {
       final Bytes32 parentRoot,
       final BLSPublicKey proposerPubkey,
       final SignedBuilderRequestAuth auth) {
-    return getExecutionPayloadBidRequest.submit(slot, parentHash, parentRoot, proposerPubkey, auth);
+    return SafeFuture.of(
+        () ->
+            getExecutionPayloadBidRequest.submit(
+                slot, parentHash, parentRoot, proposerPubkey, auth));
   }
 
   @Override
   public SafeFuture<Void> submitBuilderPreferences(
       final BLSPublicKey proposerPubkey,
       final BuilderPreferencesRequest builderPreferencesRequest) {
-    return submitBuilderPreferencesRequest.submit(proposerPubkey, builderPreferencesRequest);
+    return SafeFuture.of(
+        submitBuilderPreferencesRequest.submit(proposerPubkey, builderPreferencesRequest));
   }
 
   @Override
   public SafeFuture<Void> submitSignedBeaconBlock(final SignedBeaconBlock signedBeaconBlock) {
-    return submitSignedBeaconBlockRequest.submit(signedBeaconBlock);
+    return SafeFuture.of(submitSignedBeaconBlockRequest.submit(signedBeaconBlock));
   }
 }
