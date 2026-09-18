@@ -145,6 +145,7 @@ public class EventSourceBeaconChainEventAdapter
 
     final List<EventType> eventTypes = new ArrayList<>();
     eventTypes.add(EventType.head);
+    eventTypes.add(EventType.head_v2);
     if (shutdownWhenValidatorSlashedEnabled) {
       eventTypes.add(EventType.attester_slashing);
       eventTypes.add(EventType.proposer_slashing);
