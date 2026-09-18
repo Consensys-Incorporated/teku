@@ -67,7 +67,20 @@ public class SszProgressiveBitlistSchema implements SszBitlistSchema<SszBitlist>
   private final TreeNode defaultTree;
   private final DeserializableTypeDefinition<SszBitlist> jsonTypeDefinition;
 
+  /**
+   * Optional length limit. Progressive bitlists have no SSZ-level capacity, but consensus may still
+   * bound them; when set, the limit is enforced on construction and on deserialization. {@link
+   * Long#MAX_VALUE} means unlimited.
+   */
+  private final long maxLength;
+
   public SszProgressiveBitlistSchema() {
+    this(Long.MAX_VALUE);
+  }
+
+  public SszProgressiveBitlistSchema(final long maxLength) {
+    checkArgument(maxLength >= 0, "maxLength must not be negative but was %s", maxLength);
+    this.maxLength = maxLength;
     this.defaultTree =
         BranchNode.create(ProgressiveTreeUtil.createProgressiveTree(List.of()), toLengthNode(0));
     this.jsonTypeDefinition =
@@ -78,11 +91,13 @@ public class SszProgressiveBitlistSchema implements SszBitlistSchema<SszBitlist>
 
   @Override
   public SszBitlist ofBits(final int size, final int... setBitIndices) {
+    checkArgument(size <= maxLength, "size > maxLength");
     return SszProgressiveBitlistImpl.ofBits(this, size, setBitIndices);
   }
 
   @Override
   public SszBitlist wrapBitSet(final int size, final BitSet bitSet) {
+    checkArgument(size <= maxLength, "size > maxLength");
     return SszProgressiveBitlistImpl.wrapBitSet(this, size, bitSet);
   }
 
@@ -118,7 +133,7 @@ public class SszProgressiveBitlistSchema implements SszBitlistSchema<SszBitlist>
 
   @Override
   public long getMaxLength() {
-    return Long.MAX_VALUE;
+    return maxLength;
   }
 
   @Override
@@ -240,16 +255,23 @@ public class SszProgressiveBitlistSchema implements SszBitlistSchema<SszBitlist>
     final Bytes bytes = reader.read(availableBytes);
 
     final int length = sszGetLengthAndValidate(bytes);
+    if (length > maxLength) {
+      throw new SszDeserializeException(
+          "Bitlist length " + length + " exceeds max length " + maxLength);
+    }
     final Bytes treeBytes = sszTruncateLeadingBit(bytes, length);
     return createPackedProgressiveListTree(treeBytes, length);
   }
 
   @Override
   public SszLengthBounds getSszLengthBounds() {
-    // Progressive bitlists have no max capacity — use Long.MAX_VALUE bits directly
-    // to avoid overflow when converting from bytes to bits. Min is 8 bits (1 byte for boundary
-    // bit).
-    return SszLengthBounds.ofBits(8, Long.MAX_VALUE);
+    if (maxLength == Long.MAX_VALUE) {
+      // Progressive bitlists have no max capacity — use Long.MAX_VALUE bits directly
+      // to avoid overflow when converting from bytes to bits. Min is 8 bits (1 byte for boundary
+      // bit).
+      return SszLengthBounds.ofBits(8, Long.MAX_VALUE);
+    }
+    return ListSchemaUtil.computeListSszLengthBounds(SszPrimitiveSchemas.BIT_SCHEMA, maxLength);
   }
 
   @Override
@@ -442,16 +464,16 @@ public class SszProgressiveBitlistSchema implements SszBitlistSchema<SszBitlist>
     if (this == o) {
       return true;
     }
-    return o instanceof SszProgressiveBitlistSchema;
+    return o instanceof SszProgressiveBitlistSchema that && maxLength == that.maxLength;
   }
 
   @Override
   public int hashCode() {
-    return SszProgressiveBitlistSchema.class.hashCode();
+    return Long.hashCode(maxLength);
   }
 
   @Override
   public String toString() {
-    return "ProgressiveBitlist";
+    return "ProgressiveBitlist" + (maxLength == Long.MAX_VALUE ? "" : "[" + maxLength + "]");
   }
 }

@@ -64,16 +64,21 @@ public class SszLengthBounds {
     return getMaxBits() == Long.MAX_VALUE;
   }
 
+  /**
+   * Caps the maximum size with a network-level bound. The override must be at least as tight as the
+   * raw SSZ bound: a looser one is a misconfiguration and is rejected rather than ignored.
+   */
   public SszLengthBounds withMaxBytesUpperBound(final long maxBytes) {
-    checkArgument(
-        isUnbounded(),
-        "SSZ upper bound override is only valid for unbounded raw SSZ bounds: %s",
-        this);
     checkArgument(
         maxBytes >= getMinBytes(),
         "SSZ upper bound override %s is below raw minimum %s",
         maxBytes,
         getMinBytes());
+    checkArgument(
+        maxBytes <= getMaxBytes(),
+        "SSZ upper bound override %s is above raw maximum %s",
+        maxBytes,
+        getMaxBytes());
     return SszLengthBounds.ofBytes(getMinBytes(), maxBytes);
   }
 
