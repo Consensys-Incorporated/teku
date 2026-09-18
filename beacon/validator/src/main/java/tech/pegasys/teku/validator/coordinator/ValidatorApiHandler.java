@@ -70,7 +70,6 @@ import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionAndPublish
 import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionPerformance;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockPublishingPerformance;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
-import tech.pegasys.teku.infrastructure.exceptions.ExceptionUtil;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.gossip.subnets.AttestationTopicSubscriber;
@@ -983,15 +982,13 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
       final String url,
       final BLSPublicKey proposerPubkey,
       final BuilderPreferencesRequest builderPreferencesRequest) {
-    return stakedBuilderClientProvider
-        .getClient(url)
-        .submitBuilderPreferences(proposerPubkey, builderPreferencesRequest)
+    return SafeFuture.of(() -> stakedBuilderClientProvider.getClient(url))
+        .thenCompose(
+            client -> client.submitBuilderPreferences(proposerPubkey, builderPreferencesRequest))
         .thenApply(__ -> Optional.<SubmitDataError>empty())
         .exceptionally(
             err ->
-                Optional.of(
-                    new SubmitDataError(
-                        UInt64.valueOf(index), ExceptionUtil.getRootCauseMessage(err))));
+                Optional.of(new SubmitDataError(UInt64.valueOf(index), getRootCauseMessage(err))));
   }
 
   @Override
