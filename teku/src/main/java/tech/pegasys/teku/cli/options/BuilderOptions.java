@@ -13,9 +13,7 @@
 
 package tech.pegasys.teku.cli.options;
 
-import java.net.MalformedURLException;
 import java.net.URI;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import picocli.CommandLine;
@@ -58,6 +56,17 @@ public class BuilderOptions {
   private UInt64 builderBoostFactor = ValidatorConfig.DEFAULT_BUILDER_BOOST_FACTOR;
 
   @CommandLine.Option(
+      names = {"--Xbuilder-max-execution-payment"},
+      paramLabel = "<uint64>",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS,
+      description =
+          "The maximum execution layer payment (in Gwei) that counts when a builder's bid is valued",
+      arity = "1",
+      hidden = true,
+      converter = UInt64Converter.class)
+  private UInt64 builderMaxExecutionPayment = ValidatorConfig.DEFAULT_BUILDER_MAX_EXECUTION_PAYMENT;
+
+  @CommandLine.Option(
       names = {"--Xbuilder-urls"},
       paramLabel = "<url>",
       description = "Comma separated list of urls of builders to use when proposing",
@@ -72,17 +81,18 @@ public class BuilderOptions {
             config
                 .builderMinBid(builderMinBid)
                 .builderBoostFactor(builderBoostFactor)
+                .builderMaxExecutionPayment(builderMaxExecutionPayment)
                 .builderUrls(parseBuilderUrls()));
   }
 
-  private List<URL> parseBuilderUrls() {
+  private List<URI> parseBuilderUrls() {
     return builderUrls.stream().map(this::parseBuilderUrl).toList();
   }
 
-  private URL parseBuilderUrl(final String builderUrl) {
+  private URI parseBuilderUrl(final String builderUrl) {
     try {
-      return URI.create(builderUrl).toURL();
-    } catch (IllegalArgumentException | MalformedURLException e) {
+      return URI.create(builderUrl);
+    } catch (IllegalArgumentException e) {
       throw new InvalidConfigurationException(
           "Invalid configuration. Builder URL (" + builderUrl + ") has invalid syntax", e);
     }

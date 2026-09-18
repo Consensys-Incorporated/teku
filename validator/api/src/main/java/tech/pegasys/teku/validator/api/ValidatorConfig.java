@@ -75,6 +75,7 @@ public class ValidatorConfig {
   // Builder default options
   public static final UInt64 DEFAULT_BUILDER_MIN_BID = UInt64.ZERO;
   public static final UInt64 DEFAULT_BUILDER_BOOST_FACTOR = UInt64.valueOf(90);
+  public static final UInt64 DEFAULT_BUILDER_MAX_EXECUTION_PAYMENT = UInt64.ZERO;
 
   private final List<String> validatorKeys;
   private final List<String> validatorExternalSignerPublicKeySources;
@@ -123,7 +124,8 @@ public class ValidatorConfig {
   // Builder options
   private final UInt64 builderMinBid;
   private final UInt64 builderBoostFactor;
-  private final List<URL> builderUrls;
+  private final UInt64 builderMaxExecutionPayment;
+  private final List<URI> builderUrls;
 
   private ValidatorConfig(
       final List<String> validatorKeys,
@@ -168,7 +170,8 @@ public class ValidatorConfig {
       final boolean attestationsV2ApisEnabled,
       final UInt64 builderMinBid,
       final UInt64 builderBoostFactor,
-      final List<URL> builderUrls) {
+      final UInt64 builderMaxExecutionPayment,
+      final List<URI> builderUrls) {
     this.validatorKeys = validatorKeys;
     this.validatorExternalSignerPublicKeySources = validatorExternalSignerPublicKeySources;
     this.validatorExternalSignerUrl = validatorExternalSignerUrl;
@@ -216,6 +219,7 @@ public class ValidatorConfig {
     this.attestationsV2ApisEnabled = attestationsV2ApisEnabled;
     this.builderMinBid = builderMinBid;
     this.builderBoostFactor = builderBoostFactor;
+    this.builderMaxExecutionPayment = builderMaxExecutionPayment;
     this.builderUrls = builderUrls;
 
     LOG.debug(
@@ -407,7 +411,11 @@ public class ValidatorConfig {
     return builderBoostFactor;
   }
 
-  public List<URL> getBuilderUrls() {
+  public UInt64 getBuilderMaxExecutionPayment() {
+    return builderMaxExecutionPayment;
+  }
+
+  public List<URI> getBuilderUrls() {
     return builderUrls;
   }
 
@@ -467,7 +475,8 @@ public class ValidatorConfig {
     private boolean attestationsV2ApisEnabled = DEFAULT_ATTESTATIONS_V2_APIS_ENABLED;
     private UInt64 builderMinBid = DEFAULT_BUILDER_MIN_BID;
     private UInt64 builderBoostFactor = DEFAULT_BUILDER_BOOST_FACTOR;
-    private List<URL> builderUrls = new ArrayList<>();
+    private UInt64 builderMaxExecutionPayment = DEFAULT_BUILDER_MAX_EXECUTION_PAYMENT;
+    private List<URI> builderUrls = new ArrayList<>();
 
     private Builder() {}
 
@@ -751,7 +760,12 @@ public class ValidatorConfig {
       return this;
     }
 
-    public Builder builderUrls(final List<URL> builderUrls) {
+    public Builder builderMaxExecutionPayment(final UInt64 builderMaxExecutionPayment) {
+      this.builderMaxExecutionPayment = builderMaxExecutionPayment;
+      return this;
+    }
+
+    public Builder builderUrls(final List<URI> builderUrls) {
       this.builderUrls = builderUrls;
       return this;
     }
@@ -804,6 +818,7 @@ public class ValidatorConfig {
           attestationsV2ApisEnabled,
           builderMinBid,
           builderBoostFactor,
+          builderMaxExecutionPayment,
           builderUrls);
     }
 

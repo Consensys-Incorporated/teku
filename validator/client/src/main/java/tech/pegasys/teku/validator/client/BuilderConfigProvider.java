@@ -13,17 +13,22 @@
 
 package tech.pegasys.teku.validator.client;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.net.InetAddresses;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.collections.cache.LRUCache;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
-import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfigSchema;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderEntry;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderRequestAuth;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.SignedBuilderRequestAuth;
@@ -31,6 +36,9 @@ import tech.pegasys.teku.spec.schemas.ApiSchemas;
 import tech.pegasys.teku.validator.api.ValidatorConfig;
 
 public class BuilderConfigProvider {
+
+  private final LRUCache<URI, Bytes> cachedDefaultAuthData =
+      LRUCache.create((int) BuilderConfigSchema.MAX_BUILDER_ENTRIES);
 
   private final Spec spec;
   private final ValidatorConfig validatorConfig;
@@ -47,13 +55,10 @@ public class BuilderConfigProvider {
     }
     final Stream<SafeFuture<BuilderEntry>> builderEntriesFutures =
         validatorConfig.getBuilderUrls().stream()
-            .map(url -> Bytes.of(url.toExternalForm().getBytes(StandardCharsets.UTF_8)))
             .map(
                 builderUrl -> {
                   final BuilderRequestAuth auth =
-                      ApiSchemas.BUILDER_REQUEST_AUTH_SCHEMA.create(
-                          // default to the UTF-8 bytes of the builder's own advertised URL
-                          builderUrl, slot);
+                      ApiSchemas.BUILDER_REQUEST_AUTH_SCHEMA.create(getAuthData(builderUrl), slot);
                   // Authenticates bid requests to the builder
                   return validator
                       .getSigner()
@@ -64,10 +69,10 @@ public class BuilderConfigProvider {
                                 ApiSchemas.SIGNED_BUILDER_REQUEST_AUTH_SCHEMA.create(
                                     auth, signature);
                             return ApiSchemas.BUILDER_ENTRY_SCHEMA.create(
-                                builderUrl,
+                                Bytes.of(builderUrl.toString().getBytes(StandardCharsets.UTF_8)),
                                 signedAuth,
                                 List.of(),
-                                SpecConfigGloas.MAX_EXECUTION_PAYMENT,
+                                validatorConfig.getBuilderMaxExecutionPayment(),
                                 validatorConfig.getBuilderMinBid(),
                                 validatorConfig.getBuilderBoostFactor());
                           });
@@ -84,5 +89,23 @@ public class BuilderConfigProvider {
 
   private boolean isBuilderConfigRequired(final UInt64 slot) {
     return spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS);
+  }
+
+  private Bytes getAuthData(final URI builderUrl) {
+    return cachedDefaultAuthData.get(
+        builderUrl,
+        __ -> Bytes.of(getDefaultAuthData(builderUrl).getBytes(StandardCharsets.US_ASCII)));
+  }
+
+  // Spec: hostname lowercased, IPv6 in compressed form (RFC 5952) inside brackets
+  @VisibleForTesting
+  String getDefaultAuthData(final URI builderUrl) {
+    final String host = builderUrl.getHost(); // RFC 2732: IPv6 addresses returned with brackets
+    if (host.startsWith("[") && host.endsWith("]")) {
+      final String ipv6 = host.substring(1, host.length() - 1);
+      // toAddrString from Guava follows RFC 5952
+      return "[" + InetAddresses.toAddrString(InetAddresses.forString(ipv6)) + "]";
+    }
+    return host.toLowerCase(Locale.ROOT);
   }
 }

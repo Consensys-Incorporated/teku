@@ -17,15 +17,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFuture.completedFuture;
-import static tech.pegasys.teku.spec.config.SpecConfigGloas.MAX_EXECUTION_PAYMENT;
 
-import java.net.MalformedURLException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -61,23 +63,25 @@ class BuilderConfigProviderTest {
   }
 
   @Test
-  void shouldReturnBuilderConfigForGloas() throws MalformedURLException {
+  void shouldReturnBuilderConfigForGloas() {
     final String builderUrl = "https://builder.example.com";
     final UInt64 slot = UInt64.valueOf(42);
     final UInt64 minBid = UInt64.valueOf(100);
     final UInt64 boostFactor = UInt64.valueOf(80);
+    final UInt64 maxExecutionPayment = UInt64.valueOf(67);
     final BLSSignature signature = dataStructureUtil.randomSignature();
 
     final ValidatorConfig config =
         ValidatorConfig.builder()
-            .builderUrls(List.of(URI.create(builderUrl).toURL()))
+            .builderUrls(List.of(URI.create(builderUrl)))
             .builderMinBid(minBid)
             .builderBoostFactor(boostFactor)
+            .builderMaxExecutionPayment(maxExecutionPayment)
             .build();
 
     final BuilderRequestAuth expectedAuth =
         ApiSchemas.BUILDER_REQUEST_AUTH_SCHEMA.create(
-            Bytes.of(builderUrl.getBytes(StandardCharsets.UTF_8)), slot);
+            Bytes.of("builder.example.com".getBytes(StandardCharsets.US_ASCII)), slot);
     when(signer.signBuilderRequestAuth(expectedAuth)).thenReturn(completedFuture(signature));
 
     final BuilderConfigProvider provider = new BuilderConfigProvider(spec, config);
@@ -95,6 +99,25 @@ class BuilderConfigProviderTest {
     assertThat(entry.getAuth().getSignature()).isEqualTo(signature);
     assertThat(entry.getMinBid()).isEqualTo(minBid);
     assertThat(entry.getBuilderBoostFactor()).isEqualTo(boostFactor);
-    assertThat(entry.getMaxExecutionPayment()).isEqualTo(MAX_EXECUTION_PAYMENT);
+    assertThat(entry.getMaxExecutionPayment()).isEqualTo(maxExecutionPayment);
+  }
+
+  @ParameterizedTest
+  @MethodSource("authDataTestCases")
+  void shouldGetDefaultAuthData(final String builderUrl, final String expectedAuthData) {
+    final BuilderConfigProvider provider =
+        new BuilderConfigProvider(spec, ValidatorConfig.builder().build());
+    assertThat(provider.getDefaultAuthData(URI.create(builderUrl))).isEqualTo(expectedAuthData);
+  }
+
+  static Stream<Arguments> authDataTestCases() {
+    return Stream.of(
+        Arguments.of("https://builder.example.com/", "builder.example.com"),
+        Arguments.of("HTTPS://Builder.Example.com:443/bids?x=1", "builder.example.com"),
+        Arguments.of("https://builder.example.com:8080", "builder.example.com"),
+        Arguments.of("https://user:pw@builder.example.com/", "builder.example.com"),
+        Arguments.of("https://10.0.0.5:18550/eth/v1/builder", "10.0.0.5"),
+        Arguments.of("https://[0:0:0:0:0:0:0:1]:8443/", "[::1]"),
+        Arguments.of("https://[2001:db8::192.0.2.1]/", "[2001:db8::c000:201]"));
   }
 }
