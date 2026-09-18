@@ -27,7 +27,7 @@ import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import tech.pegasys.teku.ethereum.json.types.validator.PtcDuties;
+import tech.pegasys.teku.ethereum.json.types.validator.PayloadTimelinessCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.PtcDuty;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -62,8 +62,8 @@ class PtcDutyLoaderTest {
   private final SlotBasedScheduledDuties<PayloadAttestationProductionDuty, Duty>
       slotBasedScheduledDuties = mock(SlotBasedScheduledDuties.class);
 
-  private final PtcDutyLoader dutyLoader =
-      new PtcDutyLoader(
+  private final PayloadTimelinessCommitteeDutyLoader dutyLoader =
+      new PayloadTimelinessCommitteeDutyLoader(
           validatorApiChannel, __ -> slotBasedScheduledDuties, validators, validatorIndexProvider);
 
   @BeforeEach
@@ -73,15 +73,15 @@ class PtcDutyLoaderTest {
   }
 
   @Test
-  void shouldLoadPtcDuties() {
+  void shouldLoadPayloadTimelinessCommitteeDuties() {
     final UInt64 epoch = UInt64.valueOf(1);
     final Bytes32 dependentRoot = dataStructureUtil.randomBytes32();
 
-    when(validatorApiChannel.getPtcDuties(epoch, validatorIndices))
+    when(validatorApiChannel.getPayloadTimelinessCommitteeDuties(epoch, validatorIndices))
         .thenReturn(
             SafeFuture.completedFuture(
                 Optional.of(
-                    new PtcDuties(
+                    new PayloadTimelinessCommitteeDuties(
                         false,
                         dependentRoot,
                         List.of(

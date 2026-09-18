@@ -168,9 +168,10 @@ public class PayloadAttestationMessageGossipValidator {
               /*
                * [REJECT] The validator is a member of the payload timeliness committee
                */
-              final IntSet ptcPositions =
-                  validatablePayloadAttestationMessage.calculatePtcPositions(spec, state);
-              if (ptcPositions.isEmpty()) {
+              final IntSet payloadTimelinessCommitteePositions =
+                  validatablePayloadAttestationMessage.calculatePayloadTimelinessCommitteePositions(
+                      spec, state);
+              if (payloadTimelinessCommitteePositions.isEmpty()) {
                 return rejectPayloadAttestation(
                     payloadAttestationMessage,
                     "Payload attestation's validator index %s is not in the payload committee",

@@ -20,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assumptions.assumeThat;
 import static tech.pegasys.teku.ethereum.json.types.beacon.StateValidatorDataBuilder.STATE_VALIDATORS_RESPONSE_TYPE;
 import static tech.pegasys.teku.ethereum.json.types.validator.AttesterDutiesBuilder.ATTESTER_DUTIES_RESPONSE_TYPE;
-import static tech.pegasys.teku.ethereum.json.types.validator.PtcDuties.PTC_DUTIES_TYPE_DEFINITION;
+import static tech.pegasys.teku.ethereum.json.types.validator.PayloadTimelinessCommitteeDuties.PTC_DUTIES_TYPE_DEFINITION;
 import static tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeDutiesBuilder.SYNC_COMMITTEE_DUTIES_TYPE;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
@@ -69,7 +69,7 @@ import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.ethereum.json.types.beacon.StateValidatorData;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuty;
-import tech.pegasys.teku.ethereum.json.types.validator.PtcDuties;
+import tech.pegasys.teku.ethereum.json.types.validator.PayloadTimelinessCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.PtcDuty;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeDuty;
@@ -580,14 +580,16 @@ class OkHttpValidatorTypeDefClientTest extends AbstractTypeDefRequestTestBase {
                 dataStructureUtil.randomPublicKey(),
                 dataStructureUtil.randomValidatorIndex(),
                 dataStructureUtil.randomSlot()));
-    final PtcDuties response = new PtcDuties(true, dataStructureUtil.randomBytes32(), duties);
+    final PayloadTimelinessCommitteeDuties response =
+        new PayloadTimelinessCommitteeDuties(true, dataStructureUtil.randomBytes32(), duties);
 
     final String body = serialize(response, PTC_DUTIES_TYPE_DEFINITION);
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_OK).setBody(body));
 
     final UInt64 epoch = ONE;
     final IntList validatorIndices = IntList.of(1, 2);
-    final Optional<PtcDuties> result = typeDefClient.postPtcDuties(epoch, validatorIndices);
+    final Optional<PayloadTimelinessCommitteeDuties> result =
+        typeDefClient.postPayloadTimelinessCommitteeDuties(epoch, validatorIndices);
 
     final RecordedRequest recordedRequest = mockWebServer.takeRequest();
     assertThat(recordedRequest.getPath()).isEqualTo("/eth/v1/validator/duties/ptc/" + epoch);

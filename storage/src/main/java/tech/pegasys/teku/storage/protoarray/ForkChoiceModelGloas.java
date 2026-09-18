@@ -51,25 +51,25 @@ class ForkChoiceModelGloas implements ForkChoiceModel {
   private final UInt64 firstGloasSlot;
   private final int payloadTimelyThreshold;
   private final int dataAvailabilityTimelyThreshold;
-  private final PtcVoteTracker ptcVoteTracker;
+  private final PayloadTimelinessCommitteeVoteTracker payloadTimelinessCommitteeVoteTracker;
 
   ForkChoiceModelGloas(final SpecConfigGloas specConfig) {
     this(
         specConfig,
         specConfig.getPayloadTimelyThreshold(),
         specConfig.getDataAvailabilityTimelyThreshold(),
-        new PtcVoteTracker());
+        new PayloadTimelinessCommitteeVoteTracker());
   }
 
   ForkChoiceModelGloas(
       final SpecConfigGloas specConfig,
       final int payloadTimelyThreshold,
       final int dataAvailabilityTimelyThreshold,
-      final PtcVoteTracker ptcVoteTracker) {
+      final PayloadTimelinessCommitteeVoteTracker payloadTimelinessCommitteeVoteTracker) {
     this.firstGloasSlot = specConfig.getGloasForkEpoch().times(specConfig.getSlotsPerEpoch());
     this.payloadTimelyThreshold = payloadTimelyThreshold;
     this.dataAvailabilityTimelyThreshold = dataAvailabilityTimelyThreshold;
-    this.ptcVoteTracker = ptcVoteTracker;
+    this.payloadTimelinessCommitteeVoteTracker = payloadTimelinessCommitteeVoteTracker;
   }
 
   @Override
@@ -528,7 +528,7 @@ class ForkChoiceModelGloas implements ForkChoiceModel {
     if (!isPayloadVerified(blockNodeVariants)) {
       return !timely;
     }
-    return ptcVoteTracker.getPayloadPresentVoteCount(
+    return payloadTimelinessCommitteeVoteTracker.getPayloadPresentVoteCount(
             blockNodeVariants.baseNode().blockRoot(), timely)
         > payloadTimelyThreshold;
   }
@@ -538,7 +538,7 @@ class ForkChoiceModelGloas implements ForkChoiceModel {
     if (!isPayloadVerified(blockNodeVariants)) {
       return !available;
     }
-    return ptcVoteTracker.getDataAvailableVoteCount(
+    return payloadTimelinessCommitteeVoteTracker.getDataAvailableVoteCount(
             blockNodeVariants.baseNode().blockRoot(), available)
         > dataAvailabilityTimelyThreshold;
   }
@@ -797,34 +797,35 @@ class ForkChoiceModelGloas implements ForkChoiceModel {
       final boolean payloadPresent,
       final boolean blobDataAvailable) {
     // Spec mapping: on_payload_attestation_message / notify_ptc_messages
-    ptcVoteTracker.recordVote(blockRoot, ptcPositions, payloadPresent, blobDataAvailable);
+    payloadTimelinessCommitteeVoteTracker.recordVote(
+        blockRoot, ptcPositions, payloadPresent, blobDataAvailable);
   }
 
   @Override
   public Optional<Boolean> getPayloadTimelinessVote(
       final Bytes32 blockRoot, final int ptcPosition) {
-    return ptcVoteTracker.getPayloadPresentVote(blockRoot, ptcPosition);
+    return payloadTimelinessCommitteeVoteTracker.getPayloadPresentVote(blockRoot, ptcPosition);
   }
 
   @Override
   public Optional<Boolean> getPayloadDataAvailabilityVote(
       final Bytes32 blockRoot, final int ptcPosition) {
-    return ptcVoteTracker.getDataAvailableVote(blockRoot, ptcPosition);
+    return payloadTimelinessCommitteeVoteTracker.getDataAvailableVote(blockRoot, ptcPosition);
   }
 
   @Override
   public int getPayloadAttesterCount(final Bytes32 blockRoot) {
-    return ptcVoteTracker.getPayloadVoteCount(blockRoot);
+    return payloadTimelinessCommitteeVoteTracker.getPayloadVoteCount(blockRoot);
   }
 
   @Override
   public int getPayloadAvailabilityYesCount(final Bytes32 blockRoot) {
-    return ptcVoteTracker.getPayloadPresentVoteCount(blockRoot);
+    return payloadTimelinessCommitteeVoteTracker.getPayloadPresentVoteCount(blockRoot);
   }
 
   @Override
   public int getPayloadDataAvailabilityYesCount(final Bytes32 blockRoot) {
-    return ptcVoteTracker.getDataAvailableVoteCount(blockRoot);
+    return payloadTimelinessCommitteeVoteTracker.getDataAvailableVoteCount(blockRoot);
   }
 
   @Override
@@ -836,12 +837,12 @@ class ForkChoiceModelGloas implements ForkChoiceModel {
         .getVariants(blockRoot)
         .ifPresent(variants -> variants.allNodes().forEach(protoArray::removeNode));
     blockNodeIndex.remove(blockRoot);
-    ptcVoteTracker.remove(blockRoot);
+    payloadTimelinessCommitteeVoteTracker.remove(blockRoot);
   }
 
   @Override
   public void onPrunedBlocks(final BlockNodeVariantsIndex blockNodeIndex) {
-    ptcVoteTracker.removeIf(root -> !blockNodeIndex.containsBlock(root));
+    payloadTimelinessCommitteeVoteTracker.removeIf(root -> !blockNodeIndex.containsBlock(root));
   }
 
   private Optional<FullNodeRebuildPayload> getFullNodeRebuildPayload(

@@ -35,7 +35,7 @@ import org.apache.tuweni.bytes.Bytes32;
  * votes while reference tests can inspect the full true/false/null vote state. Duplicate validators
  * in the PTC must count once for each assigned position.
  */
-class PtcVoteTracker {
+class PayloadTimelinessCommitteeVoteTracker {
 
   private record VotesPerPtcPosition(Map<Integer, Boolean> payload, Map<Integer, Boolean> data) {}
 
