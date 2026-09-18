@@ -106,6 +106,18 @@ final class GossipTestContext {
         spec, anchorPoint, recentChainData, forkChoice, executionLayer, metricsSystem);
   }
 
+  static List<SignedBeaconBlock> loadBlocks(
+      final TestDefinition testDefinition, final Spec spec, final List<BlockEntry> blockEntries) {
+    return blockEntries.stream()
+        .map(
+            blockEntry ->
+                loadSsz(
+                    testDefinition,
+                    blockEntry.getBlock() + ".ssz_snappy",
+                    spec::deserializeSignedBeaconBlock))
+        .toList();
+  }
+
   static void assertValidationResult(
       final String messageDesc, final String expected, final InternalValidationResult result) {
     switch (expected) {
@@ -163,6 +175,17 @@ final class GossipTestContext {
             "finalized_checkpoint must specify either 'root' or 'block'");
       }
       return new Checkpoint(UInt64.valueOf(epoch), checkpointRoot);
+    }
+  }
+
+  @SuppressWarnings("unused")
+  static final class BlockEntry {
+
+    @JsonProperty(value = "block", required = true)
+    private String block;
+
+    public String getBlock() {
+      return block;
     }
   }
 }

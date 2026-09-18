@@ -47,6 +47,7 @@ import tech.pegasys.teku.spec.datastructures.interop.MockStartValidatorKeyPairFa
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
 import tech.pegasys.teku.spec.datastructures.operations.VoluntaryExit;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
+import tech.pegasys.teku.spec.datastructures.state.Validator;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.logic.versions.phase0.operations.validation.VoluntaryExitValidator.ExitInvalidReason;
@@ -86,7 +87,8 @@ public class VoluntaryExitValidatorTest {
   public void shouldAcceptValidVoluntaryExit() {
     advanceChainAndUpdateBestBlock(6);
     SignedVoluntaryExit exit = dataStructureUtil.randomSignedVoluntaryExit();
-    when(mockSpec.validateVoluntaryExit(getBestState(), exit)).thenReturn(Optional.empty());
+    when(mockSpec.validateVoluntaryExitForGossip(getBestState(), exit))
+        .thenReturn(Optional.empty());
     when(mockSpec.verifyVoluntaryExitSignature(getBestState(), exit, BLSSignatureVerifier.SIMPLE))
         .thenReturn(true);
     assertValidationResult(exit, ACCEPT);
@@ -96,7 +98,8 @@ public class VoluntaryExitValidatorTest {
   public void shouldAcceptVoluntaryExitThatWasSeenTooLongAgo() {
     advanceChainAndUpdateBestBlock(6);
     SignedVoluntaryExit exit = dataStructureUtil.randomSignedVoluntaryExit();
-    when(mockSpec.validateVoluntaryExit(getBestState(), exit)).thenReturn(Optional.empty());
+    when(mockSpec.validateVoluntaryExitForGossip(getBestState(), exit))
+        .thenReturn(Optional.empty());
     when(mockSpec.verifyVoluntaryExitSignature(getBestState(), exit, BLSSignatureVerifier.SIMPLE))
         .thenReturn(true);
     assertValidationResult(exit, ACCEPT);
@@ -259,7 +262,8 @@ public class VoluntaryExitValidatorTest {
     SignedVoluntaryExit exit2 = new SignedVoluntaryExit(exit1.getMessage(), exit1.getSignature());
     SignedVoluntaryExit exit3 = new SignedVoluntaryExit(exit2.getMessage(), exit2.getSignature());
 
-    when(mockSpec.validateVoluntaryExit(eq(getBestState()), any())).thenReturn(Optional.empty());
+    when(mockSpec.validateVoluntaryExitForGossip(eq(getBestState()), any()))
+        .thenReturn(Optional.empty());
     when(mockSpec.verifyVoluntaryExitSignature(
             eq(getBestState()), any(), eq(BLSSignatureVerifier.SIMPLE)))
         .thenReturn(true);
@@ -283,8 +287,40 @@ public class VoluntaryExitValidatorTest {
     advanceChainAndUpdateBestBlock(6);
     SignedVoluntaryExit exit = dataStructureUtil.randomSignedVoluntaryExit();
     when(gossipValidationHelper.isEpochFromFuture(exit.getMessage().getEpoch())).thenReturn(false);
-    when(mockSpec.validateVoluntaryExit(getBestState(), exit)).thenReturn(Optional.empty());
+    when(mockSpec.validateVoluntaryExitForGossip(getBestState(), exit))
+        .thenReturn(Optional.empty());
     when(mockSpec.verifyVoluntaryExitSignature(getBestState(), exit, BLSSignatureVerifier.SIMPLE))
+        .thenReturn(true);
+
+    assertValidationResult(exit, ACCEPT);
+  }
+
+  @Test
+  public void shouldIgnoreExitWhenValidatorHasAlreadyInitiatedExit() {
+    advanceChainAndUpdateBestBlock(6);
+    final BeaconState state =
+        getBestState()
+            .updated(
+                mutableState -> {
+                  final Validator validator = mutableState.getValidators().get(0);
+                  mutableState.getValidators().set(0, validator.withExitEpoch(UInt64.valueOf(10)));
+                });
+    final RecentChainData recentChainData = mock(RecentChainData.class);
+    when(recentChainData.getBestState()).thenReturn(Optional.of(SafeFuture.completedFuture(state)));
+    voluntaryExitValidator =
+        new VoluntaryExitValidator(mockSpec, recentChainData, timeProvider, gossipValidationHelper);
+    final SignedVoluntaryExit exit = dataStructureUtil.randomSignedVoluntaryExit(UInt64.ZERO);
+    assertValidationResult(exit, IGNORE, "already initiated exit");
+  }
+
+  @Test
+  public void shouldAcceptExitAllowedByWallClockWhenHeadStateIsInPreviousEpoch() {
+    advanceChainAndUpdateBestBlock(6);
+    final BeaconState state = getBestState();
+    final SignedVoluntaryExit exit = dataStructureUtil.randomSignedVoluntaryExit(UInt64.ZERO);
+    when(gossipValidationHelper.isEpochFromFuture(exit.getMessage().getEpoch())).thenReturn(false);
+    when(mockSpec.validateVoluntaryExitForGossip(state, exit)).thenReturn(Optional.empty());
+    when(mockSpec.verifyVoluntaryExitSignature(state, exit, BLSSignatureVerifier.SIMPLE))
         .thenReturn(true);
 
     assertValidationResult(exit, ACCEPT);
@@ -294,19 +330,20 @@ public class VoluntaryExitValidatorTest {
   public void shouldRejectInvalidExit() {
     advanceChainAndUpdateBestBlock(6);
     SignedVoluntaryExit exit = dataStructureUtil.randomSignedVoluntaryExit();
-    when(mockSpec.validateVoluntaryExit(getBestState(), exit))
-        .thenReturn(Optional.of(ExitInvalidReason.exitInitiated()));
+    when(mockSpec.validateVoluntaryExitForGossip(getBestState(), exit))
+        .thenReturn(Optional.of(ExitInvalidReason.validatorInactive()));
     when(mockSpec.verifyVoluntaryExitSignature(getBestState(), exit, BLSSignatureVerifier.SIMPLE))
         .thenReturn(true);
 
-    assertValidationResult(exit, REJECT, "Validator has already initiated exit");
+    assertValidationResult(exit, REJECT, "Validator is not active");
   }
 
   @Test
   public void shouldRejectExitWithInvalidSignature() {
     advanceChainAndUpdateBestBlock(6);
     SignedVoluntaryExit exit = dataStructureUtil.randomSignedVoluntaryExit();
-    when(mockSpec.validateVoluntaryExit(getBestState(), exit)).thenReturn(Optional.empty());
+    when(mockSpec.validateVoluntaryExitForGossip(getBestState(), exit))
+        .thenReturn(Optional.empty());
     when(mockSpec.verifyVoluntaryExitSignature(getBestState(), exit, BLSSignatureVerifier.SIMPLE))
         .thenReturn(false);
 

@@ -74,5 +74,31 @@ class SpecVoluntaryExitDispatchTest {
     // about EIP-7251 pending withdrawals and would wrongly report this exit as valid.
     assertThat(spec.validateVoluntaryExit(state, exit))
         .contains(ExitInvalidReason.pendingWithdrawalsInQueue());
+    assertThat(spec.validateVoluntaryExitForGossip(state, exit))
+        .contains(ExitInvalidReason.pendingWithdrawalsInQueue());
+  }
+
+  @Test
+  void shouldSkipStateRelativeEpochAndExitStatusChecksForGossip() {
+    final UInt64 currentEpoch = UInt64.valueOf(70);
+    final UInt64 slot = spec.computeStartSlotAtEpoch(currentEpoch);
+    final Validator activeValidator =
+        dataStructureUtil
+            .validatorBuilder()
+            .activationEligibilityEpoch(UInt64.ZERO)
+            .activationEpoch(UInt64.ZERO)
+            .exitEpoch(currentEpoch.plus(1))
+            .withdrawableEpoch(FAR_FUTURE_EPOCH)
+            .slashed(false)
+            .build();
+    final BeaconState state =
+        dataStructureUtil.stateBuilderElectra(1, 0).slot(slot).validators(activeValidator).build();
+    final SignedVoluntaryExit exit =
+        new SignedVoluntaryExit(
+            new VoluntaryExit(currentEpoch.plus(2), UInt64.ZERO),
+            dataStructureUtil.randomSignature());
+
+    assertThat(spec.validateVoluntaryExit(state, exit)).contains(ExitInvalidReason.exitInitiated());
+    assertThat(spec.validateVoluntaryExitForGossip(state, exit)).isEmpty();
   }
 }
