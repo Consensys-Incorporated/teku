@@ -63,11 +63,11 @@ class OkHttpStakedBuilderClient implements StakedBuilderClient {
       final BLSPublicKey proposerPubkey,
       final BuilderPreferencesRequest builderPreferencesRequest) {
     return SafeFuture.of(
-        submitBuilderPreferencesRequest.submit(proposerPubkey, builderPreferencesRequest));
+        () -> submitBuilderPreferencesRequest.submit(proposerPubkey, builderPreferencesRequest));
   }
 
   @Override
   public SafeFuture<Void> submitSignedBeaconBlock(final SignedBeaconBlock signedBeaconBlock) {
-    return SafeFuture.of(submitSignedBeaconBlockRequest.submit(signedBeaconBlock));
+    return SafeFuture.of(() -> submitSignedBeaconBlockRequest.submit(signedBeaconBlock));
   }
 }
