@@ -21,6 +21,17 @@ public class SszMaxLengthExceededException extends SszDeserializeException {
 
   public SszMaxLengthExceededException(
       final String collectionKind, final long length, final long maxLength) {
-    super(collectionKind + " length " + length + " exceeds max length " + maxLength);
+    this(collectionKind + " length " + length + " exceeds max length " + maxLength);
+  }
+
+  private SszMaxLengthExceededException(final String message) {
+    super(message);
+  }
+
+  /** For checks that reject on a lower bound of the length without reading the whole input. */
+  public static SszMaxLengthExceededException lengthAtLeast(
+      final String collectionKind, final long minLength, final long maxLength) {
+    return new SszMaxLengthExceededException(
+        collectionKind + " length of at least " + minLength + " exceeds max length " + maxLength);
   }
 }

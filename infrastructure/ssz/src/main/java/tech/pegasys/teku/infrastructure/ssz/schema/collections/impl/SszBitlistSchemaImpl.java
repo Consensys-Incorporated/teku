@@ -93,9 +93,12 @@ public class SszBitlistSchemaImpl extends SszPrimitiveListSchemaImpl<Boolean, Ss
   @Override
   public TreeNode sszDeserializeTree(final SszReader reader) {
     int availableBytes = reader.getAvailableBytes();
-    // preliminary rough check
-    checkSsz(
-        (availableBytes - 1L) * 8 <= getMaxLength(), "SSZ sequence length exceeds max type length");
+    // preliminary rough check before reading: the length is at least (availableBytes - 1) * 8
+    final long minPossibleLength = (availableBytes - 1L) * 8;
+    if (minPossibleLength > getMaxLength()) {
+      throw SszMaxLengthExceededException.lengthAtLeast(
+          "Bitlist", minPossibleLength, getMaxLength());
+    }
     Bytes bytes = reader.read(availableBytes);
     int length = SszBitlistImpl.sszGetLengthAndValidate(bytes);
     if (length > getMaxLength()) {

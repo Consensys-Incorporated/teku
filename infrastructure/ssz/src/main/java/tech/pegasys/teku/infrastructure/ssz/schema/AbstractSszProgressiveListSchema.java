@@ -87,6 +87,9 @@ public abstract class AbstractSszProgressiveListSchema<
       Suppliers.memoize(() -> SszNodeTemplate.createFromType(getElementSchema()));
 
   private final boolean packByteListElements;
+  // max SSZ size of a packed byte-list element, i.e. the element schema's own max length; checked
+  // by the offset parser since packed elements are materialized lazily
+  private final long packedMaxElementSize;
 
   /**
    * Optional length limit. Progressive lists have no SSZ-level capacity, but consensus may still
@@ -122,8 +125,10 @@ public abstract class AbstractSszProgressiveListSchema<
           hints.getHint(SszSuperNodeHint.class).isEmpty(),
           "SszPackedByteListsHint and SszSuperNodeHint are mutually exclusive");
       this.packByteListElements = true;
+      this.packedMaxElementSize = ((SszProgressiveByteListSchema<?>) elementSchema).getMaxLength();
     } else {
       this.packByteListElements = false;
+      this.packedMaxElementSize = Long.MAX_VALUE;
     }
     this.elementsPerChunk = computeElementsPerChunk(elementSchema);
     this.defaultTree =
@@ -343,7 +348,8 @@ public abstract class AbstractSszProgressiveListSchema<
     }
     final Bytes bytes = reader.read(endOffset);
     // maxLength is enforced by the offset parser before the offset table is allocated
-    final int[] offsets = PackedByteListsUtil.parsePackedOffsets(bytes, maxLength, Long.MAX_VALUE);
+    final int[] offsets =
+        PackedByteListsUtil.parsePackedOffsets(bytes, maxLength, packedMaxElementSize);
     final SszPackedProgressiveByteListsNode packedNode =
         new SszPackedProgressiveByteListsNode(bytes, offsets, this::materializePackedElement);
     return BranchNode.create(packedNode, toLengthNode(packedNode.getElementCount()));

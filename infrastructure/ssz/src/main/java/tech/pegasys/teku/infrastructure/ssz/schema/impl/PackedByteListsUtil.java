@@ -61,7 +61,9 @@ public final class PackedByteListsUtil {
     for (int i = 0; i < elementsCount; i++) {
       final int size = offsets[i + 1] - offsets[i];
       checkSsz(size >= 0, "Invalid SSZ: wrong child offsets");
-      checkSsz(size <= maxElementSize, "SSZ element length exceeds max element type length");
+      if (size > maxElementSize) {
+        throw new SszMaxLengthExceededException("List", size, maxElementSize);
+      }
     }
     return offsets;
   }

@@ -92,6 +92,36 @@ class SszProgressiveListSchemaMaxLengthTest {
   }
 
   @Test
+  void sszDeserialize_shouldRejectOversizedPackedByteListElement() {
+    final SszProgressiveByteListSchema<SszByteList> limitedElementSchema =
+        new SszProgressiveByteListSchema<>(2);
+    final SszProgressiveListSchema<SszByteList> packedListSchema =
+        SszProgressiveListSchema.create(
+            limitedElementSchema, SszSchemaHints.sszPackedByteLists(), 2);
+    final Bytes ssz =
+        UNLIMITED_BYTE_LISTS
+            .createFromElements(
+                List.of(
+                    BYTE_LIST_SCHEMA.fromBytes(Bytes.of(1, 2, 3)),
+                    BYTE_LIST_SCHEMA.fromBytes(Bytes.of(4))))
+            .sszSerialize();
+
+    // packed elements are materialized lazily, so the limit must be enforced when parsing offsets
+    assertThatThrownBy(() -> packedListSchema.sszDeserialize(ssz))
+        .isInstanceOf(SszMaxLengthExceededException.class)
+        .hasMessage("List length 3 exceeds max length 2");
+    assertThat(
+            packedListSchema
+                .sszDeserialize(
+                    UNLIMITED_BYTE_LISTS
+                        .createFromElements(List.of(BYTE_LIST_SCHEMA.fromBytes(Bytes.of(1, 2))))
+                        .sszSerialize())
+                .get(0)
+                .getBytes())
+        .isEqualTo(Bytes.of(1, 2));
+  }
+
+  @Test
   void sszDeserialize_shouldRejectBeforeMaterializingAnyElement() {
     final AtomicInteger elementDeserializations = new AtomicInteger();
     final SszContainerSchema<SszContainerImpl> countingElementSchema =
