@@ -64,7 +64,7 @@ class BuilderConfigProviderTest {
   }
 
   @Test
-  void shouldReturnBuilderConfigForGloas() {
+  void shouldReturnBuilderConfigForGloas() throws MalformedURLException {
     final String builderUrl = "https://builder.example.com";
     final UInt64 slot = UInt64.valueOf(42);
     final UInt64 minBid = UInt64.valueOf(100);
@@ -74,7 +74,7 @@ class BuilderConfigProviderTest {
 
     final ValidatorConfig config =
         ValidatorConfig.builder()
-            .builderUrls(List.of(URI.create(builderUrl)))
+            .builderUrls(List.of(URI.create(builderUrl).toURL()))
             .builderMinBid(minBid)
             .builderBoostFactor(boostFactor)
             .builderMaxExecutionPayment(maxExecutionPayment)
@@ -109,7 +109,8 @@ class BuilderConfigProviderTest {
       throws MalformedURLException {
     final BuilderConfigProvider provider =
         new BuilderConfigProvider(spec, ValidatorConfig.builder().build());
-    assertThat(provider.getDefaultAuthData(URI.create(builderUrl))).isEqualTo(expectedAuthData);
+    assertThat(provider.getDefaultAuthData(URI.create(builderUrl).toURL()))
+        .isEqualTo(expectedAuthData);
   }
 
   static Stream<Arguments> authDataTestCases() {

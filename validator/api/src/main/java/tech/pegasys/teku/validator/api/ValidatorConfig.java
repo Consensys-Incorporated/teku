@@ -126,7 +126,7 @@ public class ValidatorConfig {
   private final UInt64 builderMinBid;
   private final UInt64 builderBoostFactor;
   private final UInt64 builderMaxExecutionPayment;
-  private final List<URI> builderUrls;
+  private final List<URL> builderUrls;
 
   private ValidatorConfig(
       final List<String> validatorKeys,
@@ -172,7 +172,7 @@ public class ValidatorConfig {
       final UInt64 builderMinBid,
       final UInt64 builderBoostFactor,
       final UInt64 builderMaxExecutionPayment,
-      final List<URI> builderUrls) {
+      final List<URL> builderUrls) {
     this.validatorKeys = validatorKeys;
     this.validatorExternalSignerPublicKeySources = validatorExternalSignerPublicKeySources;
     this.validatorExternalSignerUrl = validatorExternalSignerUrl;
@@ -416,7 +416,7 @@ public class ValidatorConfig {
     return builderMaxExecutionPayment;
   }
 
-  public List<URI> getBuilderUrls() {
+  public List<URL> getBuilderUrls() {
     return builderUrls;
   }
 
@@ -477,7 +477,7 @@ public class ValidatorConfig {
     private UInt64 builderMinBid = DEFAULT_BUILDER_MIN_BID;
     private UInt64 builderBoostFactor = DEFAULT_BUILDER_BOOST_FACTOR;
     private UInt64 builderMaxExecutionPayment = DEFAULT_BUILDER_MAX_EXECUTION_PAYMENT;
-    private List<URI> builderUrls = new ArrayList<>();
+    private List<URL> builderUrls = new ArrayList<>();
 
     private Builder() {}
 
@@ -766,7 +766,7 @@ public class ValidatorConfig {
       return this;
     }
 
-    public Builder builderUrls(final List<URI> builderUrls) {
+    public Builder builderUrls(final List<URL> builderUrls) {
       this.builderUrls = builderUrls;
       return this;
     }

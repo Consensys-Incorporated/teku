@@ -13,7 +13,9 @@
 
 package tech.pegasys.teku.cli.options;
 
+import java.net.MalformedURLException;
 import java.net.URI;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import picocli.CommandLine;
@@ -88,18 +90,18 @@ public class BuilderOptions {
                 .builderUrls(parseBuilderUrls()));
   }
 
-  private List<URI> parseBuilderUrls() {
+  private List<URL> parseBuilderUrls() {
     return builderUrls.stream().map(this::parseBuilderUrl).toList();
   }
 
-  private URI parseBuilderUrl(final String builderUrl) {
+  private URL parseBuilderUrl(final String builderUrl) {
     try {
-      final URI parsedBuilderUrl = URI.create(builderUrl);
-      if (parsedBuilderUrl.getHost() == null) {
-        throw new IllegalArgumentException("Host is undefined or invalid");
+      final URL parsedBuilderUrl = URI.create(builderUrl).toURL();
+      if (parsedBuilderUrl.getHost().isEmpty()) {
+        throw new IllegalArgumentException("Builder URL must contain a valid host: " + builderUrl);
       }
       return parsedBuilderUrl;
-    } catch (IllegalArgumentException e) {
+    } catch (IllegalArgumentException | MalformedURLException e) {
       throw new InvalidConfigurationException(
           "Invalid configuration. Builder URL (" + builderUrl + ") has invalid syntax", e);
     }
