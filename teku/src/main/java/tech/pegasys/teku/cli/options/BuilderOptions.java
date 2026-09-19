@@ -13,21 +13,19 @@
 
 package tech.pegasys.teku.cli.options;
 
+import static com.google.common.base.Strings.isNullOrEmpty;
+
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
-
-import com.google.common.base.Strings;
 import picocli.CommandLine;
 import tech.pegasys.teku.cli.converter.UInt64Converter;
 import tech.pegasys.teku.config.TekuConfiguration;
 import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.validator.api.ValidatorConfig;
-
-import static com.google.common.base.Strings.isNullOrEmpty;
 
 /**
  * Configuration options for ePBS
@@ -103,7 +101,7 @@ public class BuilderOptions {
       final URL parsedBuilderUrl = URI.create(builderUrl).toURL();
       if (isNullOrEmpty(parsedBuilderUrl.getHost())) {
         throw new InvalidConfigurationException(
-            "Invalid configuration. Builder URL must contain a valid host: " + builderUrl);
+            "Invalid configuration. Builder URL (" + builderUrl + ") must contain a valid host");
       }
       return parsedBuilderUrl;
     } catch (IllegalArgumentException | MalformedURLException e) {
