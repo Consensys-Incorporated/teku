@@ -26,7 +26,6 @@ public interface SpecConfigGloas extends SpecConfigFulu, NetworkingSpecConfigGlo
   UInt64 BUILDER_PAYMENT_THRESHOLD_DENOMINATOR = UInt64.valueOf(10);
   int PAYLOAD_BUILDER_VERSION = 0;
   // builder-specs
-  UInt64 MAX_EXECUTION_PAYMENT = UInt64.MAX_VALUE; // 2**64 - 1
   long MAX_BUILDER_AUTH_DATA_SIZE = 4096;
 
   static SpecConfigGloas required(final SpecConfig specConfig) {
