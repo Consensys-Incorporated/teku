@@ -183,17 +183,20 @@ public class ExecutionPayloadBidSelectorTest {
     final SignedExecutionPayloadBid p2pBid = createBid(slot, parentRoot, parentBlockHash, value);
     final SignedExecutionPayloadBid builderBid =
         createBid(slot, parentRoot, parentBlockHash, value);
+    // the entry's boost factor matches the top-level one, so the boosted values tie
+    final BuilderEntry builderEntry =
+        createBuilderEntry(UInt64.ZERO, BUILDER_BOOST_FACTOR_MAX_PROFIT);
     when(circuitBreaker.isBuilderAllowed(any(), any())).thenReturn(true);
 
     assertThat(
             selector.selectBestRemoteBid(
                 Set.of(toRemoteBid(p2pBid)),
-                List.of(toRemoteBid(builderBid)),
+                List.of(toBuilderApiBid(builderBid, builderEntry)),
                 parentRoot,
                 parentBlockHash,
                 state,
                 BuilderConfig.NO_OP))
-        .contains(toRemoteBid(builderBid));
+        .contains(toBuilderApiBid(builderBid, builderEntry));
   }
 
   @Test
