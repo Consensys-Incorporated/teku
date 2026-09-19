@@ -24,6 +24,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -1118,7 +1119,7 @@ public class ForkChoiceTestExecutor implements TestExecutor {
       throws IOException {
     final ForkChoiceMetaData metaData;
     final Path metaPath = testDefinition.getTestDirectory().resolve("meta.yaml");
-    if (metaPath.toFile().exists()) {
+    if (Files.exists(metaPath)) {
       metaData = loadYaml(testDefinition, "meta.yaml", ForkChoiceMetaData.class);
     } else {
       metaData = ForkChoiceMetaData.DEFAULT;

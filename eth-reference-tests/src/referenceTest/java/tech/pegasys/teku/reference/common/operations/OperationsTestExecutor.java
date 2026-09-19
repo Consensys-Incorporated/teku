@@ -23,6 +23,7 @@ import static tech.pegasys.teku.spec.constants.IncentivizationWeights.WEIGHT_DEN
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
+import java.nio.file.Files;
 import java.util.List;
 import java.util.Optional;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
@@ -203,7 +204,7 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
       final BeaconState preState)
       throws Exception {
     final boolean isOperationValid =
-        testDefinition.getTestDirectory().resolve(EXPECTED_STATE_FILE).toFile().exists();
+        Files.exists(testDefinition.getTestDirectory().resolve(EXPECTED_STATE_FILE));
     if (isOperationValid) {
       assertOperationSuccessful(processor, testDefinition, preState);
     } else {

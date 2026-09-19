@@ -541,7 +541,16 @@ def slashingProtectionInterchangeRefTestBaseUrl = 'https://github.com/eth-client
 def refTestDownloadDir = "${buildDir}/refTests/${refTestVersion}"
 def blsRefTestDownloadDir = "${buildDir}/blsRefTests/${blsRefTestVersion}"
 def slashingProtectionInterchangeRefTestDownloadDir = "${buildDir}/slashingProtectionInterchangeRefTests/${slashingProtectionInterchangeRefTestVersion}"
-def refTestExpandDir = "${project.rootDir}/eth-reference-tests/src/referenceTest/resources/consensus-spec-tests/"
+// Reference test tarballs are converted into <config>.zip archives that the tests read directly
+// through the JDK zip filesystem (see ReferenceTestArchiveConverter); nothing is expanded on disk.
+ext.refTestArchivesDir = "${refTestDownloadDir}/archives"
+ext.refTestTarballs = [
+	general: "${refTestDownloadDir}/general.tar.gz",
+	minimal: "${refTestDownloadDir}/minimal.tar.gz",
+	mainnet: "${refTestDownloadDir}/mainnet.tar.gz",
+	bls: "${blsRefTestDownloadDir}/bls_tests_yaml.tar.gz",
+	'slashing-protection-interchange': "${slashingProtectionInterchangeRefTestDownloadDir}/slashing-protection-interchange-tests.tar.gz",
+]
 
 def downloadFile(String url, String token, File outputFile) {
 	println "Download ${outputFile.getName()} (${url})"
@@ -659,71 +668,6 @@ tasks.register('downloadSlashingProtectionInterchangeRefTests', Download) {
 
 tasks.register('downloadRefTests') {
 	dependsOn downloadEthRefTests, downloadBlsRefTests, downloadSlashingProtectionInterchangeRefTests
-}
-
-tasks.register('cleanRefTestsGeneral', Delete) {
-	delete "${refTestExpandDir}/tests/general"
-}
-
-tasks.register('expandRefTestsGeneral', Copy) {
-	dependsOn cleanRefTestsGeneral, downloadEthRefTests
-	from tarTree("${refTestDownloadDir}/general.tar.gz")
-	into refTestExpandDir
-}
-
-tasks.register('cleanRefTestsMainnet', Delete) {
-	delete "${refTestExpandDir}/tests/mainnet"
-}
-
-tasks.register('expandRefTestsMainnet', Copy) {
-	dependsOn cleanRefTestsMainnet, downloadEthRefTests
-	from tarTree("${refTestDownloadDir}/mainnet.tar.gz")
-	into refTestExpandDir
-}
-
-tasks.register('cleanRefTestsMinimal', Delete) {
-	delete "${refTestExpandDir}/tests/minimal"
-}
-
-tasks.register('expandRefTestsMinimal', Copy) {
-	dependsOn cleanRefTestsMinimal, downloadEthRefTests
-	from tarTree("${refTestDownloadDir}/minimal.tar.gz")
-	into refTestExpandDir
-}
-
-tasks.register('cleanRefTestsBls', Delete) {
-	delete "${refTestExpandDir}/tests/bls"
-}
-
-tasks.register('expandRefTestsBls', Copy) {
-	dependsOn cleanRefTestsBls, downloadBlsRefTests
-	from tarTree("${blsRefTestDownloadDir}/bls_tests_yaml.tar.gz")
-	into "${refTestExpandDir}/tests/bls"
-}
-
-tasks.register('cleanRefTestsSlashingProtectionInterchange', Delete) {
-	delete "${refTestExpandDir}/tests/slashing-protection-interchange"
-}
-
-tasks.register('expandRefTestsSlashingProtectionInterchange', Copy) {
-	dependsOn cleanRefTestsSlashingProtectionInterchange, downloadSlashingProtectionInterchangeRefTests
-	from {
-		tarTree("${slashingProtectionInterchangeRefTestDownloadDir}/slashing-protection-interchange-tests.tar.gz").matching {
-			include "**/tests/generated/*.json"
-			// flatten
-			eachFile { FileCopyDetails fcp ->
-				fcp.path = fcp.name
-			}
-		}
-	}
-	into "${refTestExpandDir}/tests/slashing-protection-interchange"
-}
-
-tasks.register('expandRefTests') {
-	dependsOn expandRefTestsGeneral, expandRefTestsMainnet, expandRefTestsMinimal, expandRefTestsBls, expandRefTestsSlashingProtectionInterchange
-}
-tasks.register('cleanRefTests') {
-	dependsOn cleanRefTestsGeneral, cleanRefTestsMainnet, cleanRefTestsMinimal, cleanRefTestsBls, cleanRefTestsSlashingProtectionInterchange
 }
 
 tasks.register('deploy') {}
