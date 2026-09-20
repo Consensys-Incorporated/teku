@@ -33,10 +33,6 @@ public interface SszByteListSchema<SszListT extends SszByteList>
     return new SszByteListSchemaImpl<>(SszPrimitiveSchemas.BYTE_SCHEMA, maxLength, hints);
   }
 
-  static SszByteListSchema<SszByteList> createUInt8(final long maxLength) {
-    return createUInt8(maxLength, SszSchemaHints.none());
-  }
-
   static SszByteListSchema<SszByteList> createUInt8(
       final long maxLength, final SszSchemaHints hints) {
     return new SszByteListSchemaImpl<>(SszPrimitiveSchemas.UINT8_SCHEMA, maxLength, hints);

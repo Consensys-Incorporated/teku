@@ -152,7 +152,14 @@ public class TestDataUtils {
       final Spec spec, final BeaconState state, final Collection<SignedBeaconBlock> blocks) {
     final Optional<AnchorPoint> anchorFromMatchingStateRoot =
         blocks.stream()
-            .filter(block -> block.getStateRoot().equals(state.hashTreeRoot()))
+            .filter(
+                block ->
+                    block.getStateRoot().equals(state.hashTreeRoot())
+                        && block
+                            .getMessage()
+                            .getBody()
+                            .hashTreeRoot()
+                            .equals(state.getLatestBlockHeader().getBodyRoot()))
             .findFirst()
             .map(
                 block ->

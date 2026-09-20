@@ -34,9 +34,10 @@ import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.logic.common.util.ProposerPreferencesUtil;
 import tech.pegasys.teku.validator.api.SubmitDataError;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
+import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
 import tech.pegasys.teku.validator.client.loader.OwnedValidators;
 
-public class ProposerPreferencesPublisher {
+public class ProposerPreferencesPublisher implements ValidatorTimingChannel {
 
   private static final Logger LOG = LogManager.getLogger();
 
@@ -59,6 +60,7 @@ public class ProposerPreferencesPublisher {
     this.spec = spec;
   }
 
+  @Override
   public void onProposerDutiesLoaded(final UInt64 epoch, final ProposerDuties proposerDuties) {
     if (!spec.isProposerPreferencesAvailableAtEpoch(epoch)) {
       return;
