@@ -35,6 +35,7 @@ import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszPrimitiveSchemas;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.collections.impl.SszBitlistSchemaImpl;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszMaxLengthExceededException;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszReader;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 
@@ -71,6 +72,23 @@ public class SszBitlistSchemaTest extends SszListSchemaTestBase {
     SszBitlistSchema<SszBitlist> schema = SszBitlistSchema.create(100);
     assertThatCode(() -> schema.ofBits(100)).doesNotThrowAnyException();
     assertThatThrownBy(() -> schema.ofBits(101)).isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void sszDeserialize_shouldClassifyAllMaxLengthViolations() {
+    final SszBitlistSchema<SszBitlist> limited = SszBitlistSchema.create(4);
+    // 9 bits need 2 bytes: rejected by the preliminary byte-count check before reading
+    final Bytes tooLongByBytes = SszBitlistSchema.create(9).ofBits(9).sszSerialize();
+    assertThatThrownBy(() -> limited.sszDeserialize(tooLongByBytes))
+        .isInstanceOf(SszMaxLengthExceededException.class)
+        .hasMessage("Bitlist length of at least 8 exceeds max length 4");
+    // 5 bits still fit in one byte: rejected by the exact length check after reading
+    final Bytes tooLongByBits = SszBitlistSchema.create(5).ofBits(5).sszSerialize();
+    assertThatThrownBy(() -> limited.sszDeserialize(tooLongByBits))
+        .isInstanceOf(SszMaxLengthExceededException.class)
+        .hasMessage("Bitlist length 5 exceeds max length 4");
+    assertThat(limited.sszDeserialize(SszBitlistSchema.create(4).ofBits(4).sszSerialize()).size())
+        .isEqualTo(4);
   }
 
   @Test

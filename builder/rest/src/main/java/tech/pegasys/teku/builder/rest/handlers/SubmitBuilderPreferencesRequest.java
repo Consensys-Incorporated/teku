@@ -22,6 +22,7 @@ import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.builder.rest.ResponseHandler;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesRequest;
 import tech.pegasys.teku.spec.schemas.ApiSchemas;
@@ -36,20 +37,21 @@ public class SubmitBuilderPreferencesRequest extends AbstractBuilderRequest {
     this.spec = spec;
   }
 
-  public void submit(
-      final BLSPublicKey validatorPubkey,
+  public SafeFuture<Void> submit(
+      final BLSPublicKey proposerPubkey,
       final BuilderPreferencesRequest builderPreferencesRequest) {
-    postJson(
-        SUBMIT_BUILDER_PREFERENCES,
-        Map.of("validator_pubkey", validatorPubkey.toString()),
-        Map.of(
-            HEADER_CONSENSUS_VERSION,
-            spec.atSlot(builderPreferencesRequest.getAuth().getMessage().getSlot())
-                .getMilestone()
-                .lowerCaseName()),
-        builderPreferencesRequest,
-        ApiSchemas.BUILDER_PREFERENCES_REQUEST_SCHEMA.getJsonTypeDefinition(),
-        ResponseHandler.voidHandler(),
-        Optional.empty());
+    return postJson(
+            SUBMIT_BUILDER_PREFERENCES,
+            Map.of("proposer_pubkey", proposerPubkey.toString()),
+            Map.of(
+                HEADER_CONSENSUS_VERSION,
+                spec.atSlot(builderPreferencesRequest.getAuth().getMessage().getSlot())
+                    .getMilestone()
+                    .lowerCaseName()),
+            builderPreferencesRequest,
+            ApiSchemas.BUILDER_PREFERENCES_REQUEST_SCHEMA.getJsonTypeDefinition(),
+            ResponseHandler.voidHandler(),
+            Optional.empty())
+        .thenApply(__ -> null);
   }
 }
