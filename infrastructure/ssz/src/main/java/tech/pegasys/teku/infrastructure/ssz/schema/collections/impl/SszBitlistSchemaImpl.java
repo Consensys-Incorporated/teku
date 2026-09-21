@@ -31,7 +31,7 @@ import tech.pegasys.teku.infrastructure.ssz.primitive.SszBit;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszPrimitiveSchemas;
 import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszBitlistSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.json.SszPrimitiveTypeDefinitions;
-import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszMaxLengthExceededException;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszReader;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszWriter;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
@@ -93,13 +93,16 @@ public class SszBitlistSchemaImpl extends SszPrimitiveListSchemaImpl<Boolean, Ss
   @Override
   public TreeNode sszDeserializeTree(final SszReader reader) {
     int availableBytes = reader.getAvailableBytes();
-    // preliminary rough check
-    checkSsz(
-        (availableBytes - 1L) * 8 <= getMaxLength(), "SSZ sequence length exceeds max type length");
+    // preliminary rough check before reading: the length is at least (availableBytes - 1) * 8
+    final long minPossibleLength = (availableBytes - 1L) * 8;
+    if (minPossibleLength > getMaxLength()) {
+      throw SszMaxLengthExceededException.lengthAtLeast(
+          "Bitlist", minPossibleLength, getMaxLength());
+    }
     Bytes bytes = reader.read(availableBytes);
     int length = SszBitlistImpl.sszGetLengthAndValidate(bytes);
     if (length > getMaxLength()) {
-      throw new SszDeserializeException("Too long bitlist");
+      throw new SszMaxLengthExceededException("Bitlist", length, getMaxLength());
     }
     Bytes treeBytes = SszBitlistImpl.sszTruncateLeadingBit(bytes, length);
     try (SszReader sszReader = SszReader.fromBytes(treeBytes)) {

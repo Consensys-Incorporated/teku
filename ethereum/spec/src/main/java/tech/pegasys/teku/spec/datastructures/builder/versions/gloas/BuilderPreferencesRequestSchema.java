@@ -24,7 +24,7 @@ public class BuilderPreferencesRequestSchema
       final BuilderPreferencesSchema builderPreferencesSchema,
       final SignedBuilderRequestAuthSchema authSchema) {
     super(
-        "BuilderPreferencesRequestV1",
+        "BuilderPreferencesRequest",
         namedSchema("preferences", builderPreferencesSchema),
         namedSchema("auth", authSchema));
   }
@@ -34,8 +34,18 @@ public class BuilderPreferencesRequestSchema
     return new BuilderPreferencesRequest(this, preferences, auth);
   }
 
+  public BuilderPreferencesRequest create(final BuilderPreferencesEntry builderPreferencesEntry) {
+    return create(
+        getBuilderPreferencesSchema().create(builderPreferencesEntry.getMaxExecutionPayment()),
+        builderPreferencesEntry.getAuth());
+  }
+
   @Override
   public BuilderPreferencesRequest createFromBackingNode(final TreeNode node) {
     return new BuilderPreferencesRequest(this, node);
+  }
+
+  public BuilderPreferencesSchema getBuilderPreferencesSchema() {
+    return (BuilderPreferencesSchema) getFieldSchema0();
   }
 }

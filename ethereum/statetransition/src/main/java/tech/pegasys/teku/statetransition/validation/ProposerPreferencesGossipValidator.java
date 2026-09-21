@@ -33,6 +33,7 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
+import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.fulu.BeaconStateFulu;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
@@ -283,12 +284,15 @@ public class ProposerPreferencesGossipValidator {
 
   private boolean isSignatureValid(
       final SignedProposerPreferences signedProposerPreferences, final BeaconState state) {
+    final ProposerPreferences proposerPreferences = signedProposerPreferences.getMessage();
+    final UInt64 proposalEpoch = spec.computeEpochAtSlot(proposerPreferences.getProposalSlot());
+    final ForkInfo forkInfo =
+        new ForkInfo(spec.fork(proposalEpoch), state.getGenesisValidatorsRoot());
     final Bytes signingRoot =
-        signingRootUtil.signingRootForSignProposerPreferences(
-            signedProposerPreferences.getMessage(), state.getForkInfo());
+        signingRootUtil.signingRootForSignProposerPreferences(proposerPreferences, forkInfo);
     return gossipValidationHelper.isSignatureValidWithRespectToProposerIndex(
         signingRoot,
-        signedProposerPreferences.getMessage().getValidatorIndex(),
+        proposerPreferences.getValidatorIndex(),
         signedProposerPreferences.getSignature(),
         state);
   }

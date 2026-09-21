@@ -27,8 +27,10 @@ import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 
 /**
  * Progressive (EIP-7916) variant of a byte list. Keeps Teku's {@link SszByteList} interface intact
- * while using progressive merkleization with no fixed max capacity. Raw SSZ length bounds remain
- * unbounded; network-facing size limits are resolved at gossip/RPC setup.
+ * while using progressive merkleization with no fixed max capacity. An optional {@code maxLength}
+ * (e.g. {@code MAX_PROOF_SIZE}) is enforced on construction and deserialization; without it the raw
+ * SSZ length bounds remain unbounded and network-facing size limits are resolved at gossip/RPC
+ * setup.
  */
 public class SszProgressiveByteListSchema<SszListT extends SszByteList>
     extends AbstractSszProgressiveListSchema<SszByte, SszListT>
@@ -40,13 +42,24 @@ public class SszProgressiveByteListSchema<SszListT extends SszByteList>
     this(SszPrimitiveSchemas.BYTE_SCHEMA);
   }
 
+  public SszProgressiveByteListSchema(final long maxLength) {
+    this(SszPrimitiveSchemas.BYTE_SCHEMA, SszSchemaHints.none(), maxLength);
+  }
+
   public SszProgressiveByteListSchema(final SszPrimitiveSchema<Byte, SszByte> elementSchema) {
     this(elementSchema, SszSchemaHints.none());
   }
 
   public SszProgressiveByteListSchema(
       final SszPrimitiveSchema<Byte, SszByte> elementSchema, final SszSchemaHints hints) {
-    super(elementSchema, hints);
+    this(elementSchema, hints, Long.MAX_VALUE);
+  }
+
+  public SszProgressiveByteListSchema(
+      final SszPrimitiveSchema<Byte, SszByte> elementSchema,
+      final SszSchemaHints hints,
+      final long maxLength) {
+    super(elementSchema, hints, maxLength);
     this.jsonTypeDefinition =
         elementSchema.equals(SszPrimitiveSchemas.BYTE_SCHEMA)
             ? SszPrimitiveTypeDefinitions.sszSerializedType(this, "SSZ encoded byte list")

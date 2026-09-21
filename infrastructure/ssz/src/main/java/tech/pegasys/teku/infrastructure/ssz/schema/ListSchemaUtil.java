@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 import org.apache.tuweni.bytes.Bytes;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszLengthBounds;
 import tech.pegasys.teku.infrastructure.ssz.tree.BranchNode;
 import tech.pegasys.teku.infrastructure.ssz.tree.GIndexUtil;
 import tech.pegasys.teku.infrastructure.ssz.tree.LeafNode;
@@ -32,6 +33,21 @@ import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 public class ListSchemaUtil {
 
   private ListSchemaUtil() {}
+
+  /** SSZ length bounds of a list of at most {@code maxLength} elements of the given schema. */
+  public static SszLengthBounds computeListSszLengthBounds(
+      final SszSchema<?> elementSchema, final long maxLength) {
+    final SszLengthBounds elementLengthBounds = elementSchema.getSszLengthBounds();
+    // if elements are of dynamic size the offset size should be added for every element
+    final SszLengthBounds elementAndOffsetLengthBounds =
+        elementLengthBounds.addBytes(elementSchema.isFixedSize() ? 0 : SszType.SSZ_LENGTH_SIZE);
+    final SszLengthBounds maxLenBounds =
+        SszLengthBounds.ofBits(0, elementAndOffsetLengthBounds.mul(maxLength).getMaxBits());
+    // adding 1 boundary bit for BitlistImpl
+    return maxLenBounds
+        .addBits(elementSchema.equals(SszPrimitiveSchemas.BIT_SCHEMA) ? 1 : 0)
+        .ceilToBytes();
+  }
 
   public static TreeNode toLengthNode(final int length) {
     return length == 0

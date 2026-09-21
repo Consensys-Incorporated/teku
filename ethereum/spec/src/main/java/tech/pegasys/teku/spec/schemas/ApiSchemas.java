@@ -13,12 +13,16 @@
 
 package tech.pegasys.teku.spec.schemas;
 
+import tech.pegasys.teku.infrastructure.ssz.SszList;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistrationSchema;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistrationsSchema;
 import tech.pegasys.teku.spec.datastructures.builder.ValidatorRegistrationSchema;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfigSchema;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderEntrySchema;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntrySchema;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesRequestSchema;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesSchema;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderRequestAuthSchema;
@@ -38,23 +42,39 @@ public class ApiSchemas {
       new SignedValidatorRegistrationsSchema(
           SIGNED_VALIDATOR_REGISTRATION_SCHEMA, MAX_VALIDATOR_REGISTRATIONS_SIZE);
 
+  // https://github.com/ethereum/beacon-APIs/pull/630/
   // https://github.com/ethereum/builder-specs/blob/main/specs/gloas/validator.md#new-containers
   public static final BuilderRequestAuthSchema BUILDER_REQUEST_AUTH_SCHEMA =
-      new BuilderRequestAuthSchema(SpecConfigGloas.MAX_DATA_SIZE);
+      new BuilderRequestAuthSchema(SpecConfigGloas.MAX_BUILDER_AUTH_DATA_SIZE);
 
   public static final SignedBuilderRequestAuthSchema SIGNED_BUILDER_REQUEST_AUTH_SCHEMA =
       new SignedBuilderRequestAuthSchema(BUILDER_REQUEST_AUTH_SCHEMA);
 
+  private static final long MAX_BUILDER_URL_SIZE = 2048;
+  // MAX_BUILDER_ENTRIES * (MIN_SEED_LOOKAHEAD + 1) * SLOTS_PER_EPOCH
+  private static final long MAX_BUILDER_PREFERENCES_ENTRIES = 4096;
+
+  public static final BuilderEntrySchema BUILDER_ENTRY_SCHEMA =
+      new BuilderEntrySchema(MAX_BUILDER_URL_SIZE, SIGNED_BUILDER_REQUEST_AUTH_SCHEMA);
+
+  public static final BuilderConfigSchema BUILDER_CONFIG_SCHEMA =
+      new BuilderConfigSchema(BUILDER_ENTRY_SCHEMA);
+
+  public static final BuilderPreferencesEntrySchema BUILDER_PREFERENCES_ENTRY_SCHEMA =
+      new BuilderPreferencesEntrySchema(MAX_BUILDER_URL_SIZE, SIGNED_BUILDER_REQUEST_AUTH_SCHEMA);
+
+  @SuppressWarnings("unchecked")
+  public static final SszListSchema<BuilderPreferencesEntry, SszList<BuilderPreferencesEntry>>
+      BUILDER_PREFERENCES_ENTRIES_SCHEMA =
+          (SszListSchema<BuilderPreferencesEntry, SszList<BuilderPreferencesEntry>>)
+              SszListSchema.create(
+                  BUILDER_PREFERENCES_ENTRY_SCHEMA, MAX_BUILDER_PREFERENCES_ENTRIES);
+
+  // Builder API
   public static final BuilderPreferencesSchema BUILDER_PREFERENCES_SCHEMA =
       new BuilderPreferencesSchema();
 
   public static final BuilderPreferencesRequestSchema BUILDER_PREFERENCES_REQUEST_SCHEMA =
       new BuilderPreferencesRequestSchema(
           BUILDER_PREFERENCES_SCHEMA, SIGNED_BUILDER_REQUEST_AUTH_SCHEMA);
-
-  // https://github.com/ethereum/beacon-APIs/pull/630/
-  public static final BuilderEntrySchema BUILDER_ENTRY_SCHEMA = new BuilderEntrySchema();
-
-  public static final BuilderConfigSchema BUILDER_CONFIG_SCHEMA =
-      new BuilderConfigSchema(BUILDER_ENTRY_SCHEMA);
 }

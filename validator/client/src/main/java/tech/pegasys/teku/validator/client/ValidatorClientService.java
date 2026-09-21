@@ -24,7 +24,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
-import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
@@ -34,7 +33,6 @@ import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
 import org.hyperledger.besu.plugin.services.metrics.LabelledMetric;
 import tech.pegasys.teku.bls.BLSPublicKey;
-import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuties;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.events.EventChannels;
@@ -45,7 +43,6 @@ import tech.pegasys.teku.infrastructure.io.SystemSignalListener;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.restapi.RestApi;
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
-import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.infrastructure.version.VersionProvider;
 import tech.pegasys.teku.service.serviceutils.Service;
 import tech.pegasys.teku.service.serviceutils.ServiceConfig;
@@ -197,6 +194,8 @@ public class ValidatorClientService extends Service {
             validatorApiChannel,
             config.getSpec(),
             asyncRunner);
+    validatorStatusProvider.subscribeValidatorStatusesUpdates(
+        eventChannels.getPublisher(ValidatorTimingChannel.class)::onUpdatedValidatorStatuses);
     final Optional<ProposerConfigManager> proposerConfigManager;
     Optional<BeaconProposerPreparer> beaconProposerPreparer = Optional.empty();
     Optional<ValidatorRegistrator> maybeValidatorRegistrator = Optional.empty();
@@ -238,8 +237,6 @@ public class ValidatorClientService extends Service {
               validatorApiChannel,
               validatorConfig.getBuilderRegistrationSendingBatchSize(),
               asyncRunner);
-      validatorStatusProvider.subscribeValidatorStatusesUpdates(
-          validatorRegistrator::onUpdatedValidatorStatuses);
       maybeValidatorRegistrator = Optional.of(validatorRegistrator);
     } else {
       proposerConfigManager = Optional.empty();
@@ -287,8 +284,7 @@ public class ValidatorClientService extends Service {
                     genesisDataProvider,
                     proposerConfigManager,
                     new OwnedKeyManager(
-                        validatorLoader,
-                        services.getEventChannels().getPublisher(ValidatorTimingChannel.class)),
+                        validatorLoader, eventChannels.getPublisher(ValidatorTimingChannel.class)),
                     services.getDataDirLayout(),
                     services.getTimeProvider(),
                     validatorClientService.maybeDoppelgangerDetector,
@@ -537,8 +533,6 @@ public class ValidatorClientService extends Service {
                     dvtSelectionsEndpointEnabled,
                     attestationDutyDefaultSchedulingStrategy,
                     attestationDutyBatchSchedulingStrategy)));
-    final BiConsumer<UInt64, ProposerDuties> publishProposerPreferences =
-        createPublishProposerPreferences(validators, validatorApiChannel);
     final DutyLoader<?> blockDutyLoader =
         new RetryingDutyLoader<>(
             asyncRunner,
@@ -552,7 +546,7 @@ public class ValidatorClientService extends Service {
                         validatorDutyMetrics::performDutyWithMetrics),
                 validators,
                 validatorIndexProvider,
-                publishProposerPreferences));
+                eventChannels.getPublisher(ValidatorTimingChannel.class)));
     validatorTimingChannels.add(new BlockDutyScheduler(metricsSystem, blockDutyLoader, spec));
     validatorTimingChannels.add(
         new AttestationDutyScheduler(metricsSystem, attestationDutyLoader, spec));
@@ -613,23 +607,20 @@ public class ValidatorClientService extends Service {
                   validatorIndexProvider));
       validatorTimingChannels.add(
           new PayloadTimelinessCommitteeDutyScheduler(metricsSystem, payloadDutyLoader, spec));
+      final ProposerPreferencesPublisher proposerPreferencesPublisher =
+          new ProposerPreferencesPublisher(
+              validatorApiChannel,
+              validators,
+              proposerConfigManager.orElseThrow(),
+              forkProvider,
+              spec);
+      validatorTimingChannels.add(proposerPreferencesPublisher);
     }
+
+    final ValidatorStatusLogger validatorStatusLogger = new ValidatorStatusLogger(validators);
+    validatorTimingChannels.add(validatorStatusLogger);
 
     addValidatorCountMetric(metricsSystem, validators);
-    final ValidatorStatusLogger validatorStatusLogger = new ValidatorStatusLogger(validators);
-    validatorStatusProvider.subscribeValidatorStatusesUpdates(
-        validatorStatusLogger::onUpdatedValidatorStatuses);
-  }
-
-  private BiConsumer<UInt64, ProposerDuties> createPublishProposerPreferences(
-      final OwnedValidators validators, final ValidatorApiChannel validatorApiChannel) {
-    if (proposerConfigManager.isEmpty()) {
-      return (epoch, duties) -> {};
-    }
-    final ProposerPreferencesPublisher proposerPreferencesPublisher =
-        new ProposerPreferencesPublisher(
-            validatorApiChannel, validators, proposerConfigManager.get(), forkProvider, spec);
-    return proposerPreferencesPublisher::onProposerDutiesLoaded;
   }
 
   public static Path getSlashingProtectionPath(final DataDirLayout dataDirLayout) {
@@ -710,10 +701,6 @@ public class ValidatorClientService extends Service {
                       metricsSystem,
                       maybeValidatorSlashedAction);
               eventChannels.subscribe(ValidatorTimingChannel.class, validatorTimingActions);
-              if (maybeValidatorSlashedAction.isPresent()) {
-                validatorStatusProvider.subscribeValidatorStatusesUpdates(
-                    validatorTimingActions::onUpdatedValidatorStatuses);
-              }
               validatorStatusProvider.start().finishError(LOG);
               return beaconNodeApi.subscribeToEvents();
             });

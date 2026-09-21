@@ -15,16 +15,14 @@ package tech.pegasys.teku.validator.client;
 
 import it.unimi.dsi.fastutil.ints.IntCollection;
 import java.util.Optional;
-import java.util.function.BiConsumer;
 import java.util.function.Function;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuty;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
+import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
 import tech.pegasys.teku.validator.client.duties.BlockProductionDuty;
 import tech.pegasys.teku.validator.client.duties.Duty;
 import tech.pegasys.teku.validator.client.duties.SlotBasedScheduledDuties;
@@ -33,12 +31,10 @@ import tech.pegasys.teku.validator.client.loader.OwnedValidators;
 public class BlockProductionDutyLoader
     extends AbstractDutyLoader<ProposerDuties, SlotBasedScheduledDuties<?, ?>> {
 
-  private static final Logger LOG = LogManager.getLogger();
-
   private final ValidatorApiChannel validatorApiChannel;
   private final Function<Bytes32, SlotBasedScheduledDuties<BlockProductionDuty, Duty>>
       scheduledDutiesFactory;
-  private final BiConsumer<UInt64, ProposerDuties> publishProposerPreferences;
+  private final ValidatorTimingChannel validatorTimingChannelPublisher;
 
   protected BlockProductionDutyLoader(
       final ValidatorApiChannel validatorApiChannel,
@@ -46,11 +42,11 @@ public class BlockProductionDutyLoader
           scheduledDutiesFactory,
       final OwnedValidators validators,
       final ValidatorIndexProvider validatorIndexProvider,
-      final BiConsumer<UInt64, ProposerDuties> publishProposerPreferences) {
+      final ValidatorTimingChannel validatorTimingChannelPublisher) {
     super(validators, validatorIndexProvider);
     this.validatorApiChannel = validatorApiChannel;
     this.scheduledDutiesFactory = scheduledDutiesFactory;
-    this.publishProposerPreferences = publishProposerPreferences;
+    this.validatorTimingChannelPublisher = validatorTimingChannelPublisher;
   }
 
   @Override
@@ -65,13 +61,7 @@ public class BlockProductionDutyLoader
   @Override
   protected SafeFuture<SlotBasedScheduledDuties<?, ?>> scheduleAllDuties(
       final UInt64 epoch, final ProposerDuties duties) {
-    // Isolate the proposer preferences callback: a throw here must not prevent block duty
-    // scheduling, which would otherwise retry and re-trigger the same failure forever
-    try {
-      publishProposerPreferences.accept(epoch, duties);
-    } catch (final Throwable t) {
-      LOG.error("Proposer preferences publishing failed for epoch {}", epoch, t);
-    }
+    validatorTimingChannelPublisher.onProposerDutiesLoaded(epoch, duties);
     final SlotBasedScheduledDuties<BlockProductionDuty, Duty> scheduledDuties =
         scheduledDutiesFactory.apply(duties.getDependentRoot());
     duties.getDuties().forEach(duty -> scheduleDuty(scheduledDuties, duty));
