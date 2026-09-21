@@ -48,6 +48,7 @@ import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.BlocksByRangeRe
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.BlocksByRangeResponseInvalidResponseException.InvalidResponseType;
 import tech.pegasys.teku.networking.eth2.rpc.core.RpcException;
 import tech.pegasys.teku.networking.eth2.rpc.core.RpcException.DeserializationFailedException;
+import tech.pegasys.teku.networking.eth2.rpc.core.RpcException.PayloadTruncatedException;
 import tech.pegasys.teku.networking.p2p.peer.PeerDisconnectedException;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -222,6 +223,21 @@ public class SyncSourceBatchTest {
     requestError(batch, new DeserializationFailedException());
 
     verify(conflictResolutionStrategy).reportInvalidBatch(batch, getSyncSource(batch));
+    verify(callback).run();
+    assertThatBatch(batch).isEmpty();
+    assertThatBatch(batch).isNotComplete();
+  }
+
+  @Test
+  void shouldNotBeInvalidWhenResponseTruncated() {
+    // a stream ending mid-chunk is what a disconnecting peer looks like
+    final Runnable callback = mock(Runnable.class);
+    final Batch batch = createBatch(10, 10);
+    batch.requestMoreBlocks(callback);
+
+    requestError(batch, new PayloadTruncatedException());
+
+    verify(conflictResolutionStrategy, never()).reportInvalidBatch(any(), any());
     verify(callback).run();
     assertThatBatch(batch).isEmpty();
     assertThatBatch(batch).isNotComplete();

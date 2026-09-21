@@ -329,7 +329,8 @@ public class SyncSourceBatch implements Batch {
     } else if (rootCause instanceof BlocksByRangeResponseInvalidResponseException) {
       LOG.debug("Inconsistent blocks returned from blocks by range request", error);
       markAsInvalid();
-    } else if (rootCause instanceof MalformedDataException) {
+    } else if (rootCause instanceof MalformedDataException malformed
+        && malformed.shouldApplyPenalization()) {
       LOG.debug("Malformed response received while requesting batch data", error);
       markAsInvalid();
     } else {

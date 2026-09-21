@@ -37,25 +37,40 @@ public class RpcException extends Exception {
   }
 
   /**
-   * Raised locally when data received from a peer cannot be decoded as the protocol requires. As
-   * opposed to an error response sent by the peer, this indicates the peer is misbehaving.
+   * Raised locally when data received from a peer cannot be decoded as the protocol requires, as
+   * opposed to an error response sent by the peer.
+   *
+   * <p>Not every such failure is evidence of misbehavior: a stream that ends mid-chunk looks the
+   * same whether the peer sent garbage or just disconnected. Each subclass therefore declares
+   * whether the peer should be penalized for it via {@link #shouldApplyPenalization()}.
    */
   public abstract static class MalformedDataException extends RpcException {
-    protected MalformedDataException(final String errorMessage) {
+    private final boolean applyPenalization;
+
+    protected MalformedDataException(final String errorMessage, final boolean applyPenalization) {
       super(INVALID_REQUEST_CODE, errorMessage);
+      this.applyPenalization = applyPenalization;
+    }
+
+    /**
+     * Whether this failure is attributable to the peer, so that callers may penalise it. False for
+     * failures that an honest peer can cause, e.g. by disconnecting while responding.
+     */
+    public boolean shouldApplyPenalization() {
+      return applyPenalization;
     }
   }
 
   // Malformed data
   public static class DeserializationFailedException extends MalformedDataException {
     public DeserializationFailedException() {
-      super("Failed to deserialize payload");
+      super("Failed to deserialize payload", true);
     }
   }
 
   public static class DecompressFailedException extends MalformedDataException {
     public DecompressFailedException() {
-      super("Failed to uncompress message");
+      super("Failed to uncompress message", true);
     }
   }
 
@@ -64,43 +79,46 @@ public class RpcException extends Exception {
       super(
           "Failed to recognize context bytes: "
               + context
-              + ". Must request blocks with compatible fork.");
+              + ". Must request blocks with compatible fork.",
+          true);
     }
   }
 
   // Unexpected message length
   public static class ExtraDataAppendedException extends MalformedDataException {
     public ExtraDataAppendedException() {
-      super("Extra data appended to end of message");
+      super("Extra data appended to end of message", true);
     }
 
     public ExtraDataAppendedException(final String details) {
-      super("Extra data appended to end of message: " + details);
+      super("Extra data appended to end of message: " + details, true);
     }
   }
 
+  // A stream ending mid-chunk is what a disconnecting peer looks like: not penalized
   public static class MessageTruncatedException extends MalformedDataException {
     public MessageTruncatedException() {
-      super("Message was truncated");
+      super("Message was truncated", false);
     }
   }
 
   public static class PayloadTruncatedException extends MalformedDataException {
     public PayloadTruncatedException() {
-      super("Message payload smaller than expected");
+      super("Message payload smaller than expected", false);
     }
   }
 
+  // Raised by our own completion race, not by anything the peer sent: not penalized
   public static class AdditionalDataReceivedException extends MalformedDataException {
     public AdditionalDataReceivedException() {
-      super("Received additional response after request completed");
+      super("Received additional response after request completed", false);
     }
   }
 
   // Constraint violation
   public static class ChunkTooLongException extends MalformedDataException {
     public ChunkTooLongException() {
-      super("Chunk exceeds maximum allowed length");
+      super("Chunk exceeds maximum allowed length", true);
     }
   }
 
@@ -122,7 +140,7 @@ public class RpcException extends Exception {
 
   public static class LengthOutOfBoundsException extends MalformedDataException {
     public LengthOutOfBoundsException() {
-      super("Chunk length is not within bounds for expected type");
+      super("Chunk length is not within bounds for expected type", true);
     }
   }
 
