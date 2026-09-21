@@ -9,6 +9,7 @@
 ### Breaking Changes
 
 ### Additions and Improvements
+ - Updated aircompressor to 3.8 and made it the only Snappy implementation for gossip and RPC (removed snappy-xerial dependency)
 
 ### Bug Fixes
  - Fixed status, event, validator and database log messages being written twice when `--log-destination` is set to `CONSOLE` or `FILE`.
