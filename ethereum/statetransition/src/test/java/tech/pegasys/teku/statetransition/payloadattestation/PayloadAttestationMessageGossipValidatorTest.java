@@ -97,6 +97,7 @@ public class PayloadAttestationMessageGossipValidatorTest {
     when(miscHelpers.computeSigningRoot(eq(payloadAttestationMessage.getData()), any()))
         .thenReturn(signingRoot);
     when(specVersion.miscHelpers()).thenReturn(miscHelpers);
+    when(specVersion.getMilestone()).thenReturn(SpecMilestone.GLOAS);
     when(spec.atSlot(slot)).thenReturn(specVersion);
     when(spec.getPtc(postState, slot)).thenReturn(IntList.of(validatorIndex.intValue()));
     when(gossipValidationHelper.isSignatureValidWithRespectToProposerIndex(
@@ -246,6 +247,18 @@ public class PayloadAttestationMessageGossipValidatorTest {
             reject(
                 "Payload attestation's validator index %s is out of range for the %s validators in the state",
                 validatorIndex, postState.getValidators().size()));
+  }
+
+  @TestTemplate
+  void shouldReject_whenSlotIsBeforeGloasFork() {
+    final SpecVersion preGloasSpecVersion = mock(SpecVersion.class);
+    when(preGloasSpecVersion.getMilestone()).thenReturn(SpecMilestone.FULU);
+    when(spec.atSlot(slot)).thenReturn(preGloasSpecVersion);
+    assertThatSafeFuture(
+            payloadAttestationMessageGossipValidator.validate(
+                validatablePayloadAttestationMessage()))
+        .isCompletedWithValue(
+            reject("Payload attestation's slot %s is before the Gloas fork", slot));
   }
 
   @TestTemplate
