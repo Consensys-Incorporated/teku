@@ -39,7 +39,9 @@ public class IndexedPayloadAttestationSchema
     super(
         "IndexedPayloadAttestation",
         ACTIVE_FIELDS,
-        namedSchema(ATTESTING_INDICES, SszUInt64ListSchema.create(specConfig.getPtcSize())),
+        namedSchema(
+            ATTESTING_INDICES,
+            SszUInt64ListSchema.create(specConfig.getPayloadTimelinessCommitteeSize())),
         namedSchema("data", schemaRegistry.get(PAYLOAD_ATTESTATION_DATA_SCHEMA)),
         namedSchema("signature", SszSignatureSchema.INSTANCE));
   }

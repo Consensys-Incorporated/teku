@@ -188,22 +188,19 @@ class BlockProcessorGloasTest {
   }
 
   @Test
-  void processExecutionPayloadBid_shouldReturnPreviousBidSlot() throws BlockProcessingException {
+  void processExecutionPayloadBid_shouldRejectWhenBlockHashEqualsParentBlockHash() {
     final UInt64 currentSlot = UInt64.valueOf(8);
-    final UInt64 previousBidSlot = UInt64.valueOf(3);
     final MutableBeaconStateGloas mutableState =
         BeaconStateGloas.required(dataStructureUtil.randomBeaconState(currentSlot))
             .createWritableCopy();
-    mutableState.setLatestExecutionPayloadBid(
-        dataStructureUtil.randomExecutionPayloadBid(previousBidSlot, UInt64.ZERO));
-
+    final Bytes32 parentBlockHash = mutableState.getLatestBlockHash();
     final ExecutionPayloadBid bid =
         schemaDefinitions
             .getExecutionPayloadBidSchema()
             .create(
-                mutableState.getLatestBlockHash(),
+                parentBlockHash,
                 spec.getBlockRootAtSlot(mutableState, mutableState.getSlot().minusMinZero(1)),
-                dataStructureUtil.randomBytes32(),
+                parentBlockHash,
                 spec.getRandaoMix(mutableState, spec.getCurrentEpoch(mutableState)),
                 dataStructureUtil.randomBytes20(),
                 UInt64.ZERO,
@@ -216,11 +213,9 @@ class BlockProcessorGloasTest {
     final SignedExecutionPayloadBid signedBid =
         schemaDefinitions.getSignedExecutionPayloadBidSchema().create(bid, BLSSignature.infinity());
 
-    final UInt64 returnedParentSlot =
-        blockProcessor().processExecutionPayloadBid(mutableState, signedBid);
-
-    assertThat(returnedParentSlot).isEqualTo(previousBidSlot);
-    assertThat(mutableState.getLatestExecutionPayloadBid()).isEqualTo(bid);
+    assertThatThrownBy(() -> blockProcessor().processExecutionPayloadBid(mutableState, signedBid))
+        .isInstanceOf(BlockProcessingException.class)
+        .hasMessage("Bid's block hash is the same as the parent block hash");
   }
 
   @Test
@@ -245,7 +240,7 @@ class BlockProcessorGloasTest {
   }
 
   @Test
-  void processAttestation_shouldUseBidParentSlotForConveniencePath() {
+  void processAttestation_shouldUseLatestBlockHeaderParentSlotForConveniencePath() {
     final MismatchedParentFixture fixture = mismatchedParentFixture();
 
     final AttestationProcessingResult result =
@@ -272,14 +267,16 @@ class BlockProcessorGloasTest {
         BeaconStateGloas.required(dataStructureUtil.randomBeaconState(stateSlot))
             .createWritableCopy();
     state.setLatestBlockHeader(
-        new BeaconBlockHeader(dataSlot, UInt64.ZERO, Bytes32.ZERO, Bytes32.ZERO, Bytes32.ZERO));
+        new BeaconBlockHeader(parentSlot, UInt64.ZERO, Bytes32.ZERO, Bytes32.ZERO, Bytes32.ZERO));
     state.getBlockRoots().setElement(parentSlot.mod(slotsPerHistoricalRoot).intValue(), blockRoot);
     state.getBlockRoots().setElement(dataSlot.mod(slotsPerHistoricalRoot).intValue(), blockRoot);
     state.setCurrentJustifiedCheckpoint(
         new Checkpoint(spec.computeEpochAtSlot(dataSlot), blockRoot));
     state.getCurrentEpochParticipation().set(0, SszByte.asUInt8(0));
+    // Deliberately different from the header slot so the test fails if the bid slot is used
+    final UInt64 staleBidSlot = parentSlot.minus(1);
     state.setLatestExecutionPayloadBid(
-        dataStructureUtil.randomExecutionPayloadBid(parentSlot, UInt64.ZERO));
+        dataStructureUtil.randomExecutionPayloadBid(staleBidSlot, UInt64.ZERO));
     state.setExecutionPayloadAvailability(
         schemaDefinitions
             .getExecutionPayloadAvailabilitySchema()

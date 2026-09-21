@@ -13,12 +13,18 @@
 
 package tech.pegasys.teku.statetransition.forkchoice.fastconfirmation;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.ints.IntSet;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Deque;
+import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -71,6 +77,22 @@ class FastConfirmationCalculator {
 
   // Lazily computed once per instance (single-threaded per slot); see getPulledUpHeadState.
   private BeaconState pulledUpHeadState;
+
+  // Per-instance (per-slot) memoization. The safety-threshold helpers query the same slot
+  // committees and slot ranges for every block they score (and re-evaluate a block across the two
+  // walk phases), the justifiability gates recompute the current target score and honest FFG
+  // support, and the equivocator set is fixed for the slot's vote snapshot; single-threaded per
+  // slot, so plain fields suffice. The per-balance-source maps are identity-keyed: a calculator
+  // sees at most two source states, and value equality on BeaconState would hash the whole state.
+  private final Map<UInt64, IntSet> slotCommitteeBySlot = new HashMap<>();
+  private final Map<SlotRange, IntSet> committeeByRange = new HashMap<>();
+  private final IdentityHashMap<BeaconState, Map<SlotRange, UInt64>> adversarialWeightBySource =
+      new IdentityHashMap<>();
+  private final IdentityHashMap<BeaconState, Map<Bytes32, UInt64>> safetyThresholdBySource =
+      new IdentityHashMap<>();
+  private IntList equivocatingValidatorIndices;
+  private UInt64 currentTargetScore;
+  private UInt64 honestFfgSupportForCurrentTarget;
 
   FastConfirmationCalculator(
       final Spec spec,
@@ -147,15 +169,23 @@ class FastConfirmationCalculator {
    * epoch behind (a long run of empty slots) would therefore throw {@code StateTooOldException} for
    * current-epoch slots and abort confirmation. The intervening slots are empty, so advancing the
    * head state through them is deterministic and yields the same shuffling the real chain would.
+   *
+   * <p>Memoized per slot: the ranges queried while scoring successive blocks overlap heavily, and
+   * the shuffling source is fixed for the whole run.
    */
   IntSet getSlotCommittee(final UInt64 slot) {
+    return slotCommitteeBySlot.computeIfAbsent(slot, this::computeSlotCommittee);
+  }
+
+  private IntSet computeSlotCommittee(final UInt64 slot) {
     final BeaconState shufflingSource = getPulledUpHeadState();
     final UInt64 epoch = spec.computeEpochAtSlot(slot);
-    final int committeesCount = spec.getCommitteeCountPerSlot(shufflingSource, epoch).intValue();
+    final UInt64 committeesCount = spec.getCommitteeCountPerSlot(shufflingSource, epoch);
     final IntSet participants = new IntOpenHashSet();
-    for (int committeeIndex = 0; committeeIndex < committeesCount; committeeIndex++) {
-      participants.addAll(
-          spec.getBeaconCommittee(shufflingSource, slot, UInt64.valueOf(committeeIndex)));
+    for (UInt64 committeeIndex = UInt64.ZERO;
+        committeeIndex.isLessThan(committeesCount);
+        committeeIndex = committeeIndex.increment()) {
+      participants.addAll(spec.getBeaconCommittee(shufflingSource, slot, committeeIndex));
     }
     return participants;
   }
@@ -204,6 +234,96 @@ class FastConfirmationCalculator {
   }
 
   /**
+   * Computes {@code get_attestation_score} for every block of {@code chainRoots} (blocks of a
+   * single chain, ordered oldest first) in one pass over the active validator set, instead of one
+   * pass per block.
+   *
+   * <p>Because the blocks lie on one chain, the blocks a vote supports form a prefix of the list:
+   * supporting a descendant of a block implies supporting a descendant of every earlier block.
+   * (Ancestry is checked against base/PENDING nodes, exactly as {@link #getAttestationScore} does,
+   * and under Gloas a PENDING ancestor matches any payload status, so this is plain block ancestry
+   * — transitive along the chain on all forks.) Each vote is therefore resolved once and bucketed
+   * at the latest chain block it supports; a block's score is the sum of the buckets from its own
+   * position onward.
+   */
+  Map<Bytes32, UInt64> computeChainAttestationScores(
+      final List<Bytes32> chainRoots, final BeaconState balanceSource) {
+    if (chainRoots.isEmpty()) {
+      return Map.of();
+    }
+    final List<ForkChoiceNode> chainNodes = chainRoots.stream().map(this::getNodeForRoot).toList();
+    // supportByLatestIndex[i]: total balance of votes whose latest supported chain block is i.
+    final UInt64[] supportByLatestIndex = new UInt64[chainNodes.size()];
+    Arrays.fill(supportByLatestIndex, UInt64.ZERO);
+
+    final UInt64 balanceSourceEpoch = spec.getCurrentEpoch(balanceSource);
+    final SszList<Validator> validators = balanceSource.getValidators();
+    for (final int index : spec.getActiveValidatorIndices(balanceSource, balanceSourceEpoch)) {
+      final Validator validator = validators.get(index);
+      if (validator.isSlashed()) {
+        continue;
+      }
+      final VoteTracker vote = votes.getVote(index);
+      if (vote.isEquivocating()) {
+        continue;
+      }
+      final Bytes32 votedRoot = vote.getNextRoot();
+      // A zero root means the validator is not in store.latest_messages.
+      if (votedRoot.isZero()) {
+        continue;
+      }
+      final Optional<ForkChoiceNode> maybeVotedNode =
+          forkChoice.getSupportedNode(
+              currentSlot, votedRoot, vote.getNextSlot(), vote.isNextFullPayloadHint());
+      if (maybeVotedNode.isEmpty()) {
+        continue;
+      }
+      final int latestSupported =
+          findLatestSupportedChainIndex(chainNodes, maybeVotedNode.orElseThrow());
+      if (latestSupported >= 0) {
+        supportByLatestIndex[latestSupported] =
+            supportByLatestIndex[latestSupported].plus(validator.getEffectiveBalance());
+      }
+    }
+
+    // score(chainRoots[i]) = votes supporting chainRoots[i] or any later chain block.
+    final Map<Bytes32, UInt64> scores = HashMap.newHashMap(chainRoots.size());
+    UInt64 runningScore = UInt64.ZERO;
+    for (int i = chainRoots.size() - 1; i >= 0; i--) {
+      runningScore = runningScore.plus(supportByLatestIndex[i]);
+      scores.put(chainRoots.get(i), runningScore);
+    }
+    return scores;
+  }
+
+  /**
+   * The index of the latest (highest-slot) chain block the vote supports (i.e. of which the voted
+   * node is a descendant), or {@code -1} when it supports none. Tests the newest block first — the
+   * common case, since most latest messages vote at or near the head and so support the whole chain
+   * — and otherwise binary-searches the boundary of the supported prefix.
+   */
+  int findLatestSupportedChainIndex(
+      final List<ForkChoiceNode> chainNodes, final ForkChoiceNode votedNode) {
+    final int last = chainNodes.size() - 1;
+    if (isAncestor(votedNode, chainNodes.get(last))) {
+      return last;
+    }
+    int latestSupported = -1;
+    int low = 0;
+    int high = last - 1;
+    while (low <= high) {
+      final int mid = (low + high) >>> 1;
+      if (isAncestor(votedNode, chainNodes.get(mid))) {
+        latestSupported = mid;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return latestSupported;
+  }
+
+  /**
    * Implements {@code get_block_support_between_slots}: the total effective balance (per {@code
    * balanceSource}) of unslashed, active, non-equivocating validators assigned to the inclusive
    * slot range whose latest vote is exactly {@code blockRoot}.
@@ -233,14 +353,24 @@ class FastConfirmationCalculator {
    * Implements {@code get_equivocation_score}: the total effective balance (per {@code
    * balanceSource}) of active, equivocating validators assigned to the inclusive slot range. Per
    * spec, slashed validators are not filtered out here (they are very likely already equivocating).
+   *
+   * <p>Iterates the (almost always empty) equivocator set and checks each member's committee
+   * assignment, rather than materializing the committees of the whole slot range and filtering them
+   * for equivocators as the spec does. The result is identical — both select the validators that
+   * are equivocating and assigned to the range — but no slot committee is computed at all in the
+   * common no-equivocation case, which makes {@code compute_adversarial_weight} pure arithmetic.
    */
   UInt64 getEquivocationScore(
       final BeaconState balanceSource, final UInt64 startSlot, final UInt64 endSlot) {
+    final IntList equivocatingIndices = getEquivocatingValidatorIndices();
+    if (equivocatingIndices.isEmpty()) {
+      return UInt64.ZERO;
+    }
     final UInt64 balanceSourceEpoch = spec.getCurrentEpoch(balanceSource);
     final SszList<Validator> validators = balanceSource.getValidators();
     UInt64 score = UInt64.ZERO;
-    for (final int index : getCommitteeBetweenSlots(startSlot, endSlot)) {
-      if (!votes.getVote(index).isEquivocating()) {
+    for (final int index : equivocatingIndices) {
+      if (!isInCommitteeBetweenSlots(index, startSlot, endSlot)) {
         continue;
       }
       final Validator validator = validators.get(index);
@@ -251,12 +381,49 @@ class FastConfirmationCalculator {
     return score;
   }
 
+  /** Indices of validators marked equivocating in the vote snapshot, collected once per slot. */
+  private IntList getEquivocatingValidatorIndices() {
+    if (equivocatingValidatorIndices == null) {
+      final IntArrayList indices = new IntArrayList();
+      for (int index = 0; index < votes.size(); index++) {
+        if (votes.getVote(index).isEquivocating()) {
+          indices.add(index);
+        }
+      }
+      equivocatingValidatorIndices = indices;
+    }
+    return equivocatingValidatorIndices;
+  }
+
+  /** Whether the validator is assigned to any committee of the inclusive slot range. */
+  private boolean isInCommitteeBetweenSlots(
+      final int validatorIndex, final UInt64 startSlot, final UInt64 endSlot) {
+    for (UInt64 slot = startSlot; slot.isLessThanOrEqualTo(endSlot); slot = slot.increment()) {
+      if (getSlotCommittee(slot).contains(validatorIndex)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /**
    * Implements {@code compute_adversarial_weight}: the maximum weight that could be adversarial in
    * the committees of the slot range, assuming {@code CONFIRMATION_BYZANTINE_THRESHOLD} and
    * discounting validators already known to be equivocating.
+   *
+   * <p>Memoized per (balance source, slot range): the honest-FFG gate re-queries the current
+   * epoch's range on every call, and blocks re-evaluated across the walk phases repeat theirs.
    */
   UInt64 computeAdversarialWeight(
+      final BeaconState balanceSource, final UInt64 startSlot, final UInt64 endSlot) {
+    return adversarialWeightBySource
+        .computeIfAbsent(balanceSource, __ -> new HashMap<>())
+        .computeIfAbsent(
+            new SlotRange(startSlot, endSlot),
+            range -> calculateAdversarialWeight(balanceSource, range.startSlot(), range.endSlot()));
+  }
+
+  private UInt64 calculateAdversarialWeight(
       final BeaconState balanceSource, final UInt64 startSlot, final UInt64 endSlot) {
     final UInt64 totalActiveBalance = spec.getTotalActiveBalance(balanceSource);
     final UInt64 maximumWeight =
@@ -316,8 +483,21 @@ class FastConfirmationCalculator {
     return computeEmptySlotSupportDiscount(balanceSource, blockRoot);
   }
 
-  /** Implements {@code compute_safety_threshold}: the LMD-GHOST safety threshold for the block. */
+  /**
+   * Implements {@code compute_safety_threshold}: the LMD-GHOST safety threshold for the block.
+   *
+   * <p>Memoized per (balance source, block): the block that stops the previous-epoch walk is
+   * re-evaluated by the current-epoch walk, repeating the support-discount and adversarial-weight
+   * range work below.
+   */
   UInt64 computeSafetyThreshold(final Bytes32 blockRoot, final BeaconState balanceSource) {
+    return safetyThresholdBySource
+        .computeIfAbsent(balanceSource, __ -> new HashMap<>())
+        .computeIfAbsent(blockRoot, root -> calculateSafetyThreshold(root, balanceSource));
+  }
+
+  private UInt64 calculateSafetyThreshold(
+      final Bytes32 blockRoot, final BeaconState balanceSource) {
     final UInt64 parentSlot = getBlockSlot(getBlockParentRoot(blockRoot));
     final UInt64 totalActiveBalance = spec.getTotalActiveBalance(balanceSource);
     final UInt64 proposerScore = spec.getProposerBoostAmount(balanceSource);
@@ -344,7 +524,19 @@ class FastConfirmationCalculator {
     if (!isValidForConfirmation(blockRoot)) {
       return false;
     }
-    final UInt64 support = getAttestationScore(blockRoot, balanceSource);
+    return isOneConfirmedWithSupport(
+        balanceSource, blockRoot, getAttestationScore(blockRoot, balanceSource));
+  }
+
+  /**
+   * {@code is_one_confirmed} evaluated against a precomputed attestation score (see {@link
+   * #computeChainAttestationScores}); otherwise identical to {@link #isOneConfirmed}.
+   */
+  private boolean isOneConfirmedWithSupport(
+      final BeaconState balanceSource, final Bytes32 blockRoot, final UInt64 support) {
+    if (!isValidForConfirmation(blockRoot)) {
+      return false;
+    }
     final UInt64 safetyThreshold = computeSafetyThreshold(blockRoot, balanceSource);
     return support.isGreaterThan(safetyThreshold);
   }
@@ -368,8 +560,19 @@ class FastConfirmationCalculator {
   /**
    * Implements {@code get_current_target_score}: the estimated FFG support of the current-epoch
    * target, using the pulled-up head state's validator set and the LMD votes received so far.
+   *
+   * <p>Memoized: a full pass over the active validator set that the justifiability gates ({@code
+   * will_no_conflicting_checkpoint_be_justified}, {@code will_current_target_be_justified}) would
+   * otherwise recompute several times per slot against the same snapshot.
    */
   UInt64 getCurrentTargetScore() {
+    if (currentTargetScore == null) {
+      currentTargetScore = computeCurrentTargetScore();
+    }
+    return currentTargetScore;
+  }
+
+  private UInt64 computeCurrentTargetScore() {
     final Checkpoint target = getCurrentTarget();
     final BeaconState state = getPulledUpHeadState();
     final UInt64 epoch = spec.getCurrentEpoch(state);
@@ -411,8 +614,18 @@ class FastConfirmationCalculator {
    * Implements {@code compute_honest_ffg_support_for_current_target}: the minimum honest FFG
    * support the current-epoch target can be assured of, assuming synchrony and {@code
    * CONFIRMATION_BYZANTINE_THRESHOLD}.
+   *
+   * <p>Memoized: both justifiability gates derive from it and can each run more than once per slot
+   * against the same snapshot.
    */
   UInt64 computeHonestFfgSupportForCurrentTarget() {
+    if (honestFfgSupportForCurrentTarget == null) {
+      honestFfgSupportForCurrentTarget = calculateHonestFfgSupportForCurrentTarget();
+    }
+    return honestFfgSupportForCurrentTarget;
+  }
+
+  private UInt64 calculateHonestFfgSupportForCurrentTarget() {
     final BeaconState balanceSource = getPulledUpHeadState();
     final UInt64 totalActiveBalance = spec.getTotalActiveBalance(balanceSource);
     final UInt64 ffgSupportForCheckpoint = getCurrentTargetScore();
@@ -496,8 +709,13 @@ class FastConfirmationCalculator {
                 () ->
                     new IllegalStateException(
                         "Previous balance source is required for reconfirmation"));
-    return getAncestorRoots(confirmedRoot, startRootExclusive).stream()
-        .allMatch(root -> isOneConfirmed(previousBalanceSource, root));
+    final List<Bytes32> chainToReconfirm = getAncestorRoots(confirmedRoot, startRootExclusive);
+    // Score the whole chain in a single pass over the validator set instead of one per block.
+    final Map<Bytes32, UInt64> chainScores =
+        computeChainAttestationScores(chainToReconfirm, previousBalanceSource);
+    return chainToReconfirm.stream()
+        .allMatch(
+            root -> isOneConfirmedWithSupport(previousBalanceSource, root, chainScores.get(root)));
   }
 
   /**
@@ -512,6 +730,16 @@ class FastConfirmationCalculator {
     final Bytes32 previousSlotHead = fcrStore.previousSlotHead();
     final BeaconState currentBalanceSource = states.currentBalanceSource();
     Bytes32 confirmedRoot = latestConfirmedRoot;
+
+    // Both walk phases score blocks from this one chain (the second phase from a suffix of it), so
+    // their attestation scores are computed together in a single pass over the validator set on
+    // first need (see computeChainAttestationScores) instead of one pass per block. Left null until
+    // a phase actually scores, so slots where neither gate passes do no scoring work at all.
+    final List<Bytes32> candidateChain = getAncestorRoots(head, latestConfirmedRoot);
+    Map<Bytes32, UInt64> chainScores = null;
+    // How many blocks of candidateChain the previous-epoch phase confirmed. The current-epoch phase
+    // resumes from exactly this offset, so the suffix it walks needs no second protoarray walk.
+    int advanced = 0;
 
     // The previous slot head is a root persisted in the FCR store across slots, so it may have been
     // pruned from fork choice (protoarray only keeps finalized-onward blocks, while the spec
@@ -528,8 +756,9 @@ class FastConfirmationCalculator {
                         getUnrealizedJustification(previousSlotHead).getEpoch(), 1)
                     || epochPlusIsAtLeastCurrent(
                         getUnrealizedJustification(head).getEpoch(), 1))))) {
+      chainScores = computeChainAttestationScores(candidateChain, currentBalanceSource);
       // Advance towards the head over previous-epoch blocks; stop at the first unconfirmed one.
-      for (final Bytes32 blockRoot : getAncestorRoots(head, confirmedRoot)) {
+      for (final Bytes32 blockRoot : candidateChain) {
         // Only meant to confirm previous-epoch blocks.
         if (getBlockEpoch(blockRoot).equals(currentEpoch)) {
           break;
@@ -538,22 +767,32 @@ class FastConfirmationCalculator {
         if (!isAncestor(previousSlotHead, blockRoot)) {
           break;
         }
-        if (!isOneConfirmed(currentBalanceSource, blockRoot)) {
+        if (!isOneConfirmedWithSupport(
+            currentBalanceSource, blockRoot, chainScores.get(blockRoot))) {
           break;
         }
         confirmedRoot = blockRoot;
+        advanced++;
       }
     }
 
     if (atEpochStart || epochPlusIsAtLeastCurrent(getUnrealizedJustification(head).getEpoch(), 1)) {
+      if (chainScores == null) {
+        chainScores = computeChainAttestationScores(candidateChain, currentBalanceSource);
+      }
       Bytes32 tentativeConfirmedRoot = confirmedRoot;
-      for (final Bytes32 blockRoot : getAncestorRoots(head, confirmedRoot)) {
+      // The unconfirmed suffix of candidateChain: confirmedRoot only ever advances along it, so
+      // every walked block already has a precomputed score, and slicing at the offset the first
+      // phase reached is equivalent to re-deriving the suffix with getAncestorRoots(head,
+      // confirmedRoot) — without the second O(n) protoarray walk.
+      for (final Bytes32 blockRoot : candidateChain.subList(advanced, candidateChain.size())) {
         // Only true the first time the walk advances into the current epoch.
         if (getBlockEpoch(blockRoot).isGreaterThan(getBlockEpoch(tentativeConfirmedRoot))
             && !willCurrentTargetBeJustified()) {
           break;
         }
-        if (!isOneConfirmed(currentBalanceSource, blockRoot)) {
+        if (!isOneConfirmedWithSupport(
+            currentBalanceSource, blockRoot, chainScores.get(blockRoot))) {
           break;
         }
         tentativeConfirmedRoot = blockRoot;
@@ -650,8 +889,15 @@ class FastConfirmationCalculator {
 
   /**
    * Union of {@code get_slot_committee} over the inclusive slot range {@code [startSlot, endSlot]}.
+   * Memoized per range, so a re-evaluated block does not rebuild its union.
    */
   private IntSet getCommitteeBetweenSlots(final UInt64 startSlot, final UInt64 endSlot) {
+    return committeeByRange.computeIfAbsent(
+        new SlotRange(startSlot, endSlot),
+        range -> computeCommitteeBetweenSlots(range.startSlot(), range.endSlot()));
+  }
+
+  private IntSet computeCommitteeBetweenSlots(final UInt64 startSlot, final UInt64 endSlot) {
     final IntSet participants = new IntOpenHashSet();
     for (UInt64 slot = startSlot; slot.isLessThanOrEqualTo(endSlot); slot = slot.increment()) {
       participants.addAll(getSlotCommittee(slot));
@@ -757,4 +1003,7 @@ class FastConfirmationCalculator {
         .map(ProtoNodeData::getCheckpoints)
         .orElseThrow(() -> new IllegalStateException("Missing checkpoints for " + blockRoot));
   }
+
+  /** Inclusive slot range used as a memoization key. */
+  private record SlotRange(UInt64 startSlot, UInt64 endSlot) {}
 }

@@ -1,8 +1,8 @@
 {
   "version": "heze",
-  "execution_payload_blinded": false,
   "execution_payload_value": "12345",
   "consensus_block_value": "123000000000",
+  "execution_payload_included": false,
   "data": {
     "slot": "1",
     "proposer_index": "5058312538874193142",

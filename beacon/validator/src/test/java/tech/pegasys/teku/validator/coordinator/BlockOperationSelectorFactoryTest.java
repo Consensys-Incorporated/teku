@@ -252,8 +252,8 @@ class BlockOperationSelectorFactoryTest {
                     mutableState -> {
                       final MutableBeaconStateGloas stateGloas =
                           MutableBeaconStateGloas.required(mutableState);
-                      stateGloas.setLatestExecutionPayloadBid(
-                          gloasData.randomExecutionPayloadBid(parentSlot, UInt64.ZERO));
+                      stateGloas.setLatestBlockHeader(
+                          gloasData.randomBeaconBlockHeader(parentSlot, UInt64.ZERO));
                       stateGloas.setExecutionPayloadAvailability(
                           schemaDefinitions.getExecutionPayloadAvailabilitySchema().getDefault());
                     }));

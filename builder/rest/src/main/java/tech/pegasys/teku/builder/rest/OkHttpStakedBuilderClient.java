@@ -21,7 +21,6 @@ import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.builder.rest.handlers.GetExecutionPayloadBidRequest;
 import tech.pegasys.teku.builder.rest.handlers.SubmitBuilderPreferencesRequest;
 import tech.pegasys.teku.builder.rest.handlers.SubmitSignedBeaconBlockRequest;
-import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -32,17 +31,12 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 
 class OkHttpStakedBuilderClient implements StakedBuilderClient {
 
-  private final AsyncRunner asyncRunner;
   private final GetExecutionPayloadBidRequest getExecutionPayloadBidRequest;
   private final SubmitBuilderPreferencesRequest submitBuilderPreferencesRequest;
   private final SubmitSignedBeaconBlockRequest submitSignedBeaconBlockRequest;
 
   OkHttpStakedBuilderClient(
-      final AsyncRunner asyncRunner,
-      final Spec spec,
-      final HttpUrl baseEndpoint,
-      final OkHttpClient httpClient) {
-    this.asyncRunner = asyncRunner;
+      final Spec spec, final HttpUrl baseEndpoint, final OkHttpClient httpClient) {
     this.getExecutionPayloadBidRequest =
         new GetExecutionPayloadBidRequest(spec, baseEndpoint, httpClient);
     this.submitBuilderPreferencesRequest =
@@ -57,8 +51,8 @@ class OkHttpStakedBuilderClient implements StakedBuilderClient {
       final Bytes32 parentHash,
       final Bytes32 parentRoot,
       final BLSPublicKey proposerPubkey,
-      final Optional<SignedBuilderRequestAuth> auth) {
-    return asyncRunner.runAsync(
+      final SignedBuilderRequestAuth auth) {
+    return SafeFuture.of(
         () ->
             getExecutionPayloadBidRequest.submit(
                 slot, parentHash, parentRoot, proposerPubkey, auth));
@@ -66,14 +60,14 @@ class OkHttpStakedBuilderClient implements StakedBuilderClient {
 
   @Override
   public SafeFuture<Void> submitBuilderPreferences(
-      final BLSPublicKey validatorPubkey,
+      final BLSPublicKey proposerPubkey,
       final BuilderPreferencesRequest builderPreferencesRequest) {
-    return asyncRunner.runAsync(
-        () -> submitBuilderPreferencesRequest.submit(validatorPubkey, builderPreferencesRequest));
+    return SafeFuture.of(
+        () -> submitBuilderPreferencesRequest.submit(proposerPubkey, builderPreferencesRequest));
   }
 
   @Override
   public SafeFuture<Void> submitSignedBeaconBlock(final SignedBeaconBlock signedBeaconBlock) {
-    return asyncRunner.runAsync(() -> submitSignedBeaconBlockRequest.submit(signedBeaconBlock));
+    return SafeFuture.of(() -> submitSignedBeaconBlockRequest.submit(signedBeaconBlock));
   }
 }

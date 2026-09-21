@@ -72,7 +72,7 @@ import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPending
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPaymentSchema;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingWithdrawal;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingWithdrawalSchema;
-import tech.pegasys.teku.spec.datastructures.state.versions.gloas.PtcWindowSchema;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.PayloadTimelinessCommitteeWindowSchema;
 import tech.pegasys.teku.spec.schemas.registry.SchemaRegistry;
 
 public class SchemaDefinitionsGloas extends SchemaDefinitionsFulu {
@@ -99,7 +99,7 @@ public class SchemaDefinitionsGloas extends SchemaDefinitionsFulu {
   private final SszBitvectorSchema<?> executionPayloadAvailabilitySchema;
   private final SszVectorSchema<BuilderPendingPayment, ?> builderPendingPaymentsSchema;
   private final SszListSchema<BuilderPendingWithdrawal, ?> builderPendingWithdrawalsSchema;
-  private final PtcWindowSchema ptcWindowSchema;
+  private final PayloadTimelinessCommitteeWindowSchema payloadTimelinessCommitteeWindowSchema;
   private final ExecutionPayloadEnvelopesByRootRequestMessageSchema
       executionPayloadEnvelopesByRootRequestMessageSchema;
 
@@ -130,7 +130,7 @@ public class SchemaDefinitionsGloas extends SchemaDefinitionsFulu {
         schemaRegistry.get(EXECUTION_PAYLOAD_AVAILABILITY_SCHEMA);
     this.builderPendingPaymentsSchema = schemaRegistry.get(BUILDER_PENDING_PAYMENTS_SCHEMA);
     this.builderPendingWithdrawalsSchema = schemaRegistry.get(BUILDER_PENDING_WITHDRAWALS_SCHEMA);
-    this.ptcWindowSchema = schemaRegistry.get(PTC_WINDOW_SCHEMA);
+    this.payloadTimelinessCommitteeWindowSchema = schemaRegistry.get(PTC_WINDOW_SCHEMA);
     this.executionPayloadEnvelopesByRootRequestMessageSchema =
         schemaRegistry.get(EXECUTION_PAYLOAD_ENVELOPES_BY_ROOT_REQUEST_MESSAGE_SCHEMA);
   }
@@ -254,8 +254,8 @@ public class SchemaDefinitionsGloas extends SchemaDefinitionsFulu {
     return builderPendingWithdrawalsSchema;
   }
 
-  public PtcWindowSchema getPtcWindowSchema() {
-    return ptcWindowSchema;
+  public PayloadTimelinessCommitteeWindowSchema getPtcWindowSchema() {
+    return payloadTimelinessCommitteeWindowSchema;
   }
 
   public ExecutionPayloadEnvelopesByRootRequestMessageSchema

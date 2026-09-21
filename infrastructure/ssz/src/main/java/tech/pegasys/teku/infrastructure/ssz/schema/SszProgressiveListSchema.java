@@ -36,6 +36,13 @@ public class SszProgressiveListSchema<ElementDataT extends SszData>
     super(elementSchema, hints);
   }
 
+  public SszProgressiveListSchema(
+      final SszSchema<ElementDataT> elementSchema,
+      final SszSchemaHints hints,
+      final long maxLength) {
+    super(elementSchema, hints, maxLength);
+  }
+
   public static <T extends SszData> SszProgressiveListSchema<T> create(
       final SszSchema<T> elementSchema) {
     return new SszProgressiveListSchema<>(elementSchema);
@@ -44,5 +51,19 @@ public class SszProgressiveListSchema<ElementDataT extends SszData>
   public static <T extends SszData> SszProgressiveListSchema<T> create(
       final SszSchema<T> elementSchema, final SszSchemaHints hints) {
     return new SszProgressiveListSchema<>(elementSchema, hints);
+  }
+
+  /**
+   * A progressive list that additionally enforces {@code maxLength}, both on construction and when
+   * deserializing (before any element is materialized).
+   */
+  public static <T extends SszData> SszProgressiveListSchema<T> create(
+      final SszSchema<T> elementSchema, final long maxLength) {
+    return new SszProgressiveListSchema<>(elementSchema, SszSchemaHints.none(), maxLength);
+  }
+
+  public static <T extends SszData> SszProgressiveListSchema<T> create(
+      final SszSchema<T> elementSchema, final SszSchemaHints hints, final long maxLength) {
+    return new SszProgressiveListSchema<>(elementSchema, hints, maxLength);
   }
 }

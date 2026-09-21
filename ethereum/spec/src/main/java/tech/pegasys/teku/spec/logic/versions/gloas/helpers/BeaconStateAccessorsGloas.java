@@ -45,7 +45,7 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.Be
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPayment;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingWithdrawal;
-import tech.pegasys.teku.spec.datastructures.state.versions.gloas.PtcWindowSchema;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.PayloadTimelinessCommitteeWindowSchema;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateAccessors;
 import tech.pegasys.teku.spec.logic.versions.fulu.helpers.BeaconStateAccessorsFulu;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
@@ -215,10 +215,15 @@ public class BeaconStateAccessorsGloas extends BeaconStateAccessorsFulu {
               indices.addAll(committee);
             });
     return miscHelpersGloas
-        .computeBalanceWeightedSelection(state, indices, seed, configGloas.getPtcSize(), false)
+        .computeBalanceWeightedSelection(
+            state, indices, seed, configGloas.getPayloadTimelinessCommitteeSize(), false)
         .intStream()
         .mapToObj(index -> SszUInt64.of(UInt64.valueOf(index)))
-        .collect(schemaDefinitions.getPtcWindowSchema().getPtcSchema().collector());
+        .collect(
+            schemaDefinitions
+                .getPtcWindowSchema()
+                .getPayloadTimelinessCommitteeSchema()
+                .collector());
   }
 
   /**
@@ -262,15 +267,20 @@ public class BeaconStateAccessorsGloas extends BeaconStateAccessorsFulu {
    * ``ptc_window`` field in the beacon state at genesis and after forks.
    */
   public SszVector<SszUInt64Vector> initializePtcWindow(final BeaconState state) {
-    final PtcWindowSchema ptcWindowSchema = schemaDefinitions.getPtcWindowSchema();
+    final PayloadTimelinessCommitteeWindowSchema payloadTimelinessCommitteeWindowSchema =
+        schemaDefinitions.getPtcWindowSchema();
     final List<SszUInt64Vector> emptyPreviousEpoch =
         Collections.nCopies(
             config.getSlotsPerEpoch(),
-            ptcWindowSchema
-                .getPtcSchema()
+            payloadTimelinessCommitteeWindowSchema
+                .getPayloadTimelinessCommitteeSchema()
                 .of(
                     Collections.nCopies(
-                        (int) ptcWindowSchema.getPtcSchema().getMaxLength(), UInt64.ZERO)));
+                        (int)
+                            payloadTimelinessCommitteeWindowSchema
+                                .getPayloadTimelinessCommitteeSchema()
+                                .getMaxLength(),
+                        UInt64.ZERO)));
     final List<SszUInt64Vector> ptcWindow = new ArrayList<>(emptyPreviousEpoch);
     final UInt64 currentEpoch = getCurrentEpoch(state);
     IntStream.range(0, 1 + config.getMinSeedLookahead())
@@ -282,7 +292,7 @@ public class BeaconStateAccessorsGloas extends BeaconStateAccessorsFulu {
                 ptcWindow.add(computePtc(state, startSlot.plus(i)));
               }
             });
-    return ptcWindowSchema.createFromElements(ptcWindow);
+    return payloadTimelinessCommitteeWindowSchema.createFromElements(ptcWindow);
   }
 
   /**
@@ -310,11 +320,6 @@ public class BeaconStateAccessorsGloas extends BeaconStateAccessorsFulu {
     final Bytes32 prevBlockRoot = getBlockRootAtSlot(state, data.getSlot().minusMinZero(1));
 
     return blockRoot.equals(slotBlockRoot) && !blockRoot.equals(prevBlockRoot);
-  }
-
-  @Override
-  public UInt64 getAttestationParentSlot(final BeaconState state) {
-    return BeaconStateGloas.required(state).getLatestExecutionPayloadBid().getSlot();
   }
 
   @Override

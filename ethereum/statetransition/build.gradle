@@ -24,6 +24,7 @@ dependencies {
 	implementation project(':infrastructure:serviceutils')
 	implementation project(':storage')
 	implementation project(':storage:api')
+	implementation project(':builder:rest')
 
 	implementation 'io.consensys.tuweni:tuweni-units'
 	implementation 'org.hyperledger.besu.internal:besu-metrics-core'

@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.networking.eth2.gossip.topics;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -313,6 +314,23 @@ public class Eth2TopicHandlerTest {
     asyncRunner.executeQueuedActions();
 
     assertThatSafeFuture(result).isCompletedWithValue(ValidationResult.Invalid);
+  }
+
+  @Test
+  public void getMaxMessageSize_shouldAllowWorstCaseSnappyExpansionOfMaxPayload() {
+    final MockEth2TopicHandler topicHandler =
+        new MockEth2TopicHandler(
+            recentChainData,
+            spec,
+            asyncRunner,
+            (b, __) -> SafeFuture.completedFuture(InternalValidationResult.ACCEPT),
+            debugDataDumper);
+
+    // The gossip size gate runs against the compressed payload, so it must allow snappy's
+    // worst-case expansion of a MAX_PAYLOAD_SIZE payload (max_compressed_len from the spec)
+    final int maxPayloadSize = spec.getNetworkingConfig().getMaxPayloadSize();
+    assertThat(topicHandler.getMaxMessageSize())
+        .isEqualTo(maxPayloadSize + 32 + maxPayloadSize / 6);
   }
 
   private static class MockEth2TopicHandler extends Eth2TopicHandler<SignedBeaconBlock> {

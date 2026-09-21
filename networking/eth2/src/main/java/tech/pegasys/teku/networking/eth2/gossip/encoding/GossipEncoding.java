@@ -25,9 +25,7 @@ import tech.pegasys.teku.spec.config.NetworkingSpecConfig;
 
 public interface GossipEncoding {
 
-  GossipEncoding SSZ_SNAPPY = new SszSnappyEncoding(new XerialSnappyCompressor());
-  GossipEncoding SSZ_SNAPPY_AIRCOMPRESSOR =
-      new SszSnappyEncoding(new AircompressorSnappyBlockCompressor());
+  GossipEncoding SSZ_SNAPPY = new SszSnappyEncoding(new AircompressorSnappyBlockCompressor());
 
   /**
    * Get the name of the encoding. This is the name included as part of gossip topic strings.

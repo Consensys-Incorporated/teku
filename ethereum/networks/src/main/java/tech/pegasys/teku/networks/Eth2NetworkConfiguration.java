@@ -1096,10 +1096,11 @@ public class Eth2NetworkConfiguration {
               "enr:-Le4QH6LQrusDbAHPjU_HcKOuMeXfdEB5NJyXgHWFadfHgiySqeDyusQMvfphdYWOzuSZO9Uq2AMRJR5O4ip7OvVma8BhGV0aDKQtTA_KgEAAAAAIgEAAAAAAIJpZIJ2NIJpcISLY9ncg2lwNpAkAh8AgQIBAAAAAAAAAAmXiXNlY3AyNTZrMaECDYCZTZEksF-kmgPholqgVt8IXr-8L7Nu7YrZ7HUpgxmDdWRwgiMohHVkcDaCI4I",
               "enr:-Le4QIqLuWybHNONr933Lk0dcMmAB5WgvGKRyDihy1wHDIVlNuuztX62W51voT4I8qD34GcTEOTmag1bcdZ_8aaT4NUBhGV0aDKQtTA_KgEAAAAAIgEAAAAAAIJpZIJ2NIJpcISLY04ng2lwNpAkAh8AgAIBAAAAAAAAAA-fiXNlY3AyNTZrMaEDscnRV6n1m-D9ID5UsURk0jsoKNXt1TIrj8uKOGW6iluDdWRwgiMohHVkcDaCI4I",
               // EF
-              "enr:-Ku4QHqVeJ8PPICcWk1vSn_XcSkjOkNiTg6Fmii5j6vUQgvzMc9L1goFnLKgXqBJspJjIsB91LTOleFmyWWrFVATGngBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhAMRHkWJc2VjcDI1NmsxoQKLVXFOhp2uX6jeT0DvvDpPcU8FWMjQdR4wMuORMhpX24N1ZHCCIyg",
-              "enr:-Ku4QG-2_Md3sZIAUebGYT6g0SMskIml77l6yR-M_JXc-UdNHCmHQeOiMLbylPejyJsdAPsTHJyjJB2sYGDLe0dn8uYBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhBLY-NyJc2VjcDI1NmsxoQORcM6e19T1T9gi7jxEZjk_sjVLGFscUNqAY9obgZaxbIN1ZHCCIyg",
-              "enr:-Ku4QPn5eVhcoF1opaFEvg1b6JNFD2rqVkHQ8HApOKK61OIcIXD127bKWgAtbwI7pnxx6cDyk_nI88TrZKQaGMZj0q0Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhDayLMaJc2VjcDI1NmsxoQK2sBOLGcUb4AwuYzFuAVCaNHA-dy24UuEKkeFNgCVCsIN1ZHCCIyg",
-              "enr:-Ku4QEWzdnVtXc2Q0ZVigfCGggOVB2Vc1ZCPEc6j21NIFLODSJbvNaef1g4PxhPwl_3kax86YPheFUSLXPRs98vvYsoBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhDZBrP2Jc2VjcDI1NmsxoQM6jr8Rb1ktLEsVcKAPa08wCsKUmvoQ8khiOl_SLozf9IN1ZHCCIyg",
+              "enr:-KG4QIH7EyRfHFmXLZaG6j0bMvow18k63nKWPfppuKh6iBHMPGM93HX3W3hl7jZdv_Hz8yd_jXVHX2loStJKOZqNRu0BgmlkgnY0gmlwhNRj2kKDaXA2kCoAHKALAA0CAAAAAAAAAF6Jc2VjcDI1NmsxoQMngQgKvKJR49-jugrZ_05LhAHbUlSCwZ_HyqVCb3SXYoN1ZHCCTrqEdWRwNoJOug",
+              "enr:-KG4QJIyNiCpvXrnK8dugxmFckcIduvuQraNlX0GlKwF-XyPeZ-ZG7_yHhsr08K85X1utedECuRXhXiPYJoMogs8ai4BgmlkgnY0gmlwhIHUpj2DaXA2kCYEqIAABAHQAAAAA2GdUACJc2VjcDI1NmsxoQNQbzy36fddhPGH1I6D5rQyj8zUDGWQAkkWS37qBLB_yIN1ZHCCIyiEdWRwNoIjKA",
+              "enr:-KG4QDU7s2q7Cl_qGr2BucsrhN1bKywwstBqMLUtR6f_pOejVAjXLAQsFBOCSgALH_Oy7eshQ2ic7CbFwRZIxZGIMMsBgmlkgnY0gmlwhJB-_BiDaXA2kCQAYYABAADQAAAAAYEgYAGJc2VjcDI1NmsxoQLACT5Njs8OjnCiL4_11wgqunT0BPxQ5PndoKoF6ICNWYN1ZHCCIyiEdWRwNoIjKA",
+              "enr:-KG4QD_qJswcSJKmI_kjUZ-QbUuLUzniIakQbJKgh4YFzluGEKikFzaVoIbS7jpbw2K9hjmWTn7Ha3zyNIm0Ysu-dSgBgmlkgnY0gmlwhLKc14yDaXA2kCoBBP8A9DxKAAAAAAAAAAGJc2VjcDI1NmsxoQOVp1YSg2ZkGenRZi4iGebFira2xZrER7F_WW55-Rd3boN1ZHCCIyiEdWRwNoIjKA",
+              "enr:-KG4QIFbm7kLOmOeiDwjSxLXEN0Ms4advV742CYLpGUCndm2XvAnM9uKVdWpydb8Gpstk44eFDlZlPDyV2gX7uH7KHgBgmlkgnY0gmlwhAXfXlGDaXA2kCoBBP8C8BytAAAAAAAAAAGJc2VjcDI1NmsxoQIAizAK-MKs-s08GzGzoPVIaBmfdKqosqxSkwxUuV2UnIN1ZHCCIyiEdWRwNoIjKA",
 
               // Nimbus
               "enr:-LK4QA8FfhaAjlb_BXsXxSfiysR7R52Nhi9JBt4F8SPssu8hdE1BXQQEtVDC3qStCW60LSO7hEsVHv5zm8_6Vnjhcn0Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhAN4aBKJc2VjcDI1NmsxoQJerDhsJ-KxZ8sHySMOCmTO6sHM3iCFQ6VMvLTe948MyYN0Y3CCI4yDdWRwgiOM",
@@ -1122,11 +1123,11 @@ public class Eth2NetworkConfiguration {
               "https://github.com/eth-clients/merge-testnets/raw/9c873ab67b902aa676370a549129e5e91013afa3/sepolia/genesis.ssz")
           .discoveryBootnodes(
               // EF bootnodes
-              "enr:-Ku4QDZ_rCowZFsozeWr60WwLgOfHzv1Fz2cuMvJqN5iJzLxKtVjoIURY42X_YTokMi3IGstW5v32uSYZyGUXj9Q_IECh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhIpEe5iJc2VjcDI1NmsxoQNHTpFdaNSCEWiN_QqT396nb0PzcUpLe3OVtLph-AciBYN1ZHCCIy0",
-              "enr:-Ku4QHRyRwEPT7s0XLYzJ_EeeWvZTXBQb4UCGy1F_3m-YtCNTtDlGsCMr4UTgo4uR89pv11uM-xq4w6GKfKhqU31hTgCh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhIrFM7WJc2VjcDI1NmsxoQI4diTwChN3zAAkarf7smOHCdFb1q3DSwdiQ_Lc_FdzFIN1ZHCCIy0",
-              "enr:-Ku4QOkvvf0u5Hg4-HhY-SJmEyft77G5h3rUM8VF_e-Hag5cAma3jtmFoX4WElLAqdILCA-UWFRN1ZCDJJVuEHrFeLkDh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhJK-AWeJc2VjcDI1NmsxoQLFcT5VE_NMiIC8Ll7GypWDnQ4UEmuzD7hF_Hf4veDJwIN1ZHCCIy0",
-              "enr:-Ku4QH6tYsHKITYeHUu5kdfXgEZWI18EWk_2RtGOn1jBPlx2UlS_uF3Pm5Dx7tnjOvla_zs-wwlPgjnEOcQDWXey51QCh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhIs7Mc6Jc2VjcDI1NmsxoQIET4Mlv9YzhrYhX_H9D7aWMemUrvki6W4J2Qo0YmFMp4N1ZHCCIy0",
-              "enr:-Ku4QDmz-4c1InchGitsgNk4qzorWMiFUoaPJT4G0IiF8r2UaevrekND1o7fdoftNucirj7sFFTTn2-JdC2Ej0p1Mn8Ch2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhKpA-liJc2VjcDI1NmsxoQMpHP5U1DK8O_JQU6FadmWbE42qEdcGlllR8HcSkkfWq4N1ZHCCIy0",
+              "enr:-KG4QCK5YeEoL55e2hoS6nCregwx0Zd6NQ3rhVDfeg5Q8ozUNmUYTskpmuqo2WYFo3z24-cWC9qrU3yYKDSJ299lh8sBgmlkgnY0gmlwhNRj2kKDaXA2kCoAHKALAA0CAAAAAAAAAF6Jc2VjcDI1NmsxoQLzqnTxu_nlM8V_semraAjfbH9HZpcbVUCXH2qanVPsroN1ZHCCTruEdWRwNoJOuw",
+              "enr:-KG4QF0FvRL7Eqc4oURFhOkS0V6guntLnw54dYgTruM7z9TAMWhRpCrxZ7Pd536-q4qlwdW13czht8_UEWwGyJesu1gBgmlkgnY0gmlwhIHUpj2DaXA2kCYEqIAABAHQAAAAA2GdUACJc2VjcDI1NmsxoQL5iA7gNCs4SDmnXz8Isacq0EJbJfvV_uJlccoHxHU5ZYN1ZHCCI4yEdWRwNoIjjA",
+              "enr:-KG4QI4reJ1D_BwCwg6EKAuo2HEWoIVVNjphtOTJP2gzPVLSTYM3NFwp39TAKw-7QiQ2NVts7DK4rjJR2BEcAwh3BckBgmlkgnY0gmlwhJB-_BiDaXA2kCQAYYABAADQAAAAAYEgYAGJc2VjcDI1NmsxoQLXzHa5K0M3F4pqErIhleMByA8votAUhUXylRT6SWX2HoN1ZHCCI4yEdWRwNoIjjA",
+              "enr:-KG4QI1KOrogxK8u3Oc0QLdgkNTbAPuAMtixa6Vx05N-Bl7IOCVURUvqZ2N6JA97ts7YG1B4D3hQvZ9uQlCPYVjy1DABgmlkgnY0gmlwhLKc14yDaXA2kCoBBP8A9DxKAAAAAAAAAAGJc2VjcDI1NmsxoQLB0ZhHGRmVwXja_4o-GRN1VVJYRI11F45CTAlu1s00Q4N1ZHCCI4yEdWRwNoIjjA",
+              "enr:-KG4QKU4YfXfB3_BVI7u0VvXnSJI6cqo-tCRm-Ggh3XxBImcYvrUoKUDbIjJjG9-QphuH6gzScdf69t597M0nHut4kABgmlkgnY0gmlwhAXfXlGDaXA2kCoBBP8C8BytAAAAAAAAAAGJc2VjcDI1NmsxoQL0y83XKpPgvY7XReWg9S8bdI2UUIe5dE0N7rjOIIj4xYN1ZHCCI4yEdWRwNoIjjA",
               // Teku bootnode
               "enr:-Iu4QKvMF7Ne_RSQoZGvavTuZ1QA5_Pgeb0nq_hrjhU8s0UDV3KhcMXJkGwOWhsDGZL3ISjL0CTP-hfoTjZtEtCEwR4BgmlkgnY0gmlwhAOAaySJc2VjcDI1NmsxoQNta5b_bexSSwwrGW2Re24MjfMntzFd0f2SAxQtMj3ueYN0Y3CCIyiDdWRwgiMo",
               // Another bootnode
@@ -1185,26 +1186,14 @@ public class Eth2NetworkConfiguration {
           .trustedSetupFromClasspath(MAINNET_TRUSTED_SETUP_FILENAME)
           .eth1DepositContractDeployBlock(155435)
           .discoveryBootnodes(
-              // chiado-lighthouse-0
-              "enr:-L64QOijsdi9aVIawMb5h5PWueaPM9Ai6P17GNPFlHzz7MGJQ8tFMdYrEx8WQitNKLG924g2Q9cCdzg54M0UtKa3QIKCMxaHYXR0bmV0c4j__________4RldGgykDE2cEMCAABv__________-CaWSCdjSCaXCEi5AaWYlzZWNwMjU2azGhA8CjTkD4m1s8FbKCN18LgqlYcE65jrT148vFtwd9U62SiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
-              // chiado-lighthouse-1
-              "enr:-L64QKYKGQj5ybkfBxyFU5IEVzP7oJkGHJlie4W8BCGAYEi4P0mmMksaasiYF789mVW_AxYVNVFUjg9CyzmdvpyWQ1KCMlmHYXR0bmV0c4j__________4RldGgykDE2cEMCAABv__________-CaWSCdjSCaXCEi5CtNolzZWNwMjU2azGhAuA7BAwIijy1z81AO9nz_MOukA1ER68rGA67PYQ5pF1qiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
-              // chiado-lodestar-0
-              "enr:-Ly4QJJUnV9BxP_rw2Bv7E9iyw4sYS2b4OQZIf4Mu_cA6FljJvOeSTQiCUpbZhZjR4R0VseBhdTzrLrlHrAuu_OeZqgJh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQGnOJc2VjcDI1NmsxoQPT_u3IjDtB2r-nveH5DhUmlM8F2IgLyxhmwmqW4L5k3ohzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
-              // chiado-prysm-0
-              "enr:-MK4QCkOyqOTPX1_-F-5XVFjPclDUc0fj3EeR8FJ5-hZjv6ARuGlFspM0DtioHn1r6YPUXkOg2g3x6EbeeKdsrvVBYmGAYQKrixeh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQGlWJc2VjcDI1NmsxoQKdW3-DgLExBkpLGMRtuM88wW_gZkC7Yeg0stYDTrlynYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-              // chiado-teku-0
-              "enr:-Ly4QLYLNqrjvSxD3lpAPBUNlxa6cIbe79JqLZLFcZZjWoCjZcw-85agLUErHiygG2weRSCLnd5V460qTbLbwJQsfZkoh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhKq7mu-Jc2VjcDI1NmsxoQP900YAYa9kdvzlSKGjVo-F3XVzATjOYp3BsjLjSophO4hzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
-              // chiado-teku-1
-              "enr:-Ly4QCGeYvTCNOGKi0mKRUd45rLj96b4pH98qG7B9TCUGXGpHZALtaL2-XfjASQyhbCqENccI4PGXVqYTIehNT9KJMQgh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQrVSJc2VjcDI1NmsxoQP9iDchx2PGl3JyJ29B9fhLCvVMN6n23pPAIIeFV-sHOIhzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
-              // GnosisDAO Bootnode: 3.71.132.231
-              "enr:-Ly4QAtr21x5Ps7HYhdZkIBRBgcBkvlIfEel1YNjtFWf4cV3au2LgBGICz9PtEs9-p2HUl_eME8m1WImxTxSB3AkCMwBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANHhOeJc2VjcDI1NmsxoQNLp1QPV8-pyMCohOtj6xGtSBM_GtVTqzlbvNsCF4ezkYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-              // GnosisDAO Bootnode: 3.69.35.13
-              "enr:-Ly4QLgn8Bx6faigkKUGZQvd1HDToV2FAxZIiENK-lczruzQb90qJK-4E65ADly0s4__dQOW7IkLMW7ZAyJy2vtiLy8Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANFIw2Jc2VjcDI1NmsxoQMa-fWEy9UJHfOl_lix3wdY5qust78sHAqZnWwEiyqKgYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-              // GnosisDAO Bootnode: 35.206.174.92
-              "enr:-KG4QF7z4LUdMfgwvh-fS-MDv_1hPSUCqGfyOWGLNJuoBHKFAMSHz8geQn8v3qDDbuSQKud3WIAjKqR4gqJoLBUEJ08ZhGV0aDKQDc1ElgAAAG___________4JpZIJ2NIJpcIQjzq5ciXNlY3AyNTZrMaECt7YO363pV54d3QdgnluL5kxzhCR_k0yM9C-G6bqMGoKDdGNwgiMog3VkcIIjKA",
-              // GnosisDAO Bootnode: 35.210.126.23
-              "enr:-LK4QCUTEmZrT1AgCKdyVgwnHL5J0VSoxsyjruAtwo-owBTBVEOyAnQRVNXlcW5aL-ycntk5oHDrKCR-DXZAlUAKpjEBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCdM7Z1BAAAb___________gmlkgnY0gmlwhCPSfheJc2VjcDI1NmsxoQNpdf8U9pzsU9m6Hzgd1rmTI-On-QImJnkZBGqDp4org4N0Y3CCIyiDdWRwgiMo")
+              // chiado-0
+              "enr:-IS4QC9xcSNOKeUBrjOX1-qwcPDGOvRK-Aql_YnRfuYsuXElQawANMLTOz1YfrZTMI07B7DAl9hmk3ic5G7ZHQbq4HsUgmlkgnY0gmlwhDNL9gKJc2VjcDI1NmsxoQOzB8HdKe07eQBOxu5nexAWECV47zxlau23oEYqoToy9YN1ZHCCIyg",
+              // chiado-1
+              "enr:-IS4QMpCWNqXmqbtXg7vQyYBwV2xTDpgTNpgAz060TY5cpJ3JdjuwAkLG01Vf9Vlfb0jtRhJEpj0CfteG-3K_V36bmECgmlkgnY0gmlwhDmBRt6Jc2VjcDI1NmsxoQNkoifSsk1ijP3-OR9pcL2VWCSfD5_syapyrXA83GcAvYN1ZHCCIyg",
+              // chiado-2
+              "enr:-IS4QBa3hl_BcjrY4z_OvhRBx7qUMBFGkjkoedGNMXgC_fzLRBsg161SipeHWAkUnSuvBg_7529-Qfxcc7CAbokn4fMCgmlkgnY0gmlwhDmA_HuJc2VjcDI1NmsxoQL8xX-V_pyU_l3AIfVokHKMN1OMUG02vcy4AMOxdyi5jIN1ZHCCIyg",
+              // chiado-3
+              "enr:-IS4QEuUku9zL0V3hFHt41fqmEdvphEvrOg0D4K_TgiiaePCDH2IPzt6B3O6NLHtgJNXk3UW68DL6KVBD4rjoW-nW9ACgmlkgnY0gmlwhDYnlGKJc2VjcDI1NmsxoQP3W66lisn2YOJF4B0QDEnURZ6tqzpi5gBy9rbMfpC70YN1ZHCCIyg")
           .terminalBlockHashEpochOverride(UInt64.valueOf(27263))
           .terminalBlockHashOverride(
               Bytes32.fromHexString(
@@ -1242,7 +1231,7 @@ public class Eth2NetworkConfiguration {
           .trustedSetupFromClasspath(MAINNET_TRUSTED_SETUP_FILENAME)
           .eth1DepositContractDeployBlock(0)
           .checkpointSyncUrl("https://ephemery.beaconstate.ethstaker.cc")
-          .discoveryBootnodesFromUrl("https://ephemery.dev/latest/boot_enr.txt");
+          .discoveryBootnodesFromUrl("https://ephemery.dev/latest/metadata/bootstrap_nodes.txt");
     }
 
     private Builder applyHoodiNetworkDefaults() {
@@ -1257,12 +1246,11 @@ public class Eth2NetworkConfiguration {
               "https://github.com/eth-clients/hoodi/raw/617ea32823e22ff78f66f8534abbb91cecd76962/metadata/genesis.ssz")
           .discoveryBootnodes(
               // EF bootnodes
-              "enr:-Mq4QLkmuSwbGBUph1r7iHopzRpdqE-gcm5LNZfcE-6T37OCZbRHi22bXZkaqnZ6XdIyEDTelnkmMEQB8w6NbnJUt9GGAZWaowaYh2F0dG5ldHOIABgAAAAAAACEZXRoMpDS8Zl_YAAJEAAIAAAAAAAAgmlkgnY0gmlwhNEmfKCEcXVpY4IyyIlzZWNwMjU2azGhA0hGa4jZJZYQAS-z6ZFK-m4GCFnWS8wfjO0bpSQn6hyEiHN5bmNuZXRzAIN0Y3CCIyiDdWRwgiMo",
-              "enr:-Ku4QLVumWTwyOUVS4ajqq8ZuZz2ik6t3Gtq0Ozxqecj0qNZWpMnudcvTs-4jrlwYRQMQwBS8Pvtmu4ZPP2Lx3i2t7YBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBd9cEGEAAJEP__________gmlkgnY0gmlwhNEmfKCJc2VjcDI1NmsxoQLdRlI8aCa_ELwTJhVN8k7km7IDc3pYu-FMYBs5_FiigIN1ZHCCIyk",
-              "enr:-LK4QAYuLujoiaqCAs0-qNWj9oFws1B4iy-Hff1bRB7wpQCYSS-IIMxLWCn7sWloTJzC1SiH8Y7lMQ5I36ynGV1ASj4Eh2F0dG5ldHOIYAAAAAAAAACEZXRoMpDS8Zl_YAAJEAAIAAAAAAAAgmlkgnY0gmlwhIbRilSJc2VjcDI1NmsxoQOmI5MlAu3f5WEThAYOqoygpS2wYn0XS5NV2aYq7T0a04N0Y3CCIyiDdWRwgiMo",
-              "enr:-Ku4QIC89sMC0o-irosD4_23lJJ4qCGOvdUz7SmoShWx0k6AaxCFTKviEHa-sa7-EzsiXpDp0qP0xzX6nKdXJX3X-IQBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBd9cEGEAAJEP__________gmlkgnY0gmlwhIbRilSJc2VjcDI1NmsxoQK_m0f1DzDc9Cjrspm36zuRa7072HSiMGYWLsKiVSbP34N1ZHCCIyk",
-              "enr:-Ku4QNkWjw5tNzo8DtWqKm7CnDdIq_y7xppD6c1EZSwjB8rMOkSFA1wJPLoKrq5UvA7wcxIotH6Usx3PAugEN2JMncIBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBd9cEGEAAJEP__________gmlkgnY0gmlwhIbHuBeJc2VjcDI1NmsxoQP3FwrhFYB60djwRjAoOjttq6du94DtkQuaN99wvgqaIYN1ZHCCIyk",
-              "enr:-OS4QMJGE13xEROqvKN1xnnt7U-noc51VXyM6wFMuL9LMhQDfo1p1dF_zFdS4OsnXz_vIYk-nQWnqJMWRDKvkSK6_CwDh2F0dG5ldHOIAAAAADAAAACGY2xpZW502IpMaWdodGhvdXNljDcuMC4wLWJldGEuM4RldGgykNLxmX9gAAkQAAgAAAAAAACCaWSCdjSCaXCEhse4F4RxdWljgiMqiXNlY3AyNTZrMaECef77P8k5l3PC_raLw42OAzdXfxeQ-58BJriNaqiRGJSIc3luY25ldHMAg3RjcIIjKIN1ZHCCIyg",
+              "enr:-KG4QEfvG40PslpTF5F0SAnDMHYwQu7u9dMxVmglDyR0iKEsTUr0MilWHWKPh_Cyo0cHt0muy2SsrWpiC2sC_TRPiMcBgmlkgnY0gmlwhNRj2kKDaXA2kCoAHKALAA0CAAAAAAAAAF6Jc2VjcDI1NmsxoQIM-dQNDiL8ldy7S8t_bkW9awktKz1HHSF2Qups_K5S64N1ZHCCTryEdWRwNoJOvA",
+              "enr:-KG4QDNae3UVXdwSvWbZYotO9IpGRiBDzXr4owQ1_ONk_sOtIuZoI55Ja8EGtD-kzY5I_0bTaYpVefgRK2q2hD1T8sABgmlkgnY0gmlwhIHUpj2DaXA2kCYEqIAABAHQAAAAA2GdUACJc2VjcDI1NmsxoQMu3GRf_l288UJNQcXiLp4NbOQmigxSx14ddTal4tBp9IN1ZHCCI_CEdWRwNoIj8A",
+              "enr:-KG4QOOHORt2Kmo3lgoRTcqJnxH07aELtuidFEuBzN8Xdbzkfb4MblrUOXJnDEJ8RzXpTXWBEqM3q0DRphMm8xOIVbIBgmlkgnY0gmlwhJB-_BiDaXA2kCQAYYABAADQAAAAAYEgYAGJc2VjcDI1NmsxoQOf6T6A1lri5bTBzvb3sAb42Ki9L1pSqQsNzqvBUr7BjoN1ZHCCI_CEdWRwNoIj8A",
+              "enr:-KG4QM0TIrjoocAJvIY2XYOa1UzeSM1c2d3rBf1QzyxchGmzJ3OPdLKUFrjBRCPDYHhq69pEB5YKmFtKOBuF63k1pB4BgmlkgnY0gmlwhLKc14yDaXA2kCoBBP8A9DxKAAAAAAAAAAGJc2VjcDI1NmsxoQNFCY3Kl3VQfYl3lqOTN8YG0598xcIrlg1mmqKzdpLm5IN1ZHCCI_CEdWRwNoIj8A",
+              "enr:-KG4QLBt5eeWOp11A7l2WfR-sC5j3SYybU0PeEepotPzpt4kZE0nDFFZCy8NPjun3dcM8D4_xmYxZCB0WTnitKj7dAMBgmlkgnY0gmlwhAXfXlGDaXA2kCoBBP8C8BytAAAAAAAAAAGJc2VjcDI1NmsxoQLhrnwm2X7ZcxLideAlCmQvGkyHXMl7KXL0K-WDOdAoLIN1ZHCCI_CEdWRwNoIj8A",
               // Teku bootnodes
               "enr:-LK4QDwhXMitMbC8xRiNL-XGMhRyMSOnxej-zGifjv9Nm5G8EF285phTU-CAsMHRRefZimNI7eNpAluijMQP7NDC8kEMh2F0dG5ldHOIAAAAAAAABgCEZXRoMpDS8Zl_YAAJEAAIAAAAAAAAgmlkgnY0gmlwhAOIT_SJc2VjcDI1NmsxoQMoHWNL4MAvh6YpQeM2SUjhUrLIPsAVPB8nyxbmckC6KIN0Y3CCIyiDdWRwgiMo",
               "enr:-LK4QPYl2HnMPQ7b1es6Nf_tFYkyya5bj9IqAKOEj2cmoqVkN8ANbJJJK40MX4kciL7pZszPHw6vLNyeC-O3HUrLQv8Mh2F0dG5ldHOIAAAAAAAAAMCEZXRoMpDS8Zl_YAAJEAAIAAAAAAAAgmlkgnY0gmlwhAMYRG-Jc2VjcDI1NmsxoQPQ35tjr6q1qUqwAnegQmYQyfqxC_6437CObkZneI9n34N0Y3CCIyiDdWRwgiMo");

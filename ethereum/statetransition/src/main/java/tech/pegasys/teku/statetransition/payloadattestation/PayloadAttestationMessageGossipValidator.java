@@ -20,6 +20,7 @@ import static tech.pegasys.teku.statetransition.validation.InternalValidationRes
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ignore;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.reject;
 
+import com.google.errorprone.annotations.FormatMethod;
 import it.unimi.dsi.fastutil.ints.IntSet;
 import java.util.Map;
 import java.util.Optional;
@@ -32,7 +33,6 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.collections.LimitedSet;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
-import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
@@ -70,132 +70,194 @@ public class PayloadAttestationMessageGossipValidator {
     final PayloadAttestationData data = validatablePayloadAttestationMessage.getData();
 
     /*
-     * [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance),
-     * i.e. data.slot == current_slot
+     * [IGNORE] The payload attestation's slot is for the current slot
      */
     if (!gossipValidationHelper.isSlotCurrent(data.getSlot())) {
-      LOG.trace(
-          "Ignoring payload attestation with slot {} from validator with index {} because it's not from the current slot",
-          data.getSlot(),
-          payloadAttestationMessage.getValidatorIndex());
       return completedFuture(
-          ignore(
+          ignorePayloadAttestation(
+              payloadAttestationMessage,
               "Ignoring payload attestation with slot %s from validator with index %s because it's not from the current slot",
-              data.getSlot(), payloadAttestationMessage.getValidatorIndex()));
+              data.getSlot(),
+              payloadAttestationMessage.getValidatorIndex()));
     }
 
     /*
-     * [IGNORE] The payload_attestation_message is the first valid message received from the validator
-     *  with index payload_attestation_message.validate_index
+     * [IGNORE] This is the first valid payload attestation from this validator index
      */
     final ValidatorIndexAndSlot key =
         new ValidatorIndexAndSlot(payloadAttestationMessage.getValidatorIndex(), data.getSlot());
     if (seenPayloadAttestations.contains(key)) {
-      return completedFuture(ignoreAttestationAlreadySeenValidationResult(key));
+      return completedFuture(
+          ignorePayloadAttestationAlreadySeenValidationResult(payloadAttestationMessage));
     }
 
     /*
-     * [REJECT] The message's block data.beacon_block_root passes validation.
-     * Check this before the availability check so that a known-invalid block root is rejected
-     * immediately rather than treated as an unseen block and queued for future processing.
+     * [REJECT] The payload attestation's block passes validation
      */
     if (invalidBlockRoots.containsKey(data.getBeaconBlockRoot())) {
-      LOG.trace("Payload attestations's block with root {} is invalid", data.getBeaconBlockRoot());
       return completedFuture(
-          reject(
-              "Payload attestations's block with root %s is invalid", data.getBeaconBlockRoot()));
+          rejectPayloadAttestation(
+              payloadAttestationMessage,
+              "Payload attestations's block with root %s is invalid",
+              data.getBeaconBlockRoot()));
     }
 
     /*
-     * [IGNORE] The message's block data.beacon_block_root has been seen (via gossip or non-gossip sources)
-     * (a client MAY queue attestation for processing once the block is retrieved.
-     * Note a client might want to request payload after).
+     * [IGNORE] The payload attestation's block has been seen (via gossip or non-gossip sources)
+     * (MAY be queued until block is retrieved)
      */
     if (!gossipValidationHelper.isBlockAvailable(data.getBeaconBlockRoot())) {
-      LOG.trace(
-          "Payload attestations's block with root {} is not available. Saving for future processing",
-          data.getBeaconBlockRoot());
-      return completedFuture(SAVE_FOR_FUTURE);
+      return completedFuture(
+          savePayloadAttestationForFuture(
+              payloadAttestationMessage,
+              "Payload attestations's block with root %s is not available",
+              data.getBeaconBlockRoot()));
     }
 
     /*
-     * [IGNORE] The block referenced by data.beacon_block_root is at slot data.slot,
-     * i.e. the block has block.slot == data.slot.
+     * [IGNORE] The payload attestation's block is at the assigned slot
      */
     final Optional<UInt64> maybeBlockSlot =
         gossipValidationHelper.getSlotForBlockRoot(data.getBeaconBlockRoot());
     if (maybeBlockSlot.isEmpty()) {
-      LOG.trace(
-          "Payload attestations's block with root {} has no known slot. Saving for future processing",
-          data.getBeaconBlockRoot());
-      return completedFuture(SAVE_FOR_FUTURE);
+      return completedFuture(
+          savePayloadAttestationForFuture(
+              payloadAttestationMessage,
+              "Payload attestations's block with root %s has no known slot",
+              data.getBeaconBlockRoot()));
     }
     final UInt64 blockSlot = maybeBlockSlot.get();
     if (!blockSlot.equals(data.getSlot())) {
-      LOG.trace(
-          "Payload attestations's block with root {} is at slot {} but attestation is for slot {}",
-          data.getBeaconBlockRoot(),
-          blockSlot,
-          data.getSlot());
       return completedFuture(
-          ignore(
+          ignorePayloadAttestation(
+              payloadAttestationMessage,
               "Payload attestations's block with root %s is at slot %s but attestation is for slot %s",
-              data.getBeaconBlockRoot(), blockSlot, data.getSlot()));
+              data.getBeaconBlockRoot(),
+              blockSlot,
+              data.getSlot()));
     }
 
+    // The block has just been checked to be at data.slot, so the state to validate against is its
+    // own post state. Looking it up by block root avoids the checkpoint state task queue, whose
+    // lock every message of the payload committee would otherwise contend for.
     return gossipValidationHelper
-        .getStateAtSlotAndBlockRoot(new SlotAndBlockRoot(data.getSlot(), data.getBeaconBlockRoot()))
+        .getStateAtBlockRoot(data.getBeaconBlockRoot())
         .thenApply(
             maybeState -> {
               if (maybeState.isEmpty()) {
-                LOG.trace(
-                    "State for block root {} and slot {} is unavailable",
+                return savePayloadAttestationForFuture(
+                    payloadAttestationMessage,
+                    "State for block root %s and slot %s is unavailable",
                     data.getBeaconBlockRoot(),
                     data.getSlot());
-                return SAVE_FOR_FUTURE;
               }
               final BeaconState state = maybeState.get();
+              final UInt64 validatorIndex = payloadAttestationMessage.getValidatorIndex();
+
               /*
-               * [REJECT] The message's validator index is within the payload committee in get_ptc(state, data.slot).
-               * The state is the head state corresponding to processing the block up to the current slot as determined
-               * by the fork choice.
+               * [REJECT] The validator index is valid
                */
-              final IntSet ptcPositions =
-                  validatablePayloadAttestationMessage.calculatePtcPositions(spec, state);
-              if (ptcPositions.isEmpty()) {
-                LOG.trace(
-                    "Payload attestation's validator index {} is not in the payload committee for slot {}",
-                    payloadAttestationMessage.getValidatorIndex(),
-                    data.getSlot());
-                return reject(
-                    "Payload attestation's validator index %s is not in the payload committee",
-                    payloadAttestationMessage.getValidatorIndex());
+              if (validatorIndex.isGreaterThanOrEqualTo(state.getValidators().size())) {
+                return rejectPayloadAttestation(
+                    payloadAttestationMessage,
+                    "Payload attestation's validator index %s is out of range for the %s validators in the state",
+                    validatorIndex,
+                    state.getValidators().size());
               }
 
               /*
-               * [REJECT] payload_attestation_message.signature is valid with respect to the validator's public key.
+               * [REJECT] The validator is a member of the payload timeliness committee
+               */
+              final IntSet payloadTimelinessCommitteePositions =
+                  validatablePayloadAttestationMessage.calculatePayloadTimelinessCommitteePositions(
+                      spec, state);
+              if (payloadTimelinessCommitteePositions.isEmpty()) {
+                return rejectPayloadAttestation(
+                    payloadAttestationMessage,
+                    "Payload attestation's validator index %s is not in the payload committee",
+                    validatorIndex);
+              }
+
+              /*
+               * [REJECT] The signature is valid
                */
               if (!isSignatureValid(payloadAttestationMessage, state)) {
-                return reject("Invalid payload attestation signature");
+                return rejectPayloadAttestation(
+                    payloadAttestationMessage, "Invalid payload attestation signature");
               }
 
               if (!seenPayloadAttestations.add(key)) {
-                return ignoreAttestationAlreadySeenValidationResult(key);
+                return ignorePayloadAttestationAlreadySeenValidationResult(
+                    payloadAttestationMessage);
               } else {
-                return ACCEPT;
+                return acceptPayloadAttestation(payloadAttestationMessage);
               }
             });
   }
 
-  private InternalValidationResult ignoreAttestationAlreadySeenValidationResult(
-      final ValidatorIndexAndSlot key) {
-    LOG.trace(
-        "Payload attestation for slot {} and validator index {} already seen",
-        key.slot(),
-        key.validatorIndex());
-    return ignore(
+  private InternalValidationResult ignorePayloadAttestationAlreadySeenValidationResult(
+      final PayloadAttestationMessage payloadAttestationMessage) {
+    return ignorePayloadAttestation(
+        payloadAttestationMessage,
         "Payload attestation for slot %s and validator index %s already seen",
-        key.slot(), key.validatorIndex());
+        payloadAttestationMessage.getData().getSlot(),
+        payloadAttestationMessage.getValidatorIndex());
+  }
+
+  private InternalValidationResult acceptPayloadAttestation(
+      final PayloadAttestationMessage payloadAttestationMessage) {
+    LOG.trace(
+        "PayloadAttestation Gossip Validation Result: ACCEPT, context: {}",
+        formatPayloadAttestationContext(payloadAttestationMessage));
+    return ACCEPT;
+  }
+
+  @FormatMethod
+  private InternalValidationResult rejectPayloadAttestation(
+      final PayloadAttestationMessage payloadAttestationMessage,
+      final String descriptionTemplate,
+      final Object... args) {
+    final String message = String.format(descriptionTemplate, args);
+    LOG.trace(
+        "PayloadAttestation Gossip Validation Result: REJECT, context: {}, reason: {}",
+        formatPayloadAttestationContext(payloadAttestationMessage),
+        message);
+    return reject("%s", message);
+  }
+
+  @FormatMethod
+  private InternalValidationResult ignorePayloadAttestation(
+      final PayloadAttestationMessage payloadAttestationMessage,
+      final String descriptionTemplate,
+      final Object... args) {
+    final String message = String.format(descriptionTemplate, args);
+    LOG.trace(
+        "PayloadAttestation Gossip Validation Result: IGNORE, context: {}, reason: {}",
+        formatPayloadAttestationContext(payloadAttestationMessage),
+        message);
+    return ignore("%s", message);
+  }
+
+  @FormatMethod
+  private InternalValidationResult savePayloadAttestationForFuture(
+      final PayloadAttestationMessage payloadAttestationMessage,
+      final String descriptionTemplate,
+      final Object... args) {
+    final String message = String.format(descriptionTemplate, args);
+    LOG.trace(
+        "PayloadAttestation Gossip Validation Result: SAVE_FOR_FUTURE, context: {}, reason: {}",
+        formatPayloadAttestationContext(payloadAttestationMessage),
+        message);
+    return SAVE_FOR_FUTURE;
+  }
+
+  private String formatPayloadAttestationContext(
+      final PayloadAttestationMessage payloadAttestationMessage) {
+    return String.format(
+        "validator index %s, slot %s, block root %s",
+        payloadAttestationMessage.getValidatorIndex(),
+        payloadAttestationMessage.getData().getSlot(),
+        payloadAttestationMessage.getData().getBeaconBlockRoot());
   }
 
   private boolean isSignatureValid(

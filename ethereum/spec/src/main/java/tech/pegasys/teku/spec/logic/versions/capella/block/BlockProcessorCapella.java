@@ -100,24 +100,16 @@ public class BlockProcessorCapella extends BlockProcessorBellatrix {
   }
 
   @Override
-  public UInt64 executionProcessing(
+  public void executionProcessing(
       final MutableBeaconState genericState,
       final BeaconBlock beaconBlock,
       final Optional<? extends OptimisticExecutionPayloadExecutor> payloadExecutor,
-      final Supplier<BeaconStateMutators.ValidatorExitContext> validatorExitContextSupplier,
-      final UInt64 parentSlotFallback,
       final Optional<List<InclusionList>> inclusionLists)
       throws BlockProcessingException {
     final ExecutionPayloadHeader executionPayloadHeader =
         extractExecutionPayloadHeader(beaconBlock.getBody());
     processWithdrawals(genericState, Optional.of(executionPayloadHeader));
-    return super.executionProcessing(
-        genericState,
-        beaconBlock,
-        payloadExecutor,
-        validatorExitContextSupplier,
-        parentSlotFallback,
-        inclusionLists);
+    super.executionProcessing(genericState, beaconBlock, payloadExecutor, inclusionLists);
   }
 
   @Override

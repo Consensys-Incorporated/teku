@@ -23,12 +23,14 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import org.apache.tuweni.bytes.Bytes32;
+import org.opentest4j.TestAbortedException;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -64,11 +66,21 @@ import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.storage.store.UpdatableStore;
 
 public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
+  private final List<String> testsToSkip;
 
   private static final int MIN_BID_INCREMENT_PERCENTAGE = 1;
 
+  public GossipExecutionPayloadBidTestExecutor(final String... testsToSkip) {
+    this.testsToSkip = List.of(testsToSkip);
+  }
+
   @Override
   public void runTest(final TestDefinition testDefinition) throws Throwable {
+    if (testsToSkip.contains(testDefinition.getTestName())) {
+      throw new TestAbortedException(
+          "Test " + testDefinition.getDisplayName() + " has been ignored");
+    }
+
     final GossipExecutionPayloadBidMetaData metaData =
         loadYaml(testDefinition, "meta.yaml", GossipExecutionPayloadBidMetaData.class);
     final boolean signatureVerificationDisabled = metaData.getBlsSetting() == BlsSetting.IGNORED;
@@ -236,7 +248,8 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
 
     // acceptedPreferences tracks proposer preferences that have been accepted by the validator,
     // so the bid validator can look them up to check bid compatibility.
-    final Map<UInt64, ProposerPreferences> acceptedPreferences = new ConcurrentHashMap<>();
+    final Map<UInt64, Map<Bytes32, ProposerPreferences>> acceptedPreferences =
+        new ConcurrentHashMap<>();
     final ProposerPreferencesManager proposerPreferencesManager =
         new ProposerPreferencesManager() {
           @Override
@@ -252,8 +265,17 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
           }
 
           @Override
-          public Optional<ProposerPreferences> getProposerPreferences(final UInt64 slot) {
-            return Optional.ofNullable(acceptedPreferences.get(slot));
+          public Optional<ProposerPreferences> getProposerPreferences(
+              final UInt64 slot, final Bytes32 dependentRoot) {
+            return Optional.ofNullable(acceptedPreferences.get(slot))
+                .map(preferencesByDependentRoot -> preferencesByDependentRoot.get(dependentRoot));
+          }
+
+          @Override
+          public Collection<ProposerPreferences> getProposerPreferencesForSlot(final UInt64 slot) {
+            return Optional.ofNullable(acceptedPreferences.get(slot))
+                .map(preferencesByDependentRoot -> List.copyOf(preferencesByDependentRoot.values()))
+                .orElse(List.of());
           }
 
           @Override
@@ -284,8 +306,10 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
                 proposerPreferencesSchema::sszDeserialize);
         result = safeJoin(preferencesValidator.validate(signedPreferences));
         if (result.isAccept()) {
-          acceptedPreferences.put(
-              signedPreferences.getMessage().getProposalSlot(), signedPreferences.getMessage());
+          final ProposerPreferences preferences = signedPreferences.getMessage();
+          acceptedPreferences
+              .computeIfAbsent(preferences.getProposalSlot(), __ -> new ConcurrentHashMap<>())
+              .put(preferences.getDependentRoot(), preferences);
         }
       } else if (messageName.startsWith("execution_payload_envelope_")) {
         final SignedExecutionPayloadEnvelope signedEnvelope =

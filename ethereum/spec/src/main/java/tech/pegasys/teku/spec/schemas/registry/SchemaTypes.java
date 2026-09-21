@@ -127,7 +127,7 @@ import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPending
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPaymentSchema;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingWithdrawal;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingWithdrawalSchema;
-import tech.pegasys.teku.spec.datastructures.state.versions.gloas.PtcWindowSchema;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.PayloadTimelinessCommitteeWindowSchema;
 
 public class SchemaTypes {
   // PHASE0
@@ -323,7 +323,8 @@ public class SchemaTypes {
       BUILDER_PENDING_PAYMENTS_SCHEMA = create("BUILDER_PENDING_PAYMENTS_SCHEMA");
   public static final SchemaId<SszListSchema<BuilderPendingWithdrawal, ?>>
       BUILDER_PENDING_WITHDRAWALS_SCHEMA = create("BUILDER_PENDING_WITHDRAWALS_SCHEMA");
-  public static final SchemaId<PtcWindowSchema> PTC_WINDOW_SCHEMA = create("PTC_WINDOW_SCHEMA");
+  public static final SchemaId<PayloadTimelinessCommitteeWindowSchema> PTC_WINDOW_SCHEMA =
+      create("PTC_WINDOW_SCHEMA");
   public static final SchemaId<ExecutionPayloadEnvelopesByRootRequestMessageSchema>
       EXECUTION_PAYLOAD_ENVELOPES_BY_ROOT_REQUEST_MESSAGE_SCHEMA =
           create("EXECUTION_PAYLOAD_ENVELOPES_BY_ROOT_REQUEST_MESSAGE_SCHEMA");

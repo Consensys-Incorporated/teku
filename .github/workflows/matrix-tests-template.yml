@@ -26,11 +26,15 @@ on:
       runner:
         type: string
         required: false
-        default: gha-runner-scale-set-ubuntu-24-amd64-xxl
+        default: ubuntu-latest-128
       gradle_args:
         type: string
         required: false
         default: ''
+      retry_attempts:
+        type: number
+        required: false
+        default: 1
 
 permissions:
   actions: read     # download the assemble output as an artifacts
@@ -178,8 +182,11 @@ jobs:
 
       - name: Run ${{ inputs.stage_name }} (shard)
         if: steps.shard.outputs.args != ''
-        run: |
-          ./gradlew --no-daemon --parallel ${{ inputs.gradle_args }} ${{ inputs.gradle_task }} ${{ steps.shard.outputs.args }}
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4.0.0
+        with:
+          timeout_minutes: 30
+          max_attempts: ${{ inputs.retry_attempts }}
+          command: ./gradlew --no-daemon --parallel ${{ inputs.gradle_args }} ${{ inputs.gradle_task }} ${{ steps.shard.outputs.args }}
 
       - name: Upload JUnit XML + HTML for ${{ inputs.stage_name }}
         if: always()

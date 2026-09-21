@@ -65,6 +65,8 @@ class PeerSubnetSubscriptionsTest {
 
   private final Spec spec = TestSpecFactory.createMinimalFulu();
   private final SettableLabelledGauge subnetPeerCountGauge = mock(SettableLabelledGauge.class);
+  private final SyncCommitteeSubnetPeerCountLogger syncCommitteeSubnetPeerCountLogger =
+      mock(SyncCommitteeSubnetPeerCountLogger.class);
   final Supplier<SpecVersion> currentSpecVersionSupplier = spec::getGenesisSpec;
   private final SchemaDefinitionsSupplier currentSchemaDefinitions =
       spec::getGenesisSchemaDefinitions;
@@ -323,7 +325,8 @@ class PeerSubnetSubscriptionsTest {
         dataColumnSidecarSubnetTopicProvider,
         dataColumnSubscriptions,
         TARGET_SUBSCRIBER_COUNT,
-        subnetPeerCountGauge);
+        subnetPeerCountGauge,
+        syncCommitteeSubnetPeerCountLogger);
   }
 
   private void withSubscriberCountForAllSubnets(final int subscriberCount) {

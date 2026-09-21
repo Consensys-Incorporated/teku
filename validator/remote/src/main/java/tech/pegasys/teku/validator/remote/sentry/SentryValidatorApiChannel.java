@@ -28,8 +28,8 @@ import tech.pegasys.teku.ethereum.json.types.node.PeerCount;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.BeaconCommitteeSelectionProof;
 import tech.pegasys.teku.ethereum.json.types.validator.InclusionListDuties;
+import tech.pegasys.teku.ethereum.json.types.validator.PayloadTimelinessCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuties;
-import tech.pegasys.teku.ethereum.json.types.validator.PtcDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeSelectionProof;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeSubnetSubscription;
@@ -39,6 +39,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
@@ -118,9 +119,9 @@ public class SentryValidatorApiChannel implements ValidatorApiChannel {
   }
 
   @Override
-  public SafeFuture<Optional<PtcDuties>> getPtcDuties(
+  public SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> getPayloadTimelinessCommitteeDuties(
       final UInt64 epoch, final IntCollection validatorIndices) {
-    return dutiesProviderChannel.getPtcDuties(epoch, validatorIndices);
+    return dutiesProviderChannel.getPayloadTimelinessCommitteeDuties(epoch, validatorIndices);
   }
 
   @Override
@@ -236,10 +237,11 @@ public class SentryValidatorApiChannel implements ValidatorApiChannel {
   @Override
   public SafeFuture<SendSignedBlockResult> sendSignedBlock(
       final SignedBlockContainer blockContainer,
-      final BroadcastValidationLevel broadcastValidationLevel) {
+      final BroadcastValidationLevel broadcastValidationLevel,
+      final Optional<String> builderUrl) {
     return blockHandlerChannel
         .orElse(dutiesProviderChannel)
-        .sendSignedBlock(blockContainer, broadcastValidationLevel);
+        .sendSignedBlock(blockContainer, broadcastValidationLevel, builderUrl);
   }
 
   @Override
@@ -280,6 +282,14 @@ public class SentryValidatorApiChannel implements ValidatorApiChannel {
     return blockHandlerChannel
         .orElse(dutiesProviderChannel)
         .sendSignedProposerPreferences(signedProposerPreferences);
+  }
+
+  @Override
+  public SafeFuture<List<SubmitDataError>> sendBuilderPreferences(
+      final SszList<BuilderPreferencesEntry> builderPreferences) {
+    return blockHandlerChannel
+        .orElse(dutiesProviderChannel)
+        .sendBuilderPreferences(builderPreferences);
   }
 
   @Override

@@ -65,6 +65,7 @@ import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
@@ -78,6 +79,7 @@ import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncComm
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.datastructures.validator.SubnetSubscription;
+import tech.pegasys.teku.spec.schemas.ApiSchemas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.api.CommitteeSubscriptionRequest;
 import tech.pegasys.teku.validator.api.SendSignedBlockResult;
@@ -604,7 +606,8 @@ class FailoverValidatorApiHandlerTest {
 
     final ValidatorApiChannelRequest<SendSignedBlockResult> publishingRequest =
         apiChannel ->
-            apiChannel.sendSignedBlock(blindedSignedBlock, BroadcastValidationLevel.NOT_REQUIRED);
+            apiChannel.sendSignedBlock(
+                blindedSignedBlock, BroadcastValidationLevel.NOT_REQUIRED, Optional.empty());
 
     setupSuccesses(
         publishingRequest,
@@ -616,12 +619,15 @@ class FailoverValidatorApiHandlerTest {
     SafeFutureAssert.assertThatSafeFuture(publishingRequest.run(failoverApiHandler)).isCompleted();
 
     verify(failoverApiChannel1)
-        .sendSignedBlock(blindedSignedBlock, BroadcastValidationLevel.NOT_REQUIRED);
+        .sendSignedBlock(
+            blindedSignedBlock, BroadcastValidationLevel.NOT_REQUIRED, Optional.empty());
 
     verify(primaryApiChannel, never())
-        .sendSignedBlock(blindedSignedBlock, BroadcastValidationLevel.NOT_REQUIRED);
+        .sendSignedBlock(
+            blindedSignedBlock, BroadcastValidationLevel.NOT_REQUIRED, Optional.empty());
     verify(failoverApiChannel2, never())
-        .sendSignedBlock(blindedSignedBlock, BroadcastValidationLevel.NOT_REQUIRED);
+        .sendSignedBlock(
+            blindedSignedBlock, BroadcastValidationLevel.NOT_REQUIRED, Optional.empty());
   }
 
   @Test
@@ -832,6 +838,8 @@ class FailoverValidatorApiHandlerTest {
         DATA_STRUCTURE_UTIL.randomSignedValidatorRegistrations(3);
     final BeaconPreparableProposer beaconPreparableProposer =
         DATA_STRUCTURE_UTIL.randomBeaconPreparableProposer();
+    final SszList<BuilderPreferencesEntry> emptyBuilderPreferences =
+        ApiSchemas.BUILDER_PREFERENCES_ENTRIES_SCHEMA.createFromElements(List.of());
 
     return Streams.concat(
         getSubscriptionRequests(),
@@ -855,6 +863,12 @@ class FailoverValidatorApiHandlerTest {
                 apiChannel -> apiChannel.sendSignedProposerPreferences(List.of()),
                 apiChannel -> verify(apiChannel).sendSignedProposerPreferences(List.of()),
                 BeaconNodeRequestLabels.SEND_PROPOSER_PREFERENCES_METHOD,
+                List.of()),
+            getArguments(
+                "sendBuilderPreferences",
+                apiChannel -> apiChannel.sendBuilderPreferences(emptyBuilderPreferences),
+                apiChannel -> verify(apiChannel).sendBuilderPreferences(emptyBuilderPreferences),
+                BeaconNodeRequestLabels.SEND_BUILDER_PREFERENCES_METHOD,
                 List.of())));
   }
 
@@ -889,10 +903,11 @@ class FailoverValidatorApiHandlerTest {
             "sendSignedBlock",
             apiChannel ->
                 apiChannel.sendSignedBlock(
-                    signedBeaconBlock, BroadcastValidationLevel.NOT_REQUIRED),
+                    signedBeaconBlock, BroadcastValidationLevel.NOT_REQUIRED, Optional.empty()),
             apiChannel ->
                 verify(apiChannel)
-                    .sendSignedBlock(signedBeaconBlock, BroadcastValidationLevel.NOT_REQUIRED),
+                    .sendSignedBlock(
+                        signedBeaconBlock, BroadcastValidationLevel.NOT_REQUIRED, Optional.empty()),
             BeaconNodeRequestLabels.PUBLISH_BLOCK_METHOD,
             mock(SendSignedBlockResult.class)),
         getArguments(

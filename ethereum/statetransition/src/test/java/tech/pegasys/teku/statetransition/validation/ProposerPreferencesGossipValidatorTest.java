@@ -15,6 +15,7 @@ package tech.pegasys.teku.statetransition.validation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -29,6 +30,7 @@ import static tech.pegasys.teku.statetransition.validation.InternalValidationRes
 import com.google.errorprone.annotations.FormatMethod;
 import java.util.Optional;
 import org.apache.logging.log4j.Level;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
@@ -38,13 +40,16 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecContext;
+import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
+import tech.pegasys.teku.spec.constants.Domain;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferencesSchema;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferencesSchema;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.fulu.BeaconStateFulu;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
@@ -96,8 +101,11 @@ public class ProposerPreferencesGossipValidatorTest {
     lookaheadEpochStartSlot = spec.computeStartSlotAtEpoch(lookaheadEpoch);
 
     when(gossipValidationHelper.hasSlotStarted(proposalSlot)).thenReturn(false);
+    when(gossipValidationHelper.isWithinProposerLookahead(proposalSlot)).thenReturn(true);
     when(gossipValidationHelper.isSlotFromFuture(lookaheadEpochStartSlot)).thenReturn(false);
     when(gossipValidationHelper.isBlockAvailable(dependentRoot)).thenReturn(true);
+    when(gossipValidationHelper.getStateAtBlockRoot(dependentRoot))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(state)));
     when(gossipValidationHelper.isPossibleDependentRoot(dependentRoot, lookaheadEpochStartSlot))
         .thenReturn(true);
     when(gossipValidationHelper.isSignatureValidWithRespectToProposerIndex(
@@ -121,6 +129,82 @@ public class ProposerPreferencesGossipValidatorTest {
   }
 
   @TestTemplate
+  void shouldAcceptFirstGloasEpochSignatureUsingProposalEpochFork() {
+    final Spec transitionSpec = TestSpecFactory.createMinimalWithGloasForkEpoch(UInt64.ONE);
+    final DataStructureUtil transitionDataStructureUtil = new DataStructureUtil(transitionSpec);
+    final GossipValidationHelper transitionGossipValidationHelper =
+        mock(GossipValidationHelper.class);
+    final RecentChainData transitionRecentChainData = mock(RecentChainData.class);
+    final ProposerPreferencesGossipValidator transitionValidator =
+        new ProposerPreferencesGossipValidator(
+            transitionSpec, transitionGossipValidationHelper, transitionRecentChainData);
+
+    final UInt64 proposalEpoch = UInt64.ONE;
+    final UInt64 firstGloasSlot = transitionSpec.computeStartSlotAtEpoch(proposalEpoch);
+    final BeaconState lookaheadState =
+        transitionDataStructureUtil
+            .stateBuilderFulu(100, 100)
+            .slot(UInt64.ZERO)
+            .fork(transitionSpec.getForkSchedule().getFork(UInt64.ZERO))
+            .build();
+    final int slotsPerEpoch = transitionSpec.atSlot(firstGloasSlot).getConfig().getSlotsPerEpoch();
+    final UInt64 expectedValidatorIndex =
+        BeaconStateFulu.required(lookaheadState).getProposerLookahead().getElement(slotsPerEpoch);
+    final Bytes32 transitionDependentRoot = transitionDataStructureUtil.randomBytes32();
+
+    final SchemaDefinitionsGloas schemaDefinitions =
+        SchemaDefinitionsGloas.required(
+            transitionSpec.atSlot(firstGloasSlot).getSchemaDefinitions());
+    final ProposerPreferences preferences =
+        schemaDefinitions
+            .getProposerPreferencesSchema()
+            .create(
+                transitionDependentRoot,
+                firstGloasSlot,
+                expectedValidatorIndex,
+                transitionDataStructureUtil.randomEth1Address(),
+                transitionDataStructureUtil.randomUInt64());
+    final SignedProposerPreferences signedPreferences =
+        schemaDefinitions
+            .getSignedProposerPreferencesSchema()
+            .create(preferences, transitionDataStructureUtil.randomSignature());
+
+    final Bytes32 expectedDomain =
+        transitionSpec.getDomain(
+            Domain.PROPOSER_PREFERENCES,
+            proposalEpoch,
+            transitionSpec.getForkSchedule().getFork(proposalEpoch),
+            lookaheadState.getGenesisValidatorsRoot());
+    final Bytes expectedSigningRoot =
+        transitionSpec
+            .atSlot(firstGloasSlot)
+            .miscHelpers()
+            .computeSigningRoot(preferences, expectedDomain);
+
+    when(transitionGossipValidationHelper.hasSlotStarted(firstGloasSlot)).thenReturn(false);
+    when(transitionGossipValidationHelper.isWithinProposerLookahead(firstGloasSlot))
+        .thenReturn(true);
+    when(transitionGossipValidationHelper.isBlockAvailable(transitionDependentRoot))
+        .thenReturn(true);
+    when(transitionGossipValidationHelper.isPossibleDependentRoot(
+            transitionDependentRoot, UInt64.ZERO))
+        .thenReturn(true);
+    when(transitionGossipValidationHelper.getStateAtBlockRoot(transitionDependentRoot))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(lookaheadState)));
+    when(transitionRecentChainData.retrieveCheckpointState(any(Checkpoint.class)))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(lookaheadState)));
+    when(transitionGossipValidationHelper.isSignatureValidWithRespectToProposerIndex(
+            eq(expectedSigningRoot),
+            eq(expectedValidatorIndex),
+            eq(signedPreferences.getSignature()),
+            eq(lookaheadState)))
+        .thenReturn(true);
+
+    assertThatSafeFuture(transitionValidator.validate(signedPreferences))
+        .isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
   void shouldIgnore_whenProposalSlotHasAlreadyStarted() {
     when(gossipValidationHelper.hasSlotStarted(proposalSlot)).thenReturn(true);
     assertThatSafeFuture(validator.validate(signedProposerPreferences))
@@ -131,11 +215,28 @@ public class ProposerPreferencesGossipValidatorTest {
 
   @TestTemplate
   void shouldIgnore_whenLookaheadEpochHasNotStarted() {
-    when(gossipValidationHelper.isSlotFromFuture(lookaheadEpochStartSlot)).thenReturn(true);
+    when(gossipValidationHelper.isWithinProposerLookahead(proposalSlot)).thenReturn(false);
     assertThatSafeFuture(validator.validate(signedProposerPreferences))
         .isCompletedWithValue(
             ignorePreferences(
                 signedProposerPreferences, "proposer for the proposal slot is not yet known"));
+    verify(recentChainData, never()).retrieveCheckpointState(any(Checkpoint.class));
+  }
+
+  @TestTemplate
+  void shouldIgnore_whenProposalEpochIsPreGloas() {
+    final Spec preGloasSpec = mock(Spec.class);
+    when(preGloasSpec.computeEpochAtSlot(proposalSlot)).thenReturn(lookaheadEpoch);
+    when(preGloasSpec.isProposerPreferencesAvailableAtEpoch(lookaheadEpoch)).thenReturn(false);
+
+    final ProposerPreferencesGossipValidator preGloasValidator =
+        new ProposerPreferencesGossipValidator(
+            preGloasSpec, gossipValidationHelper, recentChainData);
+
+    assertThatSafeFuture(preGloasValidator.validate(signedProposerPreferences))
+        .isCompletedWithValue(
+            ignorePreferences(signedProposerPreferences, "proposal epoch is pre-gloas"));
+    verify(gossipValidationHelper, never()).getStateAtBlockRoot(any());
     verify(recentChainData, never()).retrieveCheckpointState(any(Checkpoint.class));
   }
 
@@ -147,6 +248,18 @@ public class ProposerPreferencesGossipValidatorTest {
         .isCompletedWithValue(
             ignorePreferences(
                 signedProposerPreferences, "dependent root is not a possible dependent block"));
+    verify(recentChainData, never()).retrieveCheckpointState(any(Checkpoint.class));
+  }
+
+  @TestTemplate
+  void shouldIgnore_whenDependentBlockHasNotPassedValidation() {
+    when(gossipValidationHelper.getStateAtBlockRoot(dependentRoot))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+
+    assertThatSafeFuture(validator.validate(signedProposerPreferences))
+        .isCompletedWithValue(
+            ignorePreferences(
+                signedProposerPreferences, "dependent root has not passed validation"));
     verify(recentChainData, never()).retrieveCheckpointState(any(Checkpoint.class));
   }
 

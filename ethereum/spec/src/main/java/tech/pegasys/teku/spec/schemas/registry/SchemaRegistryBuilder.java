@@ -270,7 +270,7 @@ import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDepos
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingPartialWithdrawal.PendingPartialWithdrawalSchema;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPaymentSchema;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingWithdrawalSchema;
-import tech.pegasys.teku.spec.datastructures.state.versions.gloas.PtcWindowSchema;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.PayloadTimelinessCommitteeWindowSchema;
 import tech.pegasys.teku.spec.schemas.registry.SchemaTypes.SchemaId;
 
 // TODO Error Prone's JavaCase check doesn't yet recognize Java 25 unnamed lambda parameters.
@@ -1201,9 +1201,7 @@ public class SchemaRegistryBuilder {
             GLOAS,
             (registry, specConfig, schemaName) ->
                 new DataColumnSidecarSchemaGloas(
-                    registry.get(DATA_COLUMN_SCHEMA),
-                    OptionalLong.of(
-                        SpecConfigGloas.required(specConfig).getMaxDataColumnSidecarSize())))
+                    registry.get(DATA_COLUMN_SCHEMA), SpecConfigFulu.required(specConfig)))
         .build();
   }
 
@@ -1462,7 +1460,7 @@ public class SchemaRegistryBuilder {
         .withCreator(
             GLOAS,
             (registry, specConfig, schemaName) ->
-                new PtcWindowSchema(SpecConfigGloas.required(specConfig)))
+                new PayloadTimelinessCommitteeWindowSchema(SpecConfigGloas.required(specConfig)))
         .build();
   }
 

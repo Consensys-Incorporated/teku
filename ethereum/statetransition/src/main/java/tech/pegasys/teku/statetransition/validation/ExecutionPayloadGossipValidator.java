@@ -107,8 +107,7 @@ public class ExecutionPayloadGossipValidator {
                             && broadcastValidationLevel
                                 .map(CONSENSUS_AND_EQUIVOCATION::equals)
                                 .orElse(false)) {
-                          // consensus_and_equivocation: reject if the envelope's beacon block is an
-                          // equivocation, before it is broadcast
+                          // Extra broadcast-level equivocation check
                           return performEquivocationCheck(envelope);
                         }
                         return SafeFuture.completedFuture(markAsSeen(result, envelope));
@@ -178,7 +177,7 @@ public class ExecutionPayloadGossipValidator {
               final ExecutionPayloadBid bid = maybeExecutionPayloadBid.get();
 
               /*
-               * [REJECT] envelope.builder_index == bid.builder_index
+               * [REJECT] The envelope is from the builder committed to by the bid
                */
               if (!envelope.getBuilderIndex().equals(bid.getBuilderIndex())) {
                 LOG.trace(
@@ -191,7 +190,7 @@ public class ExecutionPayloadGossipValidator {
                         envelope.getBuilderIndex(), bid.getBuilderIndex()));
               }
               /*
-               * [REJECT] payload.block_hash == bid.block_hash
+               * [REJECT] The payload's block hash matches the bid's block hash
                */
               final ExecutionPayload payload = envelope.getPayload();
               final Bytes32 payloadBlockHash = payload.getBlockHash();
@@ -208,7 +207,7 @@ public class ExecutionPayloadGossipValidator {
               }
 
               /*
-               * [REJECT] hash_tree_root(envelope.execution_requests) == bid.execution_requests_root
+               * [REJECT] The envelope's execution requests root matches the bid's execution requests root
                */
               final Bytes32 executionRequestsRoot = envelope.getExecutionRequests().hashTreeRoot();
               final Bytes32 bidExecutionRequestsRoot = bid.getExecutionRequestsRoot();
@@ -230,14 +229,14 @@ public class ExecutionPayloadGossipValidator {
   private Optional<InternalValidationResult> performPreBlockValidation(
       final ExecutionPayloadEnvelope envelope) {
     /*
-     * [IGNORE] The node has not seen another valid SignedExecutionPayloadEnvelope for this block root from this builder.
+     * [IGNORE] The node has not seen another valid envelope for this block root from this builder
      */
     if (seenPayloads.contains(envelope.getBlockRootAndBuilderIndex())) {
       return Optional.of(ignoreExecutionPayloadAlreadySeen(envelope));
     }
 
     /*
-     * [REJECT] block passes validation
+     * [REJECT] The envelope's block passes validation
      */
     if (invalidBlockRoots.containsKey(envelope.getBeaconBlockRoot())) {
       LOG.trace(
@@ -253,8 +252,8 @@ public class ExecutionPayloadGossipValidator {
         gossipValidationHelper.getSlotForBlockRoot(envelope.getBeaconBlockRoot());
 
     /*
-     * [SAVE_FOR_FUTURE] The envelope's block root envelope.block_root has been seen (via gossip or non-gossip sources)
-     * (a client MAY queue payload for processing once the block is retrieved)
+     * [IGNORE] The envelope's block root has been seen (via gossip or non-gossip sources)
+     * (MAY be queued until block is retrieved)
      */
     if (maybeBeaconBlockSlot.isEmpty()) {
       LOG.trace(
@@ -265,7 +264,6 @@ public class ExecutionPayloadGossipValidator {
 
     /*
      * [IGNORE] The envelope is from a slot greater than or equal to the latest finalized slot
-     * -- i.e. validate that envelope.slot >= compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
      */
     if (gossipValidationHelper.isBeforeFinalizedSlot(envelope.getSlot())) {
       LOG.trace(
@@ -278,7 +276,7 @@ public class ExecutionPayloadGossipValidator {
     }
 
     /*
-     * [REJECT] block.slot equals envelope.slot
+     * [REJECT] The block's slot matches the payload's slot number
      */
     final UInt64 beaconBlockSlot = maybeBeaconBlockSlot.get();
     if (!envelope.getSlot().equals(beaconBlockSlot)) {
@@ -295,12 +293,6 @@ public class ExecutionPayloadGossipValidator {
     return verifyRequestAndWithdrawalLimits(envelope);
   }
 
-  /**
-   * [REJECT] Each execution request count, and the withdrawal count, is within its configured limit
-   * -- i.e. spec {@code verify_execution_requests_limits} plus the MAX_WITHDRAWALS_PER_PAYLOAD
-   * check. These bound the work an envelope can impose before it is propagated, so they are checked
-   * ahead of the expensive state lookup and signature verification.
-   */
   private Optional<InternalValidationResult> verifyRequestAndWithdrawalLimits(
       final ExecutionPayloadEnvelope envelope) {
     final SpecConfigGloas config =
@@ -308,6 +300,9 @@ public class ExecutionPayloadGossipValidator {
     final ExecutionRequestsGloas executionRequests =
         ExecutionRequestsGloas.required(envelope.getExecutionRequests());
 
+    /*
+     * [REJECT] The execution request counts are within their limits
+     */
     final Optional<InternalValidationResult> requestLimitResult =
         Stream.of(
                 rejectIfOverLimit(
@@ -332,6 +327,9 @@ public class ExecutionPayloadGossipValidator {
       return requestLimitResult;
     }
 
+    /*
+     * [REJECT] The number of withdrawals is within the limit
+     */
     return rejectIfOverLimit(
         "withdrawals",
         ExecutionPayloadCapella.required(envelope.getPayload()).getWithdrawals().size(),
@@ -357,7 +355,7 @@ public class ExecutionPayloadGossipValidator {
   private SafeFuture<InternalValidationResult> performWithStateValidation(
       final SignedExecutionPayloadEnvelope envelope) {
     return gossipValidationHelper
-        .getStateAtSlotAndBlockRoot(envelope.getSlotAndBlockRoot())
+        .getStateAtBlockRoot(envelope.getBeaconBlockRoot())
         .thenApply(
             maybeState -> {
               if (maybeState.isEmpty()) {
@@ -367,7 +365,7 @@ public class ExecutionPayloadGossipValidator {
                 return SAVE_FOR_FUTURE;
               }
               /*
-               * [REJECT] signed_execution_payload_envelope.signature is valid with respect to the builder's public key
+               * [REJECT] The envelope signature is valid
                */
               if (!isSignatureValid(envelope, maybeState.get())) {
                 LOG.trace("Invalid signed execution payload envelope signature. Rejecting");

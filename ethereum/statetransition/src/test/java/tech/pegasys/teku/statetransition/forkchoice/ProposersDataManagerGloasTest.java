@@ -256,7 +256,7 @@ class ProposersDataManagerGloasTest {
 
   private void prepareLocalProposer(final BeaconState state, final UInt64 blockSlot) {
     final UInt64 proposerIndex = UInt64.valueOf(spec.getBeaconProposerIndex(state, blockSlot));
-    manager.updatePreparedProposers(
+    manager.updatePreparedProposersFromPrepareBeaconProposer(
         List.of(new BeaconPreparableProposer(proposerIndex, defaultFeeRecipient)), blockSlot);
   }
 

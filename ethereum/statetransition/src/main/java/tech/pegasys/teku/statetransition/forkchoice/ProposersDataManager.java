@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
@@ -39,16 +40,19 @@ import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
 import tech.pegasys.teku.spec.datastructures.execution.versions.capella.Withdrawal;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannel;
 import tech.pegasys.teku.spec.executionlayer.ForkChoiceState;
 import tech.pegasys.teku.spec.executionlayer.PayloadBuildingAttributes;
 import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
+import tech.pegasys.teku.statetransition.util.ShufflingDependentRootUtil;
 import tech.pegasys.teku.storage.client.ChainHead;
 import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.storage.client.ValidatorIsConnectedProvider;
@@ -147,10 +151,33 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
     }
   }
 
-  public void updatePreparedProposers(
-      final Collection<BeaconPreparableProposer> preparedProposers, final UInt64 currentSlot) {
+  // pre-Gloas
+  public void updatePreparedProposersFromPrepareBeaconProposer(
+      final Collection<BeaconPreparableProposer> beaconPreparableProposers,
+      final UInt64 currentSlot) {
+    final Stream<ValidatorIndexAndFeeRecipient> preparedProposers =
+        beaconPreparableProposers.stream()
+            .map(
+                proposer ->
+                    new ValidatorIndexAndFeeRecipient(
+                        proposer.validatorIndex(), proposer.feeRecipient()));
     updatePreparedProposerCache(preparedProposers, currentSlot);
   }
+
+  // post-Gloas
+  public void updatePreparedProposersFromProposerPreferences(
+      final Collection<SignedProposerPreferences> proposerPreferences, final UInt64 currentSlot) {
+    final Stream<ValidatorIndexAndFeeRecipient> preparedProposers =
+        proposerPreferences.stream()
+            .map(
+                proposerPreference ->
+                    new ValidatorIndexAndFeeRecipient(
+                        proposerPreference.getMessage().getValidatorIndex(),
+                        proposerPreference.getMessage().getFeeRecipient()));
+    updatePreparedProposerCache(preparedProposers, currentSlot);
+  }
+
+  private record ValidatorIndexAndFeeRecipient(UInt64 validatorIndex, Eth1Address feeRecipient) {}
 
   public SafeFuture<Void> updateValidatorRegistrations(
       final SszList<SignedValidatorRegistration> signedValidatorRegistrations,
@@ -186,15 +213,15 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
   }
 
   private void updatePreparedProposerCache(
-      final Collection<BeaconPreparableProposer> preparedProposers, final UInt64 currentSlot) {
+      final Stream<ValidatorIndexAndFeeRecipient> preparedProposers, final UInt64 currentSlot) {
     final UInt64 expirySlot =
         currentSlot.plus(
             spec.getSlotsPerEpoch(currentSlot) * PROPOSER_PREPARATION_EXPIRATION_EPOCHS);
     preparedProposers.forEach(
         proposer ->
             preparedProposerInfoByValidatorIndex.put(
-                proposer.validatorIndex(),
-                new PreparedProposerInfo(expirySlot, proposer.feeRecipient())));
+                proposer.validatorIndex,
+                new PreparedProposerInfo(expirySlot, proposer.feeRecipient)));
   }
 
   private void updateValidatorRegistrationCache(
@@ -299,10 +326,12 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
     final Optional<SignedValidatorRegistration> validatorRegistration =
         Optional.ofNullable(validatorRegistrationInfoByValidatorIndex.get(proposerIndex))
             .map(RegisteredValidatorInfo::getSignedValidatorRegistration);
+    final Optional<Bytes32> dependentRoot =
+        getShufflingDependentRoot(currentHeadBlock.blockRoot(), blockSlot);
 
     final Eth1Address feeRecipient = getFeeRecipient(proposerInfo, blockSlot);
     final UInt64 targetGasLimit =
-        getTargetGasLimit(blockSlot, proposerIndex, validatorRegistration);
+        getTargetGasLimit(blockSlot, proposerIndex, dependentRoot, validatorRegistration);
 
     return getPayloadAttributeWithdrawals(currentHeadBlock, state)
         .thenApplyAsync(
@@ -367,16 +396,30 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
   UInt64 getTargetGasLimit(
       final UInt64 blockSlot,
       final UInt64 proposerIndex,
+      final Optional<Bytes32> dependentRoot,
       final Optional<SignedValidatorRegistration> validatorRegistration) {
-    return proposerPreferencesManager
-        .getProposerPreferences(blockSlot)
+    // post-Gloas, we use signed proposer preferences
+    return dependentRoot
+        .flatMap(root -> proposerPreferencesManager.getProposerPreferences(blockSlot, root))
         .filter(
             proposerPreferences -> proposerPreferences.getValidatorIndex().equals(proposerIndex))
         .map(ProposerPreferences::getTargetGasLimit)
+        // pre-Gloas, we use validator registrations
         .or(
             () ->
                 validatorRegistration.map(registration -> registration.getMessage().getGasLimit()))
         .orElse(UInt64.ZERO);
+  }
+
+  private Optional<Bytes32> getShufflingDependentRoot(
+      final Bytes32 blockRoot, final UInt64 proposalSlot) {
+    final Optional<ReadOnlyForkChoiceStrategy> maybeForkChoiceStrategy =
+        recentChainData.getForkChoiceStrategy();
+    if (maybeForkChoiceStrategy == null || maybeForkChoiceStrategy.isEmpty()) {
+      return Optional.empty();
+    }
+    return ShufflingDependentRootUtil.getShufflingDependentRoot(
+        spec, maybeForkChoiceStrategy.get(), blockRoot, proposalSlot);
   }
 
   // this function MUST return a fee recipient.

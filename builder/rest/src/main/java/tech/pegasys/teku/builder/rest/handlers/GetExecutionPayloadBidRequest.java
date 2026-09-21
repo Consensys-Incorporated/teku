@@ -26,6 +26,7 @@ import okhttp3.OkHttpClient;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.builder.rest.ResponseHandler;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.http.ContentTypes;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -47,12 +48,12 @@ public class GetExecutionPayloadBidRequest extends AbstractBuilderRequest {
     this.spec = spec;
   }
 
-  public Optional<SignedExecutionPayloadBid> submit(
+  public SafeFuture<Optional<SignedExecutionPayloadBid>> submit(
       final UInt64 slot,
       final Bytes32 parentHash,
       final Bytes32 parentRoot,
       final BLSPublicKey proposerPubkey,
-      final Optional<SignedBuilderRequestAuth> auth) {
+      final SignedBuilderRequestAuth auth) {
 
     final Map<String, String> urlParams =
         Map.of(
@@ -79,22 +80,13 @@ public class GetExecutionPayloadBidRequest extends AbstractBuilderRequest {
             REQUEST_TIMEOUT_HEADER,
             String.valueOf(BUILDER_PROPOSAL_DELAY_TOLERANCE.toMillis()));
 
-    if (auth.isPresent()) {
-      return postJson(
-          GET_EXECUTION_PAYLOAD_BID,
-          urlParams,
-          headers,
-          auth.get(),
-          ApiSchemas.SIGNED_BUILDER_REQUEST_AUTH_SCHEMA.getJsonTypeDefinition(),
-          responseHandler,
-          Optional.of(BUILDER_PROPOSAL_DELAY_TOLERANCE));
-    } else {
-      return postEmpty(
-          GET_EXECUTION_PAYLOAD_BID,
-          urlParams,
-          headers,
-          responseHandler,
-          Optional.of(BUILDER_PROPOSAL_DELAY_TOLERANCE));
-    }
+    return postJson(
+        GET_EXECUTION_PAYLOAD_BID,
+        urlParams,
+        headers,
+        auth,
+        ApiSchemas.SIGNED_BUILDER_REQUEST_AUTH_SCHEMA.getJsonTypeDefinition(),
+        responseHandler,
+        Optional.of(BUILDER_PROPOSAL_DELAY_TOLERANCE));
   }
 }

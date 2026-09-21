@@ -112,26 +112,26 @@ class ProposersDataManagerTest {
 
   @TestTemplate
   void isValidatorConnected_found_withPreparedProposer() {
-    manager.updatePreparedProposers(proposers, UInt64.ONE);
+    manager.updatePreparedProposersFromPrepareBeaconProposer(proposers, UInt64.ONE);
     assertThat(manager.isValidatorConnected(1, UInt64.valueOf(1))).isTrue();
   }
 
   @TestTemplate
   void isValidatorConnected_notFound_withDifferentPreparedProposer() {
-    manager.updatePreparedProposers(proposers, UInt64.ONE);
+    manager.updatePreparedProposersFromPrepareBeaconProposer(proposers, UInt64.ONE);
     assertThat(manager.isValidatorConnected(2, UInt64.valueOf(2))).isFalse();
   }
 
   @TestTemplate
   void isValidatorConnected_notFound_withExpiredPreparedProposer() {
-    manager.updatePreparedProposers(proposers, UInt64.ONE);
+    manager.updatePreparedProposersFromPrepareBeaconProposer(proposers, UInt64.ONE);
     assertThat(manager.isValidatorConnected(1, UInt64.valueOf(26))).isFalse();
   }
 
   @TestTemplate
   void isBlockProposerConnected_notFound_currentEpoch() {
     doReturn(2).when(spec).getBeaconProposerIndex(any(), any());
-    manager.updatePreparedProposers(proposers, UInt64.ONE);
+    manager.updatePreparedProposersFromPrepareBeaconProposer(proposers, UInt64.ONE);
 
     assertThat(manager.isBlockProposerConnected(UInt64.ONE)).isCompletedWithValue(false);
     verify(recentChainData, never()).retrieveBlockState(any(SlotAndBlockRoot.class));
@@ -140,7 +140,7 @@ class ProposersDataManagerTest {
   @TestTemplate
   void isBlockProposerConnected_found_currentEpoch() {
     doReturn(1).when(spec).getBeaconProposerIndex(any(), any());
-    manager.updatePreparedProposers(proposers, UInt64.ONE);
+    manager.updatePreparedProposersFromPrepareBeaconProposer(proposers, UInt64.ONE);
 
     assertThat(manager.isBlockProposerConnected(UInt64.ONE)).isCompletedWithValue(true);
     verify(recentChainData, never()).retrieveBlockState(any(SlotAndBlockRoot.class));
@@ -149,7 +149,7 @@ class ProposersDataManagerTest {
   @TestTemplate
   void isBlockProposerConnected_notFound_nextEpoch() {
     doReturn(2).when(spec).getBeaconProposerIndex(any(), any());
-    manager.updatePreparedProposers(proposers, UInt64.ONE);
+    manager.updatePreparedProposersFromPrepareBeaconProposer(proposers, UInt64.ONE);
 
     assertThat(manager.isBlockProposerConnected(UInt64.valueOf(10))).isCompletedWithValue(false);
     verify(recentChainData).retrieveBlockState(any(SlotAndBlockRoot.class));
@@ -158,7 +158,7 @@ class ProposersDataManagerTest {
   @TestTemplate
   void isBlockProposerConnected_found_nextEpoch() {
     doReturn(1).when(spec).getBeaconProposerIndex(any(), any());
-    manager.updatePreparedProposers(proposers, UInt64.ONE);
+    manager.updatePreparedProposersFromPrepareBeaconProposer(proposers, UInt64.ONE);
 
     assertThat(manager.isBlockProposerConnected(UInt64.valueOf(10))).isCompletedWithValue(true);
     verify(recentChainData).retrieveBlockState(any(SlotAndBlockRoot.class));

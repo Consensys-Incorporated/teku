@@ -966,6 +966,13 @@ public class Spec {
         .validateVoluntaryExit(state.getFork(), state, signedExit);
   }
 
+  public Optional<OperationInvalidReason> validateVoluntaryExitForGossip(
+      final BeaconState state, final SignedVoluntaryExit signedExit) {
+    return atState(state)
+        .getOperationValidator()
+        .validateVoluntaryExitForGossip(state.getFork(), state, signedExit);
+  }
+
   public Optional<OperationInvalidReason> validateBlsToExecutionChange(
       final BeaconState state,
       final UInt64 currentTime,

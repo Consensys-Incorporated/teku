@@ -23,16 +23,19 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.config.SpecConfigDeneb;
 import tech.pegasys.teku.spec.config.SpecConfigElectra;
 import tech.pegasys.teku.spec.config.SpecConfigFulu;
+import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.config.builder.DenebBuilder;
 import tech.pegasys.teku.spec.config.builder.ElectraBuilder;
 import tech.pegasys.teku.spec.config.builder.SpecConfigBuilder;
 import tech.pegasys.teku.spec.constants.Domain;
 import tech.pegasys.teku.spec.constants.NetworkConstants;
 import tech.pegasys.teku.spec.constants.ValidatorConstants;
+import tech.pegasys.teku.spec.constants.WithdrawalPrefixes;
 
 public class SpecConfigData {
   private static final Logger LOG = LogManager.getLogger();
@@ -79,6 +82,18 @@ public class SpecConfigData {
     configAttributes.put("DOMAIN_BUILDER_DEPOSIT", getDomainBuilderDeposit().toHexString());
     configAttributes.put(
         "DOMAIN_INCLUSION_LIST_COMMITTEE", getDomainInclusionListCommittee().toHexString());
+    configAttributes.put("BUILDER_INDEX_FLAG", ConfigProvider.formatValue(getBuilderIndexFlag()));
+    configAttributes.put(
+        "BUILDER_INDEX_SELF_BUILD", ConfigProvider.formatValue(getBuilderIndexSelfBuild()));
+    configAttributes.put(
+        "BUILDER_PAYMENT_THRESHOLD_NUMERATOR",
+        ConfigProvider.formatValue(getBuilderPaymentThresholdNumerator()));
+    configAttributes.put(
+        "BUILDER_PAYMENT_THRESHOLD_DENOMINATOR",
+        ConfigProvider.formatValue(getBuilderPaymentThresholdDenominator()));
+    configAttributes.put("BUILDER_WITHDRAWAL_PREFIX", getBuilderWithdrawalPrefix().toHexString());
+    configAttributes.put(
+        "PAYLOAD_BUILDER_VERSION", ConfigProvider.formatValue(getPayloadBuilderVersion()));
 
     getDomainSyncCommittee()
         .ifPresent(
@@ -224,6 +239,30 @@ public class SpecConfigData {
 
   public Bytes4 getDomainInclusionListCommittee() {
     return Domain.INCLUSION_LIST_COMMITTEE;
+  }
+
+  private UInt64 getBuilderIndexFlag() {
+    return SpecConfigGloas.BUILDER_INDEX_FLAG;
+  }
+
+  private UInt64 getBuilderIndexSelfBuild() {
+    return SpecConfigGloas.BUILDER_INDEX_SELF_BUILD;
+  }
+
+  private UInt64 getBuilderPaymentThresholdNumerator() {
+    return SpecConfigGloas.BUILDER_PAYMENT_THRESHOLD_NUMERATOR;
+  }
+
+  private UInt64 getBuilderPaymentThresholdDenominator() {
+    return SpecConfigGloas.BUILDER_PAYMENT_THRESHOLD_DENOMINATOR;
+  }
+
+  private Bytes getBuilderWithdrawalPrefix() {
+    return WithdrawalPrefixes.BUILDER_WITHDRAWAL_PREFIX;
+  }
+
+  private int getPayloadBuilderVersion() {
+    return SpecConfigGloas.PAYLOAD_BUILDER_VERSION;
   }
 
   private Optional<Bytes4> getDomainSyncCommittee() {

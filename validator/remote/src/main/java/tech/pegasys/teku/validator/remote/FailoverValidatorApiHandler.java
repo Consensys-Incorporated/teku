@@ -39,8 +39,8 @@ import tech.pegasys.teku.ethereum.json.types.node.PeerCount;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.BeaconCommitteeSelectionProof;
 import tech.pegasys.teku.ethereum.json.types.validator.InclusionListDuties;
+import tech.pegasys.teku.ethereum.json.types.validator.PayloadTimelinessCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuties;
-import tech.pegasys.teku.ethereum.json.types.validator.PtcDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeSelectionProof;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeSubnetSubscription;
@@ -54,6 +54,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.BlockRootAndBuilderIndex;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
@@ -174,10 +175,10 @@ public class FailoverValidatorApiHandler implements ValidatorApiChannel {
   }
 
   @Override
-  public SafeFuture<Optional<PtcDuties>> getPtcDuties(
+  public SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> getPayloadTimelinessCommitteeDuties(
       final UInt64 epoch, final IntCollection validatorIndices) {
     return tryRequestUntilSuccess(
-        apiChannel -> apiChannel.getPtcDuties(epoch, validatorIndices),
+        apiChannel -> apiChannel.getPayloadTimelinessCommitteeDuties(epoch, validatorIndices),
         BeaconNodeRequestLabels.GET_PTC_DUTIES_METHOD);
   }
 
@@ -341,7 +342,8 @@ public class FailoverValidatorApiHandler implements ValidatorApiChannel {
   @Override
   public SafeFuture<SendSignedBlockResult> sendSignedBlock(
       final SignedBlockContainer blockContainer,
-      final BroadcastValidationLevel broadcastValidationLevel) {
+      final BroadcastValidationLevel broadcastValidationLevel,
+      final Optional<String> builderUrl) {
     final SlotAndBlockRoot slotAndBlockRoot = blockContainer.getSignedBlock().getSlotAndBlockRoot();
     // when block is blinded, we need to send it only to the BN which would be able to unblind it
     if (blockContainer.isBlinded() && blockCreatorCache.containsKey(slotAndBlockRoot)) {
@@ -350,10 +352,12 @@ public class FailoverValidatorApiHandler implements ValidatorApiChannel {
           "Block for slot {} and root {} was blinded and will only be sent to the beacon node which created it.",
           slotAndBlockRoot.getSlot(),
           slotAndBlockRoot.getBlockRoot().toHexString());
-      return blockCreatorApiChannel.sendSignedBlock(blockContainer, broadcastValidationLevel);
+      return blockCreatorApiChannel.sendSignedBlock(
+          blockContainer, broadcastValidationLevel, builderUrl);
     }
     return relayRequest(
-        apiChannel -> apiChannel.sendSignedBlock(blockContainer, broadcastValidationLevel),
+        apiChannel ->
+            apiChannel.sendSignedBlock(blockContainer, broadcastValidationLevel, builderUrl),
         BeaconNodeRequestLabels.PUBLISH_BLOCK_METHOD,
         failoversPublishSignedDuties);
   }
@@ -391,6 +395,14 @@ public class FailoverValidatorApiHandler implements ValidatorApiChannel {
     return relayRequest(
         apiChannel -> apiChannel.sendSignedProposerPreferences(signedProposerPreferences),
         BeaconNodeRequestLabels.SEND_PROPOSER_PREFERENCES_METHOD);
+  }
+
+  @Override
+  public SafeFuture<List<SubmitDataError>> sendBuilderPreferences(
+      final SszList<BuilderPreferencesEntry> builderPreferences) {
+    return relayRequest(
+        apiChannel -> apiChannel.sendBuilderPreferences(builderPreferences),
+        BeaconNodeRequestLabels.SEND_BUILDER_PREFERENCES_METHOD);
   }
 
   @Override

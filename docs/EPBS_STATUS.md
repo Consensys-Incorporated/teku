@@ -32,7 +32,7 @@ Branch: tracking branch `upstream/glamsterdam-devnet-2` at `3a21b91d4d` (24 comm
   "v1.7.0-alpha.X" may need follow-ups.
 - Fork-choice work was planned as a 7-PR series. All 7 are now landed on `glamsterdam-devnet-2`:
   PRs 1..5 merged to master individually; 6/7 (#10610) was CLOSED and its content (including
-  `ForkChoiceModelGloas`, `PtcVoteTracker`, rebuild support) was absorbed into the omnibus
+  `ForkChoiceModelGloas`, `PayloadTimelinessCommitteeVoteTracker`, rebuild support) was absorbed into the omnibus
   [#10626](https://github.com/Consensys/teku/pull/10626); 7/7 ("live model swap") is done since
   `ForkChoiceModelFactory.forSlot` routes Gloas slots to `ForkChoiceModelGloas`.
 - The "honest builder" guide (`gloas/builder.md`) is conceptually a separate
@@ -98,7 +98,7 @@ Branch: tracking branch `upstream/glamsterdam-devnet-2` at `3a21b91d4d` (24 comm
 | (7/7) Live model swap | `ForkChoiceModelFactory.forSlot` routes Gloas slots to `ForkChoiceModelGloas` (no longer dormant) | ✅ [#10626](https://github.com/Consensys/teku/pull/10626) (issue [#10557](https://github.com/Consensys/teku/issues/10557)) |
 | Avoid resolving unchanged votes | Optimization | ✅ [#10604](https://github.com/Consensys/teku/pull/10604) |
 | Update head on imported payload | Head-update path | ✅ [#10478](https://github.com/Consensys/teku/pull/10478) |
-| `notify_ptc_messages` integration | PTC observation feeds `PtcVoteTracker`; consumed by Gloas head-selection helpers | ✅ [#10626](https://github.com/Consensys/teku/pull/10626) |
+| `notify_ptc_messages` integration | PTC observation feeds `PayloadTimelinessCommitteeVoteTracker`; consumed by Gloas head-selection helpers | ✅ [#10626](https://github.com/Consensys/teku/pull/10626) |
 | `should_extend_payload`, `get_payload_status_tiebreaker`, `should_apply_proposer_boost` | Gloas tiebreakers routed via `ForkChoiceStrategy` → `ForkChoiceModelGloas` | ✅ [#10626](https://github.com/Consensys/teku/pull/10626) ([`268c9c4`](https://github.com/Consensys/teku/commit/268c9c49fe), [`4b9c233`](https://github.com/Consensys/teku/commit/4b9c2332057df278e620353cff057074be3f7839)) |
 | `on_execution_payload_envelope` / `on_payload_attestation_message` Store integration | `ForkChoice.onExecutionPayloadEnvelope` and `ForkChoice.onPayloadAttestationMessage` wired to strategy/model | ✅ [#10626](https://github.com/Consensys/teku/pull/10626) |
 | `is_payload_verified` / `_timely` / `_data_available` predicates | Implemented in `ForkChoiceModelGloas` against PTC vote tracker thresholds | ✅ [#10626](https://github.com/Consensys/teku/pull/10626) |
@@ -171,7 +171,7 @@ Branch: tracking branch `upstream/glamsterdam-devnet-2` at `3a21b91d4d` (24 comm
 | Local signer extended for Gloas | Domain types | ✅ [#9982](https://github.com/Consensys/teku/pull/9982) |
 | Bare-bones Gloas block production | Stub | ✅ [#9962](https://github.com/Consensys/teku/pull/9962) |
 | Self-built bid generation | Self-build path | ✅ [#9999](https://github.com/Consensys/teku/pull/9999) |
-| PTC duty scaffolding | `PtcDutyScheduler`, `PtcDutyLoader`, `PayloadAttestationProductionDuty`, factory | ✅ [#10043](https://github.com/Consensys/teku/pull/10043), [#10126](https://github.com/Consensys/teku/pull/10126) |
+| PTC duty scaffolding | `PayloadTimelinessCommitteeDutyScheduler`, `PayloadTimelinessCommitteeDutyLoader`, `PayloadAttestationProductionDuty`, factory | ✅ [#10043](https://github.com/Consensys/teku/pull/10043), [#10126](https://github.com/Consensys/teku/pull/10126) |
 | `PtcDuty(ies)` JSON types | API types | ✅ |
 | `ProposerPreferencesPublisher` | VC publisher | ✅ |
 | Unified validator API handler | Removed `ValidatorApiHandlerGloas` | ✅ [#10561](https://github.com/Consensys/teku/pull/10561) |

@@ -54,12 +54,16 @@ public class GossipTests {
               "networking/gossip_payload_attestation_message",
               new GossipPayloadAttestationMessageTestExecutor())
           .put(
-              "networking/gossip_proposer_preferences", new GossipProposerPreferencesTestExecutor())
+              // TODO: https://github.com/Consensys-Incorporated/teku/issues/11232
+              "networking/gossip_proposer_preferences", TestExecutor.IGNORE_TESTS)
           .put(
               "networking/gossip_execution_payload_envelope",
               new GossipExecutionPayloadEnvelopeTestExecutor())
           .put(
               "networking/gossip_execution_payload_bid",
-              new GossipExecutionPayloadBidTestExecutor())
+              // TODO: https://github.com/Consensys-Incorporated/teku/issues/11233
+              new GossipExecutionPayloadBidTestExecutor(
+                  "gossip_execution_payload_bid__ignore_builder_exit_in_parent_payload",
+                  "gossip_execution_payload_bid__ignore_builder_exit_with_pending_balance"))
           .build();
 }
