@@ -40,6 +40,7 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.datastructures.attestation.AttestationSource;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BlockCheckpoints;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
@@ -52,8 +53,10 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrate
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.spec.datastructures.forkchoice.TestStoreFactory;
 import tech.pegasys.teku.spec.datastructures.forkchoice.TestStoreImpl;
+import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.util.AttestationProcessingResult;
 import tech.pegasys.teku.spec.logic.common.statetransition.availability.AvailabilityChecker;
 import tech.pegasys.teku.spec.logic.common.statetransition.availability.AvailabilityCheckerFactory;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.EpochProcessingException;
@@ -622,6 +625,69 @@ class ForkChoiceUtilTest {
             setup.harness.shouldOverrideFcuCheckProposerPreState(
                 setup.context, UInt64.valueOf(2), dataStructureUtil.randomBytes32()))
         .isFalse();
+  }
+
+  @Test
+  void
+      validateOnAttestation_blockSource_shouldRejectAttestationWhenTargetEpochDoesNotMatchSlotEpoch() {
+    // Regression test: previously the "target epoch must equal compute_epoch_at_slot(slot)"
+    // check was incorrectly gated behind AttestationSource.GOSSIP, so attestations embedded in
+    // blocks with a mismatched slot/target epoch were accepted and their votes counted toward
+    // fork choice. Per the spec, this structural check is unconditional.
+    final int slotsPerEpoch = spec.getGenesisSpecConfig().getSlotsPerEpoch();
+    final UInt64 currentEpoch = UInt64.valueOf(10);
+    final UInt64 attestationSlot = UInt64.valueOf(currentEpoch.longValue() * slotsPerEpoch);
+    // Target epoch is the previous epoch, so it would pass the current/previous-epoch recency
+    // check, but it does not match compute_epoch_at_slot(attestationSlot) == currentEpoch.
+    final Checkpoint mismatchedTarget = dataStructureUtil.randomCheckpoint(currentEpoch.minus(1));
+    final AttestationData attestationData =
+        new AttestationData(
+            attestationSlot,
+            UInt64.ZERO,
+            dataStructureUtil.randomBytes32(),
+            dataStructureUtil.randomCheckpoint(currentEpoch.minus(2)),
+            mismatchedTarget);
+    final ReadOnlyForkChoiceStrategy strategy = mock(ReadOnlyForkChoiceStrategy.class);
+
+    final AttestationProcessingResult result =
+        forkChoiceUtil.validateOnAttestation(
+            strategy, currentEpoch, attestationData, AttestationSource.BLOCK);
+
+    assertThat(result.isInvalid()).isTrue();
+    assertThat(result.getInvalidReason())
+        .contains("Attestation slot must be within specified epoch");
+    // The attestation should be rejected before any fork choice lookups are attempted.
+    verify(strategy, never()).contains(any());
+  }
+
+  @Test
+  void validateOnAttestation_blockSource_shouldSkipRecencyCheckButStillEnforceEpochConsistency() {
+    // AttestationSource.BLOCK is only meant to skip the current/previous-epoch recency check
+    // (which does not apply to attestations already embedded in a finalized-chain block).
+    // Here the target epoch is neither current nor previous, but it is internally consistent
+    // with the attestation slot, so validation should proceed past the epoch checks.
+    final int slotsPerEpoch = spec.getGenesisSpecConfig().getSlotsPerEpoch();
+    final UInt64 currentEpoch = UInt64.valueOf(10);
+    final UInt64 oldEpoch = UInt64.ZERO;
+    final UInt64 attestationSlot = UInt64.valueOf(oldEpoch.longValue() * slotsPerEpoch);
+    final Checkpoint consistentTarget = dataStructureUtil.randomCheckpoint(oldEpoch);
+    final AttestationData attestationData =
+        new AttestationData(
+            attestationSlot,
+            UInt64.ZERO,
+            dataStructureUtil.randomBytes32(),
+            dataStructureUtil.randomCheckpoint(oldEpoch),
+            consistentTarget);
+    final ReadOnlyForkChoiceStrategy strategy = mock(ReadOnlyForkChoiceStrategy.class);
+    when(strategy.contains(consistentTarget.getRoot())).thenReturn(false);
+
+    final AttestationProcessingResult result =
+        forkChoiceUtil.validateOnAttestation(
+            strategy, currentEpoch, attestationData, AttestationSource.BLOCK);
+
+    // Falls through to the unknown-block check rather than being rejected for being outside the
+    // current/previous epoch, confirming the recency check was skipped as intended.
+    assertThat(result).isEqualTo(AttestationProcessingResult.UNKNOWN_BLOCK);
   }
 
   private ReadOnlyStore mockStore(

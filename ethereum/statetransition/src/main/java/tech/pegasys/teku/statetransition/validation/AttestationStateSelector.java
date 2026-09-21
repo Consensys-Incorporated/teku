@@ -78,7 +78,10 @@ public class AttestationStateSelector {
         attestationEpoch
             .plus(spec.getSpecConfig(headEpoch).getEpochsPerHistoricalVector())
             .isGreaterThan(headEpoch);
-    if (isWithinHistoricalEpochs && isAncestorOfChainHead(chainHead.getRoot(), targetBlockRoot)) {
+    if (isWithinHistoricalEpochs
+        && isAncestorOfChainHead(chainHead.getRoot(), targetBlockRoot)
+        && hasMatchingShufflingDependentRoot(
+            chainHead.getRoot(), targetBlockRoot, attestationEpoch)) {
       appliedSelectorRule.labels("ancestor_of_head").inc();
       return chainHead.getState().thenApply(Optional::of);
     }
@@ -105,10 +108,12 @@ public class AttestationStateSelector {
     if (isWithinHistoricalEpochs) {
       // if it's an ancestor of any chain head within historic slots, use that chain head.
       final Optional<BeaconState> maybeChainHeadData =
-          recentChainData.getChainHeads().stream()
+          recentChainData.getChainHeadsIncludingNonViable().stream()
               .filter(
                   head ->
-                      isAncestorOfChainHead(head.getRoot(), targetBlockRoot, targetBlockSlot.get()))
+                      isAncestorOfChainHead(head.getRoot(), targetBlockRoot, targetBlockSlot.get())
+                          && hasMatchingShufflingDependentRoot(
+                              head.getRoot(), targetBlockRoot, attestationEpoch))
               .findFirst()
               .flatMap(
                   protoNodeData -> {
@@ -200,6 +205,45 @@ public class AttestationStateSelector {
         .orElse(false);
   }
 
+  /**
+   * Checks that {@code candidateRoot} (a chain head, or a fork's chain head) shares the same
+   * shuffling-determining history as {@code targetRoot} for {@code epoch}, before we reuse {@code
+   * candidateRoot}'s state to compute {@code targetRoot}'s committees.
+   *
+   * <p>Structural ancestry alone (i.e. {@code targetRoot} lies on the chain leading to {@code
+   * candidateRoot}) is not sufficient: the two branches can still have diverged after {@code
+   * targetRoot} but before the block whose RANDAO reveal fixes the shuffling seed for {@code epoch}
+   * (the "shuffling dependent root", per the {@code get_shuffling_dependent_root} spec helper). If
+   * they diverged before that point, {@code candidateRoot}'s state has a different seed and will
+   * produce different committees than {@code targetRoot}'s own branch would, so its state must not
+   * be reused.
+   */
+  private boolean hasMatchingShufflingDependentRoot(
+      final Bytes32 candidateRoot, final Bytes32 targetRoot, final UInt64 epoch) {
+    final Optional<ReadOnlyForkChoiceStrategy> maybeForkChoiceStrategy =
+        recentChainData.getForkChoiceStrategy();
+    if (maybeForkChoiceStrategy.isEmpty()) {
+      return false;
+    }
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy = maybeForkChoiceStrategy.get();
+    final UInt64 minSeedLookahead = UInt64.valueOf(spec.getSpecConfig(epoch).getMinSeedLookahead());
+    if (epoch.isLessThanOrEqualTo(minSeedLookahead)) {
+      // The shuffling seed for this epoch is derived from the genesis RANDAO mix on every
+      // branch, so there is nothing to diverge on yet.
+      return true;
+    }
+    // The committee shuffling for `epoch` is fixed as of the start of `epoch -
+    // MIN_SEED_LOOKAHEAD`, i.e. the dependent root is the ancestor at the slot immediately
+    // before that boundary.
+    final UInt64 dependentSlot =
+        spec.getEarliestQueryableSlotForBeaconCommitteeInTargetEpoch(epoch).minusMinZero(1);
+    final Optional<Bytes32> candidateDependentRoot =
+        forkChoiceStrategy.getAncestor(candidateRoot, dependentSlot);
+    final Optional<Bytes32> targetDependentRoot =
+        forkChoiceStrategy.getAncestor(targetRoot, dependentSlot);
+    return candidateDependentRoot.isPresent() && candidateDependentRoot.equals(targetDependentRoot);
+  }
+
   private Boolean isJustifiedCheckpointOfHeadOlderOrEqualToAttestationJustifiedSlot(
       final ProtoNodeData head, final UInt64 justifiedBlockSlot) {
     final Checkpoint justifiedCheckpoint = head.getCheckpoints().getJustifiedCheckpoint();
@@ -213,7 +257,7 @@ public class AttestationStateSelector {
   private boolean isJustificationTooOld(
       final Bytes32 justifiedRoot, final UInt64 justifiedBlockSlot) {
 
-    return recentChainData.getChainHeads().stream()
+    return recentChainData.getChainHeadsIncludingNonViable().stream()
         // must be attesting to a viable chain
         .filter(head -> isAncestorOfChainHead(head.getRoot(), justifiedRoot, justifiedBlockSlot))
         // must be attesting to something that progresses justification
