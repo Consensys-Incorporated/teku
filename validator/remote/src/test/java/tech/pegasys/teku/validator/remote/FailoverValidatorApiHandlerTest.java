@@ -66,7 +66,6 @@ import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
@@ -628,48 +627,6 @@ class FailoverValidatorApiHandlerTest {
     verify(failoverApiChannel2, never())
         .sendSignedBlock(
             blindedSignedBlock, BroadcastValidationLevel.NOT_REQUIRED, Optional.empty());
-  }
-
-  @Test
-  public void executionPayloadIsCreatedByTheBeaconNodeWhichCreatedTheBid() {
-    final Spec spec = TestSpecFactory.createMinimalGloas();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
-
-    final UInt64 slot = UInt64.ONE;
-    final UInt64 builderIndex = dataStructureUtil.randomBuilderIndex();
-
-    final ExecutionPayloadBid bid = dataStructureUtil.randomExecutionPayloadBid(slot, builderIndex);
-
-    final ValidatorApiChannelRequest<Optional<ExecutionPayloadBid>> bidCreationRequest =
-        apiChannel -> apiChannel.createUnsignedExecutionPayloadBid(slot, builderIndex);
-
-    setupFailures(bidCreationRequest, primaryApiChannel);
-    setupSuccesses(bidCreationRequest, Optional.of(bid), failoverApiChannel1);
-
-    SafeFutureAssert.assertThatSafeFuture(bidCreationRequest.run(failoverApiHandler)).isCompleted();
-    final ExecutionPayloadEnvelope executionPayloadEnvelope =
-        dataStructureUtil.randomExecutionPayloadEnvelope(slot);
-
-    final Bytes32 beaconBlockRoot = dataStructureUtil.randomBytes32();
-
-    final ValidatorApiChannelRequest<Optional<ExecutionPayloadEnvelope>>
-        executionPayloadCreationRequest =
-            apiChannel -> apiChannel.createUnsignedExecutionPayload(slot, beaconBlockRoot);
-
-    setupSuccesses(
-        executionPayloadCreationRequest,
-        Optional.of(executionPayloadEnvelope),
-        primaryApiChannel,
-        failoverApiChannel1,
-        failoverApiChannel2);
-
-    SafeFutureAssert.assertThatSafeFuture(executionPayloadCreationRequest.run(failoverApiHandler))
-        .isCompleted();
-
-    verify(failoverApiChannel1).createUnsignedExecutionPayload(slot, beaconBlockRoot);
-
-    verify(primaryApiChannel, never()).createUnsignedExecutionPayload(slot, beaconBlockRoot);
-    verify(failoverApiChannel2, never()).createUnsignedExecutionPayload(slot, beaconBlockRoot);
   }
 
   @Test

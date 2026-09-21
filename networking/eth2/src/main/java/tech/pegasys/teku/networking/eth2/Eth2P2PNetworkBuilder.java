@@ -183,9 +183,7 @@ public class Eth2P2PNetworkBuilder {
     final SubnetSubscriptionService executionProofSubnetService = new SubnetSubscriptionService();
     final DiscoveryNodeIdExtractor discoveryNodeIdExtractor = new LibP2PDiscoveryNodeIdExtractor();
     final RpcEncoding rpcEncoding =
-        RpcEncoding.createSszSnappyEncoding(
-            spec.getNetworkingConfig().getMaxPayloadSize(),
-            config.isRpcSnappyAircompressorEnabled());
+        RpcEncoding.createSszSnappyEncoding(spec.getNetworkingConfig().getMaxPayloadSize());
     if (statusMessageFactory == null) {
       statusMessageFactory = new StatusMessageFactory(spec, combinedChainDataClient, metricsSystem);
       eventChannels.subscribe(SlotEventsChannel.class, statusMessageFactory);

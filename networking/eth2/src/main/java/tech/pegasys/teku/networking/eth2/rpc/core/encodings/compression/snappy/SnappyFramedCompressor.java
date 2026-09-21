@@ -31,9 +31,6 @@ import tech.pegasys.teku.networking.eth2.rpc.core.encodings.compression.exceptio
 public class SnappyFramedCompressor implements Compressor {
 
   // Suppliers intentionally create fresh stateful encoders and decoders per framed RPC payload.
-  public static final SnappyFramedCompressor NETTY =
-      new SnappyFramedCompressor(NettySnappyFrameEncoder::new, NettySnappyFrameDecoder::new);
-
   public static final SnappyFramedCompressor AIRCOMPRESSOR =
       new SnappyFramedCompressor(
           AircompressorSnappyFrameEncoder::new, AircompressorSnappyFrameDecoder::new);

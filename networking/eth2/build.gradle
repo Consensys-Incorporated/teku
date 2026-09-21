@@ -22,7 +22,6 @@ dependencies {
 	implementation 'io.netty:netty-codec-http'
 	implementation 'io.consensys.tuweni:tuweni-ssz'
 	implementation 'io.airlift:aircompressor-v3'
-	implementation 'org.xerial.snappy:snappy-java'
 
 	testImplementation testFixtures(project(':infrastructure:metrics'))
 	testImplementation testFixtures(project(':ethereum:spec'))

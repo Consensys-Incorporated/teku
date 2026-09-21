@@ -21,14 +21,7 @@ import tech.pegasys.teku.networking.eth2.rpc.core.encodings.compression.snappy.S
 
 public interface RpcEncoding {
   static RpcEncoding createSszSnappyEncoding(final int maxChunkSize) {
-    return createSszSnappyEncoding(maxChunkSize, false);
-  }
-
-  static RpcEncoding createSszSnappyEncoding(
-      final int maxChunkSize, final boolean useAircompressor) {
-    return createSszSnappyEncoding(
-        maxChunkSize,
-        useAircompressor ? SnappyFramedCompressor.AIRCOMPRESSOR : SnappyFramedCompressor.NETTY);
+    return createSszSnappyEncoding(maxChunkSize, SnappyFramedCompressor.AIRCOMPRESSOR);
   }
 
   static RpcEncoding createSszSnappyEncoding(final int maxChunkSize, final Compressor compressor) {
