@@ -1477,7 +1477,7 @@
 - name: compute_shuffling_dependent_epoch#gloas
   sources:
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/ProposerPreferencesGossipValidator.java
-      search: spec.computeEpochAtSlot(proposalSlot).minusMinZero(minSeedLookahead)
+      search: proposalEpoch.minusMinZero(minSeedLookahead)
   spec: |
     <spec fn="compute_shuffling_dependent_epoch" fork="gloas" hash="9bf18dc3">
     def compute_shuffling_dependent_epoch(epoch: Epoch) -> Epoch:
@@ -8598,7 +8598,7 @@
     - file: storage/src/main/java/tech/pegasys/teku/storage/protoarray/ForkChoiceModelGloas.java
       search: public void processBlock(
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/block/BlockProcessorGloas.java
-      search: public UInt64 executionProcessing(
+      search: public void executionProcessing(
   spec: |
     <spec fn="on_block" fork="gloas" hash="dfd77120">
     def on_block(store: Store, signed_block: SignedBeaconBlock) -> None:
@@ -9512,7 +9512,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/block/AbstractBlockProcessor.java
       search: protected void processBlock(
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/block/BlockProcessorGloas.java
-      search: public UInt64 executionProcessing(
+      search: public void executionProcessing(
   spec: |
     <spec fn="process_block" fork="gloas" hash="c6ddaa45">
     def process_block(state: BeaconState, block: BeaconBlock) -> None:

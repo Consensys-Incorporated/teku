@@ -458,6 +458,7 @@ jobs:
       src_root: "src/integration-test/java"
       runner: "ubuntu-latest-128"
       gradle_args: ${{ (inputs.gradle_log_level == 'info' && '--info') || (inputs.gradle_log_level == 'debug' && '--debug') || '' }}
+      retry_attempts: 3
 
   integrationTestsResult:
     name: integrationTests
@@ -588,6 +589,7 @@ jobs:
       src_root: "src/acceptance-test/java"
       runner: "ubuntu-latest-128"
       gradle_args: ${{ (inputs.gradle_log_level == 'info' && '--info') || (inputs.gradle_log_level == 'debug' && '--debug') || '' }}
+      retry_attempts: 3
 
   acceptanceTestsResult:
     name: acceptanceTests

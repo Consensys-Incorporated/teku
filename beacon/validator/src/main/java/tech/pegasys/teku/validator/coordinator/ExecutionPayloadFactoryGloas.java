@@ -30,6 +30,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.execution.BlobAndCellProofs;
 import tech.pegasys.teku.spec.datastructures.execution.BlobsBundle;
 import tech.pegasys.teku.spec.datastructures.execution.GetPayloadResponse;
+import tech.pegasys.teku.spec.datastructures.type.SszKZGProof;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerBlockProductionManager;
 import tech.pegasys.teku.spec.logic.common.util.ExecutionPayloadProposalUtil.ExecutionPayloadProposalData;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas;
@@ -103,7 +104,7 @@ public class ExecutionPayloadFactoryGloas implements ExecutionPayloadFactory {
             signedExecutionPayloadEnvelopeContents.getSignedExecutionPayloadEnvelope(),
             signedExecutionPayloadEnvelopeContents.getBlobs().stream().toList(),
             signedExecutionPayloadEnvelopeContents.getKzgProofs().stream()
-                .map(sszKzgProof -> sszKzgProof.getKZGProof())
+                .map(SszKZGProof::getKZGProof)
                 .toList()));
   }
 

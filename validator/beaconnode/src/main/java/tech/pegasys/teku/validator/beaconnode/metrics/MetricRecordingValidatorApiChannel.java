@@ -49,7 +49,6 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
@@ -332,14 +331,6 @@ public class MetricRecordingValidatorApiChannel implements ValidatorApiChannel {
     return countOptionalDataRequest(
         delegate.getSyncCommitteeSelectionProof(requests),
         BeaconNodeRequestLabels.SYNC_COMMITTEE_SELECTIONS);
-  }
-
-  @Override
-  public SafeFuture<Optional<ExecutionPayloadBid>> createUnsignedExecutionPayloadBid(
-      final UInt64 slot, final UInt64 builderIndex) {
-    return countOptionalDataRequest(
-        delegate.createUnsignedExecutionPayloadBid(slot, builderIndex),
-        BeaconNodeRequestLabels.CREATE_UNSIGNED_EXECUTION_PAYLOAD_BID_METHOD);
   }
 
   @Override
