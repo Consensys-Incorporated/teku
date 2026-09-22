@@ -91,12 +91,14 @@ public record SigningHistory(
         signedAttestations.stream()
             .map(SignedAttestation::sourceEpoch)
             .filter(Objects::nonNull)
+            .filter(epoch -> !epoch.equals(UInt64.MAX_VALUE))
             .max(UInt64::compareTo)
             .orElse(null);
     final UInt64 lastSignedAttestationTargetEpoch =
         signedAttestations.stream()
             .map(SignedAttestation::targetEpoch)
             .filter(Objects::nonNull)
+            .filter(epoch -> !epoch.equals(UInt64.MAX_VALUE))
             .max(UInt64::compareTo)
             .orElse(null);
 

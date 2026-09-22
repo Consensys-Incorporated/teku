@@ -305,6 +305,7 @@ public class BlockOperationSelectorFactory {
       if (bodyBuilder.supportsPayloadAttestations()) {
         bodyBuilder.payloadAttestations(
             payloadAttestationPool.getPayloadAttestationsForBlock(blockSlotState, parentRoot));
+        blockProductionContext.blockProductionPerformance().getPayloadAttestationsForBlock();
       }
 
       return SafeFuture.allOfFailFast(

@@ -1477,6 +1477,14 @@ public class Spec {
         .orElse(false);
   }
 
+  public boolean isPayloadAttestationAvailableAtSlot(final UInt64 slot) {
+    return atSlot(slot)
+        .miscHelpers()
+        .toVersionGloas()
+        .map(MiscHelpersGloas::isPayloadAttestationAvailable)
+        .orElse(false);
+  }
+
   // Electra Utils
   public boolean isFormerDepositMechanismDisabled(final BeaconState state) {
     return atState(state).miscHelpers().isFormerDepositMechanismDisabled(state);
