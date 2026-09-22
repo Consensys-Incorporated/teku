@@ -13,7 +13,6 @@
 
 package $TEST_PACKAGE$;
 
-import java.nio.file.Path;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
@@ -26,6 +25,6 @@ public class $TEST_CLASS_NAME$ extends Eth2ReferenceTestCase {
   @DisplayName("$TEST_NAME$")
   void $TEST_METHOD_NAME$() throws Throwable {
     runReferenceTest(
-        new TestDefinition("$FORK$", "$CONFIG$", "$TEST_TYPE$", "$TEST_NAME$", Path.of("$RELATIVE_PATH$")));
+        new TestDefinition("$FORK$", "$CONFIG$", "$TEST_TYPE$", "$TEST_NAME$", "$RELATIVE_PATH$"));
   }
 }

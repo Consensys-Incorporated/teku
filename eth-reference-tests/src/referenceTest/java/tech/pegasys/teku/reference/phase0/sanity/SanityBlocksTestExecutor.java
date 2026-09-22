@@ -21,6 +21,7 @@ import static tech.pegasys.teku.reference.TestDataUtils.loadStateFromSsz;
 import static tech.pegasys.teku.reference.TestDataUtils.loadYaml;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.nio.file.Files;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -63,7 +64,7 @@ public class SanityBlocksTestExecutor implements TestExecutor {
             .collect(Collectors.toList());
 
     final Optional<BeaconState> expectedState;
-    if (testDefinition.getTestDirectory().resolve(EXPECTED_STATE_FILENAME).toFile().exists()) {
+    if (Files.exists(testDefinition.getTestDirectory().resolve(EXPECTED_STATE_FILENAME))) {
       expectedState = Optional.of(loadStateFromSsz(testDefinition, EXPECTED_STATE_FILENAME));
     } else {
       expectedState = Optional.empty();

@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static tech.pegasys.teku.reference.TestDataUtils.loadStateFromSsz;
 
 import com.google.common.collect.ImmutableMap;
+import java.nio.file.Files;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
 import tech.pegasys.teku.reference.TestExecutor;
 import tech.pegasys.teku.spec.SpecVersion;
@@ -115,7 +116,7 @@ public class EpochProcessingTestExecutor implements TestExecutor {
     final EpochProcessingExecutor processor =
         new EpochProcessingExecutor(epochProcessor, validatorStatusFactory);
 
-    if (testDefinition.getTestDirectory().resolve(postStateFileName).toFile().exists()) {
+    if (Files.exists(testDefinition.getTestDirectory().resolve(postStateFileName))) {
       final BeaconState expectedPostState = loadStateFromSsz(testDefinition, postStateFileName);
       final BeaconState result = executeOperation(preState, processor);
 
