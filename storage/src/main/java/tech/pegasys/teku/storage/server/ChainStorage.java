@@ -38,12 +38,14 @@ import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
 import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
 import tech.pegasys.teku.storage.api.ChainStorageFacade;
+import tech.pegasys.teku.storage.api.LightClientUpdateChannel;
 import tech.pegasys.teku.storage.api.OnDiskStoreData;
 import tech.pegasys.teku.storage.api.SidecarUpdateChannel;
 import tech.pegasys.teku.storage.api.StorageQueryChannel;
@@ -61,6 +63,7 @@ public class ChainStorage
         StorageQueryChannel,
         VoteUpdateChannel,
         SidecarUpdateChannel,
+        LightClientUpdateChannel,
         ChainStorageFacade {
   private static final Logger LOG = LogManager.getLogger();
 
@@ -494,5 +497,17 @@ public class ChainStorage
   @Override
   public SafeFuture<Void> onNewSidecar(final DataColumnSidecar sidecar) {
     return SafeFuture.fromRunnable(() -> database.addSidecar(sidecar));
+  }
+
+  @Override
+  public SafeFuture<Void> onNewBestLightClientUpdate(
+      final UInt64 period, final LightClientUpdate update, final Bytes32 signatureBlockRoot) {
+    return SafeFuture.fromRunnable(
+        () -> database.storeBestLightClientUpdate(period, update, signatureBlockRoot));
+  }
+
+  @Override
+  public SafeFuture<Void> onPruneBestLightClientUpdatesBefore(final UInt64 period) {
+    return SafeFuture.fromRunnable(() -> database.pruneBestLightClientUpdatesBefore(period));
   }
 }
