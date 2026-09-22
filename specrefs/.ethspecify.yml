@@ -273,11 +273,6 @@ specrefs:
       - upgrade_attester_slashing_to_gloas#gloas
       - upgrade_indexed_attestation_to_gloas#gloas
 
-      # Not implemented yet: Gloas EIP-7688 block body / execution requests limit
-      # checks are not yet enforced as explicit gossip validation steps (alpha.14)
-      - verify_block_body_operation_limits#gloas
-      - verify_execution_requests_limits#gloas
-
       # Not implemented yet: the CustodyColumnBits-returning helper is not built;
       # Teku only has the underlying custody group/column index computation
       # (MiscHelpersFulu#computeCustodyColumnIndices), not the bitvector form (alpha.14)

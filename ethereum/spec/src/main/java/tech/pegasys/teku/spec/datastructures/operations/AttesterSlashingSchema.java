@@ -15,7 +15,6 @@ package tech.pegasys.teku.spec.datastructures.operations;
 
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.INDEXED_ATTESTATION_SCHEMA;
 
-import java.util.OptionalLong;
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema2;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 import tech.pegasys.teku.spec.schemas.registry.SchemaRegistry;
@@ -23,27 +22,11 @@ import tech.pegasys.teku.spec.schemas.registry.SchemaRegistry;
 public class AttesterSlashingSchema
     extends ContainerSchema2<AttesterSlashing, IndexedAttestation, IndexedAttestation> {
 
-  private final OptionalLong networkSszLengthBytesUpperBound;
-
   public AttesterSlashingSchema(final String containerName, final SchemaRegistry schemaRegistry) {
-    this(containerName, schemaRegistry, OptionalLong.empty());
-  }
-
-  public AttesterSlashingSchema(
-      final String containerName,
-      final SchemaRegistry schemaRegistry,
-      final OptionalLong networkSszLengthBytesUpperBound) {
     super(
         containerName,
         namedSchema("attestation_1", schemaRegistry.get(INDEXED_ATTESTATION_SCHEMA)),
         namedSchema("attestation_2", schemaRegistry.get(INDEXED_ATTESTATION_SCHEMA)));
-    this.networkSszLengthBytesUpperBound = networkSszLengthBytesUpperBound;
-    validateNetworkSszLengthBytesUpperBound();
-  }
-
-  @Override
-  public OptionalLong getNetworkSszLengthBytesUpperBound() {
-    return networkSszLengthBytesUpperBound;
   }
 
   @Override
