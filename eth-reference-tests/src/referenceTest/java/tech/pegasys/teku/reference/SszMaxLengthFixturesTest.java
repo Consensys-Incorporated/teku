@@ -16,7 +16,6 @@ package tech.pegasys.teku.reference;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.nio.file.Path;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
@@ -25,10 +24,9 @@ import tech.pegasys.teku.infrastructure.ssz.sos.SszMaxLengthExceededException;
 class SszMaxLengthFixturesTest {
 
   private static final TestDefinition LISTED =
-      new TestDefinition(
-          "gloas", "minimal", "operations/attestation", "invalid_too_many", Path.of("x"));
+      new TestDefinition("gloas", "minimal", "operations/attestation", "invalid_too_many", "x");
   private static final TestDefinition UNLISTED =
-      new TestDefinition("gloas", "minimal", "operations/attestation", "valid", Path.of("y"));
+      new TestDefinition("gloas", "minimal", "operations/attestation", "valid", "y");
   private static final Set<String> LIST =
       Set.of("gloas - minimal - operations/attestation - invalid_too_many");
 

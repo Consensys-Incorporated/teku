@@ -450,6 +450,20 @@ public class SszMaxLengthFixtures {
     this.fixtures = fixtures;
   }
 
+  /**
+   * Runs a reference test, inverting the outcome for the listed fixtures.
+   *
+   * <p>A fixture that is not listed runs as usual. A listed one passes only if the executor throws
+   * {@link SszMaxLengthExceededException}: any other exception propagates as a normal failure, and
+   * completing without one fails with an {@link AssertionError} asking for the entry to be removed,
+   * so the list cannot outlive the limit that put a fixture on it.
+   *
+   * @param testDefinition the fixture, matched against the list by {@link
+   *     TestDefinition#getDisplayName()}
+   * @param executor the executor that would normally run the fixture
+   * @throws Throwable the executor's own failure for an unlisted fixture, or one that is listed but
+   *     fails for a reason other than an SSZ limit
+   */
   public void run(final TestDefinition testDefinition, final TestExecutor executor)
       throws Throwable {
     if (!fixtures.contains(key(testDefinition))) {
