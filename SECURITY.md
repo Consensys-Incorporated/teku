@@ -7,7 +7,7 @@ all security bugs seriously and if confirmed upon investigation we will patch it
 amount of time and release a public security bulletin discussing the impact and credit the discoverer.
 
 To report a security bug, email a description of the flaw and any related information
-(e.g. reproduction steps, version) to  [teku-security@consensys.com](mailto:teku-security@consensys.com).
+(e.g. reproduction steps, version) to  [teku-security-report@consensys.com](mailto:teku-security-report@consensys.com).
 
 Do not report security issues through public issues, pull requests, or discussions.
 
