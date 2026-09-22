@@ -29,14 +29,14 @@ public class SlashingProtectionInterchangeRefTestFinder implements TestFinder {
       return Stream.empty();
     }
     return Files.list(testRoot)
-        .filter(file -> file.toFile().getName().endsWith(".json"))
+        .filter(file -> file.getFileName().toString().endsWith(".json"))
         .map(
             testFile ->
                 new TestDefinition(
                     fork,
                     config,
                     config,
-                    testFile.toFile().getName(),
-                    testRoot.relativize(testFile.getParent())));
+                    testFile.getFileName().toString(),
+                    testRoot.relativize(testFile.getParent()).toString()));
   }
 }

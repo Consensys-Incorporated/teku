@@ -22,7 +22,6 @@ import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema6;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszFieldName;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszPrimitiveSchemas;
-import tech.pegasys.teku.infrastructure.ssz.schema.SszSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszBytes32VectorSchema;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -66,17 +65,8 @@ public class BlobSidecarSchema
             SszBytes32VectorSchema.create(kzgCommitmentInclusionProofDepth)));
   }
 
-  @SuppressWarnings("unchecked")
-  public SszSchema<Blob> getBlobSszSchema() {
-    return (SszSchema<Blob>) getChildSchema(getFieldIndex(FIELD_BLOB));
-  }
-
   public BlobSchema getBlobSchema() {
-    return (BlobSchema) getBlobSszSchema();
-  }
-
-  public SignedBeaconBlockHeaderSchema getSignedBlockHeaderSchema() {
-    return (SignedBeaconBlockHeaderSchema) getFieldSchema4();
+    return (BlobSchema) getChildSchema(getFieldIndex(FIELD_BLOB));
   }
 
   public SszBytes32VectorSchema<?> getKzgCommitmentInclusionProofSchema() {

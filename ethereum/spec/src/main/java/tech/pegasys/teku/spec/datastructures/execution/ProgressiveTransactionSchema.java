@@ -13,14 +13,25 @@
 
 package tech.pegasys.teku.spec.datastructures.execution;
 
+import tech.pegasys.teku.infrastructure.ssz.schema.SszPrimitiveSchemas;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszProgressiveByteListSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszSchemaHints;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
+import tech.pegasys.teku.spec.config.SpecConfigBellatrix;
 
 /**
  * Progressive (EIP-7916) variant of {@link TransactionSchema} that preserves the {@link
- * Transaction} subtype while using progressive merkleization with no fixed max capacity.
+ * Transaction} subtype while using progressive merkleization. The spec {@code LIMIT} ({@code
+ * MAX_BYTES_PER_TRANSACTION}) is enforced by the schema on construction and deserialization.
  */
 public class ProgressiveTransactionSchema extends SszProgressiveByteListSchema<Transaction> {
+
+  public ProgressiveTransactionSchema(final SpecConfigBellatrix specConfig) {
+    super(
+        SszPrimitiveSchemas.BYTE_SCHEMA,
+        SszSchemaHints.none(),
+        specConfig.getMaxBytesPerTransaction());
+  }
 
   @Override
   public Transaction createFromBackingNode(final TreeNode node) {

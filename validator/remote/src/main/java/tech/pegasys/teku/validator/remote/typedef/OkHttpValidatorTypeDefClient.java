@@ -46,6 +46,7 @@ import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPrefe
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
@@ -82,6 +83,7 @@ import tech.pegasys.teku.validator.remote.typedef.handlers.PostPayloadTimeliness
 import tech.pegasys.teku.validator.remote.typedef.handlers.PostSyncDutiesRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.PrepareBeaconProposersRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.ProduceBlockRequest;
+import tech.pegasys.teku.validator.remote.typedef.handlers.PublishSignedExecutionPayloadBidRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.PublishSignedExecutionPayloadRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.RegisterValidatorsRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.SendAggregateAndProofsRequest;
@@ -384,5 +386,12 @@ public class OkHttpValidatorTypeDefClient extends OkHttpValidatorMinimalTypeDefC
         new PublishSignedExecutionPayloadRequest(spec, getBaseEndpoint(), getOkHttpClient());
     return publishSignedExecutionPayloadRequest.submit(
         signedExecutionPayloadEnvelopeContents, broadcastValidationLevel);
+  }
+
+  public void publishSignedExecutionPayloadBid(
+      final SignedExecutionPayloadBid signedExecutionPayloadBid) {
+    final PublishSignedExecutionPayloadBidRequest publishSignedExecutionPayloadBidRequest =
+        new PublishSignedExecutionPayloadBidRequest(spec, getBaseEndpoint(), getOkHttpClient());
+    publishSignedExecutionPayloadBidRequest.submit(signedExecutionPayloadBid);
   }
 }

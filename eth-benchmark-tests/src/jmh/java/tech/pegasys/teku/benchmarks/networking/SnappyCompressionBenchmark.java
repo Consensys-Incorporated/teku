@@ -51,11 +51,10 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 /**
- * Compares Snappy block-compression implementations to evaluate consolidating on a single Snappy
- * dependency for gossip:
+ * Compares Snappy block-compression implementations available after consolidating on
+ * aircompressor-v3:
  *
  * <ul>
- *   <li>{@code SNAPPY_JAVA} — snappy-java, JNI to native C++ (used today for gossip).
  *   <li>{@code NETTY} — Netty's pure-Java Snappy block codec (used today for RPC framing).
  *   <li>{@code AIRCOMPRESSOR_NATIVE} — aircompressor-v3 native Snappy via {@code java.lang.foreign}
  *       (FFM, not JNI).
@@ -74,8 +73,8 @@ import tech.pegasys.teku.spec.util.DataStructureUtil;
  * implementations can produce different compressed sizes for the same input — a faster encoder that
  * compresses less is not actually better for gossip bandwidth. Each implementation's compressed
  * size and ratio are therefore reported alongside the timing metrics. To keep the comparison fair,
- * {@code decompress} decodes a single shared snappy-java-encoded buffer for every implementation
- * (all are wire-compatible), so decode cost is isolated from encoder-specific output shape. For
+ * {@code decompress} decodes a single shared Netty-encoded buffer for every implementation (all are
+ * wire-compatible), so decode cost is isolated from encoder-specific output shape. For
  * multi-message fixture payloads, each fixture item is compressed/decompressed independently in one
  * benchmark operation and the reported ratio aggregates all items. Synthetic {@code SYNTHETIC_*}
  * payloads exercise the encoder heuristics on compressible data, which the high-entropy SSZ message
@@ -94,7 +93,6 @@ import tech.pegasys.teku.spec.util.DataStructureUtil;
 public class SnappyCompressionBenchmark {
 
   public enum Impl {
-    SNAPPY_JAVA,
     NETTY,
     AIRCOMPRESSOR_NATIVE,
     AIRCOMPRESSOR_JAVA
@@ -130,13 +128,13 @@ public class SnappyCompressionBenchmark {
     })
     public Payload payload;
 
-    @Param({"SNAPPY_JAVA", "NETTY", "AIRCOMPRESSOR_NATIVE", "AIRCOMPRESSOR_JAVA"})
+    @Param({"NETTY", "AIRCOMPRESSOR_NATIVE", "AIRCOMPRESSOR_JAVA"})
     public Impl impl;
 
     // Uncompressed payloads (input for the compress benchmark). Most payload modes contain one
     // message; fixture modes contain one entry per block/chunk.
     public List<byte[]> rawPayloads;
-    // Shared reference compressed bytes (snappy-java block format), used as the decompress input
+    // Shared reference compressed bytes (Netty block format), used as the decompress input
     // for EVERY implementation so decode is compared on byte-identical input (all impls are
     // wire-compatible). Isolates decoder cost from encoder-specific output shape.
     public List<byte[]> referenceCompressedPayloads;
@@ -150,7 +148,7 @@ public class SnappyCompressionBenchmark {
       final Spec spec = TestSpecFactory.createMainnetFulu();
       final DataStructureUtil data = new DataStructureUtil(1, spec);
       rawPayloads = buildPayloads(payload, data);
-      referenceCompressedPayloads = snappyJavaCompressPayloads(rawPayloads);
+      referenceCompressedPayloads = nettyCompressPayloads(rawPayloads);
       measurementCount = benchmarkParams.getMeasurement().getCount();
 
       final List<byte[]> ownCompressed = compressPayloads(impl, rawPayloads);
@@ -166,11 +164,11 @@ public class SnappyCompressionBenchmark {
           implCompressedSize,
           (double) rawSize / implCompressedSize);
 
-      // Feasibility check (spec item 1): every implementation must produce/consume the same Snappy
-      // block wire format as snappy-java, or a migration would break gossip interoperability. Fail
-      // fast and loudly if not. Impl-agnostic, so run once per payload (during the SNAPPY_JAVA
-      // trial).
-      if (impl == Impl.SNAPPY_JAVA) {
+      // Feasibility check: every implementation must produce/consume the same Snappy block wire
+      // format as Netty (the RPC framing codec), or the implementations would not be
+      // interchangeable. Fail fast and loudly if not. Impl-agnostic, so run once per payload
+      // (during the NETTY trial).
+      if (impl == Impl.NETTY) {
         for (final byte[] raw : rawPayloads) {
           verifyCrossCompatibility(raw);
         }
@@ -300,18 +298,16 @@ public class SnappyCompressionBenchmark {
     return compressedPayloads;
   }
 
-  private static List<byte[]> snappyJavaCompressPayloads(final List<byte[]> rawPayloads)
-      throws IOException {
+  private static List<byte[]> nettyCompressPayloads(final List<byte[]> rawPayloads) {
     final List<byte[]> compressedPayloads = new ArrayList<>(rawPayloads.size());
     for (final byte[] rawPayload : rawPayloads) {
-      compressedPayloads.add(snappyJavaCompress(rawPayload));
+      compressedPayloads.add(nettyCompress(rawPayload));
     }
     return compressedPayloads;
   }
 
   private static byte[] compressPayload(final Impl impl, final byte[] raw) throws IOException {
     return switch (impl) {
-      case SNAPPY_JAVA -> snappyJavaCompress(raw);
       case NETTY -> nettyCompress(raw);
       case AIRCOMPRESSOR_NATIVE -> aircompressorCompress(new SnappyNativeCompressor(), raw);
       case AIRCOMPRESSOR_JAVA -> aircompressorCompress(new SnappyJavaCompressor(), raw);
@@ -321,7 +317,6 @@ public class SnappyCompressionBenchmark {
   private static byte[] decompressPayload(
       final Impl impl, final byte[] compressed, final int uncompressedLength) throws IOException {
     return switch (impl) {
-      case SNAPPY_JAVA -> snappyJavaUncompress(compressed);
       case NETTY -> nettyUncompress(compressed);
       case AIRCOMPRESSOR_NATIVE ->
           aircompressorUncompress(new SnappyNativeDecompressor(), compressed, uncompressedLength);
@@ -336,14 +331,6 @@ public class SnappyCompressionBenchmark {
       totalSize += payload.length;
     }
     return totalSize;
-  }
-
-  static byte[] snappyJavaCompress(final byte[] in) throws IOException {
-    return org.xerial.snappy.Snappy.compress(in);
-  }
-
-  static byte[] snappyJavaUncompress(final byte[] in) throws IOException {
-    return org.xerial.snappy.Snappy.uncompress(in);
   }
 
   static byte[] nettyCompress(final byte[] in) {
@@ -388,36 +375,33 @@ public class SnappyCompressionBenchmark {
   }
 
   /**
-   * Verifies every implementation shares the Snappy block wire format with snappy-java (the current
-   * production gossip codec), in both directions. A mismatch means a migration would break gossip
-   * interoperability with the network. Exercising the aircompressor-native path here also proves
-   * its FFM native library loaded on this platform (there is no silent pure-Java fallback in the
-   * {@code *Native*} classes).
+   * Verifies every implementation shares the Snappy block wire format with Netty, in both
+   * directions. A mismatch means the implementations would not be interchangeable. Exercising the
+   * aircompressor-native path here also proves its FFM native library loaded on this platform
+   * (there is no silent pure-Java fallback in the {@code *Native*} classes).
    */
   static void verifyCrossCompatibility(final byte[] raw) throws IOException {
-    final byte[] snappyJava = snappyJavaCompress(raw);
+    final byte[] netty = nettyCompress(raw);
 
-    // snappy-java must decode every implementation's compressed output.
-    requireRoundTrip("snappy-java <- Netty", raw, snappyJavaUncompress(nettyCompress(raw)));
+    // Netty must decode every implementation's compressed output.
     requireRoundTrip(
-        "snappy-java <- aircompressor-native",
+        "Netty <- aircompressor-native",
         raw,
-        snappyJavaUncompress(aircompressorCompress(new SnappyNativeCompressor(), raw)));
+        nettyUncompress(aircompressorCompress(new SnappyNativeCompressor(), raw)));
     requireRoundTrip(
-        "snappy-java <- aircompressor-java",
+        "Netty <- aircompressor-java",
         raw,
-        snappyJavaUncompress(aircompressorCompress(new SnappyJavaCompressor(), raw)));
+        nettyUncompress(aircompressorCompress(new SnappyJavaCompressor(), raw)));
 
-    // Every implementation must decode snappy-java's compressed output.
-    requireRoundTrip("Netty <- snappy-java", raw, nettyUncompress(snappyJava));
+    // Every implementation must decode Netty's compressed output.
     requireRoundTrip(
-        "aircompressor-native <- snappy-java",
+        "aircompressor-native <- Netty",
         raw,
-        aircompressorUncompress(new SnappyNativeDecompressor(), snappyJava, raw.length));
+        aircompressorUncompress(new SnappyNativeDecompressor(), netty, raw.length));
     requireRoundTrip(
-        "aircompressor-java <- snappy-java",
+        "aircompressor-java <- Netty",
         raw,
-        aircompressorUncompress(new SnappyJavaDecompressor(), snappyJava, raw.length));
+        aircompressorUncompress(new SnappyJavaDecompressor(), netty, raw.length));
   }
 
   private static void requireRoundTrip(
