@@ -426,7 +426,10 @@ public class SchemaRegistryBuilder {
         .withCreator(
             BELLATRIX,
             (_, specConfig, _) -> new TransactionSchema(SpecConfigBellatrix.required(specConfig)))
-        .withCreator(GLOAS, (_, _, _) -> new ProgressiveTransactionSchema())
+        .withCreator(
+            GLOAS,
+            (_, specConfig, _) ->
+                new ProgressiveTransactionSchema(SpecConfigBellatrix.required(specConfig)))
         .build();
   }
 
@@ -441,9 +444,11 @@ public class SchemaRegistryBuilder {
                     SszSchemaHints.sszPackedByteLists()))
         .withCreator(
             GLOAS,
-            (registry, _, _) ->
+            (registry, specConfig, _) ->
                 SszProgressiveListSchema.create(
-                    registry.get(TRANSACTION_SCHEMA), SszSchemaHints.sszPackedByteLists()))
+                    registry.get(TRANSACTION_SCHEMA),
+                    SszSchemaHints.sszPackedByteLists(),
+                    SpecConfigBellatrix.required(specConfig).getMaxTransactionsPerPayload()))
         .build();
   }
 

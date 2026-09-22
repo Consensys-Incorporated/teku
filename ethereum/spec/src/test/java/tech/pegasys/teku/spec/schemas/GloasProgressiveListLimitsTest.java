@@ -49,6 +49,21 @@ class GloasProgressiveListLimitsTest {
   }
 
   @Test
+  void executionPayloadTransactions() {
+    final SszListSchema<?, ?> transactions =
+        (SszListSchema<?, ?>)
+            schemaDefinitions
+                .getExecutionPayloadSchema()
+                .getChildSchema(
+                    schemaDefinitions
+                        .getExecutionPayloadSchema()
+                        .getFieldIndex(ExecutionPayloadFields.TRANSACTIONS));
+    assertThat(transactions.getMaxLength()).isEqualTo(config.getMaxTransactionsPerPayload());
+    assertThat(((SszListSchema<?, ?>) transactions.getElementSchema()).getMaxLength())
+        .isEqualTo(config.getMaxBytesPerTransaction());
+  }
+
+  @Test
   void attestationBitsAndIndices() {
     assertThat(schemaDefinitions.getAttestationSchema().getAggregationBitsSchema().getMaxLength())
         .isEqualTo(config.getMaxValidatorsPerAttestation());

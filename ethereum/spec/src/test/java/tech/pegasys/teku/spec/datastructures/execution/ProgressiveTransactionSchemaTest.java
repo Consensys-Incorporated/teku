@@ -14,13 +14,20 @@
 package tech.pegasys.teku.spec.datastructures.execution;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszMaxLengthExceededException;
+import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.config.SpecConfigBellatrix;
 
 class ProgressiveTransactionSchemaTest {
 
-  private static final ProgressiveTransactionSchema SCHEMA = new ProgressiveTransactionSchema();
+  private static final SpecConfigBellatrix CONFIG =
+      SpecConfigBellatrix.required(TestSpecFactory.createMinimalGloas().getGenesisSpecConfig());
+  private static final ProgressiveTransactionSchema SCHEMA =
+      new ProgressiveTransactionSchema(CONFIG);
 
   @Test
   void fromBytes_shouldProduceTransactionSubtype() {
@@ -38,6 +45,28 @@ class ProgressiveTransactionSchemaTest {
 
     assertThat(deserialized.getBytes()).isEqualTo(bytes);
     assertThat(deserialized.hashTreeRoot()).isEqualTo(transaction.hashTreeRoot());
+  }
+
+  @Test
+  void maxLength_shouldBeMaxBytesPerTransaction() {
+    assertThat(SCHEMA.getMaxLength()).isEqualTo(CONFIG.getMaxBytesPerTransaction());
+    assertThat(SCHEMA.getSszLengthBounds().getMaxBytes())
+        .isEqualTo(CONFIG.getMaxBytesPerTransaction());
+  }
+
+  @Test
+  void sszDeserialize_shouldRejectTransactionAboveMaxBytes() {
+    final ProgressiveTransactionSchema limited =
+        new ProgressiveTransactionSchema(
+            SpecConfigBellatrix.required(
+                TestSpecFactory.createMinimalGloas(
+                        builder -> builder.bellatrixBuilder(b -> b.maxBytesPerTransaction(2)))
+                    .getGenesisSpecConfig()));
+    assertThat(limited.sszDeserialize(Bytes.fromHexString("0x0102")).getBytes())
+        .isEqualTo(Bytes.fromHexString("0x0102"));
+    assertThatThrownBy(() -> limited.sszDeserialize(Bytes.fromHexString("0x010203")))
+        .isInstanceOf(SszMaxLengthExceededException.class)
+        .hasMessage("List length 3 exceeds max length 2");
   }
 
   @Test
