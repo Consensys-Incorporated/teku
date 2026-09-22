@@ -2,12 +2,14 @@
 
 ## Reporting a Vulnerability
 
-If you think you have discovered a security issue in Teku, we'd love to hear from you. We will take
-all security bugs seriously and if confirmed upon investigation we will patch it within a reasonable
-amount of time and release a public security bulletin discussing the impact and credit the discoverer.
+If you think you have discovered a security issue in Teku, please report it privately using one of
+the methods below.
 
 To report a security bug, email a description of the flaw and any related information
-(e.g. reproduction steps, version) to  [teku-security-report@consensys.com](mailto:teku-security-report@consensys.com).
+(e.g. reproduction steps, version) to [teku-security-report@consensys.com](mailto:teku-security-report@consensys.com).
+
+Alternatively, open this repository's **Security** tab and select **Report a vulnerability** to use
+GitHub private vulnerability reporting.
 
 Do not report security issues through public issues, pull requests, or discussions.
 
