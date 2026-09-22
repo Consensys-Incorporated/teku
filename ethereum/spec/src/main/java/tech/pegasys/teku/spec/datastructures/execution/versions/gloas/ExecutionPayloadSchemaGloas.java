@@ -110,7 +110,10 @@ public class ExecutionPayloadSchemaGloas
         namedSchema(BASE_FEE_PER_GAS, SszPrimitiveSchemas.UINT256_SCHEMA),
         namedSchema(BLOCK_HASH, SszPrimitiveSchemas.BYTES32_SCHEMA),
         namedSchema(TRANSACTIONS, schemaRegistry.get(TRANSACTIONS_SCHEMA)),
-        namedSchema(WITHDRAWALS, SszProgressiveListSchema.create(Withdrawal.SSZ_SCHEMA)),
+        namedSchema(
+            WITHDRAWALS,
+            SszProgressiveListSchema.create(
+                Withdrawal.SSZ_SCHEMA, specConfig.getMaxWithdrawalsPerPayload())),
         namedSchema(BLOB_GAS_USED, SszPrimitiveSchemas.UINT64_SCHEMA),
         namedSchema(EXCESS_BLOB_GAS, SszPrimitiveSchemas.UINT64_SCHEMA),
         namedSchema(BLOCK_ACCESS_LIST, schemaRegistry.get(BLOCK_ACCESS_LIST_SCHEMA)),

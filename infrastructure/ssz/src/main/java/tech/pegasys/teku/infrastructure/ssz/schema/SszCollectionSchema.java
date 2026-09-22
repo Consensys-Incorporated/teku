@@ -49,7 +49,7 @@ public interface SszCollectionSchema<
   }
 
   default TreeNode createTreeFromElements(final List<? extends SszElementT> elements) {
-    // https://github.com/Consensys/teku/issues/9035
+    // https://github.com/Consensys-Incorporated/teku/issues/9035
     // This is a generic implementation which works for both Vector and List but it potentially
     // could do better if construct the tree directly in List/Vector subclasses
     checkArgument(

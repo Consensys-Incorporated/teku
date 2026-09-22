@@ -17,6 +17,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
 import java.io.InvalidClassException;
+import java.lang.Thread.UncaughtExceptionHandler;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletionException;
 import org.junit.jupiter.api.Test;
 
 public class ExceptionUtilTest {
@@ -87,6 +91,44 @@ public class ExceptionUtilTest {
     assertThat(
             ExceptionUtil.hasCause(err, InvalidClassException.class, IllegalStateException.class))
         .isFalse();
+  }
+
+  @Test
+  public void escalateIfOutOfMemory_reportsOutOfMemoryErrorToTheUncaughtExceptionHandler() {
+    final OutOfMemoryError error =
+        new OutOfMemoryError("Cannot reserve 1048576 bytes of direct buffer memory");
+
+    assertThat(escalated(error)).containsExactly(error);
+  }
+
+  @Test
+  public void escalateIfOutOfMemory_reportsWrappedOutOfMemoryError() {
+    // The form a Netty channel error takes by the time it is handled
+    final Throwable error =
+        new CompletionException(
+            new IllegalStateException("Channel exception", new OutOfMemoryError()));
+
+    assertThat(escalated(error)).containsExactly(error);
+  }
+
+  @Test
+  public void escalateIfOutOfMemory_ignoresOtherErrors() {
+    assertThat(escalated(new IOException("nope"))).isEmpty();
+    assertThat(escalated(new CompletionException(new IllegalStateException()))).isEmpty();
+  }
+
+  /** Runs the escalation with a capturing uncaught exception handler installed. */
+  private List<Throwable> escalated(final Throwable error) {
+    final List<Throwable> captured = new ArrayList<>();
+    final Thread thread = Thread.currentThread();
+    final UncaughtExceptionHandler original = thread.getUncaughtExceptionHandler();
+    thread.setUncaughtExceptionHandler((t, e) -> captured.add(e));
+    try {
+      ExceptionUtil.escalateIfOutOfMemory(error);
+    } finally {
+      thread.setUncaughtExceptionHandler(original);
+    }
+    return captured;
   }
 
   private static class CustomRuntimeException extends RuntimeException {}

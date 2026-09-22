@@ -39,7 +39,6 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
@@ -291,14 +290,6 @@ public class SentryValidatorApiChannel implements ValidatorApiChannel {
   public SafeFuture<Optional<List<SyncCommitteeSelectionProof>>> getSyncCommitteeSelectionProof(
       final List<SyncCommitteeSelectionProof> requests) {
     return dutiesProviderChannel.getSyncCommitteeSelectionProof(requests);
-  }
-
-  @Override
-  public SafeFuture<Optional<ExecutionPayloadBid>> createUnsignedExecutionPayloadBid(
-      final UInt64 slot, final UInt64 builderIndex) {
-    return blockHandlerChannel
-        .orElse(dutiesProviderChannel)
-        .createUnsignedExecutionPayloadBid(slot, builderIndex);
   }
 
   @Override

@@ -32,6 +32,7 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
+import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.signatures.Signer;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.api.FileBackedGraffitiProvider;
@@ -77,7 +78,8 @@ class ExecutionPayloadDutyTest {
         .thenReturn(SafeFuture.completedFuture(Optional.of(signedExecutionPayload.getMessage())));
     when(signer.signExecutionPayloadEnvelope(signedExecutionPayload.getMessage(), fork))
         .thenReturn(SafeFuture.completedFuture(signedExecutionPayload.getSignature()));
-    when(validatorApiChannel.publishSignedExecutionPayload(any()))
+    when(validatorApiChannel.publishSignedExecutionPayload(
+            any(SignedExecutionPayloadEnvelope.class), any()))
         .thenReturn(
             SafeFuture.completedFuture(
                 PublishSignedExecutionPayloadResult.success(
@@ -88,7 +90,9 @@ class ExecutionPayloadDutyTest {
     // should execute now
     asyncRunner.executeDueActions();
 
-    verify(validatorApiChannel).publishSignedExecutionPayload(signedExecutionPayload);
+    verify(validatorApiChannel)
+        .publishSignedExecutionPayload(
+            signedExecutionPayload, Optional.of(BroadcastValidationLevel.GOSSIP));
     verify(validatorLogger)
         .logExecutionPayloadDuty(
             eq(signedExecutionPayload.getMessage().getSlot()),

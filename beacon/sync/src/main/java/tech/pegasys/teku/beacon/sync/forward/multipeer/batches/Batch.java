@@ -64,6 +64,12 @@ public interface Batch {
 
   void markAsContested();
 
+  /**
+   * Discard the batch data and report the current sync source for having provided it. Unless the
+   * batch is contested, the source is penalized as for any invalid data ({@code LARGE_PENALTY}, a
+   * single occurrence of which disconnects and bans the peer), so only call this for failures the
+   * peer is responsible for.
+   */
   void markAsInvalid();
 
   void requestMoreBlocks(Runnable callback);

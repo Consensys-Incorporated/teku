@@ -121,7 +121,7 @@ public abstract class Eth2ReferenceTestCase {
           .build();
 
   protected void runReferenceTest(final TestDefinition testDefinition) throws Throwable {
-    getExecutorFor(testDefinition).runTest(testDefinition);
+    SszMaxLengthFixtures.REJECTED_BY_SSZ_LIMITS.run(testDefinition, getExecutorFor(testDefinition));
   }
 
   private TestExecutor getExecutorFor(final TestDefinition testDefinition) {

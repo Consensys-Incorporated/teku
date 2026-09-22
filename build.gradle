@@ -534,7 +534,16 @@ def slashingProtectionInterchangeRefTestBaseUrl = 'https://github.com/eth-client
 def refTestDownloadDir = "${buildDir}/refTests/${refTestVersion}"
 def blsRefTestDownloadDir = "${buildDir}/blsRefTests/${blsRefTestVersion}"
 def slashingProtectionInterchangeRefTestDownloadDir = "${buildDir}/slashingProtectionInterchangeRefTests/${slashingProtectionInterchangeRefTestVersion}"
-def refTestExpandDir = "${project.rootDir}/eth-reference-tests/src/referenceTest/resources/consensus-spec-tests/"
+// Reference test tarballs are converted into <config>.zip archives that the tests read directly
+// through the JDK zip filesystem (see ReferenceTestArchiveConverter); nothing is expanded on disk.
+ext.refTestArchivesDir = "${refTestDownloadDir}/archives"
+ext.refTestTarballs = [
+	general: "${refTestDownloadDir}/general.tar.gz",
+	minimal: "${refTestDownloadDir}/minimal.tar.gz",
+	mainnet: "${refTestDownloadDir}/mainnet.tar.gz",
+	bls: "${blsRefTestDownloadDir}/bls_tests_yaml.tar.gz",
+	'slashing-protection-interchange': "${slashingProtectionInterchangeRefTestDownloadDir}/slashing-protection-interchange-tests.tar.gz",
+]
 
 def downloadFile(String url, String token, File outputFile) {
 	println "Download ${outputFile.getName()} (${url})"
@@ -652,71 +661,6 @@ tasks.register('downloadSlashingProtectionInterchangeRefTests', Download) {
 
 tasks.register('downloadRefTests') {
 	dependsOn downloadEthRefTests, downloadBlsRefTests, downloadSlashingProtectionInterchangeRefTests
-}
-
-tasks.register('cleanRefTestsGeneral', Delete) {
-	delete "${refTestExpandDir}/tests/general"
-}
-
-tasks.register('expandRefTestsGeneral', Copy) {
-	dependsOn cleanRefTestsGeneral, downloadEthRefTests
-	from tarTree("${refTestDownloadDir}/general.tar.gz")
-	into refTestExpandDir
-}
-
-tasks.register('cleanRefTestsMainnet', Delete) {
-	delete "${refTestExpandDir}/tests/mainnet"
-}
-
-tasks.register('expandRefTestsMainnet', Copy) {
-	dependsOn cleanRefTestsMainnet, downloadEthRefTests
-	from tarTree("${refTestDownloadDir}/mainnet.tar.gz")
-	into refTestExpandDir
-}
-
-tasks.register('cleanRefTestsMinimal', Delete) {
-	delete "${refTestExpandDir}/tests/minimal"
-}
-
-tasks.register('expandRefTestsMinimal', Copy) {
-	dependsOn cleanRefTestsMinimal, downloadEthRefTests
-	from tarTree("${refTestDownloadDir}/minimal.tar.gz")
-	into refTestExpandDir
-}
-
-tasks.register('cleanRefTestsBls', Delete) {
-	delete "${refTestExpandDir}/tests/bls"
-}
-
-tasks.register('expandRefTestsBls', Copy) {
-	dependsOn cleanRefTestsBls, downloadBlsRefTests
-	from tarTree("${blsRefTestDownloadDir}/bls_tests_yaml.tar.gz")
-	into "${refTestExpandDir}/tests/bls"
-}
-
-tasks.register('cleanRefTestsSlashingProtectionInterchange', Delete) {
-	delete "${refTestExpandDir}/tests/slashing-protection-interchange"
-}
-
-tasks.register('expandRefTestsSlashingProtectionInterchange', Copy) {
-	dependsOn cleanRefTestsSlashingProtectionInterchange, downloadSlashingProtectionInterchangeRefTests
-	from {
-		tarTree("${slashingProtectionInterchangeRefTestDownloadDir}/slashing-protection-interchange-tests.tar.gz").matching {
-			include "**/tests/generated/*.json"
-			// flatten
-			eachFile { FileCopyDetails fcp ->
-				fcp.path = fcp.name
-			}
-		}
-	}
-	into "${refTestExpandDir}/tests/slashing-protection-interchange"
-}
-
-tasks.register('expandRefTests') {
-	dependsOn expandRefTestsGeneral, expandRefTestsMainnet, expandRefTestsMinimal, expandRefTestsBls, expandRefTestsSlashingProtectionInterchange
-}
-tasks.register('cleanRefTests') {
-	dependsOn cleanRefTestsGeneral, cleanRefTestsMainnet, cleanRefTestsMinimal, cleanRefTestsBls, cleanRefTestsSlashingProtectionInterchange
 }
 
 tasks.register('deploy') {}
@@ -880,6 +824,16 @@ application {
 		"--sun-misc-unsafe-memory-access=allow",
 		// avoids JDK 26+ warning due to picocli
 		// "--enable-final-field-mutation=ALL-UNNAMED"
+
+		// Terminate rather than carry on in a broken state after running out of memory. Handling
+		// this in Java is unreliable: the error is usually swallowed by a catch(Throwable) on the
+		// way out, and the graceful System.exit has deadlocked in a shutdown hook before (#7166).
+		// The JVM aborts at the point the error is thrown, with exit code 3: no catch blocks and
+		// no shutdown hooks run, so the database is left unclosed and recovers from its write
+		// ahead log on the next start. Only covers errors raised by the VM, so the out of memory
+		// errors thrown by Java code (direct buffer memory) are handled in
+		// TekuDefaultExceptionHandler.
+		"-XX:+ExitOnOutOfMemoryError",
 	]
 }
 
@@ -1295,7 +1249,7 @@ subprojects {
 					pom {
 						name = "Teku - ${project.name}"
 						description = "Teku Ethereum consensus client - ${project.name}"
-						url = 'https://github.com/Consensys/teku'
+						url = 'https://github.com/Consensys-Incorporated/teku'
 						licenses {
 							license {
 								name = 'The Apache License, Version 2.0'
@@ -1311,9 +1265,9 @@ subprojects {
 							}
 						}
 						scm {
-							connection = 'scm:git:git://github.com/Consensys/teku.git'
-							developerConnection = 'https://github.com/Consensys/teku.git'
-							url = 'https://github.com/Consensys/teku'
+							connection = 'scm:git:git://github.com/Consensys-Incorporated/teku.git'
+							developerConnection = 'https://github.com/Consensys-Incorporated/teku.git'
+							url = 'https://github.com/Consensys-Incorporated/teku'
 						}
 						// workaround
 						// https://stackoverflow.com/questions/69877418/why-does-every-pom-file-published-by-gradle-has-a-self-referential-dependency
