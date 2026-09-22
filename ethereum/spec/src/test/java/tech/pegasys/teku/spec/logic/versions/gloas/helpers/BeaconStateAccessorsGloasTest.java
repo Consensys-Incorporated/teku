@@ -212,7 +212,7 @@ public class BeaconStateAccessorsGloasTest {
     final UInt64 forkEpoch = UInt64.valueOf(10);
     final UInt64 forkSlot = spec.computeStartSlotAtEpoch(forkEpoch);
     final BeaconState state = stateWithGloasFork(forkSlot, forkEpoch);
-    final UInt64 preForkSlot = forkSlot.minus(1);
+    final UInt64 preForkSlot = forkSlot.decrement();
 
     assertThatThrownBy(() -> beaconStateAccessors.getPtc(state, preForkSlot))
         .isInstanceOf(IllegalArgumentException.class)
@@ -227,9 +227,9 @@ public class BeaconStateAccessorsGloasTest {
   @Test
   public void getPtc_allowsPreviousEpochSlotAtOrAfterGloasFork() {
     final UInt64 forkEpoch = UInt64.valueOf(10);
-    final UInt64 stateSlot = spec.computeStartSlotAtEpoch(forkEpoch.plus(1));
+    final UInt64 stateSlot = spec.computeStartSlotAtEpoch(forkEpoch.increment());
     final BeaconState state = stateWithGloasFork(stateSlot, forkEpoch);
-    final UInt64 previousEpochSlot = stateSlot.minus(1);
+    final UInt64 previousEpochSlot = stateSlot.decrement();
 
     assertThat(beaconStateAccessors.getPtc(state, previousEpochSlot).isEmpty()).isFalse();
   }
@@ -246,7 +246,7 @@ public class BeaconStateAccessorsGloasTest {
     final BeaconState state =
         dataStructureUtil.randomBeaconState(forkSlot).updated(s -> s.setFork(fork));
 
-    assertThat(beaconStateAccessors.getPtc(state, forkSlot.minus(1)).isEmpty()).isFalse();
+    assertThat(beaconStateAccessors.getPtc(state, forkSlot.decrement()).isEmpty()).isFalse();
   }
 
   private BeaconState stateWithGloasFork(final UInt64 slot, final UInt64 forkEpoch) {
