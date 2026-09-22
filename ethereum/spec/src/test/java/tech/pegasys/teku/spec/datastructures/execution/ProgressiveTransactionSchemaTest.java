@@ -17,10 +17,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.config.SpecConfigBellatrix;
 
 class ProgressiveTransactionSchemaTest {
 
-  private static final ProgressiveTransactionSchema SCHEMA = new ProgressiveTransactionSchema();
+  private static final SpecConfigBellatrix CONFIG =
+      SpecConfigBellatrix.required(TestSpecFactory.createMinimalGloas().getGenesisSpecConfig());
+  private static final ProgressiveTransactionSchema SCHEMA =
+      new ProgressiveTransactionSchema(CONFIG);
 
   @Test
   void fromBytes_shouldProduceTransactionSubtype() {

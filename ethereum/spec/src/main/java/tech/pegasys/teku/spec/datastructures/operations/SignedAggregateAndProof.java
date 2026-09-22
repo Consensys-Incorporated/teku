@@ -15,7 +15,6 @@ package tech.pegasys.teku.spec.datastructures.operations;
 
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.AGGREGATE_AND_PROOF_SCHEMA;
 
-import java.util.OptionalLong;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.ssz.containers.Container2;
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema2;
@@ -31,28 +30,12 @@ public class SignedAggregateAndProof
   public static class SignedAggregateAndProofSchema
       extends ContainerSchema2<SignedAggregateAndProof, AggregateAndProof, SszSignature> {
 
-    private final OptionalLong networkSszLengthBytesUpperBound;
-
     public SignedAggregateAndProofSchema(
         final String containerName, final SchemaRegistry schemaRegistry) {
-      this(containerName, schemaRegistry, OptionalLong.empty());
-    }
-
-    public SignedAggregateAndProofSchema(
-        final String containerName,
-        final SchemaRegistry schemaRegistry,
-        final OptionalLong networkSszLengthBytesUpperBound) {
       super(
           containerName,
           namedSchema("message", schemaRegistry.get(AGGREGATE_AND_PROOF_SCHEMA)),
           namedSchema("signature", SszSignatureSchema.INSTANCE));
-      this.networkSszLengthBytesUpperBound = networkSszLengthBytesUpperBound;
-      validateNetworkSszLengthBytesUpperBound();
-    }
-
-    @Override
-    public OptionalLong getNetworkSszLengthBytesUpperBound() {
-      return networkSszLengthBytesUpperBound;
     }
 
     public AggregateAndProofSchema getAggregateAndProofSchema() {

@@ -32,6 +32,9 @@ import io.libp2p.core.multistream.ProtocolBinding;
 import io.libp2p.core.mux.StreamMuxer.Session;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
+import java.lang.Thread.UncaughtExceptionHandler;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
@@ -503,6 +506,40 @@ public class RpcHandlerTest {
   private void assertRequestsFailedCounterValue(final long expectedValue) {
     assertThat(metricsSystem.getCounterValue(TekuMetricCategory.LIBP2P, "rpc_requests_failed"))
         .isEqualTo(expectedValue);
+  }
+
+  @Test
+  void shouldEscalateOutOfMemoryErrorFromTheChannelInsteadOfOnlyRecordingIt() {
+    // Netty throws OutOfDirectMemoryError when the direct memory limit is reached, and
+    // -XX:+ExitOnOutOfMemoryError does not detect it because it is thrown by Java code. Without
+    // escalation this handler would only log it and complete the future, so the node would keep
+    // running with no usable direct memory.
+    final RpcHandler<RpcRequestHandler, RpcRequest, RpcResponseHandler<?>> handler =
+        createRpcHandler(new InboundRpcStreamLimiter(1));
+    when(rpcMethod.createIncomingRequestHandler(protocolId))
+        .thenReturn(mock(RpcRequestHandler.class));
+    final Stream p2pStream = createP2PStream(false);
+    final AtomicReference<Controller<RpcRequestHandler>> capturedController =
+        captureController(p2pStream);
+    final SafeFuture<Controller<RpcRequestHandler>> init =
+        handler.initChannel(p2pStream, protocolId);
+    final ChannelHandlerContext context = mock(ChannelHandlerContext.class);
+    capturedController.get().channelActive(context);
+    assertThat(init).isCompleted();
+
+    final OutOfMemoryError error =
+        new OutOfMemoryError("Cannot reserve 1048576 bytes of direct buffer memory");
+    final List<Throwable> escalated = new ArrayList<>();
+    final Thread thread = Thread.currentThread();
+    final UncaughtExceptionHandler original = thread.getUncaughtExceptionHandler();
+    thread.setUncaughtExceptionHandler((t, e) -> escalated.add(e));
+    try {
+      capturedController.get().exceptionCaught(context, error);
+    } finally {
+      thread.setUncaughtExceptionHandler(original);
+    }
+
+    assertThat(escalated).containsExactly(error);
   }
 
   private RpcHandler<RpcRequestHandler, RpcRequest, RpcResponseHandler<?>> createRpcHandler(

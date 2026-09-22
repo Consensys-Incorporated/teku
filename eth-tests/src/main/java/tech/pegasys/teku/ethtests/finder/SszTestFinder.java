@@ -34,7 +34,7 @@ public class SszTestFinder implements TestFinder {
   public Stream<TestDefinition> findTests(
       final String fork, final String config, final Path testRoot) throws IOException {
     final Path sszStaticDir = testRoot.resolve(testDirectoryName);
-    if (!sszStaticDir.toFile().exists()) {
+    if (!Files.exists(sszStaticDir)) {
       return Stream.empty();
     }
     return Files.list(sszStaticDir)
@@ -47,12 +47,12 @@ public class SszTestFinder implements TestFinder {
       throws IOException {
     final String testType = phase0Tests.relativize(testCategoryDir).toString();
     return Files.walk(testCategoryDir)
-        .filter(path -> path.resolve("serialized.ssz_snappy").toFile().exists())
+        .filter(path -> Files.exists(path.resolve("serialized.ssz_snappy")))
         .map(
             testDir -> {
               final String testName = testCategoryDir.relativize(testDir).toString();
               return new TestDefinition(
-                  fork, config, testType, testName, phase0Tests.relativize(testDir));
+                  fork, config, testType, testName, phase0Tests.relativize(testDir).toString());
             });
   }
 }

@@ -945,9 +945,8 @@ public class Spec {
   /**
    * Dispatched on the state's fork rather than an epoch taken from the slashing, so that pool and
    * gossip validation apply the same milestone's rules that block processing later will. The slots
-   * inside a slashing are attacker controlled and unbounded, and from Gloas the attesting indices
-   * bound is enforced in the validation logic rather than by the SSZ schema - so dispatching on
-   * them would let a slashing naming a pre-Gloas epoch skip that bound.
+   * inside a slashing are attacker controlled and unbounded, so dispatching on them would let the
+   * sender pick an arbitrarily old milestone's validation rules.
    */
   public Optional<OperationInvalidReason> validateAttesterSlashing(
       final BeaconState state, final AttesterSlashing attesterSlashing) {

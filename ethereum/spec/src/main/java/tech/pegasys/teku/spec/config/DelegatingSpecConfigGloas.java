@@ -46,21 +46,6 @@ public class DelegatingSpecConfigGloas extends DelegatingSpecConfigFulu implemen
   }
 
   @Override
-  public int getMaxSignedAggregateAndProofSize() {
-    return delegate.getMaxSignedAggregateAndProofSize();
-  }
-
-  @Override
-  public int getMaxAttesterSlashingSize() {
-    return delegate.getMaxAttesterSlashingSize();
-  }
-
-  @Override
-  public int getMaxSignedExecutionPayloadBidSize() {
-    return delegate.getMaxSignedExecutionPayloadBidSize();
-  }
-
-  @Override
   public int getMinBuilderWithdrawabilityDelay() {
     return delegate.getMinBuilderWithdrawabilityDelay();
   }
