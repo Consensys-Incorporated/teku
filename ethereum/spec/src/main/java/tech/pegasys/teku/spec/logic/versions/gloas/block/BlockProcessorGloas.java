@@ -470,8 +470,14 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
         throw new BlockProcessingException("Attestation is NOT for the previous slot");
       }
       // Verify signature
-      final IndexedPayloadAttestationLight indexedPayloadAttestation =
-          beaconStateAccessorsGloas.getIndexedPayloadAttestation(state, payloadAttestation);
+      final IndexedPayloadAttestationLight indexedPayloadAttestation;
+      try {
+        indexedPayloadAttestation =
+            beaconStateAccessorsGloas.getIndexedPayloadAttestation(state, payloadAttestation);
+      } catch (final IllegalArgumentException e) {
+        // get_ptc rejects slots outside the queryable window, e.g. before the Gloas fork epoch
+        throw new BlockProcessingException(e);
+      }
 
       if (!attestationUtilGloas.isValidIndexedPayloadAttestation(
           state, indexedPayloadAttestation)) {
