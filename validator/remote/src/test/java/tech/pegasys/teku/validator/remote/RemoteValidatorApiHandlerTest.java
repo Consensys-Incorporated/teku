@@ -77,6 +77,7 @@ import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPrefe
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
@@ -627,6 +628,21 @@ class RemoteValidatorApiHandlerTest {
 
     assertThat(result).isCompletedWithValue(expectedErrors);
     verify(typeDefClient).sendBuilderPreferences(builderPreferences);
+  }
+
+  @Test
+  public void publishSignedExecutionPayloadBid_InvokeApiWithCorrectRequest() {
+    final DataStructureUtil dataStructureUtil =
+        new DataStructureUtil(TestSpecFactory.createMinimalGloas());
+    final SignedExecutionPayloadBid signedExecutionPayloadBid =
+        dataStructureUtil.randomSignedExecutionPayloadBid();
+
+    final SafeFuture<Void> result =
+        apiHandler.publishSignedExecutionPayloadBid(signedExecutionPayloadBid);
+    asyncRunner.executeQueuedActions();
+
+    assertThat(result).isCompleted();
+    verify(typeDefClient).publishSignedExecutionPayloadBid(signedExecutionPayloadBid);
   }
 
   @Test

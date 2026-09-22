@@ -17,6 +17,7 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.google.errorprone.annotations.MustBeClosed;
+import io.airlift.compress.v3.snappy.SnappyDecompressor;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
@@ -26,7 +27,6 @@ import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 import org.apache.commons.io.IOUtils;
 import org.apache.tuweni.bytes.Bytes;
-import org.xerial.snappy.Snappy;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -128,7 +128,11 @@ public class PrettyPrintCommand implements Callable<Integer> {
       return System.in;
     } else if (input.getName().endsWith(".ssz_snappy")) {
       final byte[] data = IOUtils.toByteArray(Files.newInputStream(input.toPath()));
-      return new ByteArrayInputStream(Snappy.uncompress(data));
+      final SnappyDecompressor decompressor = SnappyDecompressor.create();
+      final int uncompressedLength = decompressor.getUncompressedLength(data, 0);
+      final byte[] uncompressed = new byte[uncompressedLength];
+      decompressor.decompress(data, 0, data.length, uncompressed, 0, uncompressedLength);
+      return new ByteArrayInputStream(uncompressed);
     } else if (input.getName().endsWith(".ssz")) {
       final byte[] data = IOUtils.toByteArray(Files.newInputStream(input.toPath()));
       return new ByteArrayInputStream(data);

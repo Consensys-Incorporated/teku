@@ -71,7 +71,7 @@ public class ReferenceTestFinder {
                           List.of(),
                           List.of(
                               // TODO-GLOAS: the following tests require equivocation
-                              // see https://github.com/Consensys/teku/issues/10608
+                              // see https://github.com/Consensys-Incorporated/teku/issues/10608
                               "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_with_enough_ffg_votes_previous_epoch",
                               "gloas - minimal - fork_choice/reorg - simple_attempted_reorg_without_enough_ffg_votes",
                               "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_with_enough_ffg_votes_current_epoch",

@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.cli.options;
 
+import static com.google.common.base.Strings.isNullOrEmpty;
+
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URL;
@@ -58,6 +60,20 @@ public class BuilderOptions {
   private UInt64 builderBoostFactor = ValidatorConfig.DEFAULT_BUILDER_BOOST_FACTOR;
 
   @CommandLine.Option(
+      names = {"--Xbuilder-max-execution-payment"},
+      paramLabel = "<uint64>",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS,
+      description =
+          """
+            The maximum execution layer payment (in Gwei) that counts when a builder's bid is valued.
+            `0` is the default which counts no execution payment, leaving the bid valued at its trustless value alone.
+            This parameter may be adjusted based on the level of trust in the builder's reliability and reputation.""",
+      arity = "1",
+      hidden = true,
+      converter = UInt64Converter.class)
+  private UInt64 builderMaxExecutionPayment = ValidatorConfig.DEFAULT_BUILDER_MAX_EXECUTION_PAYMENT;
+
+  @CommandLine.Option(
       names = {"--Xbuilder-urls"},
       paramLabel = "<url>",
       description = "Comma separated list of urls of builders to use when proposing",
@@ -72,6 +88,7 @@ public class BuilderOptions {
             config
                 .builderMinBid(builderMinBid)
                 .builderBoostFactor(builderBoostFactor)
+                .builderMaxExecutionPayment(builderMaxExecutionPayment)
                 .builderUrls(parseBuilderUrls()));
   }
 
@@ -81,7 +98,12 @@ public class BuilderOptions {
 
   private URL parseBuilderUrl(final String builderUrl) {
     try {
-      return URI.create(builderUrl).toURL();
+      final URL parsedBuilderUrl = URI.create(builderUrl).toURL();
+      if (isNullOrEmpty(parsedBuilderUrl.getHost())) {
+        throw new InvalidConfigurationException(
+            "Invalid configuration. Builder URL (" + builderUrl + ") must contain a valid host");
+      }
+      return parsedBuilderUrl;
     } catch (IllegalArgumentException | MalformedURLException e) {
       throw new InvalidConfigurationException(
           "Invalid configuration. Builder URL (" + builderUrl + ") has invalid syntax", e);

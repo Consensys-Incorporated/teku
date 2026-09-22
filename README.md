@@ -1,7 +1,7 @@
 # teku
 
- [![Build Status](https://github.com/consensys/teku/actions/workflows/ci.yml/badge.svg)](https://github.com/Consensys/teku/actions/workflows/ci.yml?query=branch%3Amaster)
- [![GitHub License](https://img.shields.io/github/license/Consensys/teku.svg?logo=apache)](https://github.com/Consensys/teku/blob/master/LICENSE)
+ [![Build Status](https://github.com/Consensys-Incorporated/teku/actions/workflows/ci.yml/badge.svg)](https://github.com/Consensys-Incorporated/teku/actions/workflows/ci.yml?query=branch%3Amaster)
+ [![GitHub License](https://img.shields.io/github/license/Consensys/teku.svg?logo=apache)](https://github.com/Consensys-Incorporated/teku/blob/master/LICENSE)
  [![Documentation](https://img.shields.io/badge/docs-readme-blue?logo=readme&logoColor=white)](https://docs.teku.consensys.io/)
  [![consensus-specs](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2FConsensys%2Fteku%2Frefs%2Fheads%2Fmaster%2Fbuild.gradle&search=refTestVersion.*%22(v%5B%5E%22%5D%2B)%22&replace=%241&label=consensus-specs)](https://github.com/ethereum/consensus-specs/releases)
  [![Discord](https://img.shields.io/badge/Chat-on%20Discord-%235865F2?logo=discord&logoColor=white)](https://discord.gg/teku)
@@ -9,16 +9,16 @@
 
 Teku is an open-source Ethereum consensus client written in Java and containing a full beacon node and validator client implementation.
 
-See the [Changelog](https://github.com/Consensys/teku/releases) for details of the latest releases and upcoming breaking changes.
+See the [Changelog](https://github.com/Consensys-Incorporated/teku/releases) for details of the latest releases and upcoming breaking changes.
 
 ## Useful links
 
 * [Ethereum Beacon Chain specification](https://github.com/ethereum/consensus-specs/blob/master/specs/phase0/beacon-chain.md)
 * [Teku user documentation](https://docs.teku.consensys.io/)
 * [Teku REST API reference documentation](https://docs.teku.consensys.io/reference/rest)
-* [Teku issues](https://github.com/Consensys/teku/issues)
+* [Teku issues](https://github.com/Consensys-Incorporated/teku/issues)
 * [Contribution guidelines](CONTRIBUTING.md)
-* [Teku Changelog](https://github.com/Consensys/teku/releases)
+* [Teku Changelog](https://github.com/Consensys-Incorporated/teku/releases)
 
 ## Teku users
 
@@ -34,7 +34,7 @@ the #teku channel on [Discord](https://discord.gg/teku) if you've got questions 
 
 ## Binary Releases
 
-Binary releases are available from the [releases page](https://github.com/Consensys/teku/releases).
+Binary releases are available from the [releases page](https://github.com/Consensys-Incorporated/teku/releases).
 Binary builds that track the latest changes on the master branch are available on
 [Dockerhub](https://hub.docker.com/r/consensys/teku) using the `develop` version or as binary
 downloads ([tar.gz format](https://artifacts.consensys.net/public/teku/raw/names/teku.tar.gz/versions/develop/teku-develop.tar.gz)
@@ -47,7 +47,7 @@ Release notifications are available via:
 * Sign up to our [release announcements](https://pages.consensys.net/teku-sign-up) email list (release and important announcements only, no marketing)
 * Follow us on [Twitter](https://twitter.com/Teku_Consensys)
 * `teku` in [Consensys Discord](https://discord.gg/teku),
-* Subscribe to release notifications on github for [teku](https://github.com/Consensys/teku)
+* Subscribe to release notifications on github for [teku](https://github.com/Consensys-Incorporated/teku)
 
 ## Build Instructions
 
@@ -64,7 +64,7 @@ Building on a more recent version of Java is supported, but the resulting build 
 To create a ready to run distribution:
 
 ```shell script
-git clone https://github.com/Consensys/teku.git
+git clone https://github.com/Consensys-Incorporated/teku.git
 cd teku && ./gradlew distTar installDist
 ```
 
@@ -77,7 +77,7 @@ This produces:
 To build, clone this repo and run with `gradle`:
 
 ```shell script
-git clone https://github.com/Consensys/teku.git
+git clone https://github.com/Consensys-Incorporated/teku.git
 cd teku && ./gradlew
 
 ```
