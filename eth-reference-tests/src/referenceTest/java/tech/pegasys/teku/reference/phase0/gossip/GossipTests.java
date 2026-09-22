@@ -54,8 +54,7 @@ public class GossipTests {
               "networking/gossip_payload_attestation_message",
               new GossipPayloadAttestationMessageTestExecutor())
           .put(
-              // TODO: https://github.com/Consensys-Incorporated/teku/issues/11232
-              "networking/gossip_proposer_preferences", TestExecutor.IGNORE_TESTS)
+              "networking/gossip_proposer_preferences", new GossipProposerPreferencesTestExecutor())
           .put(
               "networking/gossip_execution_payload_envelope",
               new GossipExecutionPayloadEnvelopeTestExecutor())

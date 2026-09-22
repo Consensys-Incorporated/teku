@@ -16,7 +16,6 @@ package tech.pegasys.teku.reference.phase0.gossip;
 import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import static tech.pegasys.teku.reference.TestDataUtils.loadSsz;
-import static tech.pegasys.teku.reference.TestDataUtils.loadStateFromSsz;
 import static tech.pegasys.teku.reference.TestDataUtils.loadYaml;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -28,11 +27,14 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.reference.BlsSetting;
 import tech.pegasys.teku.reference.TestExecutor;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
+import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferencesSchema;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
+import tech.pegasys.teku.spec.networks.Eth2Network;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.statetransition.validation.BlockBroadcastValidator;
 import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
@@ -47,7 +49,14 @@ public class GossipProposerPreferencesTestExecutor implements TestExecutor {
         loadYaml(testDefinition, "meta.yaml", GossipProposerPreferencesMetaData.class);
     final boolean signatureVerificationDisabled = metaData.getBlsSetting() == BlsSetting.IGNORED;
     final Spec spec = testDefinition.getSpec(!signatureVerificationDisabled);
-    final BeaconState state = loadStateFromSsz(testDefinition, "state.ssz_snappy");
+    final SchemaDefinitionsGloas schemaDefinitions =
+        SchemaDefinitionsGloas.required(
+            spec.forMilestone(SpecMilestone.GLOAS).getSchemaDefinitions());
+    final BeaconState state =
+        loadSsz(
+            testDefinition,
+            "state.ssz_snappy",
+            schemaDefinitions.getBeaconStateSchema()::sszDeserialize);
 
     final List<BlockEntryAndBlock> blocks =
         metaData.getBlocks().stream()
@@ -58,12 +67,18 @@ public class GossipProposerPreferencesTestExecutor implements TestExecutor {
                         loadSsz(
                             testDefinition,
                             blockEntry.getBlock() + ".ssz_snappy",
-                            spec::deserializeSignedBeaconBlock)))
+                            schemaDefinitions.getSignedBeaconBlockSchema()::sszDeserialize)))
             .toList();
 
+    // Pyspec creates the fixture chain with the Gloas module, including setup blocks from before
+    // the configured Gloas fork epoch. Recreate that chain with Gloas rules, while retaining the
+    // configured spec for production gossip validation below.
+    final Spec setupSpec =
+        TestSpecFactory.create(
+            SpecMilestone.GLOAS, Eth2Network.fromString(testDefinition.getConfigName()));
     final GossipTestContext ctx =
         GossipTestContext.create(
-            spec,
+            setupSpec,
             state,
             blocks.stream()
                 .filter(b -> !b.blockEntry().isFailed() && !b.blockEntry().isPending())
@@ -115,8 +130,7 @@ public class GossipProposerPreferencesTestExecutor implements TestExecutor {
           }
         };
     final SignedProposerPreferencesSchema schema =
-        SchemaDefinitionsGloas.required(spec.atSlot(state.getSlot()).getSchemaDefinitions())
-            .getSignedProposerPreferencesSchema();
+        schemaDefinitions.getSignedProposerPreferencesSchema();
     final ProposerPreferencesGossipValidator validator =
         new ProposerPreferencesGossipValidator(spec, gossipValidationHelper, ctx.recentChainData);
 
