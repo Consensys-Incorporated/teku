@@ -51,7 +51,6 @@ import tech.pegasys.teku.cli.AbstractBeaconNodeCommandTest;
 import tech.pegasys.teku.config.TekuConfiguration;
 import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
 import tech.pegasys.teku.networking.eth2.P2PConfig;
-import tech.pegasys.teku.networking.eth2.gossip.encoding.GossipEncoding;
 import tech.pegasys.teku.networking.p2p.discovery.DiscoveryConfig;
 import tech.pegasys.teku.networking.p2p.network.config.GeneratingFilePrivateKeySource;
 import tech.pegasys.teku.networking.p2p.network.config.NetworkConfig;
@@ -737,49 +736,6 @@ public class P2POptionsTest extends AbstractBeaconNodeCommandTest {
     final TekuConfiguration config =
         getTekuConfigurationFromArguments("--Xp2p-gossip-blobs-after-block-enabled=false");
     assertThat(config.p2p().isGossipBlobsAfterBlockEnabled()).isFalse();
-  }
-
-  @Test
-  public void gossipSnappyAircompressorEnabled_defaultIsTrue() {
-    final TekuConfiguration config = getTekuConfigurationFromArguments();
-    assertThat(config.p2p().isGossipSnappyAircompressorEnabled()).isTrue();
-    assertThat(config.p2p().getGossipEncoding()).isSameAs(GossipEncoding.SSZ_SNAPPY_AIRCOMPRESSOR);
-  }
-
-  @Test
-  public void gossipSnappyAircompressorEnabled_shouldNotRequireAValue() {
-    final TekuConfiguration config =
-        getTekuConfigurationFromArguments("--Xp2p-gossip-snappy-aircompressor-enabled");
-    assertThat(config.p2p().isGossipSnappyAircompressorEnabled()).isTrue();
-    assertThat(config.p2p().getGossipEncoding()).isSameAs(GossipEncoding.SSZ_SNAPPY_AIRCOMPRESSOR);
-  }
-
-  @Test
-  public void gossipSnappyAircompressorEnabled_false() {
-    final TekuConfiguration config =
-        getTekuConfigurationFromArguments("--Xp2p-gossip-snappy-aircompressor-enabled=false");
-    assertThat(config.p2p().isGossipSnappyAircompressorEnabled()).isFalse();
-    assertThat(config.p2p().getGossipEncoding()).isSameAs(GossipEncoding.SSZ_SNAPPY);
-  }
-
-  @Test
-  public void rpcSnappyAircompressorEnabled_defaultIsTrue() {
-    final TekuConfiguration config = getTekuConfigurationFromArguments();
-    assertThat(config.p2p().isRpcSnappyAircompressorEnabled()).isTrue();
-  }
-
-  @Test
-  public void rpcSnappyAircompressorEnabled_shouldNotRequireAValue() {
-    final TekuConfiguration config =
-        getTekuConfigurationFromArguments("--Xp2p-rpc-snappy-aircompressor-enabled");
-    assertThat(config.p2p().isRpcSnappyAircompressorEnabled()).isTrue();
-  }
-
-  @Test
-  public void rpcSnappyAircompressorEnabled_false() {
-    final TekuConfiguration config =
-        getTekuConfigurationFromArguments("--Xp2p-rpc-snappy-aircompressor-enabled=false");
-    assertThat(config.p2p().isRpcSnappyAircompressorEnabled()).isFalse();
   }
 
   @Test

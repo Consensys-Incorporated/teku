@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import okhttp3.Call;
+import okhttp3.Callback;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -31,6 +32,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.builder.rest.BuilderApiMethod;
 import tech.pegasys.teku.builder.rest.ResponseHandler;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
 import tech.pegasys.teku.infrastructure.json.types.SerializableTypeDefinition;
 
@@ -55,7 +57,7 @@ public abstract class AbstractBuilderRequest {
     return baseEndpoint.resolve(apiMethod.getPath(urlParams));
   }
 
-  protected <T, TObject> Optional<T> postJson(
+  protected <T, TObject> SafeFuture<Optional<T>> postJson(
       final BuilderApiMethod apiMethod,
       final Map<String, String> urlParams,
       final Map<String, String> headers,
@@ -74,10 +76,10 @@ public abstract class AbstractBuilderRequest {
             .url(buildUrl(apiMethod, urlParams))
             .post(RequestBody.create(requestBody, APPLICATION_JSON));
     headers.forEach(builder::addHeader);
-    return executeCall(builder.build(), responseHandler, maybeTimeout);
+    return enqueueCall(builder.build(), responseHandler, maybeTimeout);
   }
 
-  protected <T> Optional<T> postOctetStream(
+  protected <T> SafeFuture<Optional<T>> postOctetStream(
       final BuilderApiMethod apiMethod,
       final Map<String, String> urlParams,
       final Map<String, String> headers,
@@ -88,21 +90,36 @@ public abstract class AbstractBuilderRequest {
             .url(buildUrl(apiMethod, urlParams))
             .post(RequestBody.create(body, OCTET_STREAM));
     headers.forEach(builder::addHeader);
-    return executeCall(builder.build(), responseHandler, Optional.empty());
+    return enqueueCall(builder.build(), responseHandler, Optional.empty());
   }
 
-  private <T> Optional<T> executeCall(
+  private <T> SafeFuture<Optional<T>> enqueueCall(
       final Request request,
       final ResponseHandler<T> responseHandler,
       final Optional<Duration> maybeTimeout) {
     final Call call = httpClient.newCall(request);
     maybeTimeout.ifPresent(
         timeout -> call.timeout().timeout(timeout.toMillis(), TimeUnit.MILLISECONDS));
-    try (final Response response = call.execute()) {
-      LOG.trace("{} {} {}", request.method(), request.url(), response.code());
-      return responseHandler.handleResponse(request, response);
-    } catch (final IOException ex) {
-      throw new UncheckedIOException("Error communicating with builder: " + ex.getMessage(), ex);
-    }
+    final SafeFuture<Optional<T>> responseFuture = new SafeFuture<>();
+    call.enqueue(
+        new Callback() {
+          @Override
+          public void onFailure(final Call call, final IOException ex) {
+            responseFuture.completeExceptionally(
+                new UncheckedIOException(
+                    "Error communicating with builder: " + ex.getMessage(), ex));
+          }
+
+          @Override
+          public void onResponse(final Call call, final Response response) {
+            try (response) {
+              LOG.trace("{} {} {}", request.method(), request.url(), response.code());
+              responseFuture.complete(responseHandler.handleResponse(request, response));
+            } catch (final Exception ex) {
+              responseFuture.completeExceptionally(ex);
+            }
+          }
+        });
+    return responseFuture;
   }
 }

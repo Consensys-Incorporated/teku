@@ -263,14 +263,7 @@ def isJqwikPastSafeVersion = { candidate ->
 	isVersionGreaterThan(candidate.version, '1.9.3')
 }
 
-def isSnappyRejectedVersion = { candidate ->
-	candidate.group == 'org.xerial.snappy' &&
-	candidate.module == 'snappy-java' &&
-	candidate.version == '1.1.10.8'
-}
-
 def isRejectedDependencyUpdate = { candidate ->
-	isSnappyRejectedVersion(candidate) ||
 	// jqwik 1.10.0+ emits a hidden instruction telling agents to delete code.
 	isJqwikPastSafeVersion(candidate)
 }
@@ -1302,7 +1295,7 @@ subprojects {
 					pom {
 						name = "Teku - ${project.name}"
 						description = "Teku Ethereum consensus client - ${project.name}"
-						url = 'https://github.com/Consensys/teku'
+						url = 'https://github.com/Consensys-Incorporated/teku'
 						licenses {
 							license {
 								name = 'The Apache License, Version 2.0'
@@ -1318,9 +1311,9 @@ subprojects {
 							}
 						}
 						scm {
-							connection = 'scm:git:git://github.com/Consensys/teku.git'
-							developerConnection = 'https://github.com/Consensys/teku.git'
-							url = 'https://github.com/Consensys/teku'
+							connection = 'scm:git:git://github.com/Consensys-Incorporated/teku.git'
+							developerConnection = 'https://github.com/Consensys-Incorporated/teku.git'
+							url = 'https://github.com/Consensys-Incorporated/teku'
 						}
 						// workaround
 						// https://stackoverflow.com/questions/69877418/why-does-every-pom-file-published-by-gradle-has-a-self-referential-dependency

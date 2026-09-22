@@ -15,11 +15,13 @@ package tech.pegasys.teku.validator.remote.typedef.handlers;
 
 import static java.util.Collections.emptyMap;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_UNSUPPORTED_MEDIA_TYPE;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_BUILDER_URL;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.PARAM_BROADCAST_VALIDATION;
 import static tech.pegasys.teku.validator.remote.apiclient.ValidatorApiMethod.SEND_SIGNED_BLINDED_BLOCK_V2;
 import static tech.pegasys.teku.validator.remote.apiclient.ValidatorApiMethod.SEND_SIGNED_BLOCK_V2;
 
+import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -59,7 +61,8 @@ public class SendSignedBlockRequest extends AbstractTypeDefRequest {
 
   public SendSignedBlockResult submit(
       final SignedBlockContainer signedBlockContainer,
-      final BroadcastValidationLevel broadcastValidationLevel) {
+      final BroadcastValidationLevel broadcastValidationLevel,
+      final Optional<String> builderUrl) {
     final boolean blinded = signedBlockContainer.isBlinded();
 
     final ValidatorApiMethod apiMethod =
@@ -69,8 +72,9 @@ public class SendSignedBlockRequest extends AbstractTypeDefRequest {
         spec.atSlot(signedBlockContainer.getSlot()).getSchemaDefinitions();
 
     final SpecMilestone milestone = spec.atSlot(signedBlockContainer.getSlot()).getMilestone();
-    final Map<String, String> headers =
-        Map.of(HEADER_CONSENSUS_VERSION, milestone.name().toLowerCase(Locale.ROOT));
+    final Map<String, String> headers = new HashMap<>();
+    headers.put(HEADER_CONSENSUS_VERSION, milestone.name().toLowerCase(Locale.ROOT));
+    builderUrl.ifPresent(url -> headers.put(HEADER_BUILDER_URL, url));
     final DeserializableTypeDefinition<SignedBlockContainer> typeDefinition =
         blinded
             ? schemaDefinitions.getSignedBlindedBlockContainerSchema().getJsonTypeDefinition()

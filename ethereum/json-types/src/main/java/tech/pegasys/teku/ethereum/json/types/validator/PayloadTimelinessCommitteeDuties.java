@@ -24,29 +24,33 @@ import java.util.List;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
 
-public record PtcDuties(boolean executionOptimistic, Bytes32 dependentRoot, List<PtcDuty> duties) {
+public record PayloadTimelinessCommitteeDuties(
+    boolean executionOptimistic, Bytes32 dependentRoot, List<PtcDuty> duties) {
 
-  public static final DeserializableTypeDefinition<PtcDuties> PTC_DUTIES_TYPE_DEFINITION =
-      DeserializableTypeDefinition.object(PtcDuties.class, PtcDuties.Builder.class)
-          .name("GetPtcDutiesResponse")
-          .initializer(PtcDuties.Builder::new)
-          .finisher(PtcDuties.Builder::build)
-          .withField(
-              DEPENDENT_ROOT,
-              BYTES32_TYPE,
-              PtcDuties::dependentRoot,
-              PtcDuties.Builder::dependentRoot)
-          .withField(
-              EXECUTION_OPTIMISTIC,
-              BOOLEAN_TYPE,
-              PtcDuties::executionOptimistic,
-              PtcDuties.Builder::executionOptimistic)
-          .withField(
-              "data",
-              listOf(PTC_DUTY_TYPE_DEFINITION),
-              PtcDuties::duties,
-              PtcDuties.Builder::duties)
-          .build();
+  public static final DeserializableTypeDefinition<PayloadTimelinessCommitteeDuties>
+      PTC_DUTIES_TYPE_DEFINITION =
+          DeserializableTypeDefinition.object(
+                  PayloadTimelinessCommitteeDuties.class,
+                  PayloadTimelinessCommitteeDuties.Builder.class)
+              .name("GetPtcDutiesResponse")
+              .initializer(PayloadTimelinessCommitteeDuties.Builder::new)
+              .finisher(PayloadTimelinessCommitteeDuties.Builder::build)
+              .withField(
+                  DEPENDENT_ROOT,
+                  BYTES32_TYPE,
+                  PayloadTimelinessCommitteeDuties::dependentRoot,
+                  PayloadTimelinessCommitteeDuties.Builder::dependentRoot)
+              .withField(
+                  EXECUTION_OPTIMISTIC,
+                  BOOLEAN_TYPE,
+                  PayloadTimelinessCommitteeDuties::executionOptimistic,
+                  PayloadTimelinessCommitteeDuties.Builder::executionOptimistic)
+              .withField(
+                  "data",
+                  listOf(PTC_DUTY_TYPE_DEFINITION),
+                  PayloadTimelinessCommitteeDuties::duties,
+                  PayloadTimelinessCommitteeDuties.Builder::duties)
+              .build();
 
   public static class Builder {
 
@@ -69,8 +73,8 @@ public record PtcDuties(boolean executionOptimistic, Bytes32 dependentRoot, List
       return this;
     }
 
-    public PtcDuties build() {
-      return new PtcDuties(executionOptimistic, dependentRoot, duties);
+    public PayloadTimelinessCommitteeDuties build() {
+      return new PayloadTimelinessCommitteeDuties(executionOptimistic, dependentRoot, duties);
     }
   }
 }

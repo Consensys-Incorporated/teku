@@ -9,7 +9,7 @@ dependencies {
 	implementation 'io.consensys.tuweni:tuweni-bytes'
 	implementation 'it.unimi.dsi:fastutil'
 
-	testImplementation 'org.xerial.snappy:snappy-java'
+	testImplementation 'io.airlift:aircompressor-v3'
 	testImplementation testFixtures(project(':ethereum:spec'))
 	testImplementation project(':infrastructure:json')
 }

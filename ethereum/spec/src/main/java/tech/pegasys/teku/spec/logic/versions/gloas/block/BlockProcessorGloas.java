@@ -22,7 +22,6 @@ import java.util.OptionalInt;
 import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.cache.IndexedAttestationCache;
@@ -47,7 +46,6 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconStat
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPayment;
-import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateMutators;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateMutators.ValidatorExitContext;
 import tech.pegasys.teku.spec.logic.common.operations.OperationSignatureVerifier;
 import tech.pegasys.teku.spec.logic.common.operations.validation.OperationValidator;
@@ -122,23 +120,18 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
   }
 
   @Override
-  public UInt64 executionProcessing(
+  public void executionProcessing(
       final MutableBeaconState genericState,
       final BeaconBlock beaconBlock,
-      final Optional<? extends OptimisticExecutionPayloadExecutor> payloadExecutor,
-      final Supplier<BeaconStateMutators.ValidatorExitContext> validatorExitContextSupplier,
-      final UInt64 parentSlotFallback)
+      final Optional<? extends OptimisticExecutionPayloadExecutor> payloadExecutor)
       throws BlockProcessingException {
     safelyProcess(
-        () ->
-            processParentExecutionPayload(genericState, beaconBlock, validatorExitContextSupplier));
-    processWithdrawals(genericState, Optional.empty());
-    return safelyProcessAndReturn(
-        () ->
-            processExecutionPayloadBid(
-                genericState,
-                BeaconBlockBodyGloas.required(beaconBlock.getBody())
-                    .getSignedExecutionPayloadBid()));
+        () -> {
+          processWithdrawals(genericState, Optional.empty());
+          processExecutionPayloadBid(
+              genericState,
+              BeaconBlockBodyGloas.required(beaconBlock.getBody()).getSignedExecutionPayloadBid());
+        });
   }
 
   // process_parent_execution_payload
@@ -194,7 +187,7 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
         "Too many builder exit requests");
 
     final ExecutionPayloadBid parentBid = state.getLatestExecutionPayloadBid();
-    final UInt64 parentSlot = parentBid.getSlot();
+    final UInt64 parentSlot = state.getLatestBlockHeader().getSlot();
     final UInt64 parentEpoch = miscHelpers.computeEpochAtSlot(parentSlot);
 
     // Process execution requests from parent's payload. The execution requests are processed at
@@ -257,7 +250,7 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
 
   // process_execution_payload_bid
   @Override
-  public UInt64 processExecutionPayloadBid(
+  public void processExecutionPayloadBid(
       final MutableBeaconState state, final SignedExecutionPayloadBid signedBid)
       throws BlockProcessingException {
 
@@ -293,7 +286,7 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
         throw new BlockProcessingException("Builder doesn't have funds to cover the bid");
       }
       if (!operationSignatureVerifier.verifyExecutionPayloadBidSignature(
-          state, signedBid, BLSSignatureVerifier.SIMPLE)) {
+          state, signedBid, specConfig.getBLSSignatureVerifier())) {
         throw new BlockProcessingException("Signature for the signed bind was invalid");
       }
     }
@@ -355,9 +348,7 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
     }
 
     // Cache the execution payload bid
-    final UInt64 parentSlot = stateGloas.getLatestExecutionPayloadBid().getSlot();
     stateGloas.setLatestExecutionPayloadBid(bid);
-    return parentSlot;
   }
 
   @Override

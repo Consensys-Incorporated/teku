@@ -107,10 +107,11 @@ class PostPayloadAttestationsTest extends AbstractMigratedBeaconHandlerTest {
   void shouldReadSszRequestBody() throws Exception {
     final PayloadAttestationMessage message = dataStructureUtil.randomPayloadAttestationMessage();
     final PayloadAttestationMessageSchema schema = message.getSchema();
-    final int ptcSize =
-        SpecConfigGloas.required(spec.forMilestone(SpecMilestone.GLOAS).getConfig()).getPtcSize();
+    final int payloadTimelinessCommitteeSize =
+        SpecConfigGloas.required(spec.forMilestone(SpecMilestone.GLOAS).getConfig())
+            .getPayloadTimelinessCommitteeSize();
     final byte[] sszBytes =
-        SszListSchema.create(schema, ptcSize)
+        SszListSchema.create(schema, payloadTimelinessCommitteeSize)
             .createFromElements(List.of(message))
             .sszSerialize()
             .toArrayUnsafe();

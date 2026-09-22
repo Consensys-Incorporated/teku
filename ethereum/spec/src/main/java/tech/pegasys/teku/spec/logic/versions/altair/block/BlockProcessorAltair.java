@@ -388,7 +388,7 @@ public class BlockProcessorAltair extends AbstractBlockProcessor {
       final BeaconBlock beaconBlock,
       final Supplier<BeaconStateMutators.ValidatorExitContext> validatorExitContextSupplier)
       throws BlockProcessingException {
-    throw new UnsupportedOperationException("No process_parent_execution_payload until Gloas");
+    // NO-OP until Gloas
   }
 
   @Override
@@ -399,7 +399,7 @@ public class BlockProcessorAltair extends AbstractBlockProcessor {
   }
 
   @Override
-  public UInt64 processExecutionPayloadBid(
+  public void processExecutionPayloadBid(
       final MutableBeaconState state, final SignedExecutionPayloadBid signedBid)
       throws BlockProcessingException {
     throw new UnsupportedOperationException("No process_execution_payload_bid until Gloas");

@@ -20,6 +20,7 @@ import java.util.Map;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import tech.pegasys.teku.builder.rest.ResponseHandler;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 
@@ -33,14 +34,15 @@ public class SubmitSignedBeaconBlockRequest extends AbstractBuilderRequest {
     this.spec = spec;
   }
 
-  public void submit(final SignedBeaconBlock signedBeaconBlock) {
-    postOctetStream(
-        SUBMIT_SIGNED_BEACON_BLOCK,
-        Map.of(),
-        Map.of(
-            HEADER_CONSENSUS_VERSION,
-            spec.atSlot(signedBeaconBlock.getSlot()).getMilestone().lowerCaseName()),
-        signedBeaconBlock.sszSerialize().toArrayUnsafe(),
-        ResponseHandler.voidHandler());
+  public SafeFuture<Void> submit(final SignedBeaconBlock signedBeaconBlock) {
+    return postOctetStream(
+            SUBMIT_SIGNED_BEACON_BLOCK,
+            Map.of(),
+            Map.of(
+                HEADER_CONSENSUS_VERSION,
+                spec.atSlot(signedBeaconBlock.getSlot()).getMilestone().lowerCaseName()),
+            signedBeaconBlock.sszSerialize().toArrayUnsafe(),
+            ResponseHandler.voidHandler())
+        .thenApply(__ -> null);
   }
 }

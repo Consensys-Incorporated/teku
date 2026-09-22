@@ -135,12 +135,32 @@ public class SszLengthBoundsTest {
   }
 
   @Test
-  void withMaxBytesUpperBound_shouldRejectFiniteBounds() {
+  void withMaxBytesUpperBound_shouldTightenFiniteBounds() {
     final SszLengthBounds bounds = SszLengthBounds.ofBytes(2, 2048);
 
-    assertThatThrownBy(() -> bounds.withMaxBytesUpperBound(1024))
+    final SszLengthBounds result = bounds.withMaxBytesUpperBound(1024);
+
+    assertThat(result.getMinBytes()).isEqualTo(2);
+    assertThat(result.getMaxBytes()).isEqualTo(1024);
+  }
+
+  @Test
+  void withMaxBytesUpperBound_shouldAcceptBoundEqualToRawMaximum() {
+    final SszLengthBounds bounds = SszLengthBounds.ofBytes(2, 2048);
+
+    final SszLengthBounds result = bounds.withMaxBytesUpperBound(2048);
+
+    assertThat(result.getMinBytes()).isEqualTo(2);
+    assertThat(result.getMaxBytes()).isEqualTo(2048);
+  }
+
+  @Test
+  void withMaxBytesUpperBound_shouldRejectBoundAboveRawMaximum() {
+    final SszLengthBounds bounds = SszLengthBounds.ofBytes(2, 2048);
+
+    assertThatThrownBy(() -> bounds.withMaxBytesUpperBound(4096))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("only valid for unbounded raw SSZ bounds");
+        .hasMessageContaining("above raw maximum");
   }
 
   @Test

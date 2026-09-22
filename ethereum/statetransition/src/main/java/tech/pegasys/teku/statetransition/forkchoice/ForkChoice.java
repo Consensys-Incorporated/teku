@@ -384,16 +384,16 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
     }
     final IntSet ptcPositions =
         validatableMessage
-            .getPtcPositions()
+            .getPayloadTimelinessCommitteePositions()
             .orElseThrow(
                 () ->
                     new IllegalStateException(
-                        "PTC positions must be calculated before recording a payload attestation vote"));
+                        "Payload Timeliness Committee positions must be calculated before recording a payload attestation vote"));
     recentChainData
         .getUpdatableForkChoiceStrategy()
         .ifPresent(
             strategy ->
-                strategy.onPtcVote(
+                strategy.onPayloadTimelinessCommitteeVote(
                     validatableMessage.getData().getBeaconBlockRoot(),
                     ptcPositions,
                     validatableMessage.getData().isPayloadPresent(),
@@ -1301,7 +1301,8 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
                 getPayloadAttestationMessagesFromBlock(attestedBlockState, payloadAttestation)
                     .forEach(
                         validatableMessage -> {
-                          validatableMessage.calculatePtcPositions(spec, attestedBlockState);
+                          validatableMessage.calculatePayloadTimelinessCommitteePositions(
+                              spec, attestedBlockState);
                           onPayloadAttestationMessage(
                               validatableMessage, InternalValidationResult.ACCEPT, false);
                         }));
@@ -1311,7 +1312,7 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
   List<ValidatablePayloadAttestationMessage> getPayloadAttestationMessagesFromBlock(
       final BeaconState attestedBlockState, final PayloadAttestation payloadAttestation) {
     final UInt64 slot = payloadAttestation.getData().getSlot();
-    final IntList ptc = spec.getPtc(attestedBlockState, slot);
+    final IntList payloadTimelinessCommittee = spec.getPtc(attestedBlockState, slot);
     final SchemaDefinitionsGloas schemaDefinitions =
         SchemaDefinitionsGloas.required(spec.atSlot(slot).getSchemaDefinitions());
     return payloadAttestation
@@ -1323,7 +1324,7 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
                   schemaDefinitions
                       .getPayloadAttestationMessageSchema()
                       .create(
-                          UInt64.valueOf(ptc.getInt(ptcPosition)),
+                          UInt64.valueOf(payloadTimelinessCommittee.getInt(ptcPosition)),
                           payloadAttestation.getData(),
                           BLSSignature.empty());
               return ValidatablePayloadAttestationMessage.fromBlock(message);

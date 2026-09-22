@@ -1,0 +1,24 @@
+{
+  "title" : "GetLightClientOptimisticUpdateResponse",
+  "type" : "object",
+  "required" : [ "version", "data" ],
+  "properties" : {
+    "version" : {
+      "type" : "string",
+      "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze" ]
+    },
+    "data" : {
+      "title" : "LightClientOptimisticUpdate",
+      "type" : "object",
+      "oneOf" : [ {
+        "$ref" : "#/components/schemas/LightClientOptimisticUpdateAltair"
+      }, {
+        "$ref" : "#/components/schemas/LightClientOptimisticUpdateCapella"
+      }, {
+        "$ref" : "#/components/schemas/LightClientOptimisticUpdateDeneb"
+      }, {
+        "$ref" : "#/components/schemas/LightClientOptimisticUpdateGloas"
+      } ]
+    }
+  }
+}

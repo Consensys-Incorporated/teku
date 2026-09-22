@@ -90,7 +90,8 @@ class BlockPublisherFuluTest {
             blockPublisherFulu.sendSignedBlock(
                 signedBlock,
                 BroadcastValidationLevel.NOT_REQUIRED,
-                BlockPublishingPerformance.NOOP))
+                BlockPublishingPerformance.NOOP,
+                Optional.empty()))
         .isCompletedWithValue(
             SendSignedBlockResult.notImported(FailureReason.BUILDER_WITHHOLD.name()));
   }
@@ -111,7 +112,10 @@ class BlockPublisherFuluTest {
 
     assertThatSafeFuture(
             blockPublisherFulu.sendSignedBlock(
-                block, BroadcastValidationLevel.NOT_REQUIRED, BlockPublishingPerformance.NOOP))
+                block,
+                BroadcastValidationLevel.NOT_REQUIRED,
+                BlockPublishingPerformance.NOOP,
+                Optional.empty()))
         .isCompletedWithValue(SendSignedBlockResult.success(block.getRoot()));
 
     verify(blockGossipChannel).publishBlock(block);

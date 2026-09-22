@@ -21,9 +21,5 @@ public interface NetworkingSpecConfigGloas extends NetworkingSpecConfigDeneb {
 
   int getMaxAttesterSlashingSize();
 
-  int getMaxDataColumnSidecarSize();
-
-  int getMaxPartialDataColumnSidecarSize();
-
   int getMaxSignedExecutionPayloadBidSize();
 }

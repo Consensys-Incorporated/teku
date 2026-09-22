@@ -40,8 +40,8 @@ import tech.pegasys.teku.ethereum.json.types.beacon.StateValidatorData;
 import tech.pegasys.teku.ethereum.json.types.node.PeerCount;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.BeaconCommitteeSelectionProof;
+import tech.pegasys.teku.ethereum.json.types.validator.PayloadTimelinessCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuties;
-import tech.pegasys.teku.ethereum.json.types.validator.PtcDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeSelectionProof;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeSubnetSubscription;
@@ -56,7 +56,7 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
@@ -231,9 +231,10 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
   }
 
   @Override
-  public SafeFuture<Optional<PtcDuties>> getPtcDuties(
+  public SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> getPayloadTimelinessCommitteeDuties(
       final UInt64 epoch, final IntCollection validatorIndices) {
-    return sendRequest(() -> typeDefClient.postPtcDuties(epoch, validatorIndices));
+    return sendRequest(
+        () -> typeDefClient.postPayloadTimelinessCommitteeDuties(epoch, validatorIndices));
   }
 
   @Override
@@ -272,7 +273,7 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
       final BroadcastValidationLevel broadcastValidationLevel,
       final Optional<String> builderUrl) {
     return sendRequest(
-        () -> typeDefClient.sendSignedBlock(blockContainer, broadcastValidationLevel));
+        () -> typeDefClient.sendSignedBlock(blockContainer, broadcastValidationLevel, builderUrl));
   }
 
   @Override
@@ -299,6 +300,12 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
       final List<SignedProposerPreferences> signedProposerPreferences) {
     return sendRequest(
         () -> typeDefClient.sendSignedProposerPreferences(signedProposerPreferences));
+  }
+
+  @Override
+  public SafeFuture<List<SubmitDataError>> sendBuilderPreferences(
+      final SszList<BuilderPreferencesEntry> builderPreferences) {
+    return sendRequest(() -> typeDefClient.sendBuilderPreferences(builderPreferences));
   }
 
   @Override
@@ -383,18 +390,11 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
     return sendRequest(() -> typeDefClient.getSyncCommitteeSelectionProof(requests));
   }
 
-  // TODO-GLOAS: https://github.com/Consensys-Incorporated/teku/issues/11099 (only required when
-  // Teku implements the functionality to be a builder)
-  @Override
-  public SafeFuture<Optional<ExecutionPayloadBid>> createUnsignedExecutionPayloadBid(
-      final UInt64 slot, final UInt64 builderIndex) {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not yet implemented"));
-  }
-
   @Override
   public SafeFuture<Void> publishSignedExecutionPayloadBid(
       final SignedExecutionPayloadBid signedExecutionPayloadBid) {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not yet implemented"));
+    return sendRequest(
+        () -> typeDefClient.publishSignedExecutionPayloadBid(signedExecutionPayloadBid));
   }
 
   @Override

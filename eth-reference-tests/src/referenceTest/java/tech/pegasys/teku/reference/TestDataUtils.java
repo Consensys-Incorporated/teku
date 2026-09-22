@@ -16,6 +16,7 @@ package tech.pegasys.teku.reference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.fasterxml.jackson.dataformat.yaml.YAMLParser;
+import io.airlift.compress.v3.snappy.SnappyDecompressor;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -26,7 +27,6 @@ import java.util.Optional;
 import java.util.function.Function;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
-import org.xerial.snappy.Snappy;
 import org.yaml.snakeyaml.LoaderOptions;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
@@ -77,7 +77,12 @@ public class TestDataUtils {
     final Path path = testDirectory.resolve(fileName);
     final byte[] fileContent = Files.readAllBytes(path);
     if (fileName.endsWith("_snappy")) {
-      return Bytes.wrap(Snappy.uncompress(fileContent));
+      final SnappyDecompressor decompressor = SnappyDecompressor.create();
+      final int uncompressedLength = decompressor.getUncompressedLength(fileContent, 0);
+      final byte[] uncompressed = new byte[uncompressedLength];
+      decompressor.decompress(
+          fileContent, 0, fileContent.length, uncompressed, 0, uncompressedLength);
+      return Bytes.wrap(uncompressed);
     } else {
       return Bytes.wrap(fileContent);
     }
@@ -152,7 +157,14 @@ public class TestDataUtils {
       final Spec spec, final BeaconState state, final Collection<SignedBeaconBlock> blocks) {
     final Optional<AnchorPoint> anchorFromMatchingStateRoot =
         blocks.stream()
-            .filter(block -> block.getStateRoot().equals(state.hashTreeRoot()))
+            .filter(
+                block ->
+                    block.getStateRoot().equals(state.hashTreeRoot())
+                        && block
+                            .getMessage()
+                            .getBody()
+                            .hashTreeRoot()
+                            .equals(state.getLatestBlockHeader().getBodyRoot()))
             .findFirst()
             .map(
                 block ->
