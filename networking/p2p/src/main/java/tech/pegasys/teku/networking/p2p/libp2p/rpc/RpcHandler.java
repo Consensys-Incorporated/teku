@@ -320,6 +320,9 @@ public class RpcHandler<
 
     @Override
     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) {
+      // Completing the future below only records the error, so an out of memory error would be
+      // swallowed and leave the node running without usable memory
+      ExceptionUtil.escalateIfOutOfMemory(cause);
       LOG.error("Unhandled error while processes req/response", cause);
       final IllegalStateException exception = new IllegalStateException("Channel exception", cause);
       activeFuture.completeExceptionally(exception);
