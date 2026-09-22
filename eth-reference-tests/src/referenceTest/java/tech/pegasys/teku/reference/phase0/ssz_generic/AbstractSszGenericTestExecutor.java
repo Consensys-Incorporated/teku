@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -34,7 +35,7 @@ public abstract class AbstractSszGenericTestExecutor implements TestExecutor {
   public void runTest(final TestDefinition testDefinition) throws Throwable {
     final Bytes inputData = TestDataUtils.readSszData(testDefinition, "serialized.ssz_snappy");
     final Path path = testDefinition.getTestDirectory().resolve("value.yaml");
-    if (path.toFile().exists()) {
+    if (Files.exists(path)) {
       final SszSchema<?> schema = getSchema(testDefinition);
       final Meta meta = TestDataUtils.loadYaml(testDefinition, "meta.yaml", Meta.class);
       final SszData result = schema.sszDeserialize(inputData);

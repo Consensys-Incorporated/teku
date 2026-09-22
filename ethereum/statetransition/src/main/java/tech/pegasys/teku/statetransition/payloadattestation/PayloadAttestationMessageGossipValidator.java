@@ -70,6 +70,17 @@ public class PayloadAttestationMessageGossipValidator {
     final PayloadAttestationData data = validatablePayloadAttestationMessage.getData();
 
     /*
+     * [REJECT] The payload attestation slot is at or after the Gloas fork
+     */
+    if (!spec.isPayloadAttestationAvailableAtSlot(data.getSlot())) {
+      return completedFuture(
+          rejectPayloadAttestation(
+              payloadAttestationMessage,
+              "Payload attestation's slot %s is before the Gloas fork",
+              data.getSlot()));
+    }
+
+    /*
      * [IGNORE] The payload attestation's slot is for the current slot
      */
     if (!gossipValidationHelper.isSlotCurrent(data.getSlot())) {
