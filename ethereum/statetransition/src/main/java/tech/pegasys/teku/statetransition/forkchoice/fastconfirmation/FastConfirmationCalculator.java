@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.statetransition.forkchoice.fastconfirmation;
 
+import com.google.common.annotations.VisibleForTesting;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
@@ -190,7 +191,15 @@ class FastConfirmationCalculator {
    * balanceSource}) of unslashed, active, non-equivocating validators whose latest vote supports a
    * descendant of {@code nodeRoot}. Latest messages are resolved to fork-choice nodes before
    * checking ancestry, preserving Gloas PENDING, EMPTY, and FULL vote semantics.
+   *
+   * <p>No production caller: the walk phases score a whole chain in one pass ({@link
+   * #computeChainAttestationScores}) and evaluate blocks through {@link
+   * #isOneConfirmedWithSupport}. This is kept as the spec-shaped reference the batch path is
+   * verified against, so it deliberately materializes each validator instead of sharing the flat
+   * balances that path uses: computing the two independently is what makes the parity tests
+   * meaningful.
    */
+  @VisibleForTesting
   UInt64 getAttestationScore(final Bytes32 nodeRoot, final BeaconState balanceSource) {
     final UInt64 balanceSourceEpoch = spec.getCurrentEpoch(balanceSource);
     final SszList<Validator> validators = balanceSource.getValidators();
@@ -258,8 +267,11 @@ class FastConfirmationCalculator {
     final List<ForkChoiceNode> chainNodes = chainRoots.stream().map(this::getNodeForRoot).toList();
     final List<UInt64> balances = getScoringBalances(balanceSource);
 
-    // Shared across chunks: resolution is deterministic and idempotent, so a racing duplicate
-    // computation is harmless.
+    // Shared across chunks, read and written as get-then-putIfAbsent rather than computeIfAbsent:
+    // resolving a vote takes protoarray's read lock, and computeIfAbsent would hold the map's bin
+    // lock across that wait, blocking other chunks whose votes hash to the same bin. Outside the
+    // bin lock two chunks can resolve the same vote concurrently, which is harmless: resolution is
+    // deterministic, so both produce the same index and the losing putIfAbsent is simply dropped.
     final Map<VoteKey, Integer> latestSupportedByVote = new ConcurrentHashMap<>();
     final int chunkCount = Math.min(ForkJoinPool.getCommonPoolParallelism() + 1, 32);
     final int chunkSize = (balances.size() + chunkCount - 1) / chunkCount;
@@ -318,10 +330,17 @@ class FastConfirmationCalculator {
       if (votedRoot.isZero()) {
         continue;
       }
-      final int latestSupported =
-          latestSupportedByVote.computeIfAbsent(
-              new VoteKey(votedRoot, vote.getNextSlot(), vote.isNextFullPayloadHint()),
-              voteKey -> resolveLatestSupportedChainIndex(chainNodes, voteKey));
+      final VoteKey voteKey =
+          new VoteKey(votedRoot, vote.getNextSlot(), vote.isNextFullPayloadHint());
+      final Integer cached = latestSupportedByVote.get(voteKey);
+      final int latestSupported;
+      if (cached != null) {
+        latestSupported = cached;
+      } else {
+        // Outside the map: computeIfAbsent would hold a bin lock across this protoarray read.
+        latestSupported = resolveLatestSupportedChainIndex(chainNodes, voteKey);
+        latestSupportedByVote.putIfAbsent(voteKey, latestSupported);
+      }
       if (latestSupported >= 0) {
         supportByLatestIndex[latestSupported] += balance.longValue();
       }
@@ -565,7 +584,12 @@ class FastConfirmationCalculator {
    * Implements {@code is_one_confirmed}: whether the block is LMD-GHOST safe (its support exceeds
    * the safety threshold). Returns {@code false} for a block that is not fully validated (not
    * {@code VALID} per optimistic sync).
+   *
+   * <p>No production caller either: both walk phases go through {@link #isOneConfirmedWithSupport}
+   * against precomputed scores. Retained alongside {@link #getAttestationScore} as the spec-shaped
+   * reference for the parity tests and the benchmark.
    */
+  @VisibleForTesting
   boolean isOneConfirmed(final BeaconState balanceSource, final Bytes32 blockRoot) {
     if (!isValidForConfirmation(blockRoot)) {
       return false;
