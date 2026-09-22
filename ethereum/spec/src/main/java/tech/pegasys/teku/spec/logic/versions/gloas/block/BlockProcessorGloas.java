@@ -476,6 +476,8 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
             beaconStateAccessorsGloas.getIndexedPayloadAttestation(state, payloadAttestation);
       } catch (final IllegalArgumentException e) {
         // get_ptc rejects slots outside the queryable window, e.g. before the Gloas fork epoch
+        // this try\catch is required by reference tests. Production code already wraps this method
+        // via safelyProcess.
         throw new BlockProcessingException(e);
       }
 
