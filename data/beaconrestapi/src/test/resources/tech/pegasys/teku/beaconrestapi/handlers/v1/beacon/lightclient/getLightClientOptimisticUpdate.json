@@ -1,0 +1,19 @@
+{
+  "version": "altair",
+  "data": {
+    "attested_header": {
+      "beacon": {
+        "slot": "1",
+        "proposer_index": "0",
+        "parent_root": "0x367cbd40ac7318427aadb97345a91fa2e965daf3158d7f1846f1306305f41bef",
+        "state_root": "0xfd18cf40cc907a739be483f1ca0ee23ad65cdd3df23205eabc6d660a75d1f54e",
+        "body_root": "0x103ac9406cdc59b89027eb1c9e97f607dd5fdccfa8fb2da4eaeea9d25032add9"
+      }
+    },
+    "sync_aggregate": {
+      "sync_committee_bits": "0x02000000",
+      "sync_committee_signature": "0xa9f87584dfd12468c59b6ffd1bf300fd140f6c9bd1e0c97507ce28ec17704a50b7c9f8caa222ae140325583bf181091a00912aaa28cbde9f20faedb02f5f4d958a7bc9b36b39d2ab88d3cd89e15c8f0e5121885f822b336c872f3b3c45c6daf5"
+    },
+    "signature_slot": "4666673844721362956"
+  }
+}

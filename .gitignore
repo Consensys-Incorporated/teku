@@ -52,7 +52,6 @@ config/*.key
 eth-reference-tests/src/test/
 eth-reference-tests/src/referenceTest/generated/
 eth-reference-tests/src/referenceTest/generated_tests/
-eth-reference-tests/src/referenceTest/resources/consensus-spec-tests/
 **/src/jmh/generated_tests/
 **/src/jmh/generated/*
 .jqwik-database

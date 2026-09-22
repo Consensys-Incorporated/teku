@@ -411,7 +411,7 @@ jobs:
   # Runs in its own job, isolated from collate-junit-reports: this org's action-allowlist
   # policy is enforced per-job, so if capture-test-timings shared a job with anything that
   # references a disallowed action, the whole job gets killed part-way through regardless
-  # of continue-on-error (verified: https://github.com/Consensys/teku/pull/11204).
+  # of continue-on-error (verified: https://github.com/Consensys-Incorporated/teku/pull/11204).
   unitTestsCaptureTimings:
     runs-on: ubuntu-24.04
     needs: [changes, unitTestsSuite]
@@ -458,6 +458,7 @@ jobs:
       src_root: "src/integration-test/java"
       runner: "ubuntu-latest-128"
       gradle_args: ${{ (inputs.gradle_log_level == 'info' && '--info') || (inputs.gradle_log_level == 'debug' && '--debug') || '' }}
+      retry_attempts: 3
 
   integrationTestsResult:
     name: integrationTests
@@ -588,6 +589,7 @@ jobs:
       src_root: "src/acceptance-test/java"
       runner: "ubuntu-latest-128"
       gradle_args: ${{ (inputs.gradle_log_level == 'info' && '--info') || (inputs.gradle_log_level == 'debug' && '--debug') || '' }}
+      retry_attempts: 3
 
   acceptanceTestsResult:
     name: acceptanceTests
@@ -663,37 +665,37 @@ jobs:
         id: ref-cache-key
         shell: bash
         run: |
-          # Derive the cache key from the refTestVersion definition only, so unrelated
-          # build.gradle edits don't bust the consensus-spec-tests fixtures cache.
-          LINE=$(grep -E '^def refTestVersion' build.gradle)
-          if [ -z "$LINE" ]; then
-            echo "Could not find refTestVersion definition in build.gradle" >&2
+          # Derive the cache key from the reference test version definitions, the converter and the
+          # per-archive conversion options, so unrelated root build.gradle edits don't bust the cache.
+          LINES=$(grep -E '^def (refTestVersion|blsRefTestVersion|slashingProtectionInterchangeRefTestVersion)' build.gradle)
+          if [ -z "$LINES" ]; then
+            echo "Could not find reference test version definitions in build.gradle" >&2
             exit 1
           fi
-          HASH=$(echo -n "$LINE" | sha256sum | cut -c1-16)
-          echo "key=reftests-$HASH" >> "$GITHUB_OUTPUT"
+          HASH=$( (echo -n "$LINES"; cat eth-tests/src/main/java/tech/pegasys/teku/ethtests/ReferenceTestArchiveConverter.java eth-reference-tests/build.gradle) | sha256sum | cut -c1-16)
+          echo "key=reftests-archives-$HASH" >> "$GITHUB_OUTPUT"
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
-          path: eth-reference-tests/src/referenceTest/resources/consensus-spec-tests/
+          path: build/refTests/*/archives/
           key: ${{ steps.ref-cache-key.outputs.key }}
-      - shell: bash
-        run: |
-          ls -R ./eth-reference-tests/
       - name: FetchReferenceTests
         shell: bash
         run: |
-          if [ ! -d "eth-reference-tests/src/referenceTest/resources/consensus-spec-tests/tests" ]
+          # The zip archives are the only fixtures the tests need. Convert (which downloads the
+          # tarballs first) only when the cache did not provide them.
+          if ! ls build/refTests/*/archives/*.zip >/dev/null 2>&1
           then
-            ./gradlew --no-daemon expandRefTests
+            ./gradlew --no-daemon convertRefTests
           fi
+          ls -la build/refTests/*/archives/
       - name: CompileReferenceTests
         shell: bash
         run: |
-          ./gradlew --no-daemon --parallel compileReferenceTestJava resolveCiDependencies
+          ./gradlew --no-daemon --parallel -x convertRefTests compileReferenceTestJava resolveCiDependencies
       - name: Caching reference tests
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
-          path: eth-reference-tests/src/referenceTest/resources/consensus-spec-tests/
+          path: build/refTests/*/archives/
           key: ${{ steps.ref-cache-key.outputs.key }}
       - name: Compress reftests
         shell: bash
@@ -732,8 +734,9 @@ jobs:
           path: ${{ github.workspace }}
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
-          path: eth-reference-tests/src/referenceTest/resources/consensus-spec-tests/
+          path: build/refTests/*/archives/
           key: ${{ needs.referenceTestsPrep.outputs.cache-key }}
+          fail-on-cache-miss: true
       - name: Download reftests
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -774,8 +777,8 @@ jobs:
         if: steps.shard.outputs.args != ''
         run: |
           ./gradlew --no-daemon --parallel --info \
+            -x convertRefTests \
             -x generateReferenceTestClasses \
-            -x processReferenceTestResources \
             -x cleanReferenceTestClasses \
             referenceTest ${{ inputs.gradle_args }} ${{ steps.shard.outputs.args }}
       - name: Upload JUnit XML + HTML for ReferenceTests

@@ -24,6 +24,7 @@ import java.util.concurrent.TimeUnit;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.infrastructure.async.FutureUtil;
+import tech.pegasys.teku.infrastructure.exceptions.ExceptionUtil;
 
 /**
  * The very first Netty handler in the Libp2p connection pipeline. Sets up Netty Channel options and
@@ -56,6 +57,9 @@ public class Firewall extends ChannelInboundHandlerAdapter {
     @Override
     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause)
         throws Exception {
+      // Errors here are only logged, so an out of memory error would be swallowed and leave the
+      // node running without usable memory
+      ExceptionUtil.escalateIfOutOfMemory(cause);
       if (cause instanceof WriteTimeoutException) {
         LOG.debug("Firewall closed channel by write timeout. No writes during " + writeTimeout);
       } else {

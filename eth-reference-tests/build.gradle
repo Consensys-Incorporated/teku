@@ -36,7 +36,7 @@ dependencies {
 	referenceTestImplementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml'
 	referenceTestImplementation 'io.consensys.tuweni:tuweni-bytes'
 	referenceTestImplementation 'io.consensys.tuweni:tuweni-ssz'
-	referenceTestImplementation 'org.xerial.snappy:snappy-java'
+	referenceTestImplementation 'io.airlift:aircompressor-v3'
 }
 
 task cleanReferenceTestClasses(type: Delete) {
@@ -44,8 +44,76 @@ task cleanReferenceTestClasses(type: Delete) {
 	delete project.file('src/referenceTest/generated_tests')
 }
 
-def consensusSpecTestsDir = project.file('src/referenceTest/resources/consensus-spec-tests/tests')
+def refTestArchivesDir = rootProject.file(rootProject.ext.refTestArchivesDir)
 def generatedTestsDir = project.file('src/referenceTest/generated_tests')
+
+sourceSets {
+	referenceTest {
+		// Legacy location of the expanded consensus-spec-tests tree: never copy it into build/resources.
+		resources.exclude 'consensus-spec-tests/**'
+	}
+}
+
+// Converts each downloaded reference test tarball into a <config>.zip archive containing a single
+// top-level <config>/ directory. The tests mount these through the JDK zip filesystem, so the
+// fixtures never need to be expanded on disk.
+def convertRefTestOptions = [
+	general: ['--strip-prefix', 'tests/'],
+	minimal: ['--strip-prefix', 'tests/'],
+	mainnet: ['--strip-prefix', 'tests/'],
+	bls: ['--add-prefix', 'bls/'],
+	'slashing-protection-interchange': [
+		'--include',
+		'.*/tests/generated/[^/]+\\.json',
+		'--flatten',
+		'--add-prefix',
+		'slashing-protection-interchange/'
+	],
+]
+def convertRefTestDownloadTasks = [
+	general: ':downloadEthRefTests',
+	minimal: ':downloadEthRefTests',
+	mainnet: ':downloadEthRefTests',
+	bls: ':downloadBlsRefTests',
+	'slashing-protection-interchange': ':downloadSlashingProtectionInterchangeRefTests',
+]
+def convertRefTestTasks = rootProject.ext.refTestTarballs.collect { config, tarball ->
+	def taskSuffix = config.split('-').collect { it.capitalize() }.join()
+	def zip = new File(refTestArchivesDir, "${config}.zip")
+	tasks.register("convertRefTests${taskSuffix}", JavaExec) {
+		group = "Execution"
+		description = "Convert the ${config} reference test tarball into ${zip.name}"
+		dependsOn convertRefTestDownloadTasks[config]
+		classpath = configurations.refTestGenerator
+		mainClass = 'tech.pegasys.teku.ethtests.ReferenceTestArchiveConverter'
+		args = [tarball, zip.absolutePath] + convertRefTestOptions[config]
+		inputs.file(tarball).withPropertyName('tarball')
+		inputs.files(configurations.refTestGenerator)
+				.withPropertyName('converterClasspath')
+				.withNormalizer(ClasspathNormalizer)
+		outputs.file(zip).withPropertyName('archive')
+		doFirst { refTestArchivesDir.mkdirs() }
+	}
+}
+
+task convertRefTests {
+	group = "Execution"
+	description = "Convert all reference test tarballs into zip archives"
+	dependsOn convertRefTestTasks
+}
+
+// Lets the tests read either the zip archives (default) or a plain directory of <config>/ trees,
+// e.g. vectors generated from a local consensus-specs checkout:
+//   ./gradlew referenceTest -Dteku.ref-test.root-dir=/path/to/tests
+def refTestRootDirOverride = System.getProperty('teku.ref-test.root-dir')
+def configureRefTestLocation = { task ->
+	if (refTestRootDirOverride) {
+		task.systemProperty('teku.ref-test.root-dir', refTestRootDirOverride)
+	} else {
+		task.dependsOn convertRefTests
+		task.systemProperty('teku.ref-test.archives-dir', refTestArchivesDir.absolutePath)
+	}
+}
 
 task generateReferenceTestClasses(type: JavaExec) {
 	group = "Execution"
@@ -55,13 +123,19 @@ task generateReferenceTestClasses(type: JavaExec) {
 	args = [
 		generatedTestsDir.absolutePath
 	]
-	systemProperty("teku.ref-test-module.path", project.file("../eth-reference-tests").absolutePath)
+	configureRefTestLocation(it)
 
 	// Declare inputs and outputs so Gradle can skip the task when nothing relevant
 	// changed, and reuse outputs via the build cache.
-	inputs.dir(consensusSpecTestsDir)
-			.withPropertyName('consensusSpecTests')
-			.withPathSensitivity(PathSensitivity.RELATIVE)
+	if (refTestRootDirOverride) {
+		inputs.dir(refTestRootDirOverride)
+				.withPropertyName('refTestRootDir')
+				.withPathSensitivity(PathSensitivity.RELATIVE)
+	} else {
+		inputs.files(fileTree(refTestArchivesDir) { include '*.zip' })
+		.withPropertyName('refTestArchives')
+		.withPathSensitivity(PathSensitivity.NAME_ONLY)
+	}
 	inputs.files(configurations.refTestGenerator)
 			.withPropertyName('generatorClasspath')
 			.withNormalizer(ClasspathNormalizer)
@@ -82,4 +156,11 @@ compileReferenceTestJava {
 	// Fork worker to compile tests and avoid OoM errors during compilation
 	options.fork = true
 	options.forkOptions.memoryMaximumSize = "2048m"
+}
+
+tasks.named('referenceTest') {
+	configureRefTestLocation(it)
+	// Each test JVM keeps the zip central directories in memory (~200MB for minimal + mainnet)
+	// on top of the states under test, so give it more than Gradle's 512m default.
+	maxHeapSize = '2g'
 }

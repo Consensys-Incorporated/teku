@@ -2515,8 +2515,8 @@
 
 - name: PayloadTimelinessCommitteeWindow#gloas
   sources:
-    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/datastructures/state/versions/gloas/PtcWindowSchema.java
-      search: public class PtcWindowSchema
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/datastructures/state/versions/gloas/PayloadTimelinessCommitteeWindowSchema.java
+      search: public class PayloadTimelinessCommitteeWindowSchema
   spec: |
     <spec container="PayloadTimelinessCommitteeWindow" fork="gloas" hash="723b7f4c">
     class PayloadTimelinessCommitteeWindow(Vector[PayloadTimelinessCommittee]):

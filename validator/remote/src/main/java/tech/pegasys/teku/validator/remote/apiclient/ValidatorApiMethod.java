@@ -60,7 +60,8 @@ public enum ValidatorApiMethod {
   SYNC_COMMITTEE_SELECTIONS("/eth/v1/validator/sync_committee_selections"),
   SEND_SIGNED_EXECUTION_PAYLOAD_ENVELOPE("eth/v1/beacon/execution_payload_envelopes"),
   SEND_SIGNED_PROPOSER_PREFERENCES("eth/v1/validator/proposer_preferences"),
-  SEND_BUILDER_PREFERENCES("eth/v1/validator/builder_preferences");
+  SEND_BUILDER_PREFERENCES("eth/v1/validator/builder_preferences"),
+  SEND_SIGNED_EXECUTION_PAYLOAD_BID("eth/v1/beacon/execution_payload_bids");
 
   private final String path;
 

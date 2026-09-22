@@ -7,7 +7,7 @@ dependencies {
 	implementation project(':ethereum:spec')
 	implementation project(':infrastructure:logging')
 	implementation project(':infrastructure:yaml')
-	implementation 'org.xerial.snappy:snappy-java'
+	implementation 'io.airlift:aircompressor-v3'
 
 	testImplementation testFixtures(project(':infrastructure:io'))
 	testImplementation testFixtures(project(':ethereum:spec'))

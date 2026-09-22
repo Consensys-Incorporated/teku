@@ -55,7 +55,6 @@ import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.BlockRootAndBuilderIndex;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
@@ -89,8 +88,6 @@ public class FailoverValidatorApiHandler implements ValidatorApiChannel {
       "remote_beacon_nodes_requests_total";
 
   private final Map<SlotAndBlockRoot, ValidatorApiChannel> blockCreatorCache =
-      LimitedMap.createSynchronizedLRU(2);
-  private final Map<UInt64, ValidatorApiChannel> executionPayloadBidCreatorCache =
       LimitedMap.createSynchronizedLRU(2);
   private final Map<BlockRootAndBuilderIndex, ValidatorApiChannel>
       executionPayloadEnvelopeCreatorCache = LimitedMap.createSynchronizedLRU(2);
@@ -410,22 +407,6 @@ public class FailoverValidatorApiHandler implements ValidatorApiChannel {
   }
 
   @Override
-  public SafeFuture<Optional<ExecutionPayloadBid>> createUnsignedExecutionPayloadBid(
-      final UInt64 slot, final UInt64 builderIndex) {
-    return tryRequestUntilSuccess(
-        apiChannel ->
-            apiChannel
-                .createUnsignedExecutionPayloadBid(slot, builderIndex)
-                .thenPeek(
-                    bid -> {
-                      if (!failoverDelegates.isEmpty() && bid.isPresent()) {
-                        executionPayloadBidCreatorCache.put(slot, apiChannel);
-                      }
-                    }),
-        BeaconNodeRequestLabels.CREATE_UNSIGNED_EXECUTION_PAYLOAD_BID_METHOD);
-  }
-
-  @Override
   public SafeFuture<Void> publishSignedExecutionPayloadBid(
       final SignedExecutionPayloadBid signedExecutionPayloadBid) {
     return relayRequest(
@@ -436,16 +417,6 @@ public class FailoverValidatorApiHandler implements ValidatorApiChannel {
   @Override
   public SafeFuture<Optional<ExecutionPayloadEnvelope>> createUnsignedExecutionPayload(
       final UInt64 slot, final Bytes32 beaconBlockRoot) {
-    // in case one of the BNs have created the bid (when Teku VC is configured to be a builder), we
-    // want to point only to this BN
-    if (executionPayloadBidCreatorCache.containsKey(slot)) {
-      LOG.info(
-          "Execution payload for slot {} and block {} would be created only by the beacon node which created the bid.",
-          slot,
-          beaconBlockRoot);
-      return createUnsignedExecutionPayload(
-          executionPayloadBidCreatorCache.remove(slot), slot, beaconBlockRoot);
-    }
     final SlotAndBlockRoot slotAndBlockRoot = new SlotAndBlockRoot(slot, beaconBlockRoot);
     // in case the payload is self-built, we want to point only to the BN which created the block
     if (blockCreatorCache.containsKey(slotAndBlockRoot)) {

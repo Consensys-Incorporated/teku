@@ -18,6 +18,7 @@ import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszType;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszMaxLengthExceededException;
 
 /// Offset-table parsing and element-buffer building shared by the packed byte-lists
 /// representations of fixed ({@code AbstractSszListSchema}) and progressive
@@ -31,8 +32,9 @@ public final class PackedByteListsUtil {
 
   /// Parses and validates the offset table of a serialized list-of-byte-lists variable part.
   /// Structural checks always apply (truncation, alignment, zero first offset, monotonicity);
-  /// pass {@code Long.MAX_VALUE} to disable either limit check (progressive lists are
-  /// unbounded). Returns offsets with the end sentinel ({@code offsets[count] == bytes.size()}).
+  /// pass {@code Long.MAX_VALUE} to disable either limit check. The element count is checked
+  /// before the offset table is allocated. Returns offsets with the end sentinel ({@code
+  /// offsets[count] == bytes.size()}).
   public static int[] parsePackedOffsets(
       final Bytes bytes, final long maxElementCount, final long maxElementSize) {
     final int endOffset = bytes.size();
@@ -45,7 +47,9 @@ public final class PackedByteListsUtil {
     checkSsz(firstElementOffset > 0, "Invalid first element offset");
     checkSsz(firstElementOffset <= endOffset, "Invalid first element offset");
     final int elementsCount = firstElementOffset / SszType.SSZ_LENGTH_SIZE;
-    checkSsz(elementsCount <= maxElementCount, "SSZ sequence length exceeds max type length");
+    if (elementsCount > maxElementCount) {
+      throw new SszMaxLengthExceededException("List", elementsCount, maxElementCount);
+    }
     final int[] offsets = new int[elementsCount + 1];
     offsets[0] = firstElementOffset;
     for (int i = 1; i < elementsCount; i++) {
@@ -57,13 +61,11 @@ public final class PackedByteListsUtil {
     for (int i = 0; i < elementsCount; i++) {
       final int size = offsets[i + 1] - offsets[i];
       checkSsz(size >= 0, "Invalid SSZ: wrong child offsets");
-      checkSsz(size <= maxElementSize, "SSZ element length exceeds max element type length");
+      if (size > maxElementSize) {
+        throw new SszMaxLengthExceededException("List", size, maxElementSize);
+      }
     }
     return offsets;
-  }
-
-  public static int[] parseUnboundedPackedOffsets(final Bytes bytes) {
-    return parsePackedOffsets(bytes, Long.MAX_VALUE, Long.MAX_VALUE);
   }
 
   /// Serializes elements into a packed variable part (offset table + concatenated element

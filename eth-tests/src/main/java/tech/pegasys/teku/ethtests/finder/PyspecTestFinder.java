@@ -55,7 +55,7 @@ public class PyspecTestFinder implements TestFinder {
   public Stream<TestDefinition> findTests(
       final String fork, final String config, final Path testRoot) throws IOException {
     return Files.walk(testRoot)
-        .filter(path -> path.resolve(PYSPEC_TEST_DIRECTORY_NAME).toFile().exists())
+        .filter(path -> Files.exists(path.resolve(PYSPEC_TEST_DIRECTORY_NAME)))
         .flatMap(
             unchecked(
                 testCategoryDir -> findPyspecTestCases(fork, config, testRoot, testCategoryDir)));
@@ -73,7 +73,7 @@ public class PyspecTestFinder implements TestFinder {
             testDir -> {
               final String testName = pyspecDir.relativize(testDir).toString();
               return new TestDefinition(
-                  fork, config, testType, testName, testRoot.relativize(testDir));
+                  fork, config, testType, testName, testRoot.relativize(testDir).toString());
             })
         .filter(
             testDefinition ->

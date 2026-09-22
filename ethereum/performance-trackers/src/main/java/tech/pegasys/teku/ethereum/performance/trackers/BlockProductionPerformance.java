@@ -109,6 +109,9 @@ public interface BlockProductionPerformance {
         public void getAttestationsForBlock() {}
 
         @Override
+        public void getPayloadAttestationsForBlock() {}
+
+        @Override
         public void beaconBlockBodyPreparationStarted() {}
       };
 
@@ -141,6 +144,8 @@ public interface BlockProductionPerformance {
   void stateHashing();
 
   void getAttestationsForBlock();
+
+  void getPayloadAttestationsForBlock();
 
   void beaconBlockBodyPreparationStarted();
 }

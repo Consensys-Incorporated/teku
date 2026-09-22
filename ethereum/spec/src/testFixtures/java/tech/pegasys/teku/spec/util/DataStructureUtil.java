@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.spec.util;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static ethereum.ckzg4844.CKZG4844JNI.BYTES_PER_CELL;
 import static java.util.stream.Collectors.toList;
@@ -64,6 +65,7 @@ import tech.pegasys.teku.infrastructure.bytes.Bytes20;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.bytes.Bytes8;
 import tech.pegasys.teku.infrastructure.ssz.Merkleizable;
+import tech.pegasys.teku.infrastructure.ssz.SszContainer;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.SszMutableList;
@@ -79,7 +81,11 @@ import tech.pegasys.teku.infrastructure.ssz.collections.SszUInt64Vector;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszByte;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBytes32;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
+import tech.pegasys.teku.infrastructure.ssz.schema.AbstractSszProgressiveListSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszContainerSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszFieldName;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszProgressiveListSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszVectorSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszBitlistSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszBitvectorSchema;
@@ -414,6 +420,50 @@ public final class DataStructureUtil {
   public <T extends SszData> SszList<T> randomSszList(
       final SszListSchema<T, ?> schema, final Supplier<T> valueGenerator, final long numItems) {
     return randomSszList(schema, numItems, valueGenerator);
+  }
+
+  /**
+   * Builds a progressive list larger than its schema's max length, bypassing the construction
+   * check, so tests can exercise the limit enforced on deserialization.
+   */
+  public <T extends SszData> SszList<T> randomOversizedProgressiveSszList(
+      final SszListSchema<T, ?> schema, final Supplier<T> valueGenerator, final int numItems) {
+    checkArgument(
+        schema instanceof AbstractSszProgressiveListSchema<?, ?>,
+        "Expected a progressive list schema but got %s",
+        schema);
+    checkArgument(
+        numItems > schema.getMaxLength(),
+        "%s items do not exceed the max length %s",
+        numItems,
+        schema.getMaxLength());
+    final SszProgressiveListSchema<T> unlimited =
+        SszProgressiveListSchema.create(
+            schema.getElementSchema(),
+            ((AbstractSszProgressiveListSchema<?, ?>) schema).getHints());
+    final List<T> elements = Stream.generate(valueGenerator).limit(numItems).toList();
+    return schema.createFromBackingNode(unlimited.createTreeFromElements(elements));
+  }
+
+  /**
+   * Returns a copy of the container whose progressive list field is replaced by an oversized list,
+   * see {@link #randomOversizedProgressiveSszList}.
+   */
+  @SuppressWarnings("unchecked")
+  public <C extends SszContainer, T extends SszData> C withOversizedProgressiveListField(
+      final C container,
+      final SszFieldName fieldName,
+      final Supplier<T> valueGenerator,
+      final int numItems) {
+    final SszContainerSchema<C> schema = (SszContainerSchema<C>) container.getSchema();
+    final int fieldIndex = schema.getFieldIndex(fieldName);
+    final SszListSchema<T, ?> listSchema = (SszListSchema<T, ?>) schema.getChildSchema(fieldIndex);
+    final SszList<T> oversized =
+        randomOversizedProgressiveSszList(listSchema, valueGenerator, numItems);
+    return schema.createFromBackingNode(
+        container
+            .getBackingNode()
+            .updated(schema.getChildGeneralizedIndex(fieldIndex), oversized.getBackingNode()));
   }
 
   public <T extends SszData> SszList<T> randomFullSszList(
