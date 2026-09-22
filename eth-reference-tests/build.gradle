@@ -36,7 +36,7 @@ dependencies {
 	referenceTestImplementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml'
 	referenceTestImplementation 'io.consensys.tuweni:tuweni-bytes'
 	referenceTestImplementation 'io.consensys.tuweni:tuweni-ssz'
-	referenceTestImplementation 'org.xerial.snappy:snappy-java'
+	referenceTestImplementation 'io.airlift:aircompressor-v3'
 }
 
 task cleanReferenceTestClasses(type: Delete) {

@@ -36,13 +36,16 @@ import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
+import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeMessage;
+import tech.pegasys.teku.spec.schemas.ApiSchemas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.api.SubmitDataError;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
@@ -172,6 +175,59 @@ class MetricRecordingValidatorApiChannelTest {
     assertThat(
             getCounterValue(
                 BeaconNodeRequestLabels.SEND_PROPOSER_PREFERENCES_METHOD,
+                RequestOutcome.DATA_UNAVAILABLE))
+        .isZero();
+  }
+
+  @Test
+  void shouldRecordSuccessfulSendBuilderPreferences() {
+    final SszList<BuilderPreferencesEntry> emptyEntries =
+        ApiSchemas.BUILDER_PREFERENCES_ENTRIES_SCHEMA.createFromElements(emptyList());
+    when(delegate.sendBuilderPreferences(emptyEntries))
+        .thenReturn(SafeFuture.completedFuture(List.of()));
+
+    final SafeFuture<List<SubmitDataError>> result =
+        apiChannel.sendBuilderPreferences(emptyEntries);
+
+    assertThat(result).isCompletedWithValue(List.of());
+    assertThat(
+            getCounterValue(
+                BeaconNodeRequestLabels.SEND_BUILDER_PREFERENCES_METHOD, RequestOutcome.SUCCESS))
+        .isEqualTo(1);
+    assertThat(
+            getCounterValue(
+                BeaconNodeRequestLabels.SEND_BUILDER_PREFERENCES_METHOD, RequestOutcome.ERROR))
+        .isZero();
+    assertThat(
+            getCounterValue(
+                BeaconNodeRequestLabels.SEND_BUILDER_PREFERENCES_METHOD,
+                RequestOutcome.DATA_UNAVAILABLE))
+        .isZero();
+  }
+
+  @Test
+  void shouldRecordFailedSendBuilderPreferences() {
+    final List<SubmitDataError> failures = List.of(new SubmitDataError(UInt64.ZERO, "Nope"));
+    final SszList<BuilderPreferencesEntry> emptyEntries =
+        ApiSchemas.BUILDER_PREFERENCES_ENTRIES_SCHEMA.createFromElements(emptyList());
+    when(delegate.sendBuilderPreferences(emptyEntries))
+        .thenReturn(SafeFuture.completedFuture(failures));
+
+    final SafeFuture<List<SubmitDataError>> result =
+        apiChannel.sendBuilderPreferences(emptyEntries);
+
+    assertThat(result).isCompletedWithValue(failures);
+    assertThat(
+            getCounterValue(
+                BeaconNodeRequestLabels.SEND_BUILDER_PREFERENCES_METHOD, RequestOutcome.SUCCESS))
+        .isZero();
+    assertThat(
+            getCounterValue(
+                BeaconNodeRequestLabels.SEND_BUILDER_PREFERENCES_METHOD, RequestOutcome.ERROR))
+        .isEqualTo(1);
+    assertThat(
+            getCounterValue(
+                BeaconNodeRequestLabels.SEND_BUILDER_PREFERENCES_METHOD,
                 RequestOutcome.DATA_UNAVAILABLE))
         .isZero();
   }

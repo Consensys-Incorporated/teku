@@ -411,7 +411,7 @@ jobs:
   # Runs in its own job, isolated from collate-junit-reports: this org's action-allowlist
   # policy is enforced per-job, so if capture-test-timings shared a job with anything that
   # references a disallowed action, the whole job gets killed part-way through regardless
-  # of continue-on-error (verified: https://github.com/Consensys/teku/pull/11204).
+  # of continue-on-error (verified: https://github.com/Consensys-Incorporated/teku/pull/11204).
   unitTestsCaptureTimings:
     runs-on: ubuntu-24.04
     needs: [changes, unitTestsSuite]
@@ -458,6 +458,7 @@ jobs:
       src_root: "src/integration-test/java"
       runner: "ubuntu-latest-128"
       gradle_args: ${{ (inputs.gradle_log_level == 'info' && '--info') || (inputs.gradle_log_level == 'debug' && '--debug') || '' }}
+      retry_attempts: 3
 
   integrationTestsResult:
     name: integrationTests
@@ -588,6 +589,7 @@ jobs:
       src_root: "src/acceptance-test/java"
       runner: "ubuntu-latest-128"
       gradle_args: ${{ (inputs.gradle_log_level == 'info' && '--info') || (inputs.gradle_log_level == 'debug' && '--debug') || '' }}
+      retry_attempts: 3
 
   acceptanceTestsResult:
     name: acceptanceTests

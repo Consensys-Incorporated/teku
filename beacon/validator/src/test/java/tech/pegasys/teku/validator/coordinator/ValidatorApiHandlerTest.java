@@ -70,6 +70,7 @@ import tech.pegasys.teku.beacon.sync.events.SyncState;
 import tech.pegasys.teku.beacon.sync.events.SyncStateProvider;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.builder.rest.StakedBuilderClientProvider;
 import tech.pegasys.teku.ethereum.json.types.beacon.StateValidatorData;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuty;
@@ -184,6 +185,8 @@ class ValidatorApiHandlerTest {
       mock(ExecutionPayloadBidManager.class);
   private final ProposerPreferencesManager proposerPreferencesManager =
       mock(ProposerPreferencesManager.class);
+  private final StakedBuilderClientProvider stakedBuilderClientProvider =
+      mock(StakedBuilderClientProvider.class);
 
   private final SyncCommitteeMessagePool syncCommitteeMessagePool =
       mock(SyncCommitteeMessagePool.class);
@@ -248,7 +251,8 @@ class ValidatorApiHandlerTest {
             executionPayloadPublisher,
             executionPayloadBidManager,
             proposerPreferencesManager,
-            executionProofManager);
+            executionProofManager,
+            stakedBuilderClientProvider);
 
     doReturn(BlockProductionPerformance.NOOP)
         .when(blockProductionPerformanceFactory)
@@ -544,7 +548,8 @@ class ValidatorApiHandlerTest {
             executionPayloadPublisher,
             executionPayloadBidManager,
             proposerPreferencesManager,
-            executionProofManager);
+            executionProofManager,
+            stakedBuilderClientProvider);
     dataStructureUtil = new DataStructureUtil(spec);
     // Best state is still in Phase0
     final BeaconState state =

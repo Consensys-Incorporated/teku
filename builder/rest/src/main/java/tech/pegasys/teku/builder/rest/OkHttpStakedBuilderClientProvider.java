@@ -15,9 +15,10 @@ package tech.pegasys.teku.builder.rest;
 
 import static tech.pegasys.teku.spec.config.Constants.BUILDER_CALL_TIMEOUT;
 
+import java.util.concurrent.TimeUnit;
+import okhttp3.ConnectionPool;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
-import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.collections.cache.LRUCache;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfigSchema;
@@ -25,17 +26,24 @@ import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfi
 public class OkHttpStakedBuilderClientProvider implements StakedBuilderClientProvider {
 
   private final Spec spec;
-  private final AsyncRunner asyncRunner;
 
   private final OkHttpClient okHttpClient =
-      new OkHttpClient.Builder().callTimeout(BUILDER_CALL_TIMEOUT).build();
+      new OkHttpClient.Builder()
+          // Default pool (5 connections, 5-min keep-alive) is too small and short-lived:
+          // connections
+          // expire mid-epoch (~6.4 min), forcing TCP/TLS re-handshakes during posting. Size the
+          // pool to one connection per known builder with a keep-alive that outlasts an epoch.
+          .connectionPool(
+              new ConnectionPool(
+                  (int) BuilderConfigSchema.MAX_BUILDER_ENTRIES, 10, TimeUnit.MINUTES))
+          .callTimeout(BUILDER_CALL_TIMEOUT)
+          .build();
   private final LRUCache<String, StakedBuilderClient> clients =
       // reuse MAX_BUILDER_ENTRIES for the clients cache capacity
       LRUCache.create((int) BuilderConfigSchema.MAX_BUILDER_ENTRIES);
 
-  public OkHttpStakedBuilderClientProvider(final Spec spec, final AsyncRunner asyncRunner) {
+  public OkHttpStakedBuilderClientProvider(final Spec spec) {
     this.spec = spec;
-    this.asyncRunner = asyncRunner;
   }
 
   @Override
@@ -44,7 +52,6 @@ public class OkHttpStakedBuilderClientProvider implements StakedBuilderClientPro
         url,
         __ ->
             new OkHttpStakedBuilderClient(
-                asyncRunner,
                 spec,
                 // Trailing slash required so HttpUrl.resolve appends the API path rather than
                 // replacing the last segment of the base URL.

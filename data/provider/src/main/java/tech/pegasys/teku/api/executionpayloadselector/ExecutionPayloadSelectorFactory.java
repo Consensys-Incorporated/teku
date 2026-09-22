@@ -53,7 +53,7 @@ public class ExecutionPayloadSelectorFactory
             .orElse(SafeFuture.completedFuture(Optional.empty()));
   }
 
-  // TODO-GLOAS: http://github.com/Consensys/teku/issues/9997
+  // TODO-GLOAS: http://github.com/Consensys-Incorporated/teku/issues/9997
   @Override
   public ExecutionPayloadSelector genesisSelector() {
     throw new UnsupportedOperationException("Not yet implemented");

@@ -105,7 +105,10 @@ public class GossipValidationHelper {
   }
 
   public boolean isEpochFromFuture(final UInt64 epoch) {
-    return isSlotFromFuture(spec.computeStartSlotAtEpoch(epoch));
+    final UInt64 maxTime = getCurrentTimeMillis().plus(maxOffsetTimeInMillis);
+    final UInt64 maxCurrentSlot =
+        spec.getCurrentSlotFromTimeMillis(maxTime, recentChainData.getGenesisTimeMillis());
+    return epoch.isGreaterThan(spec.computeEpochAtSlot(maxCurrentSlot));
   }
 
   public boolean hasSlotStarted(final UInt64 slot) {

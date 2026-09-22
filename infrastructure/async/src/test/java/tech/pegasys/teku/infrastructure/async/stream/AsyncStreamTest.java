@@ -187,7 +187,7 @@ public class AsyncStreamTest {
   }
 
   @Test
-  @Disabled // https://github.com/Consensys/teku/issues/9718
+  @Disabled // https://github.com/Consensys-Incorporated/teku/issues/9718
   void testConcurrentExceptionHasUsefulWrap() throws Exception {
     final int baseNumber = 10000;
     final int threadCount = 10;

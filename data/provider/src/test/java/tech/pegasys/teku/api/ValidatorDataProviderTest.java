@@ -60,11 +60,13 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
+import tech.pegasys.teku.spec.schemas.ApiSchemas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.storage.client.ChainDataUnavailableException;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
@@ -325,6 +327,20 @@ public class ValidatorDataProviderTest {
 
     assertThatSafeFuture(provider.submitProposerPreferences(List.of(preferences)))
         .isCompletedWithValue(errors);
+  }
+
+  @TestTemplate
+  void submitBuilderPreferences_shouldPreserveIndexedErrors() {
+    assumeThat(specMilestone).isGreaterThanOrEqualTo(SpecMilestone.GLOAS);
+    final SszList<BuilderPreferencesEntry> entries =
+        ApiSchemas.BUILDER_PREFERENCES_ENTRIES_SCHEMA.createFromElements(
+            List.of(dataStructureUtil.randomBuilderPreferencesEntry()));
+    final List<SubmitDataError> errors =
+        List.of(new SubmitDataError(ZERO, "Invalid builder preferences entry"));
+    when(validatorApiChannel.sendBuilderPreferences(entries))
+        .thenReturn(SafeFuture.completedFuture(errors));
+
+    assertThatSafeFuture(provider.submitBuilderPreferences(entries)).isCompletedWithValue(errors);
   }
 
   @TestTemplate

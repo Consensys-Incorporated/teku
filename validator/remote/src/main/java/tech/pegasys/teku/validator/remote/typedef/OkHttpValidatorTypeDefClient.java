@@ -42,9 +42,11 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
@@ -81,9 +83,11 @@ import tech.pegasys.teku.validator.remote.typedef.handlers.PostPayloadTimeliness
 import tech.pegasys.teku.validator.remote.typedef.handlers.PostSyncDutiesRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.PrepareBeaconProposersRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.ProduceBlockRequest;
+import tech.pegasys.teku.validator.remote.typedef.handlers.PublishSignedExecutionPayloadBidRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.PublishSignedExecutionPayloadRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.RegisterValidatorsRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.SendAggregateAndProofsRequest;
+import tech.pegasys.teku.validator.remote.typedef.handlers.SendBuilderPreferencesRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.SendContributionAndProofsRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.SendPayloadAttestationMessagesRequest;
 import tech.pegasys.teku.validator.remote.typedef.handlers.SendSignedAttestationsRequest;
@@ -359,6 +363,13 @@ public class OkHttpValidatorTypeDefClient extends OkHttpValidatorMinimalTypeDefC
     return sendSignedProposerPreferencesRequest.submit(signedProposerPreferences);
   }
 
+  public List<SubmitDataError> sendBuilderPreferences(
+      final SszList<BuilderPreferencesEntry> builderPreferences) {
+    final SendBuilderPreferencesRequest sendBuilderPreferencesRequest =
+        new SendBuilderPreferencesRequest(spec, getBaseEndpoint(), getOkHttpClient());
+    return sendBuilderPreferencesRequest.submit(builderPreferences);
+  }
+
   public PublishSignedExecutionPayloadResult publishSignedExecutionPayload(
       final SignedExecutionPayloadEnvelope signedExecutionPayload,
       final Optional<BroadcastValidationLevel> broadcastValidationLevel) {
@@ -375,5 +386,12 @@ public class OkHttpValidatorTypeDefClient extends OkHttpValidatorMinimalTypeDefC
         new PublishSignedExecutionPayloadRequest(spec, getBaseEndpoint(), getOkHttpClient());
     return publishSignedExecutionPayloadRequest.submit(
         signedExecutionPayloadEnvelopeContents, broadcastValidationLevel);
+  }
+
+  public void publishSignedExecutionPayloadBid(
+      final SignedExecutionPayloadBid signedExecutionPayloadBid) {
+    final PublishSignedExecutionPayloadBidRequest publishSignedExecutionPayloadBidRequest =
+        new PublishSignedExecutionPayloadBidRequest(spec, getBaseEndpoint(), getOkHttpClient());
+    publishSignedExecutionPayloadBidRequest.submit(signedExecutionPayloadBid);
   }
 }
