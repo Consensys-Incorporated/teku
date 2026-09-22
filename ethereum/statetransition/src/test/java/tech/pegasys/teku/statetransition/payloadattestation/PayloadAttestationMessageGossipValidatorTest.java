@@ -97,7 +97,7 @@ public class PayloadAttestationMessageGossipValidatorTest {
     when(miscHelpers.computeSigningRoot(eq(payloadAttestationMessage.getData()), any()))
         .thenReturn(signingRoot);
     when(specVersion.miscHelpers()).thenReturn(miscHelpers);
-    when(specVersion.getMilestone()).thenReturn(SpecMilestone.GLOAS);
+    when(spec.isPayloadAttestationAvailableAtSlot(slot)).thenReturn(true);
     when(spec.atSlot(slot)).thenReturn(specVersion);
     when(spec.getPtc(postState, slot)).thenReturn(IntList.of(validatorIndex.intValue()));
     when(gossipValidationHelper.isSignatureValidWithRespectToProposerIndex(
@@ -251,9 +251,7 @@ public class PayloadAttestationMessageGossipValidatorTest {
 
   @TestTemplate
   void shouldReject_whenSlotIsBeforeGloasFork() {
-    final SpecVersion preGloasSpecVersion = mock(SpecVersion.class);
-    when(preGloasSpecVersion.getMilestone()).thenReturn(SpecMilestone.FULU);
-    when(spec.atSlot(slot)).thenReturn(preGloasSpecVersion);
+    when(spec.isPayloadAttestationAvailableAtSlot(slot)).thenReturn(false);
     assertThatSafeFuture(
             payloadAttestationMessageGossipValidator.validate(
                 validatablePayloadAttestationMessage()))

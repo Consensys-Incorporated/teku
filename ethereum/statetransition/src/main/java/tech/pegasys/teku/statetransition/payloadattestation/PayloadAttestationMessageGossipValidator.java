@@ -33,7 +33,6 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.collections.LimitedSet;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
-import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
@@ -69,6 +68,17 @@ public class PayloadAttestationMessageGossipValidator {
     final PayloadAttestationMessage payloadAttestationMessage =
         validatablePayloadAttestationMessage.getMessage();
     final PayloadAttestationData data = validatablePayloadAttestationMessage.getData();
+
+    /*
+     * [REJECT] The payload attestation slot is at or after the Gloas fork
+     */
+    if (!spec.isPayloadAttestationAvailableAtSlot(data.getSlot())) {
+      return completedFuture(
+          rejectPayloadAttestation(
+              payloadAttestationMessage,
+              "Payload attestation's slot %s is before the Gloas fork",
+              data.getSlot()));
+    }
 
     /*
      * [IGNORE] The payload attestation's slot is for the current slot
@@ -164,16 +174,6 @@ public class PayloadAttestationMessageGossipValidator {
                     "Payload attestation's validator index %s is out of range for the %s validators in the state",
                     validatorIndex,
                     state.getValidators().size());
-              }
-
-              /*
-               * [REJECT] The payload attestation slot is at or after the Gloas fork
-               */
-              if (spec.atSlot(data.getSlot()).getMilestone().isLessThan(SpecMilestone.GLOAS)) {
-                return rejectPayloadAttestation(
-                    payloadAttestationMessage,
-                    "Payload attestation's slot %s is before the Gloas fork",
-                    data.getSlot());
               }
 
               /*
