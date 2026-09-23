@@ -449,6 +449,9 @@ public class NoOpDatabase implements Database {
   }
 
   @Override
+  public void removeBestLightClientUpdates(final Collection<UInt64> periods) {}
+
+  @Override
   public void pruneBestLightClientUpdatesBefore(final UInt64 period) {}
 
   @Override

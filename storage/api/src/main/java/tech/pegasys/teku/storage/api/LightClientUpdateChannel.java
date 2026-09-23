@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.storage.api;
 
+import java.util.Collection;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.events.ChannelInterface;
@@ -24,5 +25,26 @@ public interface LightClientUpdateChannel extends ChannelInterface {
   SafeFuture<Void> onNewBestLightClientUpdate(
       UInt64 period, LightClientUpdate update, Bytes32 signatureBlockRoot);
 
+  SafeFuture<Void> onRemoveBestLightClientUpdates(Collection<UInt64> periods);
+
   SafeFuture<Void> onPruneBestLightClientUpdatesBefore(UInt64 period);
+
+  LightClientUpdateChannel NOOP =
+      new LightClientUpdateChannel() {
+        @Override
+        public SafeFuture<Void> onNewBestLightClientUpdate(
+            final UInt64 period, final LightClientUpdate update, final Bytes32 signatureBlockRoot) {
+          return SafeFuture.COMPLETE;
+        }
+
+        @Override
+        public SafeFuture<Void> onRemoveBestLightClientUpdates(final Collection<UInt64> periods) {
+          return SafeFuture.COMPLETE;
+        }
+
+        @Override
+        public SafeFuture<Void> onPruneBestLightClientUpdatesBefore(final UInt64 period) {
+          return SafeFuture.COMPLETE;
+        }
+      };
 }

@@ -137,6 +137,9 @@ public class SchemaHotAdapter implements Schema {
             "BLOB_SIDECAR_BY_SLOT_AND_BLOCK_ROOT_AND_BLOB_INDEX",
             getColumnBlobSidecarBySlotRootBlobIndex())
         .put("LIGHT_CLIENT_UPDATES_BY_PERIOD", getLightClientUpdatesByPeriod())
+        .put(
+            "LIGHT_CLIENT_UPDATE_SIGNATURE_BLOCK_ROOTS_BY_PERIOD",
+            getLightClientUpdateSignatureBlockRootsByPeriod())
         .build();
   }
 

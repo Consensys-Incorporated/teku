@@ -51,6 +51,7 @@ import tech.pegasys.teku.storage.api.SidecarUpdateChannel;
 import tech.pegasys.teku.storage.api.StorageQueryChannel;
 import tech.pegasys.teku.storage.api.StorageUpdate;
 import tech.pegasys.teku.storage.api.StorageUpdateChannel;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 import tech.pegasys.teku.storage.api.UpdateResult;
 import tech.pegasys.teku.storage.api.VoteUpdateChannel;
 import tech.pegasys.teku.storage.api.WeakSubjectivityState;
@@ -504,6 +505,32 @@ public class ChainStorage
       final UInt64 period, final LightClientUpdate update, final Bytes32 signatureBlockRoot) {
     return SafeFuture.fromRunnable(
         () -> database.storeBestLightClientUpdate(period, update, signatureBlockRoot));
+  }
+
+  @Override
+  public SafeFuture<Void> onRemoveBestLightClientUpdates(final Collection<UInt64> periods) {
+    return SafeFuture.fromRunnable(() -> database.removeBestLightClientUpdates(periods));
+  }
+
+  @Override
+  public SafeFuture<List<StoredLightClientUpdate>> getBestLightClientUpdates() {
+    return SafeFuture.of(
+        () -> {
+          try (final Stream<Map.Entry<UInt64, LightClientUpdate>> updates =
+              database.streamBestLightClientUpdates()) {
+            return updates
+                .flatMap(
+                    entry ->
+                        database
+                            .getBestLightClientUpdateSignatureBlockRoot(entry.getKey())
+                            .map(
+                                root ->
+                                    new StoredLightClientUpdate(
+                                        entry.getKey(), entry.getValue(), root))
+                            .stream())
+                .toList();
+          }
+        });
   }
 
   @Override

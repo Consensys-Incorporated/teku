@@ -324,6 +324,8 @@ public interface Database extends AutoCloseable {
 
   Optional<Bytes32> getBestLightClientUpdateSignatureBlockRoot(UInt64 period);
 
+  void removeBestLightClientUpdates(Collection<UInt64> periods);
+
   void pruneBestLightClientUpdatesBefore(UInt64 period);
 
   void setEarliestAvailableDataColumnSlot(UInt64 slot);

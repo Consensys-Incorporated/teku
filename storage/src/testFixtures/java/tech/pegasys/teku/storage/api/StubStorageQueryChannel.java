@@ -262,4 +262,9 @@ public class StubStorageQueryChannel implements StorageQueryChannel {
       getBlindedExecutionPayloadEnvelopesByBlockRoot(final Set<Bytes32> blockRoots) {
     return SafeFuture.completedFuture(Collections.emptyMap());
   }
+
+  @Override
+  public SafeFuture<List<StoredLightClientUpdate>> getBestLightClientUpdates() {
+    return SafeFuture.completedFuture(List.of());
+  }
 }

@@ -1379,11 +1379,16 @@ public class KvStoreDatabase implements Database {
     try (final Stream<UInt64> periods = dao.streamBestLightClientUpdatePeriods()) {
       periodsToDelete = periods.filter(storedPeriod -> storedPeriod.isLessThan(period)).toList();
     }
-    if (periodsToDelete.isEmpty()) {
+    removeBestLightClientUpdates(periodsToDelete);
+  }
+
+  @Override
+  public void removeBestLightClientUpdates(final Collection<UInt64> periods) {
+    if (periods.isEmpty()) {
       return;
     }
     try (final HotUpdater updater = hotUpdater()) {
-      periodsToDelete.forEach(updater::removeBestLightClientUpdate);
+      periods.forEach(updater::removeBestLightClientUpdate);
       updater.commit();
     }
   }

@@ -114,7 +114,7 @@ public abstract class V6SchemaCombined implements SchemaCombined {
     final KvStoreSerializer<LightClientUpdate> lightClientUpdateSerializer =
         KvStoreSerializer.createLightClientUpdateSerializer(spec);
     lightClientUpdatesByPeriod =
-        KvStoreColumn.create(8, UINT64_SERIALIZER, lightClientUpdateSerializer);
+        KvStoreColumn.create(8, UINT64_SERIALIZER, lightClientUpdateSerializer, true);
     lightClientUpdateSignatureBlockRootsByPeriod =
         KvStoreColumn.create(9, UINT64_SERIALIZER, BYTES32_SERIALIZER);
 
@@ -287,6 +287,9 @@ public abstract class V6SchemaCombined implements SchemaCombined {
             "BLOB_SIDECAR_BY_SLOT_AND_BLOCK_ROOT_AND_BLOB_INDEX",
             getColumnBlobSidecarBySlotRootBlobIndex())
         .put("LIGHT_CLIENT_UPDATES_BY_PERIOD", getBestLightClientUpdatesByPeriod())
+        .put(
+            "LIGHT_CLIENT_UPDATE_SIGNATURE_BLOCK_ROOTS_BY_PERIOD",
+            getBestLightClientUpdateSignatureBlockRootsByPeriod())
         .build();
   }
 
