@@ -84,7 +84,7 @@ public class GetEvents extends RestApiEndpoint {
             .tags(TAG_EVENTS, TAG_VALIDATOR_REQUIRED)
             .queryParam(TOPICS_PARAMETER)
             .response(SC_OK, "Request successful", new EventStreamResponseContentTypeDefinition())
-            .withBadRequestResponse(Optional.of("Invalid or missing event topics"))
+            .withBadRequestResponse(Optional.of("The topics supplied could not be parsed"))
             .withChainDataResponses()
             .build());
     eventSubscriptionManager =
@@ -106,14 +106,13 @@ public class GetEvents extends RestApiEndpoint {
     // the response and no error can be reported to the client after that point.
     final List<String> topics = request.getQueryParameterList(TOPICS_PARAMETER);
     if (topics.isEmpty()) {
-      request.respondError(SC_BAD_REQUEST, "No event topics specified");
+      request.respondError(SC_BAD_REQUEST, "No topics supplied");
       return;
     }
     final Optional<String> invalidTopic =
         topics.stream().filter(topic -> !EventType.isValidTopic(topic)).findFirst();
     if (invalidTopic.isPresent()) {
-      request.respondError(
-          SC_BAD_REQUEST, String.format("Invalid event topic: %s", invalidTopic.get()));
+      request.respondError(SC_BAD_REQUEST, String.format("Invalid topic: %s", invalidTopic.get()));
       return;
     }
     request.startEventStream(eventSubscriptionManager::registerClient);

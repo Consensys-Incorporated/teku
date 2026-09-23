@@ -58,7 +58,7 @@ class GetEventsTest {
 
     assertThat(request.getResponseCode()).isEqualTo(SC_BAD_REQUEST);
     assertThat(((HttpErrorResponse) request.getResponseBody()).getMessage())
-        .isEqualTo("Invalid event topic: not_a_real_topic");
+        .isEqualTo("Invalid topic: not_a_real_topic");
   }
 
   @Test
@@ -70,7 +70,7 @@ class GetEventsTest {
 
     assertThat(request.getResponseCode()).isEqualTo(SC_BAD_REQUEST);
     assertThat(((HttpErrorResponse) request.getResponseBody()).getMessage())
-        .isEqualTo("Invalid event topic: not_a_real_topic");
+        .isEqualTo("Invalid topic: not_a_real_topic");
   }
 
   @Test
@@ -82,7 +82,7 @@ class GetEventsTest {
 
     assertThat(request.getResponseCode()).isEqualTo(SC_BAD_REQUEST);
     assertThat(((HttpErrorResponse) request.getResponseBody()).getMessage())
-        .isEqualTo("No event topics specified");
+        .isEqualTo("No topics supplied");
   }
 
   @Test
@@ -93,7 +93,7 @@ class GetEventsTest {
 
     assertThat(request.getResponseCode()).isEqualTo(SC_BAD_REQUEST);
     assertThat(((HttpErrorResponse) request.getResponseBody()).getMessage())
-        .isEqualTo("No event topics specified");
+        .isEqualTo("No topics supplied");
   }
 
   @Test

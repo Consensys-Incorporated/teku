@@ -48,7 +48,7 @@ public class GetEventsIntegrationTest extends AbstractDataBackedRestAPIIntegrati
 
     try (final Response response = subscribe("not_a_real_topic")) {
       assertThat(response.code()).isEqualTo(SC_BAD_REQUEST);
-      assertThat(response.body().string()).contains("Invalid event topic: not_a_real_topic");
+      assertThat(response.body().string()).contains("Invalid topic: not_a_real_topic");
     }
   }
 
@@ -58,7 +58,7 @@ public class GetEventsIntegrationTest extends AbstractDataBackedRestAPIIntegrati
 
     try (final Response response = subscribe("head,not_a_real_topic")) {
       assertThat(response.code()).isEqualTo(SC_BAD_REQUEST);
-      assertThat(response.body().string()).contains("Invalid event topic: not_a_real_topic");
+      assertThat(response.body().string()).contains("Invalid topic: not_a_real_topic");
     }
   }
 
@@ -73,7 +73,7 @@ public class GetEventsIntegrationTest extends AbstractDataBackedRestAPIIntegrati
             .build();
     try (final Response response = streamClient.newCall(request).execute()) {
       assertThat(response.code()).isEqualTo(SC_BAD_REQUEST);
-      assertThat(response.body().string()).contains("No event topics specified");
+      assertThat(response.body().string()).contains("No topics supplied");
     }
   }
 
