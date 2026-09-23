@@ -296,17 +296,29 @@ public class ProposerPreferencesGossipValidatorTest {
   }
 
   @TestTemplate
-  void shouldReject_whenDependentRootBlockIsNotBeforeLookaheadEpoch() {
+  void shouldAccept_whenDependentRootBlockIsAtShufflingDependentSlot() {
+    final UInt64 shufflingDependentSlot = lookaheadEpochStartSlot.minusMinZero(1);
     when(recentChainData.getSlotForBlockRoot(dependentRoot))
-        .thenReturn(Optional.of(lookaheadEpochStartSlot));
+        .thenReturn(Optional.of(shufflingDependentSlot));
+
+    assertThatSafeFuture(validator.validate(signedProposerPreferences))
+        .isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldReject_whenDependentRootBlockIsAfterShufflingDependentSlot() {
+    final UInt64 shufflingDependentSlot = lookaheadEpochStartSlot.minusMinZero(1);
+    final UInt64 dependentRootSlot = shufflingDependentSlot.plus(1);
+    when(recentChainData.getSlotForBlockRoot(dependentRoot))
+        .thenReturn(Optional.of(dependentRootSlot));
 
     assertThatSafeFuture(validator.validate(signedProposerPreferences))
         .isCompletedWithValue(
             rejectPreferences(
                 signedProposerPreferences,
-                "dependent root is at slot %s but must be before the proposer lookahead epoch start slot %s",
-                lookaheadEpochStartSlot,
-                lookaheadEpochStartSlot));
+                "dependent root is at slot %s but must not be after the shuffling dependent slot %s",
+                dependentRootSlot,
+                shufflingDependentSlot));
     verify(recentChainData, never()).retrieveCheckpointState(any(Checkpoint.class));
   }
 

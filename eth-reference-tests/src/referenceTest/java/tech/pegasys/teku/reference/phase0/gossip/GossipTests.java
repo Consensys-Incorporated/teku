@@ -58,8 +58,7 @@ public class GossipTests {
                   // https://github.com/ethereum/consensus-specs/issues/5666
                   "gossip_payload_attestation_message__reject_pre_fork_slot"))
           .put(
-              // TODO: https://github.com/Consensys-Incorporated/teku/issues/11232
-              "networking/gossip_proposer_preferences", TestExecutor.IGNORE_TESTS)
+              "networking/gossip_proposer_preferences", new GossipProposerPreferencesTestExecutor())
           .put(
               "networking/gossip_execution_payload_envelope",
               new GossipExecutionPayloadEnvelopeTestExecutor())
