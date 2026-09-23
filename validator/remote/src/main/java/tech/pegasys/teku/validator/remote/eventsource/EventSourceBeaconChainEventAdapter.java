@@ -215,8 +215,6 @@ public class EventSourceBeaconChainEventAdapter
     eventSource.close();
     eventSource = createEventSource(beaconNodeApi, fallbackEventTypes);
     currentBeaconNodeUsedForEventStreaming = beaconNodeApi;
-    validatorLogger.switchingToFailoverBeaconNodeForEventStreaming(
-        eventSource.getEventSource().getOrigin());
     eventSource.start();
   }
 
