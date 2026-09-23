@@ -25,6 +25,7 @@ import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
@@ -210,52 +211,55 @@ public class BeaconStateAccessorsGloasTest {
   @Test
   public void getPtc_throwsForSlotBeforeGloasFork() {
     final UInt64 forkEpoch = UInt64.valueOf(10);
-    final UInt64 forkSlot = spec.computeStartSlotAtEpoch(forkEpoch);
-    final BeaconState state = stateWithGloasFork(forkSlot, forkEpoch);
+    final Spec forkSpec = TestSpecFactory.createMinimalWithGloasForkEpoch(forkEpoch);
+    final BeaconStateAccessorsGloas forkAccessors = gloasAccessors(forkSpec);
+    final UInt64 forkSlot = forkSpec.computeStartSlotAtEpoch(forkEpoch);
+    final BeaconState state = dataStructureUtil.randomBeaconState(forkSlot);
     final UInt64 preForkSlot = forkSlot.decrement();
 
-    assertThatThrownBy(() -> beaconStateAccessors.getPtc(state, preForkSlot))
+    assertThatThrownBy(() -> forkAccessors.getPtc(state, preForkSlot))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("before the Gloas fork epoch");
     assertThatThrownBy(
             () ->
-                beaconStateAccessors.getIndexedPayloadAttestation(
+                forkAccessors.getIndexedPayloadAttestation(
                     state, payloadAttestation(preForkSlot, 0)))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
   @Test
-  public void getPtc_allowsPreviousEpochSlotAtOrAfterGloasFork() {
+  public void getPtc_throwsForSlotBeforeGloasForkWhenStateForkVersionIsNotGloas() {
     final UInt64 forkEpoch = UInt64.valueOf(10);
-    final UInt64 stateSlot = spec.computeStartSlotAtEpoch(forkEpoch.increment());
-    final BeaconState state = stateWithGloasFork(stateSlot, forkEpoch);
-    final UInt64 previousEpochSlot = stateSlot.decrement();
-
-    assertThat(beaconStateAccessors.getPtc(state, previousEpochSlot).isEmpty()).isFalse();
-  }
-
-  @Test
-  public void getPtc_allowsSlotBeforeForkEpochWhenStateForkVersionIsNotGloas() {
-    final UInt64 forkEpoch = UInt64.valueOf(10);
-    final UInt64 forkSlot = spec.computeStartSlotAtEpoch(forkEpoch);
+    final Spec forkSpec = TestSpecFactory.createMinimalWithGloasForkEpoch(forkEpoch);
+    final UInt64 forkSlot = forkSpec.computeStartSlotAtEpoch(forkEpoch);
+    // e.g. after a later fork, the state's fork no longer records the Gloas fork epoch
     final Fork fork =
         new Fork(
-            spec.getGenesisSpecConfig().getElectraForkVersion(),
-            spec.getGenesisSpecConfig().getFuluForkVersion(),
-            forkEpoch);
+            forkSpec.getGenesisSpecConfig().getElectraForkVersion(),
+            forkSpec.getGenesisSpecConfig().getFuluForkVersion(),
+            UInt64.ZERO);
     final BeaconState state =
         dataStructureUtil.randomBeaconState(forkSlot).updated(s -> s.setFork(fork));
 
-    assertThat(beaconStateAccessors.getPtc(state, forkSlot.decrement()).isEmpty()).isFalse();
+    assertThatThrownBy(() -> gloasAccessors(forkSpec).getPtc(state, forkSlot.decrement()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("before the Gloas fork epoch");
   }
 
-  private BeaconState stateWithGloasFork(final UInt64 slot, final UInt64 forkEpoch) {
-    final Fork fork =
-        new Fork(
-            spec.getGenesisSpecConfig().getFuluForkVersion(),
-            spec.getGenesisSpecConfig().getGloasForkVersion(),
-            forkEpoch);
-    return dataStructureUtil.randomBeaconState(slot).updated(s -> s.setFork(fork));
+  @Test
+  public void getPtc_allowsPreviousEpochSlotAtOrAfterGloasFork() {
+    final UInt64 forkEpoch = UInt64.valueOf(10);
+    final Spec forkSpec = TestSpecFactory.createMinimalWithGloasForkEpoch(forkEpoch);
+    final UInt64 stateSlot = forkSpec.computeStartSlotAtEpoch(forkEpoch.increment());
+    final BeaconState state = dataStructureUtil.randomBeaconState(stateSlot);
+    final UInt64 previousEpochSlot = stateSlot.decrement();
+
+    assertThat(gloasAccessors(forkSpec).getPtc(state, previousEpochSlot).isEmpty()).isFalse();
+  }
+
+  private BeaconStateAccessorsGloas gloasAccessors(final Spec forkSpec) {
+    return BeaconStateAccessorsGloas.required(
+        forkSpec.forMilestone(SpecMilestone.GLOAS).beaconStateAccessors());
   }
 
   private PayloadAttestation payloadAttestation(final UInt64 slot, final int... setBits) {

@@ -334,7 +334,7 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
             loadSsz(
                 testDefinition,
                 dataFileName,
-                testDefinition.getSpec().getGenesisSchemaDefinitions().getBeaconBlockSchema());
+                schemaDefinitions(testDefinition).getBeaconBlockSchema());
         processor.processBlockHeader(state, blockHeader);
       }
       case DEPOSIT -> {
@@ -350,7 +350,7 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
             loadSsz(
                 testDefinition,
                 dataFileName,
-                testDefinition.getSpec().getGenesisSchemaDefinitions().getAttestationSchema());
+                schemaDefinitions(testDefinition).getAttestationSchema());
         final BeaconState preState = state.commitChanges();
         processor.processAttestation(state, attestation);
 
@@ -362,10 +362,7 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
                 testDefinition,
                 dataFileName,
                 BeaconBlockBodySchemaAltair.required(
-                        testDefinition
-                            .getSpec()
-                            .getGenesisSchemaDefinitions()
-                            .getBeaconBlockBodySchema())
+                        schemaDefinitions(testDefinition).getBeaconBlockBodySchema())
                     .getSyncAggregateSchema());
         processor.processSyncCommittee(state, syncAggregate);
       }
@@ -373,8 +370,7 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
         final ExecutionMeta executionMeta =
             loadYaml(testDefinition, "execution.yaml", ExecutionMeta.class);
 
-        final SchemaDefinitions schemaDefinitions =
-            testDefinition.getSpec().getGenesisSchemaDefinitions();
+        final SchemaDefinitions schemaDefinitions = schemaDefinitions(testDefinition);
         final BeaconBlockBody beaconBlockBody =
             loadSsz(testDefinition, dataFileName, schemaDefinitions.getBeaconBlockBodySchema());
         processor.processExecutionPayload(
@@ -393,7 +389,7 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
             loadSsz(
                 testDefinition,
                 dataFileName,
-                testDefinition.getSpec().getGenesisSchemaDefinitions().getBeaconBlockSchema());
+                schemaDefinitions(testDefinition).getBeaconBlockSchema());
         processor.processParentExecutionPayload(state, beaconBlock);
       }
       case EXECUTION_PAYLOAD_BID -> {
@@ -401,8 +397,7 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
             loadSsz(
                 testDefinition,
                 dataFileName,
-                SchemaDefinitionsGloas.required(
-                        testDefinition.getSpec().getGenesisSchemaDefinitions())
+                SchemaDefinitionsGloas.required(schemaDefinitions(testDefinition))
                     .getSignedExecutionPayloadBidSchema());
         processor.processExecutionPayloadBid(state, signedBid);
       }
@@ -411,8 +406,7 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
             loadSsz(
                 testDefinition,
                 dataFileName,
-                SchemaDefinitionsGloas.required(
-                        testDefinition.getSpec().getGenesisSchemaDefinitions())
+                SchemaDefinitionsGloas.required(schemaDefinitions(testDefinition))
                     .getPayloadAttestationSchema());
         processor.processPayloadAttestation(state, payloadAttestation);
       }
@@ -431,7 +425,7 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
       final OperationProcessor processor)
       throws BlockProcessingException {
     final SchemaDefinitionsCapella schemaDefinitionsCapella =
-        SchemaDefinitionsCapella.required(testDefinition.getSpec().getGenesisSchemaDefinitions());
+        SchemaDefinitionsCapella.required(schemaDefinitions(testDefinition));
     final Optional<ExecutionPayloadSummary> executionPayload;
     if (schemaDefinitionsCapella.toVersionGloas().isPresent()) {
       // no execution payload in withdrawals tests for >= Gloas
@@ -462,7 +456,7 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
       final MutableBeaconState state,
       final OperationProcessor processor) {
     final SszListSchema<DepositRequest, ?> depositRequestsSchema =
-        SchemaDefinitionsElectra.required(testDefinition.getSpec().getGenesisSchemaDefinitions())
+        SchemaDefinitionsElectra.required(schemaDefinitions(testDefinition))
             .getExecutionRequestsSchema()
             .getDepositRequestsSchema();
     final SszList<DepositRequest> depositRequests =
@@ -476,7 +470,7 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
       final MutableBeaconState state,
       final OperationProcessor processor) {
     final SszListSchema<WithdrawalRequest, ?> withdrawalRequestsSchema =
-        SchemaDefinitionsElectra.required(testDefinition.getSpec().getGenesisSchemaDefinitions())
+        SchemaDefinitionsElectra.required(schemaDefinitions(testDefinition))
             .getExecutionRequestsSchema()
             .getWithdrawalRequestsSchema();
     final SszList<WithdrawalRequest> withdrawalRequests =
@@ -490,7 +484,7 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
       final MutableBeaconState state,
       final OperationProcessor processor) {
     final SszListSchema<ConsolidationRequest, ?> consolidationRequestsSchema =
-        SchemaDefinitionsElectra.required(testDefinition.getSpec().getGenesisSchemaDefinitions())
+        SchemaDefinitionsElectra.required(schemaDefinitions(testDefinition))
             .getExecutionRequestsSchema()
             .getConsolidationRequestsSchema();
     final SszList<ConsolidationRequest> consolidationRequests =
@@ -505,8 +499,7 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
       final OperationProcessor processor) {
     final SszListSchema<BuilderDepositRequest, ?> builderDepositRequestsSchema =
         ExecutionRequestsSchemaGloas.required(
-                SchemaDefinitionsGloas.required(
-                        testDefinition.getSpec().getGenesisSchemaDefinitions())
+                SchemaDefinitionsGloas.required(schemaDefinitions(testDefinition))
                     .getExecutionRequestsSchema())
             .getBuilderDepositRequestsSchema();
     final SszList<BuilderDepositRequest> builderDepositRequests =
@@ -520,8 +513,7 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
       final OperationProcessor processor) {
     final SszListSchema<BuilderExitRequest, ?> builderExitRequestsSchema =
         ExecutionRequestsSchemaGloas.required(
-                SchemaDefinitionsGloas.required(
-                        testDefinition.getSpec().getGenesisSchemaDefinitions())
+                SchemaDefinitionsGloas.required(schemaDefinitions(testDefinition))
                     .getExecutionRequestsSchema())
             .getBuilderExitRequestsSchema();
     final SszList<BuilderExitRequest> builderExitRequests =
@@ -541,12 +533,12 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
     return loadSsz(
         testDefinition,
         dataFileName,
-        testDefinition.getSpec().getGenesisSchemaDefinitions().getAttesterSlashingSchema());
+        schemaDefinitions(testDefinition).getAttesterSlashingSchema());
   }
 
   private SignedBlsToExecutionChange loadBlsToExecutionChange(final TestDefinition testDefinition) {
     final SchemaDefinitionsCapella schemaDefinitionsCapella =
-        SchemaDefinitionsCapella.required(testDefinition.getSpec().getGenesisSchemaDefinitions());
+        SchemaDefinitionsCapella.required(schemaDefinitions(testDefinition));
     return loadSsz(
         testDefinition,
         dataFileName,
@@ -678,5 +670,13 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
     final UInt64 expectedReward = postBalance.minus(preBalance);
 
     assertThat(reward).isEqualTo(expectedReward);
+  }
+
+  /// the test fork may be scheduled after genesis, so use its schemas rather than the genesis ones
+  private static SchemaDefinitions schemaDefinitions(final TestDefinition testDefinition) {
+    return testDefinition
+        .getSpec()
+        .forMilestone(testDefinition.getMilestone())
+        .getSchemaDefinitions();
   }
 }

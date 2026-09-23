@@ -52,7 +52,9 @@ public class DefaultOperationProcessor implements OperationProcessor {
   public DefaultOperationProcessor(final Spec spec) {
     this.spec = spec;
     this.beaconBlockBodySchema =
-        spec.getGenesisSpec().getSchemaDefinitions().getBeaconBlockBodySchema();
+        spec.forMilestone(spec.getForkSchedule().getHighestSupportedMilestone())
+            .getSchemaDefinitions()
+            .getBeaconBlockBodySchema();
   }
 
   @Override
