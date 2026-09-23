@@ -24,7 +24,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import org.opentest4j.TestAbortedException;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
 import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
@@ -45,19 +44,8 @@ import tech.pegasys.teku.storage.storageSystem.StorageSystem;
 
 public class GossipBlsToExecutionChangeTestExecutor implements TestExecutor {
 
-  private final List<String> testsToSkip;
-
-  public GossipBlsToExecutionChangeTestExecutor(final String... testsToSkip) {
-    this.testsToSkip = List.of(testsToSkip);
-  }
-
   @Override
   public void runTest(final TestDefinition testDefinition) throws Throwable {
-    if (testsToSkip.contains(testDefinition.getTestName())) {
-      throw new TestAbortedException(
-          "Test " + testDefinition.getDisplayName() + " has been ignored");
-    }
-
     final GossipBlsToExecutionChangeMetaData metaData =
         loadYaml(testDefinition, "meta.yaml", GossipBlsToExecutionChangeMetaData.class);
     final Spec spec = testDefinition.getSpec();
