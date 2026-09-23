@@ -27,7 +27,6 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.reference.BlsSetting;
 import tech.pegasys.teku.reference.TestExecutor;
 import tech.pegasys.teku.spec.Spec;
-import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
@@ -51,7 +50,7 @@ public class GossipProposerPreferencesTestExecutor implements TestExecutor {
     final Spec spec = testDefinition.getSpec(!signatureVerificationDisabled);
     final SchemaDefinitionsGloas schemaDefinitions =
         SchemaDefinitionsGloas.required(
-            spec.forMilestone(SpecMilestone.GLOAS).getSchemaDefinitions());
+            spec.forMilestone(testDefinition.getMilestone()).getSchemaDefinitions());
     final BeaconState state =
         loadSsz(
             testDefinition,
@@ -75,7 +74,7 @@ public class GossipProposerPreferencesTestExecutor implements TestExecutor {
     // configured spec for production gossip validation below.
     final Spec setupSpec =
         TestSpecFactory.create(
-            SpecMilestone.GLOAS, Eth2Network.fromString(testDefinition.getConfigName()));
+            testDefinition.getMilestone(), Eth2Network.fromString(testDefinition.getConfigName()));
     final GossipTestContext ctx =
         GossipTestContext.create(
             setupSpec,
