@@ -209,7 +209,10 @@ class DefaultExecutionPayloadManagerTest {
   @Test
   public void shouldHandleInternalErrorsWhileImporting() {
     givenValidationResult(signedExecutionPayload, ACCEPT);
-    when(forkChoice.onExecutionPayloadEnvelope(signedExecutionPayload, executionLayer))
+    when(forkChoice.onExecutionPayloadEnvelope(
+            signedExecutionPayload,
+            executionLayer,
+            Optional.of(receivedExecutionPayloadEventsChannelPublisher)))
         .thenThrow(new IllegalStateException("oopsy"));
 
     final SafeFuture<InternalValidationResult> resultFuture =
@@ -245,8 +248,16 @@ class DefaultExecutionPayloadManagerTest {
 
     verify(receivedExecutionPayloadEventsChannelPublisher)
         .onExecutionPayloadImported(earlyExecutionPayload, false);
-    verify(forkChoice).onExecutionPayloadEnvelope(earlyExecutionPayload, executionLayer);
-    verify(forkChoice, never()).onExecutionPayloadEnvelope(lateExecutionPayload, executionLayer);
+    verify(forkChoice)
+        .onExecutionPayloadEnvelope(
+            earlyExecutionPayload,
+            executionLayer,
+            Optional.of(receivedExecutionPayloadEventsChannelPublisher));
+    verify(forkChoice, never())
+        .onExecutionPayloadEnvelope(
+            lateExecutionPayload,
+            executionLayer,
+            Optional.of(receivedExecutionPayloadEventsChannelPublisher));
     assertThat(publishedExecutionPayload).hasValue(earlyExecutionPayload);
     assertExecutionPayloadSeenBeforeDeadline(earlyExecutionPayload);
   }
@@ -273,8 +284,16 @@ class DefaultExecutionPayloadManagerTest {
 
     verify(receivedExecutionPayloadEventsChannelPublisher)
         .onExecutionPayloadImported(earlyExecutionPayload, false);
-    verify(forkChoice).onExecutionPayloadEnvelope(earlyExecutionPayload, executionLayer);
-    verify(forkChoice, never()).onExecutionPayloadEnvelope(lateExecutionPayload, executionLayer);
+    verify(forkChoice)
+        .onExecutionPayloadEnvelope(
+            earlyExecutionPayload,
+            executionLayer,
+            Optional.of(receivedExecutionPayloadEventsChannelPublisher));
+    verify(forkChoice, never())
+        .onExecutionPayloadEnvelope(
+            lateExecutionPayload,
+            executionLayer,
+            Optional.of(receivedExecutionPayloadEventsChannelPublisher));
     assertThat(publishedExecutionPayload).hasValue(earlyExecutionPayload);
     assertExecutionPayloadSeenBeforeDeadline(earlyExecutionPayload);
   }
@@ -301,8 +320,16 @@ class DefaultExecutionPayloadManagerTest {
 
     verify(receivedExecutionPayloadEventsChannelPublisher)
         .onExecutionPayloadImported(secondExecutionPayload, false);
-    verify(forkChoice).onExecutionPayloadEnvelope(secondExecutionPayload, executionLayer);
-    verify(forkChoice, never()).onExecutionPayloadEnvelope(firstExecutionPayload, executionLayer);
+    verify(forkChoice)
+        .onExecutionPayloadEnvelope(
+            secondExecutionPayload,
+            executionLayer,
+            Optional.of(receivedExecutionPayloadEventsChannelPublisher));
+    verify(forkChoice, never())
+        .onExecutionPayloadEnvelope(
+            firstExecutionPayload,
+            executionLayer,
+            Optional.of(receivedExecutionPayloadEventsChannelPublisher));
     assertThat(publishedExecutionPayload).hasValue(secondExecutionPayload);
     assertExecutionPayloadSeenBeforeDeadline(secondExecutionPayload);
   }
@@ -335,7 +362,10 @@ class DefaultExecutionPayloadManagerTest {
   public void shouldCacheInvalidExecutionPayloadWhenImportFailsVerification() {
     final ExecutionPayloadImportResult failedImportResult =
         ExecutionPayloadImportResult.failedVerification(new RuntimeException("invalid"));
-    when(forkChoice.onExecutionPayloadEnvelope(signedExecutionPayload, executionLayer))
+    when(forkChoice.onExecutionPayloadEnvelope(
+            signedExecutionPayload,
+            executionLayer,
+            Optional.of(receivedExecutionPayloadEventsChannelPublisher)))
         .thenReturn(completedFuture(failedImportResult));
 
     final SafeFuture<ExecutionPayloadImportResult> resultFuture =
@@ -352,7 +382,10 @@ class DefaultExecutionPayloadManagerTest {
     final ExecutionPayloadImportResult failedImportResult =
         ExecutionPayloadImportResult.failedDataAvailabilityCheckInvalid(
             Optional.of(new RuntimeException("invalid")));
-    when(forkChoice.onExecutionPayloadEnvelope(signedExecutionPayload, executionLayer))
+    when(forkChoice.onExecutionPayloadEnvelope(
+            signedExecutionPayload,
+            executionLayer,
+            Optional.of(receivedExecutionPayloadEventsChannelPublisher)))
         .thenReturn(completedFuture(failedImportResult));
 
     final SafeFuture<ExecutionPayloadImportResult> resultFuture =
@@ -368,7 +401,10 @@ class DefaultExecutionPayloadManagerTest {
   public void shouldNotCacheInvalidExecutionPayloadWhenCommitmentNotVerified() {
     final ExecutionPayloadImportResult failedImportResult =
         ExecutionPayloadImportResult.failedVerification(new RuntimeException("invalid"));
-    when(forkChoice.onExecutionPayloadEnvelope(signedExecutionPayload, executionLayer))
+    when(forkChoice.onExecutionPayloadEnvelope(
+            signedExecutionPayload,
+            executionLayer,
+            Optional.of(receivedExecutionPayloadEventsChannelPublisher)))
         .thenReturn(completedFuture(failedImportResult));
 
     // Imports that did not verify the payload commitment (e.g. sync or RPC-by-root) must not poison
@@ -390,7 +426,10 @@ class DefaultExecutionPayloadManagerTest {
   }
 
   private void givenSuccessfulImport(final SignedExecutionPayloadEnvelope executionPayload) {
-    when(forkChoice.onExecutionPayloadEnvelope(executionPayload, executionLayer))
+    when(forkChoice.onExecutionPayloadEnvelope(
+            executionPayload,
+            executionLayer,
+            Optional.of(receivedExecutionPayloadEventsChannelPublisher)))
         .thenReturn(completedFuture(ExecutionPayloadImportResult.successful(executionPayload)));
   }
 

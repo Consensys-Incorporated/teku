@@ -347,10 +347,6 @@ public class GossipValidationHelper {
    */
   public boolean isPossibleDependentRoot(final Bytes32 root, final UInt64 epochStartSlot) {
     final ReadOnlyForkChoiceStrategy forkChoiceStrategy = getForkChoiceStrategy();
-    final Optional<UInt64> rootSlot = forkChoiceStrategy.blockSlot(root);
-    if (rootSlot.isPresent() && rootSlot.get().isGreaterThanOrEqualTo(epochStartSlot)) {
-      return false;
-    }
     final UInt64 lastSlotBeforeEpoch = epochStartSlot.minusMinZero(ONE);
     // The root already is the latest block before the epoch on any branch where it has a child at
     // or after epochStartSlot. Rather than scanning every block in the store for such a child, walk

@@ -83,14 +83,21 @@ public class HeadV2Event extends Event<HeadV2Data> {
                 slot,
                 block,
                 state,
-                toApiPayloadStatus(payloadStatus),
+                toApiPayloadStatus(milestone, payloadStatus),
                 epochTransition,
                 executionOptimistic,
                 currentEpochDependentRoot,
                 nextEpochDependentRoot)));
   }
 
-  private static String toApiPayloadStatus(final ForkChoicePayloadStatus payloadStatus) {
+  private static String toApiPayloadStatus(
+      final SpecMilestone milestone, final ForkChoicePayloadStatus payloadStatus) {
+    if (milestone.isLessThan(SpecMilestone.GLOAS)) {
+      // Before Gloas a block always carries its execution payload, so there is no empty variant of
+      // a head. Fork choice still models every block as a base (pending) node, which is not a
+      // payload status the API can report, so the head is always reported as full.
+      return "full";
+    }
     return switch (payloadStatus) {
       case PAYLOAD_STATUS_EMPTY -> "empty";
       case PAYLOAD_STATUS_FULL -> "full";
