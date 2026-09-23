@@ -56,15 +56,14 @@ public class ManualReferenceTestRunner extends Eth2ReferenceTestCase {
    *
    * <p>May be overridden by the ENV_MILESTONE environment variable.
    */
-  private static final String MILESTONE = "gloas";
+  private static final String MILESTONE = "";
 
   /**
    * Filter tests to run only those where the display name contains this string.
    *
    * <p>May be overridden by the ENV_DISPLAY_NAME environment variable.
    */
-  private static final String DISPLAY_NAME =
-      "gloas - mainnet - networking/gossip_payload_attestation_message - gossip_payload_attestation_message__reject_pre_fork_slot";
+  private static final String DISPLAY_NAME = "";
 
   @ParameterizedTest(name = "{0}")
   @MethodSource("loadReferenceTests")
