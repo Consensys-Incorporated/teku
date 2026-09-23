@@ -14,6 +14,7 @@
 package tech.pegasys.teku.statetransition.lightclient;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -22,15 +23,22 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiPredicate;
 import java.util.function.Predicate;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
+import tech.pegasys.teku.storage.api.LightClientUpdateChannel;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 
 public class LightClientUpdateStore {
+  private static final Logger LOG = LogManager.getLogger();
+
   private final Spec spec;
+  private final LightClientUpdateChannel channel;
 
   private final ConcurrentNavigableMap<UInt64, StoredUpdate<LightClientUpdate>>
       bestUpdatesByPeriod = new ConcurrentSkipListMap<>();
@@ -40,7 +48,12 @@ public class LightClientUpdateStore {
       latestOptimisticUpdate = new AtomicReference<>(Optional.empty());
 
   public LightClientUpdateStore(final Spec spec) {
+    this(spec, LightClientUpdateChannel.NOOP);
+  }
+
+  public LightClientUpdateStore(final Spec spec, final LightClientUpdateChannel channel) {
     this.spec = spec;
+    this.channel = channel;
   }
 
   public synchronized void addUpdate(
@@ -58,11 +71,31 @@ public class LightClientUpdateStore {
       return;
     }
 
-    bestUpdatesByPeriod.merge(
-        attestedPeriod,
-        new StoredUpdate<>(update, signatureSlot, signatureBlockRoot),
-        (existing, incoming) ->
-            isBetterUpdate(incoming.update(), existing.update()) ? incoming : existing);
+    final StoredUpdate<LightClientUpdate> candidate =
+        new StoredUpdate<>(update, signatureSlot, signatureBlockRoot);
+    final StoredUpdate<LightClientUpdate> best =
+        bestUpdatesByPeriod.merge(
+            attestedPeriod,
+            candidate,
+            (existing, incoming) ->
+                isBetterUpdate(incoming.update(), existing.update()) ? incoming : existing);
+
+    if (best.equals(candidate)) {
+      channel
+          .onNewBestLightClientUpdate(attestedPeriod, update, signatureBlockRoot)
+          .finishError(LOG);
+    }
+  }
+
+  public synchronized void loadUpdates(final Collection<StoredLightClientUpdate> updates) {
+    updates.forEach(
+        stored ->
+            bestUpdatesByPeriod.put(
+                stored.period(),
+                new StoredUpdate<>(
+                    stored.update(),
+                    stored.update().getSignatureSlot().get(),
+                    stored.signatureBlockRoot())));
   }
 
   public synchronized void removeNonCanonicalUpdates(
@@ -70,9 +103,24 @@ public class LightClientUpdateStore {
     final Predicate<StoredUpdate<?>> canonical =
         stored -> isCanonical.test(stored.signatureSlot(), stored.signatureBlockRoot());
 
-    bestUpdatesByPeriod.tailMap(fromPeriod).values().removeIf(canonical.negate());
+    final List<UInt64> removedPeriods = new ArrayList<>();
+    bestUpdatesByPeriod
+        .tailMap(fromPeriod)
+        .entrySet()
+        .removeIf(
+            entry -> {
+              if (canonical.test(entry.getValue())) {
+                return false;
+              }
+              removedPeriods.add(entry.getKey());
+              return true;
+            });
     latestFinalityUpdate.updateAndGet(current -> current.filter(canonical));
     latestOptimisticUpdate.updateAndGet(current -> current.filter(canonical));
+
+    if (!removedPeriods.isEmpty()) {
+      channel.onRemoveBestLightClientUpdates(removedPeriods).finishError(LOG);
+    }
   }
 
   public synchronized void addFinalityUpdate(
@@ -154,6 +202,7 @@ public class LightClientUpdateStore {
 
   public synchronized void pruneUpdatesBefore(final UInt64 period) {
     bestUpdatesByPeriod.headMap(period).clear();
+    channel.onPruneBestLightClientUpdatesBefore(period).finishError(LOG);
   }
 
   public Optional<LightClientFinalityUpdate> getLatestFinalityUpdate() {
