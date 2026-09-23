@@ -227,7 +227,8 @@ public class ProposerPreferencesGossipValidatorTest {
   void shouldIgnore_whenProposalEpochIsPreGloas() {
     final Spec preGloasSpec = mock(Spec.class);
     when(preGloasSpec.computeEpochAtSlot(proposalSlot)).thenReturn(lookaheadEpoch);
-    when(preGloasSpec.isProposerPreferencesAvailableAtEpoch(lookaheadEpoch)).thenReturn(false);
+    when(preGloasSpec.areProposerAndBuilderPreferencesRequiredAtEpoch(lookaheadEpoch))
+        .thenReturn(false);
 
     final ProposerPreferencesGossipValidator preGloasValidator =
         new ProposerPreferencesGossipValidator(

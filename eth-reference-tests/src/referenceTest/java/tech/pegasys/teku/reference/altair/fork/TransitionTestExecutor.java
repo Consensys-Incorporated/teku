@@ -13,10 +13,12 @@
 
 package tech.pegasys.teku.reference.altair.fork;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static tech.pegasys.teku.infrastructure.ssz.SszDataAssert.assertThatSszData;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
+import java.nio.file.Files;
 import java.util.Optional;
 import org.assertj.core.api.Assertions;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
@@ -112,8 +114,11 @@ public class TransitionTestExecutor implements TestExecutor {
     final Spec spec = SpecFactory.create(config);
     final BeaconState preState =
         TestDataUtils.loadSsz(testDefinition, "pre.ssz_snappy", spec::deserializeBeaconState);
-    final BeaconState postState =
-        TestDataUtils.loadSsz(testDefinition, "post.ssz_snappy", spec::deserializeBeaconState);
+    // Without a post state the transition is invalid and the last block must be rejected
+    final boolean expectValid =
+        Files.exists(testDefinition.getTestDirectory().resolve("post.ssz_snappy"));
+    final BLSSignatureVerifier signatureVerifier =
+        metadata.blsSetting == 2 ? BLSSignatureVerifier.NOOP : BLSSignatureVerifier.SIMPLE;
 
     BeaconState result = preState;
     for (int i = 0; i < metadata.blocksCount; i++) {
@@ -121,10 +126,15 @@ public class TransitionTestExecutor implements TestExecutor {
           TestDataUtils.loadSsz(
               testDefinition, "blocks_" + i + ".ssz_snappy", spec::deserializeSignedBeaconBlock);
 
-      try {
+      if (!expectValid && i == metadata.blocksCount - 1) {
+        final BeaconState finalPreState = result;
+        assertThatThrownBy(
+                () -> spec.processBlock(finalPreState, block, signatureVerifier, Optional.empty()))
+            .isInstanceOf(StateTransitionException.class);
+        return;
+      }
 
-        final BLSSignatureVerifier signatureVerifier =
-            metadata.blsSetting == 2 ? BLSSignatureVerifier.NOOP : BLSSignatureVerifier.SIMPLE;
+      try {
         result = spec.processBlock(result, block, signatureVerifier, Optional.empty());
       } catch (final StateTransitionException e) {
         Assertions.fail(
@@ -132,6 +142,8 @@ public class TransitionTestExecutor implements TestExecutor {
             e);
       }
     }
+    final BeaconState postState =
+        TestDataUtils.loadSsz(testDefinition, "post.ssz_snappy", spec::deserializeBeaconState);
     assertThatSszData(result).isEqualByGettersTo(postState);
   }
 

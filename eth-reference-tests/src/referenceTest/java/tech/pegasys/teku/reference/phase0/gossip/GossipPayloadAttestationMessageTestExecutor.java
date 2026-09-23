@@ -26,11 +26,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
+import org.opentest4j.TestAbortedException;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.reference.BlsSetting;
 import tech.pegasys.teku.reference.TestExecutor;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessageSchema;
@@ -44,9 +46,19 @@ import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 
 public class GossipPayloadAttestationMessageTestExecutor implements TestExecutor {
+  private final List<String> testsToSkip;
+
+  public GossipPayloadAttestationMessageTestExecutor(final String... testsToSkip) {
+    this.testsToSkip = List.of(testsToSkip);
+  }
 
   @Override
   public void runTest(final TestDefinition testDefinition) throws Throwable {
+    if (testsToSkip.contains(testDefinition.getTestName())) {
+      throw new TestAbortedException(
+          "Test " + testDefinition.getDisplayName() + " has been ignored");
+    }
+
     final GossipPayloadAttestationMessageMetaData metaData =
         loadYaml(testDefinition, "meta.yaml", GossipPayloadAttestationMessageMetaData.class);
     final boolean signatureVerificationDisabled = metaData.getBlsSetting() == BlsSetting.IGNORED;
@@ -116,8 +128,13 @@ public class GossipPayloadAttestationMessageTestExecutor implements TestExecutor
             return validationTimeMs[0];
           }
         };
+    // The anchor state may predate Gloas when the vector spans the fork, and the message type only
+    // exists from Gloas
+    final SpecMilestone anchorMilestone = spec.atSlot(state.getSlot()).getMilestone();
+    final SpecMilestone schemaMilestone =
+        anchorMilestone.isLessThan(SpecMilestone.GLOAS) ? SpecMilestone.GLOAS : anchorMilestone;
     final PayloadAttestationMessageSchema schema =
-        SchemaDefinitionsGloas.required(spec.atSlot(state.getSlot()).getSchemaDefinitions())
+        SchemaDefinitionsGloas.required(spec.forMilestone(schemaMilestone).getSchemaDefinitions())
             .getPayloadAttestationMessageSchema();
     final PayloadAttestationMessageGossipValidator validator =
         new PayloadAttestationMessageGossipValidator(

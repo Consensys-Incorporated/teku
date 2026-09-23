@@ -234,6 +234,12 @@ public class BeaconStateAccessorsGloas extends BeaconStateAccessorsFulu {
   @Override
   public IntList getPtc(final BeaconState state, final UInt64 slot) {
     final UInt64 epoch = miscHelpers.computeEpochAtSlot(slot);
+    // The previous-epoch PTC is all zeros at the Gloas fork, so pre-fork slots are not queryable
+    checkArgument(
+        epoch.isGreaterThanOrEqualTo(config.getGloasForkEpoch()),
+        "PTC for slot %s is not queryable because it is before the Gloas fork epoch %s",
+        slot,
+        config.getGloasForkEpoch());
     final UInt64 stateEpoch = getCurrentEpoch(state);
     final int cacheIndex;
     if (epoch.isLessThan(stateEpoch)) {
