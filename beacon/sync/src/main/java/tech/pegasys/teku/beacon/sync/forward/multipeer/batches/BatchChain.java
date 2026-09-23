@@ -62,6 +62,10 @@ public class BatchChain implements Iterable<Batch> {
     return batches.subSet(from, false, to, false);
   }
 
+  public NavigableSet<Batch> batchesBetweenExclusiveStart(final Batch from, final Batch to) {
+    return batches.subSet(from, false, to, true);
+  }
+
   public Optional<Batch> previousNonEmptyBatch(final Batch batch) {
     return batchesBeforeExclusive(batch).descendingSet().stream()
         .filter(previousBatch -> !previousBatch.isEmpty())

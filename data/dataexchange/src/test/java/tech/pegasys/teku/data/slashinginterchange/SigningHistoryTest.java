@@ -24,6 +24,7 @@ import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.bls.BLSPublicKey;
+import tech.pegasys.teku.ethereum.signingrecord.ValidatorSigningRecord;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 
@@ -62,5 +63,24 @@ public class SigningHistoryTest {
                         Optional.of(
                             Bytes32.fromHexString(
                                 "0x0000000000000000000000000000000000000000000000000000000000000123"))))));
+  }
+
+  @Test
+  public void shouldIgnoreMaxValueAttestationEpochsWhenConvertingToValidatorSigningRecord() {
+    // An imported UInt64.MAX_VALUE epoch is indistinguishable from "never signed" once
+    // persisted and reloaded - see
+    // https://github.com/Consensys-Incorporated/teku-internal/issues/334
+    final SigningHistory signingHistory =
+        new SigningHistory(
+            blsPubKey,
+            List.of(),
+            List.of(new SignedAttestation(UInt64.MAX_VALUE, UInt64.MAX_VALUE, Optional.empty())));
+
+    final ValidatorSigningRecord record =
+        signingHistory.toValidatorSigningRecord(Optional.empty(), GENESIS_ROOT);
+
+    // No legitimate epoch was imported, so the floor stays unset rather than becoming MAX_VALUE.
+    assertThat(record.attestationSourceEpoch()).isNull();
+    assertThat(record.attestationTargetEpoch()).isNull();
   }
 }

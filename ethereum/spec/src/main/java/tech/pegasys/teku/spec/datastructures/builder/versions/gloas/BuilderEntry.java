@@ -63,6 +63,10 @@ public class BuilderEntry
     return new String(getField0().getBytes().toArrayUnsafe(), StandardCharsets.UTF_8);
   }
 
+  public Bytes getUrlBytes() {
+    return getField0().getBytes();
+  }
+
   public SignedBuilderRequestAuth getAuth() {
     return getField1();
   }

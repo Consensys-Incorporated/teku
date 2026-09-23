@@ -44,7 +44,22 @@ public class GetExecutionPayloadBidRequest extends AbstractBuilderRequest {
 
   public GetExecutionPayloadBidRequest(
       final Spec spec, final HttpUrl baseEndpoint, final OkHttpClient httpClient) {
-    super(baseEndpoint, httpClient);
+    // A derived client scoped to bid requests only, still sharing the underlying
+    // dispatcher/connection pool with other builder requests. An interceptor is used so the
+    // "Date-Milliseconds" timestamp lines up with when the call's timeout starts counting.
+    super(
+        baseEndpoint,
+        httpClient
+            .newBuilder()
+            .addInterceptor(
+                chain ->
+                    chain.proceed(
+                        chain
+                            .request()
+                            .newBuilder()
+                            .header(SENT_TIME_HEADER, String.valueOf(System.currentTimeMillis()))
+                            .build()))
+            .build());
     this.spec = spec;
   }
 
@@ -75,8 +90,6 @@ public class GetExecutionPayloadBidRequest extends AbstractBuilderRequest {
             ContentTypes.JSON,
             HEADER_CONSENSUS_VERSION,
             spec.atSlot(slot).getMilestone().lowerCaseName(),
-            SENT_TIME_HEADER,
-            String.valueOf(System.currentTimeMillis()),
             REQUEST_TIMEOUT_HEADER,
             String.valueOf(BUILDER_PROPOSAL_DELAY_TOLERANCE.toMillis()));
 

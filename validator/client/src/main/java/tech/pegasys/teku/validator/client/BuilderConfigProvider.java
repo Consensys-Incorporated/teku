@@ -20,9 +20,12 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
+import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.collections.cache.LRUCache;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -35,8 +38,16 @@ import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderReque
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.SignedBuilderRequestAuth;
 import tech.pegasys.teku.spec.schemas.ApiSchemas;
 import tech.pegasys.teku.validator.api.ValidatorConfig;
+import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
 
-public class BuilderConfigProvider {
+public class BuilderConfigProvider implements ValidatorTimingChannel {
+
+  // Builder preferences are sent one epoch before the proposal slot, so the BuilderConfig is
+  // computed ahead of time. Pruned on each slot; entries older than 2 epochs are discarded.
+  private final Map<ProposerPubkeyAndSlot, BuilderConfig> cachedBuilderConfig =
+      new ConcurrentHashMap<>();
+
+  private record ProposerPubkeyAndSlot(BLSPublicKey proposerPubkey, UInt64 slot) {}
 
   private final LRUCache<String, Bytes> cachedDefaultAuthDataByHost =
       LRUCache.create((int) BuilderConfigSchema.MAX_BUILDER_ENTRIES);
@@ -49,10 +60,25 @@ public class BuilderConfigProvider {
     this.validatorConfig = validatorConfig;
   }
 
+  @Override
+  public void onSlot(final UInt64 slot) {
+    final long slotsPerTwoEpochs = 2L * spec.atSlot(slot).getSlotsPerEpoch();
+    cachedBuilderConfig
+        .entrySet()
+        .removeIf(
+            entry ->
+                slot.minusMinZero(entry.getKey().slot).isGreaterThanOrEqualTo(slotsPerTwoEpochs));
+  }
+
   public SafeFuture<Optional<BuilderConfig>> getBuilderConfig(
       final Validator validator, final UInt64 slot) {
     if (!isBuilderConfigRequired(slot)) {
       return SafeFuture.completedFuture(Optional.empty());
+    }
+    final ProposerPubkeyAndSlot cacheKey =
+        new ProposerPubkeyAndSlot(validator.getPublicKey(), slot);
+    if (cachedBuilderConfig.containsKey(cacheKey)) {
+      return SafeFuture.completedFuture(Optional.of(cachedBuilderConfig.get(cacheKey)));
     }
     final Stream<SafeFuture<BuilderEntry>> builderEntriesFutures =
         validatorConfig.getBuilderUrls().stream()
@@ -80,12 +106,15 @@ public class BuilderConfigProvider {
                 });
     return SafeFuture.collectAll(builderEntriesFutures)
         .thenApply(
-            builderEntries ->
-                Optional.of(
-                    ApiSchemas.BUILDER_CONFIG_SCHEMA.create(
-                        validatorConfig.getBuilderMinBid(),
-                        validatorConfig.getBuilderBoostFactor(),
-                        builderEntries)));
+            builderEntries -> {
+              final BuilderConfig builderConfig =
+                  ApiSchemas.BUILDER_CONFIG_SCHEMA.create(
+                      validatorConfig.getBuilderMinBid(),
+                      validatorConfig.getBuilderBoostFactor(),
+                      builderEntries);
+              cachedBuilderConfig.put(cacheKey, builderConfig);
+              return Optional.of(builderConfig);
+            });
   }
 
   private boolean isBuilderConfigRequired(final UInt64 slot) {
