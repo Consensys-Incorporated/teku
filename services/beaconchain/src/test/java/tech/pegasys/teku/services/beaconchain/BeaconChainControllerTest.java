@@ -16,13 +16,18 @@ package tech.pegasys.teku.services.beaconchain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.networks.Eth2NetworkConfiguration;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
+import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
 class BeaconChainControllerTest {
@@ -100,6 +105,26 @@ class BeaconChainControllerTest {
     when(recentChainData.getCurrentEpoch()).thenReturn(Optional.of(currentEpoch));
 
     assertThat(controller.isSafeToDeactivateDenebFeatures()).isTrue();
+  }
+
+  @Test
+  void loadLightClientUpdates_shouldNotFailStartupWhenStorageReadFails() {
+    final BeaconChainController controller =
+        createController(TestSpecFactory.createMinimalAltair());
+    final BeaconChainConfiguration beaconConfig = mock(BeaconChainConfiguration.class);
+    final Eth2NetworkConfiguration networkConfig = mock(Eth2NetworkConfiguration.class);
+    when(beaconConfig.eth2NetworkConfig()).thenReturn(networkConfig);
+    when(networkConfig.isLightClientServerEnabled()).thenReturn(true);
+    final CombinedChainDataClient combinedChainDataClient = mock(CombinedChainDataClient.class);
+    when(combinedChainDataClient.getBestLightClientUpdates())
+        .thenReturn(SafeFuture.failedFuture(new IllegalStateException("corrupt row")));
+    final LightClientUpdateStore lightClientUpdateStore = mock(LightClientUpdateStore.class);
+    controller.beaconConfig = beaconConfig;
+    controller.combinedChainDataClient = combinedChainDataClient;
+    controller.lightClientUpdateStore = lightClientUpdateStore;
+
+    assertThat(controller.loadLightClientUpdates()).isCompleted();
+    verifyNoInteractions(lightClientUpdateStore);
   }
 
   private Spec createFuluSpecWithRetentionPeriod(

@@ -1712,6 +1712,11 @@ public class BeaconChainController extends Service implements BeaconChainControl
             updates -> {
               lightClientUpdateStore.loadUpdates(updates);
               LOG.debug("Loaded {} light client updates from storage", updates.size());
+            })
+        .exceptionally(
+            error -> {
+              LOG.warn("Failed to load light client updates from storage", error);
+              return null;
             });
   }
 
