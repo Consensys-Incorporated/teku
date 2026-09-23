@@ -22,6 +22,7 @@ import static tech.pegasys.teku.spec.config.Constants.BUILDER_PROPOSAL_DELAY_TOL
 import java.util.Map;
 import java.util.Optional;
 import okhttp3.HttpUrl;
+import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
@@ -47,20 +48,18 @@ public class GetExecutionPayloadBidRequest extends AbstractBuilderRequest {
     // A derived client scoped to bid requests only, still sharing the underlying
     // dispatcher/connection pool with other builder requests. An interceptor is used so the
     // "Date-Milliseconds" timestamp lines up with when the call's timeout starts counting.
-    super(
-        baseEndpoint,
-        httpClient
-            .newBuilder()
-            .addInterceptor(
-                chain ->
-                    chain.proceed(
-                        chain
-                            .request()
-                            .newBuilder()
-                            .header(SENT_TIME_HEADER, String.valueOf(System.currentTimeMillis()))
-                            .build()))
-            .build());
+    super(baseEndpoint, httpClient.newBuilder().addInterceptor(createRequestInterceptor()).build());
     this.spec = spec;
+  }
+
+  private static Interceptor createRequestInterceptor() {
+    return chain ->
+        chain.proceed(
+            chain
+                .request()
+                .newBuilder()
+                .header(SENT_TIME_HEADER, String.valueOf(System.currentTimeMillis()))
+                .build());
   }
 
   public SafeFuture<Optional<SignedExecutionPayloadBid>> submit(

@@ -752,7 +752,8 @@ public class EventSubscriptionManagerTest {
   }
 
   private void triggerExecutionPayloadAvailableEvent() {
-    triggerExecutionPayloadEvent();
+    manager.onExecutionPayloadAvailable(sampleExecutionPayload);
+    asyncRunner.executeQueuedActions();
   }
 
   private void triggerExecutionPayloadBidEvent() {
