@@ -104,11 +104,13 @@ public class SlashingProtectionImporter {
         signingHistory.signedAttestations().stream()
             .map(SignedAttestation::sourceEpoch)
             .filter(Objects::nonNull)
+            .filter(epoch -> !epoch.equals(UInt64.MAX_VALUE))
             .max(UInt64::compareTo);
     final Optional<UInt64> targetEpoch =
         signingHistory.signedAttestations().stream()
             .map(SignedAttestation::targetEpoch)
             .filter(Objects::nonNull)
+            .filter(epoch -> !epoch.equals(UInt64.MAX_VALUE))
             .max(UInt64::compareTo);
     final ValidatorSigningRecord record =
         new ValidatorSigningRecord(

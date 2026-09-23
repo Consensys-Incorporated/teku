@@ -55,6 +55,7 @@ import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationSchema;
 import tech.pegasys.teku.spec.datastructures.operations.SingleAttestationSchema;
+import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
 import tech.pegasys.teku.spec.signatures.Signer;
@@ -144,6 +145,42 @@ class AttestationProductionDutyTest {
 
     final Optional<AttestationData> invalidAttestationData =
         Optional.of(dataStructureUtil.randomAttestationData(SLOT.increment()));
+
+    when(validatorApiChannel.createAttestationData(SLOT, 0))
+        .thenReturn(completedFuture(invalidAttestationData));
+
+    final SafeFuture<Optional<AttestationData>> attestationFuture =
+        duty.addValidator(validator, 0, 5, 10, 11);
+    performAndReportDuty();
+
+    assertThat(attestationFuture).isCompletedWithValue(invalidAttestationData);
+    verify(validatorLogger)
+        .dutyFailed(
+            eq(TYPE),
+            eq(SLOT),
+            eq(Set.of(validator.getPublicKey().toAbbreviatedString())),
+            any(IllegalArgumentException.class));
+    verifyNoMoreInteractions(validatorLogger);
+
+    verify(validatorDutyMetrics)
+        .record(any(), any(AttestationProductionDuty.class), eq(CREATE_TOTAL));
+  }
+
+  @TestTemplate
+  public void shouldFailWhenUnsignedAttestationTargetEpochDoesNotMatchSlot() {
+    final Validator validator = createValidator();
+
+    // Malicious/broken beacon node response: target epoch does not correspond to SLOT.
+    // Must be rejected here so it never reaches slashing-protection signing records -
+    // see https://github.com/Consensys-Incorporated/teku-internal/issues/334
+    final Optional<AttestationData> invalidAttestationData =
+        Optional.of(
+            new AttestationData(
+                SLOT,
+                UInt64.ZERO,
+                dataStructureUtil.randomBytes32(),
+                new Checkpoint(UInt64.MAX_VALUE, dataStructureUtil.randomBytes32()),
+                new Checkpoint(UInt64.MAX_VALUE, dataStructureUtil.randomBytes32())));
 
     when(validatorApiChannel.createAttestationData(SLOT, 0))
         .thenReturn(completedFuture(invalidAttestationData));

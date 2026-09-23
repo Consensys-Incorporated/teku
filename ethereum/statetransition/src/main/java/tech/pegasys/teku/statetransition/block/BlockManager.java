@@ -229,6 +229,11 @@ public class BlockManager extends Service
   }
 
   @Override
+  public void onExecutionPayloadAvailable(final SignedExecutionPayloadEnvelope executionPayload) {
+    // No-op until the payload has been imported into fork choice.
+  }
+
+  @Override
   public void onExecutionPayloadImported(
       final SignedExecutionPayloadEnvelope executionPayload, final boolean executionOptimistic) {
     executionPayloadEventsListenerSupplier

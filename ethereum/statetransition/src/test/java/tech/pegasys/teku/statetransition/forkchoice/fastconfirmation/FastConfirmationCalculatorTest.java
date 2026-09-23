@@ -164,24 +164,13 @@ class FastConfirmationCalculatorTest {
   }
 
   @Test
-  void shouldReturnHeadStateAsPulledUpWhenAlreadyInCurrentEpoch() {
-    final BeaconState headState = genesisState();
-    // currentSlot 0 -> currentEpoch 0 == head state epoch, so no pull-up occurs.
-    final FastConfirmationCalculator calculator = calculatorWithHeadState(headState, 0);
+  void shouldReturnTheProvidedPulledUpHeadState() {
+    final BeaconState pulledUpHeadState = genesisState();
+    // The loader supplies the head state already pulled up to the current epoch (via the store's
+    // checkpoint-state cache when the head lags); the calculator uses it as-is.
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(pulledUpHeadState, 0);
 
-    assertThat(calculator.getPulledUpHeadState()).isSameAs(headState);
-  }
-
-  @Test
-  void shouldPullUpHeadStateWhenBehindCurrentEpoch() {
-    final BeaconState headState = genesisState();
-    // currentSlot 8 -> currentEpoch 1 > head state epoch 0, so pull up to slot 8.
-    final FastConfirmationCalculator calculator = calculatorWithHeadState(headState, 8);
-
-    final BeaconState pulledUp = calculator.getPulledUpHeadState();
-    assertThat(pulledUp.getSlot()).isEqualTo(UInt64.valueOf(8));
-    // Memoized: repeated reads return the same instance.
-    assertThat(calculator.getPulledUpHeadState()).isSameAs(pulledUp);
+    assertThat(calculator.getPulledUpHeadState()).isSameAs(pulledUpHeadState);
   }
 
   @Test
@@ -204,13 +193,12 @@ class FastConfirmationCalculatorTest {
   }
 
   @Test
-  void shouldQueryCommitteesFromPulledUpStateWhenHeadLagsMultipleEpochs() {
-    // Head state at genesis (slot 0, epoch 0) while currentSlot 20 -> epoch 2, so the head lags two
-    // epochs. Shuffling from the raw head state would throw StateTooOldException for a
-    // current-epoch
-    // committee query; the calculator must shuffle from the pulled-up head state instead.
-    final BeaconState headState = genesisState();
-    final FastConfirmationCalculator calculator = calculatorWithHeadState(headState, 20);
+  void shouldQueryCommitteesFromThePulledUpHeadState() throws Exception {
+    // A head lagging multiple epochs arrives from the loader already advanced to the current epoch
+    // start (slot 16 for currentSlot 20 -> epoch 2). Committee queries for current-epoch slots
+    // shuffle from it directly; the raw (genesis) head state would throw StateTooOldException.
+    final BeaconState pulledUpHeadState = spec.processSlots(genesisState(), UInt64.valueOf(16));
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(pulledUpHeadState, 20);
 
     // Slot 19 is in epoch 2 (SLOTS_PER_EPOCH == 8), unreachable from the genesis head state.
     assertThat(calculator.getSlotCommittee(UInt64.valueOf(19))).isNotEmpty();

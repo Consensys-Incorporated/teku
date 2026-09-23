@@ -207,7 +207,11 @@ public class DefaultExecutionPayloadManager
       final boolean payloadCommitmentVerified) {
     return asyncRunner
         .runAsync(
-            () -> forkChoice.onExecutionPayloadEnvelope(signedExecutionPayload, executionLayer))
+            () ->
+                forkChoice.onExecutionPayloadEnvelope(
+                    signedExecutionPayload,
+                    executionLayer,
+                    Optional.of(receivedExecutionPayloadEventsChannelPublisher)))
         .thenPeek(
             result -> {
               if (result.isSuccessful()) {

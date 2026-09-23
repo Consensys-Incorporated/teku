@@ -83,7 +83,7 @@ public class ProposerPreferencesGossipValidator {
     /*
      * [IGNORE] The proposal epoch is after the Gloas upgrade
      */
-    if (!spec.isProposerPreferencesAvailableAtEpoch(proposalEpoch)) {
+    if (!spec.areProposerAndBuilderPreferencesRequiredAtEpoch(proposalEpoch)) {
       return completedFuture(ignorePreferences(proposerPreferences, "proposal epoch is pre-gloas"));
     }
 

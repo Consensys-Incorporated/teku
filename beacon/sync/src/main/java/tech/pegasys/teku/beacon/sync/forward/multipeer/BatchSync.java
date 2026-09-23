@@ -274,6 +274,19 @@ public class BatchSync implements Sync {
         .orElse(false);
   }
 
+  /**
+   * Returns true if the batch's last received block reaches the end of its assigned slot range. A
+   * batch can be marked complete purely because a follow-up request came back empty, which does not
+   * guarantee its last block is at {@link Batch#getLastSlot()} - it may still be hiding a block in
+   * the unclaimed remainder of its range.
+   */
+  private boolean batchFullyCoversItsRange(final Batch batch) {
+    return batch
+        .getLastBlock()
+        .map(lastBlock -> lastBlock.getSlot().equals(batch.getLastSlot()))
+        .orElse(false);
+  }
+
   private void checkBatchMatchesStartingPoint(
       final Batch batch, final SignedBeaconBlock firstBlock) {
     final NavigableSet<Batch> previousBatches = activeBatches.batchesBeforeExclusive(batch);
@@ -357,8 +370,18 @@ public class BatchSync implements Sync {
       return;
     }
 
+    // firstBatch can only be exonerated if its last received block reaches the end of its
+    // assigned range and its first block is already confirmed as connecting back to our trusted
+    // chain. A batch is marked complete as soon as a follow-up request comes back empty, which
+    // can happen before its last block reaches getLastSlot(); in that case it may still be hiding
+    // the linking block in the unclaimed remainder of its range. Likewise, without a confirmed
+    // first block, firstBatch's own blocks could belong to a fork that never actually connects to
+    // our chain, in which case excluding it from the contested set would mean it is never
+    // retried. Only a batch verified on both ends can be excluded to avoid penalising its peer.
     final NavigableSet<Batch> contestedBatches =
-        activeBatches.batchesBetweenInclusive(firstBatch, secondBatch);
+        batchFullyCoversItsRange(firstBatch) && firstBatch.isFirstBlockConfirmed()
+            ? activeBatches.batchesBetweenExclusiveStart(firstBatch, secondBatch)
+            : activeBatches.batchesBetweenInclusive(firstBatch, secondBatch);
     LOG.debug(
         "Marking {} batches as contested because {} and {} do not form a chain",
         contestedBatches.size(),
