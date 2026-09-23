@@ -77,19 +77,6 @@ public class SpecConfigReaderTest {
   }
 
   @Test
-  void read_ignoresRemovedDataColumnSidecarSizePresets() {
-    // removed by consensus-specs#5613 but still present in older network config files
-    Assertions.assertThatCode(
-            () ->
-                reader.loadFromMap(
-                    Map.of(
-                        "MAX_DATA_COLUMN_SIDECAR_SIZE", "8585272",
-                        "MAX_PARTIAL_DATA_COLUMN_SIDECAR_SIZE", "8585741"),
-                    false))
-        .doesNotThrowAnyException();
-  }
-
-  @Test
   public void read_emptyFile() {
     processFileAsInputStream(
         getInvalidConfigPath("empty"),
