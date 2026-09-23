@@ -210,7 +210,8 @@ public class EventSourceBeaconChainEventAdapter
     return false;
   }
 
-  private void switchToFailoverEventTypes(final RemoteValidatorApiChannel beaconNodeApi) {
+  private synchronized void switchToFailoverEventTypes(
+      final RemoteValidatorApiChannel beaconNodeApi) {
     eventSource.close();
     eventSource = createEventSource(beaconNodeApi, fallbackEventTypes);
     currentBeaconNodeUsedForEventStreaming = beaconNodeApi;
@@ -219,7 +220,8 @@ public class EventSourceBeaconChainEventAdapter
     eventSource.start();
   }
 
-  private void switchToFailoverEventStream(final RemoteValidatorApiChannel beaconNodeApi) {
+  private synchronized void switchToFailoverEventStream(
+      final RemoteValidatorApiChannel beaconNodeApi) {
     eventSource.close();
     eventSource = createEventSource(beaconNodeApi, primaryEventTypes);
     currentBeaconNodeUsedForEventStreaming = beaconNodeApi;
@@ -228,7 +230,7 @@ public class EventSourceBeaconChainEventAdapter
     eventSource.start();
   }
 
-  private void switchBackToPrimaryEventStream() {
+  private synchronized void switchBackToPrimaryEventStream() {
     eventSource.close();
     eventSource = createEventSource(primaryBeaconNodeApi, primaryEventTypes);
     currentBeaconNodeUsedForEventStreaming = primaryBeaconNodeApi;
