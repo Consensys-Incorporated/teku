@@ -31,6 +31,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.reference.BlsSetting;
 import tech.pegasys.teku.reference.TestExecutor;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessageSchema;
@@ -116,8 +117,13 @@ public class GossipPayloadAttestationMessageTestExecutor implements TestExecutor
             return validationTimeMs[0];
           }
         };
+    // The anchor state may predate Gloas when the vector spans the fork, and the message type only
+    // exists from Gloas
+    final SpecMilestone anchorMilestone = spec.atSlot(state.getSlot()).getMilestone();
+    final SpecMilestone schemaMilestone =
+        anchorMilestone.isLessThan(SpecMilestone.GLOAS) ? SpecMilestone.GLOAS : anchorMilestone;
     final PayloadAttestationMessageSchema schema =
-        SchemaDefinitionsGloas.required(spec.atSlot(state.getSlot()).getSchemaDefinitions())
+        SchemaDefinitionsGloas.required(spec.forMilestone(schemaMilestone).getSchemaDefinitions())
             .getPayloadAttestationMessageSchema();
     final PayloadAttestationMessageGossipValidator validator =
         new PayloadAttestationMessageGossipValidator(
