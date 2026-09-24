@@ -13,9 +13,9 @@
 
 package tech.pegasys.teku.validator.client.restapi.apis;
 
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_ACCEPTED;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
+import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NO_CONTENT;
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.STRING_TYPE;
 import static tech.pegasys.teku.validator.client.restapi.ValidatorRestApi.TAG_GRAFFITI;
 import static tech.pegasys.teku.validator.client.restapi.ValidatorTypes.PARAM_PUBKEY_TYPE;
@@ -59,7 +59,7 @@ public class SetGraffiti extends RestApiEndpoint {
             .withBearerAuthSecurity()
             .pathParam(PARAM_PUBKEY_TYPE)
             .requestBodyType(GRAFFITI_REQUEST_TYPE)
-            .response(SC_ACCEPTED, "Successfully updated graffiti.")
+            .response(SC_NO_CONTENT, "Successfully updated graffiti.")
             .withAuthenticationResponses()
             .withNotFoundResponse()
             .build());
@@ -80,7 +80,7 @@ public class SetGraffiti extends RestApiEndpoint {
 
     try {
       graffitiManager.setGraffiti(publicKey, graffiti);
-      request.respondWithCode(SC_ACCEPTED);
+      request.respondWithCode(SC_NO_CONTENT);
     } catch (GraffitiManagementException e) {
       request.respondError(SC_INTERNAL_SERVER_ERROR, e.getMessage());
     }
