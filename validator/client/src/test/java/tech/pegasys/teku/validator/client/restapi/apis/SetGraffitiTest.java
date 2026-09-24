@@ -22,11 +22,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_ACCEPTED;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_FORBIDDEN;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NO_CONTENT;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_UNAUTHORIZED;
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMetadataEmptyResponse;
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMetadataErrorResponse;
@@ -70,7 +70,7 @@ class SetGraffitiTest {
     handler.handleRequest(request);
 
     verify(graffitiManager).setGraffiti(eq(publicKey), eq(graffiti));
-    assertThat(request.getResponseCode()).isEqualTo(SC_NO_CONTENT);
+    assertThat(request.getResponseCode()).isEqualTo(SC_ACCEPTED);
     assertThat(request.getResponseBody()).isNull();
   }
 
@@ -123,8 +123,8 @@ class SetGraffitiTest {
   }
 
   @Test
-  void metadata_shouldHandle204() {
-    verifyMetadataEmptyResponse(handler, SC_NO_CONTENT);
+  void metadata_shouldHandle202() {
+    verifyMetadataEmptyResponse(handler, SC_ACCEPTED);
   }
 
   @Test
