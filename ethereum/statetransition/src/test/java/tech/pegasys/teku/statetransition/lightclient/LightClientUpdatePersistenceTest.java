@@ -34,14 +34,6 @@ import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystemBuilder;
 import tech.pegasys.teku.storage.storageSystem.StorageSystem;
 
-/**
- * Covers the wiring from {@link LightClientServerService} through {@link LightClientUpdateStore}
- * into real storage, for the two paths a devnet does not reach: a reorg orphaning the block an
- * update was built from, and finalization pruning periods beyond the retention window.
- *
- * <p>{@link LightClientUpdateStoreTest} checks the same transitions against a mock channel; this
- * asserts the rows actually reach and leave the database.
- */
 class LightClientUpdatePersistenceTest {
 
   private static final BiPredicate<UInt64, Bytes32> CANONICAL = (slot, root) -> true;
@@ -64,7 +56,6 @@ class LightClientUpdatePersistenceTest {
     store.addUpdate(updateAtPeriod(1), dataStructureUtil.randomBytes32(), CANONICAL);
     assertThat(storedPeriods()).containsExactly(UInt64.ONE);
 
-    // the signature block is no longer on the canonical chain
     chainHeadUpdatedWithReorg(ORPHANED);
 
     assertThat(storedPeriods()).isEmpty();
@@ -94,8 +85,6 @@ class LightClientUpdatePersistenceTest {
             new Checkpoint(epochOfPeriod(finalizedPeriod), dataStructureUtil.randomBytes32()),
             false);
 
-    // the cutoff is finalizedPeriod - MAX_RETAINED_PERIODS, so period 1 goes and the recent one
-    // stays
     assertThat(storedPeriods()).containsExactly(retainedPeriod);
   }
 
