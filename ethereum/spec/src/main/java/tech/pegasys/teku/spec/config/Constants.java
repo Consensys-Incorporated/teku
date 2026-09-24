@@ -37,7 +37,7 @@ public class Constants {
   public static final int HIGHEST_BID_SET_SIZE = 10;
   // Target 2 different attestation data (aggregators normally agree) for two slots
   public static final int VALID_ATTESTATION_DATA_SET_SIZE = 2 * 64 * 2;
-  public static final int VALID_VALIDATOR_SET_SIZE = 10000;
+  public static final int VALID_VALIDATOR_INDEX_SET_SIZE = 10000;
   // Only need to maintain a cache for the current slot, so just needs to be as large as the
   // sync committee size.
   public static final int VALID_CONTRIBUTION_AND_PROOF_SET_SIZE = 512;

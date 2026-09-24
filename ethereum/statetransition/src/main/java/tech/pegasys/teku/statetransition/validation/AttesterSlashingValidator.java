@@ -13,7 +13,7 @@
 
 package tech.pegasys.teku.statetransition.validation;
 
-import static tech.pegasys.teku.spec.config.Constants.VALID_VALIDATOR_SET_SIZE;
+import static tech.pegasys.teku.spec.config.Constants.VALID_VALIDATOR_INDEX_SET_SIZE;
 
 import java.util.Optional;
 import java.util.Set;
@@ -34,7 +34,7 @@ public class AttesterSlashingValidator implements OperationValidator<AttesterSla
 
   private final RecentChainData recentChainData;
   private final Set<UInt64> seenIndices =
-      LimitedSet.createSynchronizedLRU(VALID_VALIDATOR_SET_SIZE);
+      LimitedSet.createSynchronizedLRU(VALID_VALIDATOR_INDEX_SET_SIZE);
   private final Spec spec;
 
   public AttesterSlashingValidator(final RecentChainData recentChainData, final Spec spec) {
