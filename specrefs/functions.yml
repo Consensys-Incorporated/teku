@@ -5391,7 +5391,13 @@
     </spec>
 
 - name: get_proposer_head#gloas
-  sources: []
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/util/ForkChoiceUtil.java
+      search: public ForkChoiceNode getProposerHead(
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/fulu/util/ForkChoiceUtilFulu.java
+      search: protected boolean isProposerStable(
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/util/ForkChoiceUtilGloas.java
+      search: public ForkChoiceNode getProposerHead(
   spec: |
     <spec fn="get_proposer_head" fork="gloas" hash="b67ab6f8">
     def get_proposer_head(store: Store, head_node: ForkChoiceNode, slot: Slot) -> ForkChoiceNode:
@@ -6855,7 +6861,9 @@
     </spec>
 
 - name: is_bid_compatible_with_head#gloas
-  sources: []
+  sources:
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/GossipValidationHelper.java
+      search: public boolean isBidCompatibleWithHead(
   spec: |
     <spec fn="is_bid_compatible_with_head" fork="gloas" hash="8918e061">
     def is_bid_compatible_with_head(store: Store, bid: ExecutionPayloadBid) -> bool:
@@ -7819,7 +7827,9 @@
     </spec>
 
 - name: is_valid_dependent_root#gloas
-  sources: []
+  sources:
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/GossipValidationHelper.java
+      search: public boolean isPossibleDependentRoot(
   spec: |
     <spec fn="is_valid_dependent_root" fork="gloas" hash="c0953ec7">
     def is_valid_dependent_root(store: Store, root: Root, dependent_slot: Slot) -> bool:
