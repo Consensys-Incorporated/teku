@@ -13,7 +13,7 @@
 
 package tech.pegasys.teku.statetransition.validation;
 
-import static tech.pegasys.teku.spec.config.Constants.VALID_VALIDATOR_SET_SIZE;
+import static tech.pegasys.teku.spec.config.Constants.VALID_VALIDATOR_INDEX_SET_SIZE;
 import static tech.pegasys.teku.spec.config.SpecConfig.FAR_FUTURE_EPOCH;
 import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.IGNORE;
 
@@ -43,7 +43,7 @@ public class VoluntaryExitValidator implements OperationValidator<SignedVoluntar
   private final RecentChainData recentChainData;
   private final GossipValidationHelper gossipValidationHelper;
   private final Map<UInt64, UInt64> receivedValidators =
-      LimitedMap.createSynchronizedNatural(VALID_VALIDATOR_SET_SIZE);
+      LimitedMap.createSynchronizedNatural(VALID_VALIDATOR_INDEX_SET_SIZE);
   private final TimeProvider timeProvider;
 
   public VoluntaryExitValidator(
