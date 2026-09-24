@@ -115,7 +115,7 @@
       "bearerAuth" : [ ]
     } ],
     "responses" : {
-      "204" : {
+      "202" : {
         "description" : "Successfully updated graffiti.",
         "content" : { }
       },
