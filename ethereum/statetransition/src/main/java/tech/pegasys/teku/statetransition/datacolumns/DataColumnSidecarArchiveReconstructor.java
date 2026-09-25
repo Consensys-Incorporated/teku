@@ -14,6 +14,7 @@
 package tech.pegasys.teku.statetransition.datacolumns;
 
 import java.util.Optional;
+import tech.pegasys.teku.ethereum.events.SlotEventsChannel;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
@@ -21,7 +22,8 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.storage.api.FinalizedCheckpointChannel;
 
-public interface DataColumnSidecarArchiveReconstructor extends FinalizedCheckpointChannel {
+public interface DataColumnSidecarArchiveReconstructor
+    extends FinalizedCheckpointChannel, SlotEventsChannel {
 
   DataColumnSidecarArchiveReconstructor NOOP =
       new DataColumnSidecarArchiveReconstructor() {
@@ -47,6 +49,9 @@ public interface DataColumnSidecarArchiveReconstructor extends FinalizedCheckpoi
         @Override
         public void onNewFinalizedCheckpoint(
             final Checkpoint checkpoint, final boolean fromOptimisticBlock) {}
+
+        @Override
+        public void onSlot(final UInt64 slot) {}
       };
 
   /**

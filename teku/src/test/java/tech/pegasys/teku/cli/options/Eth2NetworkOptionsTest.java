@@ -43,6 +43,24 @@ class Eth2NetworkOptionsTest extends AbstractBeaconNodeCommandTest {
   }
 
   @Test
+  void shouldDisableDataColumnSidecarExtensionArchivingByDefault() {
+    final TekuConfiguration config = getTekuConfigurationFromArguments();
+    // Integer.MAX_VALUE means all extension columns are retained, so supernode archiving is off
+    // unless explicitly configured.
+    assertThat(config.eth2NetworkConfiguration().getDataColumnSidecarExtensionRetentionEpochs())
+        .isEqualTo(Integer.MAX_VALUE);
+  }
+
+  @Test
+  void shouldUseDataColumnSidecarExtensionRetentionEpochsIfSpecified() {
+    final TekuConfiguration config =
+        getTekuConfigurationFromArguments(
+            "--Xdata-column-sidecar-extension-retention-epochs", "42");
+    assertThat(config.eth2NetworkConfiguration().getDataColumnSidecarExtensionRetentionEpochs())
+        .isEqualTo(42);
+  }
+
+  @Test
   void shouldUseAltairForkEpochIfSpecified() {
     final TekuConfiguration config =
         getTekuConfigurationFromArguments("--Xnetwork-altair-fork-epoch", "64");
