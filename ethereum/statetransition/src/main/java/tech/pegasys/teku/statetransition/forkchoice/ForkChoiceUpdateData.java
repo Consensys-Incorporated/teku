@@ -88,6 +88,14 @@ public class ForkChoiceUpdateData {
     return new ForkChoiceUpdateData(forkChoiceState, Optional.empty(), terminalBlockHash);
   }
 
+  /**
+   * Same fork choice state and payload attributes, with a new execution payload context future and
+   * the resend guard cleared, so {@link #send} issues a fresh forkChoiceUpdated.
+   */
+  public ForkChoiceUpdateData forResend() {
+    return new ForkChoiceUpdateData(forkChoiceState, payloadBuildingAttributes, terminalBlockHash);
+  }
+
   public ForkChoiceUpdateData withPayloadBuildingAttributes(
       final Optional<PayloadBuildingAttributes> payloadBuildingAttributes) {
     if (this.payloadBuildingAttributes.equals(payloadBuildingAttributes)) {
@@ -131,6 +139,7 @@ public class ForkChoiceUpdateData {
         executionLayer.engineForkChoiceUpdated(forkChoiceState, payloadBuildingAttributes);
 
     forkChoiceUpdatedResult
+        .thenPeek(this::warnIfPayloadIdIsMissing)
         .thenApply(ForkChoiceUpdatedResult::getPayloadId)
         .thenPeek(this::logSendForkChoiceUpdatedComplete)
         .thenApply(
@@ -147,6 +156,16 @@ public class ForkChoiceUpdateData {
         .propagateTo(executionPayloadContext);
 
     return Optional.of(forkChoiceUpdatedResult);
+  }
+
+  private void warnIfPayloadIdIsMissing(final ForkChoiceUpdatedResult forkChoiceUpdatedResult) {
+    if (payloadBuildingAttributes.isEmpty() || forkChoiceUpdatedResult.getPayloadId().isPresent()) {
+      return;
+    }
+    LOG.warn(
+        "Execution layer returned no payloadId for block production at slot {} (status: {}). Block production for this slot will fail unless a new payloadId is obtained.",
+        payloadBuildingAttributes.get().proposalSlot(),
+        forkChoiceUpdatedResult.getPayloadStatus().getStatus().map(Enum::name).orElse("UNKNOWN"));
   }
 
   private void logSendForkChoiceUpdatedComplete(final Optional<Bytes8> payloadId) {

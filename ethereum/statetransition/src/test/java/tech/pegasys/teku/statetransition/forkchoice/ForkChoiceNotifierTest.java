@@ -40,6 +40,7 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.invocation.InvocationOnMock;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -360,6 +361,13 @@ class ForkChoiceNotifierTest {
 
     final List<PayloadBuildingAttributes> payloadBuildingAttributes =
         withProposerForTwoSlots(forkChoiceState, headState, blockSlot, nextBlockSlot);
+    // the EL must answer with a payloadId, otherwise block production requests a new one
+    when(executionLayerChannel.engineForkChoiceUpdated(
+            forkChoiceState, Optional.of(payloadBuildingAttributes.get(1))))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                createForkChoiceUpdatedResult(
+                    ExecutionPayloadStatus.VALID, Optional.of(dataStructureUtil.randomBytes8()))));
 
     storageSystem.chainUpdater().setCurrentSlot(blockSlot);
 
@@ -927,6 +935,141 @@ class ForkChoiceNotifierTest {
         .isCompletedWithOptionalContaining(executionPayloadContext);
     assertThatSafeFuture(notifier.getPayloadId(ForkChoiceNode.createBase(blockRoot), blockSlot))
         .isCompletedWithOptionalContaining(executionPayloadContext);
+  }
+
+  @Test
+  void onForkChoiceUpdated_shouldWarnWhenPayloadAttributesAreSentButNoPayloadIdIsReturned() {
+    final ForkChoiceState forkChoiceState = getCurrentForkChoiceState();
+    final BeaconState headState = getHeadState();
+    final UInt64 blockSlot = headState.getSlot().plus(1);
+    final PayloadBuildingAttributes payloadBuildingAttributes =
+        withProposerForSlot(forkChoiceState, headState, blockSlot);
+
+    when(executionLayerChannel.engineForkChoiceUpdated(
+            forkChoiceState, Optional.of(payloadBuildingAttributes)))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                createForkChoiceUpdatedResult(ExecutionPayloadStatus.SYNCING, Optional.empty())));
+
+    try (LogCaptor logCaptor = LogCaptor.forClass(ForkChoiceUpdateData.class)) {
+      notifyForkChoiceUpdated(forkChoiceState);
+      assertThat(logCaptor.getWarnLogs())
+          .singleElement()
+          .asString()
+          .contains("no payloadId", "slot " + blockSlot, "SYNCING");
+    }
+  }
+
+  @Test
+  void onForkChoiceUpdated_shouldNotWarnWhenNoPayloadAttributesAreSent() {
+    final ForkChoiceState forkChoiceState = getCurrentForkChoiceState();
+    when(executionLayerChannel.engineForkChoiceUpdated(forkChoiceState, Optional.empty()))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                createForkChoiceUpdatedResult(ExecutionPayloadStatus.SYNCING, Optional.empty())));
+
+    try (LogCaptor logCaptor = LogCaptor.forClass(ForkChoiceUpdateData.class)) {
+      notifyForkChoiceUpdated(forkChoiceState);
+      assertThat(logCaptor.getWarnLogs()).isEmpty();
+    }
+  }
+
+  @Test
+  void getPayloadId_shouldRetryForkChoiceUpdatedWhenReusedResultHasNoPayloadId() {
+    final Bytes8 payloadId = dataStructureUtil.randomBytes8();
+    final ForkChoiceState forkChoiceState = getCurrentForkChoiceState();
+    final BeaconState headState = getHeadState();
+    final Bytes32 blockRoot = recentChainData.getBestBlockRoot().orElseThrow();
+    final UInt64 blockSlot = headState.getSlot().plus(1);
+    final PayloadBuildingAttributes payloadBuildingAttributes =
+        withProposerForSlot(forkChoiceState, headState, blockSlot);
+
+    when(executionLayerChannel.engineForkChoiceUpdated(
+            forkChoiceState, Optional.of(payloadBuildingAttributes)))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                createForkChoiceUpdatedResult(ExecutionPayloadStatus.SYNCING, Optional.empty())))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                createForkChoiceUpdatedResult(
+                    ExecutionPayloadStatus.VALID, Optional.of(payloadId))));
+
+    // ordinary fcU (attestations due) sends attributes but the EL returns no payloadId
+    notifyForkChoiceUpdated(forkChoiceState);
+
+    // block production for the same head and slot must not reuse the empty result
+    notifyForkChoiceUpdated(forkChoiceState, Optional.of(blockSlot));
+
+    verify(executionLayerChannel, times(2))
+        .engineForkChoiceUpdated(forkChoiceState, Optional.of(payloadBuildingAttributes));
+    final ExecutionPayloadContext executionPayloadContext =
+        new ExecutionPayloadContext(payloadId, forkChoiceState, payloadBuildingAttributes);
+    assertThatSafeFuture(notifier.getPayloadId(ForkChoiceNode.createBase(blockRoot), blockSlot))
+        .isCompletedWithOptionalContaining(executionPayloadContext);
+  }
+
+  @Test
+  void getPayloadId_shouldRetryForkChoiceUpdatedWhenReusedResultResolvesWithoutPayloadId() {
+    final Bytes8 payloadId = dataStructureUtil.randomBytes8();
+    final ForkChoiceState forkChoiceState = getCurrentForkChoiceState();
+    final BeaconState headState = getHeadState();
+    final Bytes32 blockRoot = recentChainData.getBestBlockRoot().orElseThrow();
+    final UInt64 blockSlot = headState.getSlot().plus(1);
+    final PayloadBuildingAttributes payloadBuildingAttributes =
+        withProposerForSlot(forkChoiceState, headState, blockSlot);
+
+    final SafeFuture<ForkChoiceUpdatedResult> firstResponse = new SafeFuture<>();
+    when(executionLayerChannel.engineForkChoiceUpdated(
+            forkChoiceState, Optional.of(payloadBuildingAttributes)))
+        .thenReturn(firstResponse)
+        .thenReturn(
+            SafeFuture.completedFuture(
+                createForkChoiceUpdatedResult(
+                    ExecutionPayloadStatus.VALID, Optional.of(payloadId))));
+
+    // ordinary fcU with attributes still in flight when block production pins it
+    notifyForkChoiceUpdated(forkChoiceState);
+    notifyForkChoiceUpdated(
+        forkChoiceState, Optional.of(blockSlot), notification -> assertThat(notification).isNull());
+
+    final SafeFuture<Optional<ExecutionPayloadContext>> payloadContextFuture =
+        notifier.getPayloadId(ForkChoiceNode.createBase(blockRoot), blockSlot);
+    assertThatSafeFuture(payloadContextFuture).isNotCompleted();
+
+    firstResponse.complete(
+        createForkChoiceUpdatedResult(ExecutionPayloadStatus.SYNCING, Optional.empty()));
+
+    verify(executionLayerChannel, times(2))
+        .engineForkChoiceUpdated(forkChoiceState, Optional.of(payloadBuildingAttributes));
+    final ExecutionPayloadContext executionPayloadContext =
+        new ExecutionPayloadContext(payloadId, forkChoiceState, payloadBuildingAttributes);
+    assertThatSafeFuture(payloadContextFuture)
+        .isCompletedWithOptionalContaining(executionPayloadContext);
+  }
+
+  @Test
+  void getPayloadId_shouldRetryForkChoiceUpdatedOnlyOnceWhenNoPayloadIdIsReturned() {
+    final ForkChoiceState forkChoiceState = getCurrentForkChoiceState();
+    final BeaconState headState = getHeadState();
+    final Bytes32 blockRoot = recentChainData.getBestBlockRoot().orElseThrow();
+    final UInt64 blockSlot = headState.getSlot().plus(1);
+    final PayloadBuildingAttributes payloadBuildingAttributes =
+        withProposerForSlot(forkChoiceState, headState, blockSlot);
+
+    when(executionLayerChannel.engineForkChoiceUpdated(
+            forkChoiceState, Optional.of(payloadBuildingAttributes)))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                createForkChoiceUpdatedResult(ExecutionPayloadStatus.SYNCING, Optional.empty())));
+
+    notifyForkChoiceUpdated(forkChoiceState);
+    notifyForkChoiceUpdated(forkChoiceState, Optional.of(blockSlot));
+
+    verify(executionLayerChannel, times(2))
+        .engineForkChoiceUpdated(forkChoiceState, Optional.of(payloadBuildingAttributes));
+    assertThatSafeFuture(notifier.getPayloadId(ForkChoiceNode.createBase(blockRoot), blockSlot))
+        .isCompletedExceptionallyWith(IllegalStateException.class)
+        .hasMessageContaining("Unable to obtain an executionPayloadContext");
   }
 
   @Test
