@@ -14,6 +14,7 @@
 package tech.pegasys.teku.storage.server.kvstore.serialization;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
 import java.util.stream.Stream;
@@ -72,5 +73,26 @@ public class DataColumnSidecarsProofsSerializerTest {
             .toList();
     final byte[] serialize = serializer.serialize(expectedProofs);
     assertThat(serializer.deserialize(serialize)).isEqualTo(expectedProofs);
+  }
+
+  @Test
+  final void testSingleColumnSingleProofRoundTrip() {
+    final List<List<KZGProof>> proofs = List.of(List.of(dataStructureUtil.randomKZGProof()));
+    final byte[] serialize = serializer.serialize(proofs);
+    assertThat(serializer.deserialize(serialize)).isEqualTo(proofs);
+  }
+
+  @Test
+  final void testRaggedColumnsFailToDeserialize() {
+    // columns of unequal length leave a trailing partial column that cannot be regrouped by the
+    // uniform blob size written into the header
+    final List<List<KZGProof>> ragged =
+        List.of(
+            List.of(dataStructureUtil.randomKZGProof(), dataStructureUtil.randomKZGProof()),
+            List.of(dataStructureUtil.randomKZGProof()));
+    final byte[] serialize = serializer.serialize(ragged);
+    assertThatThrownBy(() -> serializer.deserialize(serialize))
+        .isInstanceOf(RuntimeException.class)
+        .hasMessageContaining("Unexpected proofs found");
   }
 }
