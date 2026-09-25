@@ -18,3 +18,4 @@
  - Fixed an out of memory error when a sync stopped while the chain head was still far behind. The node no longer reports itself as in sync in that case.
  - Fixed cases where Teku kept running, or hung while shutting down, after an out of memory error instead of exiting. It can now exit with code 3 as well as the usual code 1; both mean the node can be restarted.
  - `POST /eth/v1/validator/{pubkey}/graffiti` now responds with `202` instead of `204` on success, as required by the keymanager API spec.
+ - A block production request that fails no longer keeps its preparation for the slot, so a retry within the same slot starts from a fresh preparation.
