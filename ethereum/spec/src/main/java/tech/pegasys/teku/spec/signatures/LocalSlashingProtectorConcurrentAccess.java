@@ -35,11 +35,15 @@ public class LocalSlashingProtectorConcurrentAccess implements SlashingProtector
       new ConcurrentHashMap<>();
   private final SyncDataAccessor dataAccessor;
   private final Path slashingProtectionBaseDir;
+  private final boolean slashingProtectionStrictModeEnabled;
 
   public LocalSlashingProtectorConcurrentAccess(
-      final SyncDataAccessor dataAccessor, final Path slashingProtectionBaseDir) {
+      final SyncDataAccessor dataAccessor,
+      final Path slashingProtectionBaseDir,
+      final boolean slashingProtectionStrictModeEnabled) {
     this.dataAccessor = dataAccessor;
     this.slashingProtectionBaseDir = slashingProtectionBaseDir;
+    this.slashingProtectionStrictModeEnabled = slashingProtectionStrictModeEnabled;
   }
 
   @Override
@@ -47,14 +51,18 @@ public class LocalSlashingProtectorConcurrentAccess implements SlashingProtector
       final BLSPublicKey validator, final Bytes32 genesisValidatorsRoot, final UInt64 slot) {
     return SafeFuture.of(
         () -> {
-          final LocalSlashingProtectionRecord record =
-              getOrCreateSigningRecord(validator, genesisValidatorsRoot);
-          record.lock();
+          final Optional<LocalSlashingProtectionRecord> record =
+              getSigningRecordForSigning(validator, genesisValidatorsRoot);
+          if (record.isEmpty()) {
+            return false;
+          }
+          final LocalSlashingProtectionRecord protectedRecord = record.get();
+          protectedRecord.lock();
           try {
-            return record.writeSigningRecord(
-                dataAccessor, record.maySignBlock(genesisValidatorsRoot, slot));
+            return protectedRecord.writeSigningRecord(
+                dataAccessor, protectedRecord.maySignBlock(genesisValidatorsRoot, slot));
           } finally {
-            record.unlock();
+            protectedRecord.unlock();
           }
         });
   }
@@ -67,15 +75,19 @@ public class LocalSlashingProtectorConcurrentAccess implements SlashingProtector
       final UInt64 targetEpoch) {
     return SafeFuture.of(
         () -> {
-          final LocalSlashingProtectionRecord record =
-              getOrCreateSigningRecord(validator, genesisValidatorsRoot);
-          record.lock();
+          final Optional<LocalSlashingProtectionRecord> record =
+              getSigningRecordForSigning(validator, genesisValidatorsRoot);
+          if (record.isEmpty()) {
+            return false;
+          }
+          final LocalSlashingProtectionRecord protectedRecord = record.get();
+          protectedRecord.lock();
           try {
-            return record.writeSigningRecord(
+            return protectedRecord.writeSigningRecord(
                 dataAccessor,
-                record.maySignAttestation(genesisValidatorsRoot, sourceEpoch, targetEpoch));
+                protectedRecord.maySignAttestation(genesisValidatorsRoot, sourceEpoch, targetEpoch));
           } finally {
-            record.unlock();
+            protectedRecord.unlock();
           }
         });
   }
@@ -98,9 +110,14 @@ public class LocalSlashingProtectorConcurrentAccess implements SlashingProtector
   }
 
   @VisibleForTesting
-  LocalSlashingProtectionRecord getOrCreateSigningRecord(
+  Optional<LocalSlashingProtectionRecord> getSigningRecordForSigning(
       final BLSPublicKey validator, final Bytes32 genesisValidatorsRoot) {
-    return records.computeIfAbsent(validator, __ -> addRecord(validator, genesisValidatorsRoot));
+    final LocalSlashingProtectionRecord record =
+        records.computeIfAbsent(validator, __ -> addRecord(validator, genesisValidatorsRoot));
+    if (slashingProtectionStrictModeEnabled && record.isNew()) {
+      return Optional.empty();
+    }
+    return Optional.of(record);
   }
 
   private LocalSlashingProtectionRecord addRecord(
@@ -113,6 +130,7 @@ public class LocalSlashingProtectorConcurrentAccess implements SlashingProtector
     return new LocalSlashingProtectionRecord(
         slashingProtectedPath,
         maybeRecord.orElse(ValidatorSigningRecord.emptySigningRecord(genesisValidatorsRoot)),
+        maybeRecord.isEmpty(),
         new ReentrantLock());
   }
 

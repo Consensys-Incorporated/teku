@@ -33,7 +33,7 @@ public class LocalSlashingProtectorConcurrentAccessTest extends LocalSlashingPro
   private static final Logger LOG = LogManager.getLogger();
 
   private final LocalSlashingProtectorConcurrentAccess slashingProtectionStorage =
-      new LocalSlashingProtectorConcurrentAccess(dataWriter, baseDir);
+      new LocalSlashingProtectorConcurrentAccess(dataWriter, baseDir, false);
 
   private final AsyncRunnerFactory asyncRunnerFactory =
       AsyncRunnerFactory.createDefault(new MetricTrackingExecutorFactory(new StubMetricsSystem()));
@@ -54,8 +54,9 @@ public class LocalSlashingProtectorConcurrentAccessTest extends LocalSlashingPro
         asyncRunner.runAsync(
             () -> {
               final LocalSlashingProtectionRecord record =
-                  slashingProtectionStorage.getOrCreateSigningRecord(
-                      validator, GENESIS_VALIDATORS_ROOT);
+                  slashingProtectionStorage
+                      .getSigningRecordForSigning(validator, GENESIS_VALIDATORS_ROOT)
+                      .orElseThrow();
               try {
                 record.lock();
                 LOG.debug("LOCKED firstSigner");
@@ -72,7 +73,9 @@ public class LocalSlashingProtectorConcurrentAccessTest extends LocalSlashingPro
               }
             });
     final LocalSlashingProtectionRecord snoopRecord =
-        slashingProtectionStorage.getOrCreateSigningRecord(validator, GENESIS_VALIDATORS_ROOT);
+        slashingProtectionStorage
+            .getSigningRecordForSigning(validator, GENESIS_VALIDATORS_ROOT)
+            .orElseThrow();
     while (!snoopRecord.getLock().isLocked()) {
       Thread.sleep(10);
     }
@@ -84,8 +87,9 @@ public class LocalSlashingProtectorConcurrentAccessTest extends LocalSlashingPro
         asyncRunner.runAsync(
             () -> {
               final LocalSlashingProtectionRecord record =
-                  slashingProtectionStorage.getOrCreateSigningRecord(
-                      validator, GENESIS_VALIDATORS_ROOT);
+                  slashingProtectionStorage
+                      .getSigningRecordForSigning(validator, GENESIS_VALIDATORS_ROOT)
+                      .orElseThrow();
               try {
                 record.lock();
                 LOG.debug("LOCKED secondSigner");
@@ -121,8 +125,9 @@ public class LocalSlashingProtectorConcurrentAccessTest extends LocalSlashingPro
         asyncRunner.runAsync(
             () -> {
               final LocalSlashingProtectionRecord record =
-                  slashingProtectionStorage.getOrCreateSigningRecord(
-                      validator, GENESIS_VALIDATORS_ROOT);
+                  slashingProtectionStorage
+                      .getSigningRecordForSigning(validator, GENESIS_VALIDATORS_ROOT)
+                      .orElseThrow();
               try {
                 record.lock();
                 LOG.debug("LOCKED firstSigner");
@@ -144,8 +149,10 @@ public class LocalSlashingProtectorConcurrentAccessTest extends LocalSlashingPro
             () -> {
               threadAcquired.countDown();
               final LocalSlashingProtectionRecord record =
-                  slashingProtectionStorage.getOrCreateSigningRecord(
-                      dataStructureUtil.randomPublicKey(), GENESIS_VALIDATORS_ROOT);
+                  slashingProtectionStorage
+                      .getSigningRecordForSigning(
+                          dataStructureUtil.randomPublicKey(), GENESIS_VALIDATORS_ROOT)
+                      .orElseThrow();
               try {
                 record.lock();
                 LOG.debug("LOCKED secondSigner");
