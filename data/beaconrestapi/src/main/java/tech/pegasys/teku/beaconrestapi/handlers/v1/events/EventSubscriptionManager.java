@@ -84,6 +84,13 @@ public class EventSubscriptionManager
   // collection of subscribers
   private final Collection<EventSubscriber> eventSubscribers;
 
+  // The v1 head event carries no payload status, so a Gloas empty -> full head update would produce
+  // a byte identical duplicate. Only head_v2 is expected to emit a second event for the same beacon
+  // block and slot (https://github.com/ethereum/beacon-APIs/pull/628), so the duplicate v1 event is
+  // suppressed by comparing against the last emitted one. Only the immediately preceding event is
+  // retained: reverting to an earlier head is a re-org, which must be re-emitted.
+  private volatile HeadEvent.HeadData lastHeadEventData;
+
   public EventSubscriptionManager(
       final Spec spec,
       final NodeDataProvider nodeDataProvider,
@@ -176,7 +183,10 @@ public class EventSubscriptionManager
             executionOptimistic,
             previousDutyDependentRoot,
             currentDutyDependentRoot);
-    notifySubscribersOfEvent(EventType.head, headEvent);
+    if (!headEvent.getData().equals(lastHeadEventData)) {
+      lastHeadEventData = headEvent.getData();
+      notifySubscribersOfEvent(EventType.head, headEvent);
+    }
 
     final HeadV2Event headV2Event =
         HeadV2Event.create(
