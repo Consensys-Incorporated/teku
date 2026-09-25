@@ -70,7 +70,7 @@ public class EventSourceBeaconChainEventAdapterTest {
   public void shouldSubscribeToSlashingEvents(final boolean shutdownWhenValidatorSlashedEnabled) {
     final EventSourceBeaconChainEventAdapter eventSourceBeaconChainEventAdapter =
         initEventSourceBeaconChainEventAdapter(shutdownWhenValidatorSlashedEnabled);
-    eventSourceBeaconChainEventAdapter.createEventSource(beaconApiMock);
+    SafeFuture<Void> unused = eventSourceBeaconChainEventAdapter.start();
     verifyEventSourceSubscriptionUrl(httpUrlMock, shutdownWhenValidatorSlashedEnabled);
   }
 
@@ -141,7 +141,7 @@ public class EventSourceBeaconChainEventAdapterTest {
       final boolean shutdownWhenValidatorSlashedEnabled) {
     return new EventSourceBeaconChainEventAdapter(
         mock(BeaconNodeReadinessManager.class),
-        mock(RemoteValidatorApiChannel.class),
+        beaconApiMock,
         new ArrayList<>(),
         mock(OkHttpClient.class),
         mock(ValidatorLogger.class),
@@ -157,8 +157,8 @@ public class EventSourceBeaconChainEventAdapterTest {
       final HttpUrl endpoint, final boolean shutdownWhenValidatorSlashedEnabled) {
     Stream<EventType> eventTypes =
         shutdownWhenValidatorSlashedEnabled
-            ? Stream.of(EventType.head, EventType.attester_slashing, EventType.proposer_slashing)
-            : Stream.of(EventType.head);
+            ? Stream.of(EventType.head_v2, EventType.attester_slashing, EventType.proposer_slashing)
+            : Stream.of(EventType.head_v2);
     verify(endpoint)
         .resolve(
             ValidatorApiMethod.EVENTS.getPath(emptyMap())
