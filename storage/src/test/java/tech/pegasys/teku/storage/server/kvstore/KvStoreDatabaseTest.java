@@ -14,6 +14,7 @@
 package tech.pegasys.teku.storage.server.kvstore;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -21,21 +22,31 @@ import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.NavigableSet;
 import java.util.Optional;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import org.mockito.invocation.InvocationOnMock;
+import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
+import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.storage.server.Database;
 import tech.pegasys.teku.storage.server.StateStorageMode;
+import tech.pegasys.teku.storage.server.kvstore.KvStoreAccessor.KvStoreTransaction;
 import tech.pegasys.teku.storage.server.kvstore.KvStoreDatabase.DataColumnSidecarType;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.FinalizedUpdater;
+import tech.pegasys.teku.storage.server.kvstore.schema.KvStoreColumn;
+import tech.pegasys.teku.storage.server.kvstore.schema.V6SchemaCombinedSnapshot;
 
 class KvStoreDatabaseTest {
 
@@ -171,6 +182,39 @@ class KvStoreDatabaseTest {
     assertThat(removedSlots).isEmpty();
     assertThat(commits).hasValue(0);
     assertThat(prunedWatermark).isEmpty();
+  }
+
+  @Test
+  void streamBestLightClientUpdatesSkipsUnreadableRows() {
+    final Spec spec = TestSpecFactory.createMinimalAltair();
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
+    final V6SchemaCombinedSnapshot schema = V6SchemaCombinedSnapshot.createV6(spec);
+    final MockKvStoreInstance db =
+        MockKvStoreInstance.createEmpty(schema.getAllColumns(), schema.getAllVariables());
+    final Database database =
+        KvStoreDatabase.createWithStateSnapshots(
+            db, schema, StateStorageMode.PRUNE, 1, false, spec, new StubMetricsSystem());
+    final LightClientUpdate update0 = dataStructureUtil.randomLightClientUpdate(UInt64.ZERO);
+    final LightClientUpdate update2 = dataStructureUtil.randomLightClientUpdate(UInt64.valueOf(2));
+    database.storeBestLightClientUpdate(UInt64.ZERO, update0, Bytes32.ZERO);
+    database.storeBestLightClientUpdate(UInt64.valueOf(2), update2, Bytes32.ZERO);
+
+    final KvStoreColumn<UInt64, LightClientUpdate> column =
+        schema.getBestLightClientUpdatesByPeriod();
+    try (final KvStoreTransaction transaction = db.startTransaction()) {
+      transaction.putRaw(
+          column,
+          Bytes.wrap(column.getKeySerializer().serialize(UInt64.ONE)),
+          Bytes.fromHexString("0xdeadbeef"));
+      transaction.commit();
+    }
+
+    try (final Stream<Map.Entry<UInt64, LightClientUpdate>> updates =
+        database.streamBestLightClientUpdates()) {
+      assertThat(updates.toList())
+          .extracting(Map.Entry::getKey, Map.Entry::getValue)
+          .containsExactly(tuple(UInt64.ZERO, update0), tuple(UInt64.valueOf(2), update2));
+    }
   }
 
   private KvStoreDatabase database(final UInt64 firstFuluSlot, final long... slots) {

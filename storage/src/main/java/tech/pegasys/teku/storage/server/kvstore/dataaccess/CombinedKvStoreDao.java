@@ -756,7 +756,8 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
   @Override
   @MustBeClosed
   public Stream<ColumnEntry<UInt64, LightClientUpdate>> streamBestLightClientUpdates() {
-    return db.stream(schema.getBestLightClientUpdatesByPeriod());
+    return V4HotKvStoreDao.streamReadableBestLightClientUpdates(
+        db, schema.getBestLightClientUpdatesByPeriod());
   }
 
   @Override

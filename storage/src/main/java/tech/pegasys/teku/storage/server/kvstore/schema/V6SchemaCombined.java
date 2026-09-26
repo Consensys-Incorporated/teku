@@ -114,7 +114,7 @@ public abstract class V6SchemaCombined implements SchemaCombined {
     final KvStoreSerializer<LightClientUpdate> lightClientUpdateSerializer =
         KvStoreSerializer.createLightClientUpdateSerializer(spec);
     lightClientUpdatesByPeriod =
-        KvStoreColumn.create(8, UINT64_SERIALIZER, lightClientUpdateSerializer, true);
+        KvStoreColumn.create(8, UINT64_SERIALIZER, lightClientUpdateSerializer);
     lightClientUpdateSignatureBlockRootsByPeriod =
         KvStoreColumn.create(9, UINT64_SERIALIZER, BYTES32_SERIALIZER);
 

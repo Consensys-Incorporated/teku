@@ -20,6 +20,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.ethereum.pow.api.DepositTreeSnapshot;
@@ -43,6 +45,8 @@ import tech.pegasys.teku.storage.server.kvstore.schema.KvStoreVariable;
 import tech.pegasys.teku.storage.server.kvstore.schema.SchemaHotAdapter;
 
 public class V4HotKvStoreDao {
+  private static final Logger LOG = LogManager.getLogger();
+
   // Persistent data
   private final KvStoreAccessor db;
   private final SchemaHotAdapter schema;
@@ -103,7 +107,27 @@ public class V4HotKvStoreDao {
 
   @MustBeClosed
   public Stream<ColumnEntry<UInt64, LightClientUpdate>> streamBestLightClientUpdates() {
-    return db.stream(schema.getLightClientUpdatesByPeriod());
+    return streamReadableBestLightClientUpdates(db, schema.getLightClientUpdatesByPeriod());
+  }
+
+  // Decode each row on its own so one unreadable update doesn't fail the whole load
+  @MustBeClosed
+  static Stream<ColumnEntry<UInt64, LightClientUpdate>> streamReadableBestLightClientUpdates(
+      final KvStoreAccessor db, final KvStoreColumn<UInt64, LightClientUpdate> column) {
+    return db.streamRaw(column).flatMap(row -> decodeBestLightClientUpdate(column, row));
+  }
+
+  private static Stream<ColumnEntry<UInt64, LightClientUpdate>> decodeBestLightClientUpdate(
+      final KvStoreColumn<UInt64, LightClientUpdate> column, final ColumnEntry<Bytes, Bytes> row) {
+    final UInt64 period = column.getKeySerializer().deserialize(row.getKey().toArrayUnsafe());
+    try {
+      return Stream.of(
+          ColumnEntry.create(
+              period, column.getValueSerializer().deserialize(row.getValue().toArrayUnsafe())));
+    } catch (final RuntimeException e) {
+      LOG.warn("Skipping unreadable light client update for period {}", period, e);
+      return Stream.empty();
+    }
   }
 
   @MustBeClosed

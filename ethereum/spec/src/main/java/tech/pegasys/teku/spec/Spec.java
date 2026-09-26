@@ -582,7 +582,7 @@ public class Spec {
         .toVersionAltair()
         .orElseThrow(
             () ->
-                new RuntimeException(
+                new IllegalStateException(
                     "Altair milestone is required to deserialize light client update"))
         .getLightClientUpdateSchema()
         .sszDeserialize(serializedUpdate);
