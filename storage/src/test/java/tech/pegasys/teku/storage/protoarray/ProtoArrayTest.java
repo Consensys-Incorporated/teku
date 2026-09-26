@@ -769,6 +769,9 @@ class ProtoArrayTest {
 
     // block2b attaches to EMPTY path
     addValidBlockWithParentIndex(2, block2b, block1a, Optional.of(emptyNodeIndex));
+    // Every Gloas block has an EMPTY variant; the head walk must end on a variant, never on BASE
+    protoArray.createEmptyNode(block2a);
+    protoArray.createEmptyNode(block2b);
 
     // Vote for block2a (FULL path child)
     voteUpdater.putVote(UInt64.ZERO, new VoteTracker(Bytes32.ZERO, block2a, false, false));
@@ -969,6 +972,8 @@ class ProtoArrayTest {
     // block2a attaches to EMPTY path, block2b attaches to FULL path
     addValidBlockWithParentIndex(6, block2a, block1a, Optional.of(emptyNodeIndex));
     addValidBlockWithParentIndex(6, block2b, block1a, Optional.of(fullNodeIndex));
+    protoArray.createEmptyNode(block2a);
+    protoArray.createEmptyNode(block2b);
 
     // Vote for block2a (EMPTY path child) — gives EMPTY path more weight
     // Need two votes so the balance list covers validator 0
@@ -999,6 +1004,8 @@ class ProtoArrayTest {
     // block2a on EMPTY path, block2b on FULL path — both get votes
     addValidBlockWithParentIndex(6, block2a, block1a, Optional.of(emptyNodeIndex));
     addValidBlockWithParentIndex(6, block2b, block1a, Optional.of(fullNodeIndex));
+    protoArray.createEmptyNode(block2a);
+    protoArray.createEmptyNode(block2b);
 
     // Vote for EMPTY path child (more votes) — validators 0 and 1
     voteUpdater.putVote(UInt64.ZERO, new VoteTracker(Bytes32.ZERO, block2a, false, false));
@@ -1217,28 +1224,98 @@ class ProtoArrayTest {
   }
 
   @Test
-  void gloas_onForkChoiceUpdatedResult_invalid_shouldMarkExactNodeInvalid() {
+  void findOptimisticHead_gloasShouldThrowWhenWalkEndsOnPendingNodeWithoutEmptyVariant() {
+    // Every Gloas block gets its EMPTY variant on import, so a PENDING leaf without one is a broken
+    // tree rather than a legitimate head. The walk must fail loudly instead of returning PENDING.
+    addValidBlock(1, block1a, GENESIS_CHECKPOINT.getRoot());
+    applyScoreChanges(gloasModel, UInt64.valueOf(100), Optional.empty());
+
+    assertThatThrownBy(
+            () ->
+                protoArray.findOptimisticHead(
+                    UInt64.valueOf(5), GENESIS_CHECKPOINT, GENESIS_CHECKPOINT))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("has no valid EMPTY variant");
+  }
+
+  @Test
+  void gloas_onForkChoiceUpdatedResult_invalidOnFull_shouldKeepBaseAndEmptyNodes() {
+    // A FULL node owns its payload, so an INVALID verdict for it (without latestValidHash) marks
+    // exactly that node: the block itself and its EMPTY variant stay.
     addOptimisticBlock(1, block1a, GENESIS_CHECKPOINT.getRoot());
     protoArray.createEmptyNode(block1a);
     protoArray.onExecutionPayload(block1a, EXECUTION_BLOCK_NUMBER, EXECUTION_BLOCK_HASH);
 
-    final ForkChoiceNode emptyNode =
-        protoArray.blockNodeIndex().getEmptyNode(block1a).orElseThrow();
+    final ForkChoiceNode fullNode = protoArray.blockNodeIndex().getFullNode(block1a).orElseThrow();
+    final int baseNodeIndex = protoArray.getIndexByRoot(block1a).orElseThrow();
     final int emptyNodeIndex = protoArray.getEmptyNodeIndices().getInt(block1a);
     final int fullNodeIndex = protoArray.getFullNodeIndices().getInt(block1a);
 
     gloasModel.onForkChoiceUpdatedResult(
         protoArray.protoArray(),
         protoArray.blockNodeIndex(),
-        emptyNode,
+        fullNode,
         ExecutionPayloadStatus.INVALID,
         Optional.empty(),
         true,
         new HeadSelectionContext(
             gloasModel, protoArray.blockNodeIndex(), UInt64.ZERO, Optional.empty()));
 
-    assertThat(protoArray.getNodeByIndex(emptyNodeIndex).isInvalid()).isTrue();
-    assertThat(protoArray.getNodeByIndex(fullNodeIndex).isOptimistic()).isTrue();
+    assertThat(protoArray.getNodeByIndex(fullNodeIndex).isInvalid()).isTrue();
+    assertThat(protoArray.getNodeByIndex(baseNodeIndex).isOptimistic()).isTrue();
+    assertThat(protoArray.getNodeByIndex(emptyNodeIndex).isOptimistic()).isTrue();
+  }
+
+  @Test
+  void
+      gloas_onForkChoiceUpdatedResult_invalidOnEmptyWithoutLatestValidHash_shouldInvalidateOwner() {
+    // BASE and EMPTY nodes own no payload: they inherit the execution block hash of the nearest
+    // FULL ancestor. An INVALID verdict for EMPTY(block2a) without latestValidHash is therefore a
+    // verdict on FULL(block1a)'s payload and must invalidate that node and everything built on it,
+    // while block1a itself and its EMPTY variant stay.
+    final Bytes32 genesisPayloadHash = getExecutionBlockHash(GENESIS_CHECKPOINT.getRoot());
+    addValidBlock(1, block1a, GENESIS_CHECKPOINT.getRoot(), genesisPayloadHash);
+    protoArray.createEmptyNode(block1a);
+    protoArray.onExecutionPayload(block1a, EXECUTION_BLOCK_NUMBER, EXECUTION_BLOCK_HASH);
+    final int block1aBaseIndex = protoArray.getIndexByRoot(block1a).orElseThrow();
+    final int block1aEmptyIndex = protoArray.getEmptyNodeIndices().getInt(block1a);
+    final int block1aFullIndex = protoArray.getFullNodeIndices().getInt(block1a);
+
+    // block2a builds on FULL(block1a) and has no payload of its own yet
+    protoArray.onBlock(
+        UInt64.valueOf(2),
+        block2a,
+        block1a,
+        Optional.of(block1aFullIndex),
+        dataStructureUtil.randomBytes32(),
+        new BlockCheckpoints(
+            GENESIS_CHECKPOINT, GENESIS_CHECKPOINT, GENESIS_CHECKPOINT, GENESIS_CHECKPOINT),
+        EXECUTION_BLOCK_NUMBER,
+        EXECUTION_BLOCK_HASH,
+        true);
+    protoArray.createEmptyNode(block2a);
+    final ForkChoiceNode block2aEmptyNode =
+        protoArray.blockNodeIndex().getEmptyNode(block2a).orElseThrow();
+    final int block2aBaseIndex = protoArray.getIndexByRoot(block2a).orElseThrow();
+    final int block2aEmptyIndex = protoArray.getEmptyNodeIndices().getInt(block2a);
+    assertThat(protoArray.getNodeByIndex(block2aEmptyIndex).getExecutionBlockHash())
+        .isEqualTo(EXECUTION_BLOCK_HASH);
+
+    gloasModel.onForkChoiceUpdatedResult(
+        protoArray.protoArray(),
+        protoArray.blockNodeIndex(),
+        block2aEmptyNode,
+        ExecutionPayloadStatus.INVALID,
+        Optional.empty(),
+        true,
+        new HeadSelectionContext(
+            gloasModel, protoArray.blockNodeIndex(), UInt64.ZERO, Optional.empty()));
+
+    assertThat(protoArray.getNodeByIndex(block1aFullIndex).isInvalid()).isTrue();
+    assertThat(protoArray.getNodeByIndex(block2aBaseIndex).isInvalid()).isTrue();
+    assertThat(protoArray.getNodeByIndex(block2aEmptyIndex).isInvalid()).isTrue();
+    assertThat(protoArray.getNodeByIndex(block1aBaseIndex).isFullyValidated()).isTrue();
+    assertThat(protoArray.getNodeByIndex(block1aEmptyIndex).isFullyValidated()).isTrue();
   }
 
   private void assertHead(final Bytes32 expectedBlockHash) {
