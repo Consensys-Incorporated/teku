@@ -37,6 +37,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
@@ -389,6 +390,23 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
   }
 
   @Override
+  @MustBeClosed
+  public Stream<ColumnEntry<UInt64, LightClientUpdate>> streamBestLightClientUpdates() {
+    return hotDao.streamBestLightClientUpdates();
+  }
+
+  @Override
+  @MustBeClosed
+  public Stream<UInt64> streamBestLightClientUpdatePeriods() {
+    return hotDao.streamBestLightClientUpdatePeriods();
+  }
+
+  @Override
+  public Optional<Bytes32> getBestLightClientUpdateSignatureBlockRoot(final UInt64 period) {
+    return hotDao.getBestLightClientUpdateSignatureBlockRoot(period);
+  }
+
+  @Override
   public Optional<List<List<KZGProof>>> getDataColumnSidecarsProofs(final UInt64 slot) {
     return finalizedDao.getDataColumnSidecarProofs(slot);
   }
@@ -528,6 +546,17 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
     @Override
     public void setCustodyGroupCount(final UInt64 custodyGroupCount) {
       hotUpdater.setCustodyGroupCount(custodyGroupCount);
+    }
+
+    @Override
+    public void addBestLightClientUpdate(
+        final UInt64 period, final LightClientUpdate update, final Bytes32 signatureBlockRoot) {
+      hotUpdater.addBestLightClientUpdate(period, update, signatureBlockRoot);
+    }
+
+    @Override
+    public void removeBestLightClientUpdate(final UInt64 period) {
+      hotUpdater.removeBestLightClientUpdate(period);
     }
 
     @Override

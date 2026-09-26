@@ -253,6 +253,10 @@ public class V6SchemaCombinedTreeState extends V6SchemaCombined implements Schem
             "NON_CANONICAL_SIDECAR_BY_COLUMN_SLOT_AND_IDENTIFIER",
             getColumnNonCanonicalSidecarByColumnSlotAndIdentifier())
         .put("DATA_COLUMN_SIDECARS_PROOFS_BY_SLOT", getColumnDataColumnSidecarsProofsBySlot())
+        .put("LIGHT_CLIENT_UPDATES_BY_PERIOD", getBestLightClientUpdatesByPeriod())
+        .put(
+            "LIGHT_CLIENT_UPDATE_SIGNATURE_BLOCK_ROOTS_BY_PERIOD",
+            getBestLightClientUpdateSignatureBlockRootsByPeriod())
         .build();
   }
 

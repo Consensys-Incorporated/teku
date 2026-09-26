@@ -66,6 +66,7 @@ import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadSummary;
 import tech.pegasys.teku.spec.datastructures.execution.SlotAndExecutionPayloadSummary;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
 import tech.pegasys.teku.spec.datastructures.hashtree.HashTree;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
@@ -1350,6 +1351,46 @@ public class KvStoreDatabase implements Database {
   @Override
   public Optional<List<List<KZGProof>>> getDataColumnSidecarsProofs(final UInt64 slot) {
     return dao.getDataColumnSidecarsProofs(slot);
+  }
+
+  @Override
+  public void storeBestLightClientUpdate(
+      final UInt64 period, final LightClientUpdate update, final Bytes32 signatureBlockRoot) {
+    try (final HotUpdater updater = hotUpdater()) {
+      updater.addBestLightClientUpdate(period, update, signatureBlockRoot);
+      updater.commit();
+    }
+  }
+
+  @Override
+  @MustBeClosed
+  public Stream<Map.Entry<UInt64, LightClientUpdate>> streamBestLightClientUpdates() {
+    return dao.streamBestLightClientUpdates().map(entry -> entry);
+  }
+
+  @Override
+  public Optional<Bytes32> getBestLightClientUpdateSignatureBlockRoot(final UInt64 period) {
+    return dao.getBestLightClientUpdateSignatureBlockRoot(period);
+  }
+
+  @Override
+  public void pruneBestLightClientUpdatesBefore(final UInt64 period) {
+    final List<UInt64> periodsToDelete;
+    try (final Stream<UInt64> periods = dao.streamBestLightClientUpdatePeriods()) {
+      periodsToDelete = periods.filter(storedPeriod -> storedPeriod.isLessThan(period)).toList();
+    }
+    removeBestLightClientUpdates(periodsToDelete);
+  }
+
+  @Override
+  public void removeBestLightClientUpdates(final Collection<UInt64> periods) {
+    if (periods.isEmpty()) {
+      return;
+    }
+    try (final HotUpdater updater = hotUpdater()) {
+      periods.forEach(updater::removeBestLightClientUpdate);
+      updater.commit();
+    }
   }
 
   @Override

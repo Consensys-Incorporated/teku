@@ -14,11 +14,19 @@
 package tech.pegasys.teku.statetransition.lightclient;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.function.BiPredicate;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -29,6 +37,8 @@ import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpda
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.storage.api.LightClientUpdateChannel;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 
 @TestSpecContext(allMilestones = true, ignoredMilestones = SpecMilestone.PHASE0)
 public class LightClientUpdateStoreTest {
@@ -38,13 +48,88 @@ public class LightClientUpdateStoreTest {
 
   private Spec spec;
   private DataStructureUtil dataStructureUtil;
+  private final LightClientUpdateChannel channel = mock(LightClientUpdateChannel.class);
   private LightClientUpdateStore store;
 
   @BeforeEach
   void setUp(final SpecContext specContext) {
     spec = specContext.getSpec();
     dataStructureUtil = specContext.getDataStructureUtil();
-    store = new LightClientUpdateStore(spec);
+    when(channel.onNewBestLightClientUpdate(any(), any(), any())).thenReturn(SafeFuture.COMPLETE);
+    when(channel.onRemoveBestLightClientUpdates(any())).thenReturn(SafeFuture.COMPLETE);
+    when(channel.onPruneBestLightClientUpdatesBefore(any())).thenReturn(SafeFuture.COMPLETE);
+    store = new LightClientUpdateStore(spec, channel);
+  }
+
+  @TestTemplate
+  public void addUpdate_shouldPersistOnlyWhenTheBestUpdateChanges() {
+    final LightClientUpdate better =
+        createLightClientUpdate().syncCommitteeParticipants(supermajorityParticipants()).build();
+    final LightClientUpdate worse =
+        createLightClientUpdate()
+            .syncCommitteeParticipants(supermajorityParticipants() - 1)
+            .build();
+    final Bytes32 betterRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 worseRoot = dataStructureUtil.randomBytes32();
+
+    store.addUpdate(better, betterRoot, CANONICAL);
+    store.addUpdate(worse, worseRoot, CANONICAL);
+
+    verify(channel).onNewBestLightClientUpdate(UInt64.ONE, better, betterRoot);
+    verify(channel, never()).onNewBestLightClientUpdate(UInt64.ONE, worse, worseRoot);
+  }
+
+  @TestTemplate
+  public void addUpdate_shouldNotPersistAnOrphanedUpdate() {
+    store.addUpdate(
+        createLightClientUpdateAtPeriod(1),
+        dataStructureUtil.randomBytes32(),
+        (slot, root) -> false);
+
+    verifyNoInteractions(channel);
+  }
+
+  @TestTemplate
+  public void pruneUpdatesBefore_shouldPruneStorage() {
+    store.pruneUpdatesBefore(UInt64.ONE);
+
+    verify(channel).onPruneBestLightClientUpdatesBefore(UInt64.ONE);
+  }
+
+  @TestTemplate
+  public void removeNonCanonicalUpdates_shouldRemoveOnlyOrphanedPeriodsFromStorage() {
+    final Bytes32 canonicalRoot = dataStructureUtil.randomBytes32();
+    store.addUpdate(createLightClientUpdateAtPeriod(1), canonicalRoot, CANONICAL);
+    store.addUpdate(
+        createLightClientUpdateAtPeriod(2), dataStructureUtil.randomBytes32(), CANONICAL);
+
+    store.removeNonCanonicalUpdates(UInt64.ZERO, (slot, root) -> root.equals(canonicalRoot));
+
+    verify(channel).onRemoveBestLightClientUpdates(List.of(UInt64.valueOf(2)));
+  }
+
+  @TestTemplate
+  public void removeNonCanonicalUpdates_shouldNotTouchStorageWhenNothingIsOrphaned() {
+    store.addUpdate(
+        createLightClientUpdateAtPeriod(1), dataStructureUtil.randomBytes32(), CANONICAL);
+
+    store.removeNonCanonicalUpdates(UInt64.ZERO, CANONICAL);
+
+    verify(channel, never()).onRemoveBestLightClientUpdates(any());
+  }
+
+  @TestTemplate
+  public void loadUpdates_shouldRestoreUpdatesWithoutPersistingThemAgain() {
+    final LightClientUpdate update = createLightClientUpdateAtPeriod(1);
+    final Bytes32 root = dataStructureUtil.randomBytes32();
+
+    store.loadUpdates(List.of(new StoredLightClientUpdate(UInt64.ONE, update, root)));
+
+    assertThat(store.getBestUpdatesInRange(UInt64.ONE, 1)).containsExactly(update);
+    verifyNoInteractions(channel);
+
+    store.removeNonCanonicalUpdates(UInt64.ZERO, (slot, blockRoot) -> blockRoot.equals(root));
+    assertThat(store.getBestUpdatesInRange(UInt64.ONE, 1)).containsExactly(update);
   }
 
   @TestTemplate

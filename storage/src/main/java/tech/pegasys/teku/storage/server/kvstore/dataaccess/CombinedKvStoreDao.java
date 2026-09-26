@@ -47,6 +47,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
@@ -752,6 +753,24 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
     }
   }
 
+  @Override
+  @MustBeClosed
+  public Stream<ColumnEntry<UInt64, LightClientUpdate>> streamBestLightClientUpdates() {
+    return V4HotKvStoreDao.streamReadableBestLightClientUpdates(
+        db, schema.getBestLightClientUpdatesByPeriod());
+  }
+
+  @Override
+  @MustBeClosed
+  public Stream<UInt64> streamBestLightClientUpdatePeriods() {
+    return db.streamKeys(schema.getBestLightClientUpdatesByPeriod());
+  }
+
+  @Override
+  public Optional<Bytes32> getBestLightClientUpdateSignatureBlockRoot(final UInt64 period) {
+    return db.get(schema.getBestLightClientUpdateSignatureBlockRootsByPeriod(), period);
+  }
+
   static class V4CombinedUpdater<S extends SchemaCombined> implements CombinedUpdater {
     private final KvStoreTransaction transaction;
 
@@ -1112,6 +1131,20 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
     @Override
     public void removeDataColumnSidecarsProofs(final UInt64 slot) {
       transaction.delete(schema.getColumnDataColumnSidecarsProofsBySlot(), slot);
+    }
+
+    @Override
+    public void addBestLightClientUpdate(
+        final UInt64 period, final LightClientUpdate update, final Bytes32 signatureBlockRoot) {
+      transaction.put(schema.getBestLightClientUpdatesByPeriod(), period, update);
+      transaction.put(
+          schema.getBestLightClientUpdateSignatureBlockRootsByPeriod(), period, signatureBlockRoot);
+    }
+
+    @Override
+    public void removeBestLightClientUpdate(final UInt64 period) {
+      transaction.delete(schema.getBestLightClientUpdatesByPeriod(), period);
+      transaction.delete(schema.getBestLightClientUpdateSignatureBlockRootsByPeriod(), period);
     }
   }
 }
