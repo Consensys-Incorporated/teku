@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.SafeFutureAssert;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.kzg.KZGProof;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
@@ -250,6 +251,29 @@ class CombinedChainDataClientTest {
 
     assertThat(result).containsExactly(firstSidecar, secondSidecar);
     verify(historicalChainData, never()).getSidecar(otherBlockIdentifier);
+  }
+
+  @Test
+  void getDataColumnSidecarProofs_returnsStoredProofs() {
+    final UInt64 slot = UInt64.valueOf(42);
+    final List<List<KZGProof>> proofs =
+        List.of(
+            List.of(dataStructureUtil.randomKZGProof(), dataStructureUtil.randomKZGProof()),
+            List.of(dataStructureUtil.randomKZGProof()));
+    when(historicalChainData.getDataColumnSidecarsProofs(slot))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(proofs)));
+
+    assertThat(SafeFutureAssert.safeJoin(client.getDataColumnSidecarProofs(slot)))
+        .isEqualTo(proofs);
+  }
+
+  @Test
+  void getDataColumnSidecarProofs_returnsEmptyListWhenAbsent() {
+    final UInt64 slot = UInt64.valueOf(42);
+    when(historicalChainData.getDataColumnSidecarsProofs(slot))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+
+    assertThat(SafeFutureAssert.safeJoin(client.getDataColumnSidecarProofs(slot))).isEmpty();
   }
 
   @Test
