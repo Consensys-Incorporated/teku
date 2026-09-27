@@ -15,6 +15,7 @@ package tech.pegasys.teku.statetransition.lightclient;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -130,6 +131,40 @@ public class LightClientUpdateStoreTest {
 
     store.removeNonCanonicalUpdates(UInt64.ZERO, (slot, blockRoot) -> blockRoot.equals(root));
     assertThat(store.getBestUpdatesInRange(UInt64.ONE, 1)).containsExactly(update);
+  }
+
+  @TestTemplate
+  public void loadUpdates_shouldKeepABetterUpdateTrackedBeforeLoading() {
+    final LightClientUpdate better =
+        createLightClientUpdate().syncCommitteeParticipants(supermajorityParticipants()).build();
+    final LightClientUpdate worse =
+        createLightClientUpdate()
+            .syncCommitteeParticipants(supermajorityParticipants() - 1)
+            .build();
+    store.addUpdate(better, dataStructureUtil.randomBytes32(), CANONICAL);
+
+    store.loadUpdates(
+        List.of(new StoredLightClientUpdate(UInt64.ONE, worse, dataStructureUtil.randomBytes32())));
+
+    assertThat(store.getBestUpdatesInRange(UInt64.ONE, 1)).containsExactly(better);
+    verify(channel, never()).onNewBestLightClientUpdate(any(), eq(worse), any());
+  }
+
+  @TestTemplate
+  public void loadUpdates_shouldReplaceAndPersistAWorseUpdateTrackedBeforeLoading() {
+    final LightClientUpdate better =
+        createLightClientUpdate().syncCommitteeParticipants(supermajorityParticipants()).build();
+    final LightClientUpdate worse =
+        createLightClientUpdate()
+            .syncCommitteeParticipants(supermajorityParticipants() - 1)
+            .build();
+    final Bytes32 betterRoot = dataStructureUtil.randomBytes32();
+    store.addUpdate(worse, dataStructureUtil.randomBytes32(), CANONICAL);
+
+    store.loadUpdates(List.of(new StoredLightClientUpdate(UInt64.ONE, better, betterRoot)));
+
+    assertThat(store.getBestUpdatesInRange(UInt64.ONE, 1)).containsExactly(better);
+    verify(channel).onNewBestLightClientUpdate(UInt64.ONE, better, betterRoot);
   }
 
   @TestTemplate

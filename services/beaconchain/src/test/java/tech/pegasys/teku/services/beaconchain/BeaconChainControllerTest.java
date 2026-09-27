@@ -26,7 +26,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networks.Eth2NetworkConfiguration;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
-import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
+import tech.pegasys.teku.statetransition.lightclient.LightClientServerService;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
@@ -118,13 +118,13 @@ class BeaconChainControllerTest {
     final CombinedChainDataClient combinedChainDataClient = mock(CombinedChainDataClient.class);
     when(combinedChainDataClient.getBestLightClientUpdates())
         .thenReturn(SafeFuture.failedFuture(new IllegalStateException("corrupt row")));
-    final LightClientUpdateStore lightClientUpdateStore = mock(LightClientUpdateStore.class);
+    final LightClientServerService lightClientServerService = mock(LightClientServerService.class);
     controller.beaconConfig = beaconConfig;
     controller.combinedChainDataClient = combinedChainDataClient;
-    controller.lightClientUpdateStore = lightClientUpdateStore;
+    controller.lightClientServerService = lightClientServerService;
 
     assertThat(controller.loadLightClientUpdates()).isCompleted();
-    verifyNoInteractions(lightClientUpdateStore);
+    verifyNoInteractions(lightClientServerService);
   }
 
   private Spec createFuluSpecWithRetentionPeriod(

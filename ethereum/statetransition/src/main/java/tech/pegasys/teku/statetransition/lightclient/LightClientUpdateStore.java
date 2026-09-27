@@ -89,13 +89,22 @@ public class LightClientUpdateStore {
 
   public synchronized void loadUpdates(final Collection<StoredLightClientUpdate> updates) {
     updates.forEach(
-        stored ->
-            bestUpdatesByPeriod.put(
-                stored.period(),
-                new StoredUpdate<>(
-                    stored.update(),
-                    stored.update().getSignatureSlot().get(),
-                    stored.signatureBlockRoot())));
+        stored -> {
+          final StoredUpdate<LightClientUpdate> candidate =
+              new StoredUpdate<>(
+                  stored.update(),
+                  stored.update().getSignatureSlot().get(),
+                  stored.signatureBlockRoot());
+          final StoredUpdate<LightClientUpdate> existing =
+              bestUpdatesByPeriod.putIfAbsent(stored.period(), candidate);
+          if (existing != null && isBetterUpdate(candidate.update(), existing.update())) {
+            bestUpdatesByPeriod.put(stored.period(), candidate);
+            channel
+                .onNewBestLightClientUpdate(
+                    stored.period(), stored.update(), stored.signatureBlockRoot())
+                .finishError(LOG);
+          }
+        });
   }
 
   public synchronized void removeNonCanonicalUpdates(

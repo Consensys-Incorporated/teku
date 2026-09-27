@@ -1710,7 +1710,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
         .getBestLightClientUpdates()
         .thenAccept(
             updates -> {
-              lightClientUpdateStore.loadUpdates(updates);
+              lightClientServerService.loadUpdates(updates);
               LOG.debug("Loaded {} light client updates from storage", updates.size());
             })
         .exceptionally(

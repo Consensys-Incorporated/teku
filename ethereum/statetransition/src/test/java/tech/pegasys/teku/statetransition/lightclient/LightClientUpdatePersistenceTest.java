@@ -88,6 +88,38 @@ class LightClientUpdatePersistenceTest {
     assertThat(storedPeriods()).containsExactly(retainedPeriod);
   }
 
+  @Test
+  void load_shouldDropUpdatesOrphanedWhileTheNodeWasDown() {
+    persistUpdateAtPeriod(1);
+
+    serviceWith(ORPHANED)
+        .loadUpdates(safeJoin(storageSystem.chainStorage().getBestLightClientUpdates()));
+
+    assertThat(store.getBestUpdatesInRange(UInt64.ONE, 1)).isEmpty();
+    assertThat(storedPeriods()).isEmpty();
+  }
+
+  @Test
+  void load_shouldKeepCanonicalUpdates() {
+    final LightClientUpdate update = persistUpdateAtPeriod(1);
+
+    serviceWith(CANONICAL)
+        .loadUpdates(safeJoin(storageSystem.chainStorage().getBestLightClientUpdates()));
+
+    assertThat(store.getBestUpdatesInRange(UInt64.ONE, 1)).containsExactly(update);
+    assertThat(storedPeriods()).containsExactly(UInt64.ONE);
+  }
+
+  private LightClientUpdate persistUpdateAtPeriod(final long period) {
+    final LightClientUpdate update = updateAtPeriod(period);
+    safeJoin(
+        storageSystem
+            .chainStorage()
+            .onNewBestLightClientUpdate(
+                UInt64.valueOf(period), update, dataStructureUtil.randomBytes32()));
+    return update;
+  }
+
   private void chainHeadUpdatedWithReorg(final BiPredicate<UInt64, Bytes32> isCanonical) {
     serviceWith(isCanonical)
         .chainHeadUpdated(
