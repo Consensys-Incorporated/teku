@@ -37,7 +37,7 @@ public class TestDefinition {
   private final String configName;
   private final String testType;
   private final String testName;
-  private final Path pathFromPhaseTestDir;
+  private final String pathFromPhaseTestDir;
 
   private Spec spec;
 
@@ -46,12 +46,12 @@ public class TestDefinition {
       final String configName,
       final String testType,
       final String testName,
-      final Path pathFromPhaseTestDir) {
+      final String pathFromPhaseTestDir) {
     this.configName = configName;
     this.fork = fork;
     this.testType = testType.replace("\\", "/");
     this.testName = testName.replace("\\", "/");
-    this.pathFromPhaseTestDir = pathFromPhaseTestDir;
+    this.pathFromPhaseTestDir = pathFromPhaseTestDir.replace("\\", "/");
   }
 
   public String getConfigName() {
@@ -126,14 +126,20 @@ public class TestDefinition {
     return toString();
   }
 
-  public Path getPathFromPhaseTestDir() {
+  /** Path of the test directory relative to {@code <config>/<fork>}, always {@code /}-separated. */
+  public String getPathFromPhaseTestDir() {
     return pathFromPhaseTestDir;
   }
 
   public Path getTestDirectory() {
-    return ReferenceTestFinder.findReferenceTestRootDirectory()
-        .resolve(Path.of(configName, fork))
-        .resolve(pathFromPhaseTestDir);
+    Path directory = ReferenceTestRoot.fromSystemProperties().getSpecDirectory(configName);
+    if (!fork.isEmpty()) {
+      directory = directory.resolve(fork);
+    }
+    if (!pathFromPhaseTestDir.isEmpty()) {
+      directory = directory.resolve(pathFromPhaseTestDir);
+    }
+    return directory;
   }
 
   /// some reference tests ship a partial `config.yaml` overriding a handful of constants on top of

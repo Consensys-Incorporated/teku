@@ -17,7 +17,9 @@ import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.CELL_SCHEMA;
 
 import java.util.List;
 import tech.pegasys.teku.infrastructure.ssz.schema.AbstractSszProgressiveListSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszSchemaHints;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
+import tech.pegasys.teku.spec.config.SpecConfigDeneb;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSchema;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.fulu.Cell;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.fulu.DataColumn;
@@ -32,8 +34,11 @@ import tech.pegasys.teku.spec.schemas.registry.SchemaRegistry;
 public class DataColumnSchemaGloas extends AbstractSszProgressiveListSchema<Cell, DataColumn>
     implements DataColumnSchema {
 
-  public DataColumnSchemaGloas(final SchemaRegistry registry) {
-    super(registry.get(CELL_SCHEMA));
+  public DataColumnSchemaGloas(final SpecConfigDeneb specConfig, final SchemaRegistry registry) {
+    super(
+        registry.get(CELL_SCHEMA),
+        SszSchemaHints.none(),
+        specConfig.getMaxBlobCommitmentsPerBlock());
   }
 
   @Override

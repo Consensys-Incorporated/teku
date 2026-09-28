@@ -1,0 +1,19 @@
+{
+  "title" : "LightClientOptimisticUpdateAltair",
+  "type" : "object",
+  "required" : [ "attested_header", "sync_aggregate", "signature_slot" ],
+  "properties" : {
+    "attested_header" : {
+      "$ref" : "#/components/schemas/LightClientHeaderAltair"
+    },
+    "sync_aggregate" : {
+      "$ref" : "#/components/schemas/SyncAggregate"
+    },
+    "signature_slot" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    }
+  }
+}

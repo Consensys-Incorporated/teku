@@ -28,16 +28,20 @@ public class ShufflingTestFinder implements TestFinder {
   public Stream<TestDefinition> findTests(
       final String fork, final String config, final Path testRoot) throws IOException {
     final Path shufflingDir = testRoot.resolve(SHUFFLING_TEST_CATEGORY);
-    if (!shufflingDir.toFile().exists()) {
+    if (!Files.exists(shufflingDir)) {
       return Stream.empty();
     }
     return Files.walk(shufflingDir)
-        .filter(path -> path.resolve("mapping.yaml").toFile().exists())
+        .filter(path -> Files.exists(path.resolve("mapping.yaml")))
         .map(
             testDir -> {
               final String testName = shufflingDir.relativize(testDir).toString();
               return new TestDefinition(
-                  fork, config, SHUFFLING_TEST_CATEGORY, testName, testRoot.relativize(testDir));
+                  fork,
+                  config,
+                  SHUFFLING_TEST_CATEGORY,
+                  testName,
+                  testRoot.relativize(testDir).toString());
             });
   }
 }

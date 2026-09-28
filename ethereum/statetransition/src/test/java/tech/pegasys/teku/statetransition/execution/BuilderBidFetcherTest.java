@@ -17,6 +17,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -25,6 +27,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.builder.rest.StakedBuilderClient;
 import tech.pegasys.teku.builder.rest.StakedBuilderClientProvider;
+import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionPerformance;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.SafeFutureAssert;
 import tech.pegasys.teku.spec.Spec;
@@ -44,6 +47,8 @@ public class BuilderBidFetcherTest {
       mock(StakedBuilderClientProvider.class);
   private final StakedBuilderClient builderClient = mock(StakedBuilderClient.class);
   private final BuilderBidValidator bidValidator = mock(BuilderBidValidator.class);
+  private final BlockProductionPerformance blockProductionPerformance =
+      mock(BlockProductionPerformance.class);
 
   private final BuilderBidFetcher fetcher =
       new BuilderBidFetcher(spec, stakedBuilderClientProvider, bidValidator);
@@ -64,7 +69,10 @@ public class BuilderBidFetcherTest {
                 state.getSlot(),
                 BuilderConfig.NO_OP,
                 dataStructureUtil.randomBytes32(),
-                dataStructureUtil.randomBytes32()));
+                dataStructureUtil.randomBytes32(),
+                blockProductionPerformance));
+
+    verifyNoInteractions(blockProductionPerformance);
 
     assertThat(result).isEmpty();
   }
@@ -87,7 +95,11 @@ public class BuilderBidFetcherTest {
                 state.getSlot(),
                 builderConfig,
                 dataStructureUtil.randomBytes32(),
-                dataStructureUtil.randomBytes32()));
+                dataStructureUtil.randomBytes32(),
+                blockProductionPerformance));
+
+    verify(blockProductionPerformance).builderGetHeader();
+    verify(blockProductionPerformance).builderBidValidated();
 
     assertThat(result).map(RemoteBid::bid).containsExactly(firstBid, secondBid);
     assertThat(result)
@@ -117,7 +129,8 @@ public class BuilderBidFetcherTest {
                 state.getSlot(),
                 builderConfig,
                 dataStructureUtil.randomBytes32(),
-                dataStructureUtil.randomBytes32()));
+                dataStructureUtil.randomBytes32(),
+                blockProductionPerformance));
 
     assertThat(result).map(RemoteBid::bid).containsExactly(validBid);
   }
@@ -145,7 +158,8 @@ public class BuilderBidFetcherTest {
                 state.getSlot(),
                 builderConfig,
                 dataStructureUtil.randomBytes32(),
-                dataStructureUtil.randomBytes32()));
+                dataStructureUtil.randomBytes32(),
+                blockProductionPerformance));
 
     assertThat(result).map(RemoteBid::bid).containsExactly(firstBid);
   }
@@ -170,7 +184,8 @@ public class BuilderBidFetcherTest {
                 state.getSlot(),
                 builderConfig,
                 dataStructureUtil.randomBytes32(),
-                dataStructureUtil.randomBytes32()));
+                dataStructureUtil.randomBytes32(),
+                blockProductionPerformance));
 
     assertThat(result).map(RemoteBid::bid).containsExactly(successfulBid);
   }

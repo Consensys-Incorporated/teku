@@ -45,13 +45,14 @@ class AttestationGloasSchemaTest {
   }
 
   @Test
-  void networkSchemasAreRawUnbounded() {
+  void networkSchemasHaveFiniteRawBounds() {
+    // aggregation bits and attesting indices declare their limit, so the containers are bounded
     assertThat(schemaDefinitions.getAttestationSchema().getSszLengthBounds().isUnbounded())
-        .isTrue();
+        .isFalse();
     assertThat(schemaDefinitions.getIndexedAttestationSchema().getSszLengthBounds().isUnbounded())
-        .isTrue();
+        .isFalse();
     assertThat(schemaDefinitions.getAttesterSlashingSchema().getSszLengthBounds().isUnbounded())
-        .isTrue();
+        .isFalse();
   }
 
   @Test

@@ -46,6 +46,11 @@ Teku is an open-source Ethereum consensus client written in Java, implementing a
 # Run reference tests (consensus spec tests)
 ./gradlew referenceTest
 
+# Reference test fixtures are read straight from zip archives (build/refTests/<version>/archives/,
+# produced by convertRefTests); nothing is expanded on disk. To run against a plain directory of
+# vectors instead (e.g. generated from a local consensus-specs checkout):
+./gradlew referenceTest -Dteku.ref-test.root-dir=/path/to/tests
+
 # Run one reference suite manually (example)
 ENV_TEST_TYPE=fork_choice/on_attestation ENV_SPEC=minimal ENV_MILESTONE=gloas ./gradlew --no-daemon :eth-reference-tests:referenceTest --tests tech.pegasys.teku.reference.ManualReferenceTestRunner -x generateReferenceTestClasses
 

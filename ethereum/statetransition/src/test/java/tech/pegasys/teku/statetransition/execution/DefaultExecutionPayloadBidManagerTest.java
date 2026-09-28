@@ -101,7 +101,7 @@ public class DefaultExecutionPayloadBidManagerTest {
   @BeforeEach
   public void setup() {
     when(executionPayloadBidCircuitBreaker.isEngaged(any(), any())).thenReturn(false);
-    when(builderBidFetcher.getBuilderBids(any(), any(), any(), any(), any()))
+    when(builderBidFetcher.getBuilderBids(any(), any(), any(), any(), any(), any()))
         .thenReturn(SafeFuture.completedFuture(Collections.emptyList()));
     executionPayloadBidManager.subscribeOperationAdded(operationAddedSubscriber);
   }
@@ -226,7 +226,7 @@ public class DefaultExecutionPayloadBidManagerTest {
     final BidForBlock builderBidForBlock =
         new BidForBlock(builderBidRaw, UInt256.ONE, Optional.empty());
 
-    when(builderBidFetcher.getBuilderBids(any(), any(), any(), any(), any()))
+    when(builderBidFetcher.getBuilderBids(any(), any(), any(), any(), any(), any()))
         .thenReturn(SafeFuture.completedFuture(builderBids));
     when(bidSelector.selectBestRemoteBid(any(), eq(builderBids), any(), any(), any(), any()))
         .thenReturn(Optional.of(builderBid));

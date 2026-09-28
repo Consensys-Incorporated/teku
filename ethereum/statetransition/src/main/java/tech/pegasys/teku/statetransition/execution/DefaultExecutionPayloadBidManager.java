@@ -213,7 +213,13 @@ public class DefaultExecutionPayloadBidManager
       // received by block proposal time
       remoteBidFuture =
           builderBidFetcher
-              .getBuilderBids(state, slot, builderConfig, parentBlockHash, parentRoot)
+              .getBuilderBids(
+                  state,
+                  slot,
+                  builderConfig,
+                  parentBlockHash,
+                  parentRoot,
+                  blockProductionPerformance)
               .thenApply(
                   builderBids -> {
                     final Set<RemoteBid> p2pBids = getP2PBidsForSlot(slot);
