@@ -77,7 +77,8 @@ public class ReferenceTestFinder {
                               "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_with_enough_ffg_votes_current_epoch",
                               "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_without_enough_ffg_votes_current_epoch",
 
-                              // TODO fix the below fork choice compliance test exclusions,
+                              // TODO https://github.com/Consensys-Incorporated/teku/issues/11347
+                              // fix the below fork choice compliance test exclusions,
                               // generated and sorted numerically by the following command
                               /*
                               ./gradlew referenceTest | grep FAILED | awk '{ sub(/ FAILED$/, ""); sub(/ > /, " - "); print "\"" $0 "\"," }' | sed -E 's/^(.*_)([0-9]+)_([0-9]+)_([0-9]+)(",?)$/\2\3\4\t\0/' | sort -n | cut -f2- > formattedReferenceTests.txt
