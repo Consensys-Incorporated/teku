@@ -83,6 +83,13 @@ public class GetLightClientBootstrapIntegrationTest
   }
 
   @TestTemplate
+  void shouldReturnBadRequestIfBlockRootIsNot32Bytes() throws IOException {
+    final Response response =
+        getResponse(GetLightClientBootstrap.ROUTE.replace("{block_root}", "0x1234"));
+    assertBadRequest(response);
+  }
+
+  @TestTemplate
   void shouldReturnNotFoundIfNoBlock() throws IOException {
     final Response response = get(blockRoot);
     assertNotFound(response);

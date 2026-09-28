@@ -76,7 +76,8 @@ public class GetLightClientBootstrap extends RestApiEndpoint {
 
   @Override
   public void handleRequest(final RestApiRequest request) throws JsonProcessingException {
-    final Bytes32 blockRoot = Bytes32.fromHexString(request.getPathParameter(BLOCK_ROOT_PARAMETER));
+    final Bytes32 blockRoot =
+        Bytes32.fromHexStringStrict(request.getPathParameter(BLOCK_ROOT_PARAMETER));
     final SafeFuture<Optional<ObjectAndMetaData<LightClientBootstrap>>> future =
         chainDataProvider.getLightClientBoostrap(blockRoot);
 
