@@ -87,10 +87,10 @@ public class GossipFailureLogger {
               messageType,
               slotLog);
       // a peer whose outbound queue is being dropped is expected during gossip mesh churn (e.g.
-      // startup, or a peer that's genuinely slow); it is downscored and recovers on its own.
+      // startup, or a peer that's genuinely slow); it is downscored and recovers on its own. Logged
+      // at debug only: the peer wasn't consuming, so those messages would never have reached it.
       case DroppedRpcPartsException ignored ->
-          LOG.log(
-              suppress ? Level.DEBUG : Level.WARN,
+          LOG.debug(
               "Failed to publish {}{} because a peer's outbound gossip queue was full and"
                   + " low-priority messages were dropped",
               messageType,
