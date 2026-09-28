@@ -63,6 +63,7 @@ import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadContext;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadHeader;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadResult;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
+import tech.pegasys.teku.spec.datastructures.execution.versions.electra.ConsolidationRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.WithdrawalRequest;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
@@ -234,8 +235,8 @@ public class BlockOperationSelectorFactory {
 
       final SafeFuture<Void> setVoluntaryExitsAndParentExecutionRequests;
 
-      // In Gloas, parent withdrawal request targeting a validator can invalidate a voluntary exit
-      // for this validator in the same block.
+      // In Gloas, parent withdrawal and consolidation requests can invalidate voluntary exits
+      // in the same block.
       if (bodyBuilder.supportsParentExecutionRequests()) {
         setVoluntaryExitsAndParentExecutionRequests =
             executionPayloadManager
@@ -245,22 +246,35 @@ public class BlockOperationSelectorFactory {
                     blockProductionContext.parentPayloadStatus())
                 .thenAccept(
                     parentExecutionRequests -> {
-                      final Set<UInt64> validatorsWithParentWithdrawalRequests = new HashSet<>();
+                      final Set<UInt64> validatorsWithConflictingParentRequests = new HashSet<>();
                       for (final WithdrawalRequest withdrawalRequest :
                           parentExecutionRequests.getWithdrawals()) {
                         spec.getValidatorIndex(
                                 blockSlotState, withdrawalRequest.getValidatorPubkey())
                             .ifPresent(
                                 idx ->
-                                    validatorsWithParentWithdrawalRequests.add(
+                                    validatorsWithConflictingParentRequests.add(
                                         UInt64.valueOf(idx)));
+                      }
+                      for (final ConsolidationRequest consolidationRequest :
+                          parentExecutionRequests.getConsolidations()) {
+                        if (!consolidationRequest
+                            .getSourcePubkey()
+                            .equals(consolidationRequest.getTargetPubkey())) {
+                          spec.getValidatorIndex(
+                                  blockSlotState, consolidationRequest.getSourcePubkey())
+                              .ifPresent(
+                                  idx ->
+                                      validatorsWithConflictingParentRequests.add(
+                                          UInt64.valueOf(idx)));
+                        }
                       }
                       final SszList<SignedVoluntaryExit> voluntaryExits =
                           getVoluntaryExitsForBlock(
                               blockSlotState,
                               specConfig.getMaxVoluntaryExits(),
                               exitedValidators,
-                              validatorsWithParentWithdrawalRequests);
+                              validatorsWithConflictingParentRequests);
                       bodyBuilder.voluntaryExits(voluntaryExits);
                       // Post-Gloas: Parent Execution Requests
                       bodyBuilder.parentExecutionRequests(parentExecutionRequests);
@@ -319,13 +333,13 @@ public class BlockOperationSelectorFactory {
       final BeaconState blockSlotState,
       final int maxVoluntaryExits,
       final Set<UInt64> exitedValidators,
-      final Set<UInt64> validatorsWithParentWithdrawalRequests) {
+      final Set<UInt64> validatorsWithConflictingParentRequests) {
     return voluntaryExitPool.getItemsForBlock(
         blockSlotState,
         maxVoluntaryExits,
         exit ->
             voluntaryExitPredicate(
-                blockSlotState, exitedValidators, exit, validatorsWithParentWithdrawalRequests),
+                blockSlotState, exitedValidators, exit, validatorsWithConflictingParentRequests),
         exit -> exitedValidators.add(exit.getMessage().getValidatorIndex()));
   }
 
@@ -340,14 +354,13 @@ public class BlockOperationSelectorFactory {
       final BeaconState blockSlotState,
       final Set<UInt64> exitedValidators,
       final SignedVoluntaryExit exit,
-      final Set<UInt64> validatorsWithParentWithdrawalRequests) {
+      final Set<UInt64> validatorsWithConflictingParentRequests) {
     final UInt64 validatorIndex = exit.getMessage().getValidatorIndex();
     if (exitedValidators.contains(validatorIndex)) {
       return false;
     }
-    // In Gloas, a withdrawal request for this validator would call initiate_validator_exit or add a
-    // pending partial withdrawal, either of which would invalidate this voluntary exit.
-    if (validatorsWithParentWithdrawalRequests.contains(validatorIndex)) {
+    // Parent requests can initiate an exit or add a pending partial withdrawal before this exit.
+    if (validatorsWithConflictingParentRequests.contains(validatorIndex)) {
       return false;
     }
     // if there is a pending withdrawal, the exit is not valid for inclusion in a block.
