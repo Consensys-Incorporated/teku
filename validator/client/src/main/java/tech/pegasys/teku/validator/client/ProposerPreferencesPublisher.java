@@ -23,7 +23,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
-import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuty;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -34,53 +33,33 @@ import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.logic.common.util.ProposerPreferencesUtil;
 import tech.pegasys.teku.validator.api.SubmitDataError;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
-import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
 import tech.pegasys.teku.validator.client.loader.OwnedValidators;
 
-public class ProposerPreferencesPublisher implements ValidatorTimingChannel {
+public class ProposerPreferencesPublisher extends AbstractPreferencesPublisher {
 
   private static final Logger LOG = LogManager.getLogger();
 
   private final ValidatorApiChannel validatorApiChannel;
-  private final OwnedValidators ownedValidators;
   private final ProposerConfigPropertiesProvider proposerConfigPropertiesProvider;
   private final ForkProvider forkProvider;
-  private final Spec spec;
 
   public ProposerPreferencesPublisher(
-      final ValidatorApiChannel validatorApiChannel,
       final OwnedValidators ownedValidators,
+      final Spec spec,
+      final ValidatorApiChannel validatorApiChannel,
       final ProposerConfigPropertiesProvider proposerConfigPropertiesProvider,
-      final ForkProvider forkProvider,
-      final Spec spec) {
+      final ForkProvider forkProvider) {
+    super(ownedValidators, spec);
     this.validatorApiChannel = validatorApiChannel;
-    this.ownedValidators = ownedValidators;
     this.proposerConfigPropertiesProvider = proposerConfigPropertiesProvider;
     this.forkProvider = forkProvider;
-    this.spec = spec;
   }
 
   @Override
-  public void onProposerDutiesLoaded(final UInt64 epoch, final ProposerDuties proposerDuties) {
-    if (!spec.isProposerPreferencesAvailableAtEpoch(epoch)) {
-      return;
-    }
-
-    final List<ProposerDuty> ownedProposerDuties =
-        proposerDuties.getDuties().stream()
-            .filter(duty -> ownedValidators.hasValidator(duty.getPublicKey()))
-            .toList();
-
-    if (ownedProposerDuties.isEmpty()) {
-      LOG.debug("No owned validators have proposer duties in epoch {}", epoch);
-      return;
-    }
-
-    // Gloas's get_shuffling_dependent_root(store, head, e) returns the block root at
-    // start_of_(e-MIN_SEED_LOOKAHEAD) - 1. As far as MIN_SEED_LOOKAHEAD == 1,
-    // for next-epoch duties, BlockProposalUtilFulu's
-    // getBlockProposalDependentRoot returns the same value, so we reuse it here.
-    final Bytes32 dependentRoot = proposerDuties.getDependentRoot();
+  void publishPreferences(
+      final UInt64 epoch,
+      final List<ProposerDuty> ownedProposerDuties,
+      final Bytes32 dependentRoot) {
     final int minSeedLookahead = spec.getGenesisSpec().getConfig().getMinSeedLookahead();
     checkArgument(
         minSeedLookahead == 1,
@@ -119,7 +98,7 @@ public class ProposerPreferencesPublisher implements ValidatorTimingChannel {
                                               .collect(Collectors.joining("; ")));
                                     }
                                     LOG.debug(
-                                        "Proposer preferences published successfully for {} validators",
+                                        "{} proposer preferences published successfully",
                                         preferencesList.size());
                                   });
                         }))
@@ -132,11 +111,10 @@ public class ProposerPreferencesPublisher implements ValidatorTimingChannel {
       final Bytes32 dependentRoot,
       final ForkInfo forkInfo,
       final ProposerPreferencesUtil preferencesUtil) {
-    final Optional<Validator> maybeValidator = ownedValidators.getValidator(duty.getPublicKey());
-    if (maybeValidator.isEmpty()) {
+    final Optional<Validator> validator = ownedValidators.getValidator(duty.getPublicKey());
+    if (validator.isEmpty()) {
       return SafeFuture.completedFuture(Optional.empty());
     }
-
     final Optional<Eth1Address> maybeFeeRecipient =
         proposerConfigPropertiesProvider.getFeeRecipient(duty.getPublicKey());
     if (maybeFeeRecipient.isEmpty()) {
@@ -160,7 +138,7 @@ public class ProposerPreferencesPublisher implements ValidatorTimingChannel {
     }
     final ProposerPreferences preferences = maybePreferences.get();
 
-    return maybeValidator
+    return validator
         .get()
         .getSigner()
         .signProposerPreferences(preferences, forkInfo)

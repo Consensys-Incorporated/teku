@@ -14,16 +14,20 @@
 package tech.pegasys.teku.beaconrestapi.handlers.v1.events;
 
 import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.TOPICS_PARAMETER;
+import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_EVENTS;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_VALIDATOR_REQUIRED;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import java.util.List;
+import java.util.Optional;
 import tech.pegasys.teku.api.ChainDataProvider;
 import tech.pegasys.teku.api.ConfigProvider;
 import tech.pegasys.teku.api.DataProvider;
 import tech.pegasys.teku.api.NodeDataProvider;
 import tech.pegasys.teku.api.SyncDataProvider;
+import tech.pegasys.teku.api.response.EventType;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.events.EventChannels;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.EndpointMetadata;
@@ -80,6 +84,7 @@ public class GetEvents extends RestApiEndpoint {
             .tags(TAG_EVENTS, TAG_VALIDATOR_REQUIRED)
             .queryParam(TOPICS_PARAMETER)
             .response(SC_OK, "Request successful", new EventStreamResponseContentTypeDefinition())
+            .withBadRequestResponse(Optional.of("The topics supplied could not be parsed"))
             .withChainDataResponses()
             .build());
     eventSubscriptionManager =
@@ -97,6 +102,19 @@ public class GetEvents extends RestApiEndpoint {
 
   @Override
   public void handleRequest(final RestApiRequest request) throws JsonProcessingException {
+    // The topics have to be checked before the event stream is started, because starting it commits
+    // the response and no error can be reported to the client after that point.
+    final List<String> topics = request.getQueryParameterList(TOPICS_PARAMETER);
+    if (topics.isEmpty()) {
+      request.respondError(SC_BAD_REQUEST, "No topics supplied");
+      return;
+    }
+    final Optional<String> invalidTopic =
+        topics.stream().filter(topic -> !EventType.isValidTopic(topic)).findFirst();
+    if (invalidTopic.isPresent()) {
+      request.respondError(SC_BAD_REQUEST, String.format("Invalid topic: %s", invalidTopic.get()));
+      return;
+    }
     request.startEventStream(eventSubscriptionManager::registerClient);
   }
 }

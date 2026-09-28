@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.api.executionpayloadselector;
 
+import static tech.pegasys.teku.spec.config.SpecConfig.GENESIS_SLOT;
+
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.api.AbstractSelectorFactory;
@@ -21,6 +23,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.metadata.ExecutionPayloadAndMetaData;
+import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.storage.client.ChainHead;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 
@@ -53,20 +56,35 @@ public class ExecutionPayloadSelectorFactory
             .orElse(SafeFuture.completedFuture(Optional.empty()));
   }
 
-  // TODO-GLOAS: http://github.com/Consensys-Incorporated/teku/issues/9997
   @Override
   public ExecutionPayloadSelector genesisSelector() {
-    throw new UnsupportedOperationException("Not yet implemented");
+    return () ->
+        client
+            .getBlockAtSlotExact(GENESIS_SLOT)
+            .thenCompose(
+                maybeGenesisBlock ->
+                    maybeGenesisBlock
+                        .map(
+                            genesisBlock ->
+                                client
+                                    .getExecutionPayloadByBlockRoot(genesisBlock.getRoot())
+                                    .thenApply(this::addMetaDataForGenesis))
+                        .orElse(SafeFuture.completedFuture(Optional.empty())));
   }
 
   @Override
   public ExecutionPayloadSelector finalizedSelector() {
-    throw new UnsupportedOperationException("Not yet implemented");
-  }
-
-  @Override
-  public ExecutionPayloadSelector justifiedSelector() {
-    throw new UnsupportedOperationException("Not yet implemented");
+    return () ->
+        client
+            .getLatestFinalized()
+            .map(
+                anchorPoint ->
+                    client
+                        .getExecutionPayloadByBlockRoot(anchorPoint.getRoot())
+                        .thenApply(
+                            maybeExecutionPayload ->
+                                addMetaDataForFinalized(maybeExecutionPayload, anchorPoint)))
+            .orElse(SafeFuture.completedFuture(Optional.empty()));
   }
 
   @Override
@@ -105,5 +123,31 @@ public class ExecutionPayloadSelectorFactory
             chainHead.isOptimistic()
                 || client.isOptimisticBlock(executionPayload.getBeaconBlockRoot()),
             client.isFinalized(executionPayload.getSlot())));
+  }
+
+  private Optional<ExecutionPayloadAndMetaData> addMetaDataForFinalized(
+      final Optional<SignedExecutionPayloadEnvelope> maybeExecutionPayload,
+      final AnchorPoint anchorPoint) {
+    if (maybeExecutionPayload.isEmpty()) {
+      return Optional.empty();
+    }
+    final SignedExecutionPayloadEnvelope executionPayload = maybeExecutionPayload.get();
+    return Optional.of(
+        new ExecutionPayloadAndMetaData(
+            executionPayload,
+            spec.atSlot(executionPayload.getSlot()).getMilestone(),
+            client.isOptimisticBlock(anchorPoint.getRoot()),
+            true));
+  }
+
+  private Optional<ExecutionPayloadAndMetaData> addMetaDataForGenesis(
+      final Optional<SignedExecutionPayloadEnvelope> maybeExecutionPayload) {
+    return maybeExecutionPayload.map(
+        executionPayloadEnvelope ->
+            new ExecutionPayloadAndMetaData(
+                executionPayloadEnvelope,
+                spec.atSlot(GENESIS_SLOT).getMilestone(),
+                false,
+                client.isFinalized(GENESIS_SLOT)));
   }
 }

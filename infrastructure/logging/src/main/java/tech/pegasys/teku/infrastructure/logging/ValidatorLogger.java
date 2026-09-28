@@ -245,6 +245,12 @@ public class ValidatorLogger {
     log.error(ColorConsolePrinter.print(errorString, Color.RED), error);
   }
 
+  public void builderPreferencesPublicationFailed(final UInt64 epoch, final Throwable error) {
+    final String errorString =
+        String.format("%sFailed to publish builder preferences for epoch %s", PREFIX, epoch);
+    log.error(ColorConsolePrinter.print(errorString, Color.RED), error);
+  }
+
   public void validatorRegistrationsSentToTheBuilderNetwork(
       final int successfullySentRegistrations, final int totalRegistrations) {
     final String infoString =

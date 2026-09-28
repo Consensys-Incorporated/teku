@@ -81,6 +81,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.MinimalBeaconBlockSummary;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
 import tech.pegasys.teku.spec.datastructures.execution.PowBlock;
 import tech.pegasys.teku.spec.datastructures.forkchoice.FastConfirmationStore;
@@ -114,6 +115,7 @@ import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.datacolumns.DataAvailabilitySampler;
+import tech.pegasys.teku.statetransition.execution.ReceivedExecutionPayloadEventsChannel;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoice.OptimisticHeadSubscriber;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoiceUpdatedResultSubscriber.ForkChoiceUpdatedResultNotification;
 import tech.pegasys.teku.statetransition.forkchoice.fastconfirmation.FastConfirmationEventChannel;
@@ -1830,13 +1832,18 @@ class ForkChoiceTest {
   }
 
   private void importPayload(final SignedBlockAndState targetBlock) {
+    final ReceivedExecutionPayloadEventsChannel receivedExecutionPayloadEventsChannelPublisher =
+        mock(ReceivedExecutionPayloadEventsChannel.class);
+    final SignedExecutionPayloadEnvelope payload =
+        chainBuilder.getExecutionPayloadAtSlot(targetBlock.getSlot()).orElseThrow();
     final SafeFuture<ExecutionPayloadImportResult> payloadImportResult =
         forkChoice.onExecutionPayloadEnvelope(
-            chainBuilder.getExecutionPayloadAtSlot(targetBlock.getSlot()).orElseThrow(),
-            executionLayer);
+            payload, executionLayer, Optional.of(receivedExecutionPayloadEventsChannelPublisher));
 
     assertThat(payloadImportResult)
         .isCompletedWithValueMatching(ExecutionPayloadImportResult::isSuccessful);
+
+    verify(receivedExecutionPayloadEventsChannelPublisher).onExecutionPayloadAvailable(payload);
   }
 
   private ValidatableAttestation createPrevalidatedFullPayloadAttestation(

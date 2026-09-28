@@ -90,10 +90,16 @@ public class TestDataUtils {
 
   public static BeaconState loadStateFromSsz(
       final TestDefinition testDefinition, final String fileName) {
+    // Use the test fork's schema rather than the genesis one, since vectors may pin the test fork's
+    // epoch after genesis while still providing a state of that fork
     return loadSsz(
         testDefinition,
         fileName,
-        testDefinition.getSpec().getGenesisSchemaDefinitions().getBeaconStateSchema());
+        testDefinition
+            .getSpec()
+            .forMilestone(testDefinition.getMilestone())
+            .getSchemaDefinitions()
+            .getBeaconStateSchema());
   }
 
   public static <T> T loadYaml(

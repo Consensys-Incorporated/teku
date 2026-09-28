@@ -763,6 +763,13 @@ public class GossipValidationHelperTest {
   }
 
   @TestTemplate
+  void isPossibleDependentRoot_shouldAcceptGenesisHeadForGenesisEpoch() {
+    final Bytes32 genesisRoot = recentChainData.getBestBlockRoot().orElseThrow();
+
+    assertThat(gossipValidationHelper.isPossibleDependentRoot(genesisRoot, ZERO)).isTrue();
+  }
+
+  @TestTemplate
   void getShufflingDependentRoot_shouldUseAncestorAtDependentSlot() {
     final UInt64 minSeedLookahead =
         UInt64.valueOf(spec.getGenesisSpecConfig().getMinSeedLookahead());

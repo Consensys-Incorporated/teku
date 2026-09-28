@@ -38,7 +38,6 @@ import tech.pegasys.teku.spec.constants.Domain;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.IndexedPayloadAttestationLight;
-import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.BeaconStateElectra;
@@ -235,15 +234,12 @@ public class BeaconStateAccessorsGloas extends BeaconStateAccessorsFulu {
   @Override
   public IntList getPtc(final BeaconState state, final UInt64 slot) {
     final UInt64 epoch = miscHelpers.computeEpochAtSlot(slot);
-    final Fork fork = state.getFork();
     // The previous-epoch PTC is all zeros at the Gloas fork, so pre-fork slots are not queryable
-    if (fork.getCurrentVersion().equals(config.getGloasForkVersion())) {
-      checkArgument(
-          epoch.isGreaterThanOrEqualTo(fork.getEpoch()),
-          "PTC for slot %s is not queryable because it is before the Gloas fork epoch %s",
-          slot,
-          fork.getEpoch());
-    }
+    checkArgument(
+        epoch.isGreaterThanOrEqualTo(config.getGloasForkEpoch()),
+        "PTC for slot %s is not queryable because it is before the Gloas fork epoch %s",
+        slot,
+        config.getGloasForkEpoch());
     final UInt64 stateEpoch = getCurrentEpoch(state);
     final int cacheIndex;
     if (epoch.isLessThan(stateEpoch)) {

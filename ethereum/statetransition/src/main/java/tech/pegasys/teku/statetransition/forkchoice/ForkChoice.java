@@ -96,6 +96,7 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.statetransition.attestation.DeferredAttestations;
 import tech.pegasys.teku.statetransition.attestation.VoteUpdates;
 import tech.pegasys.teku.statetransition.block.BlockImportPerformance;
+import tech.pegasys.teku.statetransition.execution.ReceivedExecutionPayloadEventsChannel;
 import tech.pegasys.teku.statetransition.forkchoice.fastconfirmation.FastConfirmationTracker;
 import tech.pegasys.teku.statetransition.forkchoice.fastconfirmation.ForkChoiceFastConfirmation;
 import tech.pegasys.teku.statetransition.payloadattestation.ValidatablePayloadAttestationMessage;
@@ -263,15 +264,27 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
                     forkChoiceUtil));
   }
 
-  /** on_execution_payload_envelope */
   public SafeFuture<ExecutionPayloadImportResult> onExecutionPayloadEnvelope(
       final SignedExecutionPayloadEnvelope signedEnvelope,
       final ExecutionLayerChannel executionLayer) {
+    return onExecutionPayloadEnvelope(signedEnvelope, executionLayer, Optional.empty());
+  }
+
+  /** on_execution_payload_envelope */
+  public SafeFuture<ExecutionPayloadImportResult> onExecutionPayloadEnvelope(
+      final SignedExecutionPayloadEnvelope signedEnvelope,
+      final ExecutionLayerChannel executionLayer,
+      final Optional<ReceivedExecutionPayloadEventsChannel>
+          receivedExecutionPayloadEventsChannelPublisher) {
     return recentChainData
         .retrieveBlockAndState(signedEnvelope.getBeaconBlockRoot())
         .thenCompose(
             maybeBlockAndState ->
-                onExecutionPayloadEnvelope(signedEnvelope, maybeBlockAndState, executionLayer));
+                onExecutionPayloadEnvelope(
+                    signedEnvelope,
+                    maybeBlockAndState,
+                    executionLayer,
+                    receivedExecutionPayloadEventsChannelPublisher));
   }
 
   public SafeFuture<AttestationProcessingResult> onAttestation(
@@ -653,7 +666,9 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
   private SafeFuture<ExecutionPayloadImportResult> onExecutionPayloadEnvelope(
       final SignedExecutionPayloadEnvelope signedEnvelope,
       final Optional<SignedBlockAndState> blockAndState,
-      final ExecutionLayerChannel executionLayer) {
+      final ExecutionLayerChannel executionLayer,
+      final Optional<ReceivedExecutionPayloadEventsChannel>
+          receivedExecutionPayloadEventsChannelPublisher) {
     if (blockAndState.isEmpty()) {
       return SafeFuture.completedFuture(
           ExecutionPayloadImportResult.FAILED_UNKNOWN_BEACON_BLOCK_ROOT);
@@ -687,7 +702,16 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
     }
 
     final SafeFuture<? extends DataAndValidationResult<?>> dataAndValidationResultFuture =
-        availabilityChecker.getAndLogAvailabilityCheckResult(LOG);
+        availabilityChecker
+            .getAndLogAvailabilityCheckResult(LOG)
+            .thenPeek(
+                dataAndValidationResult -> {
+                  if (dataAndValidationResult.isSuccess()) {
+                    // notify the execution payload is available
+                    receivedExecutionPayloadEventsChannelPublisher.ifPresent(
+                        publisher -> publisher.onExecutionPayloadAvailable(signedEnvelope));
+                  }
+                });
 
     return payloadExecutor
         .getExecutionResult()

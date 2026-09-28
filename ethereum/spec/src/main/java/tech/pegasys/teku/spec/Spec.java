@@ -1491,7 +1491,7 @@ public class Spec {
   }
 
   // Gloas Utils
-  public boolean isProposerPreferencesAvailableAtEpoch(final UInt64 epoch) {
+  public boolean areProposerAndBuilderPreferencesRequiredAtEpoch(final UInt64 epoch) {
     return atEpoch(epoch).miscHelpers().toVersionGloas().isPresent();
   }
 

@@ -14,7 +14,10 @@
 package tech.pegasys.teku.validator.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFuture.completedFuture;
 
@@ -101,6 +104,28 @@ class BuilderConfigProviderTest {
     assertThat(entry.getMinBid()).isEqualTo(minBid);
     assertThat(entry.getBuilderBoostFactor()).isEqualTo(boostFactor);
     assertThat(entry.getMaxExecutionPayment()).isEqualTo(maxExecutionPayment);
+  }
+
+  @Test
+  void shouldReturnCachedBuilderConfigOnSubsequentCalls() throws MalformedURLException {
+    final String builderUrl = "https://builder.example.com";
+    final UInt64 slot = UInt64.valueOf(42);
+    final BLSSignature signature = dataStructureUtil.randomSignature();
+
+    final ValidatorConfig config =
+        ValidatorConfig.builder().builderUrls(List.of(URI.create(builderUrl).toURL())).build();
+
+    when(signer.signBuilderRequestAuth(any())).thenReturn(completedFuture(signature));
+
+    final BuilderConfigProvider provider = new BuilderConfigProvider(spec, config);
+    final Optional<BuilderConfig> first = provider.getBuilderConfig(validator, slot).join();
+
+    verify(signer).signBuilderRequestAuth(any());
+
+    final Optional<BuilderConfig> second = provider.getBuilderConfig(validator, slot).join();
+
+    assertThat(second).isEqualTo(first);
+    verifyNoMoreInteractions(signer);
   }
 
   @ParameterizedTest
