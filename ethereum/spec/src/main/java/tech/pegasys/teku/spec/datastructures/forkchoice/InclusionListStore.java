@@ -15,6 +15,7 @@ package tech.pegasys.teku.spec.datastructures.forkchoice;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
+import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -25,7 +26,10 @@ import java.util.Set;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.stream.IntStream;
 import tech.pegasys.teku.infrastructure.collections.LimitedMap;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
+import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszBitvectorSchema;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionList;
@@ -114,6 +118,30 @@ public class InclusionListStore {
     readLock.lock();
     try {
       return equivocatedValidatorIndicesByKey.getOrDefault(key, Set.of()).contains(validatorIndex);
+    } finally {
+      readLock.unlock();
+    }
+  }
+
+  public SszBitvector getInclusionListBits(
+      final IntList committee, final SlotAndBlockRoot key, final boolean onlyTimely) {
+    readLock.lock();
+    try {
+      final Map<UInt64, InclusionListEntry> inclusionLists =
+          inclusionListsByKey.getOrDefault(key, Map.of());
+      final Set<UInt64> equivocators = equivocatedValidatorIndicesByKey.getOrDefault(key, Set.of());
+      return SszBitvectorSchema.create(committee.size())
+          .ofBits(
+              IntStream.range(0, committee.size())
+                  .filter(
+                      position -> {
+                        final UInt64 validatorIndex = UInt64.valueOf(committee.getInt(position));
+                        final InclusionListEntry entry = inclusionLists.get(validatorIndex);
+                        return entry != null
+                            && !equivocators.contains(validatorIndex)
+                            && (!onlyTimely || entry.timely());
+                      })
+                  .toArray());
     } finally {
       readLock.unlock();
     }

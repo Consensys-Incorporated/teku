@@ -14,6 +14,7 @@
 package tech.pegasys.teku.statetransition.validation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
@@ -31,9 +32,11 @@ import static tech.pegasys.teku.statetransition.validation.InternalValidationRes
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.saveForFuture;
 
 import com.google.errorprone.annotations.FormatMethod;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.IntStream;
 import org.apache.logging.log4j.Level;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -47,24 +50,29 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.TestSpecContext;
+import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.heze.ExecutionPayloadBidHeze;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderExitRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsGloas;
+import tech.pegasys.teku.spec.datastructures.forkchoice.InclusionListStore;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
+import tech.pegasys.teku.spec.logic.versions.heze.util.InclusionListUtil;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsHeze;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
 
-@TestSpecContext(milestone = {SpecMilestone.GLOAS})
+@TestSpecContext(milestone = {SpecMilestone.GLOAS, SpecMilestone.HEZE})
 public class ExecutionPayloadBidGossipValidatorTest {
   private static final int MIN_BID_INCREMENT_PERCENTAGE = 1;
   private static final UInt64 DEFAULT_GAS_LIMIT = UInt64.valueOf(60_000_000);
@@ -84,6 +92,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
   private Bytes32 dependentRoot;
   private BeaconState postState;
   private SchemaDefinitionsGloas schemaDefinitions;
+  private final InclusionListStore inclusionListStore = new InclusionListStore(16);
 
   @BeforeEach
   void setup(final TestSpecInvocationContextProvider.SpecContext specContext) {
@@ -91,7 +100,11 @@ public class ExecutionPayloadBidGossipValidatorTest {
     this.schemaDefinitions = SchemaDefinitionsGloas.required(specContext.getSchemaDefinitions());
     this.bidValidator =
         new ExecutionPayloadBidGossipValidator(
-            spec, gossipValidationHelper, proposerPreferencesManager, MIN_BID_INCREMENT_PERCENTAGE);
+            spec,
+            gossipValidationHelper,
+            proposerPreferencesManager,
+            MIN_BID_INCREMENT_PERCENTAGE,
+            inclusionListStore);
 
     final ExecutionPayloadBid randomBid =
         dataStructureUtil.randomSignedExecutionPayloadBid(UInt64.ZERO).getMessage();
@@ -170,8 +183,139 @@ public class ExecutionPayloadBidGossipValidatorTest {
     when(miscHelpers.computeSigningRoot(eq(signedBid.getMessage()), any())).thenReturn(signingRoot);
     when(specVersion.miscHelpers()).thenReturn(miscHelpers);
     when(spec.atSlot(slot)).thenReturn(specVersion);
+    mockInclusionListContext(bid, specVersion);
     when(spec.getActiveValidatorIndices(postState, slot))
         .thenReturn(IntList.of(builderIndex.intValue()));
+  }
+
+  @TestTemplate
+  void shouldIgnoreBidMissingTimelyInclusionListBits() {
+    assumeTrue(bid instanceof ExecutionPayloadBidHeze);
+    addInclusionList(true);
+    assertThatSafeFuture(bidValidator.validate(signedBid))
+        .isCompletedWithValueMatching(result -> result.code() == ValidationResultCode.IGNORE);
+  }
+
+  @TestTemplate
+  void shouldAcceptBidMissingOnlyUntimelyInclusionListBits() {
+    assumeTrue(bid instanceof ExecutionPayloadBidHeze);
+    addInclusionList(false);
+    assertThatSafeFuture(bidValidator.validate(signedBid)).isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldAcceptInclusiveSupersetAfterIgnoringNonInclusiveBid() {
+    assumeTrue(bid instanceof ExecutionPayloadBidHeze);
+    addInclusionList(true);
+    assertThatSafeFuture(bidValidator.validate(signedBid))
+        .isCompletedWithValueMatching(result -> result.code() == ValidationResultCode.IGNORE);
+    final SchemaDefinitionsHeze schemas = SchemaDefinitionsHeze.required(schemaDefinitions);
+    final var schema = schemas.getExecutionPayloadBidSchema();
+    final ExecutionPayloadBid inclusiveBid =
+        schema.create(
+            bid.getParentBlockHash(),
+            bid.getParentBlockRoot(),
+            bid.getBlockHash(),
+            bid.getPrevRandao(),
+            bid.getFeeRecipient(),
+            bid.getGasLimit(),
+            bid.getBuilderIndex(),
+            bid.getSlot(),
+            bid.getValue(),
+            bid.getExecutionPayment(),
+            bid.getBlobKzgCommitments(),
+            bid.getExecutionRequestsRoot(),
+            schema.getInclusionListBitsSchema().ofBits(0, 1));
+    final MiscHelpers miscHelpers = spec.atSlot(slot).miscHelpers();
+    when(miscHelpers.computeSigningRoot(eq(inclusiveBid), any())).thenReturn(Bytes32.ZERO);
+
+    assertThatSafeFuture(
+            bidValidator.validate(dataStructureUtil.randomSignedExecutionPayloadBid(inclusiveBid)))
+        .isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldCheckHistoricalRootWhenInclusionListAncestorIsFinalized() {
+    assumeTrue(bid instanceof ExecutionPayloadBidHeze);
+    when(gossipValidationHelper.getShufflingDependentRoot(parentBlockRoot, slot.decrement()))
+        .thenReturn(Optional.empty());
+    final UInt64 inclusionListEpoch = UInt64.valueOf(7);
+    when(spec.computeEpochAtSlot(slot.decrement())).thenReturn(inclusionListEpoch);
+    when(spec.getSpecConfig(inclusionListEpoch))
+        .thenReturn(TestSpecFactory.createMinimalHeze().atSlot(UInt64.ZERO).getConfig());
+    when(spec.computeStartSlotAtEpoch(UInt64.valueOf(6))).thenReturn(UInt64.valueOf(48));
+    when(spec.getBlockRootAtSlot(postState, UInt64.valueOf(47))).thenReturn(dependentRoot);
+    addInclusionList(true);
+
+    assertThatSafeFuture(bidValidator.validate(signedBid))
+        .isCompletedWithValueMatching(result -> result.code() == ValidationResultCode.IGNORE);
+  }
+
+  @TestTemplate
+  void shouldIgnoreListsForProposalSlotAndDifferentDependentRoot() {
+    assumeTrue(bid instanceof ExecutionPayloadBidHeze);
+    final SchemaDefinitionsHeze schemas = SchemaDefinitionsHeze.required(schemaDefinitions);
+    final var schema = schemas.getInclusionListSchema();
+    final var transactions = List.of(schema.getTransactionSchema().fromBytes(Bytes.of(1)));
+    inclusionListStore.processInclusionList(
+        schemas
+            .getSignedInclusionListSchema()
+            .create(
+                schema.create(slot, UInt64.ZERO, dependentRoot, transactions),
+                dataStructureUtil.randomSignature()),
+        true);
+    inclusionListStore.processInclusionList(
+        schemas
+            .getSignedInclusionListSchema()
+            .create(
+                schema.create(
+                    slot.decrement(), UInt64.ZERO, dataStructureUtil.randomBytes32(), transactions),
+                dataStructureUtil.randomSignature()),
+        true);
+
+    assertThatSafeFuture(bidValidator.validate(signedBid)).isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldNotRequireBitsForEquivocatingValidators() {
+    assumeTrue(bid instanceof ExecutionPayloadBidHeze);
+    addInclusionList(true);
+    final SchemaDefinitionsHeze schemas = SchemaDefinitionsHeze.required(schemaDefinitions);
+    final var schema = schemas.getInclusionListSchema();
+    inclusionListStore.processInclusionList(
+        schemas
+            .getSignedInclusionListSchema()
+            .create(
+                schema.create(
+                    slot.decrement(),
+                    UInt64.ZERO,
+                    dependentRoot,
+                    List.of(schema.getTransactionSchema().fromBytes(Bytes.of(2)))),
+                dataStructureUtil.randomSignature()),
+        true);
+
+    assertThatSafeFuture(bidValidator.validate(signedBid)).isCompletedWithValue(ACCEPT);
+  }
+
+  private void addInclusionList(final boolean timely) {
+    final SchemaDefinitionsHeze schemas = SchemaDefinitionsHeze.required(schemaDefinitions);
+    inclusionListStore.processInclusionList(
+        schemas
+            .getSignedInclusionListSchema()
+            .create(
+                schemas
+                    .getInclusionListSchema()
+                    .create(
+                        slot.decrement(),
+                        UInt64.ZERO,
+                        dependentRoot,
+                        List.of(
+                            schemas
+                                .getInclusionListSchema()
+                                .getTransactionSchema()
+                                .fromBytes(Bytes.of(1)))),
+                dataStructureUtil.randomSignature()),
+        timely);
   }
 
   @TestTemplate
@@ -902,6 +1046,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
       final SignedExecutionPayloadBid bid, final UInt64 builderIndex, final UInt64 bidValue) {
     final ExecutionPayloadBid message = bid.getMessage();
     final UInt64 slot = message.getSlot();
+    mockInclusionListContext(message, spec.atSlot(slot));
     final ProposerPreferences matchingPreferences = mock(ProposerPreferences.class);
     when(matchingPreferences.getFeeRecipient()).thenReturn(message.getFeeRecipient());
     when(matchingPreferences.getTargetGasLimit()).thenReturn(message.getGasLimit());
@@ -924,6 +1069,21 @@ public class ExecutionPayloadBidGossipValidatorTest {
     when(gossipValidationHelper.builderHasEnoughBalanceForBid(
             bidValue, builderIndex, postState, slot))
         .thenReturn(true);
+  }
+
+  private void mockInclusionListContext(
+      final ExecutionPayloadBid message, final SpecVersion specVersion) {
+    if (message instanceof ExecutionPayloadBidHeze hezeBid) {
+      final InclusionListUtil inclusionListUtil = mock(InclusionListUtil.class);
+      when(inclusionListUtil.getInclusionListCommittee(postState, message.getSlot().decrement()))
+          .thenReturn(
+              new IntArrayList(
+                  IntStream.range(0, hezeBid.getInclusionListBits().size()).toArray()));
+      when(specVersion.getInclusionListUtil()).thenReturn(Optional.of(inclusionListUtil));
+      when(gossipValidationHelper.getShufflingDependentRoot(
+              message.getParentBlockRoot(), message.getSlot().decrement()))
+          .thenReturn(Optional.of(dependentRoot));
+    }
   }
 
   @FormatMethod

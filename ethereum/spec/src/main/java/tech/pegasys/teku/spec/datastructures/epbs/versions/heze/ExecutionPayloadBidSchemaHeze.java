@@ -172,6 +172,16 @@ public class ExecutionPayloadBidSchemaHeze
       final ExecutionPayload executionPayload,
       final SszList<SszKZGCommitment> blobKzgCommitments,
       final Bytes32 executionRequestsRoot) {
+    throw new UnsupportedOperationException("Heze self-built bids require inclusion list bits");
+  }
+
+  public ExecutionPayloadBidHeze createLocalSelfBuiltBid(
+      final Bytes32 parentBlockRoot,
+      final UInt64 slot,
+      final ExecutionPayload executionPayload,
+      final SszList<SszKZGCommitment> blobKzgCommitments,
+      final Bytes32 executionRequestsRoot,
+      final SszBitvector inclusionListBits) {
     return new ExecutionPayloadBidHeze(
         this,
         executionPayload.getParentHash(),
@@ -186,7 +196,7 @@ public class ExecutionPayloadBidSchemaHeze
         ZERO,
         blobKzgCommitments,
         executionRequestsRoot,
-        inclusionListBitsSchema.ofBits());
+        inclusionListBits);
   }
 
   public SszBitvectorSchema<?> getInclusionListBitsSchema() {

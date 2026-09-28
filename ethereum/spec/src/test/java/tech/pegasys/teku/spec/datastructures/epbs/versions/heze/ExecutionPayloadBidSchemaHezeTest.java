@@ -55,12 +55,15 @@ class ExecutionPayloadBidSchemaHezeTest {
             dataStructureUtil.randomSlot(),
             dataStructureUtil.randomExecutionPayload(),
             dataStructureUtil.randomBlobKzgCommitments(schema.getBlobKzgCommitmentsSchema()),
-            dataStructureUtil.randomBytes32());
+            dataStructureUtil.randomBytes32(),
+            schema.getInclusionListBitsSchema().ofBits(0, 2));
 
     assertThat(schema).isInstanceOf(ExecutionPayloadBidSchemaHeze.class);
     assertThat(schema.getFieldIndex(INCLUSION_LIST_BITS)).isEqualTo(12);
     assertThat(bid).isInstanceOf(ExecutionPayloadBidHeze.class);
     assertThat(((ExecutionPayloadBidHeze) bid).getInclusionListBits())
         .hasSize(specConfigHeze.getInclusionListCommitteeSize());
+    assertThat(((ExecutionPayloadBidHeze) bid).getInclusionListBits().streamAllSetBits().toArray())
+        .containsExactly(0, 2);
   }
 }

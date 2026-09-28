@@ -1034,7 +1034,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
               spec,
               gossipValidationHelper,
               proposerPreferencesManager,
-              beaconConfig.p2pConfig().getMinBidIncrementPercentage());
+              beaconConfig.p2pConfig().getMinBidIncrementPercentage(),
+              inclusionListStore);
       final ReceivedExecutionPayloadBidEventsChannel
           receivedExecutionPayloadBidEventsChannelPublisher =
               eventChannels.getPublisher(ReceivedExecutionPayloadBidEventsChannel.class);
@@ -1060,7 +1061,9 @@ public class BeaconChainController extends Service implements BeaconChainControl
               receivedExecutionPayloadBidEventsChannelPublisher,
               poolFactory.createPendingPoolForExecutionPayloadBids(spec),
               builderBidFetcher,
-              executionPayloadBidSelector);
+              executionPayloadBidSelector,
+              inclusionListStore,
+              recentChainData);
       proposerPreferencesManager.subscribeOperationAdded(defaultExecutionPayloadBidManager);
       eventChannels.subscribe(SlotEventsChannel.class, defaultExecutionPayloadBidManager);
       eventChannels.subscribe(ReceivedBlockEventsChannel.class, defaultExecutionPayloadBidManager);

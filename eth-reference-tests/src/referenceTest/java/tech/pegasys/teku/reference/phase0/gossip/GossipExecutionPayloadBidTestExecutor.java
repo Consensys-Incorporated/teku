@@ -290,7 +290,11 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
             spec, gossipValidationHelper, blockGossipValidator, invalidBlockRoots);
     final ExecutionPayloadBidGossipValidator bidValidator =
         new ExecutionPayloadBidGossipValidator(
-            spec, gossipValidationHelper, proposerPreferencesManager, MIN_BID_INCREMENT_PERCENTAGE);
+            spec,
+            gossipValidationHelper,
+            proposerPreferencesManager,
+            MIN_BID_INCREMENT_PERCENTAGE,
+            ctx.inclusionListStore);
 
     for (final GossipExecutionPayloadBidMetaData.Message message : metaData.getMessages()) {
       validationTimeMs[0] = UInt64.valueOf(message.getCurrentTimeMs());

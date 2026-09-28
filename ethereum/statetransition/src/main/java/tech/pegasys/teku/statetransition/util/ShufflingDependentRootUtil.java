@@ -17,7 +17,9 @@ import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 
 public final class ShufflingDependentRootUtil {
 
@@ -49,5 +51,15 @@ public final class ShufflingDependentRootUtil {
     }
     return Optional.of(
         spec.computeStartSlotAtEpoch(proposalEpoch.minus(minSeedLookahead)).minus(ONE));
+  }
+
+  /** Resolves older dependent blocks which may no longer be retained by fork choice. */
+  public static Bytes32 getShufflingDependentRoot(
+      final Spec spec, final BeaconState state, final UInt64 slot) {
+    final UInt64 dependentSlot =
+        getShufflingDependentSlotForEpoch(spec, spec.computeEpochAtSlot(slot)).orElse(UInt64.ZERO);
+    return dependentSlot.equals(state.getSlot())
+        ? BeaconBlockHeader.fromState(state).getRoot()
+        : spec.getBlockRootAtSlot(state, dependentSlot);
   }
 }

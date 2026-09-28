@@ -36,18 +36,23 @@ import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.collections.LimitedMap;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.heze.ExecutionPayloadBidHeze;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsGloas;
+import tech.pegasys.teku.spec.datastructures.forkchoice.InclusionListStore;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
 import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
+import tech.pegasys.teku.statetransition.util.ShufflingDependentRootUtil;
 
 public class ExecutionPayloadBidGossipValidator {
 
@@ -63,16 +68,19 @@ public class ExecutionPayloadBidGossipValidator {
       LimitedMap.createSynchronizedLRU(HIGHEST_BID_SET_SIZE);
 
   private final ProposerPreferencesManager proposerPreferencesManager;
+  private final InclusionListStore inclusionListStore;
 
   public ExecutionPayloadBidGossipValidator(
       final Spec spec,
       final GossipValidationHelper gossipValidationHelper,
       final ProposerPreferencesManager proposerPreferencesManager,
-      final int minBidIncrementPercentage) {
+      final int minBidIncrementPercentage,
+      final InclusionListStore inclusionListStore) {
     this.spec = spec;
     this.gossipValidationHelper = gossipValidationHelper;
     this.proposerPreferencesManager = proposerPreferencesManager;
     this.minBidIncrementPercentage = minBidIncrementPercentage;
+    this.inclusionListStore = inclusionListStore;
     signingRootUtil = new SigningRootUtil(spec);
   }
 
@@ -371,6 +379,33 @@ public class ExecutionPayloadBidGossipValidator {
                     return ignoreBid(
                         bid, "parent payload may exit builder %s", bid.getBuilderIndex());
                   }
+                }
+              }
+
+              /*
+               * [IGNORE] The bid's inclusion list bits is inclusive
+               */
+              if (bid instanceof ExecutionPayloadBidHeze hezeBid) {
+                final UInt64 inclusionListSlot = bid.getSlot().decrement();
+                final Bytes32 inclusionListDependentRoot =
+                    gossipValidationHelper
+                        .getShufflingDependentRoot(bid.getParentBlockRoot(), inclusionListSlot)
+                        .orElseGet(
+                            () ->
+                                ShufflingDependentRootUtil.getShufflingDependentRoot(
+                                    spec, state, inclusionListSlot));
+                final SszBitvector inclusionListBits =
+                    inclusionListStore.getInclusionListBits(
+                        spec.atSlot(bid.getSlot())
+                            .getInclusionListUtil()
+                            .orElseThrow()
+                            .getInclusionListCommittee(state, inclusionListSlot),
+                        new SlotAndBlockRoot(inclusionListSlot, inclusionListDependentRoot),
+                        true);
+                if (!inclusionListBits
+                    .streamAllSetBits()
+                    .allMatch(hezeBid.getInclusionListBits()::getBit)) {
+                  return ignoreBid(bid, "inclusion list bits are not inclusive");
                 }
               }
 

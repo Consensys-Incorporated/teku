@@ -17,6 +17,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -31,26 +32,33 @@ import tech.pegasys.teku.ethereum.events.SlotEventsChannel;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionPerformance;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
 import tech.pegasys.teku.infrastructure.subscribers.Subscribers;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.heze.ExecutionPayloadBidHeze;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.heze.ExecutionPayloadBidSchemaHeze;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
 import tech.pegasys.teku.spec.datastructures.execution.GetPayloadResponse;
+import tech.pegasys.teku.spec.datastructures.forkchoice.InclusionListStore;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.statetransition.OperationAddedSubscriber;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
 import tech.pegasys.teku.statetransition.util.PendingPool;
+import tech.pegasys.teku.statetransition.util.ShufflingDependentRootUtil;
 import tech.pegasys.teku.statetransition.validation.ExecutionPayloadBidGossipValidator;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
+import tech.pegasys.teku.storage.client.RecentChainData;
 
 public class DefaultExecutionPayloadBidManager
     implements ExecutionPayloadBidManager,
@@ -71,6 +79,8 @@ public class DefaultExecutionPayloadBidManager
       Subscribers.create(true);
   private final BuilderBidFetcher builderBidFetcher;
   private final ExecutionPayloadBidSelector bidSelector;
+  private final InclusionListStore inclusionListStore;
+  private final RecentChainData recentChainData;
 
   // bids are valid for the current and next slot, so they're indexed by bid.slot for pruning;
   // Sorting bids is only needed during block production, which occurs infrequently. To prevent
@@ -86,7 +96,9 @@ public class DefaultExecutionPayloadBidManager
           receivedExecutionPayloadBidEventsChannelPublisher,
       final PendingPool<SignedExecutionPayloadBid> pendingExecutionPayloadBids,
       final BuilderBidFetcher builderBidFetcher,
-      final ExecutionPayloadBidSelector bidSelector) {
+      final ExecutionPayloadBidSelector bidSelector,
+      final InclusionListStore inclusionListStore,
+      final RecentChainData recentChainData) {
     this.spec = spec;
     this.executionPayloadBidGossipValidator = executionPayloadBidGossipValidator;
     this.executionPayloadBidCircuitBreaker = executionPayloadBidCircuitBreaker;
@@ -95,6 +107,8 @@ public class DefaultExecutionPayloadBidManager
     this.pendingExecutionPayloadBids = pendingExecutionPayloadBids;
     this.builderBidFetcher = builderBidFetcher;
     this.bidSelector = bidSelector;
+    this.inclusionListStore = inclusionListStore;
+    this.recentChainData = recentChainData;
   }
 
   @Override
@@ -207,10 +221,12 @@ public class DefaultExecutionPayloadBidManager
       final BuilderConfig builderConfig,
       final BlockProductionPerformance blockProductionPerformance) {
     final UInt64 slot = state.getSlot();
-    final SafeFuture<Optional<RemoteBid>> remoteBidFuture;
-    if (executionPayloadBidCircuitBreaker.isEngaged(parentRoot, state)) {
+    final SafeFuture<List<RemoteBid>> remoteBidFuture;
+    final boolean circuitBreakerEngaged =
+        executionPayloadBidCircuitBreaker.isEngaged(parentRoot, state);
+    if (circuitBreakerEngaged) {
       LOG.info("Builder circuit breaker engaged for block at slot {}; self-building", slot);
-      remoteBidFuture = SafeFuture.completedFuture(Optional.empty());
+      remoteBidFuture = SafeFuture.completedFuture(List.of());
     } else {
       // Remote bids include the bids retrieved from configured builders plus any valid p2p bids
       // received by block proposal time
@@ -223,23 +239,17 @@ public class DefaultExecutionPayloadBidManager
                   parentBlockHash,
                   parentRoot,
                   blockProductionPerformance)
-              .thenApply(
-                  builderBids -> {
-                    final Set<RemoteBid> p2pBids = getP2PBidsForSlot(slot);
-                    return bidSelector.selectBestRemoteBid(
-                        p2pBids, builderBids, parentRoot, parentBlockHash, state, builderConfig);
-                  })
               .exceptionally(
                   error -> {
                     LOG.warn(
                         "Remote bid is unavailable for block at slot {}. Will proceed with the local bid instead.",
                         slot,
                         error);
-                    return Optional.empty();
+                    return List.of();
                   });
     }
 
-    final SafeFuture<Optional<LocalBid>> localBidFuture =
+    final SafeFuture<Optional<GetPayloadResponse>> localBidFuture =
         getPayloadResponseFuture
             .thenApply(
                 getPayloadResponse -> {
@@ -251,10 +261,7 @@ public class DefaultExecutionPayloadBidManager
                       localParentBlockHash,
                       parentBlockHash,
                       slot);
-                  return new LocalBid(
-                      createLocalSelfBuiltSignedBid(getPayloadResponse, slot, parentRoot),
-                      getPayloadResponse.getExecutionPayloadValue(),
-                      getPayloadResponse.getShouldOverrideBuilder());
+                  return getPayloadResponse;
                 })
             .thenApply(Optional::of)
             .exceptionally(
@@ -268,8 +275,80 @@ public class DefaultExecutionPayloadBidManager
 
     return localBidFuture.thenCombine(
         remoteBidFuture,
-        (maybeLocalBid, maybeRemoteBid) ->
-            bidSelector.selectBestBidForBlock(maybeLocalBid, maybeRemoteBid, builderConfig, slot));
+        (maybePayload, builderBids) -> {
+          final Optional<SszBitvector> inclusionListBits = getInclusionListBits(state, parentRoot);
+          Optional<LocalBid> maybeLocalBid = Optional.empty();
+          try {
+            maybeLocalBid =
+                maybePayload.map(
+                    payload ->
+                        new LocalBid(
+                            createLocalSelfBuiltSignedBid(
+                                payload, slot, parentRoot, inclusionListBits),
+                            payload.getExecutionPayloadValue(),
+                            payload.getShouldOverrideBuilder()));
+          } catch (final Exception error) {
+            LOG.warn(
+                "Local bid creation failed for slot {}; will attempt a remote bid", slot, error);
+          }
+          Optional<RemoteBid> maybeRemoteBid = Optional.empty();
+          if (!circuitBreakerEngaged) {
+            try {
+              final Set<RemoteBid> p2pBids =
+                  getP2PBidsForSlot(slot).stream()
+                      .filter(bid -> isInclusive(bid, inclusionListBits))
+                      .collect(Collectors.toUnmodifiableSet());
+              final List<RemoteBid> inclusiveBuilderBids =
+                  builderBids.stream().filter(bid -> isInclusive(bid, inclusionListBits)).toList();
+              maybeRemoteBid =
+                  bidSelector.selectBestRemoteBid(
+                      p2pBids,
+                      inclusiveBuilderBids,
+                      parentRoot,
+                      parentBlockHash,
+                      state,
+                      builderConfig);
+            } catch (final Exception error) {
+              LOG.warn("Remote bid selection failed for slot {}; self-building", slot, error);
+            }
+          }
+          return bidSelector.selectBestBidForBlock(
+              maybeLocalBid, maybeRemoteBid, builderConfig, slot);
+        });
+  }
+
+  private Optional<SszBitvector> getInclusionListBits(
+      final BeaconState state, final Bytes32 parentRoot) {
+    return spec.atSlot(state.getSlot())
+        .getInclusionListUtil()
+        .map(
+            util -> {
+              final UInt64 inclusionListSlot = state.getSlot().decrement();
+              final Bytes32 dependentRoot =
+                  recentChainData
+                      .getForkChoiceStrategy()
+                      .flatMap(
+                          strategy ->
+                              ShufflingDependentRootUtil.getShufflingDependentRoot(
+                                  spec, strategy, parentRoot, inclusionListSlot))
+                      .orElseGet(
+                          () ->
+                              ShufflingDependentRootUtil.getShufflingDependentRoot(
+                                  spec, state, inclusionListSlot));
+              return inclusionListStore.getInclusionListBits(
+                  util.getInclusionListCommittee(state, inclusionListSlot),
+                  new SlotAndBlockRoot(inclusionListSlot, dependentRoot),
+                  false);
+            });
+  }
+
+  private boolean isInclusive(final RemoteBid bid, final Optional<SszBitvector> localBits) {
+    return localBits
+        .map(
+            bits ->
+                bid.bid().getMessage() instanceof ExecutionPayloadBidHeze hezeBid
+                    && bits.streamAllSetBits().allMatch(hezeBid.getInclusionListBits()::getBit))
+        .orElse(true);
   }
 
   /**
@@ -285,7 +364,10 @@ public class DefaultExecutionPayloadBidManager
   }
 
   private SignedExecutionPayloadBid createLocalSelfBuiltSignedBid(
-      final GetPayloadResponse getPayloadResponse, final UInt64 slot, final Bytes32 parentRoot) {
+      final GetPayloadResponse getPayloadResponse,
+      final UInt64 slot,
+      final Bytes32 parentRoot,
+      final Optional<SszBitvector> inclusionListBits) {
     final SpecVersion specVersion = spec.atSlot(slot);
     final SchemaDefinitionsGloas schemaDefinitions =
         SchemaDefinitionsGloas.required(specVersion.getSchemaDefinitions());
@@ -298,10 +380,19 @@ public class DefaultExecutionPayloadBidManager
         getPayloadResponse.getExecutionRequests().orElseThrow().hashTreeRoot();
 
     final ExecutionPayloadBid bid =
-        schemaDefinitions
-            .getExecutionPayloadBidSchema()
-            .createLocalSelfBuiltBid(
-                parentRoot, slot, executionPayload, blobKzgCommitments, executionRequestsRoot);
+        schemaDefinitions.getExecutionPayloadBidSchema()
+                instanceof ExecutionPayloadBidSchemaHeze hezeSchema
+            ? hezeSchema.createLocalSelfBuiltBid(
+                parentRoot,
+                slot,
+                executionPayload,
+                blobKzgCommitments,
+                executionRequestsRoot,
+                inclusionListBits.orElseThrow())
+            : schemaDefinitions
+                .getExecutionPayloadBidSchema()
+                .createLocalSelfBuiltBid(
+                    parentRoot, slot, executionPayload, blobKzgCommitments, executionRequestsRoot);
     // Using G2_POINT_AT_INFINITY as signature for self-builds
     return schemaDefinitions
         .getSignedExecutionPayloadBidSchema()

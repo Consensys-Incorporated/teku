@@ -15,6 +15,7 @@ package tech.pegasys.teku.spec.datastructures.forkchoice;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.List;
 import java.util.Map;
 import org.apache.tuweni.bytes.Bytes;
@@ -49,6 +50,70 @@ class InclusionListStoreTest {
       schemaDefinitionsHeze.getInclusionListSchema();
   private final SignedInclusionListSchema signedInclusionListSchema =
       schemaDefinitionsHeze.getSignedInclusionListSchema();
+
+  @Test
+  void shouldComputeBitsByCommitteePositionIncludingRepeatedValidators() {
+    final InclusionListStore store = new InclusionListStore(4);
+    store.processInclusionList(
+        createSignedInclusionList(SLOT, VALIDATOR_INDEX, DEPENDENT_ROOT_1), true);
+    store.processInclusionList(
+        createSignedInclusionList(SLOT, OTHER_VALIDATOR_INDEX, DEPENDENT_ROOT_1), false);
+    final IntList committee = IntList.of(8, 9, 7, 8);
+    final SlotAndBlockRoot key = new SlotAndBlockRoot(SLOT, DEPENDENT_ROOT_1);
+
+    assertThat(store.getInclusionListBits(committee, key, false).streamAllSetBits().toArray())
+        .containsExactly(0, 2, 3);
+    assertThat(store.getInclusionListBits(committee, key, true).streamAllSetBits().toArray())
+        .containsExactly(2);
+  }
+
+  @Test
+  void shouldExcludeEquivocatorsAndIsolateBitsBySlotAndRoot() {
+    final InclusionListStore store = new InclusionListStore(4);
+    store.processInclusionList(
+        createSignedInclusionList(SLOT, VALIDATOR_INDEX, DEPENDENT_ROOT_1), true);
+    store.processInclusionList(
+        createSignedInclusionList(
+            SLOT,
+            VALIDATOR_INDEX,
+            DEPENDENT_ROOT_1,
+            List.of(inclusionListSchema.getTransactionSchema().fromBytes(Bytes.of(1)))),
+        true);
+    store.processInclusionList(
+        createSignedInclusionList(SLOT, VALIDATOR_INDEX, DEPENDENT_ROOT_2), true);
+    store.processInclusionList(
+        createSignedInclusionList(OTHER_SLOT, OTHER_VALIDATOR_INDEX, DEPENDENT_ROOT_1), true);
+    final IntList committee = IntList.of(7, 8);
+
+    assertThat(
+            store
+                .getInclusionListBits(
+                    committee, new SlotAndBlockRoot(SLOT, DEPENDENT_ROOT_1), false)
+                .streamAllSetBits()
+                .toArray())
+        .isEmpty();
+    assertThat(
+            store
+                .getInclusionListBits(
+                    committee, new SlotAndBlockRoot(SLOT, DEPENDENT_ROOT_2), false)
+                .streamAllSetBits()
+                .toArray())
+        .containsExactly(0);
+    assertThat(
+            store
+                .getInclusionListBits(
+                    committee, new SlotAndBlockRoot(OTHER_SLOT, DEPENDENT_ROOT_1), false)
+                .streamAllSetBits()
+                .toArray())
+        .containsExactly(1);
+    assertThat(
+            store
+                .getInclusionListBits(
+                    committee, new SlotAndBlockRoot(THIRD_SLOT, DEPENDENT_ROOT_1), false)
+                .streamAllSetBits()
+                .toArray())
+        .isEmpty();
+  }
 
   @Test
   void shouldStoreAndRetrieveSignedEntriesByKeyAndSlot() {

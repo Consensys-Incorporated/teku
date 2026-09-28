@@ -57,6 +57,7 @@ final class GossipTestContext {
   final ForkChoice forkChoice;
   final ExecutionLayerChannelStub executionLayer;
   final StubMetricsSystem metricsSystem;
+  final InclusionListStore inclusionListStore;
 
   private GossipTestContext(
       final Spec spec,
@@ -64,13 +65,15 @@ final class GossipTestContext {
       final RecentChainData recentChainData,
       final ForkChoice forkChoice,
       final ExecutionLayerChannelStub executionLayer,
-      final StubMetricsSystem metricsSystem) {
+      final StubMetricsSystem metricsSystem,
+      final InclusionListStore inclusionListStore) {
     this.spec = spec;
     this.anchorPoint = anchorPoint;
     this.recentChainData = recentChainData;
     this.forkChoice = forkChoice;
     this.executionLayer = executionLayer;
     this.metricsSystem = metricsSystem;
+    this.inclusionListStore = inclusionListStore;
   }
 
   static GossipTestContext create(
@@ -108,7 +111,13 @@ final class GossipTestContext {
             AsyncBLSSignatureVerifier.wrap(BLSSignatureVerifier.NOOP));
     final ExecutionLayerChannelStub executionLayer = new ExecutionLayerChannelStub(spec, false);
     return new GossipTestContext(
-        spec, anchorPoint, recentChainData, forkChoice, executionLayer, metricsSystem);
+        spec,
+        anchorPoint,
+        recentChainData,
+        forkChoice,
+        executionLayer,
+        metricsSystem,
+        inclusionListStore);
   }
 
   static List<SignedBeaconBlock> loadBlocks(
