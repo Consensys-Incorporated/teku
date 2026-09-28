@@ -147,34 +147,24 @@ class GossipFailureLoggerTest {
   }
 
   @Test
-  void shouldLogFirstSlowPeerErrorsAtWarningLevel() {
+  void shouldLogFirstSlowPeerErrorsAtDebugLevel() {
     try (final LogCaptor logCaptor = LogCaptor.forClass(GossipFailureLogger.class)) {
       loggerSuppressing.log(new RuntimeException("Foo", SLOW_PEER_EXCEPTION), SLOT);
-      logCaptor.assertWarnLog(slowPeerMessage(SLOT, true));
-      assertThat(logCaptor.getErrorLogs()).isEmpty();
-    }
-  }
-
-  @Test
-  void shouldLogRepeatedSlowPeerErrorsAtDebugLevel() {
-    try (final LogCaptor logCaptor = LogCaptor.forClass(GossipFailureLogger.class)) {
-      loggerSuppressing.log(new RuntimeException("Foo", SLOW_PEER_EXCEPTION), SLOT);
-      logCaptor.clearLogs();
-
-      loggerSuppressing.log(new IllegalStateException("Foo", SLOW_PEER_EXCEPTION), SLOT);
       logCaptor.assertDebugLog(slowPeerMessage(SLOT, true));
+      assertThat(logCaptor.getWarnLogs()).isEmpty();
       assertThat(logCaptor.getErrorLogs()).isEmpty();
     }
   }
 
   @Test
-  void shouldLogSlowPeerErrorsWithoutSuppression() {
+  void shouldLogSlowPeerErrorsWithoutSuppressionAtDebugLevel() {
     try (final LogCaptor logCaptor = LogCaptor.forClass(GossipFailureLogger.class)) {
       loggerNoSuppression.log(new RuntimeException("Foo", SLOW_PEER_EXCEPTION), SLOT);
       logCaptor.clearLogs();
 
       loggerNoSuppression.log(new IllegalStateException("Foo", SLOW_PEER_EXCEPTION), SLOT);
-      logCaptor.assertWarnLog(slowPeerMessage(SLOT, false));
+      logCaptor.assertDebugLog(slowPeerMessage(SLOT, false));
+      assertThat(logCaptor.getWarnLogs()).isEmpty();
       assertThat(logCaptor.getErrorLogs()).isEmpty();
     }
   }
