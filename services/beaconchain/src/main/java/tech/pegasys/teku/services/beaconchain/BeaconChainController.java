@@ -1046,7 +1046,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
               receivedExecutionPayloadBidEventsChannelPublisher,
               poolFactory.createPendingPoolForExecutionPayloadBids(spec),
               builderBidFetcher,
-              executionPayloadBidSelector);
+              executionPayloadBidSelector,
+              recentChainData::getForkChoiceStrategy);
       proposerPreferencesManager.subscribeOperationAdded(defaultExecutionPayloadBidManager);
       eventChannels.subscribe(SlotEventsChannel.class, defaultExecutionPayloadBidManager);
       eventChannels.subscribe(ReceivedBlockEventsChannel.class, defaultExecutionPayloadBidManager);
