@@ -176,33 +176,36 @@ public class LoggingConfigurator {
       case CONSOLE -> {
         consoleAppender = consoleAppender(configuration, false);
 
-        statusLogger = setUpStatusLogger(consoleAppender);
-        eventsLogger = setUpEventsLogger(consoleAppender);
-        validatorLogger = setUpValidatorLogger(consoleAppender);
-        dbLogger = setUpDbLogger(consoleAppender);
+        // These loggers are additive and the root logger already has the appender, so adding it
+        // to them as well would log every message twice.
+        statusLogger = setUpStatusLogger(Optional.empty());
+        eventsLogger = setUpEventsLogger(Optional.empty());
+        validatorLogger = setUpValidatorLogger(Optional.empty());
+        dbLogger = setUpDbLogger(Optional.empty());
 
         addAppenderToRootLogger(configuration, consoleAppender);
       }
       case FILE -> {
         fileAppender = fileAppender(configuration);
 
-        statusLogger = setUpStatusLogger(fileAppender);
-        eventsLogger = setUpEventsLogger(fileAppender);
-        validatorLogger = setUpValidatorLogger(fileAppender);
-        dbLogger = setUpDbLogger(fileAppender);
+        // These loggers are additive and the root logger already has the appender, so adding it
+        // to them as well would log every message twice.
+        statusLogger = setUpStatusLogger(Optional.empty());
+        eventsLogger = setUpEventsLogger(Optional.empty());
+        validatorLogger = setUpValidatorLogger(Optional.empty());
+        dbLogger = setUpDbLogger(Optional.empty());
 
         addAppenderToRootLogger(configuration, fileAppender);
       }
       case DEFAULT_BOTH, BOTH -> {
         consoleAppender = consoleAppender(configuration, true);
-        eventsLogger = setUpEventsLogger(consoleAppender);
-        statusLogger = setUpStatusLogger(consoleAppender);
-        validatorLogger = setUpValidatorLogger(consoleAppender);
-        dbLogger = setUpDbLogger(consoleAppender);
+        eventsLogger = setUpEventsLogger(Optional.of(consoleAppender));
+        statusLogger = setUpStatusLogger(Optional.of(consoleAppender));
+        validatorLogger = setUpValidatorLogger(Optional.of(consoleAppender));
+        dbLogger = setUpDbLogger(Optional.of(consoleAppender));
 
         fileAppender = fileAppender(configuration);
 
-        setUpStatusLogger(consoleAppender);
         addAppenderToRootLogger(configuration, fileAppender);
       }
     }
@@ -294,33 +297,33 @@ public class LoggingConfigurator {
     configuration.getRootLogger().addAppender(appender, null, null);
   }
 
-  private static LoggerConfig setUpEventsLogger(final Appender appender) {
+  private static LoggerConfig setUpEventsLogger(final Optional<Appender> appender) {
     final Level eventsLogLevel = includeEvents ? rootLogLevel : Level.OFF;
     final LoggerConfig logger = new LoggerConfig(EVENT_LOGGER_NAME, eventsLogLevel, true);
-    logger.addAppender(appender, eventsLogLevel, null);
+    appender.ifPresent(a -> logger.addAppender(a, eventsLogLevel, null));
     return logger;
   }
 
-  private static LoggerConfig setUpStatusLogger(final Appender appender) {
+  private static LoggerConfig setUpStatusLogger(final Optional<Appender> appender) {
     final LoggerConfig logger = new LoggerConfig(STATUS_LOGGER_NAME, rootLogLevel, true);
-    logger.addAppender(appender, rootLogLevel, null);
+    appender.ifPresent(a -> logger.addAppender(a, rootLogLevel, null));
     return logger;
   }
 
-  private static LoggerConfig setUpValidatorLogger(final Appender appender) {
+  private static LoggerConfig setUpValidatorLogger(final Optional<Appender> appender) {
     // Don't disable validator error logs unless the root log level disables error.
     final Level validatorLogLevel =
         includeValidatorDuties || rootLogLevel.isMoreSpecificThan(Level.ERROR)
             ? rootLogLevel
             : Level.ERROR;
     final LoggerConfig logger = new LoggerConfig(VALIDATOR_LOGGER_NAME, validatorLogLevel, true);
-    logger.addAppender(appender, rootLogLevel, null);
+    appender.ifPresent(a -> logger.addAppender(a, rootLogLevel, null));
     return logger;
   }
 
-  private static LoggerConfig setUpDbLogger(final Appender appender) {
+  private static LoggerConfig setUpDbLogger(final Optional<Appender> appender) {
     final LoggerConfig logger = new LoggerConfig(DB_LOGGER_NAME, rootLogLevel, true);
-    logger.addAppender(appender, rootLogLevel, null);
+    appender.ifPresent(a -> logger.addAppender(a, rootLogLevel, null));
     return logger;
   }
 

@@ -16,6 +16,7 @@ package tech.pegasys.teku.fuzz;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import io.airlift.compress.v3.snappy.SnappyDecompressor;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
@@ -23,7 +24,6 @@ import java.util.List;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
-import org.xerial.snappy.Snappy;
 import tech.pegasys.teku.fuzz.input.AttestationFuzzInput;
 import tech.pegasys.teku.fuzz.input.AttesterSlashingFuzzInput;
 import tech.pegasys.teku.fuzz.input.BeaconBlockBodyFuzzInput;
@@ -455,7 +455,11 @@ class FuzzUtilTest {
     try {
       final byte[] data =
           getClass().getClassLoader().getResourceAsStream(path.toString()).readAllBytes();
-      return type.sszDeserialize(Bytes.wrap(Snappy.uncompress(data)));
+      final SnappyDecompressor decompressor = SnappyDecompressor.create();
+      final int uncompressedLength = decompressor.getUncompressedLength(data, 0);
+      final byte[] uncompressed = new byte[uncompressedLength];
+      decompressor.decompress(data, 0, data.length, uncompressed, 0, uncompressedLength);
+      return type.sszDeserialize(Bytes.wrap(uncompressed));
     } catch (final IOException e) {
       throw new UncheckedIOException(e);
     } catch (final NullPointerException e) {

@@ -22,9 +22,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import tech.pegasys.teku.api.response.ValidatorStatus;
 import tech.pegasys.teku.bls.BLSPublicKey;
+import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
 import tech.pegasys.teku.validator.client.loader.OwnedValidators;
 
-public class ValidatorStatusLogger {
+public class ValidatorStatusLogger implements ValidatorTimingChannel {
   private static final int VALIDATOR_KEYS_PRINT_LIMIT = 20;
 
   final OwnedValidators validators;
@@ -35,6 +36,7 @@ public class ValidatorStatusLogger {
     this.validators = validators;
   }
 
+  @Override
   public void onUpdatedValidatorStatuses(
       final Map<BLSPublicKey, ValidatorStatus> newValidatorStatuses,
       final boolean possibleMissingEvents) {

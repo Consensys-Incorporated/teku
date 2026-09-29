@@ -20,11 +20,8 @@ import io.netty.buffer.ByteBuf;
 import io.netty.util.ReferenceCounted;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.networking.eth2.rpc.Utils;
 import tech.pegasys.teku.networking.eth2.rpc.core.encodings.compression.Compressor.Decompressor;
 import tech.pegasys.teku.networking.eth2.rpc.core.encodings.compression.exceptions.CompressionException;
@@ -45,18 +42,13 @@ public class SnappyCompressorTest {
   private static final Bytes SNAPPY_HEADER =
       Bytes.wrap(new byte[] {(byte) 0xff, 0x06, 0x00, 0x00, 0x73, 0x4e, 0x61, 0x50, 0x70, 0x59});
 
+  private final Compressor compressor = SnappyFramedCompressor.AIRCOMPRESSOR;
+
   private final DataStructureUtil dataStructureUtil =
       new DataStructureUtil(TestSpecFactory.createDefault());
 
-  private static Stream<Arguments> compressors() {
-    return Stream.of(
-        Arguments.of("netty", SnappyFramedCompressor.NETTY),
-        Arguments.of("aircompressor", SnappyFramedCompressor.AIRCOMPRESSOR));
-  }
-
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("compressors")
-  public void roundTrip(final String name, final Compressor compressor) throws Exception {
+  @Test
+  public void roundTrip() throws Exception {
     final BeaconState state = dataStructureUtil.randomBeaconState(0);
     final Bytes serializedState = state.sszSerialize();
 
@@ -81,9 +73,8 @@ public class SnappyCompressorTest {
     }
   }
 
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("compressors")
-  public void uncompress_invalidData(final String name, final Compressor compressor) {
+  @Test
+  public void uncompress_invalidData() {
     final BeaconState state = dataStructureUtil.randomBeaconState(0);
     final Bytes serializedState = state.sszSerialize();
 
@@ -109,10 +100,8 @@ public class SnappyCompressorTest {
     }
   }
 
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("compressors")
-  public void uncompress_seriesOfValues(final String name, final Compressor compressor)
-      throws Exception {
+  @Test
+  public void uncompress_seriesOfValues() throws Exception {
     final BeaconState stateA = dataStructureUtil.randomBeaconState(0);
     final BeaconState stateB = dataStructureUtil.randomBeaconState(1);
     final Bytes serializedStateA = stateA.sszSerialize();
@@ -149,10 +138,8 @@ public class SnappyCompressorTest {
     }
   }
 
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("compressors")
-  public void uncompress_truncatedPayload(final String name, final Compressor compressor)
-      throws CompressionException {
+  @Test
+  public void uncompress_truncatedPayload() throws CompressionException {
     final BeaconState state = dataStructureUtil.randomBeaconState(0);
     final Bytes serializedState = state.sszSerialize();
 
@@ -166,9 +153,8 @@ public class SnappyCompressorTest {
         .isInstanceOf(PayloadSmallerThanExpectedException.class);
   }
 
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("compressors")
-  public void uncompress_maliciousBytes(final String name, final Compressor compressor) {
+  @Test
+  public void uncompress_maliciousBytes() {
     // The number of underlying uncompressed bytes encoded
     final int uncompressedByteCount = 4;
 
@@ -209,9 +195,8 @@ public class SnappyCompressorTest {
     }
   }
 
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("compressors")
-  public void uncompress_failOnExtraHeader(final String name, final Compressor compressor) {
+  @Test
+  public void uncompress_failOnExtraHeader() {
     final Bytes singleByte = compressor.compress(Bytes.of(0x01));
     final Bytes singleByteFrame = singleByte.slice(SNAPPY_HEADER.size());
     final Bytes maliciousPayload = Bytes.concatenate(SNAPPY_HEADER, SNAPPY_HEADER, singleByteFrame);
@@ -238,10 +223,8 @@ public class SnappyCompressorTest {
     }
   }
 
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("compressors")
-  public void uncompress_partialValueWhenFullFrameUnavailable(
-      final String name, final Compressor compressor) throws Exception {
+  @Test
+  public void uncompress_partialValueWhenFullFrameUnavailable() throws Exception {
     final BeaconState state = dataStructureUtil.randomBeaconState();
     final Bytes serializedState = state.sszSerialize();
 
@@ -257,28 +240,5 @@ public class SnappyCompressorTest {
     assertThatThrownBy(() -> decompressor.decodeOneMessage(partialPayload))
         .isInstanceOf(CompressionException.class);
     assertThatThrownBy(decompressor::complete).isInstanceOf(CompressionException.class);
-  }
-
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("compressors")
-  public void compressedDataCanBeUncompressedByOtherImplementation(
-      final String name, final Compressor compressor) throws Exception {
-    final Compressor otherCompressor =
-        name.equals("netty") ? SnappyFramedCompressor.AIRCOMPRESSOR : SnappyFramedCompressor.NETTY;
-    final Bytes payload = dataStructureUtil.randomBeaconState(0).sszSerialize();
-    final Bytes compressed = compressor.compress(payload);
-
-    final Decompressor decompressor = otherCompressor.createDecompressor(payload.size());
-    final ByteBuf compressedBuf = Utils.toByteBuf(compressed);
-    final ByteBuf uncompressed;
-    try {
-      uncompressed = decompressor.decodeOneMessage(compressedBuf).get();
-      decompressor.complete();
-
-      assertThat(Bytes.wrapByteBuf(uncompressed)).isEqualTo(payload);
-      uncompressed.release();
-    } finally {
-      compressedBuf.release();
-    }
   }
 }

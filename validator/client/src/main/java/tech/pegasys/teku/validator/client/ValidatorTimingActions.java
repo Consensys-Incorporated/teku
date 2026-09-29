@@ -23,6 +23,7 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.api.response.ValidatorStatus;
 import tech.pegasys.teku.bls.BLSPublicKey;
+import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuties;
 import tech.pegasys.teku.infrastructure.metrics.SettableGauge;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -173,5 +174,10 @@ public class ValidatorTimingActions implements ValidatorTimingChannel {
         .map(Map.Entry::getKey)
         .filter(validatorIndexProvider::containsPublicKey)
         .toList();
+  }
+
+  @Override
+  public void onProposerDutiesLoaded(final UInt64 epoch, final ProposerDuties proposerDuties) {
+    delegates.forEach(delegate -> delegate.onProposerDutiesLoaded(epoch, proposerDuties));
   }
 }

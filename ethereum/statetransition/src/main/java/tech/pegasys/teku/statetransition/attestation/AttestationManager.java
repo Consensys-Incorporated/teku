@@ -243,6 +243,9 @@ public class AttestationManager extends Service
   public void onExecutionPayloadValidated(final SignedExecutionPayloadEnvelope executionPayload) {}
 
   @Override
+  public void onExecutionPayloadAvailable(final SignedExecutionPayloadEnvelope executionPayload) {}
+
+  @Override
   public void onExecutionPayloadImported(
       final SignedExecutionPayloadEnvelope executionPayload, final boolean executionOptimistic) {
     final Bytes32 blockRoot = executionPayload.getBeaconBlockRoot();

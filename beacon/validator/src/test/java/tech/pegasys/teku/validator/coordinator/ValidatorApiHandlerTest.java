@@ -70,12 +70,13 @@ import tech.pegasys.teku.beacon.sync.events.SyncState;
 import tech.pegasys.teku.beacon.sync.events.SyncStateProvider;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.builder.rest.StakedBuilderClientProvider;
 import tech.pegasys.teku.ethereum.json.types.beacon.StateValidatorData;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuty;
+import tech.pegasys.teku.ethereum.json.types.validator.PayloadTimelinessCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuty;
-import tech.pegasys.teku.ethereum.json.types.validator.PtcDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.PtcDuty;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeSubnetSubscription;
@@ -184,6 +185,8 @@ class ValidatorApiHandlerTest {
       mock(ExecutionPayloadBidManager.class);
   private final ProposerPreferencesManager proposerPreferencesManager =
       mock(ProposerPreferencesManager.class);
+  private final StakedBuilderClientProvider stakedBuilderClientProvider =
+      mock(StakedBuilderClientProvider.class);
 
   private final SyncCommitteeMessagePool syncCommitteeMessagePool =
       mock(SyncCommitteeMessagePool.class);
@@ -248,7 +251,8 @@ class ValidatorApiHandlerTest {
             executionPayloadPublisher,
             executionPayloadBidManager,
             proposerPreferencesManager,
-            executionProofManager);
+            executionProofManager,
+            stakedBuilderClientProvider);
 
     doReturn(BlockProductionPerformance.NOOP)
         .when(blockProductionPerformanceFactory)
@@ -544,7 +548,8 @@ class ValidatorApiHandlerTest {
             executionPayloadPublisher,
             executionPayloadBidManager,
             proposerPreferencesManager,
-            executionProofManager);
+            executionProofManager,
+            stakedBuilderClientProvider);
     dataStructureUtil = new DataStructureUtil(spec);
     // Best state is still in Phase0
     final BeaconState state =
@@ -657,6 +662,37 @@ class ValidatorApiHandlerTest {
 
     // attempted to produce twice
     verify(blockFactory, times(2)).createUnsignedBlock(any());
+  }
+
+  @Test
+  public void createUnsignedBlock_shouldPrepareAgainIfFirstAttemptFailed() {
+    final UInt64 newSlot = UInt64.valueOf(25);
+    final BeaconState blockSlotState = dataStructureUtil.randomBeaconState(newSlot);
+    final BLSSignature randaoReveal = dataStructureUtil.randomSignature();
+    final BlockContainerAndMetaData blockContainerAndMetaData =
+        dataStructureUtil.randomBlockContainerAndMetaData(newSlot);
+
+    mockRequiredMethodsForBlockProduction(blockSlotState, newSlot);
+
+    when(blockFactory.createUnsignedBlock(any()))
+        .thenThrow(new IllegalStateException("oopsy"))
+        .thenReturn(SafeFuture.completedFuture(blockContainerAndMetaData));
+
+    // first call should fail
+    SafeFuture<Optional<BlockContainerAndMetaData>> result =
+        validatorApiHandler.createUnsignedBlock(
+            newSlot, randaoReveal, Optional.empty(), Optional.of(ONE));
+
+    assertThat(result).isCompletedExceptionally();
+    verify(forkChoiceTrigger).prepareForBlockProduction(eq(newSlot), any());
+
+    // second call in the same slot must not reuse the preparation of the failed attempt
+    result =
+        validatorApiHandler.createUnsignedBlock(
+            newSlot, randaoReveal, Optional.empty(), Optional.of(ONE));
+
+    assertThat(result).isCompletedWithValue(Optional.of(blockContainerAndMetaData));
+    verify(forkChoiceTrigger, times(2)).prepareForBlockProduction(eq(newSlot), any());
   }
 
   @Test
@@ -1456,8 +1492,8 @@ class ValidatorApiHandlerTest {
   @Test
   public void getPtcDuties_shouldFailWhenNodeIsSyncing() {
     nodeIsSyncing();
-    final SafeFuture<Optional<PtcDuties>> duties =
-        validatorApiHandler.getPtcDuties(EPOCH, IntList.of(1));
+    final SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> duties =
+        validatorApiHandler.getPayloadTimelinessCommitteeDuties(EPOCH, IntList.of(1));
     assertThat(duties).isCompletedExceptionally();
     assertThatThrownBy(duties::get).hasRootCauseInstanceOf(NodeSyncingException.class);
   }
@@ -1466,8 +1502,8 @@ class ValidatorApiHandlerTest {
   public void getPtcDuties_shouldFailForEpochTooFarAhead() {
     when(chainDataClient.getCurrentEpoch()).thenReturn(EPOCH.minus(3));
 
-    final SafeFuture<Optional<PtcDuties>> result =
-        validatorApiHandler.getPtcDuties(EPOCH, IntList.of(3, 8));
+    final SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> result =
+        validatorApiHandler.getPayloadTimelinessCommitteeDuties(EPOCH, IntList.of(3, 8));
     assertThat(result).isCompletedExceptionally();
     assertThatThrownBy(result::get).hasRootCauseInstanceOf(IllegalArgumentException.class);
   }
@@ -1479,9 +1515,9 @@ class ValidatorApiHandlerTest {
         .thenReturn(completedFuture(Optional.of(state)));
     when(chainDataClient.getCurrentEpoch()).thenReturn(EPOCH.minus(ONE));
 
-    final SafeFuture<Optional<PtcDuties>> result =
-        validatorApiHandler.getPtcDuties(EPOCH, IntList.of(3, 8, 42));
-    final Optional<PtcDuties> duties = assertCompletedSuccessfully(result);
+    final SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> result =
+        validatorApiHandler.getPayloadTimelinessCommitteeDuties(EPOCH, IntList.of(3, 8, 42));
+    final Optional<PayloadTimelinessCommitteeDuties> duties = assertCompletedSuccessfully(result);
     assertThat(duties.orElseThrow().duties())
         .containsExactly(
             new PtcDuty(

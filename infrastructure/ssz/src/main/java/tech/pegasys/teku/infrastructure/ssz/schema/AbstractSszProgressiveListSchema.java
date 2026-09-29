@@ -44,6 +44,7 @@ import tech.pegasys.teku.infrastructure.ssz.schema.impl.PackedByteListsUtil;
 import tech.pegasys.teku.infrastructure.ssz.schema.impl.StoringUtil;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszLengthBounds;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszMaxLengthExceededException;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszReader;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszWriter;
 import tech.pegasys.teku.infrastructure.ssz.tree.BranchNode;
@@ -86,6 +87,17 @@ public abstract class AbstractSszProgressiveListSchema<
       Suppliers.memoize(() -> SszNodeTemplate.createFromType(getElementSchema()));
 
   private final boolean packByteListElements;
+  // max SSZ size of a packed byte-list element, i.e. the element schema's own max length; checked
+  // by the offset parser since packed elements are materialized lazily
+  private final long packedMaxElementSize;
+
+  /**
+   * Optional length limit. Progressive lists have no SSZ-level capacity, but consensus may still
+   * bound them (e.g. {@code MAX_ATTESTATIONS_ELECTRA}); when set, the limit is enforced on
+   * construction and on deserialization, before any element is materialized. {@link Long#MAX_VALUE}
+   * means unlimited.
+   */
+  private final long maxLength;
 
   protected AbstractSszProgressiveListSchema(final SszSchema<ElementDataT> elementSchema) {
     this(elementSchema, SszSchemaHints.none());
@@ -93,8 +105,17 @@ public abstract class AbstractSszProgressiveListSchema<
 
   protected AbstractSszProgressiveListSchema(
       final SszSchema<ElementDataT> elementSchema, final SszSchemaHints hints) {
+    this(elementSchema, hints, Long.MAX_VALUE);
+  }
+
+  protected AbstractSszProgressiveListSchema(
+      final SszSchema<ElementDataT> elementSchema,
+      final SszSchemaHints hints,
+      final long maxLength) {
+    checkArgument(maxLength >= 0, "maxLength must not be negative but was %s", maxLength);
     this.elementSchema = elementSchema;
     this.hints = hints;
+    this.maxLength = maxLength;
     if (hints.getHint(SszPackedByteListsHint.class).isPresent()) {
       checkArgument(
           elementSchema instanceof SszProgressiveByteListSchema,
@@ -104,8 +125,10 @@ public abstract class AbstractSszProgressiveListSchema<
           hints.getHint(SszSuperNodeHint.class).isEmpty(),
           "SszPackedByteListsHint and SszSuperNodeHint are mutually exclusive");
       this.packByteListElements = true;
+      this.packedMaxElementSize = ((SszProgressiveByteListSchema<?>) elementSchema).getMaxLength();
     } else {
       this.packByteListElements = false;
+      this.packedMaxElementSize = Long.MAX_VALUE;
     }
     this.elementsPerChunk = computeElementsPerChunk(elementSchema);
     this.defaultTree =
@@ -131,6 +154,12 @@ public abstract class AbstractSszProgressiveListSchema<
 
   @Override
   public TreeNode createTreeFromElements(final List<? extends ElementDataT> elements) {
+    checkArgument(
+        elements.size() <= maxLength,
+        "Too many elements for this collection type (element type: %s, max length %s, size %s)",
+        elementSchema,
+        maxLength,
+        elements.size());
     if (packByteListElements && !elements.isEmpty()) {
       final PackedByteListsUtil.PackedElements packed = PackedByteListsUtil.packElements(elements);
       final SszPackedProgressiveByteListsNode packedNode =
@@ -147,7 +176,13 @@ public abstract class AbstractSszProgressiveListSchema<
 
   @Override
   public long getMaxLength() {
-    return Long.MAX_VALUE;
+    return maxLength;
+  }
+
+  private void checkDeserializedLength(final long elementsCount) {
+    if (elementsCount > maxLength) {
+      throw new SszMaxLengthExceededException("List", elementsCount, maxLength);
+    }
   }
 
   @Override
@@ -312,7 +347,9 @@ public abstract class AbstractSszProgressiveListSchema<
       return defaultTree;
     }
     final Bytes bytes = reader.read(endOffset);
-    final int[] offsets = PackedByteListsUtil.parseUnboundedPackedOffsets(bytes);
+    // maxLength is enforced by the offset parser before the offset table is allocated
+    final int[] offsets =
+        PackedByteListsUtil.parsePackedOffsets(bytes, maxLength, packedMaxElementSize);
     final SszPackedProgressiveByteListsNode packedNode =
         new SszPackedProgressiveByteListsNode(bytes, offsets, this::materializePackedElement);
     return BranchNode.create(packedNode, toLengthNode(packedNode.getElementCount()));
@@ -338,11 +375,13 @@ public abstract class AbstractSszProgressiveListSchema<
       // Primitive packing: multiple values per 32-byte leaf. The element schema validates
       // constrained encodings per chunk (e.g., booleans must be 0 or 1)
       final int elementsCount = (int) (bytesSize * 8L / elementBitSize);
+      checkDeserializedLength(elementsCount);
       return createPackedProgressiveListTree(
           reader.read(bytesSize), primitiveElementSchema::createNodeFromSszBytes, elementsCount);
     } else {
       // Fixed-size composite elements: one per chunk
       final int elementsCount = bytesSize / elementSchema.getSszFixedPartSize();
+      checkDeserializedLength(elementsCount);
       final int superNodeDepth = getSuperNodeDepth();
       if (superNodeDepth > 0) {
         final TreeNode progressiveTree =
@@ -377,6 +416,7 @@ public abstract class AbstractSszProgressiveListSchema<
                 + endOffset);
       }
       final int elementsCount = firstElementOffset / SszType.SSZ_LENGTH_SIZE;
+      checkDeserializedLength(elementsCount);
       final List<Integer> elementOffsets = new ArrayList<>(elementsCount + 1);
       elementOffsets.add(firstElementOffset);
       for (int i = 1; i < elementsCount; i++) {
@@ -400,9 +440,12 @@ public abstract class AbstractSszProgressiveListSchema<
 
   @Override
   public SszLengthBounds getSszLengthBounds() {
-    // Progressive lists have no max capacity — use Long.MAX_VALUE bits directly
-    // to avoid overflow when converting from bytes to bits
-    return SszLengthBounds.ofBits(0, Long.MAX_VALUE);
+    if (maxLength == Long.MAX_VALUE) {
+      // Progressive lists have no max capacity — use Long.MAX_VALUE bits directly
+      // to avoid overflow when converting from bytes to bits
+      return SszLengthBounds.ofBits(0, Long.MAX_VALUE);
+    }
+    return ListSchemaUtil.computeListSszLengthBounds(elementSchema, maxLength);
   }
 
   @Override
@@ -777,16 +820,22 @@ public abstract class AbstractSszProgressiveListSchema<
       return false;
     }
     final AbstractSszProgressiveListSchema<?, ?> that = (AbstractSszProgressiveListSchema<?, ?>) o;
-    return Objects.equals(elementSchema, that.elementSchema) && Objects.equals(hints, that.hints);
+    return Objects.equals(elementSchema, that.elementSchema)
+        && Objects.equals(hints, that.hints)
+        && maxLength == that.maxLength;
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(elementSchema, hints);
+    return Objects.hash(elementSchema, hints, maxLength);
   }
 
   @Override
   public String toString() {
-    return "ProgressiveList[" + elementSchema + "]" + getHints();
+    return "ProgressiveList["
+        + elementSchema
+        + (maxLength == Long.MAX_VALUE ? "" : ", " + maxLength)
+        + "]"
+        + getHints();
   }
 }

@@ -30,9 +30,6 @@ public class SpecConfigGloasImpl extends DelegatingSpecConfigFulu implements Spe
   private final int maxBuildersPerWithdrawalsSweep;
   private final int maxPayloadAttestations;
   private final int maxRequestPayloads;
-  private final int maxSignedAggregateAndProofSize;
-  private final int maxAttesterSlashingSize;
-  private final int maxSignedExecutionPayloadBidSize;
   private final int minBuilderWithdrawabilityDelay;
   private final int payloadAttestationDueBps;
   private final int payloadDueBps;
@@ -63,9 +60,6 @@ public class SpecConfigGloasImpl extends DelegatingSpecConfigFulu implements Spe
       final int churnLimitQuotientGloas,
       final int consolidationChurnLimitQuotient,
       final UInt64 maxPerEpochActivationChurnLimitGloas,
-      final int maxSignedAggregateAndProofSize,
-      final int maxAttesterSlashingSize,
-      final int maxSignedExecutionPayloadBidSize,
       final List<GasLimitScheduleEntry> gasLimitSchedule) {
     super(specConfig);
     this.aggregateDueBps = aggregateDueBps;
@@ -78,9 +72,6 @@ public class SpecConfigGloasImpl extends DelegatingSpecConfigFulu implements Spe
     this.maxBuildersPerWithdrawalsSweep = maxBuildersPerWithdrawalsSweep;
     this.maxPayloadAttestations = maxPayloadAttestations;
     this.maxRequestPayloads = maxRequestPayloads;
-    this.maxSignedAggregateAndProofSize = maxSignedAggregateAndProofSize;
-    this.maxAttesterSlashingSize = maxAttesterSlashingSize;
-    this.maxSignedExecutionPayloadBidSize = maxSignedExecutionPayloadBidSize;
     this.ptcSize = ptcSize;
     this.minBuilderWithdrawabilityDelay = minBuilderWithdrawabilityDelay;
     this.payloadAttestationDueBps = payloadAttestationDueBps;
@@ -113,21 +104,6 @@ public class SpecConfigGloasImpl extends DelegatingSpecConfigFulu implements Spe
   }
 
   @Override
-  public int getMaxSignedAggregateAndProofSize() {
-    return maxSignedAggregateAndProofSize;
-  }
-
-  @Override
-  public int getMaxAttesterSlashingSize() {
-    return maxAttesterSlashingSize;
-  }
-
-  @Override
-  public int getMaxSignedExecutionPayloadBidSize() {
-    return maxSignedExecutionPayloadBidSize;
-  }
-
-  @Override
   public int getMinBuilderWithdrawabilityDelay() {
     return minBuilderWithdrawabilityDelay;
   }
@@ -143,7 +119,7 @@ public class SpecConfigGloasImpl extends DelegatingSpecConfigFulu implements Spe
   }
 
   @Override
-  public int getPtcSize() {
+  public int getPayloadTimelinessCommitteeSize() {
     return ptcSize;
   }
 
@@ -226,9 +202,6 @@ public class SpecConfigGloasImpl extends DelegatingSpecConfigFulu implements Spe
         && contributionDueBps == that.contributionDueBps
         && maxPayloadAttestations == that.maxPayloadAttestations
         && maxRequestPayloads == that.maxRequestPayloads
-        && maxSignedAggregateAndProofSize == that.maxSignedAggregateAndProofSize
-        && maxAttesterSlashingSize == that.maxAttesterSlashingSize
-        && maxSignedExecutionPayloadBidSize == that.maxSignedExecutionPayloadBidSize
         && minBuilderWithdrawabilityDelay == that.minBuilderWithdrawabilityDelay
         && payloadAttestationDueBps == that.payloadAttestationDueBps
         && payloadDueBps == that.payloadDueBps
@@ -260,9 +233,6 @@ public class SpecConfigGloasImpl extends DelegatingSpecConfigFulu implements Spe
         maxBuildersPerWithdrawalsSweep,
         maxPayloadAttestations,
         maxRequestPayloads,
-        maxSignedAggregateAndProofSize,
-        maxAttesterSlashingSize,
-        maxSignedExecutionPayloadBidSize,
         minBuilderWithdrawabilityDelay,
         payloadAttestationDueBps,
         payloadDueBps,

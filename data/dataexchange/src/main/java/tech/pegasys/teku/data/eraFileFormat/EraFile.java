@@ -14,6 +14,8 @@
 package tech.pegasys.teku.data.eraFileFormat;
 
 import com.google.common.base.Preconditions;
+import io.airlift.compress.v3.snappy.SnappyDecompressor;
+import io.airlift.compress.v3.snappy.SnappyFramedInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -28,7 +30,6 @@ import java.util.Locale;
 import java.util.Map;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
-import org.xerial.snappy.SnappyFramedInputStream;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecFactory;
@@ -109,7 +110,8 @@ public class EraFile {
 
   private BeaconState getBeaconState(final ReadEntry entry) throws IOException {
     final SnappyFramedInputStream is =
-        new SnappyFramedInputStream(new ByteArrayInputStream(entry.getData()));
+        new SnappyFramedInputStream(
+            SnappyDecompressor.create(), new ByteArrayInputStream(entry.getData()));
 
     return spec.atSlot(stateIndices.getStartSlot())
         .getSchemaDefinitions()
@@ -119,7 +121,8 @@ public class EraFile {
 
   private SignedBeaconBlock getBlock(final ReadEntry entry) throws IOException {
     final SnappyFramedInputStream is =
-        new SnappyFramedInputStream(new ByteArrayInputStream(entry.getData()));
+        new SnappyFramedInputStream(
+            SnappyDecompressor.create(), new ByteArrayInputStream(entry.getData()));
 
     if (currentSlot == null) {
       currentSlot = blockIndices.getStartSlot();

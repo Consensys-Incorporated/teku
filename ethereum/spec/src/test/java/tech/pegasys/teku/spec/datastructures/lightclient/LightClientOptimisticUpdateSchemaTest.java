@@ -31,7 +31,7 @@ public class LightClientOptimisticUpdateSchemaTest {
   private DataStructureUtil dataStructureUtil;
 
   @BeforeEach
-  public void setup(final SpecContext specContext) {
+  void setup(final SpecContext specContext) {
     spec = specContext.getSpec();
     dataStructureUtil = specContext.getDataStructureUtil();
   }

@@ -487,6 +487,8 @@ public class BeaconNodeCommandTest extends AbstractBeaconNodeCommandTest {
       "42",
       "--Xbuilder-boost-factor",
       "80",
+      "--Xbuilder-max-execution-payment",
+      "67",
       "--Xbuilder-urls",
       "https://foobar.com,https://plataberget.com"
     };
@@ -495,6 +497,7 @@ public class BeaconNodeCommandTest extends AbstractBeaconNodeCommandTest {
         beaconNodeCommand.tekuConfiguration().validatorClient().getValidatorConfig();
     assertThat(validatorConfig.getBuilderMinBid()).isEqualTo(UInt64.valueOf(42));
     assertThat(validatorConfig.getBuilderBoostFactor()).isEqualTo(UInt64.valueOf(80));
+    assertThat(validatorConfig.getBuilderMaxExecutionPayment()).isEqualTo(UInt64.valueOf(67));
     assertThat(validatorConfig.getBuilderUrls()).hasSize(2);
   }
 

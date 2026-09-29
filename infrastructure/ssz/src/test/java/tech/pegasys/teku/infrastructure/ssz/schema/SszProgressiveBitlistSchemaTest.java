@@ -30,10 +30,12 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import tech.pegasys.teku.infrastructure.ssz.SszContainer;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBitlist;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszMutablePrimitiveList;
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema2;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBit;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszLengthBounds;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszMaxLengthExceededException;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszReader;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 
@@ -110,6 +112,64 @@ public class SszProgressiveBitlistSchemaTest {
   @Test
   void getMaxLength_shouldReturnMaxValue() {
     assertThat(SCHEMA.getMaxLength()).isEqualTo(Long.MAX_VALUE);
+  }
+
+  @Test
+  void maxLength_shouldBeEnforcedOnConstruction() {
+    final SszProgressiveBitlistSchema limited = new SszProgressiveBitlistSchema(4);
+    assertThat(limited.getMaxLength()).isEqualTo(4);
+    assertThat(limited.ofBits(4, 1, 3).size()).isEqualTo(4);
+    assertThatThrownBy(() -> limited.ofBits(5)).isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> limited.wrapBitSet(5, new BitSet()))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void maxLength_shouldBeEnforcedOnDeserialization() {
+    final SszProgressiveBitlistSchema limited = new SszProgressiveBitlistSchema(4);
+    final Bytes atLimit = SCHEMA.ofBits(4, 0).sszSerialize();
+    final Bytes tooLong = SCHEMA.ofBits(5, 0).sszSerialize();
+
+    assertThat(limited.sszDeserialize(atLimit).size()).isEqualTo(4);
+    assertThatThrownBy(() -> limited.sszDeserialize(tooLong))
+        .isInstanceOf(SszMaxLengthExceededException.class)
+        .hasMessage("Bitlist length 5 exceeds max length 4");
+  }
+
+  @Test
+  void maxLength_shouldBeEnforcedOnMutation() {
+    final SszProgressiveBitlistSchema limited = new SszProgressiveBitlistSchema(4);
+    final SszMutablePrimitiveList<Boolean, SszBit> writable =
+        limited.ofBits(4, 1).createWritableCopy();
+
+    assertThatThrownBy(() -> writable.append(SszBit.of(true)))
+        .isInstanceOf(IndexOutOfBoundsException.class);
+    assertThatThrownBy(() -> writable.set(4, SszBit.of(true)))
+        .isInstanceOf(IndexOutOfBoundsException.class);
+    writable.set(3, SszBit.of(true));
+    assertThat(writable.commitChanges().get(3).get()).isTrue();
+
+    final SszMutablePrimitiveList<Boolean, SszBit> growable =
+        limited.ofBits(3, 1).createWritableCopy();
+    growable.append(SszBit.of(true));
+    assertThat(growable.commitChanges().size()).isEqualTo(4);
+  }
+
+  @Test
+  void maxLength_shouldMakeSszLengthBoundsFinite() {
+    final SszProgressiveBitlistSchema limited = new SszProgressiveBitlistSchema(4);
+    // 4 bits plus the boundary bit fit in a single byte
+    assertThat(limited.getSszLengthBounds().getMaxBytes()).isEqualTo(1);
+    assertThat(new SszProgressiveBitlistSchema(8).getSszLengthBounds().getMaxBytes()).isEqualTo(2);
+  }
+
+  @Test
+  void maxLength_shouldBePartOfEquality() {
+    assertThat(new SszProgressiveBitlistSchema(4))
+        .isEqualTo(new SszProgressiveBitlistSchema(4))
+        .hasSameHashCodeAs(new SszProgressiveBitlistSchema(4))
+        .isNotEqualTo(new SszProgressiveBitlistSchema(5))
+        .isNotEqualTo(SCHEMA);
   }
 
   @Test

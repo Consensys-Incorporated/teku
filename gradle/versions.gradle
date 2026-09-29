@@ -129,8 +129,7 @@ dependencyManagement {
 			entry 'core'
 		}
 
-		dependency 'org.xerial.snappy:snappy-java:1.1.10.7'
-		dependency 'io.airlift:aircompressor-v3:3.7'
+		dependency 'io.airlift:aircompressor-v3:3.8'
 
 		dependency 'io.prometheus:prometheus-metrics-bom:1.5.1'
 

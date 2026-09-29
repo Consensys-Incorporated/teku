@@ -1,4 +1,4 @@
-version: v1.7.0-beta.0
+version: v1.7.0-beta.2
 style: full
 
 specrefs:
@@ -174,6 +174,7 @@ specrefs:
       - Transactions#gloas
       - Validators#phase0
       - Validators#gloas
+      - VersionedHashes#deneb
       - VoluntaryExits#phase0
       - VoluntaryExits#gloas
       - WithdrawalRequests#electra
@@ -198,6 +199,7 @@ specrefs:
       - Seen#electra
       - Seen#fulu
       - Seen#gloas
+      - Seen#heze
 
       # Not implemented: heze
       - GetInclusionListResponse#heze
@@ -263,20 +265,13 @@ specrefs:
 
 
       # Not implemented: gloas
-      - get_proposer_head#gloas
-      - is_bid_compatible_with_head#gloas
-      - is_valid_dependent_root#gloas
       - validate_partial_data_column_sidecar_gossip#gloas
+      - compute_max_partial_data_column_sidecar_size#gloas
 
       # Not implemented yet: EIP-7688 progressive SSZ transition
       - upgrade_attestation_to_gloas#gloas
       - upgrade_attester_slashing_to_gloas#gloas
       - upgrade_indexed_attestation_to_gloas#gloas
-
-      # Not implemented yet: Gloas EIP-7688 block body / execution requests limit
-      # checks are not yet enforced as explicit gossip validation steps (alpha.14)
-      - verify_block_body_operation_limits#gloas
-      - verify_execution_requests_limits#gloas
 
       # Not implemented yet: the CustodyColumnBits-returning helper is not built;
       # Teku only has the underlying custody group/column index computation
@@ -303,15 +298,13 @@ specrefs:
       - upgrade_to_heze#heze
       - get_inclusion_list_due_ms#heze
       - get_signed_inclusion_list#heze
+      - validate_execution_payload_bid_gossip#heze
+      - validate_inclusion_list_gossip#heze
 
     presets:
       # Not implemented yet: EIP-7688 progressive SSZ sizing work
       - MAX_ATTESTER_SLASHING_SIZE#gloas
       - MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE#gloas
-      # Removed by consensus-specs#5613: computed by compute_max_data_column_sidecar_size
-      # (DataColumnSidecarSchemaGloas) from the blob schedule
-      - MAX_DATA_COLUMN_SIDECAR_SIZE#gloas
-      - MAX_PARTIAL_DATA_COLUMN_SIDECAR_SIZE#gloas
       - MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE#gloas
       - MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE_HEZE#heze
       - MAX_SIGNED_INCLUSION_LIST_SIZE#heze

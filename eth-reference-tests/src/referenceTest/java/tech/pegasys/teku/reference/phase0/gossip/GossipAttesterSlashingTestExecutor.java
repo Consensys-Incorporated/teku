@@ -13,23 +13,23 @@
 
 package tech.pegasys.teku.reference.phase0.gossip;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
+import static tech.pegasys.teku.reference.BlsSetting.IGNORED;
 import static tech.pegasys.teku.reference.TestDataUtils.loadSsz;
 import static tech.pegasys.teku.reference.TestDataUtils.loadStateFromSsz;
 import static tech.pegasys.teku.reference.TestDataUtils.loadYaml;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
-import java.util.Set;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
-import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.reference.BlsSetting;
 import tech.pegasys.teku.reference.TestExecutor;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
-import tech.pegasys.teku.spec.logic.common.operations.validation.OperationInvalidReason;
+import tech.pegasys.teku.statetransition.validation.AttesterSlashingValidator;
+import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 
 public class GossipAttesterSlashingTestExecutor implements TestExecutor {
 
@@ -37,11 +37,14 @@ public class GossipAttesterSlashingTestExecutor implements TestExecutor {
   public void runTest(final TestDefinition testDefinition) throws Throwable {
     final GossipAttesterSlashingMetaData metaData =
         loadYaml(testDefinition, "meta.yaml", GossipAttesterSlashingMetaData.class);
-    final Spec spec = testDefinition.getSpec();
+    final boolean signatureVerificationDisabled = metaData.getBlsSetting() == IGNORED;
+    final Spec spec = testDefinition.getSpec(!signatureVerificationDisabled);
     final BeaconState state = loadStateFromSsz(testDefinition, "state.ssz_snappy");
-
-    // Track seen slashable validator indices across messages
-    final Set<UInt64> seenIndices = new HashSet<>();
+    final List<SignedBeaconBlock> blocks =
+        GossipTestContext.loadBlocks(testDefinition, spec, metaData.getBlocks());
+    final GossipTestContext ctx = GossipTestContext.create(spec, state, blocks);
+    final AttesterSlashingValidator validator =
+        new AttesterSlashingValidator(ctx.recentChainData, spec);
 
     for (final GossipAttesterSlashingMetaData.Message message : metaData.getMessages()) {
       final AttesterSlashing slashing =
@@ -49,34 +52,10 @@ public class GossipAttesterSlashingTestExecutor implements TestExecutor {
               testDefinition,
               message.getMessage() + ".ssz_snappy",
               spec.getGenesisSchemaDefinitions().getAttesterSlashingSchema());
+      final InternalValidationResult result = safeJoin(validator.validateForGossip(slashing));
 
-      final Set<UInt64> intersectingIndices = slashing.getIntersectingValidatorIndices();
-
-      if (seenIndices.containsAll(intersectingIndices)) {
-        // All intersecting indices already seen (includes empty intersection case)
-        assertThat(message.getExpected())
-            .describedAs(
-                "Expected ignore for attester slashing %s (all indices already seen)",
-                message.getMessage())
-            .isEqualTo("ignore");
-        continue;
-      }
-
-      final Optional<OperationInvalidReason> invalidReason =
-          spec.validateAttesterSlashing(state, slashing);
-
-      if (invalidReason.isPresent()) {
-        assertThat(message.getExpected())
-            .describedAs(
-                "Expected reject for attester slashing %s: %s",
-                message.getMessage(), invalidReason.get().describe())
-            .isEqualTo("reject");
-      } else {
-        assertThat(message.getExpected())
-            .describedAs("Expected valid for attester slashing %s", message.getMessage())
-            .isEqualTo("valid");
-        seenIndices.addAll(intersectingIndices);
-      }
+      GossipTestContext.assertValidationResult(
+          "attester slashing " + message.getMessage(), message.getExpected(), result);
     }
   }
 
@@ -89,11 +68,22 @@ public class GossipAttesterSlashingTestExecutor implements TestExecutor {
     @JsonProperty(value = "messages", required = true)
     private List<Message> messages;
 
+    @JsonProperty(value = "blocks", required = true)
+    private List<GossipTestContext.BlockEntry> blocks;
+
     @JsonProperty(value = "bls_setting", required = false, defaultValue = "0")
     private int blsSetting;
 
     public List<Message> getMessages() {
       return messages;
+    }
+
+    public List<GossipTestContext.BlockEntry> getBlocks() {
+      return blocks;
+    }
+
+    public BlsSetting getBlsSetting() {
+      return BlsSetting.forCode(blsSetting);
     }
 
     private static class Message {

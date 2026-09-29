@@ -16,7 +16,10 @@ package tech.pegasys.teku.networking.p2p.libp2p;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.embedded.EmbeddedChannel;
+import java.lang.Thread.UncaughtExceptionHandler;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeoutException;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -41,6 +44,28 @@ public class FirewallTest {
     executeAllScheduledTasks(channel, 5);
     Assertions.assertThatCode(channel::checkException).doesNotThrowAnyException();
     Assertions.assertThat(channel.isOpen()).isFalse();
+  }
+
+  @Test
+  void shouldEscalateOutOfMemoryErrorInsteadOfOnlyLoggingIt() {
+    // Netty throws OutOfDirectMemoryError when the direct memory limit is reached, and
+    // -XX:+ExitOnOutOfMemoryError does not detect it because it is thrown by Java code. Without
+    // escalation this handler would just log at debug level and the node would keep running.
+    final OutOfMemoryError error =
+        new OutOfMemoryError("Cannot reserve 1048576 bytes of direct buffer memory");
+    final List<Throwable> escalated = new ArrayList<>();
+    final Thread thread = Thread.currentThread();
+    final UncaughtExceptionHandler original = thread.getUncaughtExceptionHandler();
+    thread.setUncaughtExceptionHandler((t, e) -> escalated.add(e));
+
+    try {
+      final EmbeddedChannel channel = new EmbeddedChannel(new Firewall(Duration.ofMillis(100)));
+      channel.pipeline().fireExceptionCaught(error);
+    } finally {
+      thread.setUncaughtExceptionHandler(original);
+    }
+
+    Assertions.assertThat(escalated).containsExactly(error);
   }
 
   private void executeAllScheduledTasks(final EmbeddedChannel channel, final long maxWaitSeconds)

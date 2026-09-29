@@ -14,6 +14,9 @@
 package tech.pegasys.teku.statetransition.validation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
+import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.ACCEPT;
+import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.IGNORE;
 
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
@@ -23,6 +26,7 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.config.builder.SpecConfigBuilder;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 
 public class ElectraAttestationValidatorTest extends DenebAttestationValidatorTest {
 
@@ -118,5 +122,50 @@ public class ElectraAttestationValidatorTest extends DenebAttestationValidatorTe
             InternalValidationResult.reject(
                 "Attestation data index must be 0 for Electra, but was %s.",
                 wrongAttestation.getData().getIndex()));
+  }
+
+  @Test
+  public void shouldIgnoreDuplicateSingleAttestationBeforeOtherGossipChecks() {
+    final Attestation legacyAttestation =
+        attestationGenerator.validAttestation(storageSystem.getChainHead());
+    final BeaconState state = safeJoin(recentChainData.getBestState().orElseThrow());
+    final UInt64 attesterIndex = spec.getAttestingIndices(state, legacyAttestation).get(0);
+
+    final Attestation singleAttestation =
+        spec.getGenesisSchemaDefinitions()
+            .toVersionElectra()
+            .orElseThrow()
+            .getSingleAttestationSchema()
+            .create(
+                legacyAttestation.getFirstCommitteeIndex(),
+                attesterIndex,
+                legacyAttestation.getData(),
+                legacyAttestation.getAggregateSignature());
+
+    // First SingleAttestation from this validator/target epoch is accepted and recorded as seen.
+    assertThat(validate(singleAttestation).code()).isEqualTo(ACCEPT);
+
+    // A second SingleAttestation for the same validator/target epoch, but with a non-zero data
+    // index that would otherwise REJECT, must still be IGNORE: for SingleAttestation the
+    // duplicate check is the very first thing validated, ahead of every other check.
+    final AttestationData nonZeroIndexData =
+        new AttestationData(
+            legacyAttestation.getData().getSlot(),
+            UInt64.ONE,
+            legacyAttestation.getData().getBeaconBlockRoot(),
+            legacyAttestation.getData().getSource(),
+            legacyAttestation.getData().getTarget());
+    final Attestation duplicateWithInvalidDataIndex =
+        spec.getGenesisSchemaDefinitions()
+            .toVersionElectra()
+            .orElseThrow()
+            .getSingleAttestationSchema()
+            .create(
+                legacyAttestation.getFirstCommitteeIndex(),
+                attesterIndex,
+                nonZeroIndexData,
+                legacyAttestation.getAggregateSignature());
+
+    assertThat(validate(duplicateWithInvalidDataIndex).code()).isEqualTo(IGNORE);
   }
 }

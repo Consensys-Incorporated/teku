@@ -70,6 +70,17 @@ public class PayloadAttestationMessageGossipValidator {
     final PayloadAttestationData data = validatablePayloadAttestationMessage.getData();
 
     /*
+     * [REJECT] The payload attestation slot is at or after the Gloas fork
+     */
+    if (!spec.isPayloadAttestationAvailableAtSlot(data.getSlot())) {
+      return completedFuture(
+          rejectPayloadAttestation(
+              payloadAttestationMessage,
+              "Payload attestation's slot %s is before the Gloas fork",
+              data.getSlot()));
+    }
+
+    /*
      * [IGNORE] The payload attestation's slot is for the current slot
      */
     if (!gossipValidationHelper.isSlotCurrent(data.getSlot())) {
@@ -168,9 +179,10 @@ public class PayloadAttestationMessageGossipValidator {
               /*
                * [REJECT] The validator is a member of the payload timeliness committee
                */
-              final IntSet ptcPositions =
-                  validatablePayloadAttestationMessage.calculatePtcPositions(spec, state);
-              if (ptcPositions.isEmpty()) {
+              final IntSet payloadTimelinessCommitteePositions =
+                  validatablePayloadAttestationMessage.calculatePayloadTimelinessCommitteePositions(
+                      spec, state);
+              if (payloadTimelinessCommitteePositions.isEmpty()) {
                 return rejectPayloadAttestation(
                     payloadAttestationMessage,
                     "Payload attestation's validator index %s is not in the payload committee",

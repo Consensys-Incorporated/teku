@@ -97,6 +97,7 @@ public class PayloadAttestationMessageGossipValidatorTest {
     when(miscHelpers.computeSigningRoot(eq(payloadAttestationMessage.getData()), any()))
         .thenReturn(signingRoot);
     when(specVersion.miscHelpers()).thenReturn(miscHelpers);
+    when(spec.isPayloadAttestationAvailableAtSlot(slot)).thenReturn(true);
     when(spec.atSlot(slot)).thenReturn(specVersion);
     when(spec.getPtc(postState, slot)).thenReturn(IntList.of(validatorIndex.intValue()));
     when(gossipValidationHelper.isSignatureValidWithRespectToProposerIndex(
@@ -129,7 +130,7 @@ public class PayloadAttestationMessageGossipValidatorTest {
             payloadAttestationMessageGossipValidator.validate(validatablePayloadAttestationMessage))
         .isCompletedWithValue(ACCEPT);
 
-    assertThat(validatablePayloadAttestationMessage.getPtcPositions())
+    assertThat(validatablePayloadAttestationMessage.getPayloadTimelinessCommitteePositions())
         .hasValueSatisfying(ptcPositions -> assertThat(ptcPositions).isEqualTo(IntSet.of(0, 2, 4)));
   }
 
@@ -246,6 +247,16 @@ public class PayloadAttestationMessageGossipValidatorTest {
             reject(
                 "Payload attestation's validator index %s is out of range for the %s validators in the state",
                 validatorIndex, postState.getValidators().size()));
+  }
+
+  @TestTemplate
+  void shouldReject_whenSlotIsBeforeGloasFork() {
+    when(spec.isPayloadAttestationAvailableAtSlot(slot)).thenReturn(false);
+    assertThatSafeFuture(
+            payloadAttestationMessageGossipValidator.validate(
+                validatablePayloadAttestationMessage()))
+        .isCompletedWithValue(
+            reject("Payload attestation's slot %s is before the Gloas fork", slot));
   }
 
   @TestTemplate

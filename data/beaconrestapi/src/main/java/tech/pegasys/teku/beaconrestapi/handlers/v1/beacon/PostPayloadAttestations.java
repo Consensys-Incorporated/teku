@@ -91,7 +91,8 @@ public class PostPayloadAttestations extends RestApiEndpoint {
     final PayloadAttestationMessageSchema payloadAttestationMessageSchema =
         schemaDefinitions.getPayloadAttestationMessageSchema();
     final int ptcSize =
-        SpecConfigGloas.required(spec.forMilestone(SpecMilestone.GLOAS).getConfig()).getPtcSize();
+        SpecConfigGloas.required(spec.forMilestone(SpecMilestone.GLOAS).getConfig())
+            .getPayloadTimelinessCommitteeSize();
 
     final OneOfArrayJsonRequestContentTypeDefinition.BodyTypeSelector<PayloadAttestationMessage>
         bodyTypeSelector = context -> payloadAttestationMessageSchema.getJsonTypeDefinition();

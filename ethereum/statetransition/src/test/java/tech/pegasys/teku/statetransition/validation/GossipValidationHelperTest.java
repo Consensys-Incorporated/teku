@@ -221,6 +221,11 @@ public class GossipValidationHelperTest {
   }
 
   @TestTemplate
+  void isEpochFromFuture_shouldHandleMaximumEpoch() {
+    assertThat(gossipValidationHelper.isEpochFromFuture(UInt64.MAX_VALUE)).isTrue();
+  }
+
+  @TestTemplate
   void isSignatureValidWithRespectToProposerIndex_shouldComputeCorrectly() {
     final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
     storageSystem.chainUpdater().setCurrentSlot(nextSlot);
@@ -755,6 +760,13 @@ public class GossipValidationHelperTest {
 
     assertThat(gossipValidationHelper.isPossibleDependentRoot(head.getRoot(), epochStartSlot))
         .isTrue();
+  }
+
+  @TestTemplate
+  void isPossibleDependentRoot_shouldAcceptGenesisHeadForGenesisEpoch() {
+    final Bytes32 genesisRoot = recentChainData.getBestBlockRoot().orElseThrow();
+
+    assertThat(gossipValidationHelper.isPossibleDependentRoot(genesisRoot, ZERO)).isTrue();
   }
 
   @TestTemplate

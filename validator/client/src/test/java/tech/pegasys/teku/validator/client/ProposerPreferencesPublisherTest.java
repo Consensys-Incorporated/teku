@@ -84,11 +84,11 @@ public class ProposerPreferencesPublisherTest {
 
     publisher =
         new ProposerPreferencesPublisher(
-            validatorApiChannel,
             ownedValidators,
+            spec,
+            validatorApiChannel,
             proposerConfigPropertiesProvider,
-            forkProvider,
-            spec);
+            forkProvider);
 
     when(proposerConfigPropertiesProvider.getFeeRecipient(publicKey))
         .thenReturn(Optional.of(feeRecipient));
@@ -229,7 +229,7 @@ public class ProposerPreferencesPublisherTest {
 
     final UInt64 gloasEpoch = UInt64.ONE;
     final UInt64 firstGloasSlot = spec.computeStartSlotAtEpoch(gloasEpoch);
-    assertThat(spec.isProposerPreferencesAvailableAtEpoch(UInt64.ZERO)).isFalse();
+    assertThat(spec.areProposerAndBuilderPreferencesRequiredAtEpoch(UInt64.ZERO)).isFalse();
 
     publisher.onProposerDutiesLoaded(
         gloasEpoch,

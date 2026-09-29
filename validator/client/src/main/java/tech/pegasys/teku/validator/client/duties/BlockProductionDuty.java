@@ -242,7 +242,9 @@ public class BlockProductionDuty implements Duty {
   private String getExecutionSummaryFromBid(final ExecutionPayloadBid bid) {
     return String.format(
         "Builder: %s, Bid gas limit: %s, Bid EL block: %s",
-        bid.getBuilderIndex(),
+        bid.getBuilderIndex().equals(BUILDER_INDEX_SELF_BUILD)
+            ? "self-built"
+            : bid.getBuilderIndex(),
         bid.getGasLimit(),
         LogFormatter.formatAbbreviatedHashRoot(bid.getBlockHash()));
   }

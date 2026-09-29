@@ -55,7 +55,7 @@ import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingParti
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPayment;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingWithdrawal;
-import tech.pegasys.teku.spec.datastructures.state.versions.gloas.PtcWindowSchema;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.PayloadTimelinessCommitteeWindowSchema;
 import tech.pegasys.teku.spec.schemas.registry.SchemaRegistry;
 
 public class BeaconStateSchemaGloas
@@ -231,8 +231,9 @@ public class BeaconStateSchemaGloas
         getChildSchema(getFieldIndex(BeaconStateFields.PAYLOAD_EXPECTED_WITHDRAWALS));
   }
 
-  public PtcWindowSchema getPtcWindowSchema() {
-    return (PtcWindowSchema) getChildSchema(getFieldIndex(BeaconStateFields.PTC_WINDOW));
+  public PayloadTimelinessCommitteeWindowSchema getPtcWindowSchema() {
+    return (PayloadTimelinessCommitteeWindowSchema)
+        getChildSchema(getFieldIndex(BeaconStateFields.PTC_WINDOW));
   }
 
   @Override

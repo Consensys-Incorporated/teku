@@ -13,19 +13,22 @@
 
 package tech.pegasys.teku.statetransition.forkchoice.fastconfirmation;
 
+import com.google.common.annotations.VisibleForTesting;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.ints.IntSet;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ForkJoinPool;
+import java.util.stream.IntStream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
@@ -43,8 +46,6 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
-import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.EpochProcessingException;
-import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.SlotProcessingException;
 import tech.pegasys.teku.spec.logic.common.util.ForkChoiceUtil;
 
 /**
@@ -74,9 +75,6 @@ class FastConfirmationCalculator {
   private final Bytes32 head;
   private final UInt64 currentSlot;
   private final UInt64 currentEpoch;
-
-  // Lazily computed once per instance (single-threaded per slot); see getPulledUpHeadState.
-  private BeaconState pulledUpHeadState;
 
   // Per-instance (per-slot) memoization. The safety-threshold helpers query the same slot
   // committees and slot ranges for every block they score (and re-evaluate a block across the two
@@ -147,14 +145,12 @@ class FastConfirmationCalculator {
 
   /**
    * Implements {@code get_pulled_up_head_state}: the head state advanced to the start of the
-   * current epoch when it lags behind, otherwise the head state as-is. Memoized because the FFG
-   * helpers read it repeatedly within a single slot.
+   * current epoch when it lags behind, otherwise the head state as-is. Retrieved by {@link
+   * FastConfirmationStateLoader} through the store's checkpoint-state cache, so the epoch
+   * transition is computed once and shared with attestation processing instead of replayed here.
    */
   BeaconState getPulledUpHeadState() {
-    if (pulledUpHeadState == null) {
-      pulledUpHeadState = computePulledUpHeadState();
-    }
-    return pulledUpHeadState;
+    return states.pulledUpHeadState();
   }
 
   /**
@@ -195,7 +191,15 @@ class FastConfirmationCalculator {
    * balanceSource}) of unslashed, active, non-equivocating validators whose latest vote supports a
    * descendant of {@code nodeRoot}. Latest messages are resolved to fork-choice nodes before
    * checking ancestry, preserving Gloas PENDING, EMPTY, and FULL vote semantics.
+   *
+   * <p>No production caller: the walk phases score a whole chain in one pass ({@link
+   * #computeChainAttestationScores}) and evaluate blocks through {@link
+   * #isOneConfirmedWithSupport}. This is kept as the spec-shaped reference the batch path is
+   * verified against, so it deliberately materializes each validator instead of sharing the flat
+   * balances that path uses: computing the two independently is what makes the parity tests
+   * meaningful.
    */
+  @VisibleForTesting
   UInt64 getAttestationScore(final Bytes32 nodeRoot, final BeaconState balanceSource) {
     final UInt64 balanceSourceEpoch = spec.getCurrentEpoch(balanceSource);
     final SszList<Validator> validators = balanceSource.getValidators();
@@ -245,6 +249,15 @@ class FastConfirmationCalculator {
    * — transitive along the chain on all forks.) Each vote is therefore resolved once and bucketed
    * at the latest chain block it supports; a block's score is the sum of the buckets from its own
    * position onward.
+   *
+   * <p>The pass reads the flat zeroed-balances list (see {@link #getScoringBalances}) instead of
+   * materializing each {@link Validator}, and resolves each <em>distinct</em> latest message once
+   * (most validators vote for the same handful of recent blocks), so the per-validator work is a
+   * couple of array reads. The scan itself is memory-bound (a pointer chase across a mainnet-sized
+   * vote snapshot), so it is chunked across the common pool — the same careful {@code parallel()}
+   * pattern as {@code AbstractValidatorStatusFactory}: all inputs are effectively immutable (the
+   * balances list, the vote snapshot, and lock-guarded protoarray reads), each chunk accumulates
+   * into private buckets, and the merge runs back on a single thread.
    */
   Map<Bytes32, UInt64> computeChainAttestationScores(
       final List<Bytes32> chainRoots, final BeaconState balanceSource) {
@@ -252,15 +265,60 @@ class FastConfirmationCalculator {
       return Map.of();
     }
     final List<ForkChoiceNode> chainNodes = chainRoots.stream().map(this::getNodeForRoot).toList();
-    // supportByLatestIndex[i]: total balance of votes whose latest supported chain block is i.
-    final UInt64[] supportByLatestIndex = new UInt64[chainNodes.size()];
-    Arrays.fill(supportByLatestIndex, UInt64.ZERO);
+    final List<UInt64> balances = getScoringBalances(balanceSource);
 
-    final UInt64 balanceSourceEpoch = spec.getCurrentEpoch(balanceSource);
-    final SszList<Validator> validators = balanceSource.getValidators();
-    for (final int index : spec.getActiveValidatorIndices(balanceSource, balanceSourceEpoch)) {
-      final Validator validator = validators.get(index);
-      if (validator.isSlashed()) {
+    // Shared across chunks, read and written as get-then-putIfAbsent rather than computeIfAbsent:
+    // resolving a vote takes protoarray's read lock, and computeIfAbsent would hold the map's bin
+    // lock across that wait, blocking other chunks whose votes hash to the same bin. Outside the
+    // bin lock two chunks can resolve the same vote concurrently, which is harmless: resolution is
+    // deterministic, so both produce the same index and the losing putIfAbsent is simply dropped.
+    final Map<VoteKey, Integer> latestSupportedByVote = new ConcurrentHashMap<>();
+    final int chunkCount = Math.min(ForkJoinPool.getCommonPoolParallelism() + 1, 32);
+    final int chunkSize = (balances.size() + chunkCount - 1) / chunkCount;
+    final List<long[]> chunkSupports =
+        IntStream.range(0, chunkCount)
+            .parallel()
+            .mapToObj(
+                chunk ->
+                    scanVotesForChainSupport(
+                        chainNodes,
+                        balances,
+                        latestSupportedByVote,
+                        chunk * chunkSize,
+                        Math.min((chunk + 1) * chunkSize, balances.size())))
+            .toList();
+
+    // supportByLatestIndex[i]: total balance of votes whose latest supported chain block is i.
+    // Plain longs: the total stake in Gwei is far below 2^63, so the sums cannot overflow.
+    final long[] supportByLatestIndex = new long[chainNodes.size()];
+    for (final long[] chunkSupport : chunkSupports) {
+      for (int i = 0; i < supportByLatestIndex.length; i++) {
+        supportByLatestIndex[i] += chunkSupport[i];
+      }
+    }
+
+    // score(chainRoots[i]) = votes supporting chainRoots[i] or any later chain block.
+    final Map<Bytes32, UInt64> scores = HashMap.newHashMap(chainRoots.size());
+    long runningScore = 0;
+    for (int i = chainRoots.size() - 1; i >= 0; i--) {
+      runningScore += supportByLatestIndex[i];
+      scores.put(chainRoots.get(i), UInt64.valueOf(runningScore));
+    }
+    return scores;
+  }
+
+  /** One chunk of the scoring scan, over the validator index range {@code [fromIndex, toIndex)}. */
+  private long[] scanVotesForChainSupport(
+      final List<ForkChoiceNode> chainNodes,
+      final List<UInt64> balances,
+      final Map<VoteKey, Integer> latestSupportedByVote,
+      final int fromIndex,
+      final int toIndex) {
+    final long[] supportByLatestIndex = new long[chainNodes.size()];
+    for (int index = fromIndex; index < toIndex; index++) {
+      final UInt64 balance = balances.get(index);
+      // Zero balance: inactive or slashed, or contributing no weight anyway.
+      if (balance.isZero()) {
         continue;
       }
       final VoteTracker vote = votes.getVote(index);
@@ -272,28 +330,35 @@ class FastConfirmationCalculator {
       if (votedRoot.isZero()) {
         continue;
       }
-      final Optional<ForkChoiceNode> maybeVotedNode =
-          forkChoice.getSupportedNode(
-              currentSlot, votedRoot, vote.getNextSlot(), vote.isNextFullPayloadHint());
-      if (maybeVotedNode.isEmpty()) {
-        continue;
+      final VoteKey voteKey =
+          new VoteKey(votedRoot, vote.getNextSlot(), vote.isNextFullPayloadHint());
+      final Integer cached = latestSupportedByVote.get(voteKey);
+      final int latestSupported;
+      if (cached != null) {
+        latestSupported = cached;
+      } else {
+        // Outside the map: computeIfAbsent would hold a bin lock across this protoarray read.
+        latestSupported = resolveLatestSupportedChainIndex(chainNodes, voteKey);
+        latestSupportedByVote.putIfAbsent(voteKey, latestSupported);
       }
-      final int latestSupported =
-          findLatestSupportedChainIndex(chainNodes, maybeVotedNode.orElseThrow());
       if (latestSupported >= 0) {
-        supportByLatestIndex[latestSupported] =
-            supportByLatestIndex[latestSupported].plus(validator.getEffectiveBalance());
+        supportByLatestIndex[latestSupported] += balance.longValue();
       }
     }
+    return supportByLatestIndex;
+  }
 
-    // score(chainRoots[i]) = votes supporting chainRoots[i] or any later chain block.
-    final Map<Bytes32, UInt64> scores = HashMap.newHashMap(chainRoots.size());
-    UInt64 runningScore = UInt64.ZERO;
-    for (int i = chainRoots.size() - 1; i >= 0; i--) {
-      runningScore = runningScore.plus(supportByLatestIndex[i]);
-      scores.put(chainRoots.get(i), runningScore);
-    }
-    return scores;
+  /**
+   * Resolves the latest message to its supported fork-choice node via {@code get_supported_node},
+   * then to the chain prefix boundary; {@code -1} when the vote is unresolvable or supports none.
+   */
+  private int resolveLatestSupportedChainIndex(
+      final List<ForkChoiceNode> chainNodes, final VoteKey voteKey) {
+    return forkChoice
+        .getSupportedNode(
+            currentSlot, voteKey.votedRoot(), voteKey.voteSlot(), voteKey.fullPayloadHint())
+        .map(votedNode -> findLatestSupportedChainIndex(chainNodes, votedNode))
+        .orElse(-1);
   }
 
   /**
@@ -333,17 +398,17 @@ class FastConfirmationCalculator {
       final Bytes32 blockRoot,
       final UInt64 startSlot,
       final UInt64 endSlot) {
-    final UInt64 balanceSourceEpoch = spec.getCurrentEpoch(balanceSource);
-    final SszList<Validator> validators = balanceSource.getValidators();
+    final List<UInt64> balances = getScoringBalances(balanceSource);
     UInt64 support = UInt64.ZERO;
     for (final int index : getCommitteeBetweenSlots(startSlot, endSlot)) {
-      final Validator validator = validators.get(index);
-      if (validator.isSlashed() || !isActiveValidator(validator, balanceSourceEpoch)) {
+      final UInt64 balance = balances.get(index);
+      // Zero balance: inactive or slashed, or contributing no weight anyway.
+      if (balance.isZero()) {
         continue;
       }
       final VoteTracker vote = votes.getVote(index);
       if (!vote.isEquivocating() && vote.getNextRoot().equals(blockRoot)) {
-        support = support.plus(validator.getEffectiveBalance());
+        support = support.plus(balance);
       }
     }
     return support;
@@ -519,7 +584,12 @@ class FastConfirmationCalculator {
    * Implements {@code is_one_confirmed}: whether the block is LMD-GHOST safe (its support exceeds
    * the safety threshold). Returns {@code false} for a block that is not fully validated (not
    * {@code VALID} per optimistic sync).
+   *
+   * <p>No production caller either: both walk phases go through {@link #isOneConfirmedWithSupport}
+   * against precomputed scores. Retained alongside {@link #getAttestationScore} as the spec-shaped
+   * reference for the parity tests and the benchmark.
    */
+  @VisibleForTesting
   boolean isOneConfirmed(final BeaconState balanceSource, final Bytes32 blockRoot) {
     if (!isValidForConfirmation(blockRoot)) {
       return false;
@@ -577,18 +647,22 @@ class FastConfirmationCalculator {
     final BeaconState state = getPulledUpHeadState();
     final UInt64 epoch = spec.getCurrentEpoch(state);
     final SszList<Validator> validators = state.getValidators();
+    // Deliberately does NOT use the flat zeroed-balances list here: the pulled-up head state
+    // changes every slot, so building (and caching) a one-shot per-state list costs far more than
+    // it saves. Instead the vote filters run first, and the validator is only read for votes from
+    // the target epoch — a small subset on the early-epoch slots where the justifiability gates
+    // actually run.
+    // Distinct voted roots are few, so each root's checkpoint block is resolved only once.
+    final Map<Bytes32, Boolean> supportsTargetByVotedRoot = new HashMap<>();
+    final int indexLimit = Math.min(votes.size(), validators.size());
     UInt64 score = UInt64.ZERO;
-    for (final int index : spec.getActiveValidatorIndices(state, epoch)) {
-      final Validator validator = validators.get(index);
-      if (validator.isSlashed()) {
-        continue;
-      }
+    for (int index = 0; index < indexLimit; index++) {
       final VoteTracker vote = votes.getVote(index);
       if (vote.isEquivocating()) {
         continue;
       }
       final Bytes32 votedRoot = vote.getNextRoot();
-      if (votedRoot.isZero() || !forkChoice.contains(votedRoot)) {
+      if (votedRoot.isZero()) {
         continue;
       }
       final UInt64 messageEpoch = spec.computeEpochAtSlot(vote.getNextSlot());
@@ -603,9 +677,21 @@ class FastConfirmationCalculator {
       if (!messageEpoch.equals(target.getEpoch())) {
         continue;
       }
-      if (target.equals(getCheckpointForBlock(votedRoot, messageEpoch))) {
-        score = score.plus(validator.getEffectiveBalance());
+      if (!forkChoice.contains(votedRoot)) {
+        continue;
       }
+      // messageEpoch == target epoch here, so the resolution depends on the root alone.
+      final boolean supportsTarget =
+          supportsTargetByVotedRoot.computeIfAbsent(
+              votedRoot, root -> target.equals(getCheckpointForBlock(root, target.getEpoch())));
+      if (!supportsTarget) {
+        continue;
+      }
+      final Validator validator = validators.get(index);
+      if (validator.isSlashed() || !isActiveValidator(validator, epoch)) {
+        continue;
+      }
+      score = score.plus(validator.getEffectiveBalance());
     }
     return score;
   }
@@ -909,16 +995,17 @@ class FastConfirmationCalculator {
     return spec.atEpoch(epoch).predicates().isActiveValidator(validator, epoch);
   }
 
-  private BeaconState computePulledUpHeadState() {
-    final BeaconState headState = states.headBlockState();
-    if (spec.getCurrentEpoch(headState).isLessThan(currentEpoch)) {
-      try {
-        return spec.processSlots(headState, spec.computeStartSlotAtEpoch(currentEpoch));
-      } catch (final SlotProcessingException | EpochProcessingException e) {
-        throw new IllegalStateException("Failed to pull up head state for fast confirmation", e);
-      }
-    }
-    return headState;
+  /**
+   * Per-validator-index effective balances with inactive and slashed validators zeroed — exactly
+   * the validators the LMD and FFG scoring passes may count, so a zero entry is skipped without
+   * reading the validator. Cached inside the state's transition caches (and shared with protoarray
+   * fork-choice scoring), so the list is built at most once per state instead of materializing
+   * every {@link Validator} on every pass. Not applicable to {@code get_equivocation_score}, which
+   * per spec does not filter out slashed validators.
+   */
+  private List<UInt64> getScoringBalances(final BeaconState balanceSource) {
+    return spec.getBeaconStateUtil(balanceSource.getSlot())
+        .getEffectiveActiveUnslashedBalances(balanceSource);
   }
 
   /**
@@ -1006,4 +1093,7 @@ class FastConfirmationCalculator {
 
   /** Inclusive slot range used as a memoization key. */
   private record SlotRange(UInt64 startSlot, UInt64 endSlot) {}
+
+  /** A latest-message identity: the inputs {@code get_supported_node} resolves a vote from. */
+  private record VoteKey(Bytes32 votedRoot, UInt64 voteSlot, boolean fullPayloadHint) {}
 }

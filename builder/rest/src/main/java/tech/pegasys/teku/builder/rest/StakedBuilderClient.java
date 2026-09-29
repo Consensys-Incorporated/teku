@@ -46,7 +46,7 @@ public interface StakedBuilderClient {
 
         @Override
         public SafeFuture<Void> submitBuilderPreferences(
-            final BLSPublicKey validatorPubkey,
+            final BLSPublicKey proposerPubkey,
             final BuilderPreferencesRequest builderPreferencesRequest)
             throws BuilderClientException {
           return SafeFuture.COMPLETE;
@@ -68,7 +68,7 @@ public interface StakedBuilderClient {
       throws BuilderClientException;
 
   SafeFuture<Void> submitBuilderPreferences(
-      BLSPublicKey validatorPubkey, BuilderPreferencesRequest builderPreferencesRequest)
+      BLSPublicKey proposerPubkey, BuilderPreferencesRequest builderPreferencesRequest)
       throws BuilderClientException;
 
   SafeFuture<Void> submitSignedBeaconBlock(SignedBeaconBlock signedBeaconBlock)

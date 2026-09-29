@@ -509,28 +509,6 @@ public class P2POptions {
   private boolean gossipBlobsAfterBlockEnabled = P2PConfig.DEFAULT_GOSSIP_BLOBS_AFTER_BLOCK_ENABLED;
 
   @Option(
-      names = {"--Xp2p-gossip-snappy-aircompressor-enabled"},
-      paramLabel = "<BOOLEAN>",
-      showDefaultValue = Visibility.ALWAYS,
-      description = "Use aircompressor-v3 for gossip snappy encoding and decoding",
-      hidden = true,
-      arity = "0..1",
-      fallbackValue = "true")
-  private boolean gossipSnappyAircompressorEnabled =
-      P2PConfig.DEFAULT_GOSSIP_SNAPPY_AIRCOMPRESSOR_ENABLED;
-
-  @Option(
-      names = {"--Xp2p-rpc-snappy-aircompressor-enabled"},
-      paramLabel = "<BOOLEAN>",
-      showDefaultValue = Visibility.ALWAYS,
-      description = "Use aircompressor-v3 for RPC snappy encoding and decoding",
-      hidden = true,
-      arity = "0..1",
-      fallbackValue = "true")
-  private boolean rpcSnappyAircompressorEnabled =
-      P2PConfig.DEFAULT_RPC_SNAPPY_AIRCOMPRESSOR_ENABLED;
-
-  @Option(
       names = {"--Xpeer-all-topics-filter-enabled"},
       paramLabel = "<BOOLEAN>",
       showDefaultValue = Visibility.ALWAYS,
@@ -796,8 +774,6 @@ public class P2POptions {
                   .peerRequestLimit(peerRequestLimit)
                   .floodPublishMaxMessageSizeThreshold(floodPublishMaxMessageSizeThreshold)
                   .gossipBlobsAfterBlockEnabled(gossipBlobsAfterBlockEnabled)
-                  .gossipSnappyAircompressorEnabled(gossipSnappyAircompressorEnabled)
-                  .rpcSnappyAircompressorEnabled(rpcSnappyAircompressorEnabled)
                   .custodyGroupCountOverride(custodyGroupCountOverride)
                   .dasPublishWithholdColumnsEverySlots(dasPublishWithholdColumnsEverySlots)
                   .dasDisableElRecovery(dasDisableElRecovery)

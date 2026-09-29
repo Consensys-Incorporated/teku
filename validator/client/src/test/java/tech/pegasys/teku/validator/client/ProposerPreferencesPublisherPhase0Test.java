@@ -62,11 +62,11 @@ class ProposerPreferencesPublisherPhase0Test {
 
   private final ProposerPreferencesPublisher publisher =
       new ProposerPreferencesPublisher(
-          validatorApiChannel,
           ownedValidators,
+          spec,
+          validatorApiChannel,
           proposerConfigPropertiesProvider,
-          forkProvider,
-          spec);
+          forkProvider);
 
   @BeforeEach
   void setUp() {

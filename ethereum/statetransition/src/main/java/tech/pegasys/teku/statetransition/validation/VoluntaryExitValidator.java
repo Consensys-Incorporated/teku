@@ -13,7 +13,8 @@
 
 package tech.pegasys.teku.statetransition.validation;
 
-import static tech.pegasys.teku.spec.config.Constants.VALID_VALIDATOR_SET_SIZE;
+import static tech.pegasys.teku.spec.config.Constants.VALID_VALIDATOR_INDEX_SET_SIZE;
+import static tech.pegasys.teku.spec.config.SpecConfig.FAR_FUTURE_EPOCH;
 import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.IGNORE;
 
 import java.util.Map;
@@ -42,7 +43,7 @@ public class VoluntaryExitValidator implements OperationValidator<SignedVoluntar
   private final RecentChainData recentChainData;
   private final GossipValidationHelper gossipValidationHelper;
   private final Map<UInt64, UInt64> receivedValidators =
-      LimitedMap.createSynchronizedNatural(VALID_VALIDATOR_SET_SIZE);
+      LimitedMap.createSynchronizedNatural(VALID_VALIDATOR_INDEX_SET_SIZE);
   private final TimeProvider timeProvider;
 
   public VoluntaryExitValidator(
@@ -80,9 +81,18 @@ public class VoluntaryExitValidator implements OperationValidator<SignedVoluntar
                   exit.getMessage().getValidatorIndex())));
     }
 
-    return getFailureReason(exit)
+    return getState()
         .thenApply(
-            failureReason -> {
+            state -> {
+              if (hasValidatorInitiatedExit(state, exit)) {
+                return InternalValidationResult.create(
+                    IGNORE,
+                    String.format(
+                        "Validator %s has already initiated exit.",
+                        exit.getMessage().getValidatorIndex()));
+              }
+              final Optional<OperationInvalidReason> failureReason =
+                  getGossipFailureReason(state, exit);
               if (failureReason.isPresent()) {
                 return InternalValidationResult.reject(
                     "Exit for validator %s is invalid: %s",
@@ -123,14 +133,34 @@ public class VoluntaryExitValidator implements OperationValidator<SignedVoluntar
     return getFailureReason(stateAtBlockSlot, exit);
   }
 
-  private SafeFuture<Optional<OperationInvalidReason>> getFailureReason(
-      final SignedVoluntaryExit exit) {
-    return getState().thenApply(state -> getFailureReason(state, exit));
+  private boolean hasValidatorInitiatedExit(
+      final BeaconState state, final SignedVoluntaryExit exit) {
+    final UInt64 validatorIndex = exit.getMessage().getValidatorIndex();
+    return validatorIndex.isLessThan(UInt64.valueOf(state.getValidators().size()))
+        && !state
+            .getValidators()
+            .get(validatorIndex.intValue())
+            .getExitEpoch()
+            .equals(FAR_FUTURE_EPOCH);
   }
 
   private Optional<OperationInvalidReason> getFailureReason(
       final BeaconState state, final SignedVoluntaryExit exit) {
-    Optional<OperationInvalidReason> invalidReason = spec.validateVoluntaryExit(state, exit);
+    final Optional<OperationInvalidReason> invalidReason = spec.validateVoluntaryExit(state, exit);
+    return validateSignature(state, exit, invalidReason);
+  }
+
+  private Optional<OperationInvalidReason> getGossipFailureReason(
+      final BeaconState state, final SignedVoluntaryExit exit) {
+    final Optional<OperationInvalidReason> invalidReason =
+        spec.validateVoluntaryExitForGossip(state, exit);
+    return validateSignature(state, exit, invalidReason);
+  }
+
+  private Optional<OperationInvalidReason> validateSignature(
+      final BeaconState state,
+      final SignedVoluntaryExit exit,
+      final Optional<OperationInvalidReason> invalidReason) {
     if (invalidReason.isPresent()) {
       return invalidReason;
     }

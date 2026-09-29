@@ -44,37 +44,6 @@ public class SpecConfigGloasTest {
   }
 
   @Test
-  public void shouldLoadGloasNetworkMaxSizes() {
-    final SpecConfigGloas config =
-        SpecConfigLoader.loadConfig("minimal").specConfig().toVersionGloas().orElseThrow();
-
-    assertThat(config.getMaxSignedAggregateAndProofSize()).isEqualTo(16829);
-    assertThat(config.getMaxAttesterSlashingSize()).isEqualTo(2097616);
-    assertThat(config.getMaxSignedExecutionPayloadBidSize()).isEqualTo(196932);
-  }
-
-  @Test
-  public void shouldExposeProgrammaticGloasNetworkMaxSizeOverrides() {
-    final SpecConfigGloas config =
-        SpecConfigLoader.loadConfig(
-                "minimal",
-                builder ->
-                    builder.gloasBuilder(
-                        gloasBuilder ->
-                            gloasBuilder
-                                .maxSignedAggregateAndProofSize(1)
-                                .maxAttesterSlashingSize(2)
-                                .maxSignedExecutionPayloadBidSize(5)))
-            .specConfig()
-            .toVersionGloas()
-            .orElseThrow();
-
-    assertThat(config.getMaxSignedAggregateAndProofSize()).isEqualTo(1);
-    assertThat(config.getMaxAttesterSlashingSize()).isEqualTo(2);
-    assertThat(config.getMaxSignedExecutionPayloadBidSize()).isEqualTo(5);
-  }
-
-  @Test
   public void equals_sameRandomValues() {
     final SpecConfigFulu specConfigFulu =
         SpecConfigLoader.loadConfig("mainnet").specConfig().toVersionFulu().orElseThrow();
@@ -140,9 +109,6 @@ public class SpecConfigGloasTest {
         dataStructureUtil.randomPositiveInt(65536),
         dataStructureUtil.randomPositiveInt(65536),
         dataStructureUtil.randomUInt64(),
-        dataStructureUtil.randomPositiveInt(1_000_000),
-        dataStructureUtil.randomPositiveInt(1_000_000),
-        dataStructureUtil.randomPositiveInt(1_000_000),
         List.of(
             new GasLimitScheduleEntry(
                 dataStructureUtil.randomUInt64(), dataStructureUtil.randomUInt64()))) {};

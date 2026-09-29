@@ -43,6 +43,7 @@ import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
 import tech.pegasys.teku.validator.client.duties.BlockDutyFactory;
 import tech.pegasys.teku.validator.client.duties.BlockProductionDuty;
 import tech.pegasys.teku.validator.client.duties.Duty;
@@ -62,6 +63,8 @@ public class BlockDutySchedulerTest extends AbstractDutySchedulerTest {
   @SuppressWarnings("unchecked")
   final SlotBasedScheduledDuties<BlockProductionDuty, Duty> scheduledDuties =
       mock(SlotBasedScheduledDuties.class);
+
+  final ValidatorTimingChannel validatorTimingChannelPubisher = mock(ValidatorTimingChannel.class);
 
   final StubMetricsSystem metricsSystem2 = new StubMetricsSystem();
 
@@ -352,7 +355,7 @@ public class BlockDutySchedulerTest extends AbstractDutySchedulerTest {
                     new OwnedValidators(
                         Map.of(VALIDATOR1_KEY, validator1, VALIDATOR2_KEY, validator2)),
                     validatorIndexProvider,
-                    (epoch, duties) -> {})),
+                    validatorTimingChannelPubisher)),
             spec);
   }
 
@@ -369,7 +372,7 @@ public class BlockDutySchedulerTest extends AbstractDutySchedulerTest {
                     new OwnedValidators(
                         Map.of(VALIDATOR1_KEY, validator1, VALIDATOR2_KEY, validator2)),
                     validatorIndexProvider,
-                    (epoch, duties) -> {})),
+                    validatorTimingChannelPubisher)),
             spec);
   }
 }

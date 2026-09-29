@@ -26,9 +26,6 @@ import tech.pegasys.teku.infrastructure.async.ExceptionThrowingFunction;
 @SuppressWarnings("MustBeClosedChecker")
 public class ReferenceTestFinder {
 
-  // Can be overridden with -Dteku.ref-test-module.override-root="<path>"
-  private static final Path TEST_PATH_FROM_MODULE =
-      Path.of("src", "referenceTest", "resources", "consensus-spec-tests", "tests");
   private static final List<String> SUPPORTED_FORKS =
       List.of(
           TestFork.PHASE0,
@@ -40,9 +37,16 @@ public class ReferenceTestFinder {
           TestFork.FULU,
           TestFork.GLOAS);
 
+  /** Finds every reference test in the location configured by system properties. */
   @MustBeClosed
   public static Stream<TestDefinition> findReferenceTests() throws IOException {
-    return findSpecDirectories().flatMap(unchecked(ReferenceTestFinder::findTestTypes));
+    return findReferenceTests(ReferenceTestRoot.fromSystemProperties());
+  }
+
+  @MustBeClosed
+  public static Stream<TestDefinition> findReferenceTests(final ReferenceTestRoot root)
+      throws IOException {
+    return root.listSpecDirectories().flatMap(unchecked(ReferenceTestFinder::findTestTypes));
   }
 
   @MustBeClosed
@@ -58,7 +62,7 @@ public class ReferenceTestFinder {
         .flatMap(
             fork -> {
               final Path testsPath = specDirectory.resolve(fork);
-              if (!testsPath.toFile().exists()) {
+              if (!Files.exists(testsPath)) {
                 return Stream.empty();
               }
               return Stream.of(
@@ -71,7 +75,7 @@ public class ReferenceTestFinder {
                           List.of(),
                           List.of(
                               // TODO-GLOAS: the following tests require equivocation
-                              // see https://github.com/Consensys/teku/issues/10608
+                              // see https://github.com/Consensys-Incorporated/teku/issues/10608
                               "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_with_enough_ffg_votes_previous_epoch",
                               "gloas - minimal - fork_choice/reorg - simple_attempted_reorg_without_enough_ffg_votes",
                               "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_with_enough_ffg_votes_current_epoch",
@@ -79,33 +83,6 @@ public class ReferenceTestFinder {
                       new MerkleProofTestFinder())
                   .flatMap(unchecked(finder -> finder.findTests(fork, spec, testsPath)));
             });
-  }
-
-  @MustBeClosed
-  private static Stream<Path> findSpecDirectories() throws IOException {
-    return Files.list(findReferenceTestRootDirectory());
-  }
-
-  public static Path findReferenceTestRootDirectory() {
-    final List<Path> searchPaths =
-        List.of(
-            Path.of(System.getProperty("teku.ref-test-module.path", "")), // Set explicitly
-            Path.of(System.getProperty("user.dir")), // Run from eth-reference-tests module
-            Path.of(System.getProperty("user.dir"), "eth-reference-tests") // Run from teku root
-            );
-    return searchPaths.stream()
-        .map(
-            path ->
-                path.resolve(
-                    System.getProperty(
-                        "teku.ref-test-module.override-root", TEST_PATH_FROM_MODULE.toString())))
-        .filter(path -> path.toFile().exists())
-        .findFirst()
-        .orElseThrow(
-            () ->
-                new IllegalStateException(
-                    "Unable to find the reference tests module. Try setting teku.ref-test-module.path system property"
-                        + " and ensure you have run ./gradlew expandRefTests"));
   }
 
   static <I, O> Function<I, O> unchecked(final ExceptionThrowingFunction<I, O> function) {

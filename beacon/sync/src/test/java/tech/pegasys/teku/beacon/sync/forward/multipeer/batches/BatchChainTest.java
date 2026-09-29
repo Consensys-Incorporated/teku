@@ -204,6 +204,33 @@ class BatchChainTest {
   }
 
   @Test
+  void batchesBetweenExclusiveStart_containsOnlyEndBatchWhenNothingBetween() {
+    final Batch from = createBatch(2);
+    final Batch to = createBatch(3);
+    batchChain.add(createBatch(1));
+    batchChain.add(from);
+    batchChain.add(to);
+    batchChain.add(createBatch(4));
+    assertThat(batchChain.batchesBetweenExclusiveStart(from, to)).containsExactly(to);
+  }
+
+  @Test
+  void batchesBetweenExclusiveStart_containsBatchesBetweenAndEndBatch() {
+    batchChain.add(createBatch(1));
+    final Batch batch2 = createBatch(2);
+    final Batch batch3 = createBatch(3);
+    final Batch batch4 = createBatch(4);
+    final Batch batch5 = createBatch(5);
+    batchChain.add(batch2);
+    batchChain.add(batch3);
+    batchChain.add(batch4);
+    batchChain.add(batch5);
+    batchChain.add(createBatch(6));
+    assertThat(batchChain.batchesBetweenExclusiveStart(batch2, batch5))
+        .containsExactly(batch3, batch4, batch5);
+  }
+
+  @Test
   void iterator_shouldIterateAllItems() {
     final Batch batch1 = createBatch(1);
     final Batch batch2 = createBatch(2);

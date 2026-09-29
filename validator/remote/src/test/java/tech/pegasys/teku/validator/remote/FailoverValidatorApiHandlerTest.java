@@ -65,7 +65,7 @@ import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
@@ -78,6 +78,7 @@ import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncComm
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.datastructures.validator.SubnetSubscription;
+import tech.pegasys.teku.spec.schemas.ApiSchemas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.api.CommitteeSubscriptionRequest;
 import tech.pegasys.teku.validator.api.SendSignedBlockResult;
@@ -629,48 +630,6 @@ class FailoverValidatorApiHandlerTest {
   }
 
   @Test
-  public void executionPayloadIsCreatedByTheBeaconNodeWhichCreatedTheBid() {
-    final Spec spec = TestSpecFactory.createMinimalGloas();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
-
-    final UInt64 slot = UInt64.ONE;
-    final UInt64 builderIndex = dataStructureUtil.randomBuilderIndex();
-
-    final ExecutionPayloadBid bid = dataStructureUtil.randomExecutionPayloadBid(slot, builderIndex);
-
-    final ValidatorApiChannelRequest<Optional<ExecutionPayloadBid>> bidCreationRequest =
-        apiChannel -> apiChannel.createUnsignedExecutionPayloadBid(slot, builderIndex);
-
-    setupFailures(bidCreationRequest, primaryApiChannel);
-    setupSuccesses(bidCreationRequest, Optional.of(bid), failoverApiChannel1);
-
-    SafeFutureAssert.assertThatSafeFuture(bidCreationRequest.run(failoverApiHandler)).isCompleted();
-    final ExecutionPayloadEnvelope executionPayloadEnvelope =
-        dataStructureUtil.randomExecutionPayloadEnvelope(slot);
-
-    final Bytes32 beaconBlockRoot = dataStructureUtil.randomBytes32();
-
-    final ValidatorApiChannelRequest<Optional<ExecutionPayloadEnvelope>>
-        executionPayloadCreationRequest =
-            apiChannel -> apiChannel.createUnsignedExecutionPayload(slot, beaconBlockRoot);
-
-    setupSuccesses(
-        executionPayloadCreationRequest,
-        Optional.of(executionPayloadEnvelope),
-        primaryApiChannel,
-        failoverApiChannel1,
-        failoverApiChannel2);
-
-    SafeFutureAssert.assertThatSafeFuture(executionPayloadCreationRequest.run(failoverApiHandler))
-        .isCompleted();
-
-    verify(failoverApiChannel1).createUnsignedExecutionPayload(slot, beaconBlockRoot);
-
-    verify(primaryApiChannel, never()).createUnsignedExecutionPayload(slot, beaconBlockRoot);
-    verify(failoverApiChannel2, never()).createUnsignedExecutionPayload(slot, beaconBlockRoot);
-  }
-
-  @Test
   public void executionPayloadIsCreatedByTheBeaconNodeWhichCreatedTheBlockWithSelfBuiltPayload() {
     final Spec spec = TestSpecFactory.createMinimalGloas();
     final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
@@ -836,6 +795,8 @@ class FailoverValidatorApiHandlerTest {
         DATA_STRUCTURE_UTIL.randomSignedValidatorRegistrations(3);
     final BeaconPreparableProposer beaconPreparableProposer =
         DATA_STRUCTURE_UTIL.randomBeaconPreparableProposer();
+    final SszList<BuilderPreferencesEntry> emptyBuilderPreferences =
+        ApiSchemas.BUILDER_PREFERENCES_ENTRIES_SCHEMA.createFromElements(List.of());
 
     return Streams.concat(
         getSubscriptionRequests(),
@@ -859,6 +820,12 @@ class FailoverValidatorApiHandlerTest {
                 apiChannel -> apiChannel.sendSignedProposerPreferences(List.of()),
                 apiChannel -> verify(apiChannel).sendSignedProposerPreferences(List.of()),
                 BeaconNodeRequestLabels.SEND_PROPOSER_PREFERENCES_METHOD,
+                List.of()),
+            getArguments(
+                "sendBuilderPreferences",
+                apiChannel -> apiChannel.sendBuilderPreferences(emptyBuilderPreferences),
+                apiChannel -> verify(apiChannel).sendBuilderPreferences(emptyBuilderPreferences),
+                BeaconNodeRequestLabels.SEND_BUILDER_PREFERENCES_METHOD,
                 List.of())));
   }
 

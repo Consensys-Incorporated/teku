@@ -39,7 +39,7 @@
         "content" : { }
       },
       "400" : {
-        "description" : "The request could not be processed, check the response for more information.",
+        "description" : "The topics supplied could not be parsed",
         "content" : {
           "application/json" : {
             "schema" : {

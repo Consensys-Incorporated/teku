@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.spec.util;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static ethereum.ckzg4844.CKZG4844JNI.BYTES_PER_CELL;
 import static java.util.stream.Collectors.toList;
@@ -22,6 +23,7 @@ import static tech.pegasys.teku.kzg.KZG.CELLS_PER_EXT_BLOB;
 import static tech.pegasys.teku.spec.constants.NetworkConstants.SYNC_COMMITTEE_SUBNET_COUNT;
 import static tech.pegasys.teku.spec.schemas.ApiSchemas.BUILDER_CONFIG_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.ApiSchemas.BUILDER_ENTRY_SCHEMA;
+import static tech.pegasys.teku.spec.schemas.ApiSchemas.BUILDER_PREFERENCES_ENTRY_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.ApiSchemas.BUILDER_PREFERENCES_REQUEST_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.ApiSchemas.BUILDER_PREFERENCES_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.ApiSchemas.BUILDER_REQUEST_AUTH_SCHEMA;
@@ -63,6 +65,7 @@ import tech.pegasys.teku.infrastructure.bytes.Bytes20;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.bytes.Bytes8;
 import tech.pegasys.teku.infrastructure.ssz.Merkleizable;
+import tech.pegasys.teku.infrastructure.ssz.SszContainer;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.SszMutableList;
@@ -78,7 +81,11 @@ import tech.pegasys.teku.infrastructure.ssz.collections.SszUInt64Vector;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszByte;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBytes32;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
+import tech.pegasys.teku.infrastructure.ssz.schema.AbstractSszProgressiveListSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszContainerSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszFieldName;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszProgressiveListSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszVectorSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszBitlistSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszBitvectorSchema;
@@ -147,6 +154,7 @@ import tech.pegasys.teku.spec.datastructures.builder.ValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderEntry;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferences;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesRequest;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderRequestAuth;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.SignedBuilderRequestAuth;
@@ -412,6 +420,50 @@ public final class DataStructureUtil {
   public <T extends SszData> SszList<T> randomSszList(
       final SszListSchema<T, ?> schema, final Supplier<T> valueGenerator, final long numItems) {
     return randomSszList(schema, numItems, valueGenerator);
+  }
+
+  /**
+   * Builds a progressive list larger than its schema's max length, bypassing the construction
+   * check, so tests can exercise the limit enforced on deserialization.
+   */
+  public <T extends SszData> SszList<T> randomOversizedProgressiveSszList(
+      final SszListSchema<T, ?> schema, final Supplier<T> valueGenerator, final int numItems) {
+    checkArgument(
+        schema instanceof AbstractSszProgressiveListSchema<?, ?>,
+        "Expected a progressive list schema but got %s",
+        schema);
+    checkArgument(
+        numItems > schema.getMaxLength(),
+        "%s items do not exceed the max length %s",
+        numItems,
+        schema.getMaxLength());
+    final SszProgressiveListSchema<T> unlimited =
+        SszProgressiveListSchema.create(
+            schema.getElementSchema(),
+            ((AbstractSszProgressiveListSchema<?, ?>) schema).getHints());
+    final List<T> elements = Stream.generate(valueGenerator).limit(numItems).toList();
+    return schema.createFromBackingNode(unlimited.createTreeFromElements(elements));
+  }
+
+  /**
+   * Returns a copy of the container whose progressive list field is replaced by an oversized list,
+   * see {@link #randomOversizedProgressiveSszList}.
+   */
+  @SuppressWarnings("unchecked")
+  public <C extends SszContainer, T extends SszData> C withOversizedProgressiveListField(
+      final C container,
+      final SszFieldName fieldName,
+      final Supplier<T> valueGenerator,
+      final int numItems) {
+    final SszContainerSchema<C> schema = (SszContainerSchema<C>) container.getSchema();
+    final int fieldIndex = schema.getFieldIndex(fieldName);
+    final SszListSchema<T, ?> listSchema = (SszListSchema<T, ?>) schema.getChildSchema(fieldIndex);
+    final SszList<T> oversized =
+        randomOversizedProgressiveSszList(listSchema, valueGenerator, numItems);
+    return schema.createFromBackingNode(
+        container
+            .getBackingNode()
+            .updated(schema.getChildGeneralizedIndex(fieldIndex), oversized.getBackingNode()));
   }
 
   public <T extends SszData> SszList<T> randomFullSszList(
@@ -2127,7 +2179,8 @@ public final class DataStructureUtil {
 
   public BuilderRequestAuth randomBuilderRequestAuth() {
     return BUILDER_REQUEST_AUTH_SCHEMA.create(
-        randomBytes(randomPositiveInt((int) SpecConfigGloas.MAX_DATA_SIZE)), randomSlot());
+        randomBytes(randomPositiveInt((int) SpecConfigGloas.MAX_BUILDER_AUTH_DATA_SIZE)),
+        randomSlot());
   }
 
   public SignedBuilderRequestAuth randomSignedBuilderRequestAuth() {
@@ -2152,12 +2205,24 @@ public final class DataStructureUtil {
 
   public BuilderEntry randomBuilderEntry() {
     return BUILDER_ENTRY_SCHEMA.create(
-        Bytes.of(("https://" + randomString(6) + ".com").getBytes(StandardCharsets.UTF_8)),
+        Bytes.of(randomUrl().getBytes(StandardCharsets.UTF_8)),
         randomSignedBuilderRequestAuth(),
         List.of(),
         randomUInt64(),
         randomUInt64(),
         randomUInt64(100));
+  }
+
+  public BuilderPreferencesEntry randomBuilderPreferencesEntry() {
+    return BUILDER_PREFERENCES_ENTRY_SCHEMA.create(
+        randomPublicKey(),
+        Bytes.of(randomUrl().getBytes(StandardCharsets.UTF_8)),
+        randomSignedBuilderRequestAuth(),
+        randomUInt64());
+  }
+
+  private String randomUrl() {
+    return "https://" + randomString(6) + ".com";
   }
 
   public ForkChoiceState randomForkChoiceState(final boolean optimisticHead) {
@@ -3821,7 +3886,7 @@ public final class DataStructureUtil {
     return getConstant(
         specConfig ->
             SpecConfigGloas.required(spec.forMilestone(SpecMilestone.GLOAS).getConfig())
-                .getPtcSize());
+                .getPayloadTimelinessCommitteeSize());
   }
 
   int getKzgCommitmentsInclusionProofDepth() {
