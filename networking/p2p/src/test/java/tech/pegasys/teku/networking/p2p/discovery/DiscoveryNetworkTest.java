@@ -252,6 +252,79 @@ class DiscoveryNetworkTest {
   }
 
   @Test
+  public void setForkInfo_futureBpoForkScheduledBeforeHardFork() {
+    final ForkInfo fuluForkInfo = new ForkInfo(forks.get(6), genesisValidatorsRoot);
+    final Bytes4 fuluForkDigest =
+        spec.computeForkDigest(genesisValidatorsRoot, fuluForkInfo.getFork().getEpoch());
+    final BlobParameters nextBpoFork = new BlobParameters(UInt64.valueOf(65_000), 64);
+    final Fork nextHardFork = nextHardFork(fuluForkInfo, UInt64.valueOf(70_000));
+    final Bytes4 nextForkDigest =
+        spec.computeForkDigest(genesisValidatorsRoot, nextBpoFork.epoch());
+
+    discoveryNetwork.setForkInfo(
+        fuluForkInfo,
+        fuluForkDigest,
+        Optional.of(nextHardFork),
+        Optional.of(nextBpoFork),
+        Optional.of(nextForkDigest));
+
+    final EnrForkId expectedEnrForkId =
+        new EnrForkId(
+            fuluForkDigest, fuluForkInfo.getFork().getCurrentVersion(), nextBpoFork.epoch());
+    verify(discoveryService).updateCustomENRField("eth2", expectedEnrForkId.sszSerialize());
+    verify(discoveryService)
+        .updateCustomENRField("nfd", SszBytes4.of(nextForkDigest).sszSerialize());
+  }
+
+  @Test
+  public void setForkInfo_futureBpoForkScheduledAtHardFork() {
+    final ForkInfo fuluForkInfo = new ForkInfo(forks.get(6), genesisValidatorsRoot);
+    final Bytes4 fuluForkDigest =
+        spec.computeForkDigest(genesisValidatorsRoot, fuluForkInfo.getFork().getEpoch());
+    final BlobParameters nextBpoFork = new BlobParameters(UInt64.valueOf(65_000), 64);
+    final Fork nextHardFork = nextHardFork(fuluForkInfo, nextBpoFork.epoch());
+    final Bytes4 nextForkDigest =
+        spec.computeForkDigest(genesisValidatorsRoot, nextHardFork.getEpoch());
+
+    discoveryNetwork.setForkInfo(
+        fuluForkInfo,
+        fuluForkDigest,
+        Optional.of(nextHardFork),
+        Optional.of(nextBpoFork),
+        Optional.of(nextForkDigest));
+
+    final EnrForkId expectedEnrForkId =
+        new EnrForkId(fuluForkDigest, nextHardFork.getCurrentVersion(), nextHardFork.getEpoch());
+    verify(discoveryService).updateCustomENRField("eth2", expectedEnrForkId.sszSerialize());
+    verify(discoveryService)
+        .updateCustomENRField("nfd", SszBytes4.of(nextForkDigest).sszSerialize());
+  }
+
+  @Test
+  public void setForkInfo_futureHardForkScheduledBeforeBpoFork() {
+    final ForkInfo fuluForkInfo = new ForkInfo(forks.get(6), genesisValidatorsRoot);
+    final Bytes4 fuluForkDigest =
+        spec.computeForkDigest(genesisValidatorsRoot, fuluForkInfo.getFork().getEpoch());
+    final BlobParameters nextBpoFork = new BlobParameters(UInt64.valueOf(65_000), 64);
+    final Fork nextHardFork = nextHardFork(fuluForkInfo, UInt64.valueOf(62_000));
+    final Bytes4 nextForkDigest =
+        spec.computeForkDigest(genesisValidatorsRoot, nextHardFork.getEpoch());
+
+    discoveryNetwork.setForkInfo(
+        fuluForkInfo,
+        fuluForkDigest,
+        Optional.of(nextHardFork),
+        Optional.of(nextBpoFork),
+        Optional.of(nextForkDigest));
+
+    final EnrForkId expectedEnrForkId =
+        new EnrForkId(fuluForkDigest, nextHardFork.getCurrentVersion(), nextHardFork.getEpoch());
+    verify(discoveryService).updateCustomENRField("eth2", expectedEnrForkId.sszSerialize());
+    verify(discoveryService)
+        .updateCustomENRField("nfd", SszBytes4.of(nextForkDigest).sszSerialize());
+  }
+
+  @Test
   @SuppressWarnings("unchecked")
   public void setForkInfoShouldAddPredicateToConnectionManager() {
     discoveryNetwork.setForkInfo(
@@ -373,6 +446,11 @@ class DiscoveryNetworkTest {
         syncCommitteeSubnets,
         Optional.empty(),
         Optional.empty());
+  }
+
+  private Fork nextHardFork(final ForkInfo currentForkInfo, final UInt64 epoch) {
+    return new Fork(
+        currentForkInfo.getFork().getCurrentVersion(), Bytes4.fromHexString("0x07000001"), epoch);
   }
 
   public static Stream<Arguments> provideNodeIds() {
