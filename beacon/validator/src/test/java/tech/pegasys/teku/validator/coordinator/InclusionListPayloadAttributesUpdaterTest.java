@@ -87,6 +87,15 @@ class InclusionListPayloadAttributesUpdaterTest {
 
   @Test
   void onInclusionListDue_shouldRefreshPayloadIdWithInclusionListTransactions() throws Exception {
+    assertRefreshTransactions(false);
+  }
+
+  @Test
+  void onInclusionListDue_shouldDeduplicateTransactionsWithinAndAcrossLists() throws Exception {
+    assertRefreshTransactions(true);
+  }
+
+  private void assertRefreshTransactions(final boolean overlappingLists) throws Exception {
     final UInt64 inclusionListSlot = UInt64.valueOf(10);
     final UInt64 proposerSlot = inclusionListSlot.increment();
     final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
@@ -98,6 +107,29 @@ class InclusionListPayloadAttributesUpdaterTest {
         inclusionList.getTransactions().stream()
             .map(transaction -> transaction.getBytes())
             .toList();
+    final var schema =
+        SchemaDefinitionsHeze.required(hezeSpec.getGenesisSchemaDefinitions())
+            .getInclusionListSchema();
+    final List<InclusionListEntry> entries =
+        overlappingLists
+            ? List.of(
+                createEntry(
+                    schema.create(
+                        inclusionListSlot,
+                        UInt64.ZERO,
+                        parentRoot,
+                        List.of(
+                            schema.getTransactionSchema().fromBytes(transactions.getFirst()),
+                            schema.getTransactionSchema().fromBytes(transactions.getFirst())))),
+                createEntry(
+                    schema.create(
+                        inclusionListSlot,
+                        UInt64.ONE,
+                        parentRoot,
+                        List.of(
+                            schema.getTransactionSchema().fromBytes(transactions.getFirst()),
+                            schema.getTransactionSchema().fromBytes(transactions.get(1))))))
+            : List.of(createEntry(inclusionList));
     final ExecutionPayloadContext executionPayloadContext =
         new ExecutionPayloadContext(
             payloadId, mock(ForkChoiceState.class), mock(PayloadBuildingAttributes.class));
@@ -106,8 +138,7 @@ class InclusionListPayloadAttributesUpdaterTest {
         .thenReturn(SafeFuture.completedFuture(Optional.of(state)));
     when(spec.processSlots(state, proposerSlot)).thenReturn(proposerState);
     when(proposersDataManager.isProposerForSlot(proposerSlot, proposerState)).thenReturn(true);
-    when(inclusionListStore.getInclusionLists(inclusionListSlot))
-        .thenReturn(Optional.of(List.of(createEntry(inclusionList))));
+    when(inclusionListStore.getInclusionLists(inclusionListSlot)).thenReturn(Optional.of(entries));
     when(spec.getBlockRootAtSlot(proposerState, inclusionListSlot)).thenReturn(parentRoot);
     when(combinedChainDataClient.getChainHead()).thenReturn(Optional.of(chainHead));
     when(chainHead.getRoot()).thenReturn(parentRoot);

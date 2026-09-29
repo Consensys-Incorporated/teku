@@ -22,6 +22,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,7 @@ import tech.pegasys.teku.spec.datastructures.execution.Transaction;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionList;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannel;
 import tech.pegasys.teku.spec.executionlayer.PayloadStatus;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsHeze;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 class ForkChoicePayloadExecutorHezeTest {
@@ -75,6 +77,40 @@ class ForkChoicePayloadExecutorHezeTest {
                 assertThat(transactions)
                     .containsExactlyElementsOf(inclusionList.getTransactions()));
     assertThat(result).isTrue();
+  }
+
+  @Test
+  void optimisticallyExecute_shouldDeduplicateTransactionsWithinAndAcrossLists() {
+    final var schema =
+        SchemaDefinitionsHeze.required(spec.getGenesisSchemaDefinitions()).getInclusionListSchema();
+    final var transactionSchema = schema.getTransactionSchema();
+    final InclusionList first =
+        schema.create(
+            UInt64.ZERO,
+            UInt64.ZERO,
+            Bytes32.ZERO,
+            List.of(
+                transactionSchema.fromBytes(Bytes.of(1)),
+                transactionSchema.fromBytes(Bytes.of(1))));
+    final InclusionList second =
+        schema.create(
+            UInt64.ZERO,
+            UInt64.ONE,
+            Bytes32.ZERO,
+            List.of(
+                transactionSchema.fromBytes(Bytes.of(1)),
+                transactionSchema.fromBytes(Bytes.of(2))));
+    final ForkChoicePayloadExecutorHeze payloadExecutor =
+        new ForkChoicePayloadExecutorHeze(signedEnvelope, executionLayer, List.of(first, second));
+
+    payloadExecutor.optimisticallyExecute(Optional.empty(), requestWithoutInclusionLists);
+
+    assertThat(captureNewPayloadRequest().getInclusionList())
+        .hasValueSatisfying(
+            transactions ->
+                assertThat(transactions)
+                    .extracting(Transaction::getBytes)
+                    .containsExactly(Bytes.of(1), Bytes.of(2)));
   }
 
   @Test

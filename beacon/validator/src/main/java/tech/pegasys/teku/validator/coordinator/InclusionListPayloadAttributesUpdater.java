@@ -166,6 +166,7 @@ public class InclusionListPayloadAttributesUpdater {
         .map(InclusionList::getTransactions)
         .flatMap(transactions -> transactions.stream())
         .map(SszByteListImpl::getBytes)
+        .distinct()
         .toList();
   }
 

@@ -114,6 +114,7 @@ public class BlockProcessorHeze extends BlockProcessorGloas {
     return inclusionLists.stream()
         .map(InclusionList::getTransactions)
         .flatMap(transactions -> transactions.stream())
+        .distinct()
         .toList();
   }
 }
