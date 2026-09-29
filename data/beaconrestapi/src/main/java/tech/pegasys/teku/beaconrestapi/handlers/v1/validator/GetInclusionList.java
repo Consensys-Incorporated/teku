@@ -40,7 +40,7 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsHeze;
 
 public class GetInclusionList extends RestApiEndpoint {
-  public static final String ROUTE = "/eth/v1/validator/inclusion_list/{slot}";
+  public static final String ROUTE = "/eth/v1/validator/inclusion_list";
 
   private final ValidatorDataProvider validatorDataProvider;
 
@@ -58,7 +58,7 @@ public class GetInclusionList extends RestApiEndpoint {
             .summary("Produce an inclusion list")
             .description("Requests the beacon node to produce an inclusion list")
             .tags(TAG_VALIDATOR, TAG_VALIDATOR_REQUIRED)
-            .pathParam(
+            .queryParamRequired(
                 SLOT_PARAMETER.withDescription(
                     "The slot for which an inclusion list should be created."))
             .response(SC_OK, "Request successful", getResponseType(schemaDefinition))
@@ -74,7 +74,7 @@ public class GetInclusionList extends RestApiEndpoint {
       return;
     }
 
-    final UInt64 slot = request.getPathParameter(SLOT_PARAMETER);
+    final UInt64 slot = request.getQueryParameter(SLOT_PARAMETER);
 
     final SafeFuture<Optional<List<Transaction>>> future =
         validatorDataProvider.getInclusionList(slot);
