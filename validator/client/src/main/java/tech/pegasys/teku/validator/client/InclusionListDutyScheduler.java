@@ -25,6 +25,7 @@ import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 
@@ -97,5 +98,10 @@ public class InclusionListDutyScheduler extends AbstractDutyScheduler {
   @Override
   int getLookAheadEpochs(final UInt64 epoch) {
     return LOOKAHEAD_EPOCHS;
+  }
+
+  @Override
+  protected boolean shouldScheduleDutiesAtEpoch(final UInt64 epochNumber) {
+    return spec.atEpoch(epochNumber).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.HEZE);
   }
 }
