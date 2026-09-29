@@ -64,18 +64,19 @@ public class PostInclusionListTest extends AbstractMigratedBeaconHandlerTest {
   }
 
   @Test
-  void shouldReadRequestBody() throws IOException {
+  void shouldReadWrappedRequestBody() throws IOException {
     final SignedInclusionList signedInclusionList = dataStructureUtil.randomSignedInclusionList();
-    SignedInclusionListSchema signedInclusionListSchema =
+    final SignedInclusionListSchema signedInclusionListSchema =
         schemaDefinitionCache
             .getSchemaDefinition(HEZE)
             .toVersionHeze()
             .orElseThrow()
             .getSignedInclusionListSchema();
-    String data =
+    final String data =
         JsonUtil.serialize(signedInclusionList, signedInclusionListSchema.getJsonTypeDefinition());
 
-    Assertions.assertThat(getRequestBodyFromMetadata(handler, data)).isEqualTo(signedInclusionList);
+    Assertions.assertThat(getRequestBodyFromMetadata(handler, "{\"data\":" + data + "}"))
+        .isEqualTo(signedInclusionList);
   }
 
   @Test

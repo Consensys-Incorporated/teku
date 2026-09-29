@@ -15,6 +15,7 @@ package tech.pegasys.teku.beaconrestapi.handlers.v1.validator;
 
 import static tech.pegasys.teku.api.ValidatorDataProvider.PARTIAL_PUBLISH_FAILURE_MESSAGE;
 import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.ETH_CONSENSUS_VERSION_TYPE;
+import static tech.pegasys.teku.ethereum.json.types.SharedApiTypes.withDataWrapper;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_VALIDATOR;
@@ -69,7 +70,7 @@ public class PostInclusionList extends RestApiEndpoint {
 
   @Override
   public void handleRequest(final RestApiRequest request) throws JsonProcessingException {
-    SignedInclusionList signedInclusionList = request.getRequestBody();
+    final SignedInclusionList signedInclusionList = request.getRequestBody();
 
     final SafeFuture<List<SubmitDataError>> future =
         validatorDataProvider.sendSignedInclusionList(List.of(signedInclusionList));
@@ -86,11 +87,13 @@ public class PostInclusionList extends RestApiEndpoint {
 
   private static DeserializableTypeDefinition<SignedInclusionList> getRequestType(
       final SchemaDefinitionCache schemaDefinitionCache) {
-    return schemaDefinitionCache
-        .getSchemaDefinition(SpecMilestone.HEZE)
-        .toVersionHeze()
-        .orElseThrow()
-        .getSignedInclusionListSchema()
-        .getJsonTypeDefinition();
+    return withDataWrapper(
+        "PublishInclusionListRequest",
+        schemaDefinitionCache
+            .getSchemaDefinition(SpecMilestone.HEZE)
+            .toVersionHeze()
+            .orElseThrow()
+            .getSignedInclusionListSchema()
+            .getJsonTypeDefinition());
   }
 }

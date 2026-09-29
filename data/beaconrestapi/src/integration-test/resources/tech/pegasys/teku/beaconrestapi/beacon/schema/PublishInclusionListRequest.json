@@ -1,0 +1,10 @@
+{
+  "title" : "PublishInclusionListRequest",
+  "type" : "object",
+  "required" : [ "data" ],
+  "properties" : {
+    "data" : {
+      "$ref" : "#/components/schemas/SignedInclusionList"
+    }
+  }
+}
