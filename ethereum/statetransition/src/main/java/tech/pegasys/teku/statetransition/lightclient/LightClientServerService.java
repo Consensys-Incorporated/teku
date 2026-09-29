@@ -15,6 +15,7 @@ package tech.pegasys.teku.statetransition.lightclient;
 
 import static tech.pegasys.teku.spec.config.SpecConfig.GENESIS_SLOT;
 
+import java.util.Collection;
 import java.util.Optional;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
@@ -40,6 +41,7 @@ import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
 import tech.pegasys.teku.storage.api.ChainHeadChannel;
 import tech.pegasys.teku.storage.api.FinalizedCheckpointChannel;
 import tech.pegasys.teku.storage.api.ReorgContext;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 
 public class LightClientServerService
@@ -158,6 +160,11 @@ public class LightClientServerService
             .minusMinZero(spec.getNetworkingConfig().getMinEpochsForBlockRequests());
     lightClientStore.pruneUpdatesBefore(
         syncCommitteeUtil.computeSyncCommitteePeriod(oldestRetainedEpoch));
+  }
+
+  public void loadUpdates(final Collection<StoredLightClientUpdate> updates) {
+    lightClientStore.loadUpdates(updates);
+    lightClientStore.removeNonCanonicalUpdates(finalizedPeriod, isCanonicalBlock);
   }
 
   @Override
