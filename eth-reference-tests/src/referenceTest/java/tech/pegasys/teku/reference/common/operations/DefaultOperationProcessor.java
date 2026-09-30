@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
+import tech.pegasys.teku.ethtests.finder.TestDefinition;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockSummary;
@@ -49,10 +50,12 @@ public class DefaultOperationProcessor implements OperationProcessor {
   private final Spec spec;
   private final BeaconBlockBodySchema<?> beaconBlockBodySchema;
 
-  public DefaultOperationProcessor(final Spec spec) {
-    this.spec = spec;
+  public DefaultOperationProcessor(final TestDefinition testDefinition) {
+    this.spec = testDefinition.getSpec();
     this.beaconBlockBodySchema =
-        spec.getGenesisSpec().getSchemaDefinitions().getBeaconBlockBodySchema();
+        spec.forMilestone(testDefinition.getMilestone())
+            .getSchemaDefinitions()
+            .getBeaconBlockBodySchema();
   }
 
   @Override

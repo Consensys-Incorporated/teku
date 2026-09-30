@@ -58,7 +58,7 @@ dependencies {
 	implementation 'org.hyperledger.besu.internal:besu-metrics-core'
 	implementation 'com.fasterxml.jackson.core:jackson-databind'
 	implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml'
-	implementation 'org.xerial.snappy:snappy-java'
+	implementation 'io.airlift:aircompressor-v3'
 	implementation 'com.github.oshi:oshi-core'
 	implementation 'org.rocksdb:rocksdbjni'
 

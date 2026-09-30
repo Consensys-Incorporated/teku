@@ -209,6 +209,7 @@ import tech.pegasys.teku.statetransition.datacolumns.retriever.SimpleSidecarRetr
 import tech.pegasys.teku.statetransition.datacolumns.retriever.recovering.SidecarRetriever;
 import tech.pegasys.teku.statetransition.datacolumns.util.SuperNodeSupplier;
 import tech.pegasys.teku.statetransition.execution.BuilderBidFetcher;
+import tech.pegasys.teku.statetransition.execution.BuilderBidValidator;
 import tech.pegasys.teku.statetransition.execution.DefaultExecutionPayloadBidManager;
 import tech.pegasys.teku.statetransition.execution.DefaultExecutionPayloadManager;
 import tech.pegasys.teku.statetransition.execution.DefaultProposerPreferencesManager;
@@ -281,6 +282,7 @@ import tech.pegasys.teku.storage.api.CombinedStorageChannel;
 import tech.pegasys.teku.storage.api.DataColumnSidecarNetworkRetriever;
 import tech.pegasys.teku.storage.api.Eth1DepositStorageChannel;
 import tech.pegasys.teku.storage.api.FinalizedCheckpointChannel;
+import tech.pegasys.teku.storage.api.LightClientUpdateChannel;
 import tech.pegasys.teku.storage.api.SidecarArchivePrunableChannel;
 import tech.pegasys.teku.storage.api.SidecarUpdateChannel;
 import tech.pegasys.teku.storage.api.StorageQueryChannel;
@@ -714,6 +716,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
             })
         // Init other services
         .thenRun(this::initAll)
+        .thenCompose(__ -> loadLightClientUpdates())
         .thenRun(
             () -> {
               // complete spec initialization
@@ -1027,9 +1030,12 @@ public class BeaconChainController extends Service implements BeaconChainControl
           beaconConfig
               .executionPayloadBidCircuitBreakerFactory()
               .create(recentChainData::getForkChoiceStrategy);
-      stakedBuilderClientProvider = new OkHttpStakedBuilderClientProvider(spec, beaconAsyncRunner);
+      stakedBuilderClientProvider = new OkHttpStakedBuilderClientProvider(spec);
+      final BuilderBidValidator bidValidator =
+          new BuilderBidValidator(
+              spec, proposerPreferencesManager, recentChainData, gossipValidationHelper);
       final BuilderBidFetcher builderBidFetcher =
-          new BuilderBidFetcher(spec, stakedBuilderClientProvider);
+          new BuilderBidFetcher(spec, stakedBuilderClientProvider, bidValidator);
       final ExecutionPayloadBidSelector executionPayloadBidSelector =
           new ExecutionPayloadBidSelector(
               beaconConfig.executionLayerConfig().getUseShouldOverrideBuilderFlag(),
@@ -1042,7 +1048,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
               receivedExecutionPayloadBidEventsChannelPublisher,
               poolFactory.createPendingPoolForExecutionPayloadBids(spec),
               builderBidFetcher,
-              executionPayloadBidSelector);
+              executionPayloadBidSelector,
+              recentChainData::getForkChoiceStrategy);
       proposerPreferencesManager.subscribeOperationAdded(defaultExecutionPayloadBidManager);
       eventChannels.subscribe(SlotEventsChannel.class, defaultExecutionPayloadBidManager);
       eventChannels.subscribe(ReceivedBlockEventsChannel.class, defaultExecutionPayloadBidManager);
@@ -1691,7 +1698,27 @@ public class BeaconChainController extends Service implements BeaconChainControl
 
   protected void initLightClientUpdateStore() {
     LOG.debug("BeaconChainController.initLightClientUpdateStore()");
-    lightClientUpdateStore = new LightClientUpdateStore(spec);
+    lightClientUpdateStore =
+        new LightClientUpdateStore(
+            spec, eventChannels.getPublisher(LightClientUpdateChannel.class, beaconAsyncRunner));
+  }
+
+  protected SafeFuture<Void> loadLightClientUpdates() {
+    if (!beaconConfig.eth2NetworkConfig().isLightClientServerEnabled()) {
+      return SafeFuture.COMPLETE;
+    }
+    return combinedChainDataClient
+        .getBestLightClientUpdates()
+        .thenAccept(
+            updates -> {
+              lightClientServerService.loadUpdates(updates);
+              LOG.debug("Loaded {} light client updates from storage", updates.size());
+            })
+        .exceptionally(
+            error -> {
+              LOG.warn("Failed to load light client updates from storage", error);
+              return null;
+            });
   }
 
   protected void initLightClientServerService() {
@@ -1989,7 +2016,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
             executionPayloadPublisher,
             executionPayloadBidManager,
             proposerPreferencesManager,
-            executionProofManager);
+            executionProofManager,
+            stakedBuilderClientProvider);
 
     eventChannels
         .subscribe(SlotEventsChannel.class, activeValidatorTracker)

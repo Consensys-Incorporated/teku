@@ -118,6 +118,10 @@ public class MiscHelpersGloas extends MiscHelpersFulu {
     return true;
   }
 
+  public boolean isPayloadAttestationAvailable() {
+    return true;
+  }
+
   /**
    * compute_proposer_indices is refactored to use compute_balance_weighted_selection as a helper
    * for the balance-weighted sampling process.

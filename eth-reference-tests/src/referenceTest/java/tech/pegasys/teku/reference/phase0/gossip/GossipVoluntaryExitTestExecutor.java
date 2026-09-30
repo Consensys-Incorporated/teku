@@ -13,26 +13,24 @@
 
 package tech.pegasys.teku.reference.phase0.gossip;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static tech.pegasys.teku.reference.BlsSetting.IGNORED;
+import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import static tech.pegasys.teku.reference.TestDataUtils.loadSsz;
 import static tech.pegasys.teku.reference.TestDataUtils.loadStateFromSsz;
 import static tech.pegasys.teku.reference.TestDataUtils.loadYaml;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
-import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
-import tech.pegasys.teku.reference.BlsSetting;
 import tech.pegasys.teku.reference.TestExecutor;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
-import tech.pegasys.teku.spec.logic.common.operations.validation.OperationInvalidReason;
+import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
+import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
+import tech.pegasys.teku.statetransition.validation.VoluntaryExitValidator;
 
 public class GossipVoluntaryExitTestExecutor implements TestExecutor {
 
@@ -42,50 +40,33 @@ public class GossipVoluntaryExitTestExecutor implements TestExecutor {
         loadYaml(testDefinition, "meta.yaml", GossipVoluntaryExitMetaData.class);
     final Spec spec = testDefinition.getSpec();
     final BeaconState state = loadStateFromSsz(testDefinition, "state.ssz_snappy");
-    final BLSSignatureVerifier signatureVerifier =
-        metaData.getBlsSetting() == IGNORED
-            ? BLSSignatureVerifier.NOOP
-            : BLSSignatureVerifier.SIMPLE;
-
-    final Set<UInt64> seenValidators = new HashSet<>();
+    final List<SignedBeaconBlock> blocks =
+        GossipTestContext.loadBlocks(testDefinition, spec, metaData.getBlocks());
+    final GossipTestContext ctx = GossipTestContext.create(spec, state, blocks);
+    ctx.forkChoice.onTick(UInt64.valueOf(metaData.getCurrentTimeMs()), Optional.empty());
+    final UInt64[] validationTimeMs = {UInt64.valueOf(metaData.getCurrentTimeMs())};
+    final GossipValidationHelper gossipValidationHelper =
+        new GossipValidationHelper(spec, ctx.recentChainData, ctx.metricsSystem) {
+          @Override
+          public UInt64 getCurrentTimeMillis() {
+            return validationTimeMs[0];
+          }
+        };
+    final VoluntaryExitValidator validator =
+        new VoluntaryExitValidator(
+            spec, ctx.recentChainData, () -> validationTimeMs[0], gossipValidationHelper);
 
     for (final GossipVoluntaryExitMetaData.Message message : metaData.getMessages()) {
+      validationTimeMs[0] =
+          UInt64.valueOf(Math.addExact(metaData.getCurrentTimeMs(), message.getOffsetMs()));
+
       final SignedVoluntaryExit exit =
           loadSsz(
               testDefinition, message.getMessage() + ".ssz_snappy", SignedVoluntaryExit.SSZ_SCHEMA);
-      final UInt64 validatorIndex = exit.getMessage().getValidatorIndex();
+      final InternalValidationResult result = safeJoin(validator.validateForGossip(exit));
 
-      if (seenValidators.contains(validatorIndex)) {
-        assertThat(message.getExpected())
-            .describedAs("Expected ignore for already-seen validator %s", validatorIndex)
-            .isEqualTo("ignore");
-      } else {
-        final Optional<OperationInvalidReason> invalidReason =
-            spec.validateVoluntaryExit(state, exit);
-        final boolean signatureValid =
-            invalidReason.isEmpty()
-                && spec.verifyVoluntaryExitSignature(state, exit, signatureVerifier);
-        final boolean rejected = invalidReason.isPresent() || !signatureValid;
-
-        switch (message.getExpected()) {
-          case "valid" -> {
-            assertThat(invalidReason)
-                .describedAs("Expected valid exit for validator %s", validatorIndex)
-                .isEmpty();
-            assertThat(signatureValid)
-                .describedAs("Expected valid signature for validator %s", validatorIndex)
-                .isTrue();
-            seenValidators.add(validatorIndex);
-          }
-          case "reject" ->
-              assertThat(rejected)
-                  .describedAs("Expected reject for validator %s", validatorIndex)
-                  .isTrue();
-          default ->
-              throw new AssertionError(
-                  "Unexpected expected value: " + message.getExpected() + " for unseen validator");
-        }
-      }
+      GossipTestContext.assertValidationResult(
+          "voluntary exit " + message.getMessage(), message.getExpected(), result);
     }
   }
 
@@ -98,6 +79,12 @@ public class GossipVoluntaryExitTestExecutor implements TestExecutor {
     @JsonProperty(value = "messages", required = true)
     private List<Message> messages;
 
+    @JsonProperty(value = "blocks", required = true)
+    private List<GossipTestContext.BlockEntry> blocks;
+
+    @JsonProperty(value = "current_time_ms", required = true)
+    private long currentTimeMs;
+
     @JsonProperty(value = "bls_setting", required = false, defaultValue = "0")
     private int blsSetting;
 
@@ -105,8 +92,12 @@ public class GossipVoluntaryExitTestExecutor implements TestExecutor {
       return messages;
     }
 
-    public BlsSetting getBlsSetting() {
-      return BlsSetting.forCode(blsSetting);
+    public List<GossipTestContext.BlockEntry> getBlocks() {
+      return blocks;
+    }
+
+    public long getCurrentTimeMs() {
+      return currentTimeMs;
     }
 
     public String getTopic() {
@@ -114,6 +105,9 @@ public class GossipVoluntaryExitTestExecutor implements TestExecutor {
     }
 
     private static class Message {
+
+      @JsonProperty(value = "offset_ms", required = true)
+      private long offsetMs;
 
       @JsonProperty(value = "message", required = true)
       private String message;
@@ -126,6 +120,10 @@ public class GossipVoluntaryExitTestExecutor implements TestExecutor {
 
       public String getMessage() {
         return message;
+      }
+
+      public long getOffsetMs() {
+        return offsetMs;
       }
 
       public String getExpected() {

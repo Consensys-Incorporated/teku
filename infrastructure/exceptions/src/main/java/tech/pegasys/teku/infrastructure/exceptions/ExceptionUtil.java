@@ -32,6 +32,28 @@ public class ExceptionUtil {
     return getCause(err, targetType).isPresent();
   }
 
+  /**
+   * Hands an {@link OutOfMemoryError} to the thread's uncaught exception handler, so that a node
+   * which cannot allocate memory any more is shut down instead of being left running in a broken
+   * state. Does nothing for any other error.
+   *
+   * <p>Call this where an error would otherwise be swallowed, typically a {@code catch (Throwable)}
+   * that logs and carries on. Out of memory errors raised by the VM never reach such code, as
+   * {@code -XX:+ExitOnOutOfMemoryError} terminates the JVM where the error is thrown. This is for
+   * the ones thrown by Java code, which that flag does not detect: Netty's {@code
+   * OutOfDirectMemoryError} and NIO's "Cannot reserve ... direct buffer memory".
+   *
+   * <p>Interception is therefore best effort: it only works where Teku code sees the error. An
+   * error caught and logged inside a library, such as Netty's pipeline tail or a Jetty thread pool,
+   * is still swallowed.
+   */
+  public static void escalateIfOutOfMemory(final Throwable err) {
+    if (err instanceof OutOfMemoryError || hasCause(err, OutOfMemoryError.class)) {
+      final Thread currentThread = Thread.currentThread();
+      currentThread.getUncaughtExceptionHandler().uncaughtException(currentThread, err);
+    }
+  }
+
   public static String getRootCauseMessage(final Throwable err) {
     return Optional.ofNullable(ExceptionUtils.getRootCause(err))
         .map(ExceptionUtil::getMessageOrSimpleName)

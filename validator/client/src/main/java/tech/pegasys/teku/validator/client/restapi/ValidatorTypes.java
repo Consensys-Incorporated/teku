@@ -21,6 +21,8 @@ import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.BOOLEAN_TYPE
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.STRING_TYPE;
 import static tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition.enumOf;
 import static tech.pegasys.teku.infrastructure.json.types.SerializableTypeDefinition.listOf;
+import static tech.pegasys.teku.spec.config.SpecConfigGloas.MAX_BUILDER_AUTH_DATA_SIZE;
+import static tech.pegasys.teku.spec.schemas.ApiSchemas.MAX_BUILDER_URL_SIZE;
 
 import java.net.MalformedURLException;
 import java.net.URI;
@@ -28,6 +30,7 @@ import java.net.URL;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes48;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.json.types.CoreTypes;
@@ -37,6 +40,8 @@ import tech.pegasys.teku.infrastructure.json.types.StringBasedPrimitiveTypeDefin
 import tech.pegasys.teku.infrastructure.restapi.endpoints.ParameterMetadata;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.validator.client.Validator;
+import tech.pegasys.teku.validator.client.restapi.apis.schema.BuilderConfig;
+import tech.pegasys.teku.validator.client.restapi.apis.schema.BuilderEntry;
 import tech.pegasys.teku.validator.client.restapi.apis.schema.DeleteKeyResult;
 import tech.pegasys.teku.validator.client.restapi.apis.schema.DeleteKeysRequest;
 import tech.pegasys.teku.validator.client.restapi.apis.schema.DeleteKeysResponse;
@@ -213,6 +218,80 @@ public class ValidatorTypes {
               .name("DeleteRemoteKeysResponse")
               .withField("data", listOf(DELETE_KEY_RESULT), DeleteRemoteKeysResponse::getData)
               .build();
+
+  public static final DeserializableTypeDefinition<String> BUILDER_URL_TYPE =
+      DeserializableTypeDefinition.string(String.class)
+          .formatter(Function.identity())
+          .parser(Function.identity())
+          .format("uri")
+          .minLength(1)
+          .maxLength((int) MAX_BUILDER_URL_SIZE)
+          .description("The URL this entry's requests are sent to.")
+          .example("https://builder.example.com")
+          .build();
+
+  public static final DeserializableTypeDefinition<Bytes> BUILDER_AUTH_DATA_TYPE =
+      DeserializableTypeDefinition.string(Bytes.class)
+          .formatter(Bytes::toHexString)
+          .parser(Bytes::fromHexString)
+          .pattern("^0x(?:[a-fA-F0-9]{2}){1," + MAX_BUILDER_AUTH_DATA_SIZE + "}$")
+          .description(
+              "Opaque data used to authenticate this validator's requests to the builder. "
+                  + "Omitting it leaves the validator client to set it to the UTF-8 bytes of the entry's url.")
+          .example("0x68747470733a2f2f6275696c6465722e6578616d706c652e636f6d")
+          .build();
+
+  public static final DeserializableTypeDefinition<BuilderEntry> BUILDER_ENTRY_TYPE =
+      DeserializableTypeDefinition.object(BuilderEntry.class, BuilderEntry.Builder.class)
+          .name("BuilderEntry")
+          .initializer(BuilderEntry.Builder::new)
+          .finisher(BuilderEntry.Builder::build)
+          .withField("url", BUILDER_URL_TYPE, BuilderEntry::url, BuilderEntry.Builder::url)
+          .withOptionalField(
+              "auth_data",
+              BUILDER_AUTH_DATA_TYPE,
+              BuilderEntry::authData,
+              BuilderEntry.Builder::authData)
+          .withOptionalField(
+              "builder_pubkeys",
+              DeserializableTypeDefinition.listOf(PUBKEY_API_TYPE),
+              BuilderEntry::builderPubkeys,
+              BuilderEntry.Builder::builderPubkeys)
+          .withOptionalField(
+              "max_execution_payment",
+              CoreTypes.UINT64_TYPE,
+              BuilderEntry::maxExecutionPayment,
+              BuilderEntry.Builder::maxExecutionPayment)
+          .withOptionalField(
+              "min_bid", CoreTypes.UINT64_TYPE, BuilderEntry::minBid, BuilderEntry.Builder::minBid)
+          .withOptionalField(
+              "builder_boost_factor",
+              CoreTypes.UINT64_TYPE,
+              BuilderEntry::builderBoostFactor,
+              BuilderEntry.Builder::builderBoostFactor)
+          .build();
+
+  public static final DeserializableTypeDefinition<BuilderConfig> BUILDER_CONFIG_TYPE =
+      DeserializableTypeDefinition.object(BuilderConfig.class, BuilderConfig.Builder.class)
+          .name("BuilderConfig")
+          .initializer(BuilderConfig.Builder::new)
+          .finisher(BuilderConfig.Builder::build)
+          .withOptionalField(
+              "min_bid",
+              CoreTypes.UINT64_TYPE,
+              BuilderConfig::minBid,
+              BuilderConfig.Builder::minBid)
+          .withOptionalField(
+              "builder_boost_factor",
+              CoreTypes.UINT64_TYPE,
+              BuilderConfig::builderBoostFactor,
+              BuilderConfig.Builder::builderBoostFactor)
+          .withOptionalField(
+              "builders",
+              DeserializableTypeDefinition.listOf(BUILDER_ENTRY_TYPE),
+              BuilderConfig::builders,
+              BuilderConfig.Builder::builders)
+          .build();
 
   public static final ParameterMetadata<BLSPublicKey> PARAM_PUBKEY_TYPE =
       new ParameterMetadata<>(

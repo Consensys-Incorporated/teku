@@ -149,6 +149,9 @@ interface ForkChoiceModel {
    * when present, and otherwise consult the parent BASE's preferred sibling.
    *
    * <p>Implementations should return {@code candidate} unchanged when no redirection is needed.
+   * Implementations whose base node is never a valid head (Gloas) must also resolve a childless
+   * base landing point, i.e. the justified root without any viable descendant, to the variant the
+   * spec's {@code get_head} returns in that case.
    */
   ProtoNode resolveBestDescendant(
       ProtoNode candidate,

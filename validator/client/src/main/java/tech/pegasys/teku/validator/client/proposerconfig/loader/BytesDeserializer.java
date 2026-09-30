@@ -11,20 +11,19 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package tech.pegasys.teku.networking.eth2.rpc.core.encodings.compression.snappy;
+package tech.pegasys.teku.validator.client.proposerconfig.loader;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.handler.codec.compression.Snappy;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.JsonDeserializer;
+import java.io.IOException;
+import org.apache.tuweni.bytes.Bytes;
 
-/** Snappy framed encoder that uses Netty for raw snappy chunks. */
-public class NettySnappyFrameEncoder extends SnappyFrameEncoder {
-
-  // Owned by a fresh frame encoder per RPC payload; this mutable codec is not shared.
-  private final Snappy snappy = new Snappy();
+class BytesDeserializer extends JsonDeserializer<Bytes> {
 
   @Override
-  protected void encodeCompressedChunk(
-      final ByteBuf input, final ByteBuf output, final int dataLength) {
-    snappy.encode(input, output, dataLength);
+  public Bytes deserialize(final JsonParser p, final DeserializationContext ctxt)
+      throws IOException {
+    return Bytes.fromHexString(p.getValueAsString());
   }
 }

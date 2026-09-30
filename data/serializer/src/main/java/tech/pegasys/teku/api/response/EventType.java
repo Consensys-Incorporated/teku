@@ -13,7 +13,10 @@
 
 package tech.pegasys.teku.api.response;
 
+import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @SuppressWarnings("JavaCase")
 public enum EventType {
@@ -42,7 +45,14 @@ public enum EventType {
   proposer_preferences,
   fast_confirmation;
 
+  private static final Set<String> TOPIC_NAMES =
+      Arrays.stream(values()).map(EventType::name).collect(Collectors.toUnmodifiableSet());
+
   public static List<EventType> getTopics(final List<String> topics) {
     return topics.stream().map(EventType::valueOf).toList();
+  }
+
+  public static boolean isValidTopic(final String topic) {
+    return TOPIC_NAMES.contains(topic);
   }
 }

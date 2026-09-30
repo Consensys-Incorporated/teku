@@ -16,27 +16,18 @@ package tech.pegasys.teku.networking.eth2.gossip.encoding;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszLengthBounds;
 
 public class SnappyBlockCompressorTest {
 
   private static final long MAX_PAYLOAD_SIZE = Long.MAX_VALUE;
 
-  private static Stream<Arguments> compressors() {
-    return Stream.of(
-        Arguments.of("snappy-java", new XerialSnappyCompressor()),
-        Arguments.of("aircompressor", new AircompressorSnappyBlockCompressor()));
-  }
+  private final SnappyCompressor compressor = new AircompressorSnappyBlockCompressor();
 
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("compressors")
-  public void roundTrip(final String name, final SnappyCompressor compressor)
-      throws DecodingException {
+  @Test
+  public void roundTrip() throws DecodingException {
     final Bytes original = Bytes.fromHexString("0x010203040506");
 
     final Bytes compressed = compressor.compress(original);
@@ -47,9 +38,8 @@ public class SnappyBlockCompressorTest {
     assertThat(uncompressed).isEqualTo(original);
   }
 
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("compressors")
-  public void uncompress_randomData(final String name, final SnappyCompressor compressor) {
+  @Test
+  public void uncompress_randomData() {
     final Bytes data = Bytes.fromHexString("0x0102");
 
     assertThatThrownBy(
@@ -57,10 +47,8 @@ public class SnappyBlockCompressorTest {
         .isInstanceOf(DecodingException.class);
   }
 
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("compressors")
-  void uncompress_uncompressedLengthLongerThanSszLenghtBounds(
-      final String name, final SnappyCompressor compressor) {
+  @Test
+  void uncompress_uncompressedLengthLongerThanSszLenghtBounds() {
     final Bytes original = Bytes.fromHexString("0x010203040506");
 
     final Bytes compressed = compressor.compress(original);
@@ -71,10 +59,8 @@ public class SnappyBlockCompressorTest {
         .hasMessageContaining("not within expected bounds");
   }
 
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("compressors")
-  void uncompress_uncompressedLengthShorterThanSszLengthBounds(
-      final String name, final SnappyCompressor compressor) {
+  @Test
+  void uncompress_uncompressedLengthShorterThanSszLengthBounds() {
     final Bytes original = Bytes.fromHexString("0x010203040506");
 
     final Bytes compressed = compressor.compress(original);
@@ -87,10 +73,8 @@ public class SnappyBlockCompressorTest {
         .hasMessageContaining("not within expected bounds");
   }
 
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("compressors")
-  void uncompress_uncompressedLengthLongerThanMaxBytesLength(
-      final String name, final SnappyCompressor compressor) {
+  @Test
+  void uncompress_uncompressedLengthLongerThanMaxBytesLength() {
     final Bytes original = Bytes.fromHexString("0x010203040506");
     final long smallMaxBytesLength = 3;
     assertThat(smallMaxBytesLength).isLessThan(original.size());
@@ -104,10 +88,8 @@ public class SnappyBlockCompressorTest {
         .hasMessageContaining("exceeds max length in bytes");
   }
 
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("compressors")
-  void uncompress_uncompressedLengthEqualThanMaxBytesLength(
-      final String name, final SnappyCompressor compressor) throws DecodingException {
+  @Test
+  void uncompress_uncompressedLengthEqualThanMaxBytesLength() throws DecodingException {
     final Bytes original = Bytes.fromHexString("0x010203040506");
     final long exactMaxBytesLength = original.size();
 
@@ -119,27 +101,8 @@ public class SnappyBlockCompressorTest {
     assertThat(uncompressed).isEqualTo(original);
   }
 
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("compressors")
-  void compressedDataCanBeUncompressedByOtherImplementation(
-      final String name, final SnappyCompressor compressor) throws DecodingException {
-    final SnappyCompressor otherCompressor =
-        name.equals("snappy-java")
-            ? new AircompressorSnappyBlockCompressor()
-            : new XerialSnappyCompressor();
-    final Bytes original = Bytes.fromHexString("0x010203040506");
-
-    final Bytes compressed = compressor.compress(original);
-    final Bytes uncompressed =
-        otherCompressor.uncompress(compressed, SszLengthBounds.ofBytes(0, 1000), MAX_PAYLOAD_SIZE);
-
-    assertThat(uncompressed).isEqualTo(original);
-  }
-
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("compressors")
-  void uncompress_compressedDataWithTrailingBytesIsRejected(
-      final String name, final SnappyCompressor compressor) {
+  @Test
+  void uncompress_compressedDataWithTrailingBytesIsRejected() {
     final Bytes original = Bytes.fromHexString("0x010203040506");
     final Bytes compressed = Bytes.concatenate(compressor.compress(original), Bytes.of(1));
 

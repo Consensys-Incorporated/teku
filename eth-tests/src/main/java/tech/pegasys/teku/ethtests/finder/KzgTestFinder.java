@@ -31,7 +31,7 @@ public class KzgTestFinder implements TestFinder {
   public Stream<TestDefinition> findTests(
       final String fork, final String config, final Path testRoot) throws IOException {
     final Path kzgTestDir = testRoot.resolve("kzg");
-    if (!kzgTestDir.toFile().exists()) {
+    if (!Files.exists(kzgTestDir)) {
       return Stream.empty();
     }
     return Files.list(kzgTestDir)
@@ -44,12 +44,12 @@ public class KzgTestFinder implements TestFinder {
       throws IOException {
     final String testType = testRoot.relativize(testCategoryDir).toString();
     return Files.walk(testCategoryDir)
-        .filter(path -> path.resolve(KZG_DATA_FILE).toFile().exists())
+        .filter(path -> Files.exists(path.resolve(KZG_DATA_FILE)))
         .map(
             testDir -> {
               final String testName = testCategoryDir.relativize(testDir).toString();
               return new TestDefinition(
-                  fork, config, testType, testName, testRoot.relativize(testDir));
+                  fork, config, testType, testName, testRoot.relativize(testDir).toString());
             });
   }
 }

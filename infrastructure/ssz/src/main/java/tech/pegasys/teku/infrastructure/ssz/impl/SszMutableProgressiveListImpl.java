@@ -141,7 +141,9 @@ public class SszMutableProgressiveListImpl<
 
   @Override
   protected void checkIndex(final int index, final boolean set) {
-    if (index < 0 || (!set && index >= size()) || (set && index > size())) {
+    if (index < 0
+        || (!set && index >= size())
+        || (set && (index > size() || index >= getSchema().getMaxLength()))) {
       throw new IndexOutOfBoundsException(
           "Invalid index " + index + " for progressive list with size " + size());
     }

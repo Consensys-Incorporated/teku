@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.validator.client.duties.execution;
 
+import java.util.Optional;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
@@ -26,6 +27,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloa
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
+import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 import tech.pegasys.teku.validator.client.Validator;
@@ -108,7 +110,8 @@ public class ExecutionPayloadDuty implements ExecutionPayloadBidEventsChannel {
   private SafeFuture<Void> publishSignedExecutionPayload(
       final SignedExecutionPayloadEnvelope signedExecutionPayload) {
     return validatorApiChannel
-        .publishSignedExecutionPayload(signedExecutionPayload)
+        .publishSignedExecutionPayload(
+            signedExecutionPayload, Optional.of(BroadcastValidationLevel.GOSSIP))
         .thenAccept(
             result -> {
               final ExecutionPayloadEnvelope executionPayload = signedExecutionPayload.getMessage();

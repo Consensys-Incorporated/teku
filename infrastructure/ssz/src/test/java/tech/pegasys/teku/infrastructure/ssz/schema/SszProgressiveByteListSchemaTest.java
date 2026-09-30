@@ -14,6 +14,7 @@
 package tech.pegasys.teku.infrastructure.ssz.schema;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import java.util.List;
@@ -27,11 +28,14 @@ import tech.pegasys.teku.infrastructure.ssz.collections.SszByteList;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszMutablePrimitiveList;
 import tech.pegasys.teku.infrastructure.ssz.collections.impl.SszProgressiveByteListImpl;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszByte;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszMaxLengthExceededException;
 
 class SszProgressiveByteListSchemaTest {
 
   private static final SszProgressiveByteListSchema<SszByteList> SCHEMA =
       new SszProgressiveByteListSchema<>();
+  private static final SszProgressiveByteListSchema<SszByteList> LIMITED_SCHEMA =
+      new SszProgressiveByteListSchema<>(4);
   private static final SszProgressiveByteListSchema<SszByteList> UINT8_SCHEMA =
       new SszProgressiveByteListSchema<>(SszPrimitiveSchemas.UINT8_SCHEMA);
 
@@ -159,5 +163,33 @@ class SszProgressiveByteListSchemaTest {
 
     assertThat(updated.getBytes()).isEqualTo(Bytes.fromHexString("0x010203"));
     assertThat(updated.size()).isEqualTo(3);
+  }
+
+  @Test
+  void maxLength_shouldBeEnforcedOnDeserialization() {
+    assertThat(LIMITED_SCHEMA.getMaxLength()).isEqualTo(4);
+    assertThat(LIMITED_SCHEMA.fromBytes(Bytes.fromHexString("0x01020304")).size()).isEqualTo(4);
+    assertThatThrownBy(() -> LIMITED_SCHEMA.fromBytes(Bytes.fromHexString("0x0102030405")))
+        .isInstanceOf(SszMaxLengthExceededException.class)
+        .hasMessage("List length 5 exceeds max length 4");
+    assertThatThrownBy(() -> LIMITED_SCHEMA.sszDeserialize(Bytes.fromHexString("0x0102030405")))
+        .isInstanceOf(SszMaxLengthExceededException.class);
+    assertThatThrownBy(
+            () -> JsonUtil.parse("\"0x0102030405\"", LIMITED_SCHEMA.getJsonTypeDefinition()))
+        .hasRootCauseInstanceOf(SszMaxLengthExceededException.class);
+  }
+
+  @Test
+  void maxLength_shouldBeEnforcedOnMutation() {
+    final SszByteList byteList = LIMITED_SCHEMA.fromBytes(Bytes.fromHexString("0x01020304"));
+    final SszMutablePrimitiveList<Byte, SszByte> mutable = byteList.createWritableCopy();
+    assertThatThrownBy(() -> mutable.appendElement((byte) 0x05))
+        .isInstanceOf(IndexOutOfBoundsException.class);
+  }
+
+  @Test
+  void maxLength_shouldMakeSszLengthBoundsFinite() {
+    assertThat(LIMITED_SCHEMA.getSszLengthBounds().getMaxBytes()).isEqualTo(4);
+    assertThat(LIMITED_SCHEMA).isNotEqualTo(SCHEMA);
   }
 }

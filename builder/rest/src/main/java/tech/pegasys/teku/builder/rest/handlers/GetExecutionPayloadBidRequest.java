@@ -22,10 +22,12 @@ import static tech.pegasys.teku.spec.config.Constants.BUILDER_PROPOSAL_DELAY_TOL
 import java.util.Map;
 import java.util.Optional;
 import okhttp3.HttpUrl;
+import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.builder.rest.ResponseHandler;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.http.ContentTypes;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -43,11 +45,24 @@ public class GetExecutionPayloadBidRequest extends AbstractBuilderRequest {
 
   public GetExecutionPayloadBidRequest(
       final Spec spec, final HttpUrl baseEndpoint, final OkHttpClient httpClient) {
-    super(baseEndpoint, httpClient);
+    // A derived client scoped to bid requests only, still sharing the underlying
+    // dispatcher/connection pool with other builder requests. An interceptor is used so the
+    // "Date-Milliseconds" timestamp lines up with when the call's timeout starts counting.
+    super(baseEndpoint, httpClient.newBuilder().addInterceptor(createRequestInterceptor()).build());
     this.spec = spec;
   }
 
-  public Optional<SignedExecutionPayloadBid> submit(
+  private static Interceptor createRequestInterceptor() {
+    return chain ->
+        chain.proceed(
+            chain
+                .request()
+                .newBuilder()
+                .header(SENT_TIME_HEADER, String.valueOf(System.currentTimeMillis()))
+                .build());
+  }
+
+  public SafeFuture<Optional<SignedExecutionPayloadBid>> submit(
       final UInt64 slot,
       final Bytes32 parentHash,
       final Bytes32 parentRoot,
@@ -74,8 +89,6 @@ public class GetExecutionPayloadBidRequest extends AbstractBuilderRequest {
             ContentTypes.JSON,
             HEADER_CONSENSUS_VERSION,
             spec.atSlot(slot).getMilestone().lowerCaseName(),
-            SENT_TIME_HEADER,
-            String.valueOf(System.currentTimeMillis()),
             REQUEST_TIMEOUT_HEADER,
             String.valueOf(BUILDER_PROPOSAL_DELAY_TOLERANCE.toMillis()));
 

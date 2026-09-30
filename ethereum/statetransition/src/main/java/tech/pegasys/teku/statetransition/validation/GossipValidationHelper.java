@@ -105,7 +105,10 @@ public class GossipValidationHelper {
   }
 
   public boolean isEpochFromFuture(final UInt64 epoch) {
-    return isSlotFromFuture(spec.computeStartSlotAtEpoch(epoch));
+    final UInt64 maxTime = getCurrentTimeMillis().plus(maxOffsetTimeInMillis);
+    final UInt64 maxCurrentSlot =
+        spec.getCurrentSlotFromTimeMillis(maxTime, recentChainData.getGenesisTimeMillis());
+    return epoch.isGreaterThan(spec.computeEpochAtSlot(maxCurrentSlot));
   }
 
   public boolean hasSlotStarted(final UInt64 slot) {
@@ -344,10 +347,6 @@ public class GossipValidationHelper {
    */
   public boolean isPossibleDependentRoot(final Bytes32 root, final UInt64 epochStartSlot) {
     final ReadOnlyForkChoiceStrategy forkChoiceStrategy = getForkChoiceStrategy();
-    final Optional<UInt64> rootSlot = forkChoiceStrategy.blockSlot(root);
-    if (rootSlot.isPresent() && rootSlot.get().isGreaterThanOrEqualTo(epochStartSlot)) {
-      return false;
-    }
     final UInt64 lastSlotBeforeEpoch = epochStartSlot.minusMinZero(ONE);
     // The root already is the latest block before the epoch on any branch where it has a child at
     // or after epochStartSlot. Rather than scanning every block in the store for such a child, walk
@@ -377,7 +376,7 @@ public class GossipValidationHelper {
       final Bytes32 blockRoot, final UInt64 proposalSlot) {
     final Optional<ReadOnlyForkChoiceStrategy> maybeForkChoiceStrategy =
         recentChainData.getForkChoiceStrategy();
-    if (maybeForkChoiceStrategy == null || maybeForkChoiceStrategy.isEmpty()) {
+    if (maybeForkChoiceStrategy.isEmpty()) {
       return Optional.empty();
     }
     return ShufflingDependentRootUtil.getShufflingDependentRoot(

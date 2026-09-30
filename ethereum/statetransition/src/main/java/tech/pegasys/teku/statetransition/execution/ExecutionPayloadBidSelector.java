@@ -17,6 +17,7 @@ import static tech.pegasys.teku.infrastructure.logging.Converter.weiToEth;
 import static tech.pegasys.teku.infrastructure.logging.LogFormatter.formatAbbreviatedHashRoot;
 import static tech.pegasys.teku.spec.constants.EthConstants.GWEI_TO_WEI;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -90,15 +91,17 @@ public class ExecutionPayloadBidSelector {
         .filter(circuitBreakerPredicate)
         .filter(minBidPredicate)
         .forEach(eligibleRemoteBids::add);
-    // selecting the highest bid value based on their boosted values
+    // selecting the highest bid value based on their boosted values, with a Builder API bid (the
+    // only kind carrying an entry) winning a tie
     final Comparator<RemoteBid> remoteBidByBoostedValueAscending =
-        Comparator.comparing(
-            bid -> {
-              final UInt64 builderBoostFactor = bid.builderBoostFactor(builderConfig);
-              return bid.valueInGwei()
-                  .bigIntegerValue()
-                  .multiply(builderBoostFactor.bigIntegerValue());
-            });
+        Comparator.<RemoteBid, BigInteger>comparing(
+                bid -> {
+                  final UInt64 builderBoostFactor = bid.builderBoostFactor(builderConfig);
+                  return bid.valueInGwei()
+                      .bigIntegerValue()
+                      .multiply(builderBoostFactor.bigIntegerValue());
+                })
+            .thenComparing(bid -> bid.builderEntry().isPresent());
     return eligibleRemoteBids.stream().max(remoteBidByBoostedValueAscending);
   }
 

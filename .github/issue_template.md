@@ -1,7 +1,7 @@
 <!-- 
 By filing an Issue, you are expected to comply with the Code of Conduct, 
 including treating everyone with respect:
-https://github.com/Consensys/teku/blob/master/CODE-OF-CONDUCT.md
+https://github.com/Consensys-Incorporated/teku/blob/master/CODE-OF-CONDUCT.md
 
 Not all sections will apply to all issue types.
 -->

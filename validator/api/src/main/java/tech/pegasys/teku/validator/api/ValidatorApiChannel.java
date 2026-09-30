@@ -39,7 +39,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
@@ -208,6 +208,12 @@ public interface ValidatorApiChannel extends BuilderApiChannel, ChannelInterface
         }
 
         @Override
+        public SafeFuture<List<SubmitDataError>> sendBuilderPreferences(
+            final SszList<BuilderPreferencesEntry> builderPreferences) {
+          return SafeFuture.completedFuture(List.of());
+        }
+
+        @Override
         public SafeFuture<Void> prepareBeaconProposer(
             final Collection<BeaconPreparableProposer> beaconPreparableProposers) {
           return SafeFuture.COMPLETE;
@@ -235,12 +241,6 @@ public interface ValidatorApiChannel extends BuilderApiChannel, ChannelInterface
         public SafeFuture<Optional<List<SyncCommitteeSelectionProof>>>
             getSyncCommitteeSelectionProof(final List<SyncCommitteeSelectionProof> requests) {
           return SafeFuture.completedFuture(Optional.of(requests));
-        }
-
-        @Override
-        public SafeFuture<Optional<ExecutionPayloadBid>> createUnsignedExecutionPayloadBid(
-            final UInt64 slot, final UInt64 builderIndex) {
-          return SafeFuture.completedFuture(Optional.empty());
         }
 
         @Override
@@ -355,6 +355,9 @@ public interface ValidatorApiChannel extends BuilderApiChannel, ChannelInterface
 
   SafeFuture<List<SubmitDataError>> sendSignedProposerPreferences(
       List<SignedProposerPreferences> signedProposerPreferences);
+
+  SafeFuture<List<SubmitDataError>> sendBuilderPreferences(
+      SszList<BuilderPreferencesEntry> builderPreferences);
 
   SafeFuture<Void> prepareBeaconProposer(
       Collection<BeaconPreparableProposer> beaconPreparableProposers);

@@ -17,16 +17,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
-import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.spec.Spec;
 
 class OkHttpStakedBuilderClientProviderTest {
 
   private final Spec spec = mock(Spec.class);
-  private final AsyncRunner asyncRunner = mock(AsyncRunner.class);
 
   private final OkHttpStakedBuilderClientProvider provider =
-      new OkHttpStakedBuilderClientProvider(spec, asyncRunner);
+      new OkHttpStakedBuilderClientProvider(spec);
 
   @Test
   void returnsSameInstanceForSameUrl() {

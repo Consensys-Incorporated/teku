@@ -24,6 +24,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -146,7 +147,8 @@ public class ForkChoiceTestExecutor implements TestExecutor {
               "fork_choice/should_apply_proposer_boost",
               new ForkChoiceTestExecutor(
                   // TODO this is skipped because it relies on equivocation, which is not
-                  // currently implemented. See https://github.com/Consensys/teku/issues/10608
+                  // currently implemented. See
+                  // https://github.com/Consensys-Incorporated/teku/issues/10608
                   "should_apply_proposer_boost_withheld"))
           // Fork choice generated test types
           .put("fork_choice_compliance/block_weight_test", new ForkChoiceTestExecutor())
@@ -1144,7 +1146,7 @@ public class ForkChoiceTestExecutor implements TestExecutor {
       throws IOException {
     final ForkChoiceMetaData metaData;
     final Path metaPath = testDefinition.getTestDirectory().resolve("meta.yaml");
-    if (metaPath.toFile().exists()) {
+    if (Files.exists(metaPath)) {
       metaData = loadYaml(testDefinition, "meta.yaml", ForkChoiceMetaData.class);
     } else {
       metaData = ForkChoiceMetaData.DEFAULT;

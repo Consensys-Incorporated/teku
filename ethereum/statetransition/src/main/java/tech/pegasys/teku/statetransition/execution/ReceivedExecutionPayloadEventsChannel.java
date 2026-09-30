@@ -21,6 +21,9 @@ public interface ReceivedExecutionPayloadEventsChannel extends VoidReturningChan
   /** Execution payload passes validation rules of the `execution_payload` topic */
   void onExecutionPayloadValidated(SignedExecutionPayloadEnvelope executionPayload);
 
+  /** Execution payload passes the data availability checks * */
+  void onExecutionPayloadAvailable(SignedExecutionPayloadEnvelope executionPayload);
+
   /** Successfully imported on the fork-choice `on_execution_payload` handler */
   void onExecutionPayloadImported(
       SignedExecutionPayloadEnvelope executionPayload, boolean executionOptimistic);

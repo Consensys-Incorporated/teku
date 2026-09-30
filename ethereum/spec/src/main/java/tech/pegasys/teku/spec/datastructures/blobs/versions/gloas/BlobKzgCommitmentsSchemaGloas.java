@@ -16,7 +16,9 @@ package tech.pegasys.teku.spec.datastructures.blobs.versions.gloas;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.impl.SszProgressiveListImpl;
 import tech.pegasys.teku.infrastructure.ssz.schema.AbstractSszProgressiveListSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszSchemaHints;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
+import tech.pegasys.teku.spec.config.SpecConfigDeneb;
 import tech.pegasys.teku.spec.datastructures.blobs.BlobKzgCommitmentsSchema;
 import tech.pegasys.teku.spec.datastructures.execution.BlobsBundle;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
@@ -26,8 +28,11 @@ public class BlobKzgCommitmentsSchemaGloas
     extends AbstractSszProgressiveListSchema<SszKZGCommitment, SszList<SszKZGCommitment>>
     implements BlobKzgCommitmentsSchema {
 
-  public BlobKzgCommitmentsSchemaGloas() {
-    super(SszKZGCommitmentSchema.INSTANCE);
+  public BlobKzgCommitmentsSchemaGloas(final SpecConfigDeneb specConfig) {
+    super(
+        SszKZGCommitmentSchema.INSTANCE,
+        SszSchemaHints.none(),
+        specConfig.getMaxBlobCommitmentsPerBlock());
   }
 
   @Override

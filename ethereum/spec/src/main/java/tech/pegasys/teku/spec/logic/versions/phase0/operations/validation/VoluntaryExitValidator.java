@@ -80,6 +80,31 @@ public class VoluntaryExitValidator
         });
   }
 
+  public Optional<OperationInvalidReason> validateForGossip(
+      final Fork fork, final BeaconState state, final SignedVoluntaryExit signedExit) {
+    final VoluntaryExit exit = signedExit.getMessage();
+    return firstOf(
+        () ->
+            check(
+                UInt64.valueOf(state.getValidators().size())
+                    .isGreaterThan(exit.getValidatorIndex()),
+                ExitInvalidReason.invalidValidatorIndex()),
+        () ->
+            check(
+                predicates.isActiveValidator(
+                    getValidator(state, exit), beaconStateAccessors.getCurrentEpoch(state)),
+                ExitInvalidReason.validatorInactive()),
+        () -> {
+          final UInt64 exitEpoch =
+              getValidator(state, exit)
+                  .getActivationEpoch()
+                  .plus(specConfig.getShardCommitteePeriod());
+          return check(
+              beaconStateAccessors.getCurrentEpoch(state).isGreaterThanOrEqualTo(exitEpoch),
+              ExitInvalidReason.validatorTooYoung(exitEpoch));
+        });
+  }
+
   private Validator getValidator(final BeaconState state, final VoluntaryExit exit) {
     return state.getValidators().get(exit.getValidatorIndex().intValue());
   }

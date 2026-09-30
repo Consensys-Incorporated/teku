@@ -33,9 +33,11 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
+import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.fulu.BeaconStateFulu;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
+import tech.pegasys.teku.statetransition.util.ShufflingDependentRootUtil;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
 public class ProposerPreferencesGossipValidator {
@@ -82,7 +84,7 @@ public class ProposerPreferencesGossipValidator {
     /*
      * [IGNORE] The proposal epoch is after the Gloas upgrade
      */
-    if (!spec.isProposerPreferencesAvailableAtEpoch(proposalEpoch)) {
+    if (!spec.areProposerAndBuilderPreferencesRequiredAtEpoch(proposalEpoch)) {
       return completedFuture(ignorePreferences(proposerPreferences, "proposal epoch is pre-gloas"));
     }
 
@@ -114,9 +116,9 @@ public class ProposerPreferencesGossipValidator {
               "dependent root has not been seen; saving for future processing"));
     }
 
-    final int minSeedLookahead = spec.atSlot(proposalSlot).getConfig().getMinSeedLookahead();
-    final UInt64 lookaheadEpoch = proposalEpoch.minusMinZero(minSeedLookahead);
-    final UInt64 lookaheadEpochStartSlot = spec.computeStartSlotAtEpoch(lookaheadEpoch);
+    final UInt64 shufflingDependentSlot =
+        ShufflingDependentRootUtil.getShufflingDependentSlotForEpoch(spec, proposalEpoch)
+            .orElse(UInt64.ZERO);
 
     /*
      * [REJECT] The dependent block's slot is not after the shuffling dependent slot
@@ -125,15 +127,19 @@ public class ProposerPreferencesGossipValidator {
         recentChainData.getSlotForBlockRoot(dependentRoot);
     if (maybeDependentRootSlot.isPresent()) {
       final UInt64 dependentRootSlot = maybeDependentRootSlot.get();
-      if (!dependentRootSlot.isLessThan(lookaheadEpochStartSlot)) {
+      if (dependentRootSlot.isGreaterThan(shufflingDependentSlot)) {
         return completedFuture(
             rejectPreferences(
                 proposerPreferences,
-                "dependent root is at slot %s but must be before the proposer lookahead epoch start slot %s",
+                "dependent root is at slot %s but must not be after the shuffling dependent slot %s",
                 dependentRootSlot,
-                lookaheadEpochStartSlot));
+                shufflingDependentSlot));
       }
     }
+
+    final int minSeedLookahead = spec.atSlot(proposalSlot).getConfig().getMinSeedLookahead();
+    final UInt64 lookaheadEpoch = proposalEpoch.minusMinZero(minSeedLookahead);
+    final UInt64 lookaheadEpochStartSlot = spec.computeStartSlotAtEpoch(lookaheadEpoch);
 
     /*
      * [IGNORE] The dependent block is a possible dependent block for the proposer lookahead
@@ -283,12 +289,15 @@ public class ProposerPreferencesGossipValidator {
 
   private boolean isSignatureValid(
       final SignedProposerPreferences signedProposerPreferences, final BeaconState state) {
+    final ProposerPreferences proposerPreferences = signedProposerPreferences.getMessage();
+    final UInt64 proposalEpoch = spec.computeEpochAtSlot(proposerPreferences.getProposalSlot());
+    final ForkInfo forkInfo =
+        new ForkInfo(spec.fork(proposalEpoch), state.getGenesisValidatorsRoot());
     final Bytes signingRoot =
-        signingRootUtil.signingRootForSignProposerPreferences(
-            signedProposerPreferences.getMessage(), state.getForkInfo());
+        signingRootUtil.signingRootForSignProposerPreferences(proposerPreferences, forkInfo);
     return gossipValidationHelper.isSignatureValidWithRespectToProposerIndex(
         signingRoot,
-        signedProposerPreferences.getMessage().getValidatorIndex(),
+        proposerPreferences.getValidatorIndex(),
         signedProposerPreferences.getSignature(),
         state);
   }

@@ -45,8 +45,10 @@ import tech.pegasys.teku.infrastructure.async.ThrottlingTaskQueueWithPriority;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
+import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.builder.ValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderRequestAuth;
@@ -70,6 +72,7 @@ import tech.pegasys.teku.validator.api.signer.RandaoRevealWrapper;
 import tech.pegasys.teku.validator.api.signer.SignType;
 import tech.pegasys.teku.validator.api.signer.SyncAggregatorSelectionDataWrapper;
 import tech.pegasys.teku.validator.api.signer.SyncCommitteeMessageWrapper;
+import tech.pegasys.teku.validator.api.signer.VersionedWrapper;
 
 public class ExternalSigner implements Signer {
   public static final String EXTERNAL_SIGNER_ENDPOINT = "/api/v1/eth2/sign";
@@ -278,40 +281,82 @@ public class ExternalSigner implements Signer {
                 slashableGenericMessage("validator registration")));
   }
 
-  // TODO-GLOAS: https://github.com/ethereum/remote-signing-api/issues/23
   @Override
   public SafeFuture<BLSSignature> signExecutionPayloadBid(
       final ExecutionPayloadBid bid, final ForkInfo forkInfo) {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not yet implemented"));
+    return sign(
+        signingRootUtil.signingRootForSignExecutionPayloadBid(bid, forkInfo),
+        SignType.EXECUTION_PAYLOAD_BID,
+        Map.of(
+            SignType.EXECUTION_PAYLOAD_BID.getName(),
+            versioned(bid, forkInfo),
+            FORK_INFO,
+            forkInfo),
+        slashableGenericMessage("execution payload bid"));
   }
 
   @Override
   public SafeFuture<BLSSignature> signExecutionPayloadEnvelope(
       final ExecutionPayloadEnvelope envelope, final ForkInfo forkInfo) {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not yet implemented"));
+    return sign(
+        signingRootUtil.signingRootForSignExecutionPayloadEnvelope(envelope, forkInfo),
+        SignType.EXECUTION_PAYLOAD_ENVELOPE,
+        Map.of(
+            SignType.EXECUTION_PAYLOAD_ENVELOPE.getName(),
+            versioned(envelope, forkInfo),
+            FORK_INFO,
+            forkInfo),
+        slashableGenericMessage("execution payload envelope"));
   }
 
   @Override
   public SafeFuture<BLSSignature> signPayloadAttestationData(
       final PayloadAttestationData payloadAttestationData, final ForkInfo forkInfo) {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not yet implemented"));
+    return sign(
+        signingRootUtil.signingRootForSignPayloadAttestationData(payloadAttestationData, forkInfo),
+        SignType.PAYLOAD_ATTESTATION_MESSAGE,
+        Map.of(
+            SignType.PAYLOAD_ATTESTATION_MESSAGE.getName(),
+            versioned(payloadAttestationData, forkInfo),
+            FORK_INFO,
+            forkInfo),
+        slashableGenericMessage("payload attestation data"));
   }
 
   @Override
   public SafeFuture<BLSSignature> signProposerPreferences(
       final ProposerPreferences proposerPreferences, final ForkInfo forkInfo) {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not yet implemented"));
+    return sign(
+        signingRootUtil.signingRootForSignProposerPreferences(proposerPreferences, forkInfo),
+        SignType.PROPOSER_PREFERENCES,
+        Map.of(
+            SignType.PROPOSER_PREFERENCES.getName(),
+            versioned(proposerPreferences, forkInfo),
+            FORK_INFO,
+            forkInfo),
+        slashableGenericMessage("proposer preferences"));
   }
 
   @Override
   public SafeFuture<BLSSignature> signBuilderRequestAuth(
       final BuilderRequestAuth builderRequestAuth) {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not yet implemented"));
+    final SpecMilestone milestone = spec.atSlot(builderRequestAuth.getSlot()).getMilestone();
+    return sign(
+        signingRootUtil.signingRootForSignBuilderRequestAuth(builderRequestAuth),
+        SignType.BUILDER_REQUEST_AUTH,
+        Map.of(
+            SignType.BUILDER_REQUEST_AUTH.getName(),
+            new VersionedWrapper<>(milestone, builderRequestAuth)),
+        slashableGenericMessage("builder request auth"));
   }
 
   @Override
   public Optional<URL> getSigningServiceUrl() {
     return Optional.of(signingServiceUrl);
+  }
+
+  private <T extends SszData> VersionedWrapper<T> versioned(final T data, final ForkInfo forkInfo) {
+    return new VersionedWrapper<>(spec.atEpoch(forkInfo.getFork().getEpoch()).getMilestone(), data);
   }
 
   private SafeFuture<Bytes> signingRootFromSyncCommitteeUtils(

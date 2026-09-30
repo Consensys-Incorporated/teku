@@ -50,7 +50,10 @@ public class DataColumnSidecarSchemaGloas
         "DataColumnSidecarGloas",
         namedSchema(FIELD_INDEX, SszPrimitiveSchemas.UINT64_SCHEMA),
         namedSchema(FIELD_BLOB, dataColumnSchema),
-        namedSchema(FIELD_KZG_PROOFS, SszProgressiveListSchema.create(SszKZGProofSchema.INSTANCE)),
+        namedSchema(
+            FIELD_KZG_PROOFS,
+            SszProgressiveListSchema.create(
+                SszKZGProofSchema.INSTANCE, specConfig.getMaxBlobCommitmentsPerBlock())),
         namedSchema(FIELD_SLOT, SszPrimitiveSchemas.UINT64_SCHEMA),
         namedSchema(FIELD_BEACON_BLOCK_ROOT, SszPrimitiveSchemas.BYTES32_SCHEMA));
     this.networkSszLengthBytesUpperBound =

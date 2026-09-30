@@ -34,7 +34,6 @@ import tech.pegasys.teku.spec.datastructures.operations.VoluntaryExit;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
-import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateAccessors;
 import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
 import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
@@ -153,13 +152,14 @@ public class OperationSignatureVerifier {
       final BeaconState state,
       final SignedExecutionPayloadBid signedBid,
       final BLSSignatureVerifier signatureVerifier) {
-    final Builder builder =
+    final BLSPublicKey builderPubkey =
         BeaconStateGloas.required(state)
             .getBuilders()
-            .get(signedBid.getMessage().getBuilderIndex().intValue());
+            .get(signedBid.getMessage().getBuilderIndex().intValue())
+            .getPublicKey();
     final Bytes signingRoot =
         calculateExecutionPayloadBidSigningRoot(state, signedBid.getMessage());
-    return signatureVerifier.verify(builder.getPublicKey(), signingRoot, signedBid.getSignature());
+    return signatureVerifier.verify(builderPubkey, signingRoot, signedBid.getSignature());
   }
 
   private Bytes calculateExecutionPayloadBidSigningRoot(

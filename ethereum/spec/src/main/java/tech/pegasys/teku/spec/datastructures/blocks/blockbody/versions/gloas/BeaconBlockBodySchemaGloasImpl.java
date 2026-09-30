@@ -127,31 +127,41 @@ public class BeaconBlockBodySchemaGloasImpl
         namedSchema(BlockBodyFields.GRAFFITI, SszPrimitiveSchemas.BYTES32_SCHEMA),
         namedSchema(
             BlockBodyFields.PROPOSER_SLASHINGS,
-            SszProgressiveListSchema.create(ProposerSlashing.SSZ_SCHEMA)),
+            SszProgressiveListSchema.create(
+                ProposerSlashing.SSZ_SCHEMA, specConfig.getMaxProposerSlashings())),
         namedSchema(
             BlockBodyFields.ATTESTER_SLASHINGS,
             SszProgressiveListSchema.create(
-                schemaRegistry.get(SchemaTypes.ATTESTER_SLASHING_SCHEMA))),
+                schemaRegistry.get(SchemaTypes.ATTESTER_SLASHING_SCHEMA),
+                specConfig.getMaxAttesterSlashingsElectra())),
         namedSchema(
             BlockBodyFields.ATTESTATIONS,
-            SszProgressiveListSchema.create(schemaRegistry.get(ATTESTATION_SCHEMA))),
-        namedSchema(BlockBodyFields.DEPOSITS, SszProgressiveListSchema.create(Deposit.SSZ_SCHEMA)),
+            SszProgressiveListSchema.create(
+                schemaRegistry.get(ATTESTATION_SCHEMA), specConfig.getMaxAttestationsElectra())),
+        namedSchema(
+            BlockBodyFields.DEPOSITS,
+            // Gloas blocks must not contain deposits (spec `Deposits.LIMIT = 0`)
+            SszProgressiveListSchema.create(Deposit.SSZ_SCHEMA, 0)),
         namedSchema(
             BlockBodyFields.VOLUNTARY_EXITS,
-            SszProgressiveListSchema.create(SignedVoluntaryExit.SSZ_SCHEMA)),
+            SszProgressiveListSchema.create(
+                SignedVoluntaryExit.SSZ_SCHEMA, specConfig.getMaxVoluntaryExits())),
         namedSchema(
             BlockBodyFields.SYNC_AGGREGATE,
             SyncAggregateSchema.create(specConfig.getSyncCommitteeSize())),
         namedSchema(
             BlockBodyFields.BLS_TO_EXECUTION_CHANGES,
             SszProgressiveListSchema.create(
-                schemaRegistry.get(SIGNED_BLS_TO_EXECUTION_CHANGE_SCHEMA))),
+                schemaRegistry.get(SIGNED_BLS_TO_EXECUTION_CHANGE_SCHEMA),
+                specConfig.getMaxBlsToExecutionChanges())),
         namedSchema(
             BlockBodyFields.SIGNED_EXECUTION_PAYLOAD_BID,
             schemaRegistry.get(SIGNED_EXECUTION_PAYLOAD_BID_SCHEMA)),
         namedSchema(
             BlockBodyFields.PAYLOAD_ATTESTATIONS,
-            SszProgressiveListSchema.create(schemaRegistry.get(PAYLOAD_ATTESTATION_SCHEMA))),
+            SszProgressiveListSchema.create(
+                schemaRegistry.get(PAYLOAD_ATTESTATION_SCHEMA),
+                specConfig.getMaxPayloadAttestations())),
         namedSchema(
             BlockBodyFields.PARENT_EXECUTION_REQUESTS,
             SszSchema.as(ExecutionRequests.class, schemaRegistry.get(EXECUTION_REQUESTS_SCHEMA))));
