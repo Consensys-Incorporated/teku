@@ -56,6 +56,7 @@ import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.EpochProcessingException;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.SlotProcessingException;
 import tech.pegasys.teku.storage.api.StorageQueryChannel;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 import tech.pegasys.teku.storage.store.UpdatableStore;
 
 public class CombinedChainDataClient {
@@ -652,6 +653,10 @@ public class CombinedChainDataClient {
 
   public SafeFuture<Optional<UInt64>> getEarliestAvailableDataColumnSlot() {
     return historicalChainData.getEarliestAvailableDataColumnSlot();
+  }
+
+  public SafeFuture<List<StoredLightClientUpdate>> getBestLightClientUpdates() {
+    return historicalChainData.getBestLightClientUpdates();
   }
 
   /**

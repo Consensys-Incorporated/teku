@@ -376,7 +376,7 @@ public class GossipValidationHelper {
       final Bytes32 blockRoot, final UInt64 proposalSlot) {
     final Optional<ReadOnlyForkChoiceStrategy> maybeForkChoiceStrategy =
         recentChainData.getForkChoiceStrategy();
-    if (maybeForkChoiceStrategy == null || maybeForkChoiceStrategy.isEmpty()) {
+    if (maybeForkChoiceStrategy.isEmpty()) {
       return Optional.empty();
     }
     return ShufflingDependentRootUtil.getShufflingDependentRoot(

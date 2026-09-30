@@ -41,6 +41,7 @@ import tech.pegasys.teku.storage.api.OnDiskStoreData;
 import tech.pegasys.teku.storage.api.StorageQueryChannel;
 import tech.pegasys.teku.storage.api.StorageUpdate;
 import tech.pegasys.teku.storage.api.StorageUpdateChannel;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 import tech.pegasys.teku.storage.api.UpdateResult;
 import tech.pegasys.teku.storage.api.WeakSubjectivityState;
 import tech.pegasys.teku.storage.api.WeakSubjectivityUpdate;
@@ -335,5 +336,10 @@ public class CombinedStorageChannelSplitter implements CombinedStorageChannel {
   @Override
   public SafeFuture<Optional<List<List<KZGProof>>>> getDataColumnSidecarsProofs(final UInt64 slot) {
     return asyncRunner.runAsync(() -> queryDelegate.getDataColumnSidecarsProofs(slot));
+  }
+
+  @Override
+  public SafeFuture<List<StoredLightClientUpdate>> getBestLightClientUpdates() {
+    return asyncRunner.runAsync(queryDelegate::getBestLightClientUpdates);
   }
 }

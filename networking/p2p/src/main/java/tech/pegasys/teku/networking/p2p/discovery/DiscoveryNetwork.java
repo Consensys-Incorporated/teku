@@ -181,11 +181,6 @@ public class DiscoveryNetwork<P extends Peer> extends DelegatingP2PNetwork<P> {
       final Optional<Fork> nextForkInfo,
       final Optional<BlobParameters> nextBpoFork,
       final Optional<Bytes4> nextForkDigest) {
-    // If no future fork is planned, set next_fork_version = current_fork_version to signal this
-    final Bytes4 nextVersion =
-        nextForkInfo
-            .map(Fork::getCurrentVersion)
-            .orElse(currentForkInfo.getFork().getCurrentVersion());
     // If no future fork is planned (either BPO or a hard fork), set next_fork_epoch =
     // FAR_FUTURE_EPOCH to signal this
     final UInt64 nextForkEpoch =
@@ -198,6 +193,14 @@ public class DiscoveryNetwork<P extends Peer> extends DelegatingP2PNetwork<P> {
                         .orElse(bpoFork.epoch()))
             .or(() -> nextForkInfo.map(Fork::getEpoch))
             .orElse(SpecConfig.FAR_FUTURE_EPOCH);
+    // next_fork_version only changes for hard forks, not BPO forks, so it is the current version
+    // unless the hard fork is at next_fork_epoch. If no future fork is planned, set
+    // next_fork_version = current_fork_version to signal this
+    final Bytes4 nextVersion =
+        nextForkInfo
+            .filter(forkInfo -> forkInfo.getEpoch().equals(nextForkEpoch))
+            .map(Fork::getCurrentVersion)
+            .orElse(currentForkInfo.getFork().getCurrentVersion());
 
     final EnrForkId enrForkId = new EnrForkId(currentForkDigest, nextVersion, nextForkEpoch);
     setEth2(enrForkId);
