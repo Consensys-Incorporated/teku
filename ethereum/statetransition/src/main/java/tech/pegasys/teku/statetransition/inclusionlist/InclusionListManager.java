@@ -123,7 +123,9 @@ public class InclusionListManager implements SlotEventsChannel {
                     },
                     err -> LOG.error("Failed to process received inclusion list.", err));
           }
-          notifyInclusionListsSubscribers(signedInclusionList);
+          if (internalValidationResult.isAccept()) {
+            notifyInclusionListsSubscribers(signedInclusionList);
+          }
         });
   }
 
