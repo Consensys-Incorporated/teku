@@ -63,7 +63,16 @@ class FullEpochProcessingCoverageTest {
   void everySkippedFullEpochCheckMatchesAVector() {
     final Set<String> testNames =
         epochProcessingTests.stream().map(TestDefinition::getDisplayName).collect(toSet());
-    assertThat(SKIP_FULL_EPOCH_CHECK.stream().filter(skipped -> !testNames.contains(skipped)))
+    // Only judge entries whose fork and config were loaded, e.g. a local run may only have minimal
+    final Set<String> loadedForkAndConfigPrefixes =
+        epochProcessingTests.stream()
+            .map(test -> test.getFork() + " - " + test.getConfigName() + " - ")
+            .collect(toSet());
+    assertThat(
+            SKIP_FULL_EPOCH_CHECK.stream()
+                .filter(
+                    skipped -> loadedForkAndConfigPrefixes.stream().anyMatch(skipped::startsWith))
+                .filter(skipped -> !testNames.contains(skipped)))
         .describedAs("stale entries in SKIP_FULL_EPOCH_CHECK")
         .isEmpty();
   }
