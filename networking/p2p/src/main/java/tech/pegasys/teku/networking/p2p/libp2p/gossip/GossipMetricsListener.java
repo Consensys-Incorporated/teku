@@ -74,19 +74,19 @@ public class GossipMetricsListener implements GossipRouterEventListener {
     duplicateMessages =
         metricsSystem.createLabelledCounter(
             TekuMetricCategory.LIBP2P_GOSSIP,
-            "gossipsub_duplicate_msgs_total",
+            "gossipsub_duplicate_messages_total",
             "Number of gossip messages received that were already seen, by topic",
             "topic");
     acceptedMessages =
         metricsSystem.createLabelledCounter(
             TekuMetricCategory.LIBP2P_GOSSIP,
-            "gossipsub_accepted_messages_total",
+            "gossipsub_accepted_messages_per_topic",
             "Number of first-seen gossip messages that passed validation, by topic",
             "topic");
     invalidMessages =
         metricsSystem.createLabelledCounter(
             TekuMetricCategory.LIBP2P_GOSSIP,
-            "gossipsub_invalid_messages_total",
+            "gossipsub_invalid_messages_per_topic",
             "Number of first-seen gossip messages that failed validation, by topic",
             "topic");
     meshPeerInclusionEvents =
@@ -104,12 +104,12 @@ public class GossipMetricsListener implements GossipRouterEventListener {
     routerMisbehaviourEvents =
         metricsSystem.createCounter(
             TekuMetricCategory.LIBP2P_GOSSIP,
-            "gossipsub_router_misbehaviour_total",
+            "gossipsub_router_misbehaviour_events_total",
             "Number of gossip router misbehaviour penalties applied to peers");
     slowPeerEvents =
         metricsSystem.createCounter(
             TekuMetricCategory.LIBP2P_GOSSIP,
-            "gossipsub_slow_peer_total",
+            "gossipsub_slow_peer_events_total",
             "Number of times a peer's outbound queue stayed above the slow-peer threshold");
     meshPeerCounts =
         metricsSystem.createLabelledSuppliedGauge(

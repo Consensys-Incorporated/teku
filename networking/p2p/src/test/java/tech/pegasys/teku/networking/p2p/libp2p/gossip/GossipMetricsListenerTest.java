@@ -65,15 +65,15 @@ class GossipMetricsListenerTest {
 
     assertThat(
             metricsSystem.getLabelledCounterValue(
-                LIBP2P_GOSSIP, "gossipsub_duplicate_msgs_total", "beacon_block"))
+                LIBP2P_GOSSIP, "gossipsub_duplicate_messages_total", "beacon_block"))
         .isEqualTo(1);
     assertThat(
             metricsSystem.getLabelledCounterValue(
-                LIBP2P_GOSSIP, "gossipsub_accepted_messages_total", "beacon_block"))
+                LIBP2P_GOSSIP, "gossipsub_accepted_messages_per_topic", "beacon_block"))
         .isEqualTo(1);
     assertThat(
             metricsSystem.getLabelledCounterValue(
-                LIBP2P_GOSSIP, "gossipsub_invalid_messages_total", "beacon_block"))
+                LIBP2P_GOSSIP, "gossipsub_invalid_messages_per_topic", "beacon_block"))
         .isEqualTo(1);
   }
 
@@ -82,9 +82,11 @@ class GossipMetricsListenerTest {
     listener.notifyRouterMisbehavior(PeerId.random(), 5);
     listener.notifySlowPeer(PeerId.random());
 
-    assertThat(metricsSystem.getCounterValue(LIBP2P_GOSSIP, "gossipsub_router_misbehaviour_total"))
+    assertThat(
+            metricsSystem.getCounterValue(
+                LIBP2P_GOSSIP, "gossipsub_router_misbehaviour_events_total"))
         .isEqualTo(1);
-    assertThat(metricsSystem.getCounterValue(LIBP2P_GOSSIP, "gossipsub_slow_peer_total"))
+    assertThat(metricsSystem.getCounterValue(LIBP2P_GOSSIP, "gossipsub_slow_peer_events_total"))
         .isEqualTo(1);
   }
 
