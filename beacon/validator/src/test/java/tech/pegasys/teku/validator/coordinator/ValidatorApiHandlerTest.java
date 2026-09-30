@@ -143,6 +143,7 @@ import tech.pegasys.teku.validator.api.NodeSyncingException;
 import tech.pegasys.teku.validator.api.PublishSignedExecutionPayloadResult;
 import tech.pegasys.teku.validator.api.SendSignedBlockResult;
 import tech.pegasys.teku.validator.api.SubmitDataError;
+import tech.pegasys.teku.validator.coordinator.duties.InclusionListDutiesGenerator;
 import tech.pegasys.teku.validator.coordinator.performance.DefaultPerformanceTracker;
 import tech.pegasys.teku.validator.coordinator.publisher.BlockPublisher;
 import tech.pegasys.teku.validator.coordinator.publisher.ExecutionPayloadPublisher;
@@ -358,15 +359,30 @@ class ValidatorApiHandlerTest {
   }
 
   @Test
-  void getInclusionListDuties_shouldAllowOnlyOneEpochAhead() {
+  void getInclusionListDuties_shouldRejectEpochBeyondTolerance() {
     setUp(TestSpecFactory.createMinimalHeze());
     when(chainDataClient.getCurrentEpoch()).thenReturn(EPOCH);
     when(chainDataClient.getStateAtSlotExact(any())).thenReturn(completedFuture(Optional.empty()));
 
     assertThat(validatorApiHandler.getInclusionListDuties(EPOCH.plus(ONE), IntList.of(1)))
         .isCompletedWithValue(Optional.empty());
-    assertThat(validatorApiHandler.getInclusionListDuties(EPOCH.plus(2), IntList.of(1)))
+    assertThat(validatorApiHandler.getInclusionListDuties(EPOCH.plus(3), IntList.of(1)))
         .isCompletedExceptionally();
+  }
+
+  @Test
+  void getInclusionListDuties_shouldAllowOneEpochTolerance() {
+    setUp(TestSpecFactory.createMinimalHeze());
+    final BeaconState state = createStateWithActiveValidators(previousEpochStartSlot);
+    when(chainDataClient.getCurrentEpoch()).thenReturn(EPOCH.minus(2));
+    when(chainDataClient.getStateAtSlotExact(previousEpochStartSlot))
+        .thenReturn(completedFuture(Optional.of(state)));
+
+    assertThatSafeFuture(validatorApiHandler.getInclusionListDuties(EPOCH, IntList.of(1)))
+        .isCompletedWithOptionalContaining(
+            new InclusionListDutiesGenerator(spec)
+                .getInclusionListDutiesFromIndicesAndState(state, EPOCH, IntList.of(1), false));
+    verify(chainDataClient).getStateAtSlotExact(previousEpochStartSlot);
   }
 
   @Test

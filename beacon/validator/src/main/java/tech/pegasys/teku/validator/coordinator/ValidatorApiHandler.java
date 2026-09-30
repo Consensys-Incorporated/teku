@@ -453,7 +453,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
     }
 
     final UInt64 currentEpoch = combinedChainDataClient.getCurrentEpoch();
-    if (epoch.isGreaterThan(currentEpoch.plus(1))) {
+    if (epoch.isGreaterThan(currentEpoch.plus(1 + DUTY_EPOCH_TOLERANCE))) {
       return SafeFuture.failedFuture(
           new IllegalArgumentException(
               String.format(
