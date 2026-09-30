@@ -38,7 +38,10 @@ import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.StateTrans
 
 public class EpochProcessingTestExecutor implements TestExecutor {
 
+  private static final String PRE_STATE_FILE = "pre.ssz_snappy";
+  private static final String POST_STATE_FILE = "post.ssz_snappy";
   static final String PRE_EPOCH_STATE_FILE = "pre_epoch.ssz_snappy";
+  private static final String POST_EPOCH_STATE_FILE = "post_epoch.ssz_snappy";
 
   // These vectors put PendingAttestations with empty aggregation bits in the state, which no valid
   // block can produce. The spec never reads them at epoch 0, but Teku builds validator statuses
@@ -142,8 +145,8 @@ public class EpochProcessingTestExecutor implements TestExecutor {
       throws Throwable {
     assertTransition(
         testDefinition,
-        "pre.ssz_snappy",
-        "post.ssz_snappy",
+        PRE_STATE_FILE,
+        POST_STATE_FILE,
         preState -> preState.updated(state -> processor.executeOperation(operation, state)));
   }
 
@@ -158,7 +161,7 @@ public class EpochProcessingTestExecutor implements TestExecutor {
             assertTransition(
                 testDefinition,
                 PRE_EPOCH_STATE_FILE,
-                "post_epoch.ssz_snappy",
+                POST_EPOCH_STATE_FILE,
                 epochProcessor::processEpoch);
     if (!SKIP_FULL_EPOCH_CHECK.contains(testDefinition.getDisplayName())) {
       fullEpochCheck.execute();
