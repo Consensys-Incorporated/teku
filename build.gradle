@@ -544,6 +544,7 @@ ext.refTestTarballs = [
 	mainnet: "${refTestDownloadDir}/mainnet.tar.gz",
 	bls: "${blsRefTestDownloadDir}/bls_tests_yaml.tar.gz",
 	'slashing-protection-interchange': "${slashingProtectionInterchangeRefTestDownloadDir}/slashing-protection-interchange-tests.tar.gz",
+	'fork-choice-compliance': "${compTestDownloadDir}/comptests.tar.gz",
 ]
 
 def downloadFile(String url, String token, File outputFile) {
@@ -673,89 +674,6 @@ tasks.register('downloadCompTests', Download) {
 
 tasks.register('downloadRefTests') {
 	dependsOn downloadEthRefTests, downloadBlsRefTests, downloadSlashingProtectionInterchangeRefTests, downloadCompTests
-}
-
-tasks.register('cleanRefTestsGeneral', Delete) {
-	delete "${refTestExpandDir}/tests/general"
-}
-
-tasks.register('expandRefTestsGeneral', Copy) {
-	dependsOn cleanRefTestsGeneral, downloadEthRefTests
-	from tarTree("${refTestDownloadDir}/general.tar.gz")
-	into refTestExpandDir
-}
-
-tasks.register('cleanRefTestsMainnet', Delete) {
-	delete "${refTestExpandDir}/tests/mainnet"
-}
-
-tasks.register('expandRefTestsMainnet', Copy) {
-	dependsOn cleanRefTestsMainnet, downloadEthRefTests
-	from tarTree("${refTestDownloadDir}/mainnet.tar.gz")
-	into refTestExpandDir
-}
-
-tasks.register('cleanRefTestsMinimal', Delete) {
-	delete "${refTestExpandDir}/tests/minimal"
-}
-
-tasks.register('expandRefTestsMinimal', Copy) {
-	dependsOn cleanRefTestsMinimal, downloadEthRefTests
-	from tarTree("${refTestDownloadDir}/minimal.tar.gz")
-	into refTestExpandDir
-}
-
-tasks.register('cleanRefTestsBls', Delete) {
-	delete "${refTestExpandDir}/tests/bls"
-}
-
-tasks.register('expandRefTestsBls', Copy) {
-	dependsOn cleanRefTestsBls, downloadBlsRefTests
-	from tarTree("${blsRefTestDownloadDir}/bls_tests_yaml.tar.gz")
-	into "${refTestExpandDir}/tests/bls"
-}
-
-tasks.register('cleanRefTestsSlashingProtectionInterchange', Delete) {
-	delete "${refTestExpandDir}/tests/slashing-protection-interchange"
-}
-
-tasks.register('expandRefTestsSlashingProtectionInterchange', Copy) {
-	dependsOn cleanRefTestsSlashingProtectionInterchange, downloadSlashingProtectionInterchangeRefTests
-	from {
-		tarTree("${slashingProtectionInterchangeRefTestDownloadDir}/slashing-protection-interchange-tests.tar.gz").matching {
-			include "**/tests/generated/*.json"
-			// flatten
-			eachFile { FileCopyDetails fcp ->
-				fcp.path = fcp.name
-			}
-		}
-	}
-	into "${refTestExpandDir}/tests/slashing-protection-interchange"
-}
-
-// comptests.tar.gz bundles the whole consensus-specs tests/ tree (pyspec source included, not
-// just vectors), so only the fork_choice_compliance subtree is extracted here rather than the
-// full ~3GB archive.
-tasks.register('cleanRefTestsForkChoiceCompliance', Delete) {
-	delete "${refTestExpandDir}/tests/fork-choice-compliance"
-}
-
-tasks.register('expandRefTestsForkChoiceCompliance', Copy) {
-	dependsOn cleanRefTestsForkChoiceCompliance, downloadCompTests
-	onlyIf { !nightly }
-	from {
-		tarTree("${compTestDownloadDir}/comptests.tar.gz").matching {
-			include "tests/**/fork_choice_compliance/**"
-		}
-	}
-	into "${refTestExpandDir}/tests/fork-choice-compliance"
-}
-
-tasks.register('expandRefTests') {
-	dependsOn expandRefTestsGeneral, expandRefTestsMainnet, expandRefTestsMinimal, expandRefTestsBls, expandRefTestsSlashingProtectionInterchange, expandRefTestsForkChoiceCompliance
-}
-tasks.register('cleanRefTests') {
-	dependsOn cleanRefTestsGeneral, cleanRefTestsMainnet, cleanRefTestsMinimal, cleanRefTestsBls, cleanRefTestsSlashingProtectionInterchange, cleanRefTestsForkChoiceCompliance
 }
 
 tasks.register('deploy') {}
