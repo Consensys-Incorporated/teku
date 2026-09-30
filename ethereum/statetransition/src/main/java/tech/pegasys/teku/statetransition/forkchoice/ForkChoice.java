@@ -1385,7 +1385,7 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
 
   SafeFuture<ChainHead> prepareForBlockProduction(
       final UInt64 slot, final BlockProductionPerformance blockProductionPerformance) {
-    if (recentChainData.getCurrentSlot().filter(slot::isLessThan).isPresent()) {
+    if (slot.isLessThan(recentChainData.getCurrentSlot().orElseThrow())) {
       return SafeFuture.failedFuture(
           new IllegalArgumentException("Cannot prepare block production for past slot " + slot));
     }
