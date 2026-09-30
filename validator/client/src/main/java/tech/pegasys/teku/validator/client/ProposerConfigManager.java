@@ -196,7 +196,7 @@ public class ProposerConfigManager
   @Override
   public UInt64 getGasLimit(final BLSPublicKey publicKey, final UInt64 epoch) {
     final Optional<UInt64> maybeConfiguredGasLimit =
-        getAttributeWithFallback(Config::getBuilderGasLimit, publicKey)
+        getAttributeWithFallback(Config::getGasLimit, publicKey)
             .or(config::getBuilderRegistrationDefaultGasLimit);
 
     final Optional<UInt64> maybeScheduledGasLimit = getScheduledGasLimit(epoch);
@@ -302,7 +302,7 @@ public class ProposerConfigManager
     return maybeProposerConfig
         .get()
         .flatMap(config -> config.getConfigForPubKey(publicKey))
-        .flatMap(Config::getBuilderGasLimit);
+        .flatMap(Config::getGasLimit);
   }
 
   public boolean isOwnedValidator(final BLSPublicKey publicKey) {
