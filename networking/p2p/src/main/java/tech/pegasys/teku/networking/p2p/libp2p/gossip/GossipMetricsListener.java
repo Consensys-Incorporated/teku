@@ -37,7 +37,8 @@ import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
  *
  * <p>Threading: every {@code notify*} callback runs synchronously on the gossip event thread, so
  * the callbacks must stay cheap and must not block. Gauge suppliers run on the metrics scrape
- * thread instead, so the state they read is held in concurrent collections.
+ * thread instead, so the state they read is held in concurrent collections. Gauge registration can
+ * also run on the subscribing thread.
  */
 public class GossipMetricsListener implements GossipRouterEventListener {
 
@@ -131,6 +132,11 @@ public class GossipMetricsListener implements GossipRouterEventListener {
     final GossipMetricsListener listener = new GossipMetricsListener(metricsSystem);
     router.getEventBroadcaster().getListeners().add(listener);
     return Optional.of(listener);
+  }
+
+  /** Publishes zero for a subscribed topic shape even if no peer ever joins its mesh. */
+  public void onTopicSubscribed(final String topic) {
+    registerMeshGauge(GossipTopicShape.of(topic));
   }
 
   @Override
