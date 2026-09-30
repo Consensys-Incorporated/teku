@@ -70,10 +70,10 @@ def convertRefTestOptions = [
 		'slashing-protection-interchange/'
 	],
 	'fork-choice-compliance': [
-			'--include',
-			'tests/.+/fork_choice_compliance/.*',
-			'--add-prefix',
-			'fork-choice-compliance/'
+		'--include',
+		'tests/.+/fork_choice_compliance/.*',
+		'--add-prefix',
+		'fork-choice-compliance/'
 	]
 ]
 def convertRefTestDownloadTasks = [

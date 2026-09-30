@@ -139,8 +139,12 @@ public class TestDefinition {
 
   public Path getTestDirectory() {
     Path directory = ReferenceTestRoot.fromSystemProperties().getSpecDirectory(configName);
-    if(configName.equals("fork-choice-compliance")) {
-      return directory.resolve("tests").resolve("minimal").resolve(fork).resolve(pathFromPhaseTestDir);
+    if (configName.equals("fork-choice-compliance")) {
+      return directory
+          .resolve("tests")
+          .resolve("minimal")
+          .resolve(fork)
+          .resolve(pathFromPhaseTestDir);
     } else {
       if (!fork.isEmpty()) {
         directory = directory.resolve(fork);
