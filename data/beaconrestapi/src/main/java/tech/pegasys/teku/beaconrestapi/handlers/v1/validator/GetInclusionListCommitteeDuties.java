@@ -59,11 +59,10 @@ public class GetInclusionListCommitteeDuties extends RestApiEndpoint {
                 "Requests the beacon node to provide a set of inclusion list committee duties for a particular epoch.\n\n"
                     + "Duties should only need to be checked once per epoch, "
                     + "however a chain reorganization (of > MIN_SEED_LOOKAHEAD epochs) could occur, "
-                    + "resulting in a change of duties. For full safety, you should monitor head events and confirm the "
+                    + "resulting in a change of duties. For full safety, you should monitor head_v2 events and confirm the "
                     + "dependent root in this response matches:\n"
-                    + "- event.previous_duty_dependent_root when `compute_epoch_at_slot(event.slot) == epoch`\n"
-                    + "- event.current_duty_dependent_root when `compute_epoch_at_slot(event.slot) + 1 == epoch`\n"
-                    + "- event.block otherwise\n\n"
+                    + "- event.current_epoch_dependent_root when `compute_epoch_at_slot(event.slot) == epoch`\n"
+                    + "- event.next_epoch_dependent_root when `compute_epoch_at_slot(event.slot) + 1 == epoch`\n\n"
                     + "The dependent_root value is `get_block_root_at_slot(state, compute_start_slot_at_epoch(epoch - 1) - 1)` "
                     + "or the genesis block root in the case of underflow.")
             .tags(TAG_VALIDATOR, TAG_VALIDATOR_REQUIRED)

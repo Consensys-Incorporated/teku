@@ -14,19 +14,13 @@
 package tech.pegasys.teku.ethereum.json.types.validator;
 
 import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.PUBLIC_KEY_TYPE;
-import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.BYTES32_TYPE;
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.UINT64_TYPE;
 
-import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 
-public record InclusionListDuty(
-    BLSPublicKey publicKey,
-    UInt64 validatorIndex,
-    UInt64 slot,
-    Bytes32 inclusionListCommitteeRoot) {
+public record InclusionListDuty(BLSPublicKey publicKey, UInt64 validatorIndex, UInt64 slot) {
 
   public static final DeserializableTypeDefinition<InclusionListDuty>
       INCLUSION_LIST_DUTY_TYPE_DEFINITION =
@@ -47,11 +41,6 @@ public record InclusionListDuty(
                   InclusionListDuty.Builder::validatorIndex)
               .withField(
                   "slot", UINT64_TYPE, InclusionListDuty::slot, InclusionListDuty.Builder::slot)
-              .withField(
-                  "inclusion_list_committee_root",
-                  BYTES32_TYPE,
-                  InclusionListDuty::inclusionListCommitteeRoot,
-                  InclusionListDuty.Builder::inclusionListCommitteeRoot)
               .build();
 
   public static class Builder {
@@ -59,7 +48,6 @@ public record InclusionListDuty(
     private BLSPublicKey publicKey;
     private UInt64 validatorIndex;
     private UInt64 slot;
-    private Bytes32 inclusionListCommitteeRoot;
 
     public Builder publicKey(final BLSPublicKey publicKey) {
       this.publicKey = publicKey;
@@ -76,13 +64,8 @@ public record InclusionListDuty(
       return this;
     }
 
-    public Builder inclusionListCommitteeRoot(final Bytes32 inclusionListCommitteeRoot) {
-      this.inclusionListCommitteeRoot = inclusionListCommitteeRoot;
-      return this;
-    }
-
     public InclusionListDuty build() {
-      return new InclusionListDuty(publicKey, validatorIndex, slot, inclusionListCommitteeRoot);
+      return new InclusionListDuty(publicKey, validatorIndex, slot);
     }
   }
 }

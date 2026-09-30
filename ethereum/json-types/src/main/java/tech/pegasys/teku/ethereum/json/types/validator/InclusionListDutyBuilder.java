@@ -14,10 +14,8 @@
 package tech.pegasys.teku.ethereum.json.types.validator;
 
 import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.PUBLIC_KEY_TYPE;
-import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.BYTES32_TYPE;
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.UINT64_TYPE;
 
-import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -43,18 +41,11 @@ public class InclusionListDutyBuilder {
                   "The slot at which the validator must propose an inclusion list."),
               InclusionListDuty::slot,
               InclusionListDutyBuilder::slot)
-          .withField(
-              "inclusion_list_committee_root",
-              BYTES32_TYPE.withDescription(
-                  "The root of inclusion list committee that the validator is part of."),
-              InclusionListDuty::inclusionListCommitteeRoot,
-              InclusionListDutyBuilder::inclusionListCommitteeRoot)
           .build();
 
   private BLSPublicKey publicKey;
   private UInt64 validatorIndex;
   private UInt64 slot;
-  private Bytes32 inclusionListCommitteeRoot;
 
   public InclusionListDutyBuilder publicKey(final BLSPublicKey publicKey) {
     this.publicKey = publicKey;
@@ -71,13 +62,7 @@ public class InclusionListDutyBuilder {
     return this;
   }
 
-  public InclusionListDutyBuilder inclusionListCommitteeRoot(
-      final Bytes32 inclusionListCommitteeRoot) {
-    this.inclusionListCommitteeRoot = inclusionListCommitteeRoot;
-    return this;
-  }
-
   public InclusionListDuty build() {
-    return new InclusionListDuty(publicKey, validatorIndex, slot, inclusionListCommitteeRoot);
+    return new InclusionListDuty(publicKey, validatorIndex, slot);
   }
 }

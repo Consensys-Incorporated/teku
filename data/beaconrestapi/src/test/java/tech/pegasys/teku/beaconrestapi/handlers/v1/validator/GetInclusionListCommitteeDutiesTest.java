@@ -51,7 +51,6 @@ import tech.pegasys.teku.spec.TestSpecContext;
 @TestSpecContext(milestone = {SpecMilestone.HEZE})
 public class GetInclusionListCommitteeDutiesTest extends AbstractMigratedBeaconHandlerTest {
 
-  private final Bytes32 inclusionListCommitteeRoot = dataStructureUtil.randomBytes32();
   private final InclusionListDuties duties =
       new InclusionListDuties(
           false,
@@ -94,10 +93,7 @@ public class GetInclusionListCommitteeDutiesTest extends AbstractMigratedBeaconH
   private InclusionListDuty getInclusionListCommitteeDuty(
       final int validatorIndex, final UInt64 slot) {
     return new InclusionListDuty(
-        BLSTestUtil.randomPublicKey(1),
-        UInt64.valueOf(validatorIndex),
-        slot,
-        inclusionListCommitteeRoot);
+        BLSTestUtil.randomPublicKey(1), UInt64.valueOf(validatorIndex), slot);
   }
 
   @Test
@@ -108,7 +104,7 @@ public class GetInclusionListCommitteeDutiesTest extends AbstractMigratedBeaconH
             Resources.getResource(
                 GetInclusionListCommitteeDutiesTest.class, "getInclusionListCommitteeDuties.json"),
             UTF_8);
-    AssertionsForClassTypes.assertThat(data).isEqualTo(expected);
+    AssertionsForClassTypes.assertThat(data).isEqualToIgnoringWhitespace(expected);
   }
 
   @Test

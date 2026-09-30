@@ -16,7 +16,7 @@
       "type" : "array",
       "items" : {
         "type" : "object",
-        "required" : [ "pubkey", "validator_index", "slot", "inclusion_list_committee_root" ],
+        "required" : [ "pubkey", "validator_index", "slot" ],
         "properties" : {
           "pubkey" : {
             "type" : "string",
@@ -35,12 +35,6 @@
             "description" : "The slot at which the validator must propose an inclusion list.",
             "example" : "1",
             "format" : "uint64"
-          },
-          "inclusion_list_committee_root" : {
-            "type" : "string",
-            "description" : "The root of inclusion list committee that the validator is part of.",
-            "example" : "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
-            "format" : "byte"
           }
         }
       }

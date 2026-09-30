@@ -220,7 +220,11 @@ class ValidatorApiHandlerTest {
 
   @BeforeEach
   public void setUp() {
-    this.spec = TestSpecFactory.createMinimalGloas();
+    setUp(TestSpecFactory.createMinimalGloas());
+  }
+
+  private void setUp(final Spec spec) {
+    this.spec = spec;
     this.epochStartSlot = spec.computeStartSlotAtEpoch(EPOCH);
     this.previousEpochStartSlot = spec.computeStartSlotAtEpoch(PREVIOUS_EPOCH);
     this.dataStructureUtil = new DataStructureUtil(spec);
@@ -351,6 +355,18 @@ class ValidatorApiHandlerTest {
 
     assertThat(duties).isCompletedExceptionally();
     assertThatThrownBy(duties::get).hasRootCauseInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void getInclusionListDuties_shouldAllowOnlyOneEpochAhead() {
+    setUp(TestSpecFactory.createMinimalHeze());
+    when(chainDataClient.getCurrentEpoch()).thenReturn(EPOCH);
+    when(chainDataClient.getStateAtSlotExact(any())).thenReturn(completedFuture(Optional.empty()));
+
+    assertThat(validatorApiHandler.getInclusionListDuties(EPOCH.plus(ONE), IntList.of(1)))
+        .isCompletedWithValue(Optional.empty());
+    assertThat(validatorApiHandler.getInclusionListDuties(EPOCH.plus(2), IntList.of(1)))
+        .isCompletedExceptionally();
   }
 
   @Test

@@ -241,18 +241,16 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
         () -> typeDefClient.postPayloadTimelinessCommitteeDuties(epoch, validatorIndices));
   }
 
-  // TODO EIP7805 implement beacon FOCIL APIs
   @Override
   public SafeFuture<List<SubmitDataError>> sendSignedInclusionLists(
       final List<SignedInclusionList> signedInclusionLists) {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not yet implemented"));
+    return sendRequest(() -> typeDefClient.sendSignedInclusionLists(signedInclusionLists));
   }
 
-  // TODO EIP7805 implement beacon FOCIL APIs
   @Override
   public SafeFuture<Optional<InclusionListDuties>> getInclusionListDuties(
       final UInt64 epoch, final IntCollection validatorIndices) {
-    throw new UnsupportedOperationException("Not yet implemented");
+    return sendRequest(() -> typeDefClient.postInclusionListDuties(epoch, validatorIndices));
   }
 
   @Override
@@ -353,11 +351,10 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
     return sendRequest(() -> typeDefClient.createPayloadAttestationData(slot));
   }
 
-  // TODO EIP7805 implement beacon FOCIL APIs
   @Override
   public SafeFuture<Optional<InclusionList>> createInclusionList(
       final UInt64 slot, final UInt64 validatorIndex) {
-    throw new UnsupportedOperationException("Not yet implemented");
+    return sendRequest(() -> typeDefClient.createInclusionList(slot, validatorIndex));
   }
 
   @Override

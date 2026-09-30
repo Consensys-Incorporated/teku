@@ -103,7 +103,6 @@ public class GetInclusionListCommitteeDuttiesIntegrationTest
     return new InclusionListDuty(
         dataStructureUtil.randomPublicKey(),
         dataStructureUtil.randomValidatorIndex(),
-        dataStructureUtil.randomSlot(),
-        dataStructureUtil.randomBytes32());
+        dataStructureUtil.randomSlot());
   }
 }

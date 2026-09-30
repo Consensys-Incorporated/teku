@@ -53,30 +53,16 @@ public class InclusionListDutiesGenerator {
         spec.getValidatorIndexInclusionListAssignmentSlotMap(state, epoch);
 
     for (final int validatorIndex : validatorIndices) {
-      final UInt64 slot = validatorIndexToInclusionListAssignmentSlotMap.get(validatorIndex);
-
-      if (slot != null) {
-        final Optional<Bytes32> inclusionListCommitteeRoot =
-            spec.getInclusionListCommitteeRoot(state, slot);
-        inclusionListCommitteeRoot.ifPresent(
-            ilCommitteeRoot ->
-                inclusionListDutyFromCommitteeAssignment(
-                        slot, validatorIndex, state, ilCommitteeRoot)
-                    .ifPresent(inclusionListDutyList::add));
-      }
+      Optional.ofNullable(validatorIndexToInclusionListAssignmentSlotMap.get(validatorIndex))
+          .flatMap(slot -> inclusionListDutyFromCommitteeAssignment(slot, validatorIndex, state))
+          .ifPresent(inclusionListDutyList::add);
     }
     return inclusionListDutyList;
   }
 
   private Optional<InclusionListDuty> inclusionListDutyFromCommitteeAssignment(
-      final UInt64 slot,
-      final int validatorIndex,
-      final BeaconState state,
-      final Bytes32 inclusionListCommitteeRoot) {
+      final UInt64 slot, final int validatorIndex, final BeaconState state) {
     return spec.getValidatorPubKey(state, UInt64.valueOf(validatorIndex))
-        .map(
-            publicKey ->
-                new InclusionListDuty(
-                    publicKey, UInt64.valueOf(validatorIndex), slot, inclusionListCommitteeRoot));
+        .map(publicKey -> new InclusionListDuty(publicKey, UInt64.valueOf(validatorIndex), slot));
   }
 }

@@ -453,13 +453,12 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
     }
 
     final UInt64 currentEpoch = combinedChainDataClient.getCurrentEpoch();
-    final int tolerance = spec.getSpecConfig(epoch).getMinSeedLookahead() + DUTY_EPOCH_TOLERANCE;
-    if (epoch.isGreaterThan(currentEpoch.plus(tolerance))) {
+    if (epoch.isGreaterThan(currentEpoch.plus(1))) {
       return SafeFuture.failedFuture(
           new IllegalArgumentException(
               String.format(
-                  "Inclusion List duties were requested %s epochs ahead, only up to %s epochs ahead are supported.",
-                  epoch.minus(currentEpoch).toString(), tolerance)));
+                  "Inclusion List duties were requested %s epochs ahead, only up to 1 epoch ahead is supported.",
+                  epoch.minus(currentEpoch).toString())));
     }
 
     final UInt64 slot = spec.getEarliestQueryableSlotForBeaconCommitteeInTargetEpoch(epoch);
