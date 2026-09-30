@@ -52,6 +52,31 @@ class InclusionListStoreTest {
       schemaDefinitionsHeze.getSignedInclusionListSchema();
 
   @Test
+  void shouldDeduplicateTransactionsAndFilterUntimelyLists() {
+    final InclusionListStore store = new InclusionListStore(4);
+    final Transaction firstTransaction =
+        inclusionListSchema.getTransactionSchema().fromBytes(Bytes.of(1));
+    final Transaction secondTransaction =
+        inclusionListSchema.getTransactionSchema().fromBytes(Bytes.of(2));
+    store.processInclusionList(
+        createSignedInclusionList(
+            SLOT, VALIDATOR_INDEX, DEPENDENT_ROOT_1, List.of(firstTransaction, firstTransaction)),
+        true);
+    store.processInclusionList(
+        createSignedInclusionList(
+            SLOT,
+            OTHER_VALIDATOR_INDEX,
+            DEPENDENT_ROOT_1,
+            List.of(firstTransaction, secondTransaction)),
+        false);
+    final SlotAndBlockRoot key = new SlotAndBlockRoot(SLOT, DEPENDENT_ROOT_1);
+
+    assertThat(store.getInclusionListTransactions(key, false))
+        .containsExactly(Bytes.of(1), Bytes.of(2));
+    assertThat(store.getInclusionListTransactions(key, true)).containsExactly(Bytes.of(1));
+  }
+
+  @Test
   void shouldComputeBitsByCommitteePositionIncludingRepeatedValidators() {
     final InclusionListStore store = new InclusionListStore(4);
     store.processInclusionList(

@@ -39,6 +39,7 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferencesSchema;
+import tech.pegasys.teku.spec.datastructures.forkchoice.InclusionListStore;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannel;
@@ -66,7 +67,8 @@ public class ProposerDataManagerTest {
           executionLayerChannel,
           recentChainData,
           defaultFeeRecipient,
-          false);
+          false,
+          new InclusionListStore(4));
 
   private final BeaconState state = dataStructureUtil.randomBeaconState();
 
@@ -239,7 +241,8 @@ public class ProposerDataManagerTest {
         recentChainData,
         defaultFeeRecipient,
         false,
-        proposerPreferencesManager);
+        proposerPreferencesManager,
+        new InclusionListStore(4));
   }
 
   private ProposerPreferences proposerPreferences(

@@ -39,6 +39,7 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
+import tech.pegasys.teku.spec.datastructures.forkchoice.InclusionListStore;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannel;
@@ -91,7 +92,8 @@ class ProposersDataManagerTest {
             channel,
             recentChainData,
             Optional.of(defaultAddress),
-            false);
+            false,
+            new InclusionListStore(4));
     proposers =
         List.of(
             new BeaconPreparableProposer(UInt64.ONE, dataStructureUtil.randomEth1Address()),

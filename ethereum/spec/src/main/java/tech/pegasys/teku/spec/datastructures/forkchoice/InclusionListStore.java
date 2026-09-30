@@ -27,8 +27,10 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.IntStream;
+import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.infrastructure.collections.LimitedMap;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
+import tech.pegasys.teku.infrastructure.ssz.collections.impl.SszByteListImpl;
 import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszBitvectorSchema;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
@@ -118,6 +120,24 @@ public class InclusionListStore {
     readLock.lock();
     try {
       return equivocatedValidatorIndicesByKey.getOrDefault(key, Set.of()).contains(validatorIndex);
+    } finally {
+      readLock.unlock();
+    }
+  }
+
+  public List<Bytes> getInclusionListTransactions(
+      final SlotAndBlockRoot key, final boolean onlyTimely) {
+    readLock.lock();
+    try {
+      final Set<UInt64> equivocators = equivocatedValidatorIndicesByKey.getOrDefault(key, Set.of());
+      return inclusionListsByKey.getOrDefault(key, Map.of()).entrySet().stream()
+          .filter(entry -> !equivocators.contains(entry.getKey()))
+          .map(Map.Entry::getValue)
+          .filter(entry -> !onlyTimely || entry.timely())
+          .flatMap(entry -> entry.signedInclusionList().getMessage().getTransactions().stream())
+          .map(SszByteListImpl::getBytes)
+          .distinct()
+          .toList();
     } finally {
       readLock.unlock();
     }

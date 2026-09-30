@@ -22,9 +22,11 @@ import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import static tech.pegasys.teku.spec.SpecMilestone.GLOAS;
+import static tech.pegasys.teku.spec.SpecMilestone.HEZE;
 
 import java.util.List;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,13 +37,17 @@ import tech.pegasys.teku.infrastructure.async.eventthread.InlineEventThread;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecContext;
+import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
 import tech.pegasys.teku.spec.datastructures.execution.versions.capella.Withdrawal;
+import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionList;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
+import tech.pegasys.teku.spec.datastructures.forkchoice.InclusionListStore;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateSchemaGloas;
@@ -51,10 +57,11 @@ import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannel;
 import tech.pegasys.teku.spec.executionlayer.ForkChoiceState;
 import tech.pegasys.teku.spec.executionlayer.PayloadBuildingAttributes;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsHeze;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
-@TestSpecContext(milestone = GLOAS)
+@TestSpecContext(milestone = {GLOAS, HEZE})
 class ProposersDataManagerGloasTest {
 
   private RecentChainData recentChainData;
@@ -63,6 +70,7 @@ class ProposersDataManagerGloasTest {
   private InlineEventThread eventThread;
   private ProposersDataManager manager;
   private Eth1Address defaultFeeRecipient;
+  private final InclusionListStore inclusionListStore = new InclusionListStore(4);
 
   @BeforeEach
   void setUp(final SpecContext specContext) {
@@ -79,8 +87,98 @@ class ProposersDataManagerGloasTest {
             ExecutionLayerChannel.NOOP,
             recentChainData,
             Optional.of(defaultFeeRecipient),
-            false);
+            false,
+            inclusionListStore);
     when(recentChainData.isJustifiedCheckpointFullyValidated()).thenReturn(true);
+  }
+
+  @TestTemplate
+  void calculatePayloadBuildingAttributes_shouldSelectInclusionListsForReplacementParent() {
+    final UInt64 blockSlot = UInt64.valueOf(24);
+    final UInt64 inclusionListSlot = blockSlot.decrement();
+    final Bytes32 initialParentRoot = data.randomBytes32();
+    final Bytes32 replacementParentRoot = data.randomBytes32();
+    final Bytes32 dependentRoot = data.randomBytes32();
+    final Bytes32 replacementDependentRoot = data.randomBytes32();
+    final BeaconState state = data.randomBeaconState(blockSlot);
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy = mock(ReadOnlyForkChoiceStrategy.class);
+    when(recentChainData.getForkChoiceStrategy()).thenReturn(Optional.of(forkChoiceStrategy));
+    // Slot 23 depends on slot 7, while the proposal at slot 24 depends on slot 15.
+    when(forkChoiceStrategy.getAncestor(initialParentRoot, UInt64.valueOf(7)))
+        .thenReturn(Optional.of(dependentRoot));
+    when(forkChoiceStrategy.getAncestor(replacementParentRoot, UInt64.valueOf(7)))
+        .thenReturn(Optional.of(dependentRoot));
+    when(recentChainData.retrieveBlockState(new SlotAndBlockRoot(blockSlot, initialParentRoot)))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(state)));
+    when(recentChainData.retrieveBlockState(new SlotAndBlockRoot(blockSlot, replacementParentRoot)))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(state)));
+    storeInclusionList(inclusionListSlot, dependentRoot, 0, false, Bytes.of(1), Bytes.of(2));
+    storeInclusionList(inclusionListSlot, dependentRoot, 1, true, Bytes.of(2));
+    storeInclusionList(inclusionListSlot, dependentRoot, 2, true, Bytes.of(3));
+    storeInclusionList(inclusionListSlot, dependentRoot, 2, true, Bytes.of(4));
+    storeInclusionList(inclusionListSlot, replacementDependentRoot, 0, true, Bytes.of(5));
+    storeInclusionList(inclusionListSlot.decrement(), dependentRoot, 0, true, Bytes.of(6));
+
+    final ForkChoiceUpdateData initialForkChoiceUpdateData =
+        forkChoiceUpdateData(ForkChoiceNode.createEmpty(initialParentRoot), blockSlot);
+    final PayloadBuildingAttributes initialAttributes =
+        safeJoin(calculate(blockSlot, initialForkChoiceUpdateData)).orElseThrow();
+    final ForkChoiceUpdateData replacementForkChoiceUpdateData =
+        initialForkChoiceUpdateData
+            .withPayloadBuildingAttributes(Optional.of(initialAttributes))
+            .withFreshForkChoiceState(
+                forkChoiceUpdateData(ForkChoiceNode.createEmpty(replacementParentRoot), blockSlot)
+                    .getForkChoiceState());
+
+    final PayloadBuildingAttributes replacementAttributes =
+        safeJoin(calculate(blockSlot, replacementForkChoiceUpdateData)).orElseThrow();
+
+    final List<Bytes> expectedTransactions =
+        spec.isInclusionListAvailableAtSlot(blockSlot)
+            ? List.of(Bytes.of(1), Bytes.of(2))
+            : List.of();
+    assertThat(initialAttributes.inclusionListTransactions())
+        .containsExactlyInAnyOrderElementsOf(expectedTransactions);
+    assertThat(replacementAttributes.inclusionListTransactions())
+        .containsExactlyInAnyOrderElementsOf(expectedTransactions);
+    assertThat(replacementAttributes.parentBeaconBlock())
+        .isEqualTo(ForkChoiceNode.createEmpty(replacementParentRoot));
+
+    when(forkChoiceStrategy.getAncestor(replacementParentRoot, UInt64.valueOf(7)))
+        .thenReturn(Optional.of(replacementDependentRoot));
+    final PayloadBuildingAttributes differentForkAttributes =
+        safeJoin(calculate(blockSlot, replacementForkChoiceUpdateData)).orElseThrow();
+    assertThat(differentForkAttributes.inclusionListTransactions())
+        .containsExactlyElementsOf(
+            spec.isInclusionListAvailableAtSlot(blockSlot) ? List.of(Bytes.of(5)) : List.of());
+  }
+
+  private void storeInclusionList(
+      final UInt64 slot,
+      final Bytes32 dependentRoot,
+      final int validatorIndex,
+      final boolean timely,
+      final Bytes... transactions) {
+    final SchemaDefinitionsHeze schemaDefinitions =
+        SchemaDefinitionsHeze.required(
+            TestSpecFactory.createMinimalHeze().getGenesisSchemaDefinitions());
+    final InclusionList inclusionList =
+        schemaDefinitions
+            .getInclusionListSchema()
+            .create(
+                slot,
+                UInt64.valueOf(validatorIndex),
+                dependentRoot,
+                List.of(transactions).stream()
+                    .map(
+                        schemaDefinitions.getInclusionListSchema().getTransactionSchema()
+                            ::fromBytes)
+                    .toList());
+    inclusionListStore.processInclusionList(
+        schemaDefinitions
+            .getSignedInclusionListSchema()
+            .create(inclusionList, data.randomSignature()),
+        timely);
   }
 
   @TestTemplate

@@ -15,11 +15,9 @@ package tech.pegasys.teku.statetransition.forkchoice;
 
 import static com.google.common.base.Preconditions.checkState;
 
-import java.util.List;
 import java.util.Optional;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.eventthread.EventThread;
@@ -65,19 +63,10 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
   private record PendingPayloadAttributesPreparation(
       UInt64 slot,
       ForkChoiceNode parentBeaconBlock,
-      List<Bytes> inclusionListTransactions,
       SafeFuture<Optional<ExecutionPayloadContext>> executionPayloadContext) {
 
     boolean matches(final ForkChoiceNode parentBeaconBlock, final UInt64 slot) {
       return this.slot.equals(slot) && this.parentBeaconBlock.equals(parentBeaconBlock);
-    }
-
-    boolean matches(
-        final ForkChoiceNode parentBeaconBlock,
-        final UInt64 slot,
-        final List<Bytes> inclusionListTransactions) {
-      return matches(parentBeaconBlock, slot)
-          && this.inclusionListTransactions.equals(inclusionListTransactions);
     }
   }
 
@@ -109,17 +98,6 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
         final ForkChoiceUpdateData forkChoiceUpdateData) {
       return new PinnedBlockProductionPreparation(
           slot, parentBeaconBlock, forkChoiceUpdateData, executionPayloadContext);
-    }
-
-    boolean hasInclusionListTransactions(final List<Bytes> inclusionListTransactions) {
-      return forkChoiceUpdateData
-          .getPayloadBuildingAttributes()
-          .map(
-              payloadBuildingAttributes ->
-                  payloadBuildingAttributes
-                      .inclusionListTransactions()
-                      .equals(inclusionListTransactions))
-          .orElse(inclusionListTransactions.isEmpty());
     }
   }
 
@@ -193,13 +171,9 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
 
   @Override
   public SafeFuture<Optional<ExecutionPayloadContext>> preparePayloadAttributes(
-      final ForkChoiceNode parentBeaconBlock,
-      final UInt64 blockSlot,
-      final List<Bytes> inclusionListTransactions) {
+      final ForkChoiceNode parentBeaconBlock, final UInt64 blockSlot) {
     return eventThread.executeFuture(
-        () ->
-            internalPreparePayloadAttributes(
-                parentBeaconBlock, blockSlot, inclusionListTransactions));
+        () -> internalPreparePayloadAttributes(parentBeaconBlock, blockSlot));
   }
 
   @Override
@@ -262,15 +236,12 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
                   parentBeaconBlock,
                   parentExecutionHash,
                   blockSlot,
-                  Optional.empty(),
                   maybeExecutionPayloadContext);
             });
   }
 
   private SafeFuture<Optional<ExecutionPayloadContext>> internalPreparePayloadAttributes(
-      final ForkChoiceNode parentBeaconBlock,
-      final UInt64 blockSlot,
-      final List<Bytes> inclusionListTransactions) {
+      final ForkChoiceNode parentBeaconBlock, final UInt64 blockSlot) {
     eventThread.checkOnEventThread();
 
     final Bytes32 parentExecutionHash = getParentExecutionHash(parentBeaconBlock);
@@ -284,9 +255,7 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
     final Optional<PendingPayloadAttributesPreparation> existingPendingPreparation =
         pendingPayloadAttributesPreparation;
     if (existingPendingPreparation
-        .filter(
-            preparation ->
-                preparation.matches(parentBeaconBlock, blockSlot, inclusionListTransactions))
+        .filter(preparation -> preparation.matches(parentBeaconBlock, blockSlot))
         .isPresent()) {
       return existingPendingPreparation.orElseThrow().executionPayloadContext();
     }
@@ -305,20 +274,6 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
           preparation.slot(),
           parentBeaconBlock,
           blockSlot);
-      if (preparation.hasInclusionListTransactions(inclusionListTransactions)) {
-        return preparation
-            .executionPayloadContext()
-            .thenApply(
-                maybeExecutionPayloadContext ->
-                    validateExecutionPayloadContext(
-                        preparation.forkChoiceUpdateData(),
-                        parentBeaconBlock,
-                        parentExecutionHash,
-                        blockSlot,
-                        Optional.of(inclusionListTransactions),
-                        maybeExecutionPayloadContext));
-      }
-
       final ForkChoiceUpdateData forkChoiceUpdateDataWithoutPayloadAttributes =
           preparation
               .forkChoiceUpdateData()
@@ -342,15 +297,14 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
     }
 
     final PendingPayloadAttributesPreparation preparation =
-        new PendingPayloadAttributesPreparation(
-            blockSlot, parentBeaconBlock, inclusionListTransactions, new SafeFuture<>());
+        new PendingPayloadAttributesPreparation(blockSlot, parentBeaconBlock, new SafeFuture<>());
     pendingPayloadAttributesPreparation = Optional.of(preparation);
     final ForkChoiceUpdateData calculationForkChoiceUpdateData =
         forkChoiceUpdateData.withFreshForkChoiceState(forkChoiceUpdateData.getForkChoiceState());
 
     proposersDataManager
         .calculatePayloadBuildingAttributes(
-            blockSlot, inSync, calculationForkChoiceUpdateData, true, inclusionListTransactions)
+            blockSlot, inSync, calculationForkChoiceUpdateData, true)
         .thenAccept(
             payloadBuildingAttributes ->
                 completePendingPayloadAttributesPreparation(
@@ -428,7 +382,6 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
                     preparation.parentBeaconBlock(),
                     parentExecutionHash,
                     preparation.slot(),
-                    Optional.of(preparation.inclusionListTransactions()),
                     maybeExecutionPayloadContext))
         .propagateTo(preparation.executionPayloadContext());
     sendForkChoiceUpdated(updatedForkChoiceUpdateData);
@@ -477,7 +430,6 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
       final ForkChoiceNode parentBeaconBlock,
       final Bytes32 parentExecutionHash,
       final UInt64 blockSlot,
-      final Optional<List<Bytes>> expectedInclusionListTransactions,
       final Optional<ExecutionPayloadContext> maybeExecutionPayloadContext) {
     if (maybeExecutionPayloadContext.isEmpty()) {
       throw new IllegalStateException("Unable to obtain an executionPayloadContext");
@@ -513,13 +465,6 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
         "Payload preparation timestamp %s does not match requested timestamp %s",
         payloadBuildingAttributes.timestamp(),
         timestamp);
-    expectedInclusionListTransactions.ifPresent(
-        inclusionListTransactions ->
-            checkState(
-                payloadBuildingAttributes
-                    .inclusionListTransactions()
-                    .equals(inclusionListTransactions),
-                "Payload preparation inclusion list transactions do not match requested inclusion list transactions"));
     return maybeExecutionPayloadContext;
   }
 

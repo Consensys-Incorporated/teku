@@ -45,6 +45,7 @@ import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
 import tech.pegasys.teku.spec.datastructures.execution.versions.capella.Withdrawal;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
+import tech.pegasys.teku.spec.datastructures.forkchoice.InclusionListStore;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
@@ -73,6 +74,7 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
   private final Optional<Eth1Address> proposerDefaultFeeRecipient;
   private final boolean forkChoiceUpdatedAlwaysSendPayloadAttribute;
   private final ProposerPreferencesManager proposerPreferencesManager;
+  private final InclusionListStore inclusionListStore;
 
   public ProposersDataManager(
       final EventThread eventThread,
@@ -81,7 +83,8 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
       final ExecutionLayerChannel executionLayerChannel,
       final RecentChainData recentChainData,
       final Optional<Eth1Address> proposerDefaultFeeRecipient,
-      final boolean forkChoiceUpdatedAlwaysSendPayloadAttribute) {
+      final boolean forkChoiceUpdatedAlwaysSendPayloadAttribute,
+      final InclusionListStore inclusionListStore) {
     this(
         eventThread,
         spec,
@@ -90,7 +93,8 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
         recentChainData,
         proposerDefaultFeeRecipient,
         forkChoiceUpdatedAlwaysSendPayloadAttribute,
-        ProposerPreferencesManager.NOOP);
+        ProposerPreferencesManager.NOOP,
+        inclusionListStore);
   }
 
   public ProposersDataManager(
@@ -101,7 +105,8 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
       final RecentChainData recentChainData,
       final Optional<Eth1Address> proposerDefaultFeeRecipient,
       final boolean forkChoiceUpdatedAlwaysSendPayloadAttribute,
-      final ProposerPreferencesManager proposerPreferencesManager) {
+      final ProposerPreferencesManager proposerPreferencesManager,
+      final InclusionListStore inclusionListStore) {
     final LabelledSuppliedMetric labelledGauge =
         metricsSystem.createLabelledSuppliedGauge(
             TekuMetricCategory.BEACON,
@@ -119,6 +124,7 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
     this.proposerDefaultFeeRecipient = proposerDefaultFeeRecipient;
     this.forkChoiceUpdatedAlwaysSendPayloadAttribute = forkChoiceUpdatedAlwaysSendPayloadAttribute;
     this.proposerPreferencesManager = proposerPreferencesManager;
+    this.inclusionListStore = inclusionListStore;
   }
 
   @Override
@@ -252,16 +258,6 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
       final boolean inSync,
       final ForkChoiceUpdateData forkChoiceUpdateData,
       final boolean mandatory) {
-    return calculatePayloadBuildingAttributes(
-        blockSlot, inSync, forkChoiceUpdateData, mandatory, List.of());
-  }
-
-  public SafeFuture<Optional<PayloadBuildingAttributes>> calculatePayloadBuildingAttributes(
-      final UInt64 blockSlot,
-      final boolean inSync,
-      final ForkChoiceUpdateData forkChoiceUpdateData,
-      final boolean mandatory,
-      final List<Bytes> inclusionListTransactions) {
     eventThread.checkOnEventThread();
     if (!inSync) {
       // We don't produce blocks while syncing so don't bother preparing the payload
@@ -283,12 +279,7 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
         .thenComposeAsync(
             maybeState ->
                 calculatePayloadBuildingAttributes(
-                    currentHeadBlock,
-                    blockSlot,
-                    epoch,
-                    maybeState,
-                    mandatory,
-                    inclusionListTransactions),
+                    currentHeadBlock, blockSlot, epoch, maybeState, mandatory),
             eventThread);
   }
 
@@ -305,8 +296,7 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
       final UInt64 blockSlot,
       final UInt64 epoch,
       final Optional<BeaconState> maybeState,
-      final boolean mandatory,
-      final List<Bytes> inclusionListTransactions) {
+      final boolean mandatory) {
     eventThread.checkOnEventThread();
     if (maybeState.isEmpty()) {
       return SafeFuture.completedFuture(Optional.empty());
@@ -347,8 +337,24 @@ public class ProposersDataManager implements SlotEventsChannel, ValidatorIsConne
                         validatorRegistration,
                         withdrawals,
                         currentHeadBlock,
-                        inclusionListTransactions)),
+                        getInclusionListTransactions(currentHeadBlock, state, blockSlot))),
             eventThread);
+  }
+
+  private List<Bytes> getInclusionListTransactions(
+      final ForkChoiceNode parentBeaconBlock, final BeaconState state, final UInt64 blockSlot) {
+    if (blockSlot.isZero() || !spec.isInclusionListAvailableAtSlot(blockSlot)) {
+      return List.of();
+    }
+    final UInt64 inclusionListSlot = blockSlot.decrement();
+    final Bytes32 dependentRoot =
+        getShufflingDependentRoot(parentBeaconBlock.blockRoot(), inclusionListSlot)
+            .orElseGet(
+                () ->
+                    ShufflingDependentRootUtil.getShufflingDependentRoot(
+                        spec, state, inclusionListSlot));
+    return inclusionListStore.getInclusionListTransactions(
+        new SlotAndBlockRoot(inclusionListSlot, dependentRoot), false);
   }
 
   private SafeFuture<Optional<List<Withdrawal>>> getPayloadAttributeWithdrawals(

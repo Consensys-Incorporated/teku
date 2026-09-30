@@ -13,9 +13,7 @@
 
 package tech.pegasys.teku.statetransition.forkchoice;
 
-import java.util.List;
 import java.util.Optional;
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -38,7 +36,7 @@ public interface ForkChoiceNotifier {
       ForkChoiceNode parentBeaconBlock, UInt64 blockSlot);
 
   SafeFuture<Optional<ExecutionPayloadContext>> preparePayloadAttributes(
-      ForkChoiceNode parentBeaconBlock, UInt64 blockSlot, List<Bytes> inclusionListTransactions);
+      ForkChoiceNode parentBeaconBlock, UInt64 blockSlot);
 
   void onTerminalBlockReached(Bytes32 executionBlockHash);
 
