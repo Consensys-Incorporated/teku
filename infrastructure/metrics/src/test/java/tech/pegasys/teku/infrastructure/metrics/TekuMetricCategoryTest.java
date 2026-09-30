@@ -51,4 +51,17 @@ class TekuMetricCategoryTest {
 
     assertThat(TekuMetricCategory.defaultCategories()).containsAll(expectedDefaultCategories);
   }
+
+  @Test
+  public void shouldNotEnableExperimentalGossipMetricsByDefault() {
+    assertThat(TekuMetricCategory.defaultCategories())
+        .doesNotContain(TekuMetricCategory.LIBP2P_GOSSIP);
+  }
+
+  @Test
+  public void experimentalGossipCategoryShouldNotShareANameWithLibp2p() {
+    // Besu matches categories by name, so a shared name would make LIBP2P enable this one too.
+    assertThat(TekuMetricCategory.LIBP2P_GOSSIP.getName())
+        .isNotEqualTo(TekuMetricCategory.LIBP2P.getName());
+  }
 }

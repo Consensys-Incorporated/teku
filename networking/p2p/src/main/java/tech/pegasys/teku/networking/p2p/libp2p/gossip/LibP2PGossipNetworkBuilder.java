@@ -79,12 +79,15 @@ public class LibP2PGossipNetworkBuilder {
   public LibP2PGossipNetwork build() {
     validate();
     final GossipTopicHandlers topicHandlers = new GossipTopicHandlers();
-    final Gossip gossip =
-        createGossip(
-            gossipConfig, networkingSpecConfig, logWireGossip, gossipTopicFilter, topicHandlers);
+    final GossipRouter router =
+        createGossipRouter(gossipConfig, networkingSpecConfig, gossipTopicFilter, topicHandlers);
+    final Optional<GossipMetricsListener> gossipMetricsListener =
+        GossipMetricsListener.attachTo(metricsSystem, router);
+    final Gossip gossip = createGossip(router, logWireGossip);
     final PubsubPublisherApi publisher = gossip.createPublisher(null, NULL_SEQNO_GENERATOR);
 
-    return new LibP2PGossipNetwork(metricsSystem, gossip, publisher, topicHandlers);
+    return new LibP2PGossipNetwork(
+        metricsSystem, gossip, publisher, topicHandlers, gossipMetricsListener);
   }
 
   private void validate() {
@@ -157,16 +160,7 @@ public class LibP2PGossipNetworkBuilder {
     return builder.build();
   }
 
-  protected Gossip createGossip(
-      final GossipConfig gossipConfig,
-      final NetworkingSpecConfig networkingSpecConfig,
-      final boolean gossipLogsEnabled,
-      final GossipTopicFilter gossipTopicFilter,
-      final GossipTopicHandlers topicHandlers) {
-
-    final GossipRouter router =
-        createGossipRouter(gossipConfig, networkingSpecConfig, gossipTopicFilter, topicHandlers);
-
+  protected Gossip createGossip(final GossipRouter router, final boolean gossipLogsEnabled) {
     if (gossipLogsEnabled) {
       if (debugGossipHandler != null) {
         throw new IllegalStateException(
