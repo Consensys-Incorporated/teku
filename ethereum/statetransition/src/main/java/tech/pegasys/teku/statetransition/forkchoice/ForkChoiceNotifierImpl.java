@@ -264,6 +264,18 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
 
     LOG.debug("internalForkChoiceUpdated forkChoiceState {}", forkChoiceState);
 
+    if (requestedBlockProductionSlot.isPresent()
+        && pinnedBlockProductionPreparation
+            .filter(
+                preparation ->
+                    requestedBlockProductionSlot.orElseThrow().isLessThan(preparation.slot()))
+            .isPresent()) {
+      LOG.warn(
+          "Ignoring block production request for slot {} because a newer slot is pinned",
+          requestedBlockProductionSlot.orElseThrow());
+      return;
+    }
+
     clearPinnedBlockProductionIfHeadAdvanced(forkChoiceState);
 
     if (requestedBlockProductionSlot.isPresent()) {

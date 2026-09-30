@@ -39,6 +39,8 @@ import java.util.function.Consumer;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.invocation.InvocationOnMock;
 import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
@@ -908,6 +910,117 @@ class ForkChoiceNotifierTest {
 
     assertThatSafeFuture(payloadContextFuture)
         .isCompletedWithOptionalContaining(executionPayloadContext);
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void getPayloadId_shouldKeepNewerPinWhenOlderSlotRequested(final boolean responsePending) {
+    final ForkChoiceState forkChoiceState = getCurrentForkChoiceState();
+    final ForkChoiceNode parent = forkChoiceState.headBlock();
+    final UInt64 pastSlot = getHeadState().getSlot().plus(1);
+    final UInt64 currentSlot = pastSlot.plus(1);
+    final PayloadBuildingAttributes attributes = withProposerForSlot(currentSlot);
+    final Bytes8 payloadId = dataStructureUtil.randomBytes8();
+    final ForkChoiceUpdatedResult response =
+        createForkChoiceUpdatedResult(ExecutionPayloadStatus.VALID, Optional.of(payloadId));
+    final SafeFuture<ForkChoiceUpdatedResult> responseFuture = new SafeFuture<>();
+    when(executionLayerChannel.engineForkChoiceUpdated(forkChoiceState, Optional.of(attributes)))
+        .thenReturn(responseFuture);
+    storageSystem.chainUpdater().setCurrentSlot(currentSlot);
+    if (!responsePending) {
+      responseFuture.complete(response);
+    }
+
+    notifyForkChoiceUpdated(forkChoiceState, Optional.of(currentSlot));
+    final Optional<SafeFuture<Optional<ExecutionPayloadContext>>> waitingRequest =
+        responsePending
+            ? Optional.of(notifier.getPayloadId(parent, currentSlot))
+            : Optional.empty();
+
+    notifyForkChoiceUpdatedVerifyNoNotification(forkChoiceState, Optional.of(pastSlot));
+
+    waitingRequest.ifPresent(future -> assertThatSafeFuture(future).isNotCompleted());
+    responseFuture.complete(response);
+    final ExecutionPayloadContext expected =
+        new ExecutionPayloadContext(payloadId, forkChoiceState, attributes);
+    waitingRequest.ifPresent(
+        future -> assertThatSafeFuture(future).isCompletedWithOptionalContaining(expected));
+    assertThatSafeFuture(notifier.getPayloadId(parent, currentSlot))
+        .isCompletedWithOptionalContaining(expected);
+    verify(proposersDataManager, never())
+        .calculatePayloadBuildingAttributes(eq(pastSlot), anyBoolean(), any(), anyBoolean());
+    verify(executionLayerChannel).engineForkChoiceUpdated(forkChoiceState, Optional.of(attributes));
+    verifyNoMoreInteractions(executionLayerChannel);
+  }
+
+  @Test
+  void getPayloadId_shouldKeepNewerPinWhilePayloadAttributesArePending() {
+    final ForkChoiceState forkChoiceState = getCurrentForkChoiceState();
+    final UInt64 pastSlot = getHeadState().getSlot().plus(1);
+    final UInt64 currentSlot = pastSlot.plus(1);
+    final PayloadBuildingAttributes attributes = withProposerForSlot(currentSlot);
+    final SafeFuture<Optional<PayloadBuildingAttributes>> attributesFuture = new SafeFuture<>();
+    doAnswer(__ -> attributesFuture)
+        .when(proposersDataManager)
+        .calculatePayloadBuildingAttributes(eq(currentSlot), anyBoolean(), any(), eq(true));
+    final Bytes8 payloadId = dataStructureUtil.randomBytes8();
+    when(executionLayerChannel.engineForkChoiceUpdated(forkChoiceState, Optional.of(attributes)))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                createForkChoiceUpdatedResult(
+                    ExecutionPayloadStatus.VALID, Optional.of(payloadId))));
+    storageSystem.chainUpdater().setCurrentSlot(currentSlot);
+
+    notifyForkChoiceUpdatedVerifyNoNotification(forkChoiceState, Optional.of(currentSlot));
+    final SafeFuture<Optional<ExecutionPayloadContext>> payloadContextFuture =
+        notifier.getPayloadId(forkChoiceState.headBlock(), currentSlot);
+    notifyForkChoiceUpdatedVerifyNoNotification(forkChoiceState, Optional.of(pastSlot));
+
+    assertThatSafeFuture(payloadContextFuture).isNotCompleted();
+    verifyNoInteractions(executionLayerChannel);
+    attributesFuture.complete(Optional.of(attributes));
+
+    assertThatSafeFuture(payloadContextFuture)
+        .isCompletedWithOptionalContaining(
+            new ExecutionPayloadContext(payloadId, forkChoiceState, attributes));
+    verify(proposersDataManager, never())
+        .calculatePayloadBuildingAttributes(eq(pastSlot), anyBoolean(), any(), anyBoolean());
+    verify(executionLayerChannel).engineForkChoiceUpdated(forkChoiceState, Optional.of(attributes));
+    verifyNoMoreInteractions(executionLayerChannel);
+  }
+
+  @Test
+  void getPayloadId_shouldReplaceOlderPinWithNewerSlot() {
+    final ForkChoiceState forkChoiceState = getCurrentForkChoiceState();
+    final UInt64 pastSlot = getHeadState().getSlot().plus(1);
+    final UInt64 currentSlot = pastSlot.plus(1);
+    final List<PayloadBuildingAttributes> attributes =
+        withProposerForTwoSlots(forkChoiceState, getHeadState(), pastSlot, currentSlot);
+    when(executionLayerChannel.engineForkChoiceUpdated(
+            forkChoiceState, Optional.of(attributes.get(0))))
+        .thenReturn(new SafeFuture<>());
+    final Bytes8 payloadId = dataStructureUtil.randomBytes8();
+    when(executionLayerChannel.engineForkChoiceUpdated(
+            forkChoiceState, Optional.of(attributes.get(1))))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                createForkChoiceUpdatedResult(
+                    ExecutionPayloadStatus.VALID, Optional.of(payloadId))));
+
+    storageSystem.chainUpdater().setCurrentSlot(pastSlot);
+    notifyForkChoiceUpdated(forkChoiceState, Optional.of(pastSlot));
+    final SafeFuture<Optional<ExecutionPayloadContext>> pastRequest =
+        notifier.getPayloadId(forkChoiceState.headBlock(), pastSlot);
+    assertThatSafeFuture(pastRequest).isNotCompleted();
+    storageSystem.chainUpdater().setCurrentSlot(currentSlot);
+    notifyForkChoiceUpdated(forkChoiceState, Optional.of(currentSlot));
+
+    assertThatSafeFuture(pastRequest)
+        .isCompletedExceptionallyWith(IllegalStateException.class)
+        .hasMessageContaining("was replaced by pinned block production for slot " + currentSlot);
+    assertThatSafeFuture(notifier.getPayloadId(forkChoiceState.headBlock(), currentSlot))
+        .isCompletedWithOptionalContaining(
+            new ExecutionPayloadContext(payloadId, forkChoiceState, attributes.get(1)));
   }
 
   @Test

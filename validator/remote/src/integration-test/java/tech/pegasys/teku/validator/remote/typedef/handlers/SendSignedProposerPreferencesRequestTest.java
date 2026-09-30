@@ -27,6 +27,7 @@ import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import tech.pegasys.teku.api.exceptions.RemoteServiceNotAvailableException;
+import tech.pegasys.teku.infrastructure.http.RestApiConstants;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
 import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -45,7 +46,7 @@ public class SendSignedProposerPreferencesRequestTest extends AbstractTypeDefReq
 
   @BeforeEach
   public void setup() {
-    request = new SendSignedProposerPreferencesRequest(mockWebServer.url("/"), okHttpClient);
+    request = new SendSignedProposerPreferencesRequest(spec, mockWebServer.url("/"), okHttpClient);
     signedProposerPreferences = List.of(dataStructureUtil.randomSignedProposerPreferences());
   }
 
@@ -64,6 +65,8 @@ public class SendSignedProposerPreferencesRequestTest extends AbstractTypeDefReq
     assertThat(recordedRequest.getMethod()).isEqualTo("POST");
     assertThat(recordedRequest.getPath())
         .contains(ValidatorApiMethod.SEND_SIGNED_PROPOSER_PREFERENCES.getPath(emptyMap()));
+    assertThat(recordedRequest.getHeader(RestApiConstants.HEADER_CONSENSUS_VERSION))
+        .isEqualTo(specMilestone.lowerCaseName());
   }
 
   @TestTemplate
