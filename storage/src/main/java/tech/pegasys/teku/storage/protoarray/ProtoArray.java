@@ -338,8 +338,10 @@ public class ProtoArray {
       bestNode = getNodeByIndex(parentIndex);
     }
 
-    // Perform a sanity check that the node is indeed valid to be the head.
-    if (!nodeIsViableForHead(bestNode) && !bestNode.equals(justifiedNode)) {
+    // Perform a sanity check that the node is indeed valid to be the head. The justified block is
+    // always accepted as the fallback head, in any of its payload-status variants.
+    if (!nodeIsViableForHead(bestNode)
+        && !bestNode.getBlockRoot().equals(justifiedNode.getBlockRoot())) {
       throw new IllegalStateException(
           "ProtoArray: Best node " + bestNode.toLogString() + " is not viable for head");
     }
@@ -428,10 +430,12 @@ public class ProtoArray {
         }
       }
 
-      index = maybeFirstInvalidNodeIndex.orElse(maybeIndex.get());
+      index =
+          maybeFirstInvalidNodeIndex.orElseGet(
+              () -> findExecutionPayloadOwnerIndex(maybeIndex.get()));
       node = getNodeByIndex(index);
     } else {
-      index = maybeIndex.get();
+      index = findExecutionPayloadOwnerIndex(maybeIndex.get());
       node = getNodeByIndex(index);
     }
 
@@ -442,6 +446,35 @@ public class ProtoArray {
     applyDeltas(
         new LongArrayList(Collections.nCopies(getTotalTrackedNodeCount(), 0L)),
         headSelectionContext);
+  }
+
+  /**
+   * Resolves the node that owns the execution payload of the node at {@code nodeIndex}: the topmost
+   * ancestor carrying the same execution block hash.
+   *
+   * <p>Pre-Gloas every block owns its own payload, so this is the node itself. In Gloas, BASE and
+   * EMPTY nodes own no payload and inherit the execution block hash of the nearest FULL ancestor.
+   * An INVALID verdict that cannot be resolved through a latest valid hash refers to that inherited
+   * payload, so it must be applied to the FULL ancestor (or the protoarray root) and everything
+   * built on it, rather than to the variant node that happened to be sent to the execution client.
+   */
+  private int findExecutionPayloadOwnerIndex(final int nodeIndex) {
+    int ownerIndex = nodeIndex;
+    ProtoNode owner = getNodeByIndex(ownerIndex);
+    final Bytes32 executionBlockHash = owner.getExecutionBlockHash();
+    if (executionBlockHash.isZero()) {
+      return nodeIndex;
+    }
+    while (owner.getParentIndex().isPresent()) {
+      final int parentIndex = owner.getParentIndex().get();
+      final ProtoNode parent = getNodeByIndex(parentIndex);
+      if (!parent.getExecutionBlockHash().equals(executionBlockHash)) {
+        break;
+      }
+      ownerIndex = parentIndex;
+      owner = parent;
+    }
+    return ownerIndex;
   }
 
   private boolean nodeHasExecutionHash(final int nodeIndex, final Bytes32 executionHash) {

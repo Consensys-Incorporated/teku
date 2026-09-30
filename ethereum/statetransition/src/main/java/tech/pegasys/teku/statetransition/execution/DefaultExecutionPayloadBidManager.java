@@ -22,6 +22,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -43,12 +44,14 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
 import tech.pegasys.teku.spec.datastructures.execution.GetPayloadResponse;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.statetransition.OperationAddedSubscriber;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
 import tech.pegasys.teku.statetransition.util.PendingPool;
+import tech.pegasys.teku.statetransition.util.ShufflingDependentRootUtil;
 import tech.pegasys.teku.statetransition.validation.ExecutionPayloadBidGossipValidator;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 
@@ -66,7 +69,8 @@ public class DefaultExecutionPayloadBidManager
   private final ExecutionPayloadBidCircuitBreaker executionPayloadBidCircuitBreaker;
   private final ReceivedExecutionPayloadBidEventsChannel
       receivedExecutionPayloadBidEventsChannelPublisher;
-  private final PendingPool<SignedExecutionPayloadBid> pendingExecutionPayloadBids;
+  private final PendingPool<PendingExecutionPayloadBid> pendingExecutionPayloadBids;
+  private final Supplier<Optional<ReadOnlyForkChoiceStrategy>> forkChoiceStrategySupplier;
   private final Subscribers<OperationAddedSubscriber<SignedExecutionPayloadBid>> subscribers =
       Subscribers.create(true);
   private final BuilderBidFetcher builderBidFetcher;
@@ -84,9 +88,11 @@ public class DefaultExecutionPayloadBidManager
       final ExecutionPayloadBidCircuitBreaker executionPayloadBidCircuitBreaker,
       final ReceivedExecutionPayloadBidEventsChannel
           receivedExecutionPayloadBidEventsChannelPublisher,
-      final PendingPool<SignedExecutionPayloadBid> pendingExecutionPayloadBids,
+      final PendingPool<PendingExecutionPayloadBid> pendingExecutionPayloadBids,
       final BuilderBidFetcher builderBidFetcher,
-      final ExecutionPayloadBidSelector bidSelector) {
+      final ExecutionPayloadBidSelector bidSelector,
+      final Supplier<Optional<ReadOnlyForkChoiceStrategy>> forkChoiceStrategySupplier) {
+    this.forkChoiceStrategySupplier = forkChoiceStrategySupplier;
     this.spec = spec;
     this.executionPayloadBidGossipValidator = executionPayloadBidGossipValidator;
     this.executionPayloadBidCircuitBreaker = executionPayloadBidCircuitBreaker;
@@ -131,7 +137,20 @@ public class DefaultExecutionPayloadBidManager
         subscribers.forEach(
             subscriber -> subscriber.onOperationAdded(signedBid, result, fromNetwork));
       }
-      case SAVE_FOR_FUTURE -> pendingExecutionPayloadBids.add(signedBid);
+      case SAVE_FOR_FUTURE -> {
+        final ExecutionPayloadBid executionPayloadBid = signedBid.getMessage();
+        final Optional<Bytes32> dependentRoot =
+            forkChoiceStrategySupplier
+                .get()
+                .flatMap(
+                    forkChoiceStrategy ->
+                        ShufflingDependentRootUtil.getShufflingDependentRoot(
+                            spec,
+                            forkChoiceStrategy,
+                            executionPayloadBid.getParentBlockRoot(),
+                            executionPayloadBid.getSlot()));
+        pendingExecutionPayloadBids.add(new PendingExecutionPayloadBid(signedBid, dependentRoot));
+      }
       case REJECT, IGNORE ->
           LOG.debug(
               "Wouldn't consider bid for slot {} from builder {} because it didn't pass gossip validation: {}",
@@ -147,11 +166,12 @@ public class DefaultExecutionPayloadBidManager
         .add(signedBid);
   }
 
-  private void retryPendingBids(final Collection<SignedExecutionPayloadBid> pendingBids) {
+  private void retryPendingBids(final Collection<PendingExecutionPayloadBid> pendingBids) {
     // As with non-deferred bids, gossip validation accepts the first valid bid for each
     // (slot, builder index). Reconsider ordering if the spec allows multiple bids per tuple.
     // Deferred gossip was ignored by gossipsub, so accepted retries must be explicitly published.
-    pendingBids.forEach(pendingBid -> validateAndAddBid(pendingBid, false).finishError(LOG));
+    pendingBids.forEach(
+        pendingBid -> validateAndAddBid(pendingBid.signedBid(), false).finishError(LOG));
   }
 
   @Override
@@ -161,7 +181,7 @@ public class DefaultExecutionPayloadBidManager
     pendingExecutionPayloadBids.onSlot(slot);
     // PendingPool prunes historical items only once per epoch, so remove stale bids before retrying
     pendingExecutionPayloadBids.removeItemsMatching(
-        pendingBid -> pendingBid.getMessage().getSlot().isLessThan(slot));
+        pendingBid -> pendingBid.signedBid().getMessage().getSlot().isLessThan(slot));
     retryPendingBids(pendingExecutionPayloadBids.removeItemsMatching(__ -> true));
   }
 
@@ -173,7 +193,12 @@ public class DefaultExecutionPayloadBidManager
     final UInt64 proposalSlot = proposerPreferences.getMessage().getProposalSlot();
     retryPendingBids(
         pendingExecutionPayloadBids.removeItemsMatching(
-            pendingBid -> pendingBid.getMessage().getSlot().equals(proposalSlot)));
+            pendingExecutionPayloadBid ->
+                pendingExecutionPayloadBid.signedBid().getMessage().getSlot().equals(proposalSlot)
+                    && pendingExecutionPayloadBid
+                        .dependentRoot()
+                        .map(proposerPreferences.getMessage().getDependentRoot()::equals)
+                        .orElse(true)));
   }
 
   @Override

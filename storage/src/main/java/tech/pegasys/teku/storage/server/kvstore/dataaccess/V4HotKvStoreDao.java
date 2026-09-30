@@ -20,6 +20,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.ethereum.pow.api.DepositTreeSnapshot;
@@ -31,6 +33,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.BlockCheckpoints;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.storage.server.kvstore.ColumnEntry;
@@ -42,6 +45,8 @@ import tech.pegasys.teku.storage.server.kvstore.schema.KvStoreVariable;
 import tech.pegasys.teku.storage.server.kvstore.schema.SchemaHotAdapter;
 
 public class V4HotKvStoreDao {
+  private static final Logger LOG = LogManager.getLogger();
+
   // Persistent data
   private final KvStoreAccessor db;
   private final SchemaHotAdapter schema;
@@ -98,6 +103,40 @@ public class V4HotKvStoreDao {
   @MustBeClosed
   public Stream<SignedBeaconBlock> streamHotBlocks() {
     return db.stream(schema.getColumnHotBlocksByRoot()).map(ColumnEntry::getValue);
+  }
+
+  @MustBeClosed
+  public Stream<ColumnEntry<UInt64, LightClientUpdate>> streamBestLightClientUpdates() {
+    return streamReadableBestLightClientUpdates(db, schema.getLightClientUpdatesByPeriod());
+  }
+
+  // Decode each row on its own so one unreadable update doesn't fail the whole load
+  @MustBeClosed
+  static Stream<ColumnEntry<UInt64, LightClientUpdate>> streamReadableBestLightClientUpdates(
+      final KvStoreAccessor db, final KvStoreColumn<UInt64, LightClientUpdate> column) {
+    return db.streamRaw(column).flatMap(row -> decodeBestLightClientUpdate(column, row));
+  }
+
+  private static Stream<ColumnEntry<UInt64, LightClientUpdate>> decodeBestLightClientUpdate(
+      final KvStoreColumn<UInt64, LightClientUpdate> column, final ColumnEntry<Bytes, Bytes> row) {
+    final UInt64 period = column.getKeySerializer().deserialize(row.getKey().toArrayUnsafe());
+    try {
+      return Stream.of(
+          ColumnEntry.create(
+              period, column.getValueSerializer().deserialize(row.getValue().toArrayUnsafe())));
+    } catch (final RuntimeException e) {
+      LOG.warn("Skipping unreadable light client update for period {}", period, e);
+      return Stream.empty();
+    }
+  }
+
+  @MustBeClosed
+  public Stream<UInt64> streamBestLightClientUpdatePeriods() {
+    return db.streamKeys(schema.getLightClientUpdatesByPeriod());
+  }
+
+  public Optional<Bytes32> getBestLightClientUpdateSignatureBlockRoot(final UInt64 period) {
+    return db.get(schema.getLightClientUpdateSignatureBlockRootsByPeriod(), period);
   }
 
   @MustBeClosed
@@ -242,6 +281,20 @@ public class V4HotKvStoreDao {
     @Override
     public void setCustodyGroupCount(final UInt64 custodyGroupCount) {
       transaction.put(schema.getVariableCustodyGroupCount(), custodyGroupCount);
+    }
+
+    @Override
+    public void addBestLightClientUpdate(
+        final UInt64 period, final LightClientUpdate update, final Bytes32 signatureBlockRoot) {
+      transaction.put(schema.getLightClientUpdatesByPeriod(), period, update);
+      transaction.put(
+          schema.getLightClientUpdateSignatureBlockRootsByPeriod(), period, signatureBlockRoot);
+    }
+
+    @Override
+    public void removeBestLightClientUpdate(final UInt64 period) {
+      transaction.delete(schema.getLightClientUpdatesByPeriod(), period);
+      transaction.delete(schema.getLightClientUpdateSignatureBlockRootsByPeriod(), period);
     }
 
     @Override

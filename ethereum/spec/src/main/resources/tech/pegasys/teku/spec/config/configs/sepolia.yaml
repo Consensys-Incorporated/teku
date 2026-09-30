@@ -202,8 +202,17 @@ MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS: 4096
 MAX_REQUEST_PAYLOADS: 128
 
 # Blob Scheduling
+# ---------------------------------------------------------------
+
 BLOB_SCHEDULE:
   - EPOCH: 274176
     MAX_BLOBS_PER_BLOCK: 15
   - EPOCH: 275712
     MAX_BLOBS_PER_BLOCK: 21
+
+# Gas limit scheduling
+# ---------------------------------------------------------------
+
+GAS_LIMIT_SCHEDULE:
+  - EPOCH: 353024
+    GAS_LIMIT: 200000000

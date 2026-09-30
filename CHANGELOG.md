@@ -9,13 +9,8 @@
 ### Breaking Changes
 
 ### Additions and Improvements
- - Scheduled the Glamsterdam (Gloas) upgrade on Sepolia for epoch `353024` (October 6, 2026 13:53:36 UTC).
- - Updated aircompressor to 3.8 and made it the only Snappy implementation for gossip and RPC (removed snappy-xerial dependency)
- - `GET /eth/v1/events` now responds with `400` when a requested topic is not recognised, instead of opening a stream which never delivers any events.
  - Block production now resends `forkchoiceUpdated` when the execution layer returned no `payloadId` (e.g. `SYNCING`) for the one sent ahead of the proposal slot, instead of missing the proposal. A warning is logged when no `payloadId` is returned.
 
 ### Bug Fixes
- - Fixed status, event, validator and database log messages being written twice when `--log-destination` is set to `CONSOLE` or `FILE`.
- - Fixed an out of memory error when a sync stopped while the chain head was still far behind. The node no longer reports itself as in sync in that case.
- - Fixed cases where Teku kept running, or hung while shutting down, after an out of memory error instead of exiting. It can now exit with code 3 as well as the usual code 1; both mean the node can be restarted.
- - `POST /eth/v1/validator/{pubkey}/graffiti` now responds with `202` instead of `204` on success, as required by the keymanager API spec.
+ - The ENR `eth2` field now advertises the current fork version as `next_fork_version` when a BPO fork is scheduled before the next hard fork, as the Fulu p2p specification requires.
+ - A block production request that fails no longer keeps its preparation for the slot, so a retry within the same slot starts from a fresh preparation.

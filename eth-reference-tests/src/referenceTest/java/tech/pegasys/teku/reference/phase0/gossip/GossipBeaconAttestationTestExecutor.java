@@ -202,9 +202,6 @@ public class GossipBeaconAttestationTestExecutor implements TestExecutor {
             invalidBlockRoots,
             blockRootsWithInvalidExecutionPayload);
 
-    // Track seen attestations (by hash tree root) for "already seen" duplicate detection
-    final Set<Bytes32> seenAttestationRoots = new HashSet<>();
-
     for (final GossipBeaconAttestationMetaData.Message message : metaData.getMessages()) {
       // Advance clock to message arrival time
       final UInt64 messageTimeMs =
@@ -216,17 +213,6 @@ public class GossipBeaconAttestationTestExecutor implements TestExecutor {
               testDefinition,
               message.getMessage() + ".ssz_snappy",
               getGossipAttestationSchema(spec));
-      final Bytes32 attestationRoot = attestation.hashTreeRoot();
-
-      // Already-seen check: same attestation from same validator seen before
-      if (seenAttestationRoots.contains(attestationRoot)) {
-        assertThat(message.getExpected())
-            .describedAs("Expected ignore for already-seen attestation %s", message.getMessage())
-            .isEqualTo("ignore");
-        continue;
-      } else {
-        seenAttestationRoots.add(attestationRoot);
-      }
 
       final ValidatableAttestation validatableAttestation =
           ValidatableAttestation.fromNetwork(spec, attestation, message.getSubnetId());

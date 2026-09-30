@@ -722,12 +722,29 @@ class ForkChoiceModelGloas implements ForkChoiceModel {
             .map(protoArray::getNodeByIndex)
             .orElse(candidate);
 
-    return resolveBaseNode(blockNodeIndex, landingPoint.getBlockRoot())
-        .flatMap(protoArray::getNode)
-        .flatMap(ProtoNode::getBestChildIndex)
-        .map(protoArray::getNodeByIndex)
-        .filter(sibling -> !sibling.isInvalid())
-        .orElse(landingPoint);
+    final ProtoNode resolved =
+        resolveBaseNode(blockNodeIndex, landingPoint.getBlockRoot())
+            .flatMap(protoArray::getNode)
+            .flatMap(ProtoNode::getBestChildIndex)
+            .map(protoArray::getNodeByIndex)
+            .filter(sibling -> !sibling.isInvalid())
+            .orElse(landingPoint);
+
+    // Spec mapping: modified get_head never returns a PENDING node. A PENDING landing point
+    // without a best child is the justified root with no viable descendant, for which get_head
+    // returns ForkChoiceNode(root=store.justified_checkpoint.root, payload_status=EMPTY).
+    if (resolved.getPayloadStatus() == ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING
+        && resolved.getBestChildIndex().isEmpty()) {
+      return blockNodeIndex
+          .getEmptyNode(resolved.getBlockRoot())
+          .flatMap(protoArray::getNode)
+          .filter(emptyNode -> !emptyNode.isInvalid())
+          .orElseThrow(
+              () ->
+                  new IllegalStateException(
+                      "Gloas node " + resolved.toLogString() + " has no valid EMPTY variant"));
+    }
+    return resolved;
   }
 
   @Override
