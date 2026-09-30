@@ -42,6 +42,8 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.events.EventChannels;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
+import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszBitvectorSchema;
 import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -157,12 +159,16 @@ public class EventSubscriptionManagerTest {
               Optional.empty(),
               data.randomBytes32(),
               samplePayloadAttributes.proposerIndex(),
+              Optional.empty(),
               new PayloadAttributes(
                   samplePayloadAttributes.timestamp(),
                   samplePayloadAttributes.prevRandao(),
                   samplePayloadAttributes.feeRecipient(),
                   samplePayloadAttributes.withdrawals(),
-                  Optional.of(samplePayloadAttributes.parentBeaconBlock().blockRoot()))));
+                  Optional.of(samplePayloadAttributes.parentBeaconBlock().blockRoot()),
+                  Optional.of(samplePayloadAttributes.proposalSlot()),
+                  Optional.of(samplePayloadAttributes.targetGasLimit()),
+                  Optional.of(samplePayloadAttributes.inclusionListTransactions()))));
   final ForkChoiceUpdatedResultNotification forkChoiceUpdatedResultNotification =
       new ForkChoiceUpdatedResultNotification(
           new ForkChoiceState(
@@ -383,70 +389,42 @@ public class EventSubscriptionManagerTest {
 
   @Test
   void shouldPropagatePayloadAttributes() throws IOException {
+    final SszBitvector inclusionListBits = SszBitvectorSchema.create(16).ofBits(0, 9);
+    final SafeFuture<Optional<SszBitvector>> inclusionListBitsFuture = new SafeFuture<>();
+    when(nodeDataProvider.getInclusionListBits(
+            samplePayloadAttributes.proposalSlot(),
+            samplePayloadAttributes.parentBeaconBlock().blockRoot()))
+        .thenReturn(inclusionListBitsFuture);
     when(req.getQueryString()).thenReturn("&topics=payload_attributes");
     manager.registerClient(client1);
 
     triggerPayloadAttributesEvent();
+    assertThat(outputStream.getString()).doesNotContain("event: payload_attributes");
+
+    inclusionListBitsFuture.complete(Optional.of(inclusionListBits));
+    asyncRunner.executeQueuedActions();
+
     checkEvent(
         "payload_attributes",
         PayloadAttributesEvent.create(
-            samplePayloadAttributesData.milestone(),
+            spec,
             samplePayloadAttributes,
-            forkChoiceUpdatedResultNotification.forkChoiceState()));
+            forkChoiceUpdatedResultNotification.forkChoiceState(),
+            Optional.of(inclusionListBits)));
   }
 
   @Test
-  void shouldIncludeParentBlockNumberInPayloadAttributesEventForDeneb()
-      throws JsonProcessingException {
-    final UInt64 denebHeadExecutionBlockNumber = UInt64.valueOf(123_456L);
-    final ForkChoiceState denebForkChoiceState =
-        new ForkChoiceState(
-            ForkChoiceNode.createBase(data.randomBytes32()),
-            data.randomSlot(),
-            denebHeadExecutionBlockNumber,
-            samplePayloadAttributesData.data().parentExecutionBlockHash(),
-            data.randomBytes32(),
-            data.randomBytes32(),
-            false);
+  void shouldNotEmitHezePayloadAttributesWithoutInclusionListView() {
+    when(req.getQueryString()).thenReturn("&topics=payload_attributes");
+    manager.registerClient(client1);
+    when(nodeDataProvider.getInclusionListBits(
+            samplePayloadAttributes.proposalSlot(),
+            samplePayloadAttributes.parentBeaconBlock().blockRoot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
 
-    final PayloadAttributesEvent denebPayloadAttributesEvent =
-        PayloadAttributesEvent.create(
-            SpecMilestone.DENEB, samplePayloadAttributes, denebForkChoiceState);
+    triggerPayloadAttributesEvent();
 
-    final String result =
-        JsonUtil.serialize(
-            denebPayloadAttributesEvent.getData(),
-            denebPayloadAttributesEvent.getJsonTypeDefinition());
-
-    assertThat(result)
-        .contains(String.format("\"parent_block_number\":\"%s\"", denebHeadExecutionBlockNumber));
-  }
-
-  @Test
-  void shouldNotIncludeParentBlockNumberInPayloadAttributesEventForGloas()
-      throws JsonProcessingException {
-    final UInt64 headExecutionBlockNumber = UInt64.valueOf(123_456L);
-    final ForkChoiceState gloasForkChoiceState =
-        new ForkChoiceState(
-            ForkChoiceNode.createBase(data.randomBytes32()),
-            data.randomSlot(),
-            headExecutionBlockNumber,
-            samplePayloadAttributesData.data().parentExecutionBlockHash(),
-            data.randomBytes32(),
-            data.randomBytes32(),
-            false);
-
-    final PayloadAttributesEvent gloasPayloadAttributesEvent =
-        PayloadAttributesEvent.create(
-            SpecMilestone.GLOAS, samplePayloadAttributes, gloasForkChoiceState);
-
-    final String result =
-        JsonUtil.serialize(
-            gloasPayloadAttributesEvent.getData(),
-            gloasPayloadAttributesEvent.getJsonTypeDefinition());
-
-    assertThat(result)
-        .doesNotContain(String.format("\"parent_block_number\":\"%s\"", headExecutionBlockNumber));
+    assertThat(outputStream.getString()).doesNotContain("event: payload_attributes");
   }
 
   @Test

@@ -41,7 +41,6 @@ import tech.pegasys.teku.spec.logic.versions.fulu.util.BlockProposalUtilFulu;
 import tech.pegasys.teku.spec.logic.versions.gloas.execution.ExecutionPayloadVerifierGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.execution.ExecutionRequestsProcessorGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.BeaconStateMutatorsGloas;
-import tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.PredicatesGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.operations.OperationSignatureVerifierGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.operations.validation.AttestationDataValidatorGloas;
@@ -54,6 +53,7 @@ import tech.pegasys.teku.spec.logic.versions.gloas.withdrawals.WithdrawalsHelper
 import tech.pegasys.teku.spec.logic.versions.heze.block.BlockProcessorHeze;
 import tech.pegasys.teku.spec.logic.versions.heze.forktransition.HezeStateUpgrade;
 import tech.pegasys.teku.spec.logic.versions.heze.helpers.BeaconStateAccessorsHeze;
+import tech.pegasys.teku.spec.logic.versions.heze.helpers.MiscHelpersHeze;
 import tech.pegasys.teku.spec.logic.versions.heze.util.ForkChoiceUtilHeze;
 import tech.pegasys.teku.spec.logic.versions.heze.util.InclusionListUtil;
 import tech.pegasys.teku.spec.logic.versions.heze.util.ValidatorsUtilHeze;
@@ -73,7 +73,7 @@ public class SpecLogicHeze extends AbstractSpecLogic {
 
   private SpecLogicHeze(
       final PredicatesGloas predicates,
-      final MiscHelpersGloas miscHelpers,
+      final MiscHelpersHeze miscHelpers,
       final BeaconStateAccessorsHeze beaconStateAccessors,
       final BeaconStateMutatorsGloas beaconStateMutators,
       final OperationSignatureVerifier operationSignatureVerifier,
@@ -135,8 +135,7 @@ public class SpecLogicHeze extends AbstractSpecLogic {
       final TimeProvider timeProvider) {
     // Helpers
     final PredicatesGloas predicates = new PredicatesGloas(config);
-    final MiscHelpersGloas miscHelpers =
-        new MiscHelpersGloas(config, predicates, schemaDefinitions);
+    final MiscHelpersHeze miscHelpers = new MiscHelpersHeze(config, predicates, schemaDefinitions);
     final BeaconStateAccessorsHeze beaconStateAccessors =
         new BeaconStateAccessorsHeze(config, schemaDefinitions, predicates, miscHelpers);
     final BeaconStateMutatorsGloas beaconStateMutators =

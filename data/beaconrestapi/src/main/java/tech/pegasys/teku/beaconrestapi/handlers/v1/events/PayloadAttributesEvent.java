@@ -16,16 +16,22 @@ package tech.pegasys.teku.beaconrestapi.handlers.v1.events;
 import static tech.pegasys.teku.ethereum.execution.types.Eth1Address.ETH1ADDRESS_TYPE;
 import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.MILESTONE_TYPE;
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.BYTES32_TYPE;
+import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.STRING_TYPE;
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.UINT64_TYPE;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.function.BiFunction;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.events.PayloadAttributesEvent.PayloadAttributesData;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.json.types.SerializableArrayTypeDefinition;
 import tech.pegasys.teku.infrastructure.json.types.SerializableTypeDefinition;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.execution.versions.capella.Withdrawal;
 import tech.pegasys.teku.spec.executionlayer.ForkChoiceState;
@@ -48,6 +54,15 @@ public class PayloadAttributesEvent extends Event<PayloadAttributesData> {
               "parent_beacon_block_root",
               BYTES32_TYPE,
               payloadAttributes -> payloadAttributes.parentBeaconBlockRoot)
+          .withOptionalField("slot_number", UINT64_TYPE, PayloadAttributes::slotNumber)
+          .withOptionalField("target_gas_limit", UINT64_TYPE, PayloadAttributes::targetGasLimit)
+          .withOptionalField(
+              "inclusion_list_transactions",
+              SerializableTypeDefinition.listOf(STRING_TYPE),
+              attributes ->
+                  attributes
+                      .inclusionListTransactions()
+                      .map(transactions -> transactions.stream().map(Bytes::toHexString).toList()))
           .build();
 
   private static final SerializableTypeDefinition<PayloadAttributesEvent.Data> DATA_TYPE =
@@ -64,6 +79,10 @@ public class PayloadAttributesEvent extends Event<PayloadAttributesData> {
               BYTES32_TYPE,
               PayloadAttributesEvent.Data::parentExecutionBlockHash)
           .withField("proposer_index", UINT64_TYPE, data -> data.proposerIndex)
+          .withOptionalField(
+              "inclusion_list_bits",
+              STRING_TYPE,
+              data -> data.inclusionListBits().map(Bytes::toHexString))
           .withField(
               "payload_attributes",
               PAYLOAD_ATTRIBUTES_TYPE,
@@ -90,6 +109,7 @@ public class PayloadAttributesEvent extends Event<PayloadAttributesData> {
       Optional<UInt64> parentExecutionBlockNumber,
       Bytes32 parentExecutionBlockHash,
       UInt64 proposerIndex,
+      Optional<Bytes> inclusionListBits,
       PayloadAttributes payloadAttributes) {}
 
   record PayloadAttributes(
@@ -97,16 +117,46 @@ public class PayloadAttributesEvent extends Event<PayloadAttributesData> {
       Bytes32 prevRandao,
       Eth1Address suggestedFeeRecipient,
       Optional<List<Withdrawal>> withdrawals,
-      Optional<Bytes32> parentBeaconBlockRoot) {}
+      Optional<Bytes32> parentBeaconBlockRoot,
+      Optional<UInt64> slotNumber,
+      Optional<UInt64> targetGasLimit,
+      Optional<List<Bytes>> inclusionListTransactions) {}
 
   /**
    * @param forkChoiceState The fork choice state before sending the fCu so can use it to get
    *     parent_block_number (pre-gloas) and parent_block_hash
    */
-  static PayloadAttributesEvent create(
-      final SpecMilestone milestone,
+  static SafeFuture<Optional<PayloadAttributesEvent>> create(
+      final Spec spec,
       final PayloadBuildingAttributes payloadAttributes,
-      final ForkChoiceState forkChoiceState) {
+      final ForkChoiceState forkChoiceState,
+      final BiFunction<UInt64, Bytes32, SafeFuture<Optional<SszBitvector>>>
+          inclusionListBitsProvider) {
+    if (!spec.isInclusionListAvailableAtSlot(payloadAttributes.proposalSlot())) {
+      return SafeFuture.completedFuture(
+          Optional.of(create(spec, payloadAttributes, forkChoiceState, Optional.empty())));
+    }
+    return inclusionListBitsProvider
+        .apply(payloadAttributes.proposalSlot(), payloadAttributes.parentBeaconBlock().blockRoot())
+        .thenApply(
+            maybeInclusionListBits ->
+                maybeInclusionListBits.map(
+                    inclusionListBits ->
+                        create(
+                            spec,
+                            payloadAttributes,
+                            forkChoiceState,
+                            Optional.of(inclusionListBits))));
+  }
+
+  static PayloadAttributesEvent create(
+      final Spec spec,
+      final PayloadBuildingAttributes payloadAttributes,
+      final ForkChoiceState forkChoiceState,
+      final Optional<SszBitvector> inclusionListBits) {
+    final SpecMilestone milestone = spec.atSlot(payloadAttributes.proposalSlot()).getMilestone();
+    final boolean inclusionListAvailable =
+        spec.isInclusionListAvailableAtSlot(payloadAttributes.proposalSlot());
     final PayloadAttributesData data =
         new PayloadAttributesData(
             milestone,
@@ -118,6 +168,9 @@ public class PayloadAttributesEvent extends Event<PayloadAttributesData> {
                     : Optional.of(forkChoiceState.headExecutionBlockNumber()),
                 forkChoiceState.headExecutionBlockHash(),
                 payloadAttributes.proposerIndex(),
+                inclusionListAvailable
+                    ? inclusionListBits.map(SszBitvector::sszSerialize)
+                    : Optional.empty(),
                 // based on PayloadAttributesV<N> as defined by the execution-apis specification
                 new PayloadAttributes(
                     payloadAttributes.timestamp(),
@@ -126,6 +179,15 @@ public class PayloadAttributesEvent extends Event<PayloadAttributesData> {
                     payloadAttributes.withdrawals(),
                     milestone.isGreaterThanOrEqualTo(SpecMilestone.DENEB)
                         ? Optional.of(payloadAttributes.parentBeaconBlock().blockRoot())
+                        : Optional.empty(),
+                    milestone.isGreaterThanOrEqualTo(SpecMilestone.GLOAS)
+                        ? Optional.of(payloadAttributes.proposalSlot())
+                        : Optional.empty(),
+                    milestone.isGreaterThanOrEqualTo(SpecMilestone.GLOAS)
+                        ? Optional.of(payloadAttributes.targetGasLimit())
+                        : Optional.empty(),
+                    inclusionListAvailable
+                        ? Optional.of(payloadAttributes.inclusionListTransactions())
                         : Optional.empty())));
     return new PayloadAttributesEvent(data);
   }

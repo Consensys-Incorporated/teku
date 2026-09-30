@@ -58,6 +58,7 @@ import tech.pegasys.teku.spec.logic.versions.deneb.types.VersionedHash;
 import tech.pegasys.teku.spec.logic.versions.electra.helpers.MiscHelpersElectra;
 import tech.pegasys.teku.spec.logic.versions.fulu.helpers.MiscHelpersFulu;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas;
+import tech.pegasys.teku.spec.logic.versions.heze.helpers.MiscHelpersHeze;
 
 public class MiscHelpers {
 
@@ -538,6 +539,10 @@ public class MiscHelpers {
     return false;
   }
 
+  public boolean isInclusionListAvailable() {
+    return false;
+  }
+
   // Methods used by the SlotProcessor to determine if it needs to increase the node slot
   public boolean shouldIncrementNodeSlotWhenAttestationsAreDue() {
     return true;
@@ -567,7 +572,7 @@ public class MiscHelpers {
     return Optional.empty();
   }
 
-  public Optional<MiscHelpersGloas> toVersionHeze() {
+  public Optional<MiscHelpersHeze> toVersionHeze() {
     return Optional.empty();
   }
 }

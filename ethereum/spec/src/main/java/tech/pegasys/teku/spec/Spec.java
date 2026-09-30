@@ -1529,6 +1529,10 @@ public class Spec {
         .orElse(false);
   }
 
+  public boolean isInclusionListAvailableAtSlot(final UInt64 slot) {
+    return atSlot(slot).miscHelpers().isInclusionListAvailable();
+  }
+
   // Electra Utils
   public boolean isFormerDepositMechanismDisabled(final BeaconState state) {
     return atState(state).miscHelpers().isFormerDepositMechanismDisabled(state);

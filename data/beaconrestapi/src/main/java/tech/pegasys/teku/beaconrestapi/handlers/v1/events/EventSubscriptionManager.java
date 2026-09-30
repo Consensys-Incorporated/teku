@@ -41,7 +41,6 @@ import tech.pegasys.teku.infrastructure.restapi.endpoints.ListQueryParameterUtil
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
-import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
@@ -82,6 +81,7 @@ public class EventSubscriptionManager
   private final Spec spec;
   private final ConfigProvider configProvider;
   private final ChainDataProvider provider;
+  private final NodeDataProvider nodeDataProvider;
   private final AsyncRunner asyncRunner;
   private final TimeProvider timeProvider;
   private final int maxPendingEvents;
@@ -103,6 +103,7 @@ public class EventSubscriptionManager
       final int maxPendingEvents) {
     this.spec = spec;
     this.provider = chainDataProvider;
+    this.nodeDataProvider = nodeDataProvider;
     this.asyncRunner = asyncRunner;
     this.timeProvider = timeProvider;
     this.maxPendingEvents = maxPendingEvents;
@@ -345,16 +346,19 @@ public class EventSubscriptionManager
     forkChoiceUpdatedResultNotification
         .payloadAttributes()
         .ifPresent(
-            payloadAttributes -> {
-              final SpecMilestone milestone =
-                  spec.atSlot(payloadAttributes.proposalSlot()).getMilestone();
-              final PayloadAttributesEvent payloadAttributesEvent =
-                  PayloadAttributesEvent.create(
-                      milestone,
-                      payloadAttributes,
-                      forkChoiceUpdatedResultNotification.forkChoiceState());
-              notifySubscribersOfEvent(EventType.payload_attributes, payloadAttributesEvent);
-            });
+            payloadAttributes ->
+                PayloadAttributesEvent.create(
+                        spec,
+                        payloadAttributes,
+                        forkChoiceUpdatedResultNotification.forkChoiceState(),
+                        nodeDataProvider::getInclusionListBits)
+                    .finish(
+                        maybePayloadAttributesEvent ->
+                            maybePayloadAttributesEvent.ifPresent(
+                                payloadAttributesEvent ->
+                                    notifySubscribersOfEvent(
+                                        EventType.payload_attributes, payloadAttributesEvent)),
+                        error -> LOG.error("Failed to create payload attributes event", error)));
   }
 
   protected void onSyncStateChange(final SyncState syncState) {

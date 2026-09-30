@@ -34,6 +34,16 @@ class SpecTest {
   private final ChainBuilder chainBuilder = storageSystem.chainBuilder();
 
   @Test
+  void shouldMakeInclusionListsAvailableAtHezeFork() {
+    final UInt64 hezeForkEpoch = UInt64.valueOf(12);
+    final Spec hezeSpec = TestSpecFactory.createMinimalWithHezeForkEpoch(hezeForkEpoch);
+    final UInt64 hezeForkSlot = hezeSpec.computeStartSlotAtEpoch(hezeForkEpoch);
+
+    assertThat(hezeSpec.isInclusionListAvailableAtSlot(hezeForkSlot.decrement())).isFalse();
+    assertThat(hezeSpec.isInclusionListAvailableAtSlot(hezeForkSlot)).isTrue();
+  }
+
+  @Test
   void shouldWindStateForwardIfOutsidePeriod() {
     chainBuilder.generateGenesis();
     chainBuilder.generateBlocksUpToSlot(8);

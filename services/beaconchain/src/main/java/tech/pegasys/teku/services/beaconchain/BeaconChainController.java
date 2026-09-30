@@ -385,7 +385,6 @@ public class BeaconChainController extends Service implements BeaconChainControl
   protected volatile AggregatingAttestationPool aggregatingAttestationPool;
   protected volatile InclusionListManager inclusionListManager;
   protected volatile InclusionListStore inclusionListStore;
-  protected volatile SignedInclusionListValidator signedInclusionListValidator;
   protected volatile DepositProvider depositProvider;
   protected volatile SyncService syncService;
   protected volatile AttestationManager attestationManager;
@@ -2356,7 +2355,9 @@ public class BeaconChainController extends Service implements BeaconChainControl
     LOG.debug("BeaconChainController.initInclusionListPool()");
     final SignedInclusionListValidator signedInclusionListValidator =
         new SignedInclusionListValidator(spec, recentChainData, signatureVerificationService);
-    inclusionListManager = new InclusionListManager(signedInclusionListValidator, forkChoice);
+    inclusionListManager =
+        new InclusionListManager(
+            signedInclusionListValidator, forkChoice, spec, recentChainData, inclusionListStore);
     eventChannels.subscribe(SlotEventsChannel.class, inclusionListManager);
   }
 

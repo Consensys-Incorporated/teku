@@ -142,6 +142,11 @@ public class NodeDataProvider {
     return attestationPool.getAttestations(maybeSlot, maybeCommitteeIndex);
   }
 
+  public SafeFuture<Optional<SszBitvector>> getInclusionListBits(
+      final UInt64 proposalSlot, final Bytes32 parentRoot) {
+    return inclusionListManager.getInclusionListBits(proposalSlot, parentRoot);
+  }
+
   public List<SignedInclusionList> getInclusionLists(
       final UInt64 slot, final Bytes32 dependentRoot, final SszBitvector committeeIndices) {
     return inclusionListManager.getInclusionLists(slot, dependentRoot, committeeIndices);

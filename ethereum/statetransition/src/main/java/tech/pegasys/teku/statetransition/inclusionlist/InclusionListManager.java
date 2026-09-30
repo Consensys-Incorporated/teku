@@ -30,13 +30,18 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
 import tech.pegasys.teku.infrastructure.subscribers.Subscribers;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.SignedInclusionList;
+import tech.pegasys.teku.spec.datastructures.forkchoice.InclusionListStore;
 import tech.pegasys.teku.spec.datastructures.inclusionlist.SignedInclusionListListener;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.InclusionListImportResult;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoice;
+import tech.pegasys.teku.statetransition.util.ShufflingDependentRootUtil;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 import tech.pegasys.teku.statetransition.validation.SignedInclusionListValidator;
 import tech.pegasys.teku.statetransition.validation.ValidationResultCode;
+import tech.pegasys.teku.storage.client.RecentChainData;
 
 public class InclusionListManager implements SlotEventsChannel {
 
@@ -45,6 +50,9 @@ public class InclusionListManager implements SlotEventsChannel {
   private static final UInt64 SLOTS_TO_RETAIN = UInt64.valueOf(4);
   private final SignedInclusionListValidator signedInclusionListValidator;
   private final ForkChoice forkChoice;
+  private final Spec spec;
+  private final RecentChainData recentChainData;
+  private final InclusionListStore inclusionListStore;
   private final NavigableMap<UInt64, ConcurrentMap<UInt64, List<SignedInclusionList>>>
       slotToInclusionListsByValidatorIndex = new ConcurrentSkipListMap<>();
   private final Subscribers<SignedInclusionListListener> inclusionListsSubscribers =
@@ -52,9 +60,15 @@ public class InclusionListManager implements SlotEventsChannel {
 
   public InclusionListManager(
       final SignedInclusionListValidator signedInclusionListValidator,
-      final ForkChoice forkChoice) {
+      final ForkChoice forkChoice,
+      final Spec spec,
+      final RecentChainData recentChainData,
+      final InclusionListStore inclusionListStore) {
     this.signedInclusionListValidator = signedInclusionListValidator;
     this.forkChoice = forkChoice;
+    this.spec = spec;
+    this.recentChainData = recentChainData;
+    this.inclusionListStore = inclusionListStore;
   }
 
   @Override
@@ -163,6 +177,45 @@ public class InclusionListManager implements SlotEventsChannel {
                   : Stream.empty();
             })
         .toList();
+  }
+
+  public SafeFuture<Optional<SszBitvector>> getInclusionListBits(
+      final UInt64 proposalSlot, final Bytes32 parentRoot) {
+    return spec.atSlot(proposalSlot)
+        .getInclusionListUtil()
+        .map(
+            inclusionListUtil -> {
+              final UInt64 inclusionListSlot = proposalSlot.decrement();
+              return recentChainData
+                  .retrieveBlockState(new SlotAndBlockRoot(proposalSlot, parentRoot))
+                  .thenApply(
+                      maybeState ->
+                          maybeState.map(
+                              state -> {
+                                final Bytes32 dependentRoot =
+                                    recentChainData
+                                        .getForkChoiceStrategy()
+                                        .flatMap(
+                                            strategy ->
+                                                ShufflingDependentRootUtil
+                                                    .getShufflingDependentRoot(
+                                                        spec,
+                                                        strategy,
+                                                        parentRoot,
+                                                        inclusionListSlot))
+                                        .orElseGet(
+                                            () ->
+                                                ShufflingDependentRootUtil
+                                                    .getShufflingDependentRoot(
+                                                        spec, state, inclusionListSlot));
+                                return inclusionListStore.getInclusionListBits(
+                                    inclusionListUtil.getInclusionListCommittee(
+                                        state, inclusionListSlot),
+                                    new SlotAndBlockRoot(inclusionListSlot, dependentRoot),
+                                    false);
+                              }));
+            })
+        .orElseGet(() -> SafeFuture.completedFuture(Optional.empty()));
   }
 
   public void subscribeToInclusionLists(final SignedInclusionListListener listener) {
