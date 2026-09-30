@@ -133,36 +133,43 @@ public class EpochProcessingTestExecutor implements TestExecutor {
     // Run both checks and report both failures: a full epoch failure alone points at an
     // interaction between sub-transitions rather than at the operation under test.
     assertAll(
+        () -> assertIsolatedOperationTransition(testDefinition, processor),
+        () -> assertFullEpochTransition(testDefinition, epochProcessor));
+  }
+
+  private void assertIsolatedOperationTransition(
+      final TestDefinition testDefinition, final EpochProcessingExecutor processor)
+      throws Throwable {
+    assertTransition(
+        testDefinition,
+        "pre.ssz_snappy",
+        "post.ssz_snappy",
+        preState -> preState.updated(state -> processor.executeOperation(operation, state)));
+  }
+
+  private static void assertFullEpochTransition(
+      final TestDefinition testDefinition, final EpochProcessor epochProcessor) throws Throwable {
+    // Some vectors don't ship full epoch states (see consensus-specs #4155)
+    if (!Files.exists(testDefinition.getTestDirectory().resolve(PRE_EPOCH_STATE_FILE))) {
+      return;
+    }
+    final Executable fullEpochCheck =
         () ->
             assertTransition(
                 testDefinition,
-                "pre.ssz_snappy",
-                "post.ssz_snappy",
-                preState ->
-                    preState.updated(state -> processor.executeOperation(operation, state))),
-        () -> {
-          // Some vectors don't ship full epoch states (see consensus-specs #4155)
-          if (!Files.exists(testDefinition.getTestDirectory().resolve(PRE_EPOCH_STATE_FILE))) {
-            return;
-          }
-          final Executable fullEpochCheck =
-              () ->
-                  assertTransition(
-                      testDefinition,
-                      PRE_EPOCH_STATE_FILE,
-                      "post_epoch.ssz_snappy",
-                      epochProcessor::processEpoch);
-          if (!SKIP_FULL_EPOCH_CHECK.contains(testDefinition.getDisplayName())) {
-            fullEpochCheck.execute();
-            return;
-          }
-          // Keep skipped vectors failing for the known reason only, so the list can't go stale
-          // or hide a different failure
-          assertThat(catchThrowable(fullEpochCheck::execute))
-              .describedAs("full epoch check passes now, remove it from SKIP_FULL_EPOCH_CHECK")
-              .isInstanceOf(IllegalArgumentException.class)
-              .hasMessageContaining("Aggregation bitlist size");
-        });
+                PRE_EPOCH_STATE_FILE,
+                "post_epoch.ssz_snappy",
+                epochProcessor::processEpoch);
+    if (!SKIP_FULL_EPOCH_CHECK.contains(testDefinition.getDisplayName())) {
+      fullEpochCheck.execute();
+      return;
+    }
+    // Keep skipped vectors failing for the known reason only, so the list can't go stale or hide
+    // a different failure
+    assertThat(catchThrowable(fullEpochCheck::execute))
+        .describedAs("full epoch check passes now, remove it from SKIP_FULL_EPOCH_CHECK")
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Aggregation bitlist size");
   }
 
   /** Expects the transition to fail when the post state file is absent, as the vectors do. */
