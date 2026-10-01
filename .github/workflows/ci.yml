@@ -198,6 +198,7 @@ jobs:
     outputs:
       workflow-run-id: ${{ steps.workflowdetails.outputs.run_id }}
       publish-version: ${{ steps.projectDetails.outputs.publish-version }}
+      ref-cache-key: ${{ steps.ref-cache-key.outputs.key }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -221,10 +222,48 @@ jobs:
       - name: Determine Teku version
         id: projectDetails
         uses: ./.github/actions/get-project-version
+      - name: Compute reference test cache key
+        id: ref-cache-key
+        shell: bash
+        run: |
+          # Derive the cache key from the reference test version definitions, the converter and the
+          # per-archive conversion options, so unrelated root build.gradle edits don't bust the cache.
+          LINES=$(grep -E '^def (refTestVersion|blsRefTestVersion|slashingProtectionInterchangeRefTestVersion)' build.gradle)
+          if [ -z "$LINES" ]; then
+            echo "Could not find reference test version definitions in build.gradle" >&2
+            exit 1
+          fi
+          HASH=$( (echo -n "$LINES"; cat eth-tests/src/main/java/tech/pegasys/teku/ethtests/ReferenceTestArchiveConverter.java eth-reference-tests/build.gradle) | sha256sum | cut -c1-16)
+          echo "key=reftests-archives-$HASH" >> "$GITHUB_OUTPUT"
+      - name: Restore reference test archives
+        id: ref-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: build/refTests/*/archives/
+          key: ${{ steps.ref-cache-key.outputs.key }}
+      - name: Fetch reference tests
+        shell: bash
+        run: |
+          # The zip archives are the only fixtures the tests need. Convert (which downloads the
+          # tarballs first) only when the cache did not provide them.
+          if ! ls build/refTests/*/archives/*.zip >/dev/null 2>&1
+          then
+            ./gradlew --no-daemon convertRefTests
+          fi
+          ls -la build/refTests/*/archives/
+      # No "clean": runners are ephemeral with a fresh checkout, and clean would wipe the restored
+      # build/refTests archives. Reference test classes are generated and compiled here so they
+      # travel with the workspace and its Gradle task history, and the shards see them up to date.
       - name: Assemble
         shell: bash
         run: |
-          ./gradlew clean compileJava compileTestJava compileJmhJava compileIntegrationTestJava compileAcceptanceTestJava compilePropertyTestJava resolveCiDependencies assemble distDocker
+          ./gradlew -x convertRefTests compileJava compileTestJava compileJmhJava compileIntegrationTestJava compileAcceptanceTestJava compilePropertyTestJava resolveCiDependencies assemble distDocker generateReferenceTestClasses compileReferenceTestJava
+      - name: Save reference test archives
+        if: steps.ref-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: build/refTests/*/archives/
+          key: ${{ steps.ref-cache-key.outputs.key }}
       - name: Save Teku docker image
         shell: bash
         run: |
@@ -591,76 +630,8 @@ jobs:
         with:
           stage_key: acceptance
 
-  referenceTestsPrep:
-    needs: assemble
-    runs-on: ubuntu-latest-32
-    outputs:
-      cache-key: ${{ steps.ref-cache-key.outputs.key }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          submodules: 'recursive'
-      - name: Prepare
-        uses: ./.github/actions/prepare
-      - name: Download assemble-output
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ github.run_id }}
-          name: assemble-output
-          merge-multiple: true
-          path: ${{ github.workspace }}
-      - name: Compute reference test cache key
-        id: ref-cache-key
-        shell: bash
-        run: |
-          # Derive the cache key from the reference test version definitions, the converter and the
-          # per-archive conversion options, so unrelated root build.gradle edits don't bust the cache.
-          LINES=$(grep -E '^def (refTestVersion|blsRefTestVersion|slashingProtectionInterchangeRefTestVersion)' build.gradle)
-          if [ -z "$LINES" ]; then
-            echo "Could not find reference test version definitions in build.gradle" >&2
-            exit 1
-          fi
-          HASH=$( (echo -n "$LINES"; cat eth-tests/src/main/java/tech/pegasys/teku/ethtests/ReferenceTestArchiveConverter.java eth-reference-tests/build.gradle) | sha256sum | cut -c1-16)
-          echo "key=reftests-archives-$HASH" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: build/refTests/*/archives/
-          key: ${{ steps.ref-cache-key.outputs.key }}
-      - name: FetchReferenceTests
-        shell: bash
-        run: |
-          # The zip archives are the only fixtures the tests need. Convert (which downloads the
-          # tarballs first) only when the cache did not provide them.
-          if ! ls build/refTests/*/archives/*.zip >/dev/null 2>&1
-          then
-            ./gradlew --no-daemon convertRefTests
-          fi
-          ls -la build/refTests/*/archives/
-      - name: CompileReferenceTests
-        shell: bash
-        run: |
-          ./gradlew --no-daemon --parallel -x convertRefTests compileReferenceTestJava resolveCiDependencies
-      - name: Caching reference tests
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: build/refTests/*/archives/
-          key: ${{ steps.ref-cache-key.outputs.key }}
-      - name: Compress reftests
-        shell: bash
-        run: |
-          tar -cf reftests.tar ./eth-reference-tests/
-      - name: Upload reftests
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: reftests
-          path: reftests.tar
-          retention-days: 1
-
   referenceTests:
-    needs: referenceTestsPrep
+    needs: assemble
     runs-on: "ubuntu-latest-128"
     strategy:
       fail-fast: false
@@ -686,20 +657,8 @@ jobs:
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: build/refTests/*/archives/
-          key: ${{ needs.referenceTestsPrep.outputs.cache-key }}
+          key: ${{ needs.assemble.outputs.ref-cache-key }}
           fail-on-cache-miss: true
-      - name: Download reftests
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ github.run_id }}
-          name: reftests
-      - name: Extract reftests
-        shell: bash
-        run: |
-          tar -xf reftests.tar
-          rm reftests.tar
       - name: Compute shard ${{ matrix.shard }} of ${{ matrix.total }} for ReferenceTests
         id: shard
         shell: bash
@@ -727,11 +686,11 @@ jobs:
       - name: Run ReferenceTests (shard)
         if: steps.shard.outputs.args != ''
         run: |
-          ./gradlew --no-daemon --parallel --info \
+          ./gradlew --no-daemon --parallel \
             -x convertRefTests \
             -x generateReferenceTestClasses \
             -x cleanReferenceTestClasses \
-            referenceTest ${{ inputs.gradle_args }} ${{ steps.shard.outputs.args }}
+            referenceTest ${{ (inputs.gradle_log_level == 'info' && '--info') || (inputs.gradle_log_level == 'debug' && '--debug') || '' }} ${{ steps.shard.outputs.args }}
       - name: Merge JUnit XML for ReferenceTests
         if: always()
         uses: ./.github/actions/merge-junit-xml
