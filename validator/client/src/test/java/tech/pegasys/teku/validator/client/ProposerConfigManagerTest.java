@@ -120,10 +120,12 @@ public class ProposerConfigManagerTest {
                 validatorInConfig.getPublicKey().toBytesCompressed(),
                 new ProposerConfig.Config(
                     validatorFeeRecipientConfig,
-                    new ProposerConfig.BuilderConfig(true, validatorGasLimitConfig, null))),
+                    new ProposerConfig.BuilderConfig(
+                        true, validatorGasLimitConfig, null, null, null, null))),
             new ProposerConfig.Config(
                 defaultFeeRecipientConfig,
-                new ProposerConfig.BuilderConfig(false, defaultGasLimitConfig, null)));
+                new ProposerConfig.BuilderConfig(
+                    false, defaultGasLimitConfig, null, null, null, null)));
 
     when(proposerConfigProvider.getProposerConfig())
         .thenReturn(SafeFuture.completedFuture(Optional.of(proposerConfig)));
@@ -517,7 +519,8 @@ public class ProposerConfigManagerTest {
                 validatorInConfig.getPublicKey().toBytesCompressed(),
                 buildSingleConfigWithProperty(property, value, false)),
             new ProposerConfig.Config(
-                defaultFeeRecipientConfig, new ProposerConfig.BuilderConfig(false, null, null)));
+                defaultFeeRecipientConfig,
+                new ProposerConfig.BuilderConfig(false, null, null, null, null, null)));
 
     when(proposerConfigProvider.getProposerConfig())
         .thenReturn(SafeFuture.completedFuture(Optional.of(proposerConfig)));
@@ -543,23 +546,32 @@ public class ProposerConfigManagerTest {
       case BUILDER_ENABLED ->
           new ProposerConfig.Config(
               isDefault ? defaultFeeRecipientConfig : null,
-              new ProposerConfig.BuilderConfig((Boolean) value, null, null));
+              new ProposerConfig.BuilderConfig((Boolean) value, null, null, null, null, null));
       case BUILDER_GAS_LIMIT ->
           new ProposerConfig.Config(
               isDefault ? defaultFeeRecipientConfig : null,
-              new ProposerConfig.BuilderConfig(isDefault ? false : null, (UInt64) value, null));
+              new ProposerConfig.BuilderConfig(
+                  isDefault ? false : null, (UInt64) value, null, null, null, null));
       case BUILDER_REGISTRATION_OVERRIDE_PUB_KEY ->
           new ProposerConfig.Config(
               isDefault ? defaultFeeRecipientConfig : null,
               new ProposerConfig.BuilderConfig(
                   isDefault ? false : null,
                   null,
-                  new RegistrationOverrides(null, (BLSPublicKey) value)));
+                  new RegistrationOverrides(null, (BLSPublicKey) value),
+                  null,
+                  null,
+                  null));
       case BUILDER_REGISTRATION_OVERRIDE_TIMESTAMP ->
           new ProposerConfig.Config(
               isDefault ? defaultFeeRecipientConfig : null,
               new ProposerConfig.BuilderConfig(
-                  isDefault ? false : null, null, new RegistrationOverrides((UInt64) value, null)));
+                  isDefault ? false : null,
+                  null,
+                  new RegistrationOverrides((UInt64) value, null),
+                  null,
+                  null,
+                  null));
     };
   }
 

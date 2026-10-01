@@ -14,6 +14,7 @@
 package tech.pegasys.teku.cli.options;
 
 import com.google.common.base.Strings;
+import com.google.common.collect.Sets;
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URL;
@@ -58,6 +59,15 @@ public class MetricsOptions {
       split = ",",
       arity = "0..*")
   private Set<MetricCategory> metricsCategories = MetricsConfig.DEFAULT_METRICS_CATEGORIES;
+
+  @Option(
+      names = {"--Xmetrics-additional-categories"},
+      paramLabel = "<METRICS_CATEGORY>",
+      description = "Metric categories to enable on top of those set by --metrics-categories",
+      split = ",",
+      arity = "0..*",
+      hidden = true)
+  private Set<MetricCategory> metricsAdditionalCategories = Set.of();
 
   @Option(
       names = {"--metrics-host-allowlist"},
@@ -211,7 +221,7 @@ public class MetricsOptions {
             b.metricsEnabled(metricsEnabled)
                 .metricsPort(metricsPort)
                 .metricsInterface(metricsInterface)
-                .metricsCategories(metricsCategories)
+                .metricsCategories(Sets.union(metricsCategories, metricsAdditionalCategories))
                 .metricsHostAllowlist(metricsHostAllowlist)
                 .metricsPublishEndpoint(parseMetricsEndpointUrl())
                 .metricsPublishInterval(metricsPublicationInterval)
