@@ -188,13 +188,19 @@ jobs:
           max_attempts: ${{ inputs.retry_attempts }}
           command: ./gradlew --no-daemon --parallel ${{ inputs.gradle_args }} ${{ inputs.gradle_task }} ${{ steps.shard.outputs.args }}
 
+      - name: Merge JUnit XML for ${{ inputs.stage_name }}
+        if: always()
+        uses: ./.github/actions/merge-junit-xml
+        with:
+          output: build/test-results/merged/TEST-${{ inputs.stage_key }}-${{ matrix.shard }}.xml
+
       - name: Upload JUnit XML + HTML for ${{ inputs.stage_name }}
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ inputs.stage_key }}-reports-${{ matrix.shard }}
           path: |
-            **/build/test-results/**/TEST-*.xml
+            build/test-results/merged/TEST-*.xml
             **/build/reports/tests/**
           if-no-files-found: ignore
           retention-days: 1
