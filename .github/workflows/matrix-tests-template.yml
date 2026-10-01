@@ -138,8 +138,12 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ inputs.assemble_output_run_id }}
           name: assemble-output
-          merge-multiple: true
-          path: ${{ github.workspace }}
+          path: ${{ runner.temp }}
+      - name: Unpack assemble-output
+        shell: bash
+        run: |
+          tar --use-compress-program=zstd -xf "$RUNNER_TEMP/assemble-output.tar.zst" -C "$GITHUB_WORKSPACE"
+          rm "$RUNNER_TEMP/assemble-output.tar.zst"
 
       - name: Download shard plan
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8

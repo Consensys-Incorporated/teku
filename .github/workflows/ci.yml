@@ -204,6 +204,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: 'recursive'
+          # The Docker image is built here and the acceptance tests check teku's reported
+          # version, which comes from git describe. Without tags it is UNKNOWN+g<sha>.
+          fetch-depth: 0
+          fetch-tags: true
       - name: get workflow_details
         id: workflowdetails
         shell: bash
@@ -291,24 +295,33 @@ jobs:
           path: |
             build/distributions/*.zip
           retention-days: 7
+      # One zstd tarball instead of ~100k loose files: upload-artifact zips file by file (slow for
+      # the generated reference tests) and drops empty directories, which makes every Gradle
+      # compile task in the shards fail its up-to-date check and fall back to the build cache.
+      # GNU tar --exclude patterns are unanchored, so build/tmp matches at any depth.
+      - name: Pack workspace
+        shell: bash
+        run: |
+          tar --use-compress-program='zstd -T0 -3' -cf "$RUNNER_TEMP/assemble-output.tar.zst" \
+            --exclude=.git \
+            --exclude=teku-docker-image.tar.zst \
+            --exclude=build/docker-teku \
+            --exclude=build/distributions \
+            --exclude=build/refTests \
+            --exclude=build/docs \
+            --exclude=build/tmp \
+            --exclude=build/reports \
+            --exclude=build/test-results \
+            --exclude=build/jacoco \
+            .
+          ls -la "$RUNNER_TEMP/assemble-output.tar.zst"
       - name: Upload workspace build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: assemble-output
-          path: |
-            ./
-            !./.git/**
-            !./teku-docker-image.tar.zst
-            !./build/docker-teku/**
-            !./build/distributions/**
-            !./build/refTests/**
-            !**/build/docs/**
-            !**/build/tmp/**
-            !**/build/reports/**
-            !**/build/test-results/**
-            !**/build/jacoco/**
+          path: ${{ runner.temp }}/assemble-output.tar.zst
+          compression-level: 0
           retention-days: 1
-          include-hidden-files: 'true'
 
   prDistributions:
     needs: changes
@@ -359,7 +372,12 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ github.run_id }}
           name: assemble-output
-          merge-multiple: true
+          path: ${{ runner.temp }}
+      - name: Unpack assemble-output
+        shell: bash
+        run: |
+          tar --use-compress-program=zstd -xf "$RUNNER_TEMP/assemble-output.tar.zst" -C "$GITHUB_WORKSPACE"
+          rm "$RUNNER_TEMP/assemble-output.tar.zst"
       - name: Build runnable Teku binaries
         shell: bash
         run: |
@@ -659,8 +677,12 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ github.run_id }}
           name: assemble-output
-          merge-multiple: true
-          path: ${{ github.workspace }}
+          path: ${{ runner.temp }}
+      - name: Unpack assemble-output
+        shell: bash
+        run: |
+          tar --use-compress-program=zstd -xf "$RUNNER_TEMP/assemble-output.tar.zst" -C "$GITHUB_WORKSPACE"
+          rm "$RUNNER_TEMP/assemble-output.tar.zst"
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: build/refTests/*/archives/
@@ -775,7 +797,3 @@ jobs:
       assemble_run_id: ${{ github.run_id }}
       publish_version: ${{ needs.assemble.outputs.publish-version }}
     secrets: inherit
-          # The Docker image is built here and the acceptance tests check teku's reported
-          # version, which comes from git describe. Without tags it is UNKNOWN+g<sha>.
-          fetch-depth: 0
-          fetch-tags: true
