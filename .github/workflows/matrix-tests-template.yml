@@ -131,6 +131,9 @@ jobs:
           fetch-depth: 0  # Full history
           fetch-tags: true
 
+      - name: Prepare
+        uses: ./.github/actions/prepare
+
       - name: Download assemble-output
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -150,9 +153,6 @@ jobs:
         with:
           name: ${{ inputs.stage_key }}-shard-plan
           path: ${{ github.workspace }}
-
-      - name: Prepare
-        uses: ./.github/actions/prepare
 
       # only acceptance tests need the docker image and login
       - name: Download Teku docker image
