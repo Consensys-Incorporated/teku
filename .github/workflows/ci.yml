@@ -296,9 +296,10 @@ jobs:
             build/distributions/*.zip
           retention-days: 7
       # One zstd tarball instead of ~100k loose files: upload-artifact zips file by file (slow for
-      # the generated reference tests) and drops empty directories, which makes every Gradle
-      # compile task in the shards fail its up-to-date check and fall back to the build cache.
-      # GNU tar --exclude patterns are unanchored, so build/tmp matches at any depth.
+      # the generated reference tests) and drops empty directories, which Gradle treats as removed
+      # task outputs. build/tmp stays in: build/tmp/<compileTask>/previous-compilation-data.bin is a
+      # declared output of every JavaCompile task, so without it no compile task is up to date in
+      # the shards. GNU tar --exclude patterns are unanchored, so build/docs matches at any depth.
       - name: Pack workspace
         shell: bash
         run: |
@@ -309,7 +310,6 @@ jobs:
             --exclude=build/distributions \
             --exclude=build/refTests \
             --exclude=build/docs \
-            --exclude=build/tmp \
             --exclude=build/reports \
             --exclude=build/test-results \
             --exclude=build/jacoco \
