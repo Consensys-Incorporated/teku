@@ -34,6 +34,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: 'recursive'
+          # The jars are rebuilt in this job and their manifest Implementation-Version comes from
+          # git describe; with a shallow, tagless checkout it is UNKNOWN+g<sha>.
+          fetch-depth: 0
+          fetch-tags: true
       - name: Prepare
         uses: ./.github/actions/prepare
       # v4.0.0
