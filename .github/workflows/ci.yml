@@ -730,9 +730,10 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: reference-reports-${{ matrix.shard }}
+          # XML only: the HTML report is 16k files / 130MB per shard for the generated classes and
+          # nothing reads it; test-reports.yml and capture-test-timings only need the merged XML.
           path: |
             build/test-results/merged/TEST-*.xml
-            **/build/reports/tests/**
           if-no-files-found: ignore
           retention-days: 1
           # A rerun of one failed shard would otherwise add a second artifact with the same
