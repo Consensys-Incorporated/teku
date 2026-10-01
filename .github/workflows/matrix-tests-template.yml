@@ -58,7 +58,7 @@ jobs:
             test-timing-${{ inputs.stage_key }}-
 
       # Greedy LPT (longest-processing-time-first) bin-packing of test classes across
-      # shards, using timings cached by collate-junit-reports on the last master run.
+      # shards, using timings cached by capture-test-timings on the last master run.
       # Classes with no cached timing (new classes, or no cache yet) get the average of
       # known classes so the plan stays balanced instead of dumping them all in shard 0.
       - name: Compute shard plan

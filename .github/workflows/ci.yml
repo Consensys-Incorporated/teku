@@ -408,10 +408,12 @@ jobs:
           fi
           echo "✅ All unitTests matrix jobs passed."
 
-  # Runs in its own job, isolated from collate-junit-reports: this org's action-allowlist
-  # policy is enforced per-job, so if capture-test-timings shared a job with anything that
-  # references a disallowed action, the whole job gets killed part-way through regardless
-  # of continue-on-error (verified: https://github.com/Consensys-Incorporated/teku/pull/11204).
+  # Runs in its own job: this org's action-allowlist policy is enforced per-job, so if
+  # capture-test-timings shared a job with anything that references a disallowed action,
+  # the whole job gets killed part-way through regardless of continue-on-error
+  # (verified: https://github.com/Consensys-Incorporated/teku/pull/11204).
+  # Test result reports are published by test-reports.yml (workflow_run), so they also
+  # work for PRs from forks, whose pull_request token cannot create check runs.
   unitTestsCaptureTimings:
     runs-on: ubuntu-24.04
     needs: [changes, unitTestsSuite]
@@ -422,22 +424,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/capture-test-timings
-        continue-on-error: true
-        if: always()
-        with:
-          stage_key: unit
-
-  unitTestsReport:
-    runs-on: ubuntu-24.04
-    needs: [changes, unitTestsSuite]
-    if: always() && needs.changes.outputs.code == 'true'
-    permissions:
-      contents: read
-      actions: read
-      checks: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: ./.github/actions/collate-junit-reports
         continue-on-error: true
         if: always()
         with:
@@ -493,22 +479,6 @@ jobs:
         with:
           stage_key: integration
 
-  integrationTestsReport:
-    runs-on: ubuntu-24.04
-    needs: [changes, integrationTestsSuite]
-    if: always() && needs.changes.outputs.code == 'true'
-    permissions:
-      contents: read
-      actions: read
-      checks: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: ./.github/actions/collate-junit-reports
-        continue-on-error: true
-        if: always()
-        with:
-          stage_key: integration
-
   propertyTestsSuite:
     needs: assemble
     permissions:
@@ -553,22 +523,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/capture-test-timings
-        continue-on-error: true
-        if: always()
-        with:
-          stage_key: property
-
-  propertyTestsReport:
-    runs-on: ubuntu-24.04
-    needs: [changes, propertyTestsSuite]
-    if: always() && needs.changes.outputs.code == 'true'
-    permissions:
-      contents: read
-      actions: read
-      checks: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: ./.github/actions/collate-junit-reports
         continue-on-error: true
         if: always()
         with:
@@ -619,22 +573,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/capture-test-timings
-        continue-on-error: true
-        if: always()
-        with:
-          stage_key: acceptance
-
-  acceptanceTestsReport:
-    runs-on: ubuntu-24.04
-    needs: [changes, acceptanceTestsSuite]
-    if: always() && needs.changes.outputs.code == 'true'
-    permissions:
-      contents: read
-      actions: read
-      checks: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: ./.github/actions/collate-junit-reports
         continue-on-error: true
         if: always()
         with:
@@ -809,22 +747,6 @@ jobs:
             exit 1
           fi
           echo "✅ All referenceTests matrix jobs passed."
-
-  referenceTestsReport:
-    runs-on: ubuntu-24.04
-    needs: [changes, referenceTests]
-    if: always() && needs.changes.outputs.code == 'true'
-    permissions:
-      contents: read
-      actions: read
-      checks: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: ./.github/actions/collate-junit-reports
-        continue-on-error: true
-        if: always()
-        with:
-          stage_key: reference
 
   # DockerTags
   # develop = develop-jdk25
