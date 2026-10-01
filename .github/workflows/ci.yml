@@ -735,6 +735,9 @@ jobs:
             **/build/reports/tests/**
           if-no-files-found: ignore
           retention-days: 1
+          # A rerun of one failed shard would otherwise add a second artifact with the same
+          # name next to the stale one, and test-reports.yml / capture-test-timings download both.
+          overwrite: true
 
   referenceTestsResult:
     name: referenceTests
