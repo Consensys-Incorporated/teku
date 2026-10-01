@@ -48,7 +48,7 @@ concurrency:
 
 env:
   JAVA_TOOL_OPTIONS: -Xmx4096m
-  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Dorg.gradle.workers.max=4 -Xmx4096m
+  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Xmx4096m
 
 permissions: read-all
 
