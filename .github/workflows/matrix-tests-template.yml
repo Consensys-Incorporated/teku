@@ -35,6 +35,10 @@ on:
         type: number
         required: false
         default: 1
+      shard_count:
+        type: number
+        required: false
+        default: 12
 
 permissions:
   actions: read     # download the assemble output as an artifacts
@@ -43,6 +47,8 @@ permissions:
 jobs:
   planShards:
     runs-on: ubuntu-24.04
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -62,9 +68,11 @@ jobs:
       # Classes with no cached timing (new classes, or no cache yet) get the average of
       # known classes so the plan stays balanced instead of dumping them all in shard 0.
       - name: Compute shard plan
+        id: plan
         shell: bash
         env:
           STAGE_KEY: ${{ inputs.stage_key }}
+          SHARD_COUNT: ${{ inputs.shard_count }}
           SRC_PATTERN: ${{ inputs.src_pattern }}
           SRC_ROOT: ${{ inputs.src_root }}
         run: |
@@ -78,7 +86,7 @@ jobs:
           import json, os
 
           stage = os.environ["STAGE_KEY"]
-          shards = 12
+          shards = int(os.environ["SHARD_COUNT"])
 
           with open("classes.txt") as f:
               classes = [line.strip() for line in f if line.strip()]
@@ -105,6 +113,8 @@ jobs:
           with open("plan.json", "w") as f:
               json.dump(plan, f)
           print(f"planned {len(classes)} classes across {shards} shards ({len(known)} with known timing)")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"shards={json.dumps(list(range(shards)))}\n")
           PY
 
       - name: Upload shard plan
@@ -120,8 +130,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0,1,2,3,4,5,6,7,8,9,10,11]   # parallel shards
-        total: [12]
+        # [0 .. shard_count-1], emitted by planShards
+        shard: ${{ fromJSON(needs.planShards.outputs.shards) }}
 
     steps:
       - name: Checkout
@@ -181,7 +191,7 @@ jobs:
           username: "cddockeruser"
           password: "fa8651f2-88be-48b7-98ce-e711bd376252"
 
-      - name: Compute shard ${{ matrix.shard }} of ${{ matrix.total }} for ${{ inputs.stage_name }}
+      - name: Compute shard ${{ matrix.shard }} of ${{ inputs.shard_count }} for ${{ inputs.stage_name }}
         id: shard
         shell: bash
         run: |

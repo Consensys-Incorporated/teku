@@ -462,6 +462,9 @@ jobs:
       stage_name: Unit Tests
       stage_key: unit
       gradle_task: test
+      # unit and integration shards finish in ~3 minutes; 8 instead of 12 frees large runners for
+      # the acceptance shards, which are the long ones and otherwise queue behind these
+      shard_count: 8
       src_pattern: "*/src/test/java/*"
       src_root: "src/test/java"
       runner: "ubuntu-latest-128"
@@ -517,6 +520,9 @@ jobs:
       stage_name: Integration Tests
       stage_key: integration
       gradle_task: integrationTest
+      # unit and integration shards finish in ~3 minutes; 8 instead of 12 frees large runners for
+      # the acceptance shards, which are the long ones and otherwise queue behind these
+      shard_count: 8
       src_pattern: "*/src/integration-test/java/*"
       src_root: "src/integration-test/java"
       runner: "ubuntu-latest-128"
