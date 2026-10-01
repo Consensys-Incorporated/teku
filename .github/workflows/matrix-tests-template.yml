@@ -150,7 +150,23 @@ jobs:
       - name: Prepare
         uses: ./.github/actions/prepare
 
-      # only acceptance tests need the docker login
+      # only acceptance tests need the docker image and login
+      - name: Download Teku docker image
+        if: ${{ inputs.stage_key == 'acceptance' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.assemble_output_run_id }}
+          name: teku-docker-image
+          path: ${{ runner.temp }}
+
+      - name: Load Teku docker image
+        if: ${{ inputs.stage_key == 'acceptance' }}
+        shell: bash
+        run: |
+          zstd -dc "${{ runner.temp }}/teku-docker-image.tar.zst" | docker load && rm "${{ runner.temp }}/teku-docker-image.tar.zst" && docker images consensys/teku
+
       # 4.0.0
       - name: Login to dockerhub
         uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2

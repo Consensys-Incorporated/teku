@@ -224,7 +224,18 @@ jobs:
       - name: Assemble
         shell: bash
         run: |
-          ./gradlew clean compileJava compileTestJava compileJmhJava compileIntegrationTestJava compileAcceptanceTestJava compilePropertyTestJava resolveCiDependencies assemble
+          ./gradlew clean compileJava compileTestJava compileJmhJava compileIntegrationTestJava compileAcceptanceTestJava compilePropertyTestJava resolveCiDependencies assemble distDocker
+      - name: Save Teku docker image
+        shell: bash
+        run: |
+          docker save consensys/teku:develop | zstd -T0 -3 -o teku-docker-image.tar.zst
+          ls -la teku-docker-image.tar.zst
+      - name: Upload Teku docker image
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: teku-docker-image
+          path: teku-docker-image.tar.zst
+          retention-days: 1
       - name: Upload distribution tar
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -248,6 +259,8 @@ jobs:
           path: |
             ./
             !./.git/**
+            !./teku-docker-image.tar.zst
+            !./build/docker-teku/**
           retention-days: 1
           include-hidden-files: 'true'
 
@@ -542,7 +555,7 @@ jobs:
       src_pattern: "*/src/acceptance-test/java/*"
       src_root: "src/acceptance-test/java"
       runner: "ubuntu-latest-128"
-      gradle_args: ${{ (inputs.gradle_log_level == 'info' && '--info') || (inputs.gradle_log_level == 'debug' && '--debug') || '' }}
+      gradle_args: ${{ (inputs.gradle_log_level == 'info' && '--info') || (inputs.gradle_log_level == 'debug' && '--debug') || '' }} -x distDocker
       retry_attempts: 3
 
   acceptanceTestsResult:
