@@ -86,11 +86,13 @@ jobs:
 
       # autobuild ran Gradle's default build, which also compiled every test, test fixture, JMH
       # and generated reference test source set under the tracer. Only production code needs
-      # analysing, so compile just that. --no-daemon keeps javac inside the traced process tree.
+      # analysing, so compile just that. --no-daemon keeps javac inside the traced process tree,
+      # and --no-build-cache makes javac actually run: with the shared Gradle home restored every
+      # compileJava comes FROM-CACHE, the tracer sees nothing and database finalize fails.
       - name: Compile production sources
         shell: bash
         run: |
-          ./gradlew --no-daemon compileJava
+          ./gradlew --no-daemon --no-build-cache compileJava
 
       # 4
       - name: Perform CodeQL Analysis
