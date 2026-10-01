@@ -1140,6 +1140,12 @@ subprojects {
 			// Without this the build fails if you filter out all the tests for any module
 			setFailOnNoMatchingTests(false)
 		}
+		testLogging {
+			// Print the assertion message and full stack trace for failed tests, so a CI job log
+			// is enough to see what broke without downloading the JUnit XML artifact
+			events "failed"
+			exceptionFormat "full"
+		}
 	}
 
 	apply plugin: 'jacoco'
