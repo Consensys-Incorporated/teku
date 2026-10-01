@@ -48,7 +48,7 @@ concurrency:
 
 env:
   JAVA_TOOL_OPTIONS: -Xmx4096m
-  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Dorg.gradle.workers.max=4 -Xmx4096m
+  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Xmx4096m
 
 permissions: read-all
 
@@ -691,11 +691,11 @@ jobs:
         id: shard
         shell: bash
         run: |
-          SRC_PATTERN="*/src/referenceTest/generated_tests/*Test.java"
-          SRC_ROOT="src/referenceTest/generated_tests"
-          # 1) Collect test classes by pattern = FQNs
-          CLASSNAMES=$(find . -type f -name "*.java" -path "$SRC_PATTERN" \
-            | sed "s@.*/$SRC_ROOT/@@" \
+          # 1) Collect test classes by pattern = FQNs, generated tests plus the handwritten ones
+          CLASSNAMES=$(for SRC_ROOT in src/referenceTest/generated_tests src/referenceTest/java; do
+              find . -type f -path "*/$SRC_ROOT/*Test.java" -not -path "*/build/*" \
+                | sed "s@.*/$SRC_ROOT/@@"
+            done \
             | sed 's@/@.@g' \
             | sed 's/.\{5\}$//' \
             | sort)

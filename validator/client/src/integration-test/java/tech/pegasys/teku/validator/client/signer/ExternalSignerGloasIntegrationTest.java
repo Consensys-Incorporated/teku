@@ -27,7 +27,6 @@ import org.mockserver.model.HttpRequest;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.spec.Spec;
-import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderRequestAuth;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
@@ -59,7 +58,7 @@ public class ExternalSignerGloasIntegrationTest extends AbstractExternalSignerIn
         new SigningRequestBody(
             signingRootUtil.signingRootForSignExecutionPayloadBid(bid, forkInfo),
             SignType.EXECUTION_PAYLOAD_BID,
-            Map.of("fork_info", forkInfo, "execution_payload_bid", gloas(bid)));
+            Map.of("fork_info", forkInfo, "execution_payload_bid", versioned(bid)));
     verifySignRequest(
         client,
         KEYPAIR.getPublicKey().toString(),
@@ -83,7 +82,7 @@ public class ExternalSignerGloasIntegrationTest extends AbstractExternalSignerIn
         new SigningRequestBody(
             signingRootUtil.signingRootForSignExecutionPayloadEnvelope(envelope, forkInfo),
             SignType.EXECUTION_PAYLOAD_ENVELOPE,
-            Map.of("fork_info", forkInfo, "execution_payload_envelope", gloas(envelope)));
+            Map.of("fork_info", forkInfo, "execution_payload_envelope", versioned(envelope)));
     verifySignRequest(
         client,
         KEYPAIR.getPublicKey().toString(),
@@ -114,7 +113,7 @@ public class ExternalSignerGloasIntegrationTest extends AbstractExternalSignerIn
                 "fork_info",
                 forkInfo,
                 "payload_attestation_message",
-                gloas(payloadAttestationData)));
+                versioned(payloadAttestationData)));
     verifySignRequest(
         client,
         KEYPAIR.getPublicKey().toString(),
@@ -139,7 +138,7 @@ public class ExternalSignerGloasIntegrationTest extends AbstractExternalSignerIn
         new SigningRequestBody(
             signingRootUtil.signingRootForSignProposerPreferences(proposerPreferences, forkInfo),
             SignType.PROPOSER_PREFERENCES,
-            Map.of("fork_info", forkInfo, "proposer_preferences", gloas(proposerPreferences)));
+            Map.of("fork_info", forkInfo, "proposer_preferences", versioned(proposerPreferences)));
     verifySignRequest(
         client,
         KEYPAIR.getPublicKey().toString(),
@@ -163,7 +162,7 @@ public class ExternalSignerGloasIntegrationTest extends AbstractExternalSignerIn
         new SigningRequestBody(
             signingRootUtil.signingRootForSignBuilderRequestAuth(builderRequestAuth),
             SignType.BUILDER_REQUEST_AUTH,
-            Map.of(SignType.BUILDER_REQUEST_AUTH.getName(), gloas(builderRequestAuth)));
+            Map.of(SignType.BUILDER_REQUEST_AUTH.getName(), versioned(builderRequestAuth)));
     verifySignRequest(
         client,
         KEYPAIR.getPublicKey().toString(),
@@ -173,8 +172,8 @@ public class ExternalSignerGloasIntegrationTest extends AbstractExternalSignerIn
     verifyVersionedPayload("builder_request_auth", "slot", builderRequestAuth.getSlot().toString());
   }
 
-  private static <T extends SszData> VersionedWrapper<T> gloas(final T data) {
-    return new VersionedWrapper<>(SpecMilestone.GLOAS, data);
+  private <T extends SszData> VersionedWrapper<T> versioned(final T data) {
+    return new VersionedWrapper<>(spec.getGenesisSpec().getMilestone(), data);
   }
 
   private void verifyVersionedPayload(

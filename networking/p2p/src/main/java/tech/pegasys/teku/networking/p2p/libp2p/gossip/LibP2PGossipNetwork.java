@@ -25,6 +25,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import kotlin.jvm.functions.Function0;
@@ -52,16 +53,19 @@ public class LibP2PGossipNetwork implements GossipNetwork {
   private final Gossip gossip;
   private final PubsubPublisherApi publisher;
   private final GossipTopicHandlers topicHandlers;
+  private final Optional<GossipMetricsListener> gossipMetricsListener;
 
   public LibP2PGossipNetwork(
       final MetricsSystem metricsSystem,
       final Gossip gossip,
       final PubsubPublisherApi publisher,
-      final GossipTopicHandlers topicHandlers) {
+      final GossipTopicHandlers topicHandlers,
+      final Optional<GossipMetricsListener> gossipMetricsListener) {
     this.metricsSystem = metricsSystem;
     this.gossip = gossip;
     this.publisher = publisher;
     this.topicHandlers = topicHandlers;
+    this.gossipMetricsListener = gossipMetricsListener;
   }
 
   @Override
@@ -77,7 +81,8 @@ public class LibP2PGossipNetwork implements GossipNetwork {
     final Topic libP2PTopic = new Topic(topic);
     final GossipHandler gossipHandler =
         new GossipHandler(metricsSystem, libP2PTopic, publisher, topicHandler);
-    PubsubSubscription subscription = gossip.subscribe(gossipHandler, libP2PTopic);
+    final PubsubSubscription subscription = gossip.subscribe(gossipHandler, libP2PTopic);
+    gossipMetricsListener.ifPresent(listener -> listener.onTopicSubscribed(topic));
     return new LibP2PTopicChannel(gossipHandler, subscription);
   }
 
