@@ -300,6 +300,13 @@ jobs:
             !./.git/**
             !./teku-docker-image.tar.zst
             !./build/docker-teku/**
+            !./build/distributions/**
+            !./build/refTests/**
+            !**/build/docs/**
+            !**/build/tmp/**
+            !**/build/reports/**
+            !**/build/test-results/**
+            !**/build/jacoco/**
           retention-days: 1
           include-hidden-files: 'true'
 
