@@ -181,11 +181,14 @@ public class ChainDataProvider {
     final Bytes32 genesisValidatorsRoot = getGenesisStateData().getGenesisValidatorsRoot();
     return updates.stream()
         .map(
-            update ->
-                new LightClientUpdateWithContext(
-                    spec.computeForkDigest(
-                        genesisValidatorsRoot, spec.computeEpochAtSlot(attestedSlot(update))),
-                    update))
+            update -> {
+              final UInt64 attestedSlot = attestedSlot(update);
+              return new LightClientUpdateWithContext(
+                  spec.computeForkDigest(
+                      genesisValidatorsRoot, spec.computeEpochAtSlot(attestedSlot)),
+                  spec.atSlot(attestedSlot).getMilestone(),
+                  update);
+            })
         .toList();
   }
 

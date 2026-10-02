@@ -15,27 +15,30 @@ package tech.pegasys.teku.beaconrestapi.v1.beacon;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
-import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import java.io.IOException;
+import java.util.List;
 import okhttp3.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import tech.pegasys.teku.beaconrestapi.AbstractDataBackedRestAPIIntegrationTest;
-import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.lightclient.GetLightClientFinalityUpdate;
+import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.lightclient.GetLightClientUpdatesByRange;
 import tech.pegasys.teku.ethereum.json.types.SharedApiTypes;
+import tech.pegasys.teku.infrastructure.json.JsonTestUtil;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
+import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider;
-import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
-import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdateSchema;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdateSchema;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 @TestSpecContext(allMilestones = true, ignoredMilestones = SpecMilestone.PHASE0)
-public class GetLightClientFinalityUpdateIntegrationTest
+public class GetLightClientUpdatesByRangeIntegrationTest
     extends AbstractDataBackedRestAPIIntegrationTest {
 
   private DataStructureUtil dataStructureUtil;
@@ -47,31 +50,49 @@ public class GetLightClientFinalityUpdateIntegrationTest
   }
 
   @TestTemplate
-  void shouldReturnNotFoundWhenNoFinalityUpdateAvailable() throws IOException {
-    final Response response = getResponse(GetLightClientFinalityUpdate.ROUTE);
-    assertNotFound(response);
+  void shouldReturnEmptyListWhenNoUpdatesAvailable() throws Exception {
+    final Response response = get(UInt64.ZERO, 1);
+
+    assertThat(response.code()).isEqualTo(SC_OK);
+    assertThat(JsonTestUtil.parseAsJsonNode(response.body().string())).isEmpty();
   }
 
   @TestTemplate
-  void shouldReturnLatestFinalityUpdate(
-      final TestSpecInvocationContextProvider.SpecContext specContext) throws IOException {
-    final LightClientFinalityUpdate expected =
-        dataStructureUtil.randomLightClientFinalityUpdate(UInt64.ONE);
-    lightClientUpdateStore.addFinalityUpdate(
+  void shouldReturnBestUpdates(final TestSpecInvocationContextProvider.SpecContext specContext)
+      throws Exception {
+    final LightClientUpdate expected =
+        dataStructureUtil.createRandomLightClientUpdateBuilder(UInt64.ONE).build();
+    lightClientUpdateStore.addUpdate(
         expected, dataStructureUtil.randomBytes32(), (slot, blockRoot) -> true);
 
-    final Response response = getResponse(GetLightClientFinalityUpdate.ROUTE);
+    final Response response = get(UInt64.ZERO, 1);
 
     assertThat(response.code()).isEqualTo(SC_OK);
-    assertThat(response.header(HEADER_CONSENSUS_VERSION))
+
+    final String body = response.body().string();
+    final JsonNode json = JsonTestUtil.parseAsJsonNode(body);
+    assertThat(json).hasSize(1);
+    assertThat(json.get(0).get("version").asText())
         .isEqualTo(specContext.getSpecMilestone().lowerCaseName());
 
-    final LightClientFinalityUpdateSchema schema =
+    final LightClientUpdateSchema schema =
         SchemaDefinitionsAltair.required(spec.getGenesisSchemaDefinitions())
-            .getLightClientFinalityUpdateSchema();
-    final LightClientFinalityUpdate parsed =
-        JsonUtil.parse(response.body().string(), SharedApiTypes.withDataWrapper(schema));
+            .getLightClientUpdateSchema();
+    final List<LightClientUpdate> parsed =
+        JsonUtil.parse(
+            body, DeserializableTypeDefinition.listOf(SharedApiTypes.withDataWrapper(schema)));
 
-    assertThat(parsed).isEqualTo(expected);
+    assertThat(parsed).containsExactly(expected);
+  }
+
+  @TestTemplate
+  void shouldReturnBadRequestWhenParametersMissing() throws IOException {
+    final Response response = getResponse(GetLightClientUpdatesByRange.ROUTE);
+    assertBadRequest(response);
+  }
+
+  private Response get(final UInt64 startPeriod, final int count) throws IOException {
+    return getResponse(
+        GetLightClientUpdatesByRange.ROUTE + "?start_period=" + startPeriod + "&count=" + count);
   }
 }

@@ -13,7 +13,7 @@
 
 package tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.lightclient;
 
-import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
@@ -25,16 +25,21 @@ import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMe
 import static tech.pegasys.teku.spec.constants.NetworkConstants.MAX_REQUEST_LIGHT_CLIENT_UPDATES;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.io.Resources;
-import java.io.IOException;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerWithChainDataProviderTest;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
+import tech.pegasys.teku.infrastructure.json.JsonTestUtil;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -92,24 +97,79 @@ public class GetLightClientUpdatesByRangeTest
   }
 
   @Test
-  void metadata_shouldHandleJson200() throws IOException {
+  void metadata_shouldHandleJson200() throws Exception {
     final LightClientUpdate lightClientUpdate =
         dataStructureUtil.randomLightClientUpdate(UInt64.ONE);
     final List<LightClientUpdateWithContext> response =
         List.of(
-            new LightClientUpdateWithContext(dataStructureUtil.randomBytes4(), lightClientUpdate));
+            new LightClientUpdateWithContext(
+                dataStructureUtil.randomBytes4(), SpecMilestone.ALTAIR, lightClientUpdate));
 
     final String data = getResponseStringFromMetadata(handler, SC_OK, response);
+    final JsonNode responseDataAsJsonNode = JsonTestUtil.parseAsJsonNode(data);
     final String expected =
         Resources.toString(
             Resources.getResource(
-                GetLightClientBootstrapTest.class, "getLightClientUpdatesByRange.json"),
+                GetLightClientUpdatesByRangeTest.class, "getLightClientUpdatesByRange.json"),
             StandardCharsets.UTF_8);
-    assertThat(data).isEqualTo(expected);
+    final JsonNode expectedAsJsonNode = JsonTestUtil.parseAsJsonNode(expected);
+    assertThat(responseDataAsJsonNode).isEqualTo(expectedAsJsonNode);
+  }
+
+  @ParameterizedTest
+  @EnumSource(value = SpecMilestone.class, mode = EnumSource.Mode.EXCLUDE, names = "PHASE0")
+  void shouldSerializeForEveryMilestoneWithItsOwnSchema(final SpecMilestone milestone)
+      throws Exception {
+    setSpec(TestSpecFactory.createMinimal(milestone));
+    setHandler(new GetLightClientUpdatesByRange(chainDataProvider, schemaDefinitionCache));
+
+    final LightClientUpdateWithContext lightClientUpdate =
+        dataStructureUtil.randomLightClientUpdateWithContext(UInt64.ONE);
+
+    final JsonNode response =
+        JsonTestUtil.parseAsJsonNode(
+            getResponseStringFromMetadata(handler, SC_OK, List.of(lightClientUpdate)));
+
+    assertThat(response).hasSize(1);
+    assertThat(response.get(0).get("version").asText()).isEqualTo(milestone.lowerCaseName());
+
+    final JsonNode data = response.get(0).get("data");
+    assertThat(ImmutableSet.copyOf(data.get("attested_header").fieldNames()))
+        .containsExactlyInAnyOrderElementsOf(expectedHeaderFields(milestone));
+    assertThat(ImmutableSet.copyOf(data.get("finalized_header").fieldNames()))
+        .containsExactlyInAnyOrderElementsOf(expectedHeaderFields(milestone));
+
+    assertThat(data.get("next_sync_committee_branch"))
+        .hasSize(expectedSyncCommitteeBranchLength(milestone));
+    assertThat(data.get("finality_branch")).hasSize(expectedFinalityBranchLength(milestone));
+  }
+
+  private static Set<String> expectedHeaderFields(final SpecMilestone milestone) {
+    return switch (milestone) {
+      case ALTAIR, BELLATRIX -> Set.of("beacon");
+      case GLOAS, HEZE -> Set.of("beacon", "execution_block_hash", "execution_branch");
+      default -> Set.of("beacon", "execution", "execution_branch");
+    };
+  }
+
+  private static int expectedSyncCommitteeBranchLength(final SpecMilestone milestone) {
+    return switch (milestone) {
+      case ELECTRA, FULU -> 6;
+      case GLOAS, HEZE -> 11;
+      default -> 5;
+    };
+  }
+
+  private static int expectedFinalityBranchLength(final SpecMilestone milestone) {
+    return switch (milestone) {
+      case ELECTRA, FULU -> 7;
+      case GLOAS, HEZE -> 9;
+      default -> 6;
+    };
   }
 
   @Test
-  void metadata_shouldHandleSsz200() throws IOException {
+  void metadata_shouldHandleSsz200() throws Exception {
     final LightClientUpdateWithContext first =
         dataStructureUtil.randomLightClientUpdateWithContext(UInt64.ONE);
     final LightClientUpdateWithContext second =

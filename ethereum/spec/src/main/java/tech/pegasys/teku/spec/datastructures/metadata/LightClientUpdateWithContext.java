@@ -14,6 +14,8 @@
 package tech.pegasys.teku.spec.datastructures.metadata;
 
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 
-public record LightClientUpdateWithContext(Bytes4 context, LightClientUpdate update) {}
+public record LightClientUpdateWithContext(
+    Bytes4 context, SpecMilestone milestone, LightClientUpdate update) {}

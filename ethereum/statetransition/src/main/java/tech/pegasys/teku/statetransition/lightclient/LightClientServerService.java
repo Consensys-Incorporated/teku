@@ -13,7 +13,8 @@
 
 package tech.pegasys.teku.statetransition.lightclient;
 
-import com.google.common.annotations.VisibleForTesting;
+import static tech.pegasys.teku.spec.config.SpecConfig.GENESIS_SLOT;
+
 import java.util.Collection;
 import java.util.Optional;
 import java.util.function.BiPredicate;
@@ -35,6 +36,7 @@ import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.util.LightClientUtil;
+import tech.pegasys.teku.spec.logic.common.util.SyncCommitteeUtil;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
 import tech.pegasys.teku.storage.api.ChainHeadChannel;
 import tech.pegasys.teku.storage.api.FinalizedCheckpointChannel;
@@ -46,9 +48,6 @@ public class LightClientServerService
     implements ReceivedBlockEventsChannel, FinalizedCheckpointChannel, ChainHeadChannel {
 
   private static final Logger LOG = LogManager.getLogger();
-
-  /** Sync committee periods of updates retained behind the finalized period. */
-  @VisibleForTesting static final int MAX_RETAINED_PERIODS = 128;
 
   private final Spec spec;
   private final LightClientUpdateStore lightClientStore;
@@ -152,13 +151,15 @@ public class LightClientServerService
       return;
     }
 
-    final UInt64 finalizedPeriod =
-        spec.getSyncCommitteeUtilRequired(finalizedSlot)
-            .computeSyncCommitteePeriod(checkpoint.getEpoch());
+    final SyncCommitteeUtil syncCommitteeUtil = spec.getSyncCommitteeUtilRequired(finalizedSlot);
+    this.finalizedPeriod = syncCommitteeUtil.computeSyncCommitteePeriod(checkpoint.getEpoch());
 
-    this.finalizedPeriod = finalizedPeriod;
-
-    lightClientStore.pruneUpdatesBefore(finalizedPeriod.minusMinZero(MAX_RETAINED_PERIODS));
+    final UInt64 oldestRetainedEpoch =
+        checkpoint
+            .getEpoch()
+            .minusMinZero(spec.getNetworkingConfig().getMinEpochsForBlockRequests());
+    lightClientStore.pruneUpdatesBefore(
+        syncCommitteeUtil.computeSyncCommitteePeriod(oldestRetainedEpoch));
   }
 
   public void loadUpdates(final Collection<StoredLightClientUpdate> updates) {
@@ -204,13 +205,8 @@ public class LightClientServerService
           final SignedBeaconBlock attestedBlock = maybeAttestedBlock.get();
           final BeaconState attestedState = maybeAttestedState.get();
 
-          final Bytes32 finalizedRoot = attestedState.getFinalizedCheckpoint().getRoot();
-          final SafeFuture<Optional<SignedBeaconBlock>> finalizedBlockFuture;
-          if (finalizedRoot.isZero()) {
-            finalizedBlockFuture = SafeFuture.completedFuture(Optional.empty());
-          } else {
-            finalizedBlockFuture = retrieveBlockByRoot.apply(finalizedRoot);
-          }
+          final SafeFuture<Optional<SignedBeaconBlock>> finalizedBlockFuture =
+              retrieveFinalizedBlock(attestedBlock, attestedState);
 
           return finalizedBlockFuture.thenApply(
               maybeFinalizedBlock -> {
@@ -246,5 +242,23 @@ public class LightClientServerService
                 return Optional.of(update);
               });
         });
+  }
+
+  private SafeFuture<Optional<SignedBeaconBlock>> retrieveFinalizedBlock(
+      final SignedBeaconBlock attestedBlock, final BeaconState attestedState) {
+    final Bytes32 finalizedRoot = attestedState.getFinalizedCheckpoint().getRoot();
+    if (!finalizedRoot.isZero()) {
+      return retrieveBlockByRoot.apply(finalizedRoot);
+    }
+    if (attestedBlock.getSlot().equals(GENESIS_SLOT)) {
+      return SafeFuture.completedFuture(Optional.of(attestedBlock));
+    }
+    if (attestedState
+        .getSlot()
+        .isGreaterThan(
+            spec.atSlot(attestedState.getSlot()).getConfig().getSlotsPerHistoricalRoot())) {
+      return SafeFuture.completedFuture(Optional.empty());
+    }
+    return retrieveBlockByRoot.apply(spec.getBlockRootAtSlot(attestedState, GENESIS_SLOT));
   }
 }

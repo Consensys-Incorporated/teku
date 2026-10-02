@@ -36,7 +36,7 @@ import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrapSch
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
 
-@TestSpecContext(milestone = {SpecMilestone.ALTAIR, SpecMilestone.ELECTRA})
+@TestSpecContext(allMilestones = true, ignoredMilestones = SpecMilestone.PHASE0)
 public class GetLightClientBootstrapIntegrationTest
     extends AbstractDataBackedRestAPIIntegrationTest {
 
@@ -79,6 +79,13 @@ public class GetLightClientBootstrapIntegrationTest
   void shouldReturnBadRequestIfInvalidPath() throws IOException {
     final Response response =
         getResponse(GetLightClientBootstrap.ROUTE.replace("{block_root}", "foo"));
+    assertBadRequest(response);
+  }
+
+  @TestTemplate
+  void shouldReturnBadRequestIfBlockRootIsNot32Bytes() throws IOException {
+    final Response response =
+        getResponse(GetLightClientBootstrap.ROUTE.replace("{block_root}", "0x1234"));
     assertBadRequest(response);
   }
 

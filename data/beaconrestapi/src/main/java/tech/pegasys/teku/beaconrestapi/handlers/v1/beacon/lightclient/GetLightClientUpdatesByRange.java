@@ -49,8 +49,8 @@ public class GetLightClientUpdatesByRange extends RestApiEndpoint {
   private final ChainDataProvider chainDataProvider;
 
   public GetLightClientUpdatesByRange(
-      final DataProvider provider, final SchemaDefinitionCache schemaDefinitionCache) {
-    this(provider.getChainDataProvider(), schemaDefinitionCache);
+      final DataProvider dataProvider, final SchemaDefinitionCache schemaDefinitionCache) {
+    this(dataProvider.getChainDataProvider(), schemaDefinitionCache);
   }
 
   public GetLightClientUpdatesByRange(
@@ -93,7 +93,8 @@ public class GetLightClientUpdatesByRange extends RestApiEndpoint {
             List.of(
                 new MilestoneDependentTypesUtil.ConditionalSchemaGetter<>(
                     (update, milestone) ->
-                        milestoneAtAttestedSlot(schemaDefinitionCache, update).equals(milestone),
+                        milestoneAtUpdateSlot(schemaDefinitionCache, update).equals(milestone)
+                            && milestone.isGreaterThan(SpecMilestone.PHASE0),
                     SpecMilestone.ALTAIR,
                     schemaDefinitions ->
                         SchemaDefinitionsAltair.required(schemaDefinitions)
@@ -101,16 +102,13 @@ public class GetLightClientUpdatesByRange extends RestApiEndpoint {
 
     return SerializableTypeDefinition.listOf(
         SerializableTypeDefinition.<LightClientUpdateWithContext>object()
-            .withField(
-                "version",
-                MILESTONE_TYPE,
-                updateWithContext ->
-                    milestoneAtAttestedSlot(schemaDefinitionCache, updateWithContext.update()))
+            .name("GetLightClientUpdatesByRangeResponse")
+            .withField("version", MILESTONE_TYPE, LightClientUpdateWithContext::milestone)
             .withField("data", lightClientUpdateType, LightClientUpdateWithContext::update)
             .build());
   }
 
-  private static SpecMilestone milestoneAtAttestedSlot(
+  private static SpecMilestone milestoneAtUpdateSlot(
       final SchemaDefinitionCache schemaDefinitionCache, final LightClientUpdate update) {
     return schemaDefinitionCache.milestoneAtSlot(update.getAttestedHeader().getBeacon().getSlot());
   }

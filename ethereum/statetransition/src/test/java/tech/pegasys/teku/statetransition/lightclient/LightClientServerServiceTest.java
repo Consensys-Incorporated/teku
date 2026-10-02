@@ -183,12 +183,28 @@ public class LightClientServerServiceTest {
   }
 
   @TestTemplate
-  public void onBlockImported_shouldNotStoreFinalityUpdateBeforeTheChainFinalizes() {
+  public void onBlockImported_shouldProveGenesisFinalityBeforeTheChainFinalizes() {
     final Chain chain = generateChain();
+    assertThat(chain.attested().getState().getFinalizedCheckpoint().getRoot().isZero()).isTrue();
 
     service.onBlockImported(chain.signature().getBlock(), false);
 
+    final LightClientUpdate update = onlyUpdateAtPeriod(0);
+    assertThat(update.getFinalityBranch().isDefault()).isFalse();
+    assertThat(update.getFinalizedHeader().getBeacon().getSlot()).isEqualTo(UInt64.ZERO);
+    assertThat(update.getFinalizedHeader().getBeacon().getBodyRoot()).isEqualTo(Bytes32.ZERO);
+    assertThat(store.getLatestFinalityUpdate()).isPresent();
     assertThat(store.getLatestOptimisticUpdate()).isPresent();
+  }
+
+  @TestTemplate
+  public void onBlockImported_shouldStoreNonFinalityUpdateWhenGenesisBlockIsUnavailable() {
+    final Chain chain = generateChain();
+    blocksByRoot.remove(chain.genesis().getRoot());
+
+    service.onBlockImported(chain.signature().getBlock(), false);
+
+    assertThat(onlyUpdateAtPeriod(0).getFinalityBranch().isDefault()).isTrue();
     assertThat(store.getLatestFinalityUpdate()).isEmpty();
   }
 
@@ -259,7 +275,7 @@ public class LightClientServerServiceTest {
 
   @TestTemplate
   public void onNewFinalizedCheckpoint_shouldKeepUpdateExactlyAtRetentionBoundary() {
-    final int boundaryPeriod = 200 - LightClientServerService.MAX_RETAINED_PERIODS;
+    final int boundaryPeriod = 200 - retainedPeriodsBehindFinalized();
     addUpdateAtPeriod(boundaryPeriod - 1);
     final LightClientUpdate atBoundary = addUpdateAtPeriod(boundaryPeriod);
 
@@ -363,7 +379,8 @@ public class LightClientServerServiceTest {
     assertNothingStored();
   }
 
-  private record Chain(SignedBlockAndState attested, SignedBlockAndState signature) {}
+  private record Chain(
+      SignedBlockAndState genesis, SignedBlockAndState attested, SignedBlockAndState signature) {}
 
   private LightClientServerService orphanEverything() {
     return new LightClientServerService(
@@ -422,12 +439,13 @@ public class LightClientServerServiceTest {
 
   private Chain generateChain(final BlockOptions signatureBlockOptions) {
     final ChainBuilder chainBuilder = ChainBuilder.create(spec);
-    chainBuilder.generateGenesis();
     final Chain chain =
         new Chain(
+            chainBuilder.generateGenesis(),
             chainBuilder.generateNextBlock(),
             chainBuilder.generateNextBlock(signatureBlockOptions));
 
+    blocksByRoot.put(chain.genesis().getRoot(), chain.genesis().getBlock());
     blocksByRoot.put(chain.attested().getRoot(), chain.attested().getBlock());
     statesByRoot.put(chain.attested().getRoot(), chain.attested().getState());
     statesByRoot.put(chain.signature().getRoot(), chain.signature().getState());
@@ -444,6 +462,13 @@ public class LightClientServerServiceTest {
   private Checkpoint checkpointAtPeriod(final long period) {
     return new Checkpoint(
         spec.computeEpochAtSlot(periodStartSlot(period)), dataStructureUtil.randomBytes32());
+  }
+
+  private int retainedPeriodsBehindFinalized() {
+    final int epochsPerPeriod =
+        SpecConfigAltair.required(spec.getGenesisSpecConfig()).getEpochsPerSyncCommitteePeriod();
+    return (spec.getNetworkingConfig().getMinEpochsForBlockRequests() + epochsPerPeriod - 1)
+        / epochsPerPeriod;
   }
 
   private UInt64 periodStartSlot(final long period) {
