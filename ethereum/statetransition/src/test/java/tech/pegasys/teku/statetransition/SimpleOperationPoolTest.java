@@ -78,7 +78,7 @@ public class SimpleOperationPoolTest {
             beaconBlockSchemaSupplier.andThen(BeaconBlockBodySchema::getProposerSlashingsSchema),
             validator);
     assertThat(pool.getItemsForBlock(state, spec.getGenesisSpecConfig().getMaxProposerSlashings()))
-        .isEmpty();
+        .isNotEmpty();
   }
 
   @Test
