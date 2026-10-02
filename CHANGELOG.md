@@ -10,6 +10,7 @@
 
 ### Additions and Improvements
  - Added gossipsub metrics `libp2p_gossip_gossipsub_*` (off by default; enable them with `--Xmetrics-additional-categories=LIBP2P_GOSSIP`).
+ - Extended the gossipsub metrics with per-topic sent counts and bytes, RPC counts and wire bytes in each direction, control message counts by type, ignored and non-subscribed message counts, a topic subscription gauge, and a `reason` label on `libp2p_gossip_gossipsub_invalid_messages_per_topic`.
  - Block production now resends `forkchoiceUpdated` when the execution layer returned no `payloadId` (e.g. `SYNCING`) for the one sent ahead of the proposal slot, instead of missing the proposal. A warning is logged when no `payloadId` is returned.
  - Set gossip `max_total_fields` limit to 32768. See [#11341](https://github.com/Consensys-Incorporated/teku/issues/11341).
 
