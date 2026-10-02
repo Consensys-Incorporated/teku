@@ -18,6 +18,7 @@ import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.BOOLEAN_TYPE
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.BYTES32_TYPE;
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.UINT64_TYPE;
 
+import java.util.Objects;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.json.types.SerializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -110,6 +111,36 @@ public class HeadEvent extends Event<HeadEvent.HeadData> {
 
     public Bytes32 getCurrentDutyDependentRoot() {
       return currentDutyDependentRoot;
+    }
+
+    @Override
+    public boolean equals(final Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (o == null || getClass() != o.getClass()) {
+        return false;
+      }
+      final HeadData headData = (HeadData) o;
+      return epochTransition == headData.epochTransition
+          && executionOptimistic == headData.executionOptimistic
+          && Objects.equals(slot, headData.slot)
+          && Objects.equals(block, headData.block)
+          && Objects.equals(state, headData.state)
+          && Objects.equals(previousDutyDependentRoot, headData.previousDutyDependentRoot)
+          && Objects.equals(currentDutyDependentRoot, headData.currentDutyDependentRoot);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(
+          slot,
+          block,
+          state,
+          epochTransition,
+          executionOptimistic,
+          previousDutyDependentRoot,
+          currentDutyDependentRoot);
     }
   }
 }
