@@ -113,6 +113,11 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
   }
 
   @Override
+  public Set<Bytes32> getUnsatisfiedInclusionListBlocks() {
+    return hotDao.getUnsatisfiedInclusionListBlocks();
+  }
+
+  @Override
   public Optional<SignedBlindedExecutionPayloadEnvelope> getBlindedExecutionPayloadEnvelope(
       final Bytes32 root) {
     return finalizedDao.getBlindedExecutionPayloadEnvelope(root);
@@ -579,6 +584,11 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
     @Override
     public void addHotState(final Bytes32 blockRoot, final BeaconState state) {
       hotUpdater.addHotState(blockRoot, state);
+    }
+
+    @Override
+    public void addUnsatisfiedInclusionListBlock(final Bytes32 blockRoot) {
+      hotUpdater.addUnsatisfiedInclusionListBlock(blockRoot);
     }
 
     @Override

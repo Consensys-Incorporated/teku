@@ -20,9 +20,11 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import org.apache.logging.log4j.LogManager;
@@ -59,6 +61,7 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
   private final ProtoArray protoArray;
   private final BlockNodeVariantsIndex blockNodeIndex;
   private final ForkChoiceModelFactory forkChoiceModelFactory;
+  private final Set<Bytes32> unsatisfiedInclusionListBlocks;
   private List<UInt64> balances;
 
   private Optional<ForkChoiceNode> proposerBoostNode = Optional.empty();
@@ -69,19 +72,44 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
       final Spec spec,
       final ProtoArray protoArray,
       final BlockNodeVariantsIndex blockNodeIndex,
-      final List<UInt64> balances) {
+      final List<UInt64> balances,
+      final Set<Bytes32> unsatisfiedInclusionListBlocks,
+      final UInt64 currentSlot) {
     this.spec = spec;
     this.protoArray = protoArray;
     this.blockNodeIndex = blockNodeIndex;
-    this.forkChoiceModelFactory = new ForkChoiceModelFactory(spec);
+    this.unsatisfiedInclusionListBlocks = new HashSet<>(unsatisfiedInclusionListBlocks);
+    this.forkChoiceModelFactory =
+        new ForkChoiceModelFactory(
+            spec, root -> !this.unsatisfiedInclusionListBlocks.contains(root));
     this.balances = balances;
     this.headSelectionContext =
         forkChoiceModelFactory.createHeadSelectionContext(
-            UInt64.ZERO, blockNodeIndex, Optional.empty());
+            currentSlot, blockNodeIndex, Optional.empty());
   }
 
   private ForkChoiceModel getForkChoiceModel(final UInt64 slot) {
     return forkChoiceModelFactory.forSlot(slot);
+  }
+
+  public void onUnsatisfiedInclusionList(final Bytes32 blockRoot) {
+    protoArrayLock.writeLock().lock();
+    try {
+      if (blockNodeIndex.getBaseNode(blockRoot).isPresent()) {
+        unsatisfiedInclusionListBlocks.add(blockRoot);
+      }
+    } finally {
+      protoArrayLock.writeLock().unlock();
+    }
+  }
+
+  public boolean satisfiesInclusionList(final Bytes32 blockRoot) {
+    protoArrayLock.readLock().lock();
+    try {
+      return !unsatisfiedInclusionListBlocks.contains(blockRoot);
+    } finally {
+      protoArrayLock.readLock().unlock();
+    }
   }
 
   private Optional<ForkChoiceModel> getForkChoiceModelForRoot(final Bytes32 blockRoot) {
@@ -89,8 +117,29 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
   }
 
   public static ForkChoiceStrategy initialize(final Spec spec, final ProtoArray protoArray) {
+    return initialize(spec, protoArray, Set.of());
+  }
+
+  public static ForkChoiceStrategy initialize(
+      final Spec spec,
+      final ProtoArray protoArray,
+      final Set<Bytes32> unsatisfiedInclusionListBlocks) {
+    return initialize(spec, protoArray, unsatisfiedInclusionListBlocks, UInt64.ZERO);
+  }
+
+  public static ForkChoiceStrategy initialize(
+      final Spec spec,
+      final ProtoArray protoArray,
+      final Set<Bytes32> unsatisfiedInclusionListBlocks,
+      final UInt64 currentSlot) {
     final BlockNodeVariantsIndex blockNodeIndex = BlockNodeVariantsIndex.fromProtoArray(protoArray);
-    return new ForkChoiceStrategy(spec, protoArray, blockNodeIndex, new ArrayList<>());
+    return new ForkChoiceStrategy(
+        spec,
+        protoArray,
+        blockNodeIndex,
+        new ArrayList<>(),
+        unsatisfiedInclusionListBlocks,
+        currentSlot);
   }
 
   public SlotAndForkChoiceNode findHead(
@@ -599,6 +648,16 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
   }
 
   @Override
+  public Optional<ProtoNodeData> getAncestorNodeData(final ForkChoiceNode node, final UInt64 slot) {
+    protoArrayLock.readLock().lock();
+    try {
+      return getAncestorProtoNode(node, slot).map(ProtoNode::getBlockData);
+    } finally {
+      protoArrayLock.readLock().unlock();
+    }
+  }
+
+  @Override
   public Optional<ForkChoiceNode> getSupportedNode(
       final UInt64 currentSlot,
       final Bytes32 voteRoot,
@@ -877,8 +936,7 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
                               protoArray, blockNodeIndex, root)));
       final int sizeBefore = protoArray.getTotalTrackedNodeCount();
       protoArray.maybePrune(ForkChoiceNode.createBase(finalizedCheckpoint.getRoot()));
-      blockNodeIndex.removeIf(
-          root -> blockNodeIndex.getBaseNode(root).flatMap(protoArray::getNode).isEmpty());
+      removeStaleBlockRoots();
       if (protoArray.getTotalTrackedNodeCount() < sizeBefore) {
         forkChoiceModelFactory.onPrunedBlocks(blockNodeIndex);
       }
@@ -1072,8 +1130,7 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
                     headSelectionContext);
               });
       if (status.isInvalid()) {
-        blockNodeIndex.removeIf(
-            root -> blockNodeIndex.getBaseNode(root).flatMap(protoArray::getNode).isEmpty());
+        removeStaleBlockRoots();
       }
     } finally {
       protoArrayLock.writeLock().unlock();
@@ -1113,11 +1170,16 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
           verifiedInvalidTransition,
           headSelectionContext);
       if (status.isInvalid()) {
-        blockNodeIndex.removeIf(
-            root -> blockNodeIndex.getBaseNode(root).flatMap(protoArray::getNode).isEmpty());
+        removeStaleBlockRoots();
       }
     } finally {
       protoArrayLock.writeLock().unlock();
     }
+  }
+
+  private void removeStaleBlockRoots() {
+    blockNodeIndex.removeIf(
+        root -> blockNodeIndex.getBaseNode(root).flatMap(protoArray::getNode).isEmpty());
+    unsatisfiedInclusionListBlocks.removeIf(root -> blockNodeIndex.getBaseNode(root).isEmpty());
   }
 }

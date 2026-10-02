@@ -111,6 +111,8 @@ public interface KvStoreCombinedDao extends AutoCloseable {
 
   Optional<BeaconState> getHotState(Bytes32 root);
 
+  Set<Bytes32> getUnsatisfiedInclusionListBlocks();
+
   Optional<SignedBlindedExecutionPayloadEnvelope> getBlindedExecutionPayloadEnvelope(Bytes32 root);
 
   List<Bytes32> getStateRootsBeforeSlot(UInt64 slot);
@@ -237,6 +239,8 @@ public interface KvStoreCombinedDao extends AutoCloseable {
     void setLatestFinalizedState(BeaconState state);
 
     void addHotState(Bytes32 blockRoot, BeaconState state);
+
+    void addUnsatisfiedInclusionListBlock(Bytes32 blockRoot);
 
     default void addHotStates(final Map<Bytes32, BeaconState> states) {
       states.forEach(this::addHotState);

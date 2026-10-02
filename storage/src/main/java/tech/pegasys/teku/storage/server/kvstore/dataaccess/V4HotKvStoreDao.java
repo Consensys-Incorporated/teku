@@ -14,11 +14,13 @@
 package tech.pegasys.teku.storage.server.kvstore.dataaccess;
 
 import com.google.errorprone.annotations.MustBeClosed;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -93,6 +95,15 @@ public class V4HotKvStoreDao {
 
   public Optional<BeaconState> getHotState(final Bytes32 root) {
     return db.get(schema.getColumnHotStatesByRoot(), root);
+  }
+
+  public Set<Bytes32> getUnsatisfiedInclusionListBlocks() {
+    final Set<Bytes32> blockRoots = new HashSet<>();
+    try (final Stream<ColumnEntry<Bytes32, Bytes32>> stream =
+        db.stream(schema.getColumnUnsatisfiedInclusionListBlocksByRoot())) {
+      stream.forEach(entry -> blockRoots.add(entry.getKey()));
+    }
+    return blockRoots;
   }
 
   @MustBeClosed
@@ -278,6 +289,11 @@ public class V4HotKvStoreDao {
     }
 
     @Override
+    public void addUnsatisfiedInclusionListBlock(final Bytes32 blockRoot) {
+      transaction.put(schema.getColumnUnsatisfiedInclusionListBlocksByRoot(), blockRoot, blockRoot);
+    }
+
+    @Override
     public void addHotStateRoots(
         final Map<Bytes32, SlotAndBlockRoot> stateRootToSlotAndBlockRootMap) {
       stateRootToSlotAndBlockRootMap.forEach(
@@ -302,12 +318,14 @@ public class V4HotKvStoreDao {
     public void deleteHotBlock(final Bytes32 blockRoot) {
       transaction.delete(schema.getColumnHotBlocksByRoot(), blockRoot);
       transaction.delete(schema.getColumnHotBlockCheckpointEpochsByRoot(), blockRoot);
+      transaction.delete(schema.getColumnUnsatisfiedInclusionListBlocksByRoot(), blockRoot);
       deleteHotState(blockRoot);
     }
 
     @Override
     public void deleteHotBlockOnly(final Bytes32 blockRoot) {
       transaction.delete(schema.getColumnHotBlocksByRoot(), blockRoot);
+      transaction.delete(schema.getColumnUnsatisfiedInclusionListBlocksByRoot(), blockRoot);
     }
 
     @Override

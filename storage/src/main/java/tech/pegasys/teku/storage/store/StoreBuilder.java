@@ -20,6 +20,7 @@ import com.google.common.annotations.VisibleForTesting;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.dataproviders.lookup.BlindedExecutionPayloadProvider;
@@ -59,6 +60,7 @@ public class StoreBuilder {
   private Checkpoint justifiedCheckpoint;
   private Checkpoint bestJustifiedCheckpoint;
   private Map<UInt64, VoteTracker> votes;
+  private Set<Bytes32> unsatisfiedInclusionListBlocks = Set.of();
   private Optional<SlotAndExecutionPayloadSummary> finalizedOptimisticTransitionPayload =
       Optional.empty();
   private ForkChoiceStrategy forkChoiceStrategy = null;
@@ -100,6 +102,7 @@ public class StoreBuilder {
         anchor.getCheckpoint(),
         blockInfo,
         new HashMap<>(),
+        Set.of(),
         Optional.empty(),
         Optional.empty());
   }
@@ -115,6 +118,7 @@ public class StoreBuilder {
         .bestJustifiedCheckpoint(data.bestJustifiedCheckpoint())
         .blockInformation(data.blockInformation())
         .votes(data.votes())
+        .unsatisfiedInclusionListBlocks(data.unsatisfiedInclusionListBlocks())
         .latestCanonicalBlockRoot(data.latestCanonicalBlockRoot());
   }
 
@@ -162,6 +166,7 @@ public class StoreBuilder {
         blockInfoByRoot,
         latestCanonicalBlockRoot,
         votes,
+        unsatisfiedInclusionListBlocks,
         storeConfig,
         custodyGroupCount);
   }
@@ -311,6 +316,13 @@ public class StoreBuilder {
   public StoreBuilder votes(final Map<UInt64, VoteTracker> votes) {
     checkNotNull(votes);
     this.votes = votes;
+    return this;
+  }
+
+  public StoreBuilder unsatisfiedInclusionListBlocks(
+      final Set<Bytes32> unsatisfiedInclusionListBlocks) {
+    checkNotNull(unsatisfiedInclusionListBlocks);
+    this.unsatisfiedInclusionListBlocks = unsatisfiedInclusionListBlocks;
     return this;
   }
 }

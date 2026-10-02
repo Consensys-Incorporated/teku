@@ -14,6 +14,7 @@
 package tech.pegasys.teku.spec.logic.versions.gloas.util;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkState;
 import static tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY;
 import static tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL;
 import static tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING;
@@ -191,11 +192,27 @@ public class ForkChoiceUtilGloas extends ForkChoiceUtilFulu {
       final UInt64 slot,
       final BeaconBlock block,
       final int committeeIndex,
-      final ReadOnlyStore store) {
+      final Optional<ForkChoiceNode> selectedNode) {
     if (slot.equals(block.getSlot())) {
       return 0;
     }
-    return isPayloadVerified(store, block.getRoot()) ? 1 : 0;
+    final ForkChoiceNode node =
+        selectedNode.orElseThrow(
+            () -> new IllegalStateException("Canonical payload status is unavailable"));
+    checkState(
+        node.blockRoot().equals(block.getRoot()),
+        "Head changed while preparing attestation for slot %s",
+        slot);
+    if (node.payloadStatus() == PAYLOAD_STATUS_PENDING) {
+      final SpecConfigGloas config = SpecConfigGloas.required(specConfig);
+      final UInt64 firstGloasSlot = config.getGloasForkEpoch().times(config.getSlotsPerEpoch());
+      checkState(
+          block.getSlot().isLessThan(firstGloasSlot),
+          "Canonical payload status is pending for an older block at slot %s",
+          slot);
+      return 0;
+    }
+    return node.payloadStatus() == PAYLOAD_STATUS_FULL ? 1 : 0;
   }
 
   @Override

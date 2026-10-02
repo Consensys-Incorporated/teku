@@ -892,6 +892,7 @@ public class KvStoreDatabase implements Database {
             bestJustifiedCheckpoint,
             blockInformation,
             votes,
+            dao.getUnsatisfiedInclusionListBlocks(),
             latestCanonicalBlockRoot,
             custodyGroupCount));
   }
@@ -1598,6 +1599,14 @@ public class KvStoreDatabase implements Database {
 
       updateHotBlocks(updater, update.getHotBlocks(), update.getDeletedHotBlocks().keySet());
       updater.addHotStates(update.getHotStates());
+      update
+          .getUnsatisfiedInclusionListBlockRoot()
+          .filter(
+              blockRoot ->
+                  update.getHotBlocks().containsKey(blockRoot)
+                      || (!update.getDeletedHotBlocks().containsKey(blockRoot)
+                          && dao.getHotBlock(blockRoot).isPresent()))
+          .ifPresent(updater::addUnsatisfiedInclusionListBlock);
 
       if (update.getStateRoots().size() > 0) {
         updater.addHotStateRoots(update.getStateRoots());

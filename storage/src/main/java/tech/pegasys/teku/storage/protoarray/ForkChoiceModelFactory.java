@@ -14,6 +14,7 @@
 package tech.pegasys.teku.storage.protoarray;
 
 import java.util.Optional;
+import java.util.function.Predicate;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -29,10 +30,15 @@ public class ForkChoiceModelFactory {
   private final UInt64 firstGloasSlot;
 
   public ForkChoiceModelFactory(final Spec spec) {
+    this(spec, __ -> true);
+  }
+
+  public ForkChoiceModelFactory(final Spec spec, final Predicate<Bytes32> satisfiesInclusionList) {
     if (spec.isMilestoneSupported(SpecMilestone.GLOAS)) {
       gloasModel =
           new ForkChoiceModelGloas(
-              SpecConfigGloas.required(spec.forMilestone(SpecMilestone.GLOAS).getConfig()));
+              SpecConfigGloas.required(spec.forMilestone(SpecMilestone.GLOAS).getConfig()),
+              satisfiesInclusionList);
       firstGloasSlot =
           spec.computeStartSlotAtEpoch(
               spec.getForkSchedule().getFork(SpecMilestone.GLOAS).getEpoch());

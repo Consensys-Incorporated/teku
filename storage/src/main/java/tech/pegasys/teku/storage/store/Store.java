@@ -52,7 +52,6 @@ import tech.pegasys.teku.dataproviders.lookup.StateAndBlockSummaryProvider;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.collections.LimitedMap;
-import tech.pegasys.teku.infrastructure.collections.LimitedSet;
 import tech.pegasys.teku.infrastructure.metrics.SettableGauge;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -118,7 +117,6 @@ class Store extends CacheableStore {
   private final Map<Bytes32, SignedBeaconBlock> blocks;
   private final CachingTaskQueue<SlotAndBlockRoot, BeaconState> checkpointStates;
   private final Map<SlotAndBlockRoot, List<BlobSidecar>> blobSidecars;
-  private final Set<Bytes32> unsatisfiedInclusionListBlocks;
 
   private UInt64 timeMillis;
   private UInt64 genesisTime;
@@ -159,8 +157,7 @@ class Store extends CacheableStore {
       final Optional<Map<Bytes32, StateAndBlockSummary>> maybeEpochStates,
       final Map<SlotAndBlockRoot, List<BlobSidecar>> blobSidecars,
       final Optional<UInt64> custodyGroupCount,
-      final Map<Bytes32, SignedExecutionPayloadEnvelope> executionPayloads,
-      final Set<Bytes32> unsatisfiedInclusionListBlocks) {
+      final Map<Bytes32, SignedExecutionPayloadEnvelope> executionPayloads) {
     checkArgument(
         time.isGreaterThanOrEqualTo(genesisTime),
         "Time must be greater than or equal to genesisTime");
@@ -185,7 +182,6 @@ class Store extends CacheableStore {
     this.bestJustifiedCheckpoint = bestJustifiedCheckpoint;
     this.blocks = blocks;
     this.blobSidecars = blobSidecars;
-    this.unsatisfiedInclusionListBlocks = unsatisfiedInclusionListBlocks;
     this.highestVotedValidatorIndex =
         votes.keySet().stream().max(Comparator.naturalOrder()).orElse(UInt64.ZERO);
     this.votes =
@@ -315,9 +311,6 @@ class Store extends CacheableStore {
     final Map<Bytes32, SignedExecutionPayloadEnvelope> executionPayloads =
         LimitedMap.createSynchronizedNatural(config.getBlockCacheSize());
 
-    final Set<Bytes32> unsatisfiedInclusionListBlocks =
-        LimitedSet.createSynchronizedNatural(config.getInclusionListCacheSize());
-
     return new Store(
         metricsSystem,
         spec,
@@ -342,8 +335,7 @@ class Store extends CacheableStore {
         maybeEpochStates,
         blobSidecars,
         custodyGroupCount,
-        executionPayloads,
-        unsatisfiedInclusionListBlocks);
+        executionPayloads);
   }
 
   static UpdatableStore create(
@@ -365,9 +357,11 @@ class Store extends CacheableStore {
       final Map<Bytes32, StoredBlockMetadata> blockInfoByRoot,
       final Optional<Bytes32> initialCanonicalBlockRoot,
       final Map<UInt64, VoteTracker> votes,
+      final Set<Bytes32> unsatisfiedInclusionListBlocks,
       final StoreConfig config,
       final Optional<UInt64> custodyGroupCount) {
-    final UInt64 currentEpoch = spec.computeEpochAtSlot(spec.getCurrentSlot(time, genesisTime));
+    final UInt64 currentSlot = spec.getCurrentSlot(time, genesisTime);
+    final UInt64 currentEpoch = spec.computeEpochAtSlot(currentSlot);
     final ForkChoiceStrategy forkChoiceStrategy =
         ForkChoiceStrategy.initialize(
             spec,
@@ -378,7 +372,11 @@ class Store extends CacheableStore {
                 currentEpoch,
                 justifiedCheckpoint,
                 finalizedAnchor,
-                getInitialCanonicalBlockRoot(config, initialCanonicalBlockRoot)));
+                getInitialCanonicalBlockRoot(config, initialCanonicalBlockRoot),
+                currentSlot,
+                unsatisfiedInclusionListBlocks),
+            unsatisfiedInclusionListBlocks,
+            currentSlot);
     return create(
         asyncRunner,
         metricsSystem,
@@ -420,10 +418,13 @@ class Store extends CacheableStore {
       final UInt64 currentEpoch,
       final Checkpoint justifiedCheckpoint,
       final AnchorPoint finalizedAnchor,
-      final Optional<Bytes32> initialCanonicalBlockRoot) {
+      final Optional<Bytes32> initialCanonicalBlockRoot,
+      final UInt64 currentSlot,
+      final Set<Bytes32> unsatisfiedInclusionListBlocks) {
     final List<StoredBlockMetadata> blocks = new ArrayList<>(blockInfoByRoot.values());
     blocks.sort(Comparator.comparing(StoredBlockMetadata::getBlockSlot));
-    final ForkChoiceModelFactory forkChoiceModelFactory = new ForkChoiceModelFactory(spec);
+    final ForkChoiceModelFactory forkChoiceModelFactory =
+        new ForkChoiceModelFactory(spec, root -> !unsatisfiedInclusionListBlocks.contains(root));
     final BlockNodeVariantsIndex blockNodeIndex = new BlockNodeVariantsIndex();
     final ProtoArray protoArray =
         ProtoArray.builder()
@@ -462,7 +463,7 @@ class Store extends CacheableStore {
             protoArray.setInitialCanonicalBlockRoot(
                 blockRoot,
                 forkChoiceModelFactory.createHeadSelectionContext(
-                    spec.computeStartSlotAtEpoch(currentEpoch), blockNodeIndex, Optional.empty())));
+                    currentSlot, blockNodeIndex, Optional.empty())));
 
     return protoArray;
   }
@@ -755,16 +756,7 @@ class Store extends CacheableStore {
 
   @Override
   public boolean satisfiesInclusionList(final Bytes32 blockRoot) {
-    return !unsatisfiedInclusionListBlocks.contains(blockRoot);
-  }
-
-  @Override
-  public Optional<Bytes32> getInclusionListAttesterHead(final Bytes32 headRoot) {
-    if (!satisfiesInclusionList(headRoot)) {
-      return getBlockIfAvailable(headRoot).map(SignedBeaconBlock::getParentRoot);
-    } else {
-      return Optional.of(headRoot);
-    }
+    return forkChoiceStrategy.satisfiesInclusionList(blockRoot);
   }
 
   private Optional<ProtoNodeData> getBlockDataFromForkChoiceStrategy(final Bytes32 root) {
@@ -897,7 +889,7 @@ class Store extends CacheableStore {
   /** Non-synchronized, no lock, unsafe if Store is not locked externally */
   @Override
   void cacheUnsatisfiedInclusionListBlock(final Bytes32 blockRoot) {
-    unsatisfiedInclusionListBlocks.add(blockRoot);
+    forkChoiceStrategy.onUnsatisfiedInclusionList(blockRoot);
   }
 
   /** Non-synchronized, no lock, unsafe if Store is not locked externally */

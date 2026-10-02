@@ -43,6 +43,7 @@ public class StorageUpdate {
   private final Map<Bytes32, BlockAndCheckpoints> hotBlocks;
   private final Map<Bytes32, BeaconState> hotStates;
   private final Map<Bytes32, SignedBlindedExecutionPayloadEnvelope> blindedExecutionPayloads;
+  private final Optional<Bytes32> unsatisfiedInclusionListBlockRoot;
   private final Map<Bytes32, UInt64> deletedHotBlocks;
   private final Map<SlotAndBlockRoot, List<BlobSidecar>> blobSidecars;
   private final Optional<UInt64> maybeEarliestBlobSidecarSlot;
@@ -63,6 +64,7 @@ public class StorageUpdate {
       final Map<Bytes32, BlockAndCheckpoints> hotBlocks,
       final Map<Bytes32, BeaconState> hotStates,
       final Map<Bytes32, SignedBlindedExecutionPayloadEnvelope> blindedExecutionPayloads,
+      final Optional<Bytes32> unsatisfiedInclusionListBlockRoot,
       final Map<SlotAndBlockRoot, List<BlobSidecar>> blobSidecars,
       final Optional<UInt64> maybeEarliestBlobSidecarSlot,
       final Map<Bytes32, UInt64> deletedHotBlocks,
@@ -81,6 +83,7 @@ public class StorageUpdate {
     this.hotBlocks = hotBlocks;
     this.hotStates = hotStates;
     this.blindedExecutionPayloads = blindedExecutionPayloads;
+    this.unsatisfiedInclusionListBlockRoot = unsatisfiedInclusionListBlockRoot;
     this.blobSidecars = blobSidecars;
     this.maybeEarliestBlobSidecarSlot = maybeEarliestBlobSidecarSlot;
     this.deletedHotBlocks = deletedHotBlocks;
@@ -104,6 +107,7 @@ public class StorageUpdate {
             && hotBlocks.isEmpty()
             && hotStates.isEmpty()
             && blindedExecutionPayloads.isEmpty()
+            && unsatisfiedInclusionListBlockRoot.isEmpty()
             && deletedHotBlocks.isEmpty()
             && stateRoots.isEmpty()
             && blobSidecars.isEmpty()
@@ -151,6 +155,10 @@ public class StorageUpdate {
 
   public Map<Bytes32, SignedBlindedExecutionPayloadEnvelope> getBlindedExecutionPayloads() {
     return blindedExecutionPayloads;
+  }
+
+  public Optional<Bytes32> getUnsatisfiedInclusionListBlockRoot() {
+    return unsatisfiedInclusionListBlockRoot;
   }
 
   public Map<Bytes32, UInt64> getDeletedHotBlocks() {

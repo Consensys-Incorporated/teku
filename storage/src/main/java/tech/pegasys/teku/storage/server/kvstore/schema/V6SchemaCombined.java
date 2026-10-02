@@ -64,6 +64,8 @@ public abstract class V6SchemaCombined implements SchemaCombined {
   private static final KvStoreColumn<Bytes32, BlockCheckpoints>
       HOT_BLOCK_CHECKPOINT_EPOCHS_BY_ROOT =
           KvStoreColumn.create(7, BYTES32_SERIALIZER, CHECKPOINT_EPOCHS_SERIALIZER);
+  private static final KvStoreColumn<Bytes32, Bytes32> UNSATISFIED_INCLUSION_LIST_BLOCKS_BY_ROOT =
+      KvStoreColumn.create(8, BYTES32_SERIALIZER, BYTES32_SERIALIZER);
 
   // Variables
   private static final KvStoreVariable<UInt64> GENESIS_TIME =
@@ -162,6 +164,11 @@ public abstract class V6SchemaCombined implements SchemaCombined {
   }
 
   @Override
+  public KvStoreColumn<Bytes32, Bytes32> getColumnUnsatisfiedInclusionListBlocksByRoot() {
+    return UNSATISFIED_INCLUSION_LIST_BLOCKS_BY_ROOT;
+  }
+
+  @Override
   public KvStoreVariable<UInt64> getVariableGenesisTime() {
     return GENESIS_TIME;
   }
@@ -256,6 +263,9 @@ public abstract class V6SchemaCombined implements SchemaCombined {
         .put("STATE_ROOT_TO_SLOT_AND_BLOCK_ROOT", getColumnStateRootToSlotAndBlockRoot())
         .put("HOT_STATES_BY_ROOT", getColumnHotStatesByRoot())
         .put("HOT_BLOCK_CHECKPOINT_EPOCHS_BY_ROOT", getColumnHotBlockCheckpointEpochsByRoot())
+        .put(
+            "UNSATISFIED_INCLUSION_LIST_BLOCKS_BY_ROOT",
+            getColumnUnsatisfiedInclusionListBlocksByRoot())
         .put("SLOTS_BY_FINALIZED_ROOT", getColumnSlotsByFinalizedRoot())
         .put("FINALIZED_BLOCKS_BY_SLOT", getColumnFinalizedBlocksBySlot())
         .put(

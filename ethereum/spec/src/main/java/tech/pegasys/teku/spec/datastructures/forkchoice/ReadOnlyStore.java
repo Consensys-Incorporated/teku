@@ -165,6 +165,4 @@ public interface ReadOnlyStore extends TimeProvider {
   Optional<Boolean> isFfgCompetitive(Bytes32 headRoot, Bytes32 parentRoot);
 
   boolean satisfiesInclusionList(Bytes32 blockRoot);
-
-  Optional<Bytes32> getInclusionListAttesterHead(Bytes32 headRoot);
 }

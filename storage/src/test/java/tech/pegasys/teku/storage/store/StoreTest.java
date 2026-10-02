@@ -95,6 +95,7 @@ class StoreTest extends AbstractStoreTest {
                     Collections.emptyMap(),
                     Optional.empty(),
                     Collections.emptyMap(),
+                    Collections.emptySet(),
                     defaultStoreConfig,
                     Optional.empty()))
         .isInstanceOf(IllegalArgumentException.class)

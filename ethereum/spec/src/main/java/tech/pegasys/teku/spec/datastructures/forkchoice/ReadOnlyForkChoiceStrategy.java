@@ -56,6 +56,17 @@ public interface ReadOnlyForkChoiceStrategy {
   Optional<ForkChoiceNode> getAncestorNode(ForkChoiceNode node, UInt64 slot);
 
   /**
+   * Returns an immutable snapshot of the ancestor node at {@code slot}.
+   *
+   * <p>Implementations backed by mutable fork-choice state should override this method so ancestry
+   * resolution and node-data lookup occur atomically.
+   */
+  default Optional<ProtoNodeData> getAncestorNodeData(
+      final ForkChoiceNode node, final UInt64 slot) {
+    return getAncestorNode(node, slot).flatMap(this::getNodeData);
+  }
+
+  /**
    * Resolves a latest-message vote to the fork-choice node that it supports.
    *
    * <p>{@code currentSlot} selects the active fork-choice model, matching score application.

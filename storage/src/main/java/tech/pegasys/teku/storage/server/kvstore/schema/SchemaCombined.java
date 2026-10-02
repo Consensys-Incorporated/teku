@@ -51,6 +51,8 @@ public interface SchemaCombined extends Schema {
 
   KvStoreColumn<Bytes32, BeaconState> getColumnHotStatesByRoot();
 
+  KvStoreColumn<Bytes32, Bytes32> getColumnUnsatisfiedInclusionListBlocksByRoot();
+
   KvStoreColumn<Bytes32, UInt64> getColumnSlotsByFinalizedRoot();
 
   KvStoreColumn<UInt64, SignedBeaconBlock> getColumnFinalizedBlocksBySlot();

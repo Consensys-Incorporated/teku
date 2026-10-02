@@ -123,6 +123,7 @@ class StoreTransactionUpdates {
         hotBlocks,
         hotStatesToPersist,
         blindedExecutionPayloads,
+        maybeUnsatisfiedInclusionListBlockRoot,
         blobSidecars,
         maybeEarliestBlobSidecarSlot,
         prunedHotBlockRoots,

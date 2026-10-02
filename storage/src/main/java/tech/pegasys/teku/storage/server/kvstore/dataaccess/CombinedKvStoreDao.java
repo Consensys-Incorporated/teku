@@ -158,6 +158,16 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
   }
 
   @Override
+  public Set<Bytes32> getUnsatisfiedInclusionListBlocks() {
+    final Set<Bytes32> blockRoots = new HashSet<>();
+    try (final Stream<ColumnEntry<Bytes32, Bytes32>> stream =
+        db.stream(schema.getColumnUnsatisfiedInclusionListBlocksByRoot())) {
+      stream.forEach(entry -> blockRoots.add(entry.getKey()));
+    }
+    return blockRoots;
+  }
+
+  @Override
   public Optional<SignedBlindedExecutionPayloadEnvelope> getBlindedExecutionPayloadEnvelope(
       final Bytes32 root) {
     return db.get(schema.getColumnBlindedExecutionPayloadEnvelopesByRoot(), root);
@@ -838,6 +848,11 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
     }
 
     @Override
+    public void addUnsatisfiedInclusionListBlock(final Bytes32 blockRoot) {
+      transaction.put(schema.getColumnUnsatisfiedInclusionListBlocksByRoot(), blockRoot, blockRoot);
+    }
+
+    @Override
     public void addHotStateRoots(
         final Map<Bytes32, SlotAndBlockRoot> stateRootToSlotAndBlockRootMap) {
       stateRootToSlotAndBlockRootMap.forEach(
@@ -862,12 +877,14 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
     public void deleteHotBlock(final Bytes32 blockRoot) {
       transaction.delete(schema.getColumnHotBlocksByRoot(), blockRoot);
       transaction.delete(schema.getColumnHotBlockCheckpointEpochsByRoot(), blockRoot);
+      transaction.delete(schema.getColumnUnsatisfiedInclusionListBlocksByRoot(), blockRoot);
       deleteHotState(blockRoot);
     }
 
     @Override
     public void deleteHotBlockOnly(final Bytes32 blockRoot) {
       transaction.delete(schema.getColumnHotBlocksByRoot(), blockRoot);
+      transaction.delete(schema.getColumnUnsatisfiedInclusionListBlocksByRoot(), blockRoot);
     }
 
     @Override

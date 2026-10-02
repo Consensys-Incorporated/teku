@@ -321,11 +321,6 @@ public class TestStoreImpl implements MutableStore, VoteUpdater {
   }
 
   @Override
-  public Optional<Bytes32> getInclusionListAttesterHead(final Bytes32 headRoot) {
-    return Optional.empty();
-  }
-
-  @Override
   public Optional<List<BlobSidecar>> getBlobSidecarsIfAvailable(
       final SlotAndBlockRoot slotAndBlockRoot) {
     return Optional.ofNullable(blobSidecars.get(slotAndBlockRoot));

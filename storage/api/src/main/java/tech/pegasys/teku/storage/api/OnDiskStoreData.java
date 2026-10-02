@@ -15,6 +15,7 @@ package tech.pegasys.teku.storage.api;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.execution.SlotAndExecutionPayloadSummary;
@@ -32,5 +33,6 @@ public record OnDiskStoreData(
     Checkpoint bestJustifiedCheckpoint,
     Map<Bytes32, StoredBlockMetadata> blockInformation,
     Map<UInt64, VoteTracker> votes,
+    Set<Bytes32> unsatisfiedInclusionListBlocks,
     Optional<Bytes32> latestCanonicalBlockRoot,
     Optional<UInt64> custodyGroupCount) {}

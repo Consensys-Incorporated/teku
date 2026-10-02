@@ -50,10 +50,13 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.stubbing.Answer;
 import org.mockito.stubbing.Stubber;
@@ -73,13 +76,16 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.kzg.KZG;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
+import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.Eth1Data;
 import tech.pegasys.teku.spec.datastructures.blocks.MinimalBeaconBlockSummary;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
+import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
@@ -92,6 +98,7 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.FastConfirmationStore;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 import tech.pegasys.teku.spec.datastructures.forkchoice.InclusionListStore;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeValidationStatus;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.SlotAndForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
@@ -1809,8 +1816,10 @@ class ForkChoiceTest {
         .isEqualTo(ZERO);
   }
 
-  @Test
-  void onExecutionPayloadEnvelope_shouldRecordUnsatisfiedInclusionListWithoutRejectingPayload() {
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void onExecutionPayloadEnvelope_shouldRecordUnsatisfiedInclusionListWithoutRejectingPayload(
+      final boolean timelyPtcVotes) {
     setupWithSpec(
         TestSpecFactory.createMinimalHeze(
             builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
@@ -1824,6 +1833,82 @@ class ForkChoiceTest {
     importPayload(targetBlock);
 
     assertThat(recentChainData.getStore().satisfiesInclusionList(targetBlock.getRoot())).isFalse();
+    if (timelyPtcVotes) {
+      recentChainData
+          .getStore()
+          .getForkChoiceStrategy()
+          .onPayloadTimelinessCommitteeVote(
+              targetBlock.getRoot(),
+              ptcPositions(spec.getPtc(targetBlock.getState(), targetBlock.getSlot()).size()),
+              true,
+              true);
+    }
+    final UInt64 nextSlot = targetBlock.getSlot().increment();
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(nextSlot);
+    processHead(nextSlot);
+
+    assertThat(recentChainData.getChainHead().orElseThrow().getForkChoiceNode())
+        .isEqualTo(ForkChoiceNode.createEmpty(targetBlock.getRoot()));
+    assertThat(
+            recentChainData
+                .getStore()
+                .getForkChoiceStrategy()
+                .shouldExtendPayload(
+                    recentChainData.getStore(),
+                    new SlotAndBlockRoot(targetBlock.getSlot(), targetBlock.getRoot())))
+        .isFalse();
+    assertThat(
+            safeJoin(
+                    forkChoice.prepareForBlockProduction(nextSlot, BlockProductionPerformance.NOOP))
+                .getForkChoiceNode())
+        .isEqualTo(ForkChoiceNode.createEmpty(targetBlock.getRoot()));
+    assertThat(
+            recentChainData
+                .getStore()
+                .getForkChoiceStrategy()
+                .getBlockData(targetBlock.getRoot(), ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL)
+                .orElseThrow()
+                .getValidationStatus())
+        .isEqualTo(ProtoNodeValidationStatus.VALID);
+
+    // IL satisfaction is a previous-slot selection rule, not permanent payload invalidation.
+    final UInt64 laterSlot = nextSlot.increment();
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(laterSlot);
+    processHead(laterSlot);
+    assertThat(recentChainData.getChainHead().orElseThrow().getForkChoiceNode())
+        .isEqualTo(ForkChoiceNode.createFull(targetBlock.getRoot()));
+  }
+
+  @Nested
+  @TestSpecContext(
+      milestone = {SpecMilestone.GLOAS, SpecMilestone.HEZE},
+      signatureVerifierNoop = true)
+  class SatisfiedPayloadTest {
+
+    @BeforeEach
+    void setUpForMilestone(final SpecContext specContext) {
+      setupWithSpec(specContext.getSpec());
+    }
+
+    @TestTemplate
+    void onExecutionPayloadEnvelope_shouldExtendSatisfiedPayload() {
+      assertThat(forkChoice.applyGenesisExecutionPayloadForGloas()).isCompleted();
+      final SignedBlockAndState block = chainBuilder.generateBlockAtSlot(ONE);
+      importBlock(block);
+      executionLayer.setPayloadStatus(
+          PayloadStatus.valid(
+              Optional.empty(),
+              Optional.empty(),
+              spec.isMilestoneSupported(SpecMilestone.HEZE)
+                  ? Optional.of(true)
+                  : Optional.empty()));
+      importPayload(block);
+      final UInt64 nextSlot = block.getSlot().increment();
+      storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(nextSlot);
+      processHead(nextSlot);
+      assertThat(recentChainData.getChainHead().orElseThrow().getForkChoiceNode())
+          .isEqualTo(ForkChoiceNode.createFull(block.getRoot()));
+    }
   }
 
   @Test
@@ -1837,6 +1922,10 @@ class ForkChoiceTest {
     importBlock(targetBlock);
     executionLayer.setPayloadStatus(PayloadStatus.ACCEPTED);
     importPayload(targetBlock);
+
+    final UInt64 nextSlot = targetBlock.getSlot().increment();
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(nextSlot);
+    processHead(nextSlot);
 
     final ForkChoiceNode fullNode = ForkChoiceNode.createFull(targetBlock.getRoot());
     final PayloadStatus validButUnsatisfied =
@@ -1857,6 +1946,9 @@ class ForkChoiceTest {
                 new ForkChoiceUpdatedResult(validButUnsatisfied, Optional.empty()))));
 
     assertThat(recentChainData.getStore().satisfiesInclusionList(targetBlock.getRoot())).isFalse();
+    processHead(nextSlot);
+    assertThat(recentChainData.getChainHead().orElseThrow().getForkChoiceNode())
+        .isEqualTo(ForkChoiceNode.createEmpty(targetBlock.getRoot()));
   }
 
   @Test
