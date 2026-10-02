@@ -14,6 +14,7 @@
 package tech.pegasys.teku.statetransition.execution;
 
 import java.util.Optional;
+import java.util.function.Consumer;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -73,6 +74,9 @@ public interface ExecutionPayloadManager {
         @Override
         public void subscribeFailedPayloadExecution(
             final FailedPayloadExecutionSubscriber subscriber) {}
+
+        @Override
+        public void subscribeRequiredExecutionPayload(final Consumer<Bytes32> subscriber) {}
       };
 
   /**
@@ -136,6 +140,12 @@ public interface ExecutionPayloadManager {
   }
 
   void subscribeFailedPayloadExecution(final FailedPayloadExecutionSubscriber subscriber);
+
+  /**
+   * Subscribes to block roots whose pending payload was evicted before its block was imported, so
+   * the payload has to be fetched by root.
+   */
+  void subscribeRequiredExecutionPayload(final Consumer<Bytes32> subscriber);
 
   interface FailedPayloadExecutionSubscriber {
     void onPayloadExecutionFailed(SignedExecutionPayloadEnvelope executionPayload);

@@ -125,6 +125,7 @@ class GossipScoringConfigurator implements GossipConfigurator {
     // updated periodically
     public void configureDynamicTopics(final GossipTopicsScoringConfig.Builder builder) {
       configureBlockTopic(builder);
+      configureExecutionPayloadTopic(builder);
       configureAggregateTopic(builder);
       configureAttestationSubnetTopics(builder);
     }
@@ -188,6 +189,20 @@ class GossipScoringConfigurator implements GossipConfigurator {
                   scoringConfig.calculateDecayFactor(
                       scoringConfig.getEpochDuration().multipliedBy(20)),
                   Optional.of(msgDeliveryOptions)));
+    }
+
+    private void configureExecutionPayloadTopic(final GossipTopicsScoringConfig.Builder builder) {
+      final String topic =
+          GossipTopics.getTopic(
+              forkDigest, GossipTopicName.EXECUTION_PAYLOAD, eth2Context.getGossipEncoding());
+      builder.topicScoring(
+          topic,
+          b ->
+              configureTopic(
+                  b,
+                  scoringConfig.getExecutionPayloadTopicWeight(),
+                  1.0,
+                  scoringConfig.getTargetScoreDecayFactor()));
     }
 
     private void configureAggregateTopic(final GossipTopicsScoringConfig.Builder builder) {

@@ -47,12 +47,18 @@ public class ExecutionPayloadGossipValidator {
 
   private static final Logger LOG = LogManager.getLogger();
 
+  // Large enough to cover the non-finalized chain, one entry per block root
+  private static final int INVALID_SIGNATURE_PAYLOADS_SET_SIZE = 1024;
+
   private final GossipValidationHelper gossipValidationHelper;
   private final BlockGossipValidator blockGossipValidator;
   private final SigningRootUtil signingRootUtil;
 
   private final Set<BlockRootAndBuilderIndex> seenPayloads =
       LimitedSet.createSynchronizedLRU(VALID_EXECUTION_PAYLOAD_SET_SIZE);
+
+  private final Set<BlockRootAndBuilderIndex> invalidSignaturePayloads =
+      LimitedSet.createSynchronizedLRU(INVALID_SIGNATURE_PAYLOADS_SET_SIZE);
 
   private final Map<Bytes32, BlockImportResult> invalidBlockRoots;
 
@@ -183,6 +189,31 @@ public class ExecutionPayloadGossipValidator {
                         "Invalid builder index. Execution payload envelope had %s but the block execution payload bid had %s",
                         envelope.getBuilderIndex(), bid.getBuilderIndex()));
               }
+
+              /*
+               * Not a spec rule. An envelope with an invalid signature was already received for
+               * this block root and builder, and the payload for the block is already imported, so
+               * nothing is lost by skipping the signing root and signature verification. Without
+               * the imported check, invalid envelopes sent ahead of the builder's could get the
+               * valid one ignored. This deliberately turns what the spec would REJECT into an
+               * IGNORE (no peer penalty), because proving the invalidity would need the signature
+               * work we are trying to skip. Only peer scoring is affected, not forwarding. It only
+               * needs the block root and builder index, so it runs before the hash tree root of the
+               * (attacker controlled) execution requests is computed.
+               */
+              if (invalidSignaturePayloads.contains(envelope.getBlockRootAndBuilderIndex())
+                  && gossipValidationHelper.isExecutionPayloadImported(
+                      envelope.getBeaconBlockRoot())) {
+                LOG.trace(
+                    "Already received execution payload envelope with invalid signature for block root {} from builder with index {} and the payload is already imported. Ignoring the execution payload envelope",
+                    envelope.getBeaconBlockRoot(),
+                    envelope.getBuilderIndex());
+                return Optional.of(
+                    ignore(
+                        "Already received execution payload envelope with invalid signature for block root %s from builder with index %s and the payload is already imported",
+                        envelope.getBeaconBlockRoot(), envelope.getBuilderIndex()));
+              }
+
               /*
                * [REJECT] The payload's block hash matches the bid's block hash
                */
@@ -250,6 +281,18 @@ public class ExecutionPayloadGossipValidator {
      * (MAY be queued until block is retrieved)
      */
     if (maybeBeaconBlockSlot.isEmpty()) {
+      // Queued envelopes are kept decoded until their block arrives, so only queue the ones that
+      // could belong to a block which is still in flight
+      if (!gossipValidationHelper.isSlotCurrentOrPrevious(envelope.getSlot())) {
+        LOG.trace(
+            "Block for execution payload envelope not yet seen (root: {}) and slot {} is not recent. Ignoring the execution payload envelope",
+            envelope.getBeaconBlockRoot(),
+            envelope.getSlot());
+        return Optional.of(
+            ignore(
+                "Block for execution payload envelope not yet seen (root: %s) and slot %s is not recent",
+                envelope.getBeaconBlockRoot(), envelope.getSlot()));
+      }
       LOG.trace(
           "Block for execution Payload Envelope not yet seen (root: {}). Saving the execution payload envelope for future processing",
           envelope.getBeaconBlockRoot());
@@ -289,6 +332,23 @@ public class ExecutionPayloadGossipValidator {
 
   private SafeFuture<InternalValidationResult> performWithStateValidation(
       final SignedExecutionPayloadEnvelope envelope) {
+    /*
+     * Not a spec rule. Regenerating the state of an older block replays up to a full epoch of
+     * blocks and holds a validation slot for that long, and the signature is not checked yet, so
+     * envelopes for old blocks whose state is not cached are ignored rather than regenerated.
+     */
+    if (!gossipValidationHelper.isSlotCurrentOrPrevious(envelope.getMessage().getSlot())
+        && !gossipValidationHelper.isBlockStateAvailableWithoutRegeneration(
+            envelope.getMessage().getBeaconBlockRoot())) {
+      LOG.trace(
+          "State for block root {} is not cached and slot {} is not recent. Ignoring the execution payload envelope",
+          envelope.getMessage().getBeaconBlockRoot(),
+          envelope.getMessage().getSlot());
+      return SafeFuture.completedFuture(
+          ignore(
+              "State for block root %s is not cached and slot %s is not recent",
+              envelope.getMessage().getBeaconBlockRoot(), envelope.getMessage().getSlot()));
+    }
     return gossipValidationHelper
         .getStateAtBlockRoot(envelope.getBeaconBlockRoot())
         .thenApply(
@@ -304,6 +364,7 @@ public class ExecutionPayloadGossipValidator {
                */
               if (!isSignatureValid(envelope, maybeState.get())) {
                 LOG.trace("Invalid signed execution payload envelope signature. Rejecting");
+                invalidSignaturePayloads.add(envelope.getMessage().getBlockRootAndBuilderIndex());
                 return reject("Invalid signed execution payload envelope signature");
               }
               return ACCEPT;

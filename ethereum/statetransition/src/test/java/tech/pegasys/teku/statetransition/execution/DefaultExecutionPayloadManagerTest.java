@@ -27,7 +27,9 @@ import static tech.pegasys.teku.statetransition.validation.InternalValidationRes
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.SAVE_FOR_FUTURE;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.reject;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import org.apache.tuweni.bytes.Bytes32;
@@ -356,6 +358,66 @@ class DefaultExecutionPayloadManagerTest {
         .onExecutionPayloadImported(signedExecutionPayload, false);
     assertThat(publishedExecutionPayload).hasValue(signedExecutionPayload);
     assertExecutionPayloadSeenBeforeDeadline(signedExecutionPayload);
+  }
+
+  @Test
+  public void shouldRequestEvictedExecutionPayloadByRootWhenItsBlockIsImported() {
+    final List<Bytes32> requestedRoots = new ArrayList<>();
+    executionPayloadManager.subscribeRequiredExecutionPayload(requestedRoots::add);
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(42);
+    final SignedExecutionPayloadEnvelope honestPayload = signedExecutionPayloadForBlock(block);
+    queueForFuture(honestPayload);
+    for (int i = 0; i < 8; i++) {
+      queueForFuture(dataStructureUtil.randomSignedExecutionPayloadEnvelope(42));
+    }
+
+    executionPayloadManager.onBlockImported(block, false);
+    asyncRunner.executeDueActions();
+
+    assertThat(requestedRoots).containsExactly(block.getRoot());
+    verifyNoInteractions(forkChoice);
+
+    // only requested once
+    executionPayloadManager.onBlockImported(block, false);
+    assertThat(requestedRoots).hasSize(1);
+  }
+
+  @Test
+  public void shouldKeepTheNewestEightPendingPayloadsAndNotRequestWhenNothingWasEvicted() {
+    final List<Bytes32> requestedRoots = new ArrayList<>();
+    executionPayloadManager.subscribeRequiredExecutionPayload(requestedRoots::add);
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(42);
+    final SignedExecutionPayloadEnvelope honestPayload = signedExecutionPayloadForBlock(block);
+    queueForFuture(honestPayload);
+    for (int i = 0; i < 7; i++) {
+      queueForFuture(dataStructureUtil.randomSignedExecutionPayloadEnvelope(42));
+    }
+    givenValidationResult(honestPayload, ACCEPT);
+    givenSuccessfulImport(honestPayload);
+
+    executionPayloadManager.onBlockImported(block, false);
+    asyncRunner.executeDueActions();
+
+    assertThat(requestedRoots).isEmpty();
+    assertThat(publishedExecutionPayload).hasValue(honestPayload);
+  }
+
+  @Test
+  public void shouldNotRequestPayloadWhenImportedBlockWasNeverEvicted() {
+    final List<Bytes32> requestedRoots = new ArrayList<>();
+    executionPayloadManager.subscribeRequiredExecutionPayload(requestedRoots::add);
+    for (int i = 0; i < 9; i++) {
+      queueForFuture(dataStructureUtil.randomSignedExecutionPayloadEnvelope(42));
+    }
+
+    executionPayloadManager.onBlockImported(dataStructureUtil.randomSignedBeaconBlock(42), false);
+
+    assertThat(requestedRoots).isEmpty();
+  }
+
+  private void queueForFuture(final SignedExecutionPayloadEnvelope executionPayload) {
+    givenValidationResult(executionPayload, SAVE_FOR_FUTURE);
+    validateAndImportAndJoin(executionPayload, UInt64.ZERO);
   }
 
   @Test

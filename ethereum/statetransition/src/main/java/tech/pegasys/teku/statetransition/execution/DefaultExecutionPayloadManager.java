@@ -19,6 +19,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -52,10 +53,12 @@ public class DefaultExecutionPayloadManager
 
   private static final Logger LOG = LogManager.getLogger();
 
-  // A payload is kept pending while its beacon block is still missing. Payloads from before the
-  // finalized slot are never queued, so the cache only needs to span the non-finalized window.
-  // Under healthy finality that window is ~2 epochs (2 * SLOTS_PER_EPOCH = 64 slots on mainnet)
-  private static final int PENDING_EXECUTION_PAYLOADS_CACHE_SIZE = 64;
+  // A payload is kept pending while its beacon block is still missing. Only gossiped payloads for
+  // the current or previous slot are queued, and each is kept decoded, so keep the cache small.
+  // The pool can be flooded with junk roots, so the block root of an evicted payload is remembered
+  // and the payload is fetched by root if that block is imported later (gossip will not redeliver)
+  private static final int PENDING_EXECUTION_PAYLOADS_CACHE_SIZE = 8;
+  private static final int EVICTED_PENDING_BLOCK_ROOTS_CACHE_SIZE = 64;
 
   private final Set<Bytes32> executionPayloadsSeenBeforePayloadDue =
       LimitedSet.createSynchronizedNatural(VALID_EXECUTION_PAYLOAD_SET_SIZE);
@@ -64,7 +67,12 @@ public class DefaultExecutionPayloadManager
   private final Map<BlockRootAndBuilderIndex, PendingExecutionPayload> pendingExecutionPayloads =
       LimitedMap.createSynchronizedNatural(PENDING_EXECUTION_PAYLOADS_CACHE_SIZE);
 
+  private final Set<Bytes32> evictedPendingBlockRoots =
+      LimitedSet.createSynchronizedNatural(EVICTED_PENDING_BLOCK_ROOTS_CACHE_SIZE);
+
   private final Subscribers<FailedPayloadExecutionSubscriber> failedPayloadExecutionSubscribers =
+      Subscribers.create(true);
+  private final Subscribers<Consumer<Bytes32>> requiredExecutionPayloadSubscribers =
       Subscribers.create(true);
 
   private final Spec spec;
@@ -194,10 +202,19 @@ public class DefaultExecutionPayloadManager
       // since no slashing is implemented in order to prevent DoS, we keep one pending
       // payload: the latest candidate received before payload due, or the first candidate
       // if none arrived before payload due
-      pendingExecutionPayloads.merge(
-          signedExecutionPayload.getBlockRootAndBuilderIndex(),
-          new PendingExecutionPayload(signedExecutionPayload, arrivalTimestamp),
-          this::selectPendingExecutionPayload);
+      final BlockRootAndBuilderIndex key = signedExecutionPayload.getBlockRootAndBuilderIndex();
+      synchronized (pendingExecutionPayloads) {
+        if (!pendingExecutionPayloads.containsKey(key)
+            && pendingExecutionPayloads.size() >= PENDING_EXECUTION_PAYLOADS_CACHE_SIZE) {
+          // the oldest entry is about to be evicted
+          evictedPendingBlockRoots.add(
+              pendingExecutionPayloads.keySet().iterator().next().blockRoot());
+        }
+        pendingExecutionPayloads.merge(
+            key,
+            new PendingExecutionPayload(signedExecutionPayload, arrivalTimestamp),
+            this::selectPendingExecutionPayload);
+      }
     }
   }
 
@@ -297,27 +314,39 @@ public class DefaultExecutionPayloadManager
   }
 
   @Override
+  public void subscribeRequiredExecutionPayload(final Consumer<Bytes32> subscriber) {
+    requiredExecutionPayloadSubscribers.subscribe(subscriber);
+  }
+
+  @Override
   public void onBlockValidated(final SignedBeaconBlock block) {}
 
   @Override
   public void onBlockImported(final SignedBeaconBlock block, final boolean executionOptimistic) {
+    final boolean wasEvicted = evictedPendingBlockRoots.remove(block.getRoot());
     // Process pending execution payload
-    block
-        .getMessage()
-        .getBody()
-        .toVersionGloas()
-        .map(BeaconBlockBodyGloas::getSignedExecutionPayloadBid)
-        .map(
-            bid ->
-                new BlockRootAndBuilderIndex(block.getRoot(), bid.getMessage().getBuilderIndex()))
-        .map(pendingExecutionPayloads::remove)
-        .ifPresent(
-            pendingExecutionPayload ->
-                validateAndImportExecutionPayload(
-                        pendingExecutionPayload.executionPayload(),
-                        Optional.of(pendingExecutionPayload.arrivalTimestamp()))
-                    .thenCompose(r -> publishPayload(r, pendingExecutionPayload.executionPayload()))
-                    .finishError(LOG));
+    final Optional<PendingExecutionPayload> pending =
+        block
+            .getMessage()
+            .getBody()
+            .toVersionGloas()
+            .map(BeaconBlockBodyGloas::getSignedExecutionPayloadBid)
+            .map(
+                bid ->
+                    new BlockRootAndBuilderIndex(
+                        block.getRoot(), bid.getMessage().getBuilderIndex()))
+            .map(pendingExecutionPayloads::remove);
+    pending.ifPresent(
+        pendingExecutionPayload ->
+            validateAndImportExecutionPayload(
+                    pendingExecutionPayload.executionPayload(),
+                    Optional.of(pendingExecutionPayload.arrivalTimestamp()))
+                .thenCompose(r -> publishPayload(r, pendingExecutionPayload.executionPayload()))
+                .finishError(LOG));
+    if (wasEvicted && pending.isEmpty()) {
+      LOG.debug("Requesting evicted pending execution payload for block {}", block.getRoot());
+      requiredExecutionPayloadSubscribers.deliver(Consumer::accept, block.getRoot());
+    }
   }
 
   private void recordIfExecutionPayloadIsSeenBeforeDeadline(

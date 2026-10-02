@@ -135,6 +135,7 @@ public class GossipForkSubscriptionsGloas extends GossipForkSubscriptionsFulu {
         new ExecutionPayloadGossipManager(
             spec,
             recentChainData,
+            metricsSystem,
             asyncRunner,
             discoveryNetwork,
             gossipEncoding,

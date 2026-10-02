@@ -14,13 +14,17 @@
 package tech.pegasys.teku.networking.eth2.gossip;
 
 import com.google.common.annotations.VisibleForTesting;
+import java.time.Duration;
 import java.util.Optional;
 import java.util.function.Function;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
+import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
+import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszSchema;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -63,6 +67,44 @@ public abstract class AbstractGossipManager<T extends SszData> implements Gossip
       final NetworkingSpecConfig networkingConfig,
       final GossipFailureLogger gossipFailureLogger,
       final DebugDataDumper debugDataDumper) {
+    this(
+        recentChainData,
+        topicName,
+        asyncRunner,
+        gossipNetwork,
+        gossipEncoding,
+        forkInfo,
+        forkDigest,
+        processor,
+        gossipType,
+        getSlotForMessage,
+        getEpochForMessage,
+        networkingConfig,
+        gossipFailureLogger,
+        debugDataDumper,
+        Integer.MAX_VALUE,
+        Duration.ZERO,
+        new NoOpMetricsSystem());
+  }
+
+  protected AbstractGossipManager(
+      final RecentChainData recentChainData,
+      final GossipTopicName topicName,
+      final AsyncRunner asyncRunner,
+      final GossipNetwork gossipNetwork,
+      final GossipEncoding gossipEncoding,
+      final ForkInfo forkInfo,
+      final Bytes4 forkDigest,
+      final OperationProcessor<T> processor,
+      final SszSchema<T> gossipType,
+      final Function<T, Optional<UInt64>> getSlotForMessage,
+      final Function<T, UInt64> getEpochForMessage,
+      final NetworkingSpecConfig networkingConfig,
+      final GossipFailureLogger gossipFailureLogger,
+      final DebugDataDumper debugDataDumper,
+      final int maxInFlightMessages,
+      final Duration inFlightTimeout,
+      final MetricsSystem metricsSystem) {
     this.gossipNetwork = gossipNetwork;
     this.topicHandler =
         new Eth2TopicHandler<>(
@@ -71,12 +113,30 @@ public abstract class AbstractGossipManager<T extends SszData> implements Gossip
             processor,
             gossipEncoding,
             forkDigest,
-            topicName,
+            topicName.toString(),
             new OperationMilestoneValidator<>(
                 recentChainData.getSpec(), forkInfo.getFork(), getEpochForMessage),
             gossipType,
             networkingConfig,
-            debugDataDumper);
+            debugDataDumper,
+            maxInFlightMessages,
+            inFlightTimeout,
+            metricsSystem
+                .createLabelledCounter(
+                    TekuMetricCategory.NETWORK,
+                    "gossip_messages_in_flight_limit_discarded_total",
+                    "Total number of gossip messages discarded because too many messages for the topic were already being processed",
+                    "topic")
+                .labels(topicName.toString()));
+    if (maxInFlightMessages != Integer.MAX_VALUE) {
+      metricsSystem
+          .createLabelledSuppliedGauge(
+              TekuMetricCategory.NETWORK,
+              "gossip_messages_in_flight",
+              "Number of gossip messages currently being processed for the topic",
+              "topic")
+          .labels(topicHandler::getInFlightMessageCount, topicName.toString());
+    }
     this.gossipEncoding = gossipEncoding;
     this.gossipFailureLogger = gossipFailureLogger;
     this.getSlotForMessage = getSlotForMessage;

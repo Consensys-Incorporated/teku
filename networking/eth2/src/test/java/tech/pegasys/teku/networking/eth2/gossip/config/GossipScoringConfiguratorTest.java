@@ -87,10 +87,11 @@ public class GossipScoringConfiguratorTest {
     configurator.configureAllTopics(builder, postGenesisEth2Context());
     final Map<String, GossipTopicScoringConfig> allTopics = builder.build().getTopicConfigs();
 
-    final int expectedCount = 5 + attestationSubnetCount;
+    final int expectedCount = 6 + attestationSubnetCount;
     assertThat(allTopics.size()).isEqualTo(expectedCount);
 
     validateVoluntaryExitTopicParams(allTopics);
+    validateExecutionPayloadTopicParams(allTopics);
     validateSlashingTopicParams(allTopics);
     validateAggregateTopicParams(allTopics, true);
     validateBlockTopicParams(allTopics, true);
@@ -103,10 +104,11 @@ public class GossipScoringConfiguratorTest {
     configurator.configureAllTopics(builder, genesisEth2Context());
     final Map<String, GossipTopicScoringConfig> allTopics = builder.build().getTopicConfigs();
 
-    final int expectedCount = 5 + attestationSubnetCount;
+    final int expectedCount = 6 + attestationSubnetCount;
     assertThat(allTopics.size()).isEqualTo(expectedCount);
 
     validateVoluntaryExitTopicParams(allTopics);
+    validateExecutionPayloadTopicParams(allTopics);
     validateSlashingTopicParams(allTopics);
     validateAggregateTopicParams(allTopics, false);
     validateBlockTopicParams(allTopics, false);
@@ -125,6 +127,18 @@ public class GossipScoringConfiguratorTest {
     assertThat(params.getFirstMessageDeliveriesWeight()).isCloseTo(1.8407, within(TOLERANCE));
     assertThat(params.getFirstMessageDeliveriesDecay()).isCloseTo(0.99856, within(TOLERANCE));
     assertThat(params.getFirstMessageDeliveriesCap()).isCloseTo(21.73035, within(TOLERANCE));
+    assertThat(params.getInvalidMessageDeliveriesWeight()).isCloseTo(-2150.0, within(TOLERANCE));
+    assertThat(params.getInvalidMessageDeliveriesDecay()).isCloseTo(0.99713, within(TOLERANCE));
+  }
+
+  private void validateExecutionPayloadTopicParams(
+      final Map<String, GossipTopicScoringConfig> allTopics) {
+    final GossipTopicScoringConfig params =
+        allTopics.get(
+            GossipTopics.getTopic(forkDigest, GossipTopicName.EXECUTION_PAYLOAD, gossipEncoding));
+    assertMessageRatePenaltiesDisabled(params);
+
+    assertThat(params.getTopicWeight()).isEqualTo(0.05);
     assertThat(params.getInvalidMessageDeliveriesWeight()).isCloseTo(-2150.0, within(TOLERANCE));
     assertThat(params.getInvalidMessageDeliveriesDecay()).isCloseTo(0.99713, within(TOLERANCE));
   }

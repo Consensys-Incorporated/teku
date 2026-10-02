@@ -750,6 +750,12 @@ public abstract class RecentChainData
     return store.retrieveSignedBlindedExecutionPayload(beaconBlockRoot);
   }
 
+  public boolean isBlockStateCached(final Bytes32 blockRoot) {
+    return Optional.ofNullable(store)
+        .map(s -> s.getBlockStateIfAvailable(blockRoot).isPresent())
+        .orElse(false);
+  }
+
   public SafeFuture<Optional<BeaconState>> retrieveBlockState(final Bytes32 blockRoot) {
     if (store == null) {
       return EmptyStoreResults.EMPTY_STATE_FUTURE;

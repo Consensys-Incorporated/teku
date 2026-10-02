@@ -13,7 +13,9 @@
 
 package tech.pegasys.teku.networking.eth2.gossip;
 
+import java.time.Duration;
 import java.util.Optional;
+import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
@@ -32,9 +34,15 @@ import tech.pegasys.teku.storage.client.RecentChainData;
 public class ExecutionPayloadGossipManager
     extends AbstractGossipManager<SignedExecutionPayloadEnvelope> {
 
+  // Honest nodes see about one envelope per slot, but each one can be large and costly to
+  // validate. Keep the limit small so they can't pile up in memory (worst case 8 x 10 MiB) or take
+  // over the P2P workers. A message holds a slot for at most one slot duration.
+  static final int MAX_IN_FLIGHT_MESSAGES = 8;
+
   public ExecutionPayloadGossipManager(
       final Spec spec,
       final RecentChainData recentChainData,
+      final MetricsSystem metricsSystem,
       final AsyncRunner asyncRunner,
       final GossipNetwork gossipNetwork,
       final GossipEncoding gossipEncoding,
@@ -59,7 +67,11 @@ public class ExecutionPayloadGossipManager
         message -> recentChainData.getSpec().computeEpochAtSlot(message.getMessage().getSlot()),
         networkingConfig,
         GossipFailureLogger.createSuppressing(GossipTopicName.EXECUTION_PAYLOAD.toString()),
-        debugDataDumper);
+        debugDataDumper,
+        MAX_IN_FLIGHT_MESSAGES,
+        Duration.ofMillis(
+            spec.atEpoch(forkInfo.getFork().getEpoch()).getConfig().getSlotDurationMillis()),
+        metricsSystem);
   }
 
   public SafeFuture<Void> publish(final SignedExecutionPayloadEnvelope message) {

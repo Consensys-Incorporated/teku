@@ -16,11 +16,16 @@ package tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers;
 import static tech.pegasys.teku.infrastructure.logging.P2PLogger.P2P_LOG;
 
 import io.libp2p.core.pubsub.ValidationResult;
+import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
+import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
+import org.hyperledger.besu.plugin.services.metrics.Counter;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
@@ -60,6 +65,10 @@ public class Eth2TopicHandler<MessageT extends SszData> implements TopicHandler 
   private final DebugDataDumper debugDataDumper;
   private final String topic;
   final TimeProvider timeProvider;
+  private final int maxInFlightMessages;
+  private final Duration inFlightTimeout;
+  private final AtomicInteger inFlightMessages = new AtomicInteger();
+  private final Counter inFlightLimitDiscardedCounter;
 
   // every slot of mainnet config
   private final Throttler<Logger> loggerThrottler = new Throttler<>(LOG, UInt64.valueOf(12));
@@ -75,6 +84,48 @@ public class Eth2TopicHandler<MessageT extends SszData> implements TopicHandler 
       final SszSchema<MessageT> messageType,
       final NetworkingSpecConfig networkingConfig,
       final DebugDataDumper debugDataDumper) {
+    this(
+        recentChainData,
+        asyncRunner,
+        processor,
+        gossipEncoding,
+        forkDigest,
+        topicName,
+        forkValidator,
+        messageType,
+        networkingConfig,
+        debugDataDumper,
+        Integer.MAX_VALUE,
+        Duration.ZERO,
+        NoOpMetricsSystem.NO_OP_COUNTER);
+  }
+
+  /**
+   * @param maxInFlightMessages maximum number of messages queued or being validated at once. Any
+   *     further message is ignored before SSZ decoding (snappy decompression to compute the message
+   *     id has already happened by then).
+   * @param inFlightTimeout maximum time a message may hold an in-flight slot, after which it is
+   *     ignored and the slot released (the underlying validation may keep running). {@link
+   *     Duration#ZERO} means no timeout.
+   * @param inFlightLimitDiscardedCounter incremented for each message ignored because of the limit
+   */
+  public Eth2TopicHandler(
+      final RecentChainData recentChainData,
+      final AsyncRunner asyncRunner,
+      final OperationProcessor<MessageT> processor,
+      final GossipEncoding gossipEncoding,
+      final Bytes4 forkDigest,
+      final String topicName,
+      final OperationValidator<MessageT> forkValidator,
+      final SszSchema<MessageT> messageType,
+      final NetworkingSpecConfig networkingConfig,
+      final DebugDataDumper debugDataDumper,
+      final int maxInFlightMessages,
+      final Duration inFlightTimeout,
+      final Counter inFlightLimitDiscardedCounter) {
+    this.maxInFlightMessages = maxInFlightMessages;
+    this.inFlightTimeout = inFlightTimeout;
+    this.inFlightLimitDiscardedCounter = inFlightLimitDiscardedCounter;
     this.asyncRunner = asyncRunner;
     this.processor = processor;
     this.gossipEncoding = gossipEncoding;
@@ -116,26 +167,43 @@ public class Eth2TopicHandler<MessageT extends SszData> implements TopicHandler 
 
   @Override
   public SafeFuture<ValidationResult> handleMessage(final PreparedGossipMessage message) {
-    return SafeFuture.of(() -> deserialize(message))
-        .thenCompose(
-            deserialized -> {
+    if (inFlightMessages.incrementAndGet() > maxInFlightMessages) {
+      inFlightMessages.decrementAndGet();
+      inFlightLimitDiscardedCounter.inc();
+      loggerThrottler.invoke(
+          timeProvider.getTimeInSeconds(),
+          (log) ->
+              log.warn(
+                  "Discarding gossip message for topic {} because too many messages are being processed",
+                  getTopic()));
+      return SafeFuture.completedFuture(ValidationResult.Ignore);
+    }
+    // SSZ decode on the async runner so large messages are not decoded on the libp2p thread and
+    // are not held decoded while waiting in the queue
+    final SafeFuture<ValidationResult> validation =
+        asyncRunner.runAsync(
+            () -> {
+              final MessageT deserialized = deserialize(message);
               if (!forkValidator.isValid(deserialized)) {
                 return SafeFuture.completedFuture(
                     GossipSubValidationUtil.fromInternalValidationResult(
                         InternalValidationResult.reject("Incorrect spec milestone")));
               }
-              return asyncRunner.runAsync(
-                  () ->
-                      processor
-                          .process(deserialized, message.getArrivalTimestamp())
-                          .thenApply(
-                              internalValidation -> {
-                                processMessage(internalValidation, message);
-                                return GossipSubValidationUtil.fromInternalValidationResult(
-                                    internalValidation);
-                              }));
-            })
-        .exceptionally(error -> handleMessageProcessingError(message, error));
+              return processor
+                  .process(deserialized, message.getArrivalTimestamp())
+                  .thenApply(
+                      internalValidation -> {
+                        processMessage(internalValidation, message);
+                        return GossipSubValidationUtil.fromInternalValidationResult(
+                            internalValidation);
+                      });
+            });
+    // alwaysRun is attached once to the final future, so the slot is released exactly once
+    return (inFlightTimeout.isZero()
+            ? validation
+            : validation.orTimeout(asyncRunner, inFlightTimeout))
+        .exceptionally(error -> handleMessageProcessingError(message, error))
+        .alwaysRun(inFlightMessages::decrementAndGet);
   }
 
   private void processMessage(
@@ -169,7 +237,16 @@ public class Eth2TopicHandler<MessageT extends SszData> implements TopicHandler 
   protected ValidationResult handleMessageProcessingError(
       final PreparedGossipMessage message, final Throwable err) {
     final ValidationResult response;
-    if (ExceptionUtil.hasCause(err, DecodingException.class)) {
+    if (ExceptionUtil.hasCause(err, TimeoutException.class)) {
+      loggerThrottler.invoke(
+          timeProvider.getTimeInSeconds(),
+          (log) ->
+              log.warn(
+                  "Ignoring gossip message for topic {} because processing timed out after {}",
+                  getTopic(),
+                  inFlightTimeout));
+      response = ValidationResult.Ignore;
+    } else if (ExceptionUtil.hasCause(err, DecodingException.class)) {
 
       debugDataDumper.saveGossipMessageDecodingError(
           getTopic(), message.getArrivalTimestamp(), message::getOriginalMessage, err);
@@ -212,6 +289,10 @@ public class Eth2TopicHandler<MessageT extends SszData> implements TopicHandler 
 
   protected MessageT deserialize(final PreparedGossipMessage message) throws DecodingException {
     return getGossipEncoding().decodeMessage(message, getMessageType());
+  }
+
+  public int getInFlightMessageCount() {
+    return inFlightMessages.get();
   }
 
   public OperationProcessor<MessageT> getProcessor() {

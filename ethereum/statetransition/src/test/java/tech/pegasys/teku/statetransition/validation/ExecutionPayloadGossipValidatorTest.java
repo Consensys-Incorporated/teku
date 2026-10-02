@@ -16,6 +16,9 @@ package tech.pegasys.teku.statetransition.validation;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
@@ -92,6 +95,7 @@ public class ExecutionPayloadGossipValidatorTest {
     when(gossipValidationHelper.getSlotForBlockRoot(envelope.getBeaconBlockRoot()))
         .thenReturn(Optional.of(slot));
     when(gossipValidationHelper.isBeforeFinalizedSlot(slot)).thenReturn(false);
+    when(gossipValidationHelper.isSlotCurrentOrPrevious(slot)).thenReturn(true);
     when(gossipValidationHelper.retrieveBlockByRoot(blockRoot))
         .thenReturn(SafeFuture.completedFuture(Optional.of(beaconBlock)));
     when(gossipValidationHelper.getStateAtBlockRoot(any(Bytes32.class)))
@@ -127,7 +131,19 @@ public class ExecutionPayloadGossipValidatorTest {
   @TestTemplate
   void shouldSaveForFutureIfBlockNotSeen() {
     when(gossipValidationHelper.getSlotForBlockRoot(blockRoot)).thenReturn(Optional.empty());
+    when(gossipValidationHelper.isSlotCurrentOrPrevious(slot)).thenReturn(true);
     assertThatSafeFuture(validator.validate(signedEnvelope)).isCompletedWithValue(SAVE_FOR_FUTURE);
+  }
+
+  @TestTemplate
+  void shouldIgnoreIfBlockNotSeenAndSlotIsNotRecent() {
+    when(gossipValidationHelper.getSlotForBlockRoot(blockRoot)).thenReturn(Optional.empty());
+    when(gossipValidationHelper.isSlotCurrentOrPrevious(slot)).thenReturn(false);
+    assertThatSafeFuture(validator.validate(signedEnvelope))
+        .isCompletedWithValue(
+            ignore(
+                "Block for execution payload envelope not yet seen (root: %s) and slot %s is not recent",
+                blockRoot, slot));
   }
 
   @TestTemplate
@@ -237,6 +253,120 @@ public class ExecutionPayloadGossipValidatorTest {
         .thenReturn(false);
     assertThatSafeFuture(validator.validate(signedEnvelope))
         .isCompletedWithValue(reject("Invalid signed execution payload envelope signature"));
+  }
+
+  @TestTemplate
+  void shouldIgnoreWithoutSignatureCheckAfterInvalidSignatureIfPayloadAlreadyImported() {
+    when(gossipValidationHelper.isSignatureValidWithRespectToBuilderIndex(
+            any(), any(), any(), any()))
+        .thenReturn(false);
+    assertThatSafeFuture(validator.validate(signedEnvelope))
+        .isCompletedWithValue(reject("Invalid signed execution payload envelope signature"));
+
+    when(gossipValidationHelper.isExecutionPayloadImported(blockRoot)).thenReturn(true);
+    assertThatSafeFuture(validator.validate(signedEnvelope))
+        .isCompletedWithValue(
+            ignore(
+                "Already received execution payload envelope with invalid signature for block root %s from builder with index %s and the payload is already imported",
+                blockRoot, envelope.getBuilderIndex()));
+    verify(gossipValidationHelper, times(1))
+        .isSignatureValidWithRespectToBuilderIndex(any(), any(), any(), any());
+    verify(gossipValidationHelper, times(1)).getStateAtBlockRoot(blockRoot);
+  }
+
+  @TestTemplate
+  void shouldNotSkipValidationForOtherBlockRootAfterInvalidSignature() {
+    when(gossipValidationHelper.isSignatureValidWithRespectToBuilderIndex(
+            any(), any(), any(), any()))
+        .thenReturn(false);
+    assertThatSafeFuture(validator.validate(signedEnvelope))
+        .isCompletedWithValue(reject("Invalid signed execution payload envelope signature"));
+    when(gossipValidationHelper.isExecutionPayloadImported(any())).thenReturn(true);
+
+    // same builder, different block root, which has its own block and matching bid
+    final SignedExecutionPayloadEnvelope otherSignedEnvelope =
+        dataStructureUtil.randomSignedExecutionPayloadEnvelope(slot.longValue());
+    final ExecutionPayloadEnvelope otherEnvelope = otherSignedEnvelope.getMessage();
+    final Bytes32 otherRoot = otherEnvelope.getBeaconBlockRoot();
+    final SignedExecutionPayloadBid otherBid =
+        dataStructureUtil.randomSignedExecutionPayloadBid(
+            dataStructureUtil.randomExecutionPayloadBid(
+                otherEnvelope.getSlot(),
+                otherEnvelope.getBuilderIndex(),
+                otherEnvelope.getPayload().getBlockHash(),
+                otherEnvelope.getExecutionRequests().hashTreeRoot()));
+    final BeaconBlock otherBlock =
+        dataStructureUtil.randomBeaconBlock(
+            otherEnvelope.getSlot(),
+            dataStructureUtil.randomBeaconBlockBody(
+                builder -> builder.signedExecutionPayloadBid(otherBid)));
+    when(gossipValidationHelper.getSlotForBlockRoot(otherRoot))
+        .thenReturn(Optional.of(otherEnvelope.getSlot()));
+    when(gossipValidationHelper.isBeforeFinalizedSlot(otherEnvelope.getSlot())).thenReturn(false);
+    when(gossipValidationHelper.isSlotCurrentOrPrevious(otherEnvelope.getSlot())).thenReturn(true);
+    when(gossipValidationHelper.retrieveBlockByRoot(otherRoot))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(otherBlock)));
+    final SpecVersion specVersion = spec.atSlot(slot);
+    when(spec.atSlot(otherEnvelope.getSlot())).thenReturn(specVersion);
+
+    assertThatSafeFuture(validator.validate(otherSignedEnvelope))
+        .isCompletedWithValue(reject("Invalid signed execution payload envelope signature"));
+    verify(gossipValidationHelper, times(2))
+        .isSignatureValidWithRespectToBuilderIndex(any(), any(), any(), any());
+  }
+
+  @TestTemplate
+  void shouldIgnoreWithoutRegeneratingStateIfSlotIsNotRecentAndStateNotCached() {
+    when(gossipValidationHelper.isSlotCurrentOrPrevious(slot)).thenReturn(false);
+    when(gossipValidationHelper.isBlockStateAvailableWithoutRegeneration(blockRoot))
+        .thenReturn(false);
+
+    assertThatSafeFuture(validator.validate(signedEnvelope))
+        .isCompletedWithValue(
+            ignore(
+                "State for block root %s is not cached and slot %s is not recent",
+                blockRoot, slot));
+    verify(gossipValidationHelper, never()).getStateAtBlockRoot(any());
+  }
+
+  @TestTemplate
+  void shouldValidateIfSlotIsNotRecentButStateIsCached() {
+    when(gossipValidationHelper.isSlotCurrentOrPrevious(slot)).thenReturn(false);
+    when(gossipValidationHelper.isBlockStateAvailableWithoutRegeneration(blockRoot))
+        .thenReturn(true);
+
+    assertThatSafeFuture(validator.validate(signedEnvelope)).isCompletedWithValue(ACCEPT);
+    verify(gossipValidationHelper).getStateAtBlockRoot(blockRoot);
+  }
+
+  @TestTemplate
+  void shouldValidateIfSlotIsRecentAndStateNotCached() {
+    when(gossipValidationHelper.isSlotCurrentOrPrevious(slot)).thenReturn(true);
+    when(gossipValidationHelper.isBlockStateAvailableWithoutRegeneration(blockRoot))
+        .thenReturn(false);
+
+    assertThatSafeFuture(validator.validate(signedEnvelope)).isCompletedWithValue(ACCEPT);
+    verify(gossipValidationHelper).getStateAtBlockRoot(blockRoot);
+  }
+
+  @TestTemplate
+  void shouldAcceptAfterInvalidSignatureIfPayloadNotImported() {
+    when(gossipValidationHelper.isSignatureValidWithRespectToBuilderIndex(
+            any(), any(), any(), any()))
+        .thenReturn(false);
+    assertThatSafeFuture(validator.validate(signedEnvelope))
+        .isCompletedWithValue(reject("Invalid signed execution payload envelope signature"));
+
+    when(gossipValidationHelper.isSignatureValidWithRespectToBuilderIndex(
+            any(), any(), any(), any()))
+        .thenReturn(true);
+    assertThatSafeFuture(validator.validate(signedEnvelope)).isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldAcceptIfPayloadAlreadyImportedWithoutInvalidSignature() {
+    when(gossipValidationHelper.isExecutionPayloadImported(blockRoot)).thenReturn(true);
+    assertThatSafeFuture(validator.validate(signedEnvelope)).isCompletedWithValue(ACCEPT);
   }
 
   @TestTemplate

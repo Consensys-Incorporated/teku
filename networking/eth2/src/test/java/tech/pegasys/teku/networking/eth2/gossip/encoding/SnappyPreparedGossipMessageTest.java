@@ -183,6 +183,23 @@ public class SnappyPreparedGossipMessageTest {
   }
 
   @Test
+  public void getDecodedMessage_ShouldReuseUncompressedPayloadFromMessageId()
+      throws DecodingException {
+    final Uncompressor uncompressor = mock(Uncompressor.class);
+    when(uncompressor.uncompress(any(), any(), anyLong())).thenReturn(Bytes.random(1000));
+
+    final String altairTopic = GossipTopics.getTopic(altairForkDigest, "test", gossipEncoding);
+    final SnappyPreparedGossipMessage message =
+        getAltairMessage(messageBytes, altairTopic, uncompressor);
+
+    message.getMessageId();
+    message.getDecodedMessage();
+    message.getDecodedMessage();
+
+    verify(uncompressor).uncompress(any(), any(), anyLong());
+  }
+
+  @Test
   public void getDecodedMessage_ShouldUseNetworkSszLengthBounds() throws DecodingException {
     final SszLengthBounds networkBounds = SszLengthBounds.ofBytes(8, 16);
     final Uncompressor uncompressor = mock(Uncompressor.class);

@@ -581,6 +581,22 @@ class RecentChainDataTest {
   }
 
   @Test
+  public void isBlockStateCached_shouldReturnFalseWhenStoreUnavailable() {
+    initPreGenesis();
+
+    assertThat(recentChainData.isBlockStateCached(Bytes32.ZERO)).isFalse();
+  }
+
+  @Test
+  public void isBlockStateCached_shouldOnlyReturnTrueForCachedStates() {
+    initPostGenesis();
+
+    assertThat(recentChainData.isBlockStateCached(recentChainData.getBestBlockRoot().orElseThrow()))
+        .isTrue();
+    assertThat(recentChainData.isBlockStateCached(dataStructureUtil.randomBytes32())).isFalse();
+  }
+
+  @Test
   public void containsExecutionPayload_shouldReturnFalseWhenStoreUnavailable() {
     initPreGenesis();
 

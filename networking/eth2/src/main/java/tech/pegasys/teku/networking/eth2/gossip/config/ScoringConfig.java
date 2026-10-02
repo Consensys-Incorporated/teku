@@ -29,6 +29,8 @@ class ScoringConfig {
   private static final double VOLUNTARY_EXIT_TOPIC_WEIGHT = 0.05;
   private static final double PROPOSER_SLASHING_TOPIC_WEIGHT = 0.05;
   private static final double ATTESTER_SLASHING_TOPIC_WEIGHT = 0.05;
+  // Not part of the max positive score, so adding it leaves existing topic scoring unchanged
+  private static final double EXECUTION_PAYLOAD_TOPIC_WEIGHT = 0.05;
 
   private static final double GOSSIP_THRESHOLD = -4000.0;
   private static final double PUBLISH_THRESHOLD = -8000.0;
@@ -94,6 +96,10 @@ class ScoringConfig {
 
   public double getAttesterSlashingTopicWeight() {
     return ATTESTER_SLASHING_TOPIC_WEIGHT;
+  }
+
+  public double getExecutionPayloadTopicWeight() {
+    return EXECUTION_PAYLOAD_TOPIC_WEIGHT;
   }
 
   public double getGossipThreshold() {

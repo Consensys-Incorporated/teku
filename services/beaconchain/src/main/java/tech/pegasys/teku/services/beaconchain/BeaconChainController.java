@@ -571,6 +571,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
                 .finish(
                     err ->
                         LOG.error("Failed to process recently fetched execution payload.", err)));
+    executionPayloadManager.subscribeRequiredExecutionPayload(
+        recentExecutionPayloadsFetcher::requestRecentExecutionPayload);
     pendingAttestationPool.subscribeRequiredFullPayload(
         recentExecutionPayloadsFetcher::requestRecentExecutionPayload);
     blockManager.subscribeRequiredParentExecutionPayload(
