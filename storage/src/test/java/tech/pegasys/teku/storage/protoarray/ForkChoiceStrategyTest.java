@@ -478,6 +478,88 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
   }
 
   @Test
+  void getAncestorNodeData_returnsExactGloasEmptyVariantAndOptimism() {
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final ChainBuilder chainBuilder = ChainBuilder.create(gloasSpec);
+    final SignedBlockAndState genesis = chainBuilder.generateGenesis();
+    final SignedBlockAndState ancestor = chainBuilder.generateBlockAtSlot(ONE);
+    final SignedBlockAndState head = chainBuilder.generateBlockAtSlot(2);
+    final ForkChoiceNode emptyAncestor = ForkChoiceNode.createEmpty(ancestor.getRoot());
+    final ForkChoiceNode baseHead = ForkChoiceNode.createBase(head.getRoot());
+    final ProtoArray protoArray = createProtoArray(gloasSpec, head.getState());
+    addBlockToProtoArray(gloasSpec, protoArray, genesis);
+    addBlockToProtoArray(gloasSpec, protoArray, ancestor);
+    addProjectedNodeToProtoArray(
+        gloasSpec,
+        protoArray,
+        ancestor,
+        emptyAncestor,
+        ForkChoiceNode.createBase(ancestor.getRoot()),
+        ZERO,
+        dataStructureUtil.randomBytes32(),
+        false);
+    addProjectedNodeToProtoArray(
+        gloasSpec,
+        protoArray,
+        head,
+        baseHead,
+        emptyAncestor,
+        ZERO,
+        dataStructureUtil.randomBytes32(),
+        false);
+    final ForkChoiceStrategy strategy = ForkChoiceStrategy.initialize(gloasSpec, protoArray);
+
+    final ProtoNodeData ancestorData =
+        strategy.getAncestorNodeData(baseHead, ancestor.getSlot()).orElseThrow();
+
+    assertThat(ancestorData.getRoot()).isEqualTo(ancestor.getRoot());
+    assertThat(ancestorData.getPayloadStatus())
+        .isEqualTo(ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY);
+    assertThat(ancestorData.isOptimistic()).isFalse();
+  }
+
+  @Test
+  void getAncestorNodeData_returnsExactGloasFullVariantAndOptimism() {
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final ChainBuilder chainBuilder = ChainBuilder.create(gloasSpec);
+    final SignedBlockAndState genesis = chainBuilder.generateGenesis();
+    final SignedBlockAndState ancestor = chainBuilder.generateBlockAtSlot(ONE);
+    final SignedBlockAndState head = chainBuilder.generateBlockAtSlot(2);
+    final ForkChoiceNode fullAncestor = ForkChoiceNode.createFull(ancestor.getRoot());
+    final ForkChoiceNode baseHead = ForkChoiceNode.createBase(head.getRoot());
+    final ProtoArray protoArray = createProtoArray(gloasSpec, head.getState());
+    addBlockToProtoArray(gloasSpec, protoArray, genesis);
+    addBlockToProtoArray(gloasSpec, protoArray, ancestor);
+    addProjectedNodeToProtoArray(
+        gloasSpec,
+        protoArray,
+        ancestor,
+        fullAncestor,
+        ForkChoiceNode.createBase(ancestor.getRoot()),
+        ONE,
+        dataStructureUtil.randomBytes32(),
+        true);
+    addProjectedNodeToProtoArray(
+        gloasSpec,
+        protoArray,
+        head,
+        baseHead,
+        fullAncestor,
+        ONE,
+        dataStructureUtil.randomBytes32(),
+        true);
+    final ForkChoiceStrategy strategy = ForkChoiceStrategy.initialize(gloasSpec, protoArray);
+
+    final ProtoNodeData ancestorData =
+        strategy.getAncestorNodeData(baseHead, ancestor.getSlot()).orElseThrow();
+
+    assertThat(ancestorData.getRoot()).isEqualTo(ancestor.getRoot());
+    assertThat(ancestorData.getPayloadStatus())
+        .isEqualTo(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+    assertThat(ancestorData.isOptimistic()).isTrue();
+  }
+
+  @Test
   void getChainHeads() {
     final StorageSystem storageSystem = initStorageSystem();
     final SignedBlockAndState head = storageSystem.chainUpdater().advanceChain(5);
@@ -564,6 +646,8 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
     final ForkChoiceStrategy strategy = getProtoArray(storageSystem);
     // Genesis = 0, block1 = 1, block2 = 2, block3 = 3, block4 = 4
     strategy.setPruneThreshold(3);
+    strategy.onUnsatisfiedInclusionList(block1.getRoot());
+    strategy.onUnsatisfiedInclusionList(block4.getRoot());
 
     // Not pruned because threshold isn't reached.
     strategy.applyUpdate(
@@ -572,6 +656,8 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
     assertThat(strategy.contains(block2.getRoot())).isTrue();
     assertThat(strategy.contains(block3.getRoot())).isTrue();
     assertThat(strategy.contains(block4.getRoot())).isTrue();
+    assertThat(strategy.satisfiesInclusionList(block1.getRoot())).isFalse();
+    assertThat(strategy.satisfiesInclusionList(block4.getRoot())).isFalse();
 
     // Prune when threshold is exceeded
     strategy.applyUpdate(
@@ -580,6 +666,8 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
     assertThat(strategy.contains(block2.getRoot())).isFalse();
     assertThat(strategy.contains(block3.getRoot())).isTrue();
     assertThat(strategy.contains(block4.getRoot())).isTrue();
+    assertThat(strategy.satisfiesInclusionList(block1.getRoot())).isTrue();
+    assertThat(strategy.satisfiesInclusionList(block4.getRoot())).isFalse();
   }
 
   @Test
@@ -1261,6 +1349,8 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
     addProjectedNodeToProtoArray(
         gloasSpec, protoArray, blockC, emptyC, baseC, ONE, payloadHashB, true);
     final ForkChoiceStrategy strategy = ForkChoiceStrategy.initialize(gloasSpec, protoArray);
+    strategy.onUnsatisfiedInclusionList(blockC.getRoot());
+    assertThat(strategy.satisfiesInclusionList(blockC.getRoot())).isFalse();
 
     final SlotAndForkChoiceNode headSentToEl =
         strategy.findHead(ZERO, genesisCheckpoint, genesisCheckpoint);
@@ -1291,6 +1381,7 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
             strategy.getBlockData(blockC.getRoot(), ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY))
         .describedAs("EMPTY(C)")
         .isEmpty();
+    assertThat(strategy.satisfiesInclusionList(blockC.getRoot())).isTrue();
     // B's block and EMPTY variant are untouched
     assertThat(
             strategy

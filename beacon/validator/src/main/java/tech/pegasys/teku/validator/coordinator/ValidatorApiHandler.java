@@ -98,6 +98,8 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerP
 import tech.pegasys.teku.spec.datastructures.execution.Transaction;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionList;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.SignedInclusionList;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
@@ -645,74 +647,62 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
     final SafeFuture<Optional<AttestationData>> result =
         forkChoiceTrigger
             .prepareForAttestationProduction(slot)
+            .thenApply(__ -> getAttestationHeadNode(slot))
             .thenCompose(
-                __ ->
-                    combinedChainDataClient
-                        .getSignedBlockAndStateInEffectAtSlot(slot)
+                selectedHead ->
+                    getAttestationHeadBlockAndState(
+                            slot, selectedHead.map(AttestationHeadSelection::forkChoiceNode))
                         .thenCompose(
                             maybeBlockAndState -> {
                               if (maybeBlockAndState.isEmpty()) {
                                 return SafeFuture.completedFuture(Optional.empty());
                               }
                               final SignedBlockAndState blockAndState = maybeBlockAndState.get();
-                              final BeaconBlock block = blockAndState.getBlock().getMessage();
-                              final Optional<Bytes32> maybeAttesterHeadRoot =
-                                  combinedChainDataClient
-                                      .getStore()
-                                      .getInclusionListAttesterHead(block.getRoot());
-                              if (maybeAttesterHeadRoot.isEmpty()) {
-                                return SafeFuture.failedFuture(
-                                    new IllegalArgumentException(
-                                        String.format(
-                                            "Unable to create attestation for slot %s. No suitable block available.",
-                                            slot)));
-                              }
-                              final Bytes32 attesterHeadRoot = maybeAttesterHeadRoot.get();
                               // The head block must not be optimistically synced.
-                              if (combinedChainDataClient.isOptimisticBlock(attesterHeadRoot)) {
+                              if (selectedHead
+                                  .map(AttestationHeadSelection::optimistic)
+                                  .orElseGet(
+                                      () ->
+                                          combinedChainDataClient.isOptimisticBlock(
+                                              blockAndState.getRoot()))) {
                                 return NodeSyncingException.failedFuture();
                               }
-                              return getAttesterHeadBlockAndState(attesterHeadRoot, blockAndState)
-                                  .thenCompose(
-                                      maybeAttesterHeadBlockAndState ->
-                                          maybeAttesterHeadBlockAndState
-                                              .map(
-                                                  attesterHeadBlockAndState ->
-                                                      createAttestationData(
-                                                          epoch,
-                                                          minQuerySlot,
-                                                          slot,
-                                                          committeeIndex,
-                                                          attesterHeadBlockAndState))
-                                              .orElseGet(
-                                                  () ->
-                                                      SafeFuture.failedFuture(
-                                                          new IllegalArgumentException(
-                                                              String.format(
-                                                                  "Unable to create attestation for slot %s. No suitable block available.",
-                                                                  slot)))));
+                              return createAttestationData(
+                                  epoch,
+                                  minQuerySlot,
+                                  slot,
+                                  committeeIndex,
+                                  blockAndState,
+                                  selectedHead.map(AttestationHeadSelection::forkChoiceNode));
                             }));
     result.always(context::stopTimer);
     return result;
   }
 
-  private SafeFuture<Optional<SignedBlockAndState>> getAttesterHeadBlockAndState(
-      final Bytes32 attesterHeadRoot, final SignedBlockAndState candidateBlockAndState) {
-    if (attesterHeadRoot.equals(candidateBlockAndState.getRoot())) {
-      return SafeFuture.completedFuture(Optional.of(candidateBlockAndState));
+  private SafeFuture<Optional<SignedBlockAndState>> getAttestationHeadBlockAndState(
+      final UInt64 slot, final Optional<ForkChoiceNode> selectedHead) {
+    if (!spec.isExecutionPayloadEnvelopeAvailableAtSlot(slot)) {
+      return combinedChainDataClient.getSignedBlockAndStateInEffectAtSlot(slot);
     }
 
-    return combinedChainDataClient
-        .getStore()
-        .getBlockIfAvailable(attesterHeadRoot)
+    return selectedHead
         .map(
-            attesterHeadBlock ->
+            node ->
                 combinedChainDataClient
-                    .getStateByBlockRoot(attesterHeadRoot)
-                    .thenApply(
-                        maybeState ->
-                            maybeState.map(
-                                state -> new SignedBlockAndState(attesterHeadBlock, state))))
+                    .getBlockByBlockRoot(node.blockRoot())
+                    .thenCompose(
+                        maybeBlock ->
+                            maybeBlock
+                                .map(
+                                    block ->
+                                        combinedChainDataClient
+                                            .getStateByBlockRoot(node.blockRoot())
+                                            .thenApply(
+                                                maybeState ->
+                                                    maybeState.map(
+                                                        state ->
+                                                            new SignedBlockAndState(block, state))))
+                                .orElseGet(() -> SafeFuture.completedFuture(Optional.empty()))))
         .orElseGet(() -> SafeFuture.completedFuture(Optional.empty()));
   }
 
@@ -721,10 +711,13 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
       final UInt64 minQuerySlot,
       final UInt64 slot,
       final int committeeIndex,
-      final SignedBlockAndState blockAndState) {
+      final SignedBlockAndState blockAndState,
+      final Optional<ForkChoiceNode> selectedHead) {
     final BeaconBlock block = blockAndState.getBlock().getMessage();
     final int computedCommitteeIndex =
-        computeCommitteeIndexForAttestation(slot, block, committeeIndex);
+        spec.atSlot(slot)
+            .getForkChoiceUtil()
+            .computeCommitteeIndexForAttestation(slot, block, committeeIndex, selectedHead);
 
     if (blockAndState.getSlot().compareTo(minQuerySlot) < 0) {
       // The current effective block is too far in the past - so roll the state forward to the
@@ -743,13 +736,36 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
     return SafeFuture.completedFuture(Optional.of(attestationData));
   }
 
-  private int computeCommitteeIndexForAttestation(
-      final UInt64 slot, final BeaconBlock block, final int committeeIndex) {
-    return spec.atSlot(slot)
-        .getForkChoiceUtil()
-        .computeCommitteeIndexForAttestation(
-            slot, block, committeeIndex, combinedChainDataClient.getStore());
+  private Optional<AttestationHeadSelection> getAttestationHeadNode(final UInt64 slot) {
+    if (!spec.isExecutionPayloadEnvelopeAvailableAtSlot(slot)) {
+      return Optional.empty();
+    }
+    return combinedChainDataClient
+        .getChainHead()
+        .flatMap(
+            head -> {
+              if (head.getSlot().isLessThanOrEqualTo(slot)) {
+                return Optional.of(
+                    new AttestationHeadSelection(head.getForkChoiceNode(), head.isOptimistic()));
+              }
+              // Preserve the payload variant selected by the canonical descendant
+              final ProtoNodeData ancestorData =
+                  combinedChainDataClient
+                      .getStore()
+                      .getForkChoiceStrategy()
+                      .getAncestorNodeData(head.getForkChoiceNode(), slot)
+                      .orElseThrow(
+                          () ->
+                              new IllegalStateException(
+                                  "Canonical head data is unavailable for slot " + slot));
+              final ForkChoiceNode ancestor =
+                  new ForkChoiceNode(ancestorData.getRoot(), ancestorData.getPayloadStatus());
+              return Optional.of(
+                  new AttestationHeadSelection(ancestor, ancestorData.isOptimistic()));
+            });
   }
+
+  private record AttestationHeadSelection(ForkChoiceNode forkChoiceNode, boolean optimistic) {}
 
   private AttestationData createAttestationData(
       final BeaconBlock block,

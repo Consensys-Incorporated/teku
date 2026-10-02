@@ -18,6 +18,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import com.google.common.annotations.VisibleForTesting;
 import it.unimi.dsi.fastutil.ints.IntSet;
 import java.util.Optional;
+import java.util.function.Predicate;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
@@ -52,13 +53,20 @@ class ForkChoiceModelGloas implements ForkChoiceModel {
   private final int payloadTimelyThreshold;
   private final int dataAvailabilityTimelyThreshold;
   private final PayloadTimelinessCommitteeVoteTracker payloadTimelinessCommitteeVoteTracker;
+  private final Predicate<Bytes32> satisfiesInclusionList;
 
   ForkChoiceModelGloas(final SpecConfigGloas specConfig) {
+    this(specConfig, __ -> true);
+  }
+
+  ForkChoiceModelGloas(
+      final SpecConfigGloas specConfig, final Predicate<Bytes32> satisfiesInclusionList) {
     this(
         specConfig,
         specConfig.getPayloadTimelyThreshold(),
         specConfig.getDataAvailabilityTimelyThreshold(),
-        new PayloadTimelinessCommitteeVoteTracker());
+        new PayloadTimelinessCommitteeVoteTracker(),
+        satisfiesInclusionList);
   }
 
   ForkChoiceModelGloas(
@@ -66,10 +74,25 @@ class ForkChoiceModelGloas implements ForkChoiceModel {
       final int payloadTimelyThreshold,
       final int dataAvailabilityTimelyThreshold,
       final PayloadTimelinessCommitteeVoteTracker payloadTimelinessCommitteeVoteTracker) {
+    this(
+        specConfig,
+        payloadTimelyThreshold,
+        dataAvailabilityTimelyThreshold,
+        payloadTimelinessCommitteeVoteTracker,
+        __ -> true);
+  }
+
+  private ForkChoiceModelGloas(
+      final SpecConfigGloas specConfig,
+      final int payloadTimelyThreshold,
+      final int dataAvailabilityTimelyThreshold,
+      final PayloadTimelinessCommitteeVoteTracker payloadTimelinessCommitteeVoteTracker,
+      final Predicate<Bytes32> satisfiesInclusionList) {
     this.firstGloasSlot = specConfig.getGloasForkEpoch().times(specConfig.getSlotsPerEpoch());
     this.payloadTimelyThreshold = payloadTimelyThreshold;
     this.dataAvailabilityTimelyThreshold = dataAvailabilityTimelyThreshold;
     this.payloadTimelinessCommitteeVoteTracker = payloadTimelinessCommitteeVoteTracker;
+    this.satisfiesInclusionList = satisfiesInclusionList;
   }
 
   @Override
@@ -497,6 +520,10 @@ class ForkChoiceModelGloas implements ForkChoiceModel {
       return false;
     }
 
+    // Heze: a valid payload can still be ineligible for extension due to its inclusion lists.
+    if (!satisfiesInclusionList.test(blockRoot)) {
+      return false;
+    }
     final boolean payloadIsTimely = payloadTimeliness(blockNodeVariants.get(), true);
     final boolean payloadDataIsAvailable = payloadDataAvailability(blockNodeVariants.get(), true);
     if (payloadIsTimely && payloadDataIsAvailable) {

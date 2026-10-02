@@ -14,6 +14,7 @@
 package tech.pegasys.teku.spec.logic.versions.gloas.util;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -178,6 +179,34 @@ class ForkChoiceUtilGloasTest {
     // PAYLOAD_ATTESTATION_DUE_BPS remains 7500 (75%), so the payload deadline is now earlier
     assertThat(forkChoiceUtil.getPayloadDueMillis())
         .isNotEqualTo(forkChoiceUtil.getPayloadAttestationDueMillis());
+  }
+
+  @Test
+  void computeCommitteeIndexForAttestation_shouldUseZeroForPreGloasHead() {
+    final BeaconBlock preGloasBlock = dataStructureUtil.randomBeaconBlock(gloasSlot.minus(1));
+
+    assertThat(
+            forkChoiceUtil.computeCommitteeIndexForAttestation(
+                gloasSlot,
+                preGloasBlock,
+                0,
+                Optional.of(ForkChoiceNode.createBase(preGloasBlock.getRoot()))))
+        .isZero();
+  }
+
+  @Test
+  void computeCommitteeIndexForAttestation_shouldRejectPendingGloasHead() {
+    final BeaconBlock gloasBlock = dataStructureUtil.randomBeaconBlock(gloasSlot);
+
+    assertThatThrownBy(
+            () ->
+                forkChoiceUtil.computeCommitteeIndexForAttestation(
+                    gloasSlot.increment(),
+                    gloasBlock,
+                    0,
+                    Optional.of(ForkChoiceNode.createBase(gloasBlock.getRoot()))))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("Canonical payload status is pending");
   }
 
   @Test
