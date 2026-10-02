@@ -31,6 +31,9 @@ specrefs:
       # Constant in the KZG library
       - G2_POINT_AT_INFINITY
 
+      # Remove when consensus-specs PR#5670 is merged and included in a spec release
+      - COMMITTEE_WEIGHT_ESTIMATION_ADJUSTMENT_FACTOR#phase0
+
       # Not defined, implemented differently
       - PTC_TIMELINESS_INDEX#gloas
       - NUM_BLOCK_TIMELINESS_DEADLINES#gloas
@@ -210,6 +213,9 @@ specrefs:
     functions:
       # Unnecessary
       - xor#phase0
+
+      # Remove when consensus-specs PR#5670 is merged and included in a spec release
+      - adjust_committee_weight_estimate_to_ensure_safety#phase0
 
       # Will not implement: Deprecated
       - get_pow_block_at_terminal_total_difficulty#bellatrix

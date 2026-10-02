@@ -83,21 +83,6 @@
 
     </spec>
 
-- name: adjust_committee_weight_estimate_to_ensure_safety#phase0
-  sources:
-    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/fastconfirmation/FastConfirmationRuleUtil.java
-      search: static UInt64 adjustCommitteeWeightEstimateToEnsureSafety(
-  spec: |
-    <spec fn="adjust_committee_weight_estimate_to_ensure_safety" fork="phase0" hash="fc740ba6">
-    def adjust_committee_weight_estimate_to_ensure_safety(estimate: Gwei) -> Gwei:
-        """
-        Return adjusted ``estimate`` of the weight of a committee for a sequence of slots
-        spanning an epoch boundary that does not cover any full epoch.
-        """
-        ceil = (estimate + 999) // 1000
-        return ceil * (1000 + COMMITTEE_WEIGHT_ESTIMATION_ADJUSTMENT_FACTOR)
-    </spec>
-
 - name: apply_deposit#phase0
   sources:
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/block/AbstractBlockProcessor.java
@@ -2044,8 +2029,8 @@
 
 - name: estimate_committee_weight_between_slots#phase0
   sources:
-    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/fastconfirmation/FastConfirmationRuleUtil.java
-      search: static UInt64 estimateCommitteeWeightBetweenSlots(
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/fastconfirmation/FastConfirmationCalculator.java
+      search: UInt64 computeCommitteeWeightBetweenSlots(
   spec: |
     <spec fn="estimate_committee_weight_between_slots" fork="phase0" hash="802eaa0b">
     def estimate_committee_weight_between_slots(
