@@ -35,7 +35,10 @@ public interface ProposerConfigPropertiesProvider {
 
   Optional<BLSPublicKey> getBuilderRegistrationPublicKeyOverride(BLSPublicKey publicKey);
 
+  // only used pre-Gloas for validator registrations
   boolean isBuilderEnabled(BLSPublicKey publicKey);
+
+  ResolvedBuilderConfig resolveBuilderConfig(BLSPublicKey publicKey);
 
   SafeFuture<Void> refresh();
 
