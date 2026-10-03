@@ -52,6 +52,8 @@ public class EventSourceBeaconChainEventAdapter
   private static final Logger LOG = LogManager.getLogger();
 
   private static final Duration MAX_RECONNECT_TIME = Duration.ofSeconds(12);
+  private final List<EventType> primaryEventTypes = new ArrayList<>();
+  private final List<EventType> fallbackEventTypes = new ArrayList<>();
 
   private final CountDownLatch runningLatch = new CountDownLatch(1);
 
@@ -65,8 +67,6 @@ public class EventSourceBeaconChainEventAdapter
   private final ValidatorLogger validatorLogger;
   private final BeaconChainEventAdapter timeBasedEventAdapter;
   private final EventSourceHandler eventSourceHandler;
-
-  private final boolean shutdownWhenValidatorSlashedEnabled;
 
   public EventSourceBeaconChainEventAdapter(
       final BeaconNodeReadinessManager beaconNodeReadinessManager,
@@ -89,7 +89,15 @@ public class EventSourceBeaconChainEventAdapter
     this.eventSourceHandler =
         new EventSourceHandler(
             validatorTimingChannel, metricsSystem, generateEarlyAttestations, spec);
-    this.shutdownWhenValidatorSlashedEnabled = shutdownWhenValidatorSlashedEnabled;
+
+    primaryEventTypes.add(EventType.head_v2);
+    fallbackEventTypes.add(EventType.head);
+    if (shutdownWhenValidatorSlashedEnabled) {
+      primaryEventTypes.add(EventType.attester_slashing);
+      primaryEventTypes.add(EventType.proposer_slashing);
+      fallbackEventTypes.add(EventType.attester_slashing);
+      fallbackEventTypes.add(EventType.proposer_slashing);
+    }
   }
 
   @Override
@@ -97,7 +105,7 @@ public class EventSourceBeaconChainEventAdapter
     // EventSource uses a daemon thread which allows the process to exit because all threads are
     // daemons, but while we're subscribed to events we should just wait for the next event, not
     // exit.  So create a non-daemon thread that lives until the adapter is stopped.
-    eventSource = createEventSource(primaryBeaconNodeApi);
+    eventSource = createEventSource(primaryBeaconNodeApi, primaryEventTypes);
     currentBeaconNodeUsedForEventStreaming = primaryBeaconNodeApi;
     eventSource.start();
     new Thread(this::waitForExit).start();
@@ -141,14 +149,8 @@ public class EventSourceBeaconChainEventAdapter
   }
 
   @VisibleForTesting
-  BackgroundEventSource createEventSource(final RemoteValidatorApiChannel beaconNodeApi) {
-
-    final List<EventType> eventTypes = new ArrayList<>();
-    eventTypes.add(EventType.head);
-    if (shutdownWhenValidatorSlashedEnabled) {
-      eventTypes.add(EventType.attester_slashing);
-      eventTypes.add(EventType.proposer_slashing);
-    }
+  BackgroundEventSource createEventSource(
+      final RemoteValidatorApiChannel beaconNodeApi, final List<EventType> eventTypes) {
     final HttpUrl eventSourceUrl =
         createEventStreamSourceUrl(beaconNodeApi.getEndpoint(), eventTypes);
 
@@ -160,7 +162,13 @@ public class EventSourceBeaconChainEventAdapter
     return new BackgroundEventSource.Builder(eventSourceHandler, eventSourceBuilder)
         .connectionErrorHandler(
             __ -> {
-              switchToFailoverEventStreamIfAvailable();
+              if (eventTypes.contains(EventType.head_v2)) {
+                // if eventTypes contains head_v2, we should try using the same connection details
+                // but subscribing to head instead
+                switchToFailoverEventTypes(beaconNodeApi);
+              } else {
+                switchToFailoverEventStreamIfAvailable();
+              }
               return Action.PROCEED;
             })
         .build();
@@ -202,18 +210,27 @@ public class EventSourceBeaconChainEventAdapter
     return false;
   }
 
-  private void switchToFailoverEventStream(final RemoteValidatorApiChannel beaconNodeApi) {
+  private synchronized void switchToFailoverEventTypes(
+      final RemoteValidatorApiChannel beaconNodeApi) {
     eventSource.close();
-    eventSource = createEventSource(beaconNodeApi);
+    eventSource = createEventSource(beaconNodeApi, fallbackEventTypes);
+    currentBeaconNodeUsedForEventStreaming = beaconNodeApi;
+    eventSource.start();
+  }
+
+  private synchronized void switchToFailoverEventStream(
+      final RemoteValidatorApiChannel beaconNodeApi) {
+    eventSource.close();
+    eventSource = createEventSource(beaconNodeApi, primaryEventTypes);
     currentBeaconNodeUsedForEventStreaming = beaconNodeApi;
     validatorLogger.switchingToFailoverBeaconNodeForEventStreaming(
         eventSource.getEventSource().getOrigin());
     eventSource.start();
   }
 
-  private void switchBackToPrimaryEventStream() {
+  private synchronized void switchBackToPrimaryEventStream() {
     eventSource.close();
-    eventSource = createEventSource(primaryBeaconNodeApi);
+    eventSource = createEventSource(primaryBeaconNodeApi, primaryEventTypes);
     currentBeaconNodeUsedForEventStreaming = primaryBeaconNodeApi;
     validatorLogger.switchingBackToPrimaryBeaconNodeForEventStreaming();
     eventSource.start();
