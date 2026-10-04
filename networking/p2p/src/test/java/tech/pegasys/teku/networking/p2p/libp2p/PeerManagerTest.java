@@ -19,6 +19,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -326,6 +327,35 @@ public class PeerManagerTest {
     verify(network).connect(tcpMultiaddr);
     verify(reputationManager).reportInitiatedConnectionFailed(peerAddress);
     verify(reputationManager, never()).reportInitiatedConnectionSuccessful(peerAddress);
+  }
+
+  @Test
+  public void connect_shouldNotDropNewPendingConnectionWhenPreviousAttemptCompletes() {
+    final Multiaddr multiaddr = Multiaddr.fromString("/ip4/127.0.0.1/tcp/9000");
+    final MultiaddrPeerAddress peerAddress = new MultiaddrPeerAddress(new MockNodeId(1), multiaddr);
+    final SafeFuture<Connection> firstDial = new SafeFuture<>();
+    final SafeFuture<Connection> secondDial = new SafeFuture<>();
+    when(network.connect(multiaddr)).thenReturn(firstDial).thenReturn(secondDial);
+
+    // Two callers share the first pending attempt, each registering its own cleanup
+    final SafeFuture<Peer> firstCaller = peerManager.connect(peerAddress, network);
+    final SafeFuture<Peer> secondCaller = peerManager.connect(peerAddress, network);
+    // A new attempt starts as soon as the second caller observes the failure, i.e. after the
+    // second caller's cleanup ran but before the first caller's cleanup runs
+    final List<SafeFuture<Peer>> laterCallers = new ArrayList<>();
+    final SafeFuture<Void> thirdCaller =
+        secondCaller
+            .exceptionally(__ -> null)
+            .thenRun(() -> laterCallers.add(peerManager.connect(peerAddress, network)));
+
+    firstDial.completeExceptionally(new RuntimeException("Nope"));
+    assertThat(firstCaller).isCompletedExceptionally();
+    assertThat(thirdCaller).isCompleted();
+
+    // The new attempt must still be pending, so another caller joins it instead of dialing again
+    laterCallers.add(peerManager.connect(peerAddress, network));
+    verify(network, times(2)).connect(multiaddr);
+    assertThat(laterCallers).allMatch(future -> !future.isDone());
   }
 
   @Test

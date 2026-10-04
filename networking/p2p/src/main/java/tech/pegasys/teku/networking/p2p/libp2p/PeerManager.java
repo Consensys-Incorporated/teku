@@ -134,9 +134,11 @@ public class PeerManager implements ConnectionHandler {
   }
 
   public SafeFuture<Peer> connect(final MultiaddrPeerAddress peer, final Network network) {
-    return pendingConnections
-        .computeIfAbsent(peer.getId(), __ -> doConnect(peer, network))
-        .whenComplete((result, error) -> pendingConnections.remove(peer.getId()));
+    final SafeFuture<Peer> pendingConnection =
+        pendingConnections.computeIfAbsent(peer.getId(), __ -> doConnect(peer, network));
+    // Remove only our own attempt: a later caller may have already started a new one
+    return pendingConnection.whenComplete(
+        (result, error) -> pendingConnections.remove(peer.getId(), pendingConnection));
   }
 
   private SafeFuture<Peer> doConnect(final MultiaddrPeerAddress peer, final Network network) {
