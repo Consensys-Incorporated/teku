@@ -17,3 +17,4 @@
  - The ENR `eth2` field now advertises the current fork version as `next_fork_version` when a BPO fork is scheduled before the next hard fork, as the Fulu p2p specification requires.
  - A block production request that fails no longer keeps its preparation for the slot, so a retry within the same slot starts from a fresh preparation.
  - Fixed valid voluntary exits and slashings referring to an earlier fork being rejected on gossip, which wrongly penalised the peers forwarding them.
+ - Peers discovered with both QUIC and TCP addresses are now dialed over TCP when the QUIC dial fails, instead of being retried over QUIC only. [#11397](https://github.com/Consensys/teku/issues/11397)

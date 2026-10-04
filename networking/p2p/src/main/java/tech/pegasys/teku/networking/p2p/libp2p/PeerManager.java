@@ -143,6 +143,21 @@ public class PeerManager implements ConnectionHandler {
     LOG.debug("Connecting to {}", peer);
 
     return SafeFuture.of(() -> network.connect(peer.getMultiaddr()))
+        .exceptionallyCompose(
+            error ->
+                peer.getFallbackMultiaddr()
+                    // A duplicate connection means the peer is already connected, nothing to retry
+                    .filter(__ -> !isPeerAlreadyConnected(error))
+                    .map(
+                        fallbackMultiaddr -> {
+                          LOG.debug(
+                              "Failed to connect to {} ({}), retrying via {}",
+                              peer,
+                              Throwables.getRootCause(error).getMessage(),
+                              fallbackMultiaddr);
+                          return SafeFuture.of(() -> network.connect(fallbackMultiaddr));
+                        })
+                    .orElseGet(() -> SafeFuture.failedFuture(error)))
         .thenApply(
             connection -> {
               final LibP2PNodeId nodeId =
@@ -169,10 +184,14 @@ public class PeerManager implements ConnectionHandler {
   }
 
   private CompletionStage<Peer> handleConcurrentConnectionInitiation(final Throwable error) {
-    final Throwable rootCause = Throwables.getRootCause(error);
-    return rootCause instanceof PeerAlreadyConnectedException
-        ? SafeFuture.completedFuture(((PeerAlreadyConnectedException) rootCause).getPeer())
+    return isPeerAlreadyConnected(error)
+        ? SafeFuture.completedFuture(
+            ((PeerAlreadyConnectedException) Throwables.getRootCause(error)).getPeer())
         : SafeFuture.failedFuture(error);
+  }
+
+  private static boolean isPeerAlreadyConnected(final Throwable error) {
+    return Throwables.getRootCause(error) instanceof PeerAlreadyConnectedException;
   }
 
   public Optional<Peer> getPeer(final NodeId id) {
