@@ -42,7 +42,14 @@ jobs:
         uses: ./.github/actions/prepare
       # v4.0.0
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd 
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+        with:
+          # Pull base images through the GCR mirror but fall back to docker.io when the mirror
+          # is missing a blob. BASE_IMAGE_PREFIX below points the Dockerfiles at docker.io so
+          # the fallback can kick in; everywhere else they default to the mirror.
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
       - name: Download assemble-output
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -119,6 +126,7 @@ jobs:
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache          
           build-args: |
+            BASE_IMAGE_PREFIX=docker.io/library/
             VERSION=${{ steps.jdkDetails.outputs.buildVersion }}
             VCS_REF=${{ github.sha }}
             BUILD_DATE=${{ steps.jdkDetails.outputs.build_date }}
