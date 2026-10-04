@@ -1,4 +1,4 @@
-FROM mirror.gcr.io/library/eclipse-temurin:25 AS jre-build
+FROM eclipse-temurin:25 AS jre-build
 
 # Create a custom Java runtime
 RUN $JAVA_HOME/bin/jlink \
@@ -16,7 +16,7 @@ RUN $JAVA_HOME/bin/jlink \
          --compress=2 \
          --output /javaruntime
 
-FROM mirror.gcr.io/library/ubuntu:24.04
+FROM ubuntu:24.04
 ENV JAVA_HOME=/opt/java/openjdk
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 COPY --from=jre-build /javaruntime $JAVA_HOME
