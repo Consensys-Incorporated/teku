@@ -43,8 +43,6 @@ public class HezeTimeBasedEventAdapter extends GloasTimeBasedEventAdapter {
     scheduleAll(
         nextSlotStartTimeMillis,
         expirationTimeMillis,
-        new ScheduledEvent(
-            specVersion.getForkChoiceUtil().getInclusionListDueMillis().orElseThrow(),
-            this::onInclusionListCreationDue));
+        new ScheduledEvent(0, this::onInclusionListCreationDue));
   }
 }
