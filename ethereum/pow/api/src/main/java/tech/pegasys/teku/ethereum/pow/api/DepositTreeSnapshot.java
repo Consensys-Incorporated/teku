@@ -33,7 +33,7 @@ public class DepositTreeSnapshot
     extends Container5<
         DepositTreeSnapshot, SszList<SszBytes32>, SszBytes32, SszUInt64, SszBytes32, SszUInt64> {
 
-  private static class DepositTreeSnapshotSchema
+  static class DepositTreeSnapshotSchema
       extends ContainerSchema5<
           DepositTreeSnapshot, SszList<SszBytes32>, SszBytes32, SszUInt64, SszBytes32, SszUInt64> {
 

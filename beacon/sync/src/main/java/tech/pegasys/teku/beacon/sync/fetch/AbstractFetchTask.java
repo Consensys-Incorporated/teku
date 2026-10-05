@@ -33,7 +33,7 @@ import tech.pegasys.teku.networking.p2p.peer.NodeId;
 public abstract class AbstractFetchTask<K, T> {
 
   private static final Comparator<Eth2Peer> SHUFFLING_COMPARATOR =
-      Comparator.comparing(p -> Math.random());
+      Comparator.comparingDouble(p -> Math.random());
 
   private final AtomicInteger numberOfRuns = new AtomicInteger(0);
   private final Set<NodeId> queriedPeers = Collections.newSetFromMap(new ConcurrentHashMap<>());
@@ -100,7 +100,7 @@ public abstract class AbstractFetchTask<K, T> {
         .streamPeers()
         .filter(this::peerIsNotQueried)
         .min(
-            Comparator.comparing(Eth2Peer::getOutstandingRequests)
+            Comparator.comparingInt(Eth2Peer::getOutstandingRequests)
                 .thenComparing(SHUFFLING_COMPARATOR));
   }
 

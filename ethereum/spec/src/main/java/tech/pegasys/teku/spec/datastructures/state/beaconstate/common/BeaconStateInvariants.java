@@ -72,7 +72,7 @@ public class BeaconStateInvariants {
     return SLOT_SCHEMA.sszDeserialize(slotData).get();
   }
 
-  @SuppressWarnings("ReferenceComparison")
+  @SuppressWarnings({"ReferenceComparison", "ReferenceEquality"})
   static boolean equals(final BeaconState state, final Object obj) {
     if (Objects.isNull(obj)) {
       return false;

@@ -113,13 +113,13 @@ class BlockProposalUtilFuluTest {
                           dutiesEpoch))
           .hasMessageContaining("Attempting to calculate dependent root");
     } else {
-      Bytes32 expected = Bytes32.ZERO;
-      switch (expectedResult) {
-        case PREVIOUS -> expected = previousTargetRoot;
-        case CURRENT -> expected = currentTargetRoot;
-        case HEAD -> expected = headBlockRoot;
-        case FAILURE -> expected = Bytes32.ZERO;
-      }
+      final Bytes32 expected =
+          switch (expectedResult) {
+            case PREVIOUS -> previousTargetRoot;
+            case CURRENT -> currentTargetRoot;
+            case HEAD -> headBlockRoot;
+            case FAILURE -> Bytes32.ZERO;
+          };
       LOG.debug("Expected: {}", expected);
       assertThat(
               spec.getGenesisSpec()

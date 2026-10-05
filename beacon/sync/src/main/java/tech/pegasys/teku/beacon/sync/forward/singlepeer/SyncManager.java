@@ -262,7 +262,7 @@ public class SyncManager extends Service {
         .max(
             Comparator.comparing(Eth2Peer::finalizedEpoch)
                 .thenComparing(peer -> peer.getStatus().getHeadSlot())
-                .thenComparing(p -> Math.random()));
+                .thenComparingDouble(p -> Math.random()));
   }
 
   private void onNewPeer(final Eth2Peer peer) {

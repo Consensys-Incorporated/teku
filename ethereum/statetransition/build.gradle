@@ -7,6 +7,7 @@ idea {
 dependencies {
 	api project(':ethereum:events')
 
+	implementation 'com.google.errorprone:error_prone_annotations'
 	implementation project(':ethereum:performance-trackers')
 	implementation project(':ethereum:execution-types')
 	implementation project(':ethereum:dataproviders')

@@ -610,7 +610,7 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
                 LOG.error("Failed to calculate payload attributes for slot {}", blockSlot, error));
   }
 
-  @SuppressWarnings("ReferenceComparison")
+  @SuppressWarnings({"ReferenceComparison", "ReferenceEquality"})
   private boolean isStaleForkChoiceUpdateData(
       final ForkChoiceUpdateData localForkChoiceUpdateData) {
     return forkChoiceUpdateData != localForkChoiceUpdateData;

@@ -62,12 +62,12 @@ public class MuxFirewall implements ChannelVisitor<Connection> {
     this.currentTimeSupplier = currentTimeSupplier;
   }
 
-  protected void remoteParallelOpenStreamLimitExceeded(final MuxFirewallHandler peerMplexHandler) {
+  private void remoteParallelOpenStreamLimitExceeded(final MuxFirewallHandler peerMplexHandler) {
     LOG.debug("Abruptly closing peer connection due to exceeding parallel open streams limit");
     FutureUtil.ignoreFuture(peerMplexHandler.getConnection().close());
   }
 
-  protected void remoteOpenFrameRateLimitExceeded(final MuxFirewallHandler peerMplexHandler) {
+  private void remoteOpenFrameRateLimitExceeded(final MuxFirewallHandler peerMplexHandler) {
     LOG.debug("Abruptly closing peer connection due to exceeding open mux frame rate limit");
     FutureUtil.ignoreFuture(peerMplexHandler.getConnection().close());
   }

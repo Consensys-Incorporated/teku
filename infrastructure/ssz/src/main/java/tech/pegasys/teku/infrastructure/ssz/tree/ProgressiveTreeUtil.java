@@ -226,7 +226,7 @@ public class ProgressiveTreeUtil {
     final TreeNode newRight =
         updateLevel(right, level + 1, maxLevel, updatesByLevel, levelDefaults);
 
-    @SuppressWarnings("ReferenceComparison")
+    @SuppressWarnings({"ReferenceComparison", "ReferenceEquality"})
     boolean unchanged = left == originalLeft && newRight == right;
     if (unchanged) {
       return node; // structural sharing

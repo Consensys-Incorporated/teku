@@ -227,7 +227,7 @@ public class SafeFuture<T> extends CompletableFuture<T> {
    *     CompletableFuture#allOf(CompletableFuture[])}
    * @param futures the futures passed to allOf
    */
-  @SuppressWarnings({"FutureReturnValueIgnored", "ReferenceComparison"})
+  @SuppressWarnings({"FutureReturnValueIgnored", "ReferenceComparison", "ReferenceEquality"})
   public static void addSuppressedErrors(
       final Throwable completionException, final SafeFuture<?>[] futures) {
     Stream.of(futures)

@@ -101,7 +101,7 @@ public class SyncDataAccessor {
    *
    * @param path the path to write to
    * @param data the data to write
-   * @exception IOException if an IO error occurs while writing
+   * @throws IOException if an IO error occurs while writing
    */
   public void syncedWrite(final Path path, final Bytes data) throws IOException {
     if (atomicFileMoveSupport) {
