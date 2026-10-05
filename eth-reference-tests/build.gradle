@@ -8,6 +8,7 @@ configurations {
 dependencies {
 	refTestGenerator project(':eth-tests')
 
+	referenceTestImplementation 'com.google.errorprone:error_prone_annotations'
 	referenceTestImplementation project(':beacon:validator')
 	referenceTestImplementation project(':ethereum:networks')
 	referenceTestImplementation project(':ethereum:spec')

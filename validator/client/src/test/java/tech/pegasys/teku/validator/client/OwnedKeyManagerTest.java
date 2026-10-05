@@ -34,6 +34,7 @@ import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -504,6 +505,6 @@ class OwnedKeyManagerTest {
   private String getKeystore(final String fileName) throws IOException, URISyntaxException {
     final URL resource = Resources.getResource(fileName);
     FileInputStream fis = new FileInputStream(new File(resource.toURI()));
-    return IOUtils.toString(fis, "UTF-8");
+    return IOUtils.toString(fis, StandardCharsets.UTF_8);
   }
 }

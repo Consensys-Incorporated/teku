@@ -193,7 +193,7 @@ public class EventSourceBeaconChainEventAdapter
         failoverBeaconNodeApis.stream()
             .filter(beaconNodeReadinessManager::isReady)
             .filter(failover -> !currentEventStreamHasSameEndpoint(failover))
-            .max(Comparator.comparing(beaconNodeReadinessManager::getReadinessStatusWeight));
+            .max(Comparator.comparingInt(beaconNodeReadinessManager::getReadinessStatusWeight));
     if (readyFailover.isPresent()) {
       switchToFailoverEventStream(readyFailover.get());
       return true;

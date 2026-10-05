@@ -44,7 +44,7 @@ public record SubnetSubscription(int subnetId, UInt64 unsubscriptionSlot)
   @Override
   public int compareTo(@NotNull final SubnetSubscription o) {
     return Comparator.comparing(SubnetSubscription::unsubscriptionSlot)
-        .thenComparing(SubnetSubscription::subnetId)
+        .thenComparingInt(SubnetSubscription::subnetId)
         .compare(this, o);
   }
 

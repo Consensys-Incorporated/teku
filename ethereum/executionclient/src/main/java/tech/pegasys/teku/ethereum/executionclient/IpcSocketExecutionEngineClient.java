@@ -132,7 +132,7 @@ public class IpcSocketExecutionEngineClient extends AbstractExecutionEngineClien
     }
   }
 
-  @SuppressWarnings("ReferenceComparison")
+  @SuppressWarnings({"ReferenceComparison", "ReferenceEquality"})
   private void handleDisconnect(final Socket disconnectedSocket, final Throwable cause) {
     synchronized (this) {
       if (socket != disconnectedSocket) {

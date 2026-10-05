@@ -84,7 +84,7 @@ public class BeaconNodeReadinessManager extends Service implements ValidatorTimi
 
   public Iterator<? extends RemoteValidatorApiChannel> getFailoversInOrderOfReadiness() {
     return failoverBeaconNodeApis.stream()
-        .sorted(Comparator.comparing(this::getReadinessStatusWeight).reversed())
+        .sorted(Comparator.comparingInt(this::getReadinessStatusWeight).reversed())
         .iterator();
   }
 
@@ -168,7 +168,7 @@ public class BeaconNodeReadinessManager extends Service implements ValidatorTimi
         lastErrorTimestamp.get().plus(ERRORED_SECONDARY_READINESS_CHECK_INTERVAL_DELAY_MS));
   }
 
-  @SuppressWarnings("ReferenceComparison")
+  @SuppressWarnings({"ReferenceComparison", "ReferenceEquality"})
   private boolean isPrimary(final RemoteValidatorApiChannel beaconNodeApi) {
     return beaconNodeApi == primaryBeaconNodeApi;
   }

@@ -36,8 +36,7 @@ import tech.pegasys.teku.bls.BatchSemiAggregate;
  */
 public class BatchSignatureVerifierImpl implements BatchSignatureVerifier {
 
-  private record Job(
-      int idx, List<BLSPublicKey> publicKeys, Bytes message, BLSSignature signature) {}
+  record Job(int idx, List<BLSPublicKey> publicKeys, Bytes message, BLSSignature signature) {}
 
   @VisibleForTesting final List<Job> toVerify = new ArrayList<>();
   private boolean complete = false;

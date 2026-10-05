@@ -36,6 +36,7 @@ public class ScheduledExecutorAsyncRunner implements AsyncRunner {
     this.workerPool = workerPool;
   }
 
+  @SuppressWarnings("ThreadPriorityCheck")
   public static AsyncRunner create(
       final String name,
       final int maxThreads,

@@ -49,7 +49,7 @@ public class BpoForkSchedule {
 
   public Optional<Integer> getHighestMaxBlobsPerBlock() {
     return epochToBlobParameters.values().stream()
-        .max(Comparator.comparing(BlobParameters::maxBlobsPerBlock))
+        .max(Comparator.comparingInt(BlobParameters::maxBlobsPerBlock))
         .map(BlobParameters::maxBlobsPerBlock);
   }
 

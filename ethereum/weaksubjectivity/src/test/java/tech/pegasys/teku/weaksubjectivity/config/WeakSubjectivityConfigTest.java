@@ -65,7 +65,6 @@ public class WeakSubjectivityConfigTest {
     WeakSubjectivityConfig configB = configA.updated((__) -> {});
 
     assertThat(configA).isEqualTo(configB);
-    assertThat(configA).isEqualTo(configB);
   }
 
   @Test

@@ -52,19 +52,13 @@ public class SszGenericBasicVectorTestExecutor extends AbstractSszGenericTestExe
 
   @Override
   protected String parseString(final TestDefinition testDefinition, final String value) {
-    switch (getElementType(testDefinition)) {
-      case "uint8" -> {
-        // Java will treat the byte as a signed byte so unsigned value to signed byte
-        return Byte.toString((byte) Integer.parseUnsignedInt(value));
-      }
-      case "uint256" -> {
-        // UInt256.toString outputs hex whereas the tests use decimal - reformat to match
-        return UInt256.valueOf(new BigInteger(value)).toString();
-      }
-      default -> {
-        return value;
-      }
-    }
+    return switch (getElementType(testDefinition)) {
+      // Java will treat the byte as a signed byte so unsigned value to signed byte
+      case "uint8" -> Byte.toString((byte) Integer.parseUnsignedInt(value));
+      // UInt256.toString outputs hex whereas the tests use decimal - reformat to match
+      case "uint256" -> UInt256.valueOf(new BigInteger(value)).toString();
+      default -> value;
+    };
   }
 
   // vec_{element type}_{length}

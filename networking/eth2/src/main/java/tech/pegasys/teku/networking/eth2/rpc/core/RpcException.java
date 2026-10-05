@@ -175,6 +175,7 @@ public class RpcException extends Exception {
   }
 
   @Override
+  @SuppressWarnings("ThrowableEqualsHashCode")
   public boolean equals(final Object o) {
     if (this == o) {
       return true;
@@ -187,6 +188,7 @@ public class RpcException extends Exception {
   }
 
   @Override
+  @SuppressWarnings("ThrowableEqualsHashCode")
   public int hashCode() {
     return Objects.hash(responseCode, errorMessage);
   }
