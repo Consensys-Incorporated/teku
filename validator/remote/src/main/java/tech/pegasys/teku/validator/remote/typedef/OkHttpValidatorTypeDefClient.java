@@ -352,7 +352,7 @@ public class OkHttpValidatorTypeDefClient extends OkHttpValidatorMinimalTypeDefC
   public List<SubmitDataError> sendPayloadAttestationMessages(
       final List<PayloadAttestationMessage> payloadAttestationMessages) {
     final SendPayloadAttestationMessagesRequest sendPayloadAttestationMessagesRequest =
-        new SendPayloadAttestationMessagesRequest(getBaseEndpoint(), getOkHttpClient());
+        new SendPayloadAttestationMessagesRequest(spec, getBaseEndpoint(), getOkHttpClient());
     return sendPayloadAttestationMessagesRequest.submit(payloadAttestationMessages);
   }
 
