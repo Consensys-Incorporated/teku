@@ -34,9 +34,13 @@ public class MultiaddrUtil {
     if (localNodeQuicEnabled) {
       return peer.getQuicAddress()
           .map(quicAddr -> fromInetSocketAddressAsQuic(quicAddr, nodeId))
-          .orElseGet(() -> fromInetSocketAddress(peer.getNodeAddress(), nodeId));
+          .orElseGet(() -> fromDiscoveryPeerAsTcp(peer));
     }
-    return fromInetSocketAddress(peer.getNodeAddress(), nodeId);
+    return fromDiscoveryPeerAsTcp(peer);
+  }
+
+  public static Multiaddr fromDiscoveryPeerAsTcp(final DiscoveryPeer peer) {
+    return fromInetSocketAddress(peer.getNodeAddress(), getNodeId(peer));
   }
 
   public static Multiaddr fromDiscoveryPeerAsUdp(final DiscoveryPeer peer) {

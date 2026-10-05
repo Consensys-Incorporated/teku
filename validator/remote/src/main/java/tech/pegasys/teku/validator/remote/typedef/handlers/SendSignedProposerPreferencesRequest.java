@@ -14,22 +14,32 @@
 package tech.pegasys.teku.validator.remote.typedef.handlers;
 
 import static java.util.Collections.emptyMap;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
 import static tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition.listOf;
 import static tech.pegasys.teku.validator.remote.apiclient.ValidatorApiMethod.SEND_SIGNED_PROPOSER_PREFERENCES;
 import static tech.pegasys.teku.validator.remote.typedef.FailureListResponse.getFailureListResponseResponseHandler;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
+import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.validator.api.SubmitDataError;
 import tech.pegasys.teku.validator.remote.typedef.FailureListResponse;
 
 public class SendSignedProposerPreferencesRequest extends AbstractTypeDefRequest {
+  private final Spec spec;
+
   public SendSignedProposerPreferencesRequest(
-      final HttpUrl baseEndpoint, final OkHttpClient okHttpClient) {
+      final Spec spec, final HttpUrl baseEndpoint, final OkHttpClient okHttpClient) {
     super(baseEndpoint, okHttpClient);
+    this.spec = spec;
   }
 
   public List<SubmitDataError> submit(
@@ -37,11 +47,21 @@ public class SendSignedProposerPreferencesRequest extends AbstractTypeDefRequest
     if (signedProposerPreferences.isEmpty()) {
       return Collections.emptyList();
     }
+    final UInt64 slot = signedProposerPreferences.getFirst().getMessage().getProposalSlot();
+    final SpecMilestone milestone = spec.atSlot(slot).getMilestone();
+
+    final DeserializableTypeDefinition<SignedProposerPreferences> typeDefinition =
+        SchemaDefinitionsGloas.required(spec.atSlot(slot).getSchemaDefinitions())
+            .getSignedProposerPreferencesSchema()
+            .getJsonTypeDefinition();
+
     return postJson(
             SEND_SIGNED_PROPOSER_PREFERENCES,
             emptyMap(),
+            emptyMap(),
+            Map.of(HEADER_CONSENSUS_VERSION, milestone.lowerCaseName()),
             signedProposerPreferences,
-            listOf(signedProposerPreferences.getFirst().getSchema().getJsonTypeDefinition()),
+            listOf(typeDefinition),
             getFailureListResponseResponseHandler())
         .map(FailureListResponse::failures)
         .orElse(Collections.emptyList());

@@ -1385,6 +1385,10 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
 
   SafeFuture<ChainHead> prepareForBlockProduction(
       final UInt64 slot, final BlockProductionPerformance blockProductionPerformance) {
+    if (slot.isLessThan(recentChainData.getCurrentSlot().orElseThrow())) {
+      return SafeFuture.failedFuture(
+          new IllegalArgumentException("Cannot prepare block production for past slot " + slot));
+    }
     final UInt64 slotStartTimeMillis =
         spec.computeTimeMillisAtSlot(slot, recentChainData.getGenesisTimeMillis());
     final UInt64 currentTime = recentChainData.getStore().getTimeInMillis();

@@ -15,14 +15,17 @@ package tech.pegasys.teku.validator.client;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
+import static java.util.Objects.requireNonNullElse;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes48;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
@@ -49,7 +52,7 @@ public class ProposerConfig {
             || defaultConfig.builder.registrationOverrides == null
             || defaultConfig.builder.registrationOverrides.publicKey == null,
         "\"publicKey\" is not allowed in \"default_config.builder.registrationOverrides\"");
-    this.proposerConfig = proposerConfig == null ? ImmutableMap.of() : proposerConfig;
+    this.proposerConfig = requireNonNullElse(proposerConfig, ImmutableMap.of());
     this.defaultConfig = defaultConfig;
   }
 
@@ -111,7 +114,7 @@ public class ProposerConfig {
       return Optional.ofNullable(feeRecipient);
     }
 
-    public Optional<UInt64> getBuilderGasLimit() {
+    public Optional<UInt64> getGasLimit() {
       return getBuilder().flatMap(BuilderConfig::getGasLimit);
     }
 
@@ -149,15 +152,30 @@ public class ProposerConfig {
     @JsonProperty(value = "registration_overrides")
     private final RegistrationOverrides registrationOverrides;
 
+    @JsonProperty(value = "min_bid")
+    private final UInt64 minBid;
+
+    @JsonProperty(value = "builder_boost_factor")
+    private final UInt64 builderBoostFactor;
+
+    @JsonProperty(value = "urls")
+    private final Map<String, BuilderOverrides> urls;
+
     @JsonCreator
     public BuilderConfig(
         @JsonProperty(value = "enabled") final Boolean enabled,
         @JsonProperty(value = "gas_limit") final UInt64 gasLimit,
         @JsonProperty(value = "registration_overrides")
-            final RegistrationOverrides registrationOverrides) {
+            final RegistrationOverrides registrationOverrides,
+        @JsonProperty(value = "min_bid") final UInt64 minBid,
+        @JsonProperty(value = "builder_boost_factor") final UInt64 builderBoostFactor,
+        @JsonProperty(value = "urls") final Map<String, BuilderOverrides> urls) {
       this.enabled = enabled;
       this.gasLimit = gasLimit;
       this.registrationOverrides = registrationOverrides;
+      this.minBid = minBid;
+      this.builderBoostFactor = builderBoostFactor;
+      this.urls = requireNonNullElse(urls, ImmutableMap.of());
     }
 
     public Optional<Boolean> isEnabled() {
@@ -172,6 +190,18 @@ public class ProposerConfig {
       return Optional.ofNullable(registrationOverrides);
     }
 
+    public Optional<UInt64> getMinBid() {
+      return Optional.ofNullable(minBid);
+    }
+
+    public Optional<UInt64> getBuilderBoostFactor() {
+      return Optional.ofNullable(builderBoostFactor);
+    }
+
+    public Map<String, BuilderOverrides> getUrls() {
+      return urls;
+    }
+
     @Override
     public boolean equals(final Object o) {
       if (this == o) {
@@ -183,12 +213,16 @@ public class ProposerConfig {
       final BuilderConfig that = (BuilderConfig) o;
       return Objects.equals(enabled, that.enabled)
           && Objects.equals(gasLimit, that.gasLimit)
-          && Objects.equals(registrationOverrides, that.registrationOverrides);
+          && Objects.equals(registrationOverrides, that.registrationOverrides)
+          && Objects.equals(minBid, that.minBid)
+          && Objects.equals(builderBoostFactor, that.builderBoostFactor)
+          && Objects.equals(urls, that.urls);
     }
 
     @Override
     public int hashCode() {
-      return Objects.hash(enabled, gasLimit, registrationOverrides);
+      return Objects.hash(
+          enabled, gasLimit, registrationOverrides, minBid, builderBoostFactor, urls);
     }
   }
 
@@ -230,6 +264,80 @@ public class ProposerConfig {
     @Override
     public int hashCode() {
       return Objects.hash(timestamp, publicKey);
+    }
+  }
+
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  public static class BuilderOverrides {
+    @JsonProperty(value = "auth_data")
+    private final Bytes authData;
+
+    @JsonProperty(value = "builder_pubkeys")
+    private final List<BLSPublicKey> builderPubkeys;
+
+    @JsonProperty(value = "min_bid")
+    private final UInt64 minBid;
+
+    @JsonProperty(value = "builder_boost_factor")
+    private final UInt64 builderBoostFactor;
+
+    @JsonProperty(value = "max_execution_payment")
+    private final UInt64 maxExecutionPayment;
+
+    @JsonCreator
+    public BuilderOverrides(
+        @JsonProperty(value = "auth_data") final Bytes authData,
+        @JsonProperty(value = "builder_pubkeys") final List<BLSPublicKey> builderPubkeys,
+        @JsonProperty(value = "min_bid") final UInt64 minBid,
+        @JsonProperty(value = "builder_boost_factor") final UInt64 builderBoostFactor,
+        @JsonProperty(value = "max_execution_payment") final UInt64 maxExecutionPayment) {
+      this.authData = authData;
+      this.builderPubkeys = builderPubkeys;
+      this.minBid = minBid;
+      this.builderBoostFactor = builderBoostFactor;
+      this.maxExecutionPayment = maxExecutionPayment;
+    }
+
+    public Optional<Bytes> getAuthData() {
+      return Optional.ofNullable(authData);
+    }
+
+    public Optional<List<BLSPublicKey>> getBuilderPubkeys() {
+      return Optional.ofNullable(builderPubkeys);
+    }
+
+    public Optional<UInt64> getMinBid() {
+      return Optional.ofNullable(minBid);
+    }
+
+    public Optional<UInt64> getBuilderBoostFactor() {
+      return Optional.ofNullable(builderBoostFactor);
+    }
+
+    public Optional<UInt64> getMaxExecutionPayment() {
+      return Optional.ofNullable(maxExecutionPayment);
+    }
+
+    @Override
+    public boolean equals(final Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (o == null || getClass() != o.getClass()) {
+        return false;
+      }
+      final BuilderOverrides that = (BuilderOverrides) o;
+      return Objects.equals(authData, that.authData)
+          && Objects.equals(builderPubkeys, that.builderPubkeys)
+          && Objects.equals(minBid, that.minBid)
+          && Objects.equals(builderBoostFactor, that.builderBoostFactor)
+          && Objects.equals(maxExecutionPayment, that.maxExecutionPayment);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(
+          authData, builderPubkeys, minBid, builderBoostFactor, maxExecutionPayment);
     }
   }
 }

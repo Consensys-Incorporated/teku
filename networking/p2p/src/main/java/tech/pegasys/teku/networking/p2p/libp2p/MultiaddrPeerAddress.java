@@ -16,6 +16,7 @@ package tech.pegasys.teku.networking.p2p.libp2p;
 import io.libp2p.core.PeerId;
 import io.libp2p.core.multiformats.Multiaddr;
 import java.util.Objects;
+import java.util.Optional;
 import tech.pegasys.teku.networking.p2p.discovery.DiscoveryPeer;
 import tech.pegasys.teku.networking.p2p.network.PeerAddress;
 import tech.pegasys.teku.networking.p2p.peer.NodeId;
@@ -23,10 +24,18 @@ import tech.pegasys.teku.networking.p2p.peer.NodeId;
 public class MultiaddrPeerAddress extends PeerAddress {
 
   private final Multiaddr multiaddr;
+  // Dialed only if a dial to multiaddr fails (e.g. TCP when the peer's QUIC port is unreachable)
+  private final Optional<Multiaddr> fallbackMultiaddr;
 
   protected MultiaddrPeerAddress(final NodeId nodeId, final Multiaddr multiaddr) {
+    this(nodeId, multiaddr, Optional.empty());
+  }
+
+  protected MultiaddrPeerAddress(
+      final NodeId nodeId, final Multiaddr multiaddr, final Optional<Multiaddr> fallbackMultiaddr) {
     super(nodeId);
     this.multiaddr = multiaddr;
+    this.fallbackMultiaddr = fallbackMultiaddr;
   }
 
   @Override
@@ -43,20 +52,32 @@ public class MultiaddrPeerAddress extends PeerAddress {
       final DiscoveryPeer discoveryPeer, final boolean localNodeQuicEnabled) {
     final Multiaddr multiaddr =
         MultiaddrUtil.fromDiscoveryPeer(discoveryPeer, localNodeQuicEnabled);
-    return fromMultiaddr(multiaddr);
+    final Multiaddr tcpMultiaddr = MultiaddrUtil.fromDiscoveryPeerAsTcp(discoveryPeer);
+    final Optional<Multiaddr> fallbackMultiaddr =
+        multiaddr.equals(tcpMultiaddr) ? Optional.empty() : Optional.of(tcpMultiaddr);
+    return fromMultiaddr(multiaddr, fallbackMultiaddr);
   }
 
   private static MultiaddrPeerAddress fromMultiaddr(final Multiaddr multiaddr) {
+    return fromMultiaddr(multiaddr, Optional.empty());
+  }
+
+  private static MultiaddrPeerAddress fromMultiaddr(
+      final Multiaddr multiaddr, final Optional<Multiaddr> fallbackMultiaddr) {
     final PeerId peerId = multiaddr.getPeerId();
     if (peerId == null) {
       throw new IllegalArgumentException("No peer ID present in multiaddr: " + multiaddr);
     }
     final LibP2PNodeId nodeId = new LibP2PNodeId(peerId);
-    return new MultiaddrPeerAddress(nodeId, multiaddr);
+    return new MultiaddrPeerAddress(nodeId, multiaddr, fallbackMultiaddr);
   }
 
   public Multiaddr getMultiaddr() {
     return multiaddr;
+  }
+
+  public Optional<Multiaddr> getFallbackMultiaddr() {
+    return fallbackMultiaddr;
   }
 
   @Override
@@ -76,11 +97,12 @@ public class MultiaddrPeerAddress extends PeerAddress {
       return false;
     }
     final MultiaddrPeerAddress that = (MultiaddrPeerAddress) o;
-    return Objects.equals(multiaddr, that.multiaddr);
+    return Objects.equals(multiaddr, that.multiaddr)
+        && Objects.equals(fallbackMultiaddr, that.fallbackMultiaddr);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(super.hashCode(), multiaddr);
+    return Objects.hash(super.hashCode(), multiaddr, fallbackMultiaddr);
   }
 }

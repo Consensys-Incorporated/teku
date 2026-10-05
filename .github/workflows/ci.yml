@@ -48,7 +48,7 @@ concurrency:
 
 env:
   JAVA_TOOL_OPTIONS: -Xmx4096m
-  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Dorg.gradle.workers.max=4 -Xmx4096m
+  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Xmx4096m
 
 permissions: read-all
 
@@ -198,11 +198,16 @@ jobs:
     outputs:
       workflow-run-id: ${{ steps.workflowdetails.outputs.run_id }}
       publish-version: ${{ steps.projectDetails.outputs.publish-version }}
+      ref-cache-key: ${{ steps.ref-cache-key.outputs.key }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: 'recursive'
+          # The Docker image is built here and the acceptance tests check teku's reported
+          # version, which comes from git describe. Without tags it is UNKNOWN+g<sha>.
+          fetch-depth: 0
+          fetch-tags: true
       - name: get workflow_details
         id: workflowdetails
         shell: bash
@@ -221,10 +226,59 @@ jobs:
       - name: Determine Teku version
         id: projectDetails
         uses: ./.github/actions/get-project-version
+      - name: Compute reference test cache key
+        id: ref-cache-key
+        shell: bash
+        run: |
+          # Derive the cache key from the reference test version definitions, the converter and the
+          # per-archive conversion options, so unrelated root build.gradle edits don't bust the cache.
+          LINES=$(grep -E '^def (refTestVersion|blsRefTestVersion|slashingProtectionInterchangeRefTestVersion)' build.gradle)
+          if [ -z "$LINES" ]; then
+            echo "Could not find reference test version definitions in build.gradle" >&2
+            exit 1
+          fi
+          HASH=$( (echo -n "$LINES"; cat eth-tests/src/main/java/tech/pegasys/teku/ethtests/ReferenceTestArchiveConverter.java eth-reference-tests/build.gradle) | sha256sum | cut -c1-16)
+          echo "key=reftests-archives-$HASH" >> "$GITHUB_OUTPUT"
+      - name: Restore reference test archives
+        id: ref-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: build/refTests/*/archives/
+          key: ${{ steps.ref-cache-key.outputs.key }}
+      - name: Fetch reference tests
+        shell: bash
+        run: |
+          # The zip archives are the only fixtures the tests need. Convert (which downloads the
+          # tarballs first) only when the cache did not provide them.
+          if ! ls build/refTests/*/archives/*.zip >/dev/null 2>&1
+          then
+            ./gradlew --no-daemon convertRefTests
+          fi
+          ls -la build/refTests/*/archives/
+      # No "clean": runners are ephemeral with a fresh checkout, and clean would wipe the restored
+      # build/refTests archives. Reference test classes are generated and compiled here so they
+      # travel with the workspace and its Gradle task history, and the shards see them up to date.
       - name: Assemble
         shell: bash
         run: |
-          ./gradlew clean compileJava compileTestJava compileJmhJava compileIntegrationTestJava compileAcceptanceTestJava compilePropertyTestJava resolveCiDependencies assemble
+          ./gradlew -x convertRefTests compileJava compileTestJava compileJmhJava compileIntegrationTestJava compileAcceptanceTestJava compilePropertyTestJava resolveCiDependencies assemble distDocker generateReferenceTestClasses compileReferenceTestJava
+      - name: Save reference test archives
+        if: steps.ref-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: build/refTests/*/archives/
+          key: ${{ steps.ref-cache-key.outputs.key }}
+      - name: Save Teku docker image
+        shell: bash
+        run: |
+          docker save consensys/teku:develop | zstd -T0 -3 -o teku-docker-image.tar.zst
+          ls -la teku-docker-image.tar.zst
+      - name: Upload Teku docker image
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: teku-docker-image
+          path: teku-docker-image.tar.zst
+          retention-days: 1
       - name: Upload distribution tar
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -241,15 +295,33 @@ jobs:
           path: |
             build/distributions/*.zip
           retention-days: 7
+      # One zstd tarball instead of ~100k loose files: upload-artifact zips file by file (slow for
+      # the generated reference tests) and drops empty directories, which Gradle treats as removed
+      # task outputs. build/tmp stays in: build/tmp/<compileTask>/previous-compilation-data.bin is a
+      # declared output of every JavaCompile task, so without it no compile task is up to date in
+      # the shards. GNU tar --exclude patterns are unanchored, so build/docs matches at any depth.
+      - name: Pack workspace
+        shell: bash
+        run: |
+          tar --use-compress-program='zstd -T0 -3' -cf "$RUNNER_TEMP/assemble-output.tar.zst" \
+            --exclude=.git \
+            --exclude=teku-docker-image.tar.zst \
+            --exclude=build/docker-teku \
+            --exclude=build/distributions \
+            --exclude=build/refTests \
+            --exclude=build/docs \
+            --exclude=build/reports \
+            --exclude=build/test-results \
+            --exclude=build/jacoco \
+            .
+          ls -la "$RUNNER_TEMP/assemble-output.tar.zst"
       - name: Upload workspace build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: assemble-output
-          path: |
-            ./
-            !./.git/**
+          path: ${{ runner.temp }}/assemble-output.tar.zst
+          compression-level: 0
           retention-days: 1
-          include-hidden-files: 'true'
 
   prDistributions:
     needs: changes
@@ -300,7 +372,12 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ github.run_id }}
           name: assemble-output
-          merge-multiple: true
+          path: ${{ runner.temp }}
+      - name: Unpack assemble-output
+        shell: bash
+        run: |
+          tar --use-compress-program=zstd -xf "$RUNNER_TEMP/assemble-output.tar.zst" -C "$GITHUB_WORKSPACE"
+          rm "$RUNNER_TEMP/assemble-output.tar.zst"
       - name: Build runnable Teku binaries
         shell: bash
         run: |
@@ -385,6 +462,9 @@ jobs:
       stage_name: Unit Tests
       stage_key: unit
       gradle_task: test
+      # unit and integration shards finish in ~3 minutes; 8 instead of 12 frees large runners for
+      # the acceptance shards, which are the long ones and otherwise queue behind these
+      shard_count: 8
       src_pattern: "*/src/test/java/*"
       src_root: "src/test/java"
       runner: "ubuntu-latest-128"
@@ -408,10 +488,12 @@ jobs:
           fi
           echo "✅ All unitTests matrix jobs passed."
 
-  # Runs in its own job, isolated from collate-junit-reports: this org's action-allowlist
-  # policy is enforced per-job, so if capture-test-timings shared a job with anything that
-  # references a disallowed action, the whole job gets killed part-way through regardless
-  # of continue-on-error (verified: https://github.com/Consensys-Incorporated/teku/pull/11204).
+  # Runs in its own job: this org's action-allowlist policy is enforced per-job, so if
+  # capture-test-timings shared a job with anything that references a disallowed action,
+  # the whole job gets killed part-way through regardless of continue-on-error
+  # (verified: https://github.com/Consensys-Incorporated/teku/pull/11204).
+  # Test result reports are published by test-reports.yml (workflow_run), so they also
+  # work for PRs from forks, whose pull_request token cannot create check runs.
   unitTestsCaptureTimings:
     runs-on: ubuntu-24.04
     needs: [changes, unitTestsSuite]
@@ -422,22 +504,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/capture-test-timings
-        continue-on-error: true
-        if: always()
-        with:
-          stage_key: unit
-
-  unitTestsReport:
-    runs-on: ubuntu-24.04
-    needs: [changes, unitTestsSuite]
-    if: always() && needs.changes.outputs.code == 'true'
-    permissions:
-      contents: read
-      actions: read
-      checks: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: ./.github/actions/collate-junit-reports
         continue-on-error: true
         if: always()
         with:
@@ -454,6 +520,9 @@ jobs:
       stage_name: Integration Tests
       stage_key: integration
       gradle_task: integrationTest
+      # unit and integration shards finish in ~3 minutes; 8 instead of 12 frees large runners for
+      # the acceptance shards, which are the long ones and otherwise queue behind these
+      shard_count: 8
       src_pattern: "*/src/integration-test/java/*"
       src_root: "src/integration-test/java"
       runner: "ubuntu-latest-128"
@@ -488,22 +557,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/capture-test-timings
-        continue-on-error: true
-        if: always()
-        with:
-          stage_key: integration
-
-  integrationTestsReport:
-    runs-on: ubuntu-24.04
-    needs: [changes, integrationTestsSuite]
-    if: always() && needs.changes.outputs.code == 'true'
-    permissions:
-      contents: read
-      actions: read
-      checks: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: ./.github/actions/collate-junit-reports
         continue-on-error: true
         if: always()
         with:
@@ -558,22 +611,6 @@ jobs:
         with:
           stage_key: property
 
-  propertyTestsReport:
-    runs-on: ubuntu-24.04
-    needs: [changes, propertyTestsSuite]
-    if: always() && needs.changes.outputs.code == 'true'
-    permissions:
-      contents: read
-      actions: read
-      checks: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: ./.github/actions/collate-junit-reports
-        continue-on-error: true
-        if: always()
-        with:
-          stage_key: property
-
   acceptanceTestsSuite:
     needs: assemble
     permissions:
@@ -588,7 +625,7 @@ jobs:
       src_pattern: "*/src/acceptance-test/java/*"
       src_root: "src/acceptance-test/java"
       runner: "ubuntu-latest-128"
-      gradle_args: ${{ (inputs.gradle_log_level == 'info' && '--info') || (inputs.gradle_log_level == 'debug' && '--debug') || '' }}
+      gradle_args: ${{ (inputs.gradle_log_level == 'info' && '--info') || (inputs.gradle_log_level == 'debug' && '--debug') || '' }} -x distDocker
       retry_attempts: 3
 
   acceptanceTestsResult:
@@ -624,92 +661,8 @@ jobs:
         with:
           stage_key: acceptance
 
-  acceptanceTestsReport:
-    runs-on: ubuntu-24.04
-    needs: [changes, acceptanceTestsSuite]
-    if: always() && needs.changes.outputs.code == 'true'
-    permissions:
-      contents: read
-      actions: read
-      checks: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: ./.github/actions/collate-junit-reports
-        continue-on-error: true
-        if: always()
-        with:
-          stage_key: acceptance
-
-  referenceTestsPrep:
-    needs: assemble
-    runs-on: ubuntu-latest-32
-    outputs:
-      cache-key: ${{ steps.ref-cache-key.outputs.key }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          submodules: 'recursive'
-      - name: Prepare
-        uses: ./.github/actions/prepare
-      - name: Download assemble-output
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ github.run_id }}
-          name: assemble-output
-          merge-multiple: true
-          path: ${{ github.workspace }}
-      - name: Compute reference test cache key
-        id: ref-cache-key
-        shell: bash
-        run: |
-          # Derive the cache key from the reference test version definitions, the converter and the
-          # per-archive conversion options, so unrelated root build.gradle edits don't bust the cache.
-          LINES=$(grep -E '^def (refTestVersion|blsRefTestVersion|slashingProtectionInterchangeRefTestVersion)' build.gradle)
-          if [ -z "$LINES" ]; then
-            echo "Could not find reference test version definitions in build.gradle" >&2
-            exit 1
-          fi
-          HASH=$( (echo -n "$LINES"; cat eth-tests/src/main/java/tech/pegasys/teku/ethtests/ReferenceTestArchiveConverter.java eth-reference-tests/build.gradle) | sha256sum | cut -c1-16)
-          echo "key=reftests-archives-$HASH" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: build/refTests/*/archives/
-          key: ${{ steps.ref-cache-key.outputs.key }}
-      - name: FetchReferenceTests
-        shell: bash
-        run: |
-          # The zip archives are the only fixtures the tests need. Convert (which downloads the
-          # tarballs first) only when the cache did not provide them.
-          if ! ls build/refTests/*/archives/*.zip >/dev/null 2>&1
-          then
-            ./gradlew --no-daemon convertRefTests
-          fi
-          ls -la build/refTests/*/archives/
-      - name: CompileReferenceTests
-        shell: bash
-        run: |
-          ./gradlew --no-daemon --parallel -x convertRefTests compileReferenceTestJava resolveCiDependencies
-      - name: Caching reference tests
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: build/refTests/*/archives/
-          key: ${{ steps.ref-cache-key.outputs.key }}
-      - name: Compress reftests
-        shell: bash
-        run: |
-          tar -cf reftests.tar ./eth-reference-tests/
-      - name: Upload reftests
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: reftests
-          path: reftests.tar
-          retention-days: 1
-
   referenceTests:
-    needs: referenceTestsPrep
+    needs: assemble
     runs-on: "ubuntu-latest-128"
     strategy:
       fail-fast: false
@@ -730,34 +683,26 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ github.run_id }}
           name: assemble-output
-          merge-multiple: true
-          path: ${{ github.workspace }}
+          path: ${{ runner.temp }}
+      - name: Unpack assemble-output
+        shell: bash
+        run: |
+          tar --use-compress-program=zstd -xf "$RUNNER_TEMP/assemble-output.tar.zst" -C "$GITHUB_WORKSPACE"
+          rm "$RUNNER_TEMP/assemble-output.tar.zst"
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: build/refTests/*/archives/
-          key: ${{ needs.referenceTestsPrep.outputs.cache-key }}
+          key: ${{ needs.assemble.outputs.ref-cache-key }}
           fail-on-cache-miss: true
-      - name: Download reftests
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ github.run_id }}
-          name: reftests
-      - name: Extract reftests
-        shell: bash
-        run: |
-          tar -xf reftests.tar
-          rm reftests.tar
       - name: Compute shard ${{ matrix.shard }} of ${{ matrix.total }} for ReferenceTests
         id: shard
         shell: bash
         run: |
-          SRC_PATTERN="*/src/referenceTest/generated_tests/*Test.java"
-          SRC_ROOT="src/referenceTest/generated_tests"
-          # 1) Collect test classes by pattern = FQNs
-          CLASSNAMES=$(find . -type f -name "*.java" -path "$SRC_PATTERN" \
-            | sed "s@.*/$SRC_ROOT/@@" \
+          # 1) Collect test classes by pattern = FQNs, generated tests plus the handwritten ones
+          CLASSNAMES=$(for SRC_ROOT in src/referenceTest/generated_tests src/referenceTest/java; do
+              find . -type f -path "*/$SRC_ROOT/*Test.java" -not -path "*/build/*" \
+                | sed "s@.*/$SRC_ROOT/@@"
+            done \
             | sed 's@/@.@g' \
             | sed 's/.\{5\}$//' \
             | sort)
@@ -776,21 +721,30 @@ jobs:
       - name: Run ReferenceTests (shard)
         if: steps.shard.outputs.args != ''
         run: |
-          ./gradlew --no-daemon --parallel --info \
+          ./gradlew --no-daemon --parallel \
             -x convertRefTests \
             -x generateReferenceTestClasses \
             -x cleanReferenceTestClasses \
-            referenceTest ${{ inputs.gradle_args }} ${{ steps.shard.outputs.args }}
+            referenceTest ${{ (inputs.gradle_log_level == 'info' && '--info') || (inputs.gradle_log_level == 'debug' && '--debug') || '' }} ${{ steps.shard.outputs.args }}
+      - name: Merge JUnit XML for ReferenceTests
+        if: always()
+        uses: ./.github/actions/merge-junit-xml
+        with:
+          output: build/test-results/merged/TEST-reference-${{ matrix.shard }}.xml
       - name: Upload JUnit XML + HTML for ReferenceTests
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: reference-reports-${{ matrix.shard }}
+          # XML only: the HTML report is 16k files / 130MB per shard for the generated classes and
+          # nothing reads it; test-reports.yml and capture-test-timings only need the merged XML.
           path: |
-            **/build/test-results/**/TEST-*.xml
-            **/build/reports/tests/**
+            build/test-results/merged/TEST-*.xml
           if-no-files-found: ignore
           retention-days: 1
+          # A rerun of one failed shard would otherwise add a second artifact with the same
+          # name next to the stale one, and test-reports.yml / capture-test-timings download both.
+          overwrite: true
 
   referenceTestsResult:
     name: referenceTests
@@ -809,22 +763,6 @@ jobs:
             exit 1
           fi
           echo "✅ All referenceTests matrix jobs passed."
-
-  referenceTestsReport:
-    runs-on: ubuntu-24.04
-    needs: [changes, referenceTests]
-    if: always() && needs.changes.outputs.code == 'true'
-    permissions:
-      contents: read
-      actions: read
-      checks: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: ./.github/actions/collate-junit-reports
-        continue-on-error: true
-        if: always()
-        with:
-          stage_key: reference
 
   # DockerTags
   # develop = develop-jdk25

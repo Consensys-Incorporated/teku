@@ -152,4 +152,17 @@ public class ExecutionLayerOptionsTest extends AbstractBeaconNodeCommandTest {
     final TekuConfiguration config = getTekuConfigurationFromArguments(args);
     assertThat(config.executionLayer().getEngineJwtClaimId()).hasValue("foobar");
   }
+
+  @Test
+  void shouldConsiderP2PBidsDuringBlockProductionByDefault() {
+    final TekuConfiguration config = getTekuConfigurationFromArguments();
+    assertThat(config.executionLayer().getConsiderP2PBidsDuringBlockProduction()).isTrue();
+  }
+
+  @Test
+  void shouldNotConsiderP2PBidsDuringBlockProductionIfConfiguredToFalse() {
+    final String[] args = {"--Xconsider-p2p-bids-during-block-production=false"};
+    final TekuConfiguration config = getTekuConfigurationFromArguments(args);
+    assertThat(config.executionLayer().getConsiderP2PBidsDuringBlockProduction()).isFalse();
+  }
 }

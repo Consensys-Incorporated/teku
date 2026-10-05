@@ -49,7 +49,11 @@ public class VoluntaryExitGossipManager extends AbstractGossipManager<SignedVolu
         processor,
         SignedVoluntaryExit.SSZ_SCHEMA,
         exit -> Optional.empty(),
-        exit -> exit.getMessage().getEpoch(),
+        // The exit's epoch is only the earliest epoch it can be processed at, so an exit naming an
+        // epoch from an earlier fork is still valid. Always consider exits to match the fork of the
+        // topic they arrived on (ie disable fork checking at this level) and leave validation to
+        // the processor.
+        exit -> forkInfo.getFork().getEpoch(),
         networkingConfig,
         GossipFailureLogger.createNonSuppressing(GossipTopicName.VOLUNTARY_EXIT.toString()),
         debugDataDumper);

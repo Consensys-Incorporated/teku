@@ -1451,6 +1451,22 @@ class ForkChoiceTest {
   }
 
   @Test
+  void prepareForBlockProduction_shouldRejectPastSlot() {
+    final UInt64 currentSlot = UInt64.valueOf(2);
+    storageSystem.chainUpdater().setCurrentSlot(currentSlot);
+    final ChainHead originalHead = recentChainData.getChainHead().orElseThrow();
+    final BlockProductionPerformance performance = mock(BlockProductionPerformance.class);
+
+    assertThatSafeFuture(forkChoice.prepareForBlockProduction(ONE, performance))
+        .isCompletedExceptionallyWith(IllegalArgumentException.class)
+        .hasMessageContaining("Cannot prepare block production for past slot 1");
+
+    assertThat(recentChainData.getCurrentSlot()).contains(currentSlot);
+    assertThat(recentChainData.getChainHead()).contains(originalHead);
+    verifyNoInteractions(forkChoiceNotifier, performance);
+  }
+
+  @Test
   void prepareForBlockProduction_NotYetInProposalSlotShouldRunOnTickWhenWithinTolerance() {
     final UInt64 newTime =
         spec.computeTimeMillisAtSlot(ONE, recentChainData.getGenesisTimeMillis())

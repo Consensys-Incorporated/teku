@@ -36,7 +36,7 @@ runs:
 
     # By default setup-gradle scopes the Gradle home cache entry to the job that wrote it, and read-only
     # jobs fall back to whichever entry on this OS was created most recently. That made the test shards
-    # restore an arbitrary job's Gradle home (usually a small one such as referenceTestsPrep) instead of
+    # restore an arbitrary job's Gradle home (usually a small one such as spotless) instead of
     # assemble's, so they re-downloaded the missing jars from Maven Central. Dozens of shards doing that
     # at once gets the runners rate limited (HTTP 429).
     #

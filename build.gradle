@@ -532,6 +532,7 @@ def refTestBaseUrl = 'https://github.com/ethereum/consensus-specs/releases/downl
 def blsRefTestBaseUrl = 'https://github.com/ethereum/bls12-381-tests/releases/download'
 def slashingProtectionInterchangeRefTestBaseUrl = 'https://github.com/eth-clients/slashing-protection-interchange-tests/archive/refs/tags'
 def refTestDownloadDir = "${buildDir}/refTests/${refTestVersion}"
+def compTestDownloadDir = "${buildDir}/compTests/${refTestVersion}"
 def blsRefTestDownloadDir = "${buildDir}/blsRefTests/${blsRefTestVersion}"
 def slashingProtectionInterchangeRefTestDownloadDir = "${buildDir}/slashingProtectionInterchangeRefTests/${slashingProtectionInterchangeRefTestVersion}"
 // Reference test tarballs are converted into <config>.zip archives that the tests read directly
@@ -543,6 +544,7 @@ ext.refTestTarballs = [
 	mainnet: "${refTestDownloadDir}/mainnet.tar.gz",
 	bls: "${blsRefTestDownloadDir}/bls_tests_yaml.tar.gz",
 	'slashing-protection-interchange': "${slashingProtectionInterchangeRefTestDownloadDir}/slashing-protection-interchange-tests.tar.gz",
+	'fork-choice-compliance': "${compTestDownloadDir}/comptests.tar.gz",
 ]
 
 def downloadFile(String url, String token, File outputFile) {
@@ -659,8 +661,19 @@ tasks.register('downloadSlashingProtectionInterchangeRefTests', Download) {
 	overwrite false
 }
 
+// comptests.tar.gz is only published alongside tagged consensus-specs releases (not the nightly
+// vector-generation workflow), so it is skipped for nightly builds.
+tasks.register('downloadCompTests', Download) {
+	onlyIf { !nightly }
+	src([
+		"${refTestBaseUrl}/${refTestVersion}/comptests.tar.gz"
+	])
+	dest "${compTestDownloadDir}/comptests.tar.gz"
+	overwrite false
+}
+
 tasks.register('downloadRefTests') {
-	dependsOn downloadEthRefTests, downloadBlsRefTests, downloadSlashingProtectionInterchangeRefTests
+	dependsOn downloadEthRefTests, downloadBlsRefTests, downloadSlashingProtectionInterchangeRefTests, downloadCompTests
 }
 
 tasks.register('deploy') {}
@@ -1126,6 +1139,12 @@ subprojects {
 			// Support filtering tests with the --tests option to gradle
 			// Without this the build fails if you filter out all the tests for any module
 			setFailOnNoMatchingTests(false)
+		}
+		testLogging {
+			// Print the assertion message and full stack trace for failed tests, so a CI job log
+			// is enough to see what broke without downloading the JUnit XML artifact
+			events "failed"
+			exceptionFormat "full"
 		}
 	}
 
