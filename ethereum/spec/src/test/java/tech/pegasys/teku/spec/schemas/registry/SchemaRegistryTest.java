@@ -193,6 +193,24 @@ public class SchemaRegistryTest {
   }
 
   @Test
+  void shouldReleaseProviderWhenSchemaCreationFails() {
+    final TestSchema createdSchema = new TestSchema("test", 2);
+    final IllegalStateException creationException =
+        new IllegalStateException("schema creation failed");
+
+    when(schemaProvider.getSchemaId()).thenReturn(schemaId);
+    when(schemaProvider.getSchema(schemaRegistry))
+        .thenThrow(creationException)
+        .thenReturn(createdSchema);
+    when(schemaProvider.alwaysCreateNewSchema()).thenReturn(true);
+
+    schemaRegistry.registerProvider(schemaProvider);
+
+    assertThatThrownBy(() -> schemaRegistry.get(schemaId)).isSameAs(creationException);
+    assertThat(schemaRegistry.get(schemaId)).isSameAs(createdSchema);
+  }
+
+  @Test
   @SuppressWarnings("unchecked")
   void shouldThrowIfDependencyWhenDependencyLoop() {
     final SchemaProvider<String> provider1 = mock(SchemaProvider.class);

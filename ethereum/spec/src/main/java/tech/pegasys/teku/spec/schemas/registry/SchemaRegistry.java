@@ -91,10 +91,13 @@ public class SchemaRegistry {
     }
 
     // actual schema creation (may trigger recursive registry lookups)
-    final T createdSchema = provider.getSchema(this);
-
-    // release the provider
-    INFLIGHT_PROVIDERS.remove(provider);
+    final T createdSchema;
+    try {
+      createdSchema = provider.getSchema(this);
+    } finally {
+      // release the provider even when schema creation fails
+      INFLIGHT_PROVIDERS.remove(provider);
+    }
 
     // let's check if the created schema is equal to the one from the previous milestone
     final SpecMilestone effectiveMilestone = provider.getBaseMilestone(milestone);
