@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.config.SpecConfigAltair;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
@@ -72,8 +73,7 @@ class LightClientUpdatePersistenceTest {
 
   @Test
   void finalization_shouldPruneStorageBeyondTheRetentionWindow() {
-    final UInt64 finalizedPeriod =
-        UInt64.valueOf(LightClientServerService.MAX_RETAINED_PERIODS + 2);
+    final UInt64 finalizedPeriod = UInt64.valueOf(retainedPeriodsBehindFinalized() + 2);
     final UInt64 retainedPeriod = finalizedPeriod.minus(1);
     store.addUpdate(updateAtPeriod(1), dataStructureUtil.randomBytes32(), CANONICAL);
     store.addUpdate(
@@ -159,6 +159,13 @@ class LightClientUpdatePersistenceTest {
     return dataStructureUtil
         .createRandomLightClientUpdateBuilder(periodOneStartSlot().times(period))
         .build();
+  }
+
+  private int retainedPeriodsBehindFinalized() {
+    final int epochsPerPeriod =
+        SpecConfigAltair.required(spec.getGenesisSpecConfig()).getEpochsPerSyncCommitteePeriod();
+    return (spec.getNetworkingConfig().getMinEpochsForBlockRequests() + epochsPerPeriod - 1)
+        / epochsPerPeriod;
   }
 
   private UInt64 epochOfPeriod(final UInt64 period) {
