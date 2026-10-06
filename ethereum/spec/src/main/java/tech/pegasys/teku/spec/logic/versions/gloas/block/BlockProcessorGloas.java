@@ -172,26 +172,6 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
     final UInt64 parentSlot = state.getLatestBlockHeader().getSlot();
     final UInt64 parentEpoch = miscHelpers.computeEpochAtSlot(parentSlot);
 
-    // Process execution requests from parent's payload. The execution requests are processed at
-    // state.slot (child's slot), not the parent's slot.
-    final long startTimeMillis = System.currentTimeMillis();
-    LOG.debug("Starting processing {} deposit requests", requests.getDeposits().size());
-    executionRequestsProcessorGloas.processDepositRequests(state, requests.getDeposits());
-    LOG.debug(
-        "Finished processing {} deposit requests. Pending deposits: {}, builders: {}. Took {} ms.",
-        requests.getDeposits().size(),
-        state.getPendingDeposits().size(),
-        state.getBuilders().size(),
-        System.currentTimeMillis() - startTimeMillis);
-    executionRequestsProcessorGloas.processWithdrawalRequests(
-        state, requests.getWithdrawals(), validatorExitContextSupplier);
-    executionRequestsProcessorGloas.processConsolidationRequests(
-        state, requests.getConsolidations());
-    executionRequestsProcessorGloas.processBuilderDepositRequests(
-        state, requestsGloas.getBuilderDeposits());
-    executionRequestsProcessorGloas.processBuilderExitRequests(
-        state, requestsGloas.getBuilderExits());
-
     // Settle the builder payment
     if (parentEpoch.equals(beaconStateAccessorsGloas.getCurrentEpoch(state))) {
       final UInt64 paymentIndex =
@@ -213,6 +193,26 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
                       parentBid.getValue(),
                       parentBid.getBuilderIndex()));
     }
+
+    // Process execution requests from parent's payload. The execution requests are processed at
+    // state.slot (child's slot), not the parent's slot.
+    final long startTimeMillis = System.currentTimeMillis();
+    LOG.debug("Starting processing {} deposit requests", requests.getDeposits().size());
+    executionRequestsProcessorGloas.processDepositRequests(state, requests.getDeposits());
+    LOG.debug(
+        "Finished processing {} deposit requests. Pending deposits: {}, builders: {}. Took {} ms.",
+        requests.getDeposits().size(),
+        state.getPendingDeposits().size(),
+        state.getBuilders().size(),
+        System.currentTimeMillis() - startTimeMillis);
+    executionRequestsProcessorGloas.processWithdrawalRequests(
+        state, requests.getWithdrawals(), validatorExitContextSupplier);
+    executionRequestsProcessorGloas.processConsolidationRequests(
+        state, requests.getConsolidations());
+    executionRequestsProcessorGloas.processBuilderDepositRequests(
+        state, requestsGloas.getBuilderDeposits());
+    executionRequestsProcessorGloas.processBuilderExitRequests(
+        state, requestsGloas.getBuilderExits());
 
     // Update parent payload availability and latest block hash
     state.setExecutionPayloadAvailability(
