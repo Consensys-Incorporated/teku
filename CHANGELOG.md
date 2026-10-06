@@ -9,9 +9,9 @@
 ### Breaking Changes
 
 ### Additions and Improvements
- - Updated jvm-libp2p to 1.3.8, which bounds the number of protobuf fields in an inbound gossipsub RPC before decoding it, and configured that limit to 32768 fields. Together with the 256 KiB control-plane byte budget from 1.3.7, this bounds the heap a single gossipsub frame can allocate, closing the remaining empty-envelope and unknown-field amplification vectors.
  - Added gossipsub metrics `libp2p_gossip_gossipsub_*` (off by default; enable them with `--Xmetrics-additional-categories=LIBP2P_GOSSIP`).
  - Block production now resends `forkchoiceUpdated` when the execution layer returned no `payloadId` (e.g. `SYNCING`) for the one sent ahead of the proposal slot, instead of missing the proposal. A warning is logged when no `payloadId` is returned.
+ - Set gossip `max_total_fields` limit to 32768. See [#11341](https://github.com/Consensys-Incorporated/teku/issues/11341).
 
 ### Bug Fixes
  - The validator client now sends the required `Eth-Consensus-Version` header when submitting gloas proposer preferences to the beacon node.
