@@ -64,6 +64,7 @@ public class LibP2PParamsFactoryTest {
     assertThat(gossipParams.getMaxIHaveLength()).isEqualTo(5000);
     assertThat(gossipParams.getMaxPeersAcceptedInPruneMsg()).isEqualTo(0);
     assertThat(gossipParams.getMaxIDontWantMessageIds()).isEqualTo(5000);
+    assertThat(gossipParams.getMaxTotalFields()).isEqualTo(32768);
   }
 
   @Test
