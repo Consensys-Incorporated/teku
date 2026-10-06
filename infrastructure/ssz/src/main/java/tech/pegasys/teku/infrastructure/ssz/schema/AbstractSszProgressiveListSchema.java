@@ -291,13 +291,16 @@ public abstract class AbstractSszProgressiveListSchema<
     if (elementSchema instanceof AbstractSszPrimitiveSchema) {
       // Primitive packing: multiple values per 32-byte leaf chunk
       final int chunksCount = getChunks(elementsCount);
+      final int serializedSize =
+          (int) bitsCeilToBytes((long) elementsCount * getSszElementBitSize());
       int bytesCnt = 0;
       for (int c = 0; c < chunksCount; c++) {
         final long gIdx = ProgressiveTreeUtil.getElementGeneralizedIndex(c);
         final LeafNode leafNode = (LeafNode) dataNode.get(gIdx);
         final Bytes data = leafNode.getData();
-        writer.write(data);
-        bytesCnt += data.size();
+        final int bytesToWrite = Math.min(data.size(), serializedSize - bytesCnt);
+        writer.write(data.slice(0, bytesToWrite));
+        bytesCnt += bytesToWrite;
       }
       return bytesCnt;
     } else {

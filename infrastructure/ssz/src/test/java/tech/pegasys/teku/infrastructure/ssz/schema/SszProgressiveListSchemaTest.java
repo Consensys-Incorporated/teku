@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static tech.pegasys.teku.infrastructure.ssz.schema.TreeNodeAssert.assertThatTreeNode;
 
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -27,6 +28,7 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import tech.pegasys.teku.infrastructure.crypto.Hash;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
@@ -516,6 +518,33 @@ public class SszProgressiveListSchemaTest {
     final SszList<SszByte> loaded = byteListSchema.createFromBackingNode(result);
     assertThat(loaded.size()).isEqualTo(32);
     assertThat(loaded.get(0).get()).isEqualTo((byte) 0);
+  }
+
+  @ParameterizedTest
+  @MethodSource("partialChunkElementCounts")
+  void storeAndLoadBackingNodes_partialPrimitiveChunkSerializesCanonically(final int elementCount) {
+    final SszProgressiveListSchema<SszByte> schema =
+        SszProgressiveListSchema.create(SszPrimitiveSchemas.BYTE_SCHEMA);
+    final SszList<SszByte> original =
+        schema.createFromElements(
+            IntStream.range(0, elementCount).mapToObj(value -> SszByte.of((byte) value)).toList());
+    final InMemoryStoringTreeNodeStore nodeStore = new InMemoryStoringTreeNodeStore();
+    final long rootGIndex = 34;
+
+    schema.storeBackingNodes(nodeStore, 15, rootGIndex, original.getBackingNode());
+    final SszList<SszByte> restored =
+        schema.createFromBackingNode(
+            schema.loadBackingNodes(nodeStore, original.hashTreeRoot(), rootGIndex));
+
+    final Bytes expected = original.sszSerialize();
+    final ByteArrayOutputStream output = new ByteArrayOutputStream();
+    assertThat(restored.sszSerialize(output)).isEqualTo(expected.size());
+    assertThat(Bytes.wrap(output.toByteArray())).isEqualTo(expected);
+    assertThat(restored.sszSerialize()).isEqualTo(expected);
+  }
+
+  private static IntStream partialChunkElementCounts() {
+    return IntStream.concat(IntStream.range(1, 32), IntStream.range(33, 64));
   }
 
   @Test
