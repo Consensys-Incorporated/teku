@@ -15,7 +15,9 @@ package tech.pegasys.teku.validator.client;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import org.apache.logging.log4j.LogManager;
@@ -24,34 +26,75 @@ import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.validator.api.ValidatorConfig;
+import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
 import tech.pegasys.teku.validator.client.ProposerConfig.BuilderConfig;
 import tech.pegasys.teku.validator.client.ProposerConfig.Config;
 import tech.pegasys.teku.validator.client.ProposerConfig.RegistrationOverrides;
 import tech.pegasys.teku.validator.client.loader.OwnedValidators;
 import tech.pegasys.teku.validator.client.proposerconfig.ProposerConfigProvider;
 
-public class ProposerConfigManager implements ProposerConfigPropertiesProvider {
+public class ProposerConfigManager
+    implements ProposerConfigPropertiesProvider, ValidatorTimingChannel {
   private static final Logger LOG = LogManager.getLogger();
 
   private final ValidatorConfig config;
   private final RuntimeProposerConfig runtimeProposerConfig;
   private final ProposerConfigProvider proposerConfigProvider;
+  private final Spec spec;
 
   private final AtomicReference<Optional<ProposerConfig>> maybeProposerConfig =
       new AtomicReference<>(Optional.empty());
   private final SafeFuture<Void> initializationComplete = new SafeFuture<>();
+
+  private final AtomicReference<UInt64> currentEpoch = new AtomicReference<>(UInt64.ZERO);
+  // EIP-8261: the gas limit scheduled for the current epoch, only recomputed on epoch change
+  private final AtomicReference<Optional<UInt64>> scheduledGasLimit =
+      new AtomicReference<>(Optional.empty());
+  // keeps the "configured gas limit is above the recommended one" warning to one per validator
+  private final Map<BLSPublicKey, UInt64> warnedGasLimitByPublicKey = new ConcurrentHashMap<>();
 
   private Optional<OwnedValidators> ownedValidators = Optional.empty();
 
   public ProposerConfigManager(
       final ValidatorConfig config,
       final RuntimeProposerConfig runtimeProposerConfig,
-      final ProposerConfigProvider proposerConfigProvider) {
-    checkNotNull(config.getBuilderRegistrationDefaultGasLimit(), "A default Gas Limit is expected");
+      final ProposerConfigProvider proposerConfigProvider,
+      final Spec spec) {
+    checkNotNull(spec, "A spec is expected");
     this.config = config;
     this.runtimeProposerConfig = runtimeProposerConfig;
     this.proposerConfigProvider = proposerConfigProvider;
+    this.spec = spec;
+    updateScheduledGasLimit(currentEpoch.get());
+  }
+
+  @Override
+  public void onSlot(final UInt64 slot) {
+    final UInt64 epoch = spec.computeEpochAtSlot(slot);
+    if (currentEpoch.getAndSet(epoch).equals(epoch)) {
+      return;
+    }
+    updateScheduledGasLimit(epoch);
+  }
+
+  /**
+   * EIP-8261: resolves the gas limit scheduled for the given epoch, logging whenever the value
+   * provided by the schedule changes.
+   */
+  private void updateScheduledGasLimit(final UInt64 epoch) {
+    final Optional<UInt64> maybeScheduledGasLimit = spec.getScheduledGasLimit(epoch);
+    if (scheduledGasLimit.getAndSet(maybeScheduledGasLimit).equals(maybeScheduledGasLimit)) {
+      return;
+    }
+    warnedGasLimitByPublicKey.clear();
+    maybeScheduledGasLimit.ifPresent(
+        gasLimit ->
+            LOG.info(
+                "Gas limit schedule is active: the network recommends a gas limit of {} from epoch {}.",
+                gasLimit,
+                epoch));
   }
 
   public SafeFuture<Void> initialize(final OwnedValidators ownedValidators) {
@@ -135,10 +178,65 @@ public class ProposerConfigManager implements ProposerConfigPropertiesProvider {
         .or(config::getProposerDefaultFeeRecipient);
   }
 
+  /**
+   * Priority order
+   *
+   * <ul>
+   *   <li>gas limit configured for the key (proposer config file, or the SET api)
+   *   <li>default configured via <code>--validators-builder-registration-default-gas-limit</code>
+   *   <li>gas limit scheduled by the network for the epoch (EIP-8261)
+   *   <li>{@link ValidatorConfig#DEFAULT_BUILDER_REGISTRATION_GAS_LIMIT}
+   * </ul>
+   */
   @Override
   public UInt64 getGasLimit(final BLSPublicKey publicKey) {
-    return getAttributeWithFallback(Config::getBuilderGasLimit, publicKey)
-        .orElse(config.getBuilderRegistrationDefaultGasLimit());
+    return getGasLimit(publicKey, currentEpoch.get());
+  }
+
+  @Override
+  public UInt64 getGasLimit(final BLSPublicKey publicKey, final UInt64 epoch) {
+    final Optional<UInt64> maybeConfiguredGasLimit =
+        getAttributeWithFallback(Config::getGasLimit, publicKey)
+            .or(config::getBuilderRegistrationDefaultGasLimit);
+
+    final Optional<UInt64> maybeScheduledGasLimit = getScheduledGasLimit(epoch);
+    if (maybeConfiguredGasLimit.isEmpty()) {
+      return maybeScheduledGasLimit.orElse(ValidatorConfig.DEFAULT_BUILDER_REGISTRATION_GAS_LIMIT);
+    }
+
+    final UInt64 configuredGasLimit = maybeConfiguredGasLimit.get();
+    if (maybeScheduledGasLimit.isPresent()
+        && configuredGasLimit.isGreaterThan(maybeScheduledGasLimit.get())) {
+      warnAboutGasLimit(publicKey, epoch, configuredGasLimit, maybeScheduledGasLimit.get());
+    }
+    return configuredGasLimit;
+  }
+
+  private Optional<UInt64> getScheduledGasLimit(final UInt64 epoch) {
+    if (epoch.equals(currentEpoch.get())) {
+      // the common case, resolved once per epoch instead of once per validator
+      return scheduledGasLimit.get();
+    }
+    return spec.getScheduledGasLimit(epoch);
+  }
+
+  /** Warns at most once per validator for a given configured gas limit. */
+  private void warnAboutGasLimit(
+      final BLSPublicKey publicKey,
+      final UInt64 epoch,
+      final UInt64 configuredGasLimit,
+      final UInt64 recommendedGasLimit) {
+    final UInt64 previouslyWarnedGasLimit =
+        warnedGasLimitByPublicKey.put(publicKey, configuredGasLimit);
+    if (configuredGasLimit.equals(previouslyWarnedGasLimit)) {
+      return;
+    }
+    LOG.warn(
+        "The gas limit {} configured for validator {} is higher than the {} recommended by the network for epoch {}.",
+        configuredGasLimit,
+        publicKey,
+        recommendedGasLimit,
+        epoch);
   }
 
   @Override
@@ -204,7 +302,7 @@ public class ProposerConfigManager implements ProposerConfigPropertiesProvider {
     return maybeProposerConfig
         .get()
         .flatMap(config -> config.getConfigForPubKey(publicKey))
-        .flatMap(Config::getBuilderGasLimit);
+        .flatMap(Config::getGasLimit);
   }
 
   public boolean isOwnedValidator(final BLSPublicKey publicKey) {

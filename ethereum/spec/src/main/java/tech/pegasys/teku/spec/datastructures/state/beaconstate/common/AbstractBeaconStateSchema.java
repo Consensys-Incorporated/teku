@@ -69,7 +69,7 @@ public abstract class AbstractBeaconStateSchema<
   private static List<SszField> combineFields(
       final List<SszField> fieldsA, final List<SszField> fieldsB) {
     return Stream.concat(fieldsA.stream(), fieldsB.stream())
-        .sorted(Comparator.comparing(SszField::getIndex))
+        .sorted(Comparator.comparingInt(SszField::getIndex))
         .toList();
   }
 

@@ -15,6 +15,7 @@ package tech.pegasys.teku.validator.client.restapi.apis;
 
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_ACCEPTED;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
+import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_SERVICE_UNAVAILABLE;
 import static tech.pegasys.teku.validator.client.restapi.ValidatorRestApi.TAG_GAS_LIMIT;
 import static tech.pegasys.teku.validator.client.restapi.ValidatorTypes.PARAM_PUBKEY_TYPE;
@@ -83,13 +84,20 @@ public class SetGasLimit extends RestApiEndpoint {
           "Gas limit cannot be set to 0. It must match the regex: ^[1-9][0-9]{0,19}$");
       return;
     }
+
+    final ProposerConfigManager manager =
+        proposerConfigManager.orElseThrow(
+            () ->
+                new IllegalArgumentException(
+                    "Bellatrix is not currently scheduled on this network, unable to set gas limit."));
+
+    if (!manager.isOwnedValidator(publicKey)) {
+      request.respondError(SC_NOT_FOUND, "Validator public key not found");
+      return;
+    }
+
     try {
-      proposerConfigManager
-          .orElseThrow(
-              () ->
-                  new IllegalArgumentException(
-                      "Bellatrix is not currently scheduled on this network, unable to set fee recipient."))
-          .setGasLimit(publicKey, body.getGasLimit());
+      manager.setGasLimit(publicKey, body.getGasLimit());
     } catch (SetGasLimitException e) {
       request.respondError(SC_BAD_REQUEST, e.getMessage());
       return;

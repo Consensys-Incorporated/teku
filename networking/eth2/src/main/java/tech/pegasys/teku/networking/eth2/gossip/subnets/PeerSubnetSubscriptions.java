@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.networking.eth2.gossip.subnets;
 
+import static tech.pegasys.teku.networking.eth2.P2PConfig.DEFAULT_P2P_TARGET_SUBNET_SUBSCRIBER_COUNT;
+
 import com.google.common.annotations.VisibleForTesting;
 import it.unimi.dsi.fastutil.ints.Int2IntMap;
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
@@ -77,7 +79,8 @@ public class PeerSubnetSubscriptions {
       final DataColumnSidecarSubnetTopicProvider dataColumnSidecarSubnetTopicProvider,
       final SubnetSubscriptionService dataColumnSidecarSubnetService,
       final int targetSubnetSubscriberCount,
-      final SettableLabelledGauge subnetPeerCountGauge) {
+      final SettableLabelledGauge subnetPeerCountGauge,
+      final SyncCommitteeSubnetPeerCountLogger syncCommitteeSubnetPeerCountLogger) {
     final Map<String, Collection<NodeId>> subscribersByTopic = network.getSubscribersByTopic();
     // Peers without a derivable discovery node id (e.g. non-secp256k1 identities) cannot be mapped
     // to DAS custody columns, so they provide no data column sidecar value and are excluded from
@@ -162,6 +165,8 @@ public class PeerSubnetSubscriptions {
         subnetPeerCountGauge,
         subscriptions,
         dataColumnSidecarSubnetCount);
+    syncCommitteeSubnetPeerCountLogger.onSubscriptionsUpdated(
+        subscriptions, network.getPeerCount());
     return subscriptions;
   }
 
@@ -388,7 +393,7 @@ public class PeerSubnetSubscriptions {
     private final SubnetSubscriptions.Builder syncCommitteeSubnetSubscriptions;
     private final SubnetSubscriptions.Builder dataColumnSidecarSubnetSubscriptions;
     private NodeIdToDataColumnSidecarSubnetsCalculator nodeIdToDataColumnSidecarSubnetsCalculator;
-    private int targetSubnetSubscriberCount = 2;
+    private int targetSubnetSubscriberCount = DEFAULT_P2P_TARGET_SUBNET_SUBSCRIBER_COUNT;
 
     private Builder(
         final SchemaDefinitionsSupplier currentSchemaDefinitions,

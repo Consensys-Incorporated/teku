@@ -64,6 +64,7 @@ public class BlobSidecarPrunerTest {
           blobSidecarsArchiver,
           stubMetricsSystem,
           asyncRunner,
+          asyncRunner,
           timeProvider,
           PRUNE_INTERVAL,
           PRUNE_LIMIT,
@@ -71,7 +72,8 @@ public class BlobSidecarPrunerTest {
           "test",
           mock(SettableLabelledGauge.class),
           mock(SettableLabelledGauge.class),
-          true);
+          true,
+          Duration.ofMinutes(5));
 
   @BeforeEach
   void setUp() {
@@ -161,6 +163,7 @@ public class BlobSidecarPrunerTest {
             blobSidecarsArchiver,
             stubMetricsSystem,
             asyncRunner,
+            asyncRunner,
             timeProvider,
             PRUNE_INTERVAL,
             PRUNE_LIMIT,
@@ -168,7 +171,8 @@ public class BlobSidecarPrunerTest {
             "test",
             mock(SettableLabelledGauge.class),
             mock(SettableLabelledGauge.class),
-            true);
+            true,
+            Duration.ofMinutes(5));
     when(databaseOverride.getGenesisTime()).thenReturn(Optional.of(genesisTime));
     assertThat(blobsPrunerOverride.start()).isCompleted();
 
@@ -221,6 +225,7 @@ public class BlobSidecarPrunerTest {
             blobSidecarsArchiver,
             stubMetricsSystem,
             asyncRunner,
+            asyncRunner,
             timeProvider,
             PRUNE_INTERVAL,
             PRUNE_LIMIT,
@@ -228,7 +233,8 @@ public class BlobSidecarPrunerTest {
             "test",
             mock(SettableLabelledGauge.class),
             mock(SettableLabelledGauge.class),
-            true);
+            true,
+            Duration.ofMinutes(5));
     when(databaseOverride.getGenesisTime()).thenReturn(Optional.of(genesisTime));
     assertThat(blobsPrunerOverride.start()).isCompleted();
 

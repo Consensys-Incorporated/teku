@@ -15,7 +15,6 @@ package tech.pegasys.teku.spec.logic.common.util;
 
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
-import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockAndState;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
@@ -37,7 +36,6 @@ public class ExecutionPayloadProposalUtil {
       SszList<SszKZGCommitment> kzgCommitments) {}
 
   public SafeFuture<ExecutionPayloadEnvelope> createNewUnsignedExecutionPayload(
-      final UInt64 builderIndex,
       final BeaconBlockAndState blockAndState,
       final SafeFuture<ExecutionPayloadProposalData> executionPayloadProposalDataFuture) {
     return executionPayloadProposalDataFuture.thenApply(
@@ -47,7 +45,13 @@ public class ExecutionPayloadProposalUtil {
                 .create(
                     executionPayloadProposalData.executionPayload,
                     executionPayloadProposalData.executionRequests,
-                    builderIndex,
+                    blockAndState
+                        .getBlock()
+                        .getBody()
+                        .getOptionalSignedExecutionPayloadBid()
+                        .orElseThrow()
+                        .getMessage()
+                        .getBuilderIndex(),
                     blockAndState.getRoot(),
                     blockAndState.getBlock().getParentRoot()));
   }

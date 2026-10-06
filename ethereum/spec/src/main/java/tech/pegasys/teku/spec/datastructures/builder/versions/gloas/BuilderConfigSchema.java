@@ -25,7 +25,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 public class BuilderConfigSchema
     extends ContainerSchema3<BuilderConfig, SszUInt64, SszUInt64, SszList<BuilderEntry>> {
 
-  private static final long MAX_BUILDER_ENTRIES = 64;
+  public static final long MAX_BUILDER_ENTRIES = 64;
 
   public BuilderConfigSchema(final BuilderEntrySchema builderEntrySchema) {
     super(
@@ -38,10 +38,6 @@ public class BuilderConfigSchema
   public BuilderConfig create(
       final UInt64 minBid, final UInt64 builderBoostFactor, final List<BuilderEntry> builders) {
     return new BuilderConfig(this, minBid, builderBoostFactor, builders);
-  }
-
-  public BuilderConfig create(final UInt64 builderBoostFactor) {
-    return new BuilderConfig(this, UInt64.ZERO, builderBoostFactor, List.of());
   }
 
   @Override

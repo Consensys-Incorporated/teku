@@ -33,10 +33,10 @@ import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSchema;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecarSchema;
 import tech.pegasys.teku.spec.datastructures.blocks.BlockContainer;
 import tech.pegasys.teku.spec.datastructures.blocks.BlockContainerSchema;
-import tech.pegasys.teku.spec.datastructures.blocks.BlockContentsWithBlobsSchema;
+import tech.pegasys.teku.spec.datastructures.blocks.BlockContentsSchema;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainerSchema;
-import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContentsWithBlobsSchema;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContentsSchema;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBodyBuilder;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.deneb.BeaconBlockBodyBuilderDeneb;
 import tech.pegasys.teku.spec.datastructures.builder.BlobsBundleSchema;
@@ -51,8 +51,8 @@ public class SchemaDefinitionsDeneb extends SchemaDefinitionsCapella {
   private final BlobSchema blobSchema;
   private final SszListSchema<Blob, ? extends SszList<Blob>> blobsInBlockSchema;
   private final BlobSidecarSchema blobSidecarSchema;
-  private final BlockContentsWithBlobsSchema<?> blockContentsSchema;
-  private final SignedBlockContentsWithBlobsSchema<?> signedBlockContentsSchema;
+  private final BlockContentsSchema<?> blockContentsSchema;
+  private final SignedBlockContentsSchema<?> signedBlockContentsSchema;
   private final BlobsBundleSchema<?> blobsBundleSchema;
   private final ExecutionPayloadAndBlobsBundleSchema executionPayloadAndBlobsBundleSchema;
   private final BlobSidecarsByRootRequestMessageSchema blobSidecarsByRootRequestMessageSchema;
@@ -120,11 +120,11 @@ public class SchemaDefinitionsDeneb extends SchemaDefinitionsCapella {
     return blobSidecarSchema;
   }
 
-  public BlockContentsWithBlobsSchema<?> getBlockContentsSchema() {
+  public BlockContentsSchema<?> getBlockContentsSchema() {
     return blockContentsSchema;
   }
 
-  public SignedBlockContentsWithBlobsSchema<?> getSignedBlockContentsSchema() {
+  public SignedBlockContentsSchema<?> getSignedBlockContentsSchema() {
     return signedBlockContentsSchema;
   }
 

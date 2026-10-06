@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.benchmarks.gen;
 
+import java.io.EOFException;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
@@ -20,6 +21,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.function.Consumer;
@@ -126,6 +128,16 @@ public class BlockIO {
     }
   }
 
+  public static List<byte[]> readResourceBytes(final String resourcePath, final int limit) {
+    try (ObjectInputStream inputStream =
+        createObjectInputStream(
+            BlockIO.class.getResourceAsStream(resourcePath), resourcePath.endsWith(".gz"))) {
+      return readBytes(inputStream, limit);
+    } catch (IOException e) {
+      throw new RuntimeException("Error reading resource " + resourcePath, e);
+    }
+  }
+
   public static Reader createFileReader(final Spec spec, final String inFile) {
     try {
       return createReader(spec, new FileInputStream(inFile), inFile.endsWith(".gz"));
@@ -137,10 +149,34 @@ public class BlockIO {
   public static Reader createReader(
       final Spec spec, final InputStream inputStream, final boolean gzipped) {
     try {
-      return new Reader(
-          new ObjectInputStream(gzipped ? new GZIPInputStream(inputStream) : inputStream), spec);
+      return new Reader(createObjectInputStream(inputStream, gzipped), spec);
     } catch (IOException e) {
       throw new RuntimeException(e);
     }
+  }
+
+  private static ObjectInputStream createObjectInputStream(
+      final InputStream inputStream, final boolean gzipped) throws IOException {
+    if (inputStream == null) {
+      throw new IOException("Input stream was not available");
+    }
+    return new ObjectInputStream(gzipped ? new GZIPInputStream(inputStream) : inputStream);
+  }
+
+  private static List<byte[]> readBytes(final ObjectInputStream inputStream, final int limit)
+      throws IOException {
+    final List<byte[]> blocks = new ArrayList<>();
+    while (blocks.size() < limit) {
+      final int size;
+      try {
+        size = inputStream.readInt();
+      } catch (EOFException e) {
+        break;
+      }
+      final byte[] bytes = new byte[size];
+      inputStream.readFully(bytes);
+      blocks.add(bytes);
+    }
+    return blocks;
   }
 }

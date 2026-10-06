@@ -1,0 +1,25 @@
+{
+  "title" : "BuilderConfig",
+  "type" : "object",
+  "required" : [ "min_bid", "builder_boost_factor", "builders" ],
+  "properties" : {
+    "min_bid" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "builder_boost_factor" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "builders" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/BuilderEntry"
+      }
+    }
+  }
+}

@@ -19,6 +19,7 @@ import tech.pegasys.teku.infrastructure.ssz.containers.Container3;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.spec.schemas.ApiSchemas;
 
 public class BuilderConfig
     extends Container3<BuilderConfig, SszUInt64, SszUInt64, SszList<BuilderEntry>> {
@@ -33,6 +34,14 @@ public class BuilderConfig
         SszUInt64.of(minBid),
         SszUInt64.of(builderBoostFactor),
         schema.getBuildersSchema().createFromElements(builders));
+  }
+
+  // used primarily for testing (non-biased value comparison between local and builder bids)
+  public static final BuilderConfig NO_OP = withBuilderBoostFactor(UInt64.valueOf(100));
+
+  // used primarily for backwards compatibility with milestones prior to Gloas
+  public static BuilderConfig withBuilderBoostFactor(final UInt64 builderBoostFactor) {
+    return ApiSchemas.BUILDER_CONFIG_SCHEMA.create(UInt64.ZERO, builderBoostFactor, List.of());
   }
 
   protected BuilderConfig(final BuilderConfigSchema schema, final TreeNode backingNode) {

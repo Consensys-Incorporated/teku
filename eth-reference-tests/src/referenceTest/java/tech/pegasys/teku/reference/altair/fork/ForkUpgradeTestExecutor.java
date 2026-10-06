@@ -19,6 +19,7 @@ import static tech.pegasys.teku.spec.SpecMilestone.BELLATRIX;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
+import tech.pegasys.teku.reference.BlsSetting;
 import tech.pegasys.teku.reference.TestDataUtils;
 import tech.pegasys.teku.reference.TestExecutor;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -44,13 +45,17 @@ public class ForkUpgradeTestExecutor implements TestExecutor {
   public void runTest(final TestDefinition testDefinition) throws Throwable {
     final MetaData metadata = TestDataUtils.loadYaml(testDefinition, "meta.yaml", MetaData.class);
     final SpecMilestone specMilestone = SpecMilestone.forName(metadata.fork);
-    processUpgrade(testDefinition, specMilestone);
+    final boolean blsEnabled = metadata.getBlsSetting() != BlsSetting.IGNORED;
+    processUpgrade(testDefinition, specMilestone, blsEnabled);
   }
 
-  private void processUpgrade(final TestDefinition testDefinition, final SpecMilestone milestone) {
+  private void processUpgrade(
+      final TestDefinition testDefinition,
+      final SpecMilestone milestone,
+      final boolean blsEnabled) {
     final SpecMilestone previousMilestone = milestone.getPreviousMilestone();
     final SpecVersion previousMilestoneSpecVersion =
-        testDefinition.getSpec().forMilestone(previousMilestone);
+        testDefinition.getSpec(blsEnabled).forMilestone(previousMilestone);
     final BeaconStateSchema<?, ?> fromMilestoneSchema =
         switch (milestone) {
           case ALTAIR -> BeaconStateSchemaPhase0.create(previousMilestoneSpecVersion.getConfig());
@@ -92,7 +97,7 @@ public class ForkUpgradeTestExecutor implements TestExecutor {
     final BeaconState postState = TestDataUtils.loadStateFromSsz(testDefinition, "post.ssz_snappy");
 
     final StateUpgrade<?> stateUpgrade =
-        testDefinition.getSpec().getGenesisSpec().getStateUpgrade().orElseThrow();
+        testDefinition.getSpec(blsEnabled).getGenesisSpec().getStateUpgrade().orElseThrow();
 
     final BeaconState updated = stateUpgrade.upgrade(preState);
 
@@ -102,5 +107,12 @@ public class ForkUpgradeTestExecutor implements TestExecutor {
   private static class MetaData {
     @JsonProperty(value = "fork", required = true)
     private String fork;
+
+    @JsonProperty(value = "bls_setting", required = false, defaultValue = "1")
+    private int blsSetting;
+
+    public BlsSetting getBlsSetting() {
+      return BlsSetting.forCode(blsSetting);
+    }
   }
 }

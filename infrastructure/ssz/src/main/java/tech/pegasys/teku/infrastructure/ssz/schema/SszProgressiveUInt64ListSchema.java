@@ -32,12 +32,21 @@ public class SszProgressiveUInt64ListSchema
     super(SszPrimitiveSchemas.UINT64_SCHEMA, hints);
   }
 
+  public SszProgressiveUInt64ListSchema(final SszSchemaHints hints, final long maxLength) {
+    super(SszPrimitiveSchemas.UINT64_SCHEMA, hints, maxLength);
+  }
+
   public static SszProgressiveUInt64ListSchema create() {
     return create(SszSchemaHints.none());
   }
 
   public static SszProgressiveUInt64ListSchema create(final SszSchemaHints hints) {
     return new SszProgressiveUInt64ListSchema(hints);
+  }
+
+  /** A progressive uint64 list that additionally enforces {@code maxLength}. */
+  public static SszProgressiveUInt64ListSchema create(final long maxLength) {
+    return new SszProgressiveUInt64ListSchema(SszSchemaHints.none(), maxLength);
   }
 
   @Override

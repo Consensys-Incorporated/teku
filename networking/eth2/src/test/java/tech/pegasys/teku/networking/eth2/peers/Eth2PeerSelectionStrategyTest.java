@@ -464,7 +464,7 @@ class Eth2PeerSelectionStrategyTest {
 
   private void withShuffleOrder(final Object... values) {
     final List<?> shuffledOrder = asList(values);
-    shuffler = list -> list.sort(Comparator.comparing(shuffledOrder::indexOf));
+    shuffler = list -> list.sort(Comparator.comparingInt(shuffledOrder::indexOf));
   }
 
   private static DiscoveryPeer createDiscoveryPeer(final PeerAddress peer, final int... attnets) {

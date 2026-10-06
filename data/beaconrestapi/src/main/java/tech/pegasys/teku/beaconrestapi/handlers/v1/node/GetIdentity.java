@@ -100,7 +100,7 @@ public class GetIdentity extends RestApiEndpoint {
             listOf(
                 string(
                     "Node's addresses on which eth2 rpc requests are served. "
-                        + "[Read more](https://docs.libp2p.io/reference/glossary/#multiaddr)",
+                        + "[Read more](https://libp2p.io/docs/addressing/)",
                     "/ip4/7.7.7.7/tcp/4242/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N")),
             IdentityData::getListeningAddresses)
         .withField(
@@ -108,7 +108,7 @@ public class GetIdentity extends RestApiEndpoint {
             listOf(
                 string(
                     "Node's addresses on which is listening for discv5 requests. "
-                        + "[Read more](https://docs.libp2p.io/reference/glossary/#multiaddr)",
+                        + "[Read more](https://libp2p.io/docs/addressing/)",
                     "/ip4/7.7.7.7/udp/30303/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N")),
             IdentityData::getDiscoveryAddresses)
         .withField("metadata", createMetadataType(networkingConfig), IdentityData::getMetadata)

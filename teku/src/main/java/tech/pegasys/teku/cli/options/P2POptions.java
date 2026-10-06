@@ -18,6 +18,7 @@ import static tech.pegasys.teku.networking.eth2.P2PConfig.DEFAULT_COLUMN_CUSTODY
 import static tech.pegasys.teku.networking.eth2.P2PConfig.DEFAULT_COLUMN_CUSTODY_BACKFILLER_POLL_PERIOD_SECONDS;
 import static tech.pegasys.teku.networking.eth2.P2PConfig.DEFAULT_DOWNLOAD_TIMEOUT_MS;
 import static tech.pegasys.teku.networking.eth2.P2PConfig.DEFAULT_RECOVERY_TIMEOUT_MS;
+import static tech.pegasys.teku.networking.eth2.P2PConfig.DEFAULT_SIDECAR_RETRIEVAL_OVERLAP_FRACTION;
 import static tech.pegasys.teku.networking.p2p.discovery.DiscoveryConfig.DEFAULT_P2P_PEERS_LOWER_BOUND;
 import static tech.pegasys.teku.networking.p2p.discovery.DiscoveryConfig.DEFAULT_P2P_PEERS_LOWER_BOUND_ALL_SUBNETS;
 import static tech.pegasys.teku.networking.p2p.discovery.DiscoveryConfig.DEFAULT_P2P_PEERS_UPPER_BOUND;
@@ -437,6 +438,18 @@ public class P2POptions {
   private Integer sidecarDownloadTimeoutMs = DEFAULT_DOWNLOAD_TIMEOUT_MS;
 
   @Option(
+      names = {"--Xp2p-sidecar-retrieval-overlap-fraction"},
+      paramLabel = "<NUMBER>",
+      showDefaultValue = Visibility.ALWAYS,
+      description =
+          "Fraction of pending data column sidecar retrievals that may be hedged with a redundant "
+              + "request to an alternate custody peer when the original peer is slow to respond. "
+              + "Any positive value permits at least one hedged retrieval. Set to 0 to disable.",
+      arity = "1",
+      hidden = true)
+  private Double sidecarRetrievalOverlapFraction = DEFAULT_SIDECAR_RETRIEVAL_OVERLAP_FRACTION;
+
+  @Option(
       names = {"--p2p-subscribe-all-subnets-enabled"},
       paramLabel = "<BOOLEAN>",
       showDefaultValue = Visibility.ALWAYS,
@@ -494,28 +507,6 @@ public class P2POptions {
       arity = "0..1",
       fallbackValue = "true")
   private boolean gossipBlobsAfterBlockEnabled = P2PConfig.DEFAULT_GOSSIP_BLOBS_AFTER_BLOCK_ENABLED;
-
-  @Option(
-      names = {"--Xp2p-gossip-snappy-aircompressor-enabled"},
-      paramLabel = "<BOOLEAN>",
-      showDefaultValue = Visibility.ALWAYS,
-      description = "Use aircompressor-v3 for gossip snappy encoding and decoding",
-      hidden = true,
-      arity = "0..1",
-      fallbackValue = "true")
-  private boolean gossipSnappyAircompressorEnabled =
-      P2PConfig.DEFAULT_GOSSIP_SNAPPY_AIRCOMPRESSOR_ENABLED;
-
-  @Option(
-      names = {"--Xp2p-rpc-snappy-aircompressor-enabled"},
-      paramLabel = "<BOOLEAN>",
-      showDefaultValue = Visibility.ALWAYS,
-      description = "Use aircompressor-v3 for RPC snappy encoding and decoding",
-      hidden = true,
-      arity = "0..1",
-      fallbackValue = "true")
-  private boolean rpcSnappyAircompressorEnabled =
-      P2PConfig.DEFAULT_RPC_SNAPPY_AIRCOMPRESSOR_ENABLED;
 
   @Option(
       names = {"--Xpeer-all-topics-filter-enabled"},
@@ -783,8 +774,6 @@ public class P2POptions {
                   .peerRequestLimit(peerRequestLimit)
                   .floodPublishMaxMessageSizeThreshold(floodPublishMaxMessageSizeThreshold)
                   .gossipBlobsAfterBlockEnabled(gossipBlobsAfterBlockEnabled)
-                  .gossipSnappyAircompressorEnabled(gossipSnappyAircompressorEnabled)
-                  .rpcSnappyAircompressorEnabled(rpcSnappyAircompressorEnabled)
                   .custodyGroupCountOverride(custodyGroupCountOverride)
                   .dasPublishWithholdColumnsEverySlots(dasPublishWithholdColumnsEverySlots)
                   .dasDisableElRecovery(dasDisableElRecovery)
@@ -793,6 +782,7 @@ public class P2POptions {
                   .executionProofTopicEnabled(executionProofTopicEnabled)
                   .sidecarRecoveryTimeout(sidecarCancelTimeoutMs)
                   .sidecarDownloadTimeout(sidecarDownloadTimeoutMs)
+                  .sidecarRetrievalOverlapFraction(sidecarRetrievalOverlapFraction)
                   .sidecarSyncPollPeriod(sidecarCustodySyncPollPeriodSeconds)
                   .sidecarSyncBatchSize(sidecarCustodySyncBatchSize)
                   .columnsDataAvailabilityHalfCheckEnabled(columnsDataAvailabilityHalfCheckEnabled)

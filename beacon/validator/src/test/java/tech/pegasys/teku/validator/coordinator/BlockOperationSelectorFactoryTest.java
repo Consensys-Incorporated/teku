@@ -252,8 +252,8 @@ class BlockOperationSelectorFactoryTest {
                     mutableState -> {
                       final MutableBeaconStateGloas stateGloas =
                           MutableBeaconStateGloas.required(mutableState);
-                      stateGloas.setLatestExecutionPayloadBid(
-                          gloasData.randomExecutionPayloadBid(parentSlot, UInt64.ZERO));
+                      stateGloas.setLatestBlockHeader(
+                          gloasData.randomBeaconBlockHeader(parentSlot, UInt64.ZERO));
                       stateGloas.setExecutionPayloadAvailability(
                           schemaDefinitions.getExecutionPayloadAvailabilitySchema().getDefault());
                     }));
@@ -285,6 +285,7 @@ class BlockOperationSelectorFactoryTest {
             blockSlotState.getLatestBlockHash(),
             randaoReveal,
             Optional.empty(),
+            false,
             Optional.empty(),
             BlockProductionPerformance.NOOP);
 
@@ -416,6 +417,75 @@ class BlockOperationSelectorFactoryTest {
             .apply(gloasBodyBuilder));
 
     assertThat(gloasBodyBuilder.voluntaryExits).isEmpty();
+  }
+
+  @ParameterizedTest(name = "selfConsolidation={0}")
+  @ValueSource(booleans = {false, true})
+  void shouldOnlyExcludeVoluntaryExitForNonSelfParentConsolidationSource(
+      final boolean selfConsolidation) {
+    final UInt64 slot = UInt64.ONE;
+    final BeaconState blockSlotState = dataStructureUtil.randomBeaconState(slot);
+    final int sourceValidatorIndex = 1;
+    final int targetValidatorIndex = selfConsolidation ? sourceValidatorIndex : 2;
+    final SignedVoluntaryExit sourceExit =
+        dataStructureUtil.randomSignedVoluntaryExit(UInt64.valueOf(sourceValidatorIndex));
+    final SignedVoluntaryExit otherExit =
+        dataStructureUtil.randomSignedVoluntaryExit(UInt64.valueOf(2));
+    final SignedVoluntaryExit unrelatedExit =
+        dataStructureUtil.randomSignedVoluntaryExit(UInt64.valueOf(3));
+
+    addToPool(voluntaryExitPool, sourceExit);
+    addToPool(voluntaryExitPool, otherExit);
+    addToPool(voluntaryExitPool, unrelatedExit);
+    prepareBlockProductionWithPayload(
+        dataStructureUtil.randomExecutionPayload(),
+        executionPayloadContext,
+        blockSlotState,
+        Optional.of(dataStructureUtil.randomUInt256()));
+
+    final SchemaDefinitionsElectra schemaDefinitions =
+        SchemaDefinitionsElectra.required(spec.atSlot(slot).getSchemaDefinitions());
+    final ExecutionRequests parentRequests =
+        schemaDefinitions
+            .getExecutionRequestsSchema()
+            .createBuilder()
+            .consolidations(
+                List.of(
+                    schemaDefinitions
+                        .getConsolidationRequestSchema()
+                        .create(
+                            Bytes20.ZERO,
+                            blockSlotState.getValidators().get(sourceValidatorIndex).getPublicKey(),
+                            blockSlotState
+                                .getValidators()
+                                .get(targetValidatorIndex)
+                                .getPublicKey())))
+            .build();
+    final CapturingBeaconBlockBodyBuilder gloasBodyBuilder =
+        new CapturingBeaconBlockBodyBuilder(false, false, true);
+    when(executionPayloadManager.getParentExecutionRequestsForBlock(any(), any(), any()))
+        .thenReturn(SafeFuture.completedFuture(parentRequests));
+
+    safeJoin(
+        factory
+            .createSelector(
+                blockProductionContext(
+                    parentRoot,
+                    blockSlotState,
+                    randaoReveal,
+                    Optional.of(defaultGraffiti),
+                    Optional.empty(),
+                    BlockProductionPerformance.NOOP))
+            .apply(gloasBodyBuilder));
+
+    if (selfConsolidation) {
+      assertThat(gloasBodyBuilder.voluntaryExits)
+          .containsExactlyInAnyOrder(sourceExit, otherExit, unrelatedExit);
+    } else {
+      assertThat(gloasBodyBuilder.voluntaryExits)
+          .containsExactlyInAnyOrder(otherExit, unrelatedExit);
+    }
+    assertThat(gloasBodyBuilder.parentExecutionRequests).isEqualTo(parentRequests);
   }
 
   @Test
@@ -1069,6 +1139,7 @@ class BlockOperationSelectorFactoryTest {
     protected ExecutionPayloadHeader executionPayloadHeader;
     protected SszList<SszKZGCommitment> blobKzgCommitments;
     protected ExecutionRequests executionRequests;
+    protected ExecutionRequests parentExecutionRequests;
 
     public CapturingBeaconBlockBodyBuilder(final boolean supportsKzgCommitments) {
       this.supportsKzgCommitments = supportsKzgCommitments;
@@ -1224,6 +1295,7 @@ class BlockOperationSelectorFactoryTest {
     @Override
     public BeaconBlockBodyBuilder parentExecutionRequests(
         final ExecutionRequests parentExecutionRequests) {
+      this.parentExecutionRequests = parentExecutionRequests;
       return this;
     }
 

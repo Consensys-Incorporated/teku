@@ -14,7 +14,6 @@
 package tech.pegasys.teku.cli.options;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static tech.pegasys.teku.validator.api.ValidatorConfig.DEFAULT_BUILDER_REGISTRATION_GAS_LIMIT;
 
 import java.net.MalformedURLException;
 import java.net.URI;
@@ -163,11 +162,11 @@ public class ValidatorOptionsTest extends AbstractBeaconNodeCommandTest {
   }
 
   @Test
-  public void shouldReportDefaultGasLimitIfRegistrationDefaultGasLimitNotSpecified() {
+  public void shouldNotSetDefaultGasLimitIfRegistrationDefaultGasLimitNotSpecified() {
     final TekuConfiguration config = getTekuConfigurationFromArguments();
     assertThat(
             config.validatorClient().getValidatorConfig().getBuilderRegistrationDefaultGasLimit())
-        .isEqualTo(DEFAULT_BUILDER_REGISTRATION_GAS_LIMIT);
+        .isEmpty();
   }
 
   @Test
@@ -176,7 +175,7 @@ public class ValidatorOptionsTest extends AbstractBeaconNodeCommandTest {
     final TekuConfiguration config = getTekuConfigurationFromArguments(args);
     assertThat(
             config.validatorClient().getValidatorConfig().getBuilderRegistrationDefaultGasLimit())
-        .isEqualTo(UInt64.valueOf(1000));
+        .contains(UInt64.valueOf(1000));
   }
 
   @Test

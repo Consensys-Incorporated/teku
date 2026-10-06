@@ -17,6 +17,7 @@ import static tech.pegasys.teku.infrastructure.async.SafeFuture.completedFuture;
 import static tech.pegasys.teku.infrastructure.logging.Converter.gweiToEth;
 import static tech.pegasys.teku.spec.config.Constants.HIGHEST_BID_SET_SIZE;
 import static tech.pegasys.teku.spec.config.Constants.MAX_SLOTS_TO_TRACK_BUILDERS_BIDS;
+import static tech.pegasys.teku.spec.config.SpecConfigGloas.PAYLOAD_BUILDER_VERSION;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ignore;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.reject;
@@ -34,12 +35,17 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.collections.LimitedMap;
+import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
 import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
 
@@ -47,6 +53,7 @@ public class ExecutionPayloadBidGossipValidator {
 
   private static final Logger LOG = LogManager.getLogger();
 
+  private final Spec spec;
   private final GossipValidationHelper gossipValidationHelper;
   private final SigningRootUtil signingRootUtil;
   private final int minBidIncrementPercentage;
@@ -62,6 +69,7 @@ public class ExecutionPayloadBidGossipValidator {
       final GossipValidationHelper gossipValidationHelper,
       final ProposerPreferencesManager proposerPreferencesManager,
       final int minBidIncrementPercentage) {
+    this.spec = spec;
     this.gossipValidationHelper = gossipValidationHelper;
     this.proposerPreferencesManager = proposerPreferencesManager;
     this.minBidIncrementPercentage = minBidIncrementPercentage;
@@ -73,7 +81,7 @@ public class ExecutionPayloadBidGossipValidator {
     final ExecutionPayloadBid bid = signedExecutionPayloadBid.getMessage();
 
     /*
-     * [REJECT] bid.execution_payment is zero.
+     * [REJECT] The bid's execution payment is zero
      */
     final UInt64 executionPayment = bid.getExecutionPayment();
     if (!executionPayment.isZero()) {
@@ -82,7 +90,15 @@ public class ExecutionPayloadBidGossipValidator {
     }
 
     /*
-     * [IGNORE] bid.slot is the current slot or the next slot.
+     * [REJECT] The bid's block hash is not equal to its parent block hash
+     */
+
+    if (bid.getBlockHash().equals(bid.getParentBlockHash())) {
+      return completedFuture(rejectBid(bid, "block hash and parent block hash are the same"));
+    }
+
+    /*
+     * [IGNORE] The bid's slot is the current slot or the next slot
      */
     if (!gossipValidationHelper.isSlotCurrentOrNext(bid.getSlot())) {
       return completedFuture(
@@ -90,114 +106,25 @@ public class ExecutionPayloadBidGossipValidator {
     }
 
     /*
-     * [IGNORE] the SignedProposerPreferences where preferences.proposal_slot is equal to
-     * bid.slot has been seen
+     * [REJECT] The bid's blob KZG commitment count is within the per-epoch limit
      */
-    final Optional<ProposerPreferences> proposerPreferences =
-        proposerPreferencesManager.getProposerPreferences(bid.getSlot());
-    if (proposerPreferences.isEmpty()) {
-      return completedFuture(
-          saveBidForFuture(bid, "no proposer preferences available; saving for future processing"));
-    }
-
-    /*
-     * [REJECT] bid.fee_recipient matches the fee_recipient from the proposer's
-     * SignedProposerPreferences associated with bid.slot
-     */
-    if (!bid.getFeeRecipient().equals(proposerPreferences.get().getFeeRecipient())) {
-      return completedFuture(
-          ignoreBid(
-              bid,
-              "fee recipient %s does not match proposer preferences fee recipient %s",
-              bid.getFeeRecipient(),
-              proposerPreferences.get().getFeeRecipient()));
-    }
-
-    /*
-     * [IGNORE] this is the first signed bid seen with a valid signature from the given builder for the tuple
-     * (bid.slot, bid.parent_block_hash, bid.parent_block_root).
-     */
-    final BuilderAndParent builderAndParent =
-        new BuilderAndParent(
-            bid.getBuilderIndex(), bid.getParentBlockHash(), bid.getParentBlockRoot());
-    if (seenExecutionPayloadBids.getOrDefault(bid.getSlot(), Set.of()).contains(builderAndParent)) {
-      return completedFuture(
-          ignoreBid(
-              bid,
-              "already received for parent block hash %s and parent block root %s",
-              bid.getParentBlockHash(),
-              bid.getParentBlockRoot()));
-    }
-
-    /*
-     * [IGNORE] this bid is the highest value bid seen for the tuple
-     * (bid.slot, bid.parent_block_hash, bid.parent_block_root).
-     *
-     * Note: Implementations SHOULD include DoS prevention measures to
-     * mitigate spam from malicious builders submitting numerous bids with minimal value increments.
-     * Possible strategies include: (1) only forwarding bids that exceed the current highest bid by a
-     * minimum threshold, or (2) forwarding only the highest observed bid at regular time intervals.
-     *
-     */
-    final BidParent bidValueKey =
-        new BidParent(bid.getSlot(), bid.getParentBlockHash(), bid.getParentBlockRoot());
-    final UInt64 existingBidValue = highestBids.getOrDefault(bidValueKey, UInt64.ZERO);
-    if (!existingBidValue.isZero()) {
-      final UInt64 minRequiredBid = calculateMinimumRequiredBid(existingBidValue);
-
-      if (bid.getValue().isLessThan(minRequiredBid)) {
+    final Optional<Integer> maybeMaxBlobsPerBlock = spec.getMaxBlobsPerBlockAtSlot(bid.getSlot());
+    if (maybeMaxBlobsPerBlock.isPresent()) {
+      final int maxBlobsPerBlock = maybeMaxBlobsPerBlock.get();
+      final int blobKzgCommitmentsCount = bid.getBlobKzgCommitments().size();
+      if (blobKzgCommitmentsCount > maxBlobsPerBlock) {
         return completedFuture(
-            ignoreBid(
+            rejectBid(
                 bid,
-                "does not meet minimum increment threshold (%s%%); current highest is %s ETH and minimum required is %s ETH",
-                minBidIncrementPercentage,
-                gweiToEth(existingBidValue),
-                gweiToEth(minRequiredBid)));
+                "has %s blob kzg commitments which exceeds the maximum of %s for the slot",
+                blobKzgCommitmentsCount,
+                maxBlobsPerBlock));
       }
     }
 
     /*
-     * [IGNORE] bid.parent_block_hash is the block hash of a known execution payload in fork choice
-     * and is_gas_limit_target_compatible(parent_gas_limit, bid.gas_limit, proposer_preferences.target_gas_limit)
-     * is True where parent_gas_limit is the gas_limit of that execution payload.
-     */
-    final Optional<UInt64> maybeParentGasLimit =
-        gossipValidationHelper.getGasLimitForExecutionPayload(
-            bid.getParentBlockRoot(), bid.getParentBlockHash());
-    if (maybeParentGasLimit.isEmpty()) {
-      return completedFuture(
-          saveBidForFuture(
-              bid,
-              "parent execution payload gas limit is unavailable for parent block hash %s; saving for future processing",
-              bid.getParentBlockHash()));
-    }
-    final UInt64 parentGasLimit = maybeParentGasLimit.get();
-    final UInt64 targetGasLimit = proposerPreferences.get().getTargetGasLimit();
-    if (!isGasLimitTargetCompatible(parentGasLimit, bid.getGasLimit(), targetGasLimit)) {
-      return completedFuture(
-          ignoreBid(
-              bid,
-              "gas limit %s is not compatible with parent gas limit %s and proposer preferences target gas limit %s",
-              bid.getGasLimit(),
-              parentGasLimit,
-              targetGasLimit));
-    }
-
-    /*
-     * [IGNORE] The bid is compatible with the current head branch, i.e.
-     * is_bid_compatible_with_head(store, bid) returns True.
-     */
-    if (!gossipValidationHelper.isBidCompatibleWithHead(bid)) {
-      return completedFuture(
-          ignoreBid(
-              bid,
-              "is not compatible with the current head branch (parent block hash %s, parent block root %s)",
-              bid.getParentBlockHash(),
-              bid.getParentBlockRoot()));
-    }
-
-    /*
-     * Retrieve the bid's parent block slot for the remaining validation rules.
+     * [IGNORE] The bid's parent block root is a known beacon block
+     * (MAY be queued until parent is imported)
      */
     final Optional<UInt64> maybeParentBlockSlot =
         gossipValidationHelper.getSlotForBlockRoot(bid.getParentBlockRoot());
@@ -211,7 +138,14 @@ public class ExecutionPayloadBidGossipValidator {
     final UInt64 parentBlockSlot = maybeParentBlockSlot.get();
 
     /*
-     * [REJECT] The bid is for a higher slot than its parent block.
+     * [IGNORE] The bid's slot is within the parent's proposer lookahead
+     */
+    if (!gossipValidationHelper.isWithinParentProposerLookahead(bid.getSlot(), parentBlockSlot)) {
+      return completedFuture(ignoreBid(bid, "bid's slot is past the parent's proposer lookahead"));
+    }
+
+    /*
+     * [REJECT] The bid is for a higher slot than its parent block
      */
     if (!bid.getSlot().isGreaterThan(parentBlockSlot)) {
       return completedFuture(
@@ -226,6 +160,10 @@ public class ExecutionPayloadBidGossipValidator {
         .getParentStateInBlockEpoch(parentBlockSlot, bid.getParentBlockRoot(), bid.getSlot())
         .thenApply(
             maybeState -> {
+              /*
+               * [IGNORE] The bid's parent block has been imported
+               * (MAY be queued until parent is imported)
+               */
               if (maybeState.isEmpty()) {
                 return saveBidForFuture(
                     bid,
@@ -236,8 +174,112 @@ public class ExecutionPayloadBidGossipValidator {
               final BeaconState state = maybeState.get();
 
               /*
-               * [REJECT] bid.prev_randao is the correct RANDAO mix -- i.e. validate that
-               * bid.prev_randao == get_randao_mix(parent_state, get_current_epoch(parent_state)).
+               * [IGNORE] The matching proposer preferences have been seen
+               */
+              final Optional<Bytes32> maybeDependentRoot =
+                  gossipValidationHelper.getShufflingDependentRoot(
+                      bid.getParentBlockRoot(), bid.getSlot());
+              if (maybeDependentRoot.isEmpty()) {
+                return saveBidForFuture(
+                    bid, "shuffling dependent root is unavailable; saving for future processing");
+              }
+              final Optional<ProposerPreferences> proposerPreferences =
+                  proposerPreferencesManager.getProposerPreferences(
+                      bid.getSlot(), maybeDependentRoot.get());
+              if (proposerPreferences.isEmpty()) {
+                return saveBidForFuture(
+                    bid, "no proposer preferences available; saving for future processing");
+              }
+
+              /*
+               * [IGNORE] The bid's fee recipient matches the proposer's preference
+               */
+              if (!bid.getFeeRecipient().equals(proposerPreferences.get().getFeeRecipient())) {
+                return ignoreBid(
+                    bid,
+                    "fee recipient %s does not match proposer preferences fee recipient %s",
+                    bid.getFeeRecipient(),
+                    proposerPreferences.get().getFeeRecipient());
+              }
+
+              /*
+               * [IGNORE] This is the first bid for this slot, parent, and builder
+               */
+              final BuilderAndParent builderAndParent =
+                  new BuilderAndParent(
+                      bid.getBuilderIndex(), bid.getParentBlockHash(), bid.getParentBlockRoot());
+              if (seenExecutionPayloadBids
+                  .getOrDefault(bid.getSlot(), Set.of())
+                  .contains(builderAndParent)) {
+                return ignoreBid(
+                    bid,
+                    "already received valid bid for slot %s, parent block hash %s, parent block root %s, and builder index %s",
+                    bid.getSlot(),
+                    bid.getParentBlockHash(),
+                    bid.getParentBlockRoot(),
+                    bid.getBuilderIndex());
+              }
+
+              /*
+               * [IGNORE] This is the highest value bid seen for the slot and parent
+               *
+               */
+              final BidParent bidValueKey =
+                  new BidParent(bid.getSlot(), bid.getParentBlockHash(), bid.getParentBlockRoot());
+              final UInt64 existingBidValue = highestBids.getOrDefault(bidValueKey, UInt64.ZERO);
+              if (!existingBidValue.isZero()) {
+                final UInt64 minRequiredBid = calculateMinimumRequiredBid(existingBidValue);
+
+                if (bid.getValue().isLessThan(minRequiredBid)) {
+                  return ignoreBid(
+                      bid,
+                      "does not meet minimum increment threshold (%s%%); current highest is %s ETH and minimum required is %s ETH",
+                      minBidIncrementPercentage,
+                      gweiToEth(existingBidValue),
+                      gweiToEth(minRequiredBid));
+                }
+              }
+
+              /*
+               * [IGNORE] The bid's parent block hash is the hash of a known execution payload
+               */
+              final Optional<UInt64> maybeParentGasLimit =
+                  gossipValidationHelper.getGasLimitForExecutionPayload(
+                      bid.getParentBlockRoot(), bid.getParentBlockHash());
+              if (maybeParentGasLimit.isEmpty()) {
+                return saveBidForFuture(
+                    bid,
+                    "parent execution payload gas limit is unavailable for parent block hash %s; saving for future processing",
+                    bid.getParentBlockHash());
+              }
+
+              /*
+               * [IGNORE] The bid's gas limit is compatible with the proposer's target gas limit
+               */
+              final UInt64 parentGasLimit = maybeParentGasLimit.get();
+              final UInt64 targetGasLimit = proposerPreferences.get().getTargetGasLimit();
+              if (!isGasLimitTargetCompatible(parentGasLimit, bid.getGasLimit(), targetGasLimit)) {
+                return ignoreBid(
+                    bid,
+                    "gas limit %s is not compatible with parent gas limit %s and proposer preferences target gas limit %s",
+                    bid.getGasLimit(),
+                    parentGasLimit,
+                    targetGasLimit);
+              }
+
+              /*
+               * [IGNORE] The bid is compatible with the current head branch
+               */
+              if (!gossipValidationHelper.isBidCompatibleWithHead(bid)) {
+                return ignoreBid(
+                    bid,
+                    "is not compatible with the current head branch (parent block hash %s, parent block root %s)",
+                    bid.getParentBlockHash(),
+                    bid.getParentBlockRoot());
+              }
+
+              /*
+               * [REJECT] The bid's previous randao is correct
                */
               final Bytes32 expectedRandaoMix =
                   gossipValidationHelper.getRandaoMixForCurrentEpoch(state, bid.getSlot());
@@ -249,9 +291,23 @@ public class ExecutionPayloadBidGossipValidator {
                     expectedRandaoMix);
               }
 
+              final SszList<Builder> builders = BeaconStateGloas.required(state).getBuilders();
+
               /*
-               * [REJECT] bid.builder_index is a valid/active builder index -- i.e. is_active_builder(state, bid.builder_index) returns True
+               * [REJECT] The builder index is valid
                */
+              if (bid.getBuilderIndex().isGreaterThanOrEqualTo(builders.size())) {
+                return rejectBid(
+                    bid,
+                    "builder index %s is out of range for the %s builders in the state",
+                    bid.getBuilderIndex(),
+                    builders.size());
+              }
+
+              /*
+               * [REJECT] The builder is active
+               */
+
               if (!gossipValidationHelper.isActiveBuilder(
                   bid.getBuilderIndex(), state, bid.getSlot())) {
                 return rejectBid(
@@ -261,8 +317,21 @@ public class ExecutionPayloadBidGossipValidator {
               }
 
               /*
-               * [IGNORE] bid.value is less or equal than the builder's excess balance
-               * -- i.e. MIN_ACTIVATION_BALANCE + bid.value <= state.balances[bid.builder_index].
+               * [REJECT] The builder is a payload builder
+               */
+              final Builder builder = builders.get(bid.getBuilderIndex().intValue());
+              final int builderVersion = builder.getVersion();
+              if (builderVersion != PAYLOAD_BUILDER_VERSION) {
+                return rejectBid(
+                    bid,
+                    "builder index %s has version %s but only payload builder version %s may bid",
+                    bid.getBuilderIndex(),
+                    builderVersion,
+                    PAYLOAD_BUILDER_VERSION);
+              }
+
+              /*
+               * [IGNORE] The builder can cover the bid
                */
               if (!gossipValidationHelper.builderHasEnoughBalanceForBid(
                   bid.getValue(), bid.getBuilderIndex(), state, bid.getSlot())) {
@@ -270,7 +339,43 @@ public class ExecutionPayloadBidGossipValidator {
               }
 
               /*
-               * [REJECT] signed_execution_payload_bid.signature is valid with respect to the bid.builder_index.
+               * [IGNORE] The parent's payload does not try to exit the builder
+               */
+              if (bid.getParentBlockHash()
+                  .equals(
+                      BeaconStateGloas.required(state)
+                          .getLatestExecutionPayloadBid()
+                          .getBlockHash())) {
+                if (spec.isExecutionPayloadEnvelopeAvailableAtSlot(parentBlockSlot)) {
+                  final Optional<SignedExecutionPayloadEnvelope> maybeParentPayload =
+                      gossipValidationHelper.getRecentlyImportedExecutionPayload(
+                          bid.getParentBlockRoot());
+                  if (maybeParentPayload.isEmpty()) {
+                    return saveBidForFuture(
+                        bid,
+                        "parent execution payload is unavailable. Saving for future processing");
+                  }
+                  final boolean parentPayloadMayExitBuilder =
+                      ExecutionRequestsGloas.required(
+                              maybeParentPayload.get().getMessage().getExecutionRequests())
+                          .getBuilderExits()
+                          .stream()
+                          .anyMatch(
+                              request ->
+                                  request.getPubkey().equals(builder.getPublicKey())
+                                      && request
+                                          .getSourceAddress()
+                                          .getWrappedBytes()
+                                          .equals(builder.getExecutionAddress().getWrappedBytes()));
+                  if (parentPayloadMayExitBuilder) {
+                    return ignoreBid(
+                        bid, "parent payload may exit builder %s", bid.getBuilderIndex());
+                  }
+                }
+              }
+
+              /*
+               * [REJECT] The bid signature is valid
                */
               if (!isSignatureValid(signedExecutionPayloadBid, state)) {
                 return rejectBid(bid, "invalid execution payload bid signature");
@@ -428,7 +533,7 @@ public class ExecutionPayloadBidGossipValidator {
         state);
   }
 
-  static boolean isGasLimitTargetCompatible(
+  public static boolean isGasLimitTargetCompatible(
       final UInt64 parentGasLimit, final UInt64 gasLimit, final UInt64 targetGasLimit) {
     final UInt64 maxGasLimitDifference =
         parentGasLimit.dividedBy(1024).max(UInt64.ONE).minus(UInt64.ONE);

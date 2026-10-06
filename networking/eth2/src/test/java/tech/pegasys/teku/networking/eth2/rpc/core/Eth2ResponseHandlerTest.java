@@ -145,6 +145,25 @@ public class Eth2ResponseHandlerTest {
   }
 
   @Test
+  public void expectOptionalResponse_appliesListenerWrapper() {
+    final RuntimeException validationError = new RuntimeException("invalid");
+    Eth2RpcResponseHandler<Integer, Optional<Integer>> handler =
+        Eth2RpcResponseHandler.expectOptionalResponse(
+            listener ->
+                response -> {
+                  if (response == 2) {
+                    throw validationError;
+                  }
+                  return listener.onResponse(response);
+                });
+    assertNotDone(handler);
+
+    final SafeFuture<?> responseResult = handler.onResponse(2);
+    assertThat(responseResult).isCompletedExceptionally();
+    assertThatThrownBy(responseResult::get).hasCause(validationError);
+  }
+
+  @Test
   public void expectOptionalResponse_successfulWithNoResponse() throws Exception {
     Eth2RpcResponseHandler<Integer, Optional<Integer>> handler =
         Eth2RpcResponseHandler.expectOptionalResponse();

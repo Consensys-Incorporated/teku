@@ -42,6 +42,7 @@ import tech.pegasys.teku.spec.datastructures.state.Validator;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.util.BeaconStateBuilderAltair;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
 import tech.pegasys.teku.storage.client.BlobReconstructionProvider;
 import tech.pegasys.teku.storage.client.BlobSidecarReconstructionProvider;
 import tech.pegasys.teku.storage.client.ChainHead;
@@ -142,7 +143,8 @@ public abstract class AbstractChainDataProviderTest {
             blobSelectorFactory,
             dataColumnSidecarSelectorFactory,
             executionPayloadSelectorFactory,
-            rewardCalculatorMock);
+            rewardCalculatorMock,
+            new LightClientUpdateStore(spec));
 
     if (spec.getGenesisSpec().getMilestone().isGreaterThanOrEqualTo(SpecMilestone.ALTAIR)) {
       final SszList<Validator> validators =

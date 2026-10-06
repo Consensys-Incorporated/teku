@@ -16,8 +16,8 @@ package tech.pegasys.teku.validator.remote.typedef.handlers;
 import static java.util.Collections.emptyMap;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_ACCEPTED;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_BLOB_DATA_INCLUDED;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
-import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_EXECUTION_PAYLOAD_BLINDED;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.PARAM_BROADCAST_VALIDATION;
 import static tech.pegasys.teku.validator.remote.apiclient.ValidatorApiMethod.SEND_SIGNED_EXECUTION_PAYLOAD_ENVELOPE;
 
@@ -31,7 +31,6 @@ import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
@@ -53,13 +52,37 @@ public class PublishSignedExecutionPayloadRequest extends AbstractTypeDefRequest
     this.spec = spec;
   }
 
+  /**
+   * Stateful flow: the envelope is sent without blob data, the beacon node attaches the blobs and
+   * KZG proofs it cached during block production.
+   */
   public PublishSignedExecutionPayloadResult submit(
       final SignedExecutionPayloadEnvelope signedExecutionPayload,
       final Optional<BroadcastValidationLevel> broadcastValidationLevel) {
-    // Blind before sending: the BN unblinds from its getPayload cache; avoids a blob round-trip.
-    return submit(signedExecutionPayload.blind(spec), broadcastValidationLevel);
+
+    final Map<String, String> queryParams = getQueryParams(broadcastValidationLevel);
+
+    final DeserializableTypeDefinition<SignedExecutionPayloadEnvelope> typeDefinition =
+        spec.atSlot(signedExecutionPayload.getSlot())
+            .getSchemaDefinitions()
+            .toVersionGloas()
+            .orElseThrow()
+            .getSignedExecutionPayloadEnvelopeSchema()
+            .getJsonTypeDefinition();
+
+    return createResult(
+        postJson(
+            SEND_SIGNED_EXECUTION_PAYLOAD_ENVELOPE,
+            emptyMap(),
+            queryParams,
+            getHeaders(signedExecutionPayload.getSlot(), false),
+            signedExecutionPayload,
+            typeDefinition,
+            responseHandler),
+        signedExecutionPayload.getBeaconBlockRoot());
   }
 
+  /** Stateless flow: the envelope is sent along with its blobs and KZG proofs. */
   public PublishSignedExecutionPayloadResult submit(
       final SignedExecutionPayloadEnvelopeContents signedExecutionPayloadEnvelopeContents,
       final Optional<BroadcastValidationLevel> broadcastValidationLevel) {
@@ -79,37 +102,11 @@ public class PublishSignedExecutionPayloadRequest extends AbstractTypeDefRequest
             SEND_SIGNED_EXECUTION_PAYLOAD_ENVELOPE,
             emptyMap(),
             queryParams,
-            getHeaders(signedExecutionPayloadEnvelopeContents.getSlot(), false),
+            getHeaders(signedExecutionPayloadEnvelopeContents.getSlot(), true),
             signedExecutionPayloadEnvelopeContents,
             typeDefinition,
             responseHandler),
         signedExecutionPayloadEnvelopeContents.getBeaconBlockRoot());
-  }
-
-  public PublishSignedExecutionPayloadResult submit(
-      final SignedBlindedExecutionPayloadEnvelope signedBlindedExecutionPayload,
-      final Optional<BroadcastValidationLevel> broadcastValidationLevel) {
-
-    final Map<String, String> queryParams = getQueryParams(broadcastValidationLevel);
-
-    final DeserializableTypeDefinition<SignedBlindedExecutionPayloadEnvelope> typeDefinition =
-        spec.atSlot(signedBlindedExecutionPayload.getSlot())
-            .getSchemaDefinitions()
-            .toVersionGloas()
-            .orElseThrow()
-            .getSignedBlindedExecutionPayloadEnvelopeSchema()
-            .getJsonTypeDefinition();
-
-    return createResult(
-        postJson(
-            SEND_SIGNED_EXECUTION_PAYLOAD_ENVELOPE,
-            emptyMap(),
-            queryParams,
-            getHeaders(signedBlindedExecutionPayload.getSlot(), true),
-            signedBlindedExecutionPayload,
-            typeDefinition,
-            responseHandler),
-        signedBlindedExecutionPayload.getBeaconBlockRoot());
   }
 
   private PublishSignedExecutionPayloadResult createResult(
@@ -124,11 +121,11 @@ public class PublishSignedExecutionPayloadRequest extends AbstractTypeDefRequest
             () -> PublishSignedExecutionPayloadResult.notImported(beaconBlockRoot, "UNKNOWN"));
   }
 
-  private Map<String, String> getHeaders(final UInt64 slot, final boolean blinded) {
+  private Map<String, String> getHeaders(final UInt64 slot, final boolean blobDataIncluded) {
     final SpecMilestone milestone = spec.atSlot(slot).getMilestone();
     return Map.of(
         HEADER_CONSENSUS_VERSION, milestone.name().toLowerCase(Locale.ROOT),
-        HEADER_EXECUTION_PAYLOAD_BLINDED, String.valueOf(blinded));
+        HEADER_BLOB_DATA_INCLUDED, String.valueOf(blobDataIncluded));
   }
 
   private Map<String, String> getQueryParams(

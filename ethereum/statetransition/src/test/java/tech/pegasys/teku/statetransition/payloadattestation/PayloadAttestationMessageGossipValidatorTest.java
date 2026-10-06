@@ -43,7 +43,6 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider;
-import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
@@ -73,16 +72,24 @@ public class PayloadAttestationMessageGossipValidatorTest {
         new PayloadAttestationMessageGossipValidator(
             spec, gossipValidationHelper, invalidBlockRoots);
 
-    payloadAttestationMessage = dataStructureUtil.randomPayloadAttestationMessage();
-    slot = payloadAttestationMessage.getData().getSlot();
-    validatorIndex = payloadAttestationMessage.getValidatorIndex();
-    blockRoot = payloadAttestationMessage.getData().getBeaconBlockRoot();
+    final PayloadAttestationMessage randomPayloadAttestationMessage =
+        dataStructureUtil.randomPayloadAttestationMessage();
     postState = dataStructureUtil.randomBeaconState();
+    validatorIndex = UInt64.ZERO;
+    payloadAttestationMessage =
+        randomPayloadAttestationMessage
+            .getSchema()
+            .create(
+                validatorIndex,
+                randomPayloadAttestationMessage.getData(),
+                randomPayloadAttestationMessage.getSignature());
+    slot = payloadAttestationMessage.getData().getSlot();
+    blockRoot = payloadAttestationMessage.getData().getBeaconBlockRoot();
 
     when(gossipValidationHelper.isSlotCurrent(slot)).thenReturn(true);
     when(gossipValidationHelper.isBlockAvailable(blockRoot)).thenReturn(true);
     when(gossipValidationHelper.getSlotForBlockRoot(blockRoot)).thenReturn(Optional.of(slot));
-    when(gossipValidationHelper.getStateAtSlotAndBlockRoot(new SlotAndBlockRoot(slot, blockRoot)))
+    when(gossipValidationHelper.getStateAtBlockRoot(blockRoot))
         .thenReturn(SafeFuture.completedFuture(Optional.of(postState)));
     final SpecVersion specVersion = mock(SpecVersion.class);
     final MiscHelpers miscHelpers = mock(MiscHelpers.class);
@@ -90,6 +97,7 @@ public class PayloadAttestationMessageGossipValidatorTest {
     when(miscHelpers.computeSigningRoot(eq(payloadAttestationMessage.getData()), any()))
         .thenReturn(signingRoot);
     when(specVersion.miscHelpers()).thenReturn(miscHelpers);
+    when(spec.isPayloadAttestationAvailableAtSlot(slot)).thenReturn(true);
     when(spec.atSlot(slot)).thenReturn(specVersion);
     when(spec.getPtc(postState, slot)).thenReturn(IntList.of(validatorIndex.intValue()));
     when(gossipValidationHelper.isSignatureValidWithRespectToProposerIndex(
@@ -122,7 +130,7 @@ public class PayloadAttestationMessageGossipValidatorTest {
             payloadAttestationMessageGossipValidator.validate(validatablePayloadAttestationMessage))
         .isCompletedWithValue(ACCEPT);
 
-    assertThat(validatablePayloadAttestationMessage.getPtcPositions())
+    assertThat(validatablePayloadAttestationMessage.getPayloadTimelinessCommitteePositions())
         .hasValueSatisfying(ptcPositions -> assertThat(ptcPositions).isEqualTo(IntSet.of(0, 2, 4)));
   }
 
@@ -157,7 +165,7 @@ public class PayloadAttestationMessageGossipValidatorTest {
   void shouldIgnore_whenAlreadySeen_AfterInitialCheck() {
     final SafeFuture<Optional<BeaconState>> getStateFuture1 = new SafeFuture<>();
     final SafeFuture<Optional<BeaconState>> getStateFuture2 = new SafeFuture<>();
-    when(gossipValidationHelper.getStateAtSlotAndBlockRoot(any()))
+    when(gossipValidationHelper.getStateAtBlockRoot(any()))
         .thenReturn(getStateFuture1)
         .thenReturn(getStateFuture2);
 
@@ -213,12 +221,42 @@ public class PayloadAttestationMessageGossipValidatorTest {
 
   @TestTemplate
   void shouldSaveForFuture_whenStateIsUnavailable() {
-    when(gossipValidationHelper.getStateAtSlotAndBlockRoot(new SlotAndBlockRoot(slot, blockRoot)))
+    when(gossipValidationHelper.getStateAtBlockRoot(blockRoot))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
     assertThatSafeFuture(
             payloadAttestationMessageGossipValidator.validate(
                 validatablePayloadAttestationMessage()))
         .isCompletedWithValue(SAVE_FOR_FUTURE);
+  }
+
+  @TestTemplate
+  void shouldReject_whenValidatorIndexIsOutOfRange() {
+    validatorIndex = UInt64.valueOf(postState.getValidators().size());
+    payloadAttestationMessage =
+        payloadAttestationMessage
+            .getSchema()
+            .create(
+                validatorIndex,
+                payloadAttestationMessage.getData(),
+                payloadAttestationMessage.getSignature());
+
+    assertThatSafeFuture(
+            payloadAttestationMessageGossipValidator.validate(
+                validatablePayloadAttestationMessage()))
+        .isCompletedWithValue(
+            reject(
+                "Payload attestation's validator index %s is out of range for the %s validators in the state",
+                validatorIndex, postState.getValidators().size()));
+  }
+
+  @TestTemplate
+  void shouldReject_whenSlotIsBeforeGloasFork() {
+    when(spec.isPayloadAttestationAvailableAtSlot(slot)).thenReturn(false);
+    assertThatSafeFuture(
+            payloadAttestationMessageGossipValidator.validate(
+                validatablePayloadAttestationMessage()))
+        .isCompletedWithValue(
+            reject("Payload attestation's slot %s is before the Gloas fork", slot));
   }
 
   @TestTemplate
@@ -252,7 +290,7 @@ public class PayloadAttestationMessageGossipValidatorTest {
                 validatablePayloadAttestationMessage()))
         .isCompletedWithValue(ACCEPT);
     verify(gossipValidationHelper).isBlockAvailable(blockRoot);
-    verify(gossipValidationHelper).getStateAtSlotAndBlockRoot(any());
+    verify(gossipValidationHelper).getStateAtBlockRoot(any());
     verify(gossipValidationHelper)
         .isSignatureValidWithRespectToProposerIndex(any(), any(), any(), any());
 
@@ -267,7 +305,7 @@ public class PayloadAttestationMessageGossipValidatorTest {
                 "Payload attestation for slot %s and validator index %s already seen",
                 slot, validatorIndex));
     verify(gossipValidationHelper, never()).isBlockAvailable(blockRoot);
-    verify(gossipValidationHelper, never()).getStateAtSlotAndBlockRoot(any());
+    verify(gossipValidationHelper, never()).getStateAtBlockRoot(any());
     verify(gossipValidationHelper, never())
         .isSignatureValidWithRespectToProposerIndex(any(), any(), any(), any());
   }

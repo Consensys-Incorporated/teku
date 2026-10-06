@@ -336,6 +336,75 @@ class ConnectionManagerTest {
   }
 
   @Test
+  public void shouldRequestPeerSearchImmediately() {
+    when(network.getPeerCount()).thenReturn(1);
+    final ConnectionManager manager = createManager();
+
+    safeJoin(manager.start());
+    verify(discoveryService, times(1)).searchForPeers();
+
+    manager.requestPeerSearch();
+    asyncRunner.executeDueActions();
+    verify(discoveryService, times(2)).searchForPeers();
+  }
+
+  @Test
+  public void shouldThrottleRequestedPeerSearches() {
+    when(network.getPeerCount()).thenReturn(1);
+    final ConnectionManager manager = createManager();
+
+    safeJoin(manager.start());
+    verify(discoveryService, times(1)).searchForPeers();
+
+    manager.requestPeerSearch();
+    asyncRunner.executeDueActions();
+    verify(discoveryService, times(2)).searchForPeers();
+
+    manager.requestPeerSearch();
+    verify(discoveryService, times(2)).searchForPeers();
+
+    timeProvider.advanceTimeBy(ConnectionManager.REQUESTED_DISCOVERY_INTERVAL);
+    manager.requestPeerSearch();
+    asyncRunner.executeDueActions();
+    verify(discoveryService, times(3)).searchForPeers();
+  }
+
+  @Test
+  public void shouldNotStartRequestedPeerSearchWhenSearchAlreadyInProgress() {
+    when(network.getPeerCount()).thenReturn(1);
+    final SafeFuture<Collection<DiscoveryPeer>> search1 = new SafeFuture<>();
+    when(discoveryService.searchForPeers()).thenReturn(search1);
+    final ConnectionManager manager = createManager();
+
+    safeJoin(manager.start());
+    verify(discoveryService, times(1)).searchForPeers();
+
+    manager.requestPeerSearch();
+    verify(discoveryService, times(1)).searchForPeers();
+  }
+
+  @Test
+  public void shouldNotThrottleRequestedPeerSearchWhenSearchAlreadyInProgress() {
+    when(network.getPeerCount()).thenReturn(1);
+    final SafeFuture<Collection<DiscoveryPeer>> search1 = new SafeFuture<>();
+    when(discoveryService.searchForPeers())
+        .thenReturn(search1)
+        .thenReturn(SafeFuture.completedFuture(emptyList()));
+    final ConnectionManager manager = createManager();
+
+    safeJoin(manager.start());
+    verify(discoveryService, times(1)).searchForPeers();
+
+    manager.requestPeerSearch();
+    verify(discoveryService, times(1)).searchForPeers();
+
+    search1.complete(emptyList());
+    manager.requestPeerSearch();
+    asyncRunner.executeDueActions();
+    verify(discoveryService, times(2)).searchForPeers();
+  }
+
+  @Test
   public void shouldConnectToKnownPeersWhenDiscoverySearchCompletes() {
     final SafeFuture<Collection<DiscoveryPeer>> search1 = new SafeFuture<>();
     when(network.connect(any(PeerAddress.class))).thenReturn(new SafeFuture<>());

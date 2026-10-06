@@ -14,6 +14,7 @@
 package tech.pegasys.teku.statetransition.execution;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -76,6 +77,7 @@ public class DefaultProposerPreferencesManagerTest {
     final SignedProposerPreferences signedProposerPreferences =
         dataStructureUtil.randomSignedProposerPreferences();
     final UInt64 slot = signedProposerPreferences.getMessage().getProposalSlot();
+    final Bytes32 dependentRoot = signedProposerPreferences.getMessage().getDependentRoot();
 
     when(gossipValidator.validate(signedProposerPreferences))
         .thenReturn(SafeFuture.completedFuture(ACCEPT));
@@ -83,8 +85,44 @@ public class DefaultProposerPreferencesManagerTest {
     final InternalValidationResult result = safeJoin(manager.addLocal(signedProposerPreferences));
 
     assertThat(result).isEqualTo(ACCEPT);
-    assertThat(manager.getProposerPreferences(slot))
+    assertThat(manager.getProposerPreferences(slot, dependentRoot))
         .hasValue(signedProposerPreferences.getMessage());
+  }
+
+  @TestTemplate
+  void shouldStorePreferencesForDistinctDependentRootsAtTheSameSlot() {
+    final UInt64 proposalSlot = UInt64.valueOf(10);
+    final Bytes32 firstDependentRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 secondDependentRoot = dataStructureUtil.randomBytes32();
+    final SignedProposerPreferences firstPreferences =
+        createSignedProposerPreferences(proposalSlot, firstDependentRoot);
+    final SignedProposerPreferences secondPreferences =
+        createSignedProposerPreferences(proposalSlot, secondDependentRoot);
+    when(gossipValidator.validate(any())).thenReturn(SafeFuture.completedFuture(ACCEPT));
+
+    safeJoin(manager.addRemote(firstPreferences));
+    safeJoin(manager.addRemote(secondPreferences));
+
+    assertThat(manager.getProposerPreferences(proposalSlot, firstDependentRoot))
+        .contains(firstPreferences.getMessage());
+    assertThat(manager.getProposerPreferences(proposalSlot, secondDependentRoot))
+        .contains(secondPreferences.getMessage());
+    assertThat(manager.getProposerPreferencesForSlot(proposalSlot))
+        .containsExactlyInAnyOrder(firstPreferences.getMessage(), secondPreferences.getMessage());
+  }
+
+  @TestTemplate
+  void shouldReturnImmutableSnapshotOfPreferencesForSlot() {
+    final SignedProposerPreferences preferences =
+        dataStructureUtil.randomSignedProposerPreferences();
+    final UInt64 proposalSlot = preferences.getMessage().getProposalSlot();
+    when(gossipValidator.validate(preferences)).thenReturn(SafeFuture.completedFuture(ACCEPT));
+    safeJoin(manager.addRemote(preferences));
+
+    assertThatThrownBy(() -> manager.getProposerPreferencesForSlot(proposalSlot).clear())
+        .isInstanceOf(UnsupportedOperationException.class);
+    assertThat(manager.getProposerPreferencesForSlot(proposalSlot))
+        .containsExactly(preferences.getMessage());
   }
 
   @TestTemplate
@@ -100,7 +138,10 @@ public class DefaultProposerPreferencesManagerTest {
 
     assertThat(result.isReject()).isTrue();
 
-    assertThat(manager.getProposerPreferences(slot)).isEmpty();
+    assertThat(
+            manager.getProposerPreferences(
+                slot, signedProposerPreferences.getMessage().getDependentRoot()))
+        .isEmpty();
   }
 
   @TestTemplate
@@ -147,7 +188,7 @@ public class DefaultProposerPreferencesManagerTest {
 
   @TestTemplate
   void shouldReturnEmptyForUnknownSlot() {
-    assertThat(manager.getProposerPreferences(UInt64.valueOf(999))).isEmpty();
+    assertThat(manager.getProposerPreferencesForSlot(UInt64.valueOf(999))).isEmpty();
   }
 
   @TestTemplate
@@ -162,9 +203,9 @@ public class DefaultProposerPreferencesManagerTest {
 
     manager.onSlot(UInt64.valueOf(10));
 
-    assertThat(manager.getProposerPreferences(UInt64.valueOf(9))).isEmpty();
-    assertThat(manager.getProposerPreferences(UInt64.valueOf(10))).isPresent();
-    assertThat(manager.getProposerPreferences(UInt64.valueOf(11))).isPresent();
+    assertThat(manager.getProposerPreferencesForSlot(UInt64.valueOf(9))).isEmpty();
+    assertThat(manager.getProposerPreferencesForSlot(UInt64.valueOf(10))).isNotEmpty();
+    assertThat(manager.getProposerPreferencesForSlot(UInt64.valueOf(11))).isNotEmpty();
   }
 
   @TestTemplate
@@ -178,7 +219,7 @@ public class DefaultProposerPreferencesManagerTest {
                   UInt64.valueOf(slot), dataStructureUtil.randomBytes32())));
     }
     for (int slot = 0; slot < 32; slot++) {
-      assertThat(manager.getProposerPreferences(UInt64.valueOf(slot))).isPresent();
+      assertThat(manager.getProposerPreferencesForSlot(UInt64.valueOf(slot))).isNotEmpty();
     }
 
     manager.onSlot(UInt64.valueOf(32));
@@ -190,7 +231,7 @@ public class DefaultProposerPreferencesManagerTest {
     }
 
     for (int slot = 32; slot < 64; slot++) {
-      assertThat(manager.getProposerPreferences(UInt64.valueOf(slot))).isPresent();
+      assertThat(manager.getProposerPreferencesForSlot(UInt64.valueOf(slot))).isNotEmpty();
     }
   }
 
@@ -207,7 +248,7 @@ public class DefaultProposerPreferencesManagerTest {
 
     assertThat(pendingProposerPreferences.get(preferences.hashTreeRoot()))
         .contains(new PendingProposerPreferences(preferences, true));
-    assertThat(manager.getProposerPreferences(slot)).isEmpty();
+    assertThat(manager.getProposerPreferencesForSlot(slot)).isEmpty();
   }
 
   @TestTemplate
@@ -225,7 +266,10 @@ public class DefaultProposerPreferencesManagerTest {
     manager.onBlockImported(dependentBlock, false);
 
     verify(gossipValidator, times(2)).validate(preferences);
-    assertThat(manager.getProposerPreferences(proposalSlot)).contains(preferences.getMessage());
+    assertThat(
+            manager.getProposerPreferences(
+                proposalSlot, preferences.getMessage().getDependentRoot()))
+        .contains(preferences.getMessage());
     assertThat(pendingProposerPreferences.get(preferences.hashTreeRoot())).isEmpty();
   }
 
@@ -243,7 +287,10 @@ public class DefaultProposerPreferencesManagerTest {
     manager.onSlot(proposalSlot);
 
     verify(gossipValidator, times(2)).validate(preferences);
-    assertThat(manager.getProposerPreferences(proposalSlot)).contains(preferences.getMessage());
+    assertThat(
+            manager.getProposerPreferences(
+                proposalSlot, preferences.getMessage().getDependentRoot()))
+        .contains(preferences.getMessage());
   }
 
   @TestTemplate

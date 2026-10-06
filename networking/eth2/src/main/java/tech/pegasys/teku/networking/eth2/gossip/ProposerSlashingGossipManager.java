@@ -49,10 +49,10 @@ public class ProposerSlashingGossipManager extends AbstractGossipManager<Propose
         processor,
         ProposerSlashing.SSZ_SCHEMA,
         message -> Optional.of(message.getHeader1().getMessage().getSlot()),
-        message ->
-            recentChainData
-                .getSpec()
-                .computeEpochAtSlot(message.getHeader1().getMessage().getSlot()),
+        // A validator stays slashable however old the offence is, so slashings are always
+        // considered to match the fork of the topic they arrived on (ie disable fork checking at
+        // this level)
+        message -> forkInfo.getFork().getEpoch(),
         networkingConfig,
         GossipFailureLogger.createNonSuppressing(GossipTopicName.PROPOSER_SLASHING.toString()),
         debugDataDumper);

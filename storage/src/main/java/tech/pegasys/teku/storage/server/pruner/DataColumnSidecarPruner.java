@@ -39,6 +39,7 @@ public class DataColumnSidecarPruner extends Service {
   private final Spec spec;
   private final Database database;
   private final AsyncRunner asyncRunner;
+  private final AsyncRunner metricsAsyncRunner;
   private final Duration pruneInterval;
   private final int pruneLimit;
   private final TimeProvider timeProvider;
@@ -46,28 +47,33 @@ public class DataColumnSidecarPruner extends Service {
   private final SettableLabelledGauge pruningTimingsLabelledGauge;
   private final SettableLabelledGauge pruningActiveLabelledGauge;
   private final String pruningMetricsType;
+  private final Duration pruningWarnTimeout;
 
   private final AtomicLong dataColumnSize = new AtomicLong(0);
   private final AtomicLong earliestDataColumnSidecarSlot = new AtomicLong(-1);
   private Optional<UInt64> genesisTime = Optional.empty();
 
   private Optional<Cancellable> scheduledPruner = Optional.empty();
+  private Optional<Cancellable> scheduledMetricsUpdater = Optional.empty();
 
   public DataColumnSidecarPruner(
       final Spec spec,
       final Database database,
       final MetricsSystem metricsSystem,
       final AsyncRunner asyncRunner,
+      final AsyncRunner metricsAsyncRunner,
       final TimeProvider timeProvider,
       final Duration pruneInterval,
       final int pruneLimit,
       final boolean dataColumnSidecarsStorageCountersEnabled,
       final String pruningMetricsType,
       final SettableLabelledGauge pruningTimingsLabelledGauge,
-      final SettableLabelledGauge pruningActiveLabelledGauge) {
+      final SettableLabelledGauge pruningActiveLabelledGauge,
+      final Duration pruningWarnTimeout) {
     this.spec = spec;
     this.database = database;
     this.asyncRunner = asyncRunner;
+    this.metricsAsyncRunner = metricsAsyncRunner;
     this.pruneInterval = pruneInterval;
     this.pruneLimit = pruneLimit;
     this.timeProvider = timeProvider;
@@ -75,6 +81,7 @@ public class DataColumnSidecarPruner extends Service {
     this.pruningMetricsType = pruningMetricsType;
     this.pruningTimingsLabelledGauge = pruningTimingsLabelledGauge;
     this.pruningActiveLabelledGauge = pruningActiveLabelledGauge;
+    this.pruningWarnTimeout = pruningWarnTimeout;
     if (dataColumnSidecarsStorageCountersEnabled) {
       LabelledSuppliedMetric labelledGauge =
           metricsSystem.createLabelledSuppliedGauge(
@@ -93,16 +100,27 @@ public class DataColumnSidecarPruner extends Service {
     scheduledPruner =
         Optional.of(
             asyncRunner.runWithFixedDelay(
-                this::pruneDataColumnSidecars,
+                this::doPruneDataColumnSidecars,
                 Duration.ZERO,
                 pruneInterval,
                 error -> LOG.error("Failed to prune old data column sidecars", error)));
+    if (dataColumnSidecarsStorageCountersEnabled) {
+      scheduledMetricsUpdater =
+          Optional.of(
+              metricsAsyncRunner.runWithFixedDelay(
+                  this::doUpdateDataColumnSidecarMetrics,
+                  Duration.ZERO,
+                  pruneInterval,
+                  error ->
+                      LOG.error("Failed to update data column sidecar storage counters", error)));
+    }
     return SafeFuture.COMPLETE;
   }
 
   @Override
   protected SafeFuture<?> doStop() {
     scheduledPruner.ifPresent(Cancellable::cancel);
+    scheduledMetricsUpdater.ifPresent(Cancellable::cancel);
     return SafeFuture.COMPLETE;
   }
 
@@ -110,11 +128,11 @@ public class DataColumnSidecarPruner extends Service {
    * NOTE: the column pruning must not update earliestAvailableDataColumnSlot db variable. That
    * variable is fully maintained by DasCustodyBackfiller
    */
-  private void pruneDataColumnSidecars() {
-
+  private void doPruneDataColumnSidecars() {
+    LOG.debug("Data column sidecars pruner task triggered");
     final Optional<UInt64> genesisTime = getGenesisTime();
     if (genesisTime.isEmpty()) {
-      LOG.debug("Not pruning as no genesis time is available.");
+      LOG.debug("Not pruning data column sidecars: no genesis time available yet.");
       return;
     }
 
@@ -123,24 +141,41 @@ public class DataColumnSidecarPruner extends Service {
     final UInt64 minCustodySlot = calculatePruneSlot();
     LOG.debug("Pruning data column sidecars before slot {}", minCustodySlot);
     database.pruneAllSidecars(minCustodySlot.minusMinZero(1), pruneLimit);
-
-    pruningTimingsLabelledGauge.set(System.currentTimeMillis() - start, pruningMetricsType);
+    final long elapsed = System.currentTimeMillis() - start;
+    pruningTimingsLabelledGauge.set(elapsed, pruningMetricsType);
     pruningActiveLabelledGauge.set(0, pruningMetricsType);
-    if (dataColumnSidecarsStorageCountersEnabled) {
-      dataColumnSize.set(database.getSidecarColumnCount());
-      earliestDataColumnSidecarSlot.set(
-          database.getEarliestDataColumnSidecarSlot().map(UInt64::longValue).orElse(-1L));
+    LOG.debug("Data column sidecars pruning completed in {} ms", elapsed);
+    if (elapsed > pruningWarnTimeout.toMillis()) {
+      LOG.warn(
+          "Pruning task for {} took {} ms, exceeding the warn threshold of {} ms",
+          pruningMetricsType,
+          elapsed,
+          pruningWarnTimeout.toMillis());
     }
   }
 
   /**
-   * This method adds an extra epoch following the rational of the edge case found in the
-   * BlobSidecarPruner. See {@link
-   * tech.pegasys.teku.storage.server.pruner.BlobSidecarPruner#getLatestPrunableSlot(UInt64)}
+   * Updates storage counter gauges by performing a full sequential scan of the sidecar column. O(N)
+   * — may take minutes on nodes with large DCS datasets.
    */
+  private void doUpdateDataColumnSidecarMetrics() {
+    LOG.debug("Updating data column sidecar storage counters (full column scan — may be slow)");
+    final long start = System.currentTimeMillis();
+    dataColumnSize.set(database.getSidecarColumnCount());
+    earliestDataColumnSidecarSlot.set(
+        database.getEarliestDataColumnSidecarSlot().map(UInt64::longValue).orElse(-1L));
+    LOG.debug(
+        "Data column sidecar storage counters updated in {} ms: total={}, earliestSlot={}",
+        System.currentTimeMillis() - start,
+        dataColumnSize.get(),
+        earliestDataColumnSidecarSlot.get());
+  }
+
+  // Adds one extra epoch beyond custodyPeriodEpochs to avoid the edge case described in
+  // BlobSidecarPruner where the slot at the exact epoch boundary could be kept one epoch too long.
   private UInt64 calculatePruneSlot() {
     final UInt64 currentSlot =
-        spec.getCurrentSlot(timeProvider.getTimeInSeconds(), genesisTime.get());
+        spec.getCurrentSlot(timeProvider.getTimeInSeconds(), genesisTime.orElseThrow());
     final UInt64 currentEpoch = spec.computeEpochAtSlot(currentSlot);
     final int custodyPeriodEpochs =
         spec.getSpecConfig(currentEpoch)

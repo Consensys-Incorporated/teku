@@ -37,8 +37,8 @@ public class SyncStallDetector extends Service {
   static final Duration STALL_CHECK_INTERVAL = Duration.ofSeconds(15);
   // Time periods are fairly long because sync stalls should be rare and we might be rate limited
   // if we have to request blocks from a small number of peers.
-  static final int MAX_SECONDS_BETWEEN_IMPORTS = 180;
-  static final int MAX_SECONDS_BETWEEN_IMPORT_PROGRESS = 180;
+  static final int MAX_SECONDS_BETWEEN_IMPORTS = 300;
+  static final int MAX_SECONDS_BETWEEN_IMPORT_PROGRESS = 300;
 
   private final Spec spec;
   private final EventThread eventThread;

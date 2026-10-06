@@ -16,6 +16,7 @@ package tech.pegasys.teku.statetransition.datacolumns.retriever;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ZERO;
@@ -109,6 +110,56 @@ public class DataColumnReqRespBatchingImplTest {
     verify(byRootRpc)
         .requestDataColumnSidecarsByRoot(
             UInt256.valueOf(2), List.of(byRootSchema.create(blockRoot2, List.of(ZERO))));
+  }
+
+  @Test
+  public void shouldNotSendBufferedRequestWhoseCallerAlreadyGaveUp() {
+    // A caller that no longer needs a column (it arrived via gossip) cancels the promise it was
+    // handed. The request is still sitting in the buffer at that point, and flushing it would put
+    // an RPC on the wire whose response nobody consumes.
+    final SignedBeaconBlockHeader blockHeader =
+        dataStructureUtil.randomSignedBeaconBlockHeader(UInt64.valueOf(10));
+    final Bytes32 blockRoot = blockHeader.getMessage().getRoot();
+
+    final SafeFuture<DataColumnSidecar> cancelled =
+        dataColumnReqResp.requestDataColumnSidecar(
+            UInt256.ZERO,
+            new DataColumnSlotAndIdentifier(blockHeader.getMessage().getSlot(), blockRoot, ZERO));
+    cancelled.cancel(true);
+
+    dataColumnReqResp.flush();
+
+    verifyNoInteractions(byRootRpc);
+  }
+
+  @Test
+  public void shouldStillSendLiveRequestsBatchedAlongsideAbandonedOnes() {
+    // Dropping abandoned entries must not disturb the batching of the surviving ones.
+    final SignedBeaconBlockHeader blockHeader =
+        dataStructureUtil.randomSignedBeaconBlockHeader(UInt64.valueOf(10));
+    final Bytes32 blockRoot = blockHeader.getMessage().getRoot();
+    final UInt64 slot = blockHeader.getMessage().getSlot();
+    final DataColumnSidecar sidecar = dataStructureUtil.randomDataColumnSidecar(blockHeader, ONE);
+
+    when(byRootRpc.requestDataColumnSidecarsByRoot(
+            UInt256.ZERO, List.of(byRootSchema.create(blockRoot, List.of(ONE)))))
+        .thenReturn(AsyncStream.of(sidecar));
+
+    final SafeFuture<DataColumnSidecar> cancelled =
+        dataColumnReqResp.requestDataColumnSidecar(
+            UInt256.ZERO, new DataColumnSlotAndIdentifier(slot, blockRoot, ZERO));
+    final SafeFuture<DataColumnSidecar> live =
+        dataColumnReqResp.requestDataColumnSidecar(
+            UInt256.ZERO, new DataColumnSlotAndIdentifier(slot, blockRoot, ONE));
+    cancelled.cancel(true);
+
+    dataColumnReqResp.flush();
+
+    // Only the live column is requested - the abandoned one is not part of the batch.
+    verify(byRootRpc)
+        .requestDataColumnSidecarsByRoot(
+            UInt256.ZERO, List.of(byRootSchema.create(blockRoot, List.of(ONE))));
+    assertThat(live).isCompletedWithValue(sidecar);
   }
 
   @Test

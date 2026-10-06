@@ -20,8 +20,8 @@ import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_ACCEPTED;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_BLOB_DATA_INCLUDED;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
-import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_EXECUTION_PAYLOAD_BLINDED;
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.getRequestBodyFromMetadata;
 
 import java.util.List;
@@ -33,7 +33,6 @@ import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerTest;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
 import tech.pegasys.teku.validator.api.PublishSignedExecutionPayloadResult;
@@ -53,9 +52,9 @@ public class PostExecutionPayloadEnvelopeTest extends AbstractMigratedBeaconHand
     final PublishSignedExecutionPayloadResult successResult =
         PublishSignedExecutionPayloadResult.success(envelope.getBeaconBlockRoot());
 
-    request.setRequestBody(envelope.blind(spec));
+    request.setRequestBody(envelope);
     when(validatorDataProvider.publishSignedExecutionPayload(
-            any(SignedBlindedExecutionPayloadEnvelope.class), any()))
+            any(SignedExecutionPayloadEnvelope.class), any()))
         .thenReturn(SafeFuture.completedFuture(successResult));
 
     handler.handleRequest(request);
@@ -72,9 +71,9 @@ public class PostExecutionPayloadEnvelopeTest extends AbstractMigratedBeaconHand
         PublishSignedExecutionPayloadResult.notImported(
             envelope.getBeaconBlockRoot(), "Invalid payload");
 
-    request.setRequestBody(envelope.blind(spec));
+    request.setRequestBody(envelope);
     when(validatorDataProvider.publishSignedExecutionPayload(
-            any(SignedBlindedExecutionPayloadEnvelope.class), any()))
+            any(SignedExecutionPayloadEnvelope.class), any()))
         .thenReturn(SafeFuture.completedFuture(failResult));
 
     handler.handleRequest(request);
@@ -90,9 +89,9 @@ public class PostExecutionPayloadEnvelopeTest extends AbstractMigratedBeaconHand
     final PublishSignedExecutionPayloadResult failResult =
         PublishSignedExecutionPayloadResult.rejected(envelope.getBeaconBlockRoot(), "oopsy");
 
-    request.setRequestBody(envelope.blind(spec));
+    request.setRequestBody(envelope);
     when(validatorDataProvider.publishSignedExecutionPayload(
-            any(SignedBlindedExecutionPayloadEnvelope.class), any()))
+            any(SignedExecutionPayloadEnvelope.class), any()))
         .thenReturn(SafeFuture.completedFuture(failResult));
 
     handler.handleRequest(request);
@@ -107,7 +106,7 @@ public class PostExecutionPayloadEnvelopeTest extends AbstractMigratedBeaconHand
     final SignedExecutionPayloadEnvelope envelope =
         dataStructureUtil.randomSignedExecutionPayloadEnvelope(1);
 
-    request.setRequestBody(envelope.blind(spec));
+    request.setRequestBody(envelope);
     request.setOptionalQueryParameter("broadcast_validation", "invalid_value");
 
     handler.handleRequest(request);
@@ -119,7 +118,7 @@ public class PostExecutionPayloadEnvelopeTest extends AbstractMigratedBeaconHand
   }
 
   @Test
-  void shouldReturnOkIfSuccessWithUnblindedContents() throws Exception {
+  void shouldReturnOkIfSuccessWithContents() throws Exception {
     final SignedExecutionPayloadEnvelope envelope =
         dataStructureUtil.randomSignedExecutionPayloadEnvelope(1);
     final SignedExecutionPayloadEnvelopeContents contents = contentsFor(envelope);
@@ -138,7 +137,7 @@ public class PostExecutionPayloadEnvelopeTest extends AbstractMigratedBeaconHand
   }
 
   @Test
-  void shouldReturnAcceptedIfPublishedButRejectedWithUnblindedContents() throws Exception {
+  void shouldReturnAcceptedIfPublishedButRejectedWithContents() throws Exception {
     final SignedExecutionPayloadEnvelope envelope =
         dataStructureUtil.randomSignedExecutionPayloadEnvelope(1);
     final SignedExecutionPayloadEnvelopeContents contents = contentsFor(envelope);
@@ -158,12 +157,12 @@ public class PostExecutionPayloadEnvelopeTest extends AbstractMigratedBeaconHand
   }
 
   @Test
-  void shouldRejectRequestWhenBlindedHeaderMissing() {
+  void shouldRejectRequestWhenBlobDataIncludedHeaderMissing() {
     assertThatThrownBy(
             () ->
                 getRequestBodyFromMetadata(handler, Map.of(HEADER_CONSENSUS_VERSION, "gloas"), ""))
         .isInstanceOf(BadRequestException.class)
-        .hasMessageContaining(HEADER_EXECUTION_PAYLOAD_BLINDED);
+        .hasMessageContaining(HEADER_BLOB_DATA_INCLUDED);
   }
 
   private SignedExecutionPayloadEnvelopeContents contentsFor(

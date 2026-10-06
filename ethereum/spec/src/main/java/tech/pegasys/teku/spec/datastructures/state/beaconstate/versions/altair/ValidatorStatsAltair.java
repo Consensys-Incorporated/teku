@@ -29,15 +29,16 @@ public interface ValidatorStatsAltair extends BeaconStateAltair {
     return getValidatorStats(getCurrentEpochParticipation());
   }
 
-  private CorrectAndLiveValidators getValidatorStats(final SszList<SszByte> participationFlags) {
+  private CorrectAndLiveValidators getValidatorStats(
+      final SszList<SszByte> epochParticipationFlags) {
     int numberOfCorrectValidators = 0;
     int numberOfLiveValidators = 0;
-    for (SszByte participationFlag : participationFlags) {
-      final byte flag = participationFlag.get();
-      if (ParticipationFlags.isTimelyTarget(flag)) {
+    for (SszByte participationFlags : epochParticipationFlags) {
+      final byte flags = participationFlags.get();
+      if (ParticipationFlags.isTimelyTarget(flags)) {
         numberOfCorrectValidators++;
       }
-      if (ParticipationFlags.isAnyFlagSet(flag)) {
+      if (ParticipationFlags.isAnyFlagSet(flags)) {
         numberOfLiveValidators++;
       }
     }

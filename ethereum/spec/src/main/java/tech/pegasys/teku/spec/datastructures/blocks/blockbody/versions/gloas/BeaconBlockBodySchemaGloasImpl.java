@@ -20,8 +20,12 @@ import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.SIGNED_BLS_TO_
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.SIGNED_EXECUTION_PAYLOAD_BID_SCHEMA;
 
 import it.unimi.dsi.fastutil.longs.LongList;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Function;
+import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema13;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBytes32;
@@ -38,6 +42,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBodyBui
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.common.BlockBodyFields;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.altair.SyncAggregate;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.altair.SyncAggregateSchema;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBidSchema;
@@ -50,6 +55,8 @@ import tech.pegasys.teku.spec.datastructures.operations.Deposit;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.SignedBlsToExecutionChange;
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
 import tech.pegasys.teku.spec.datastructures.type.SszSignature;
 import tech.pegasys.teku.spec.datastructures.type.SszSignatureSchema;
@@ -120,31 +127,41 @@ public class BeaconBlockBodySchemaGloasImpl
         namedSchema(BlockBodyFields.GRAFFITI, SszPrimitiveSchemas.BYTES32_SCHEMA),
         namedSchema(
             BlockBodyFields.PROPOSER_SLASHINGS,
-            SszProgressiveListSchema.create(ProposerSlashing.SSZ_SCHEMA)),
+            SszProgressiveListSchema.create(
+                ProposerSlashing.SSZ_SCHEMA, specConfig.getMaxProposerSlashings())),
         namedSchema(
             BlockBodyFields.ATTESTER_SLASHINGS,
             SszProgressiveListSchema.create(
-                schemaRegistry.get(SchemaTypes.ATTESTER_SLASHING_SCHEMA))),
+                schemaRegistry.get(SchemaTypes.ATTESTER_SLASHING_SCHEMA),
+                specConfig.getMaxAttesterSlashingsElectra())),
         namedSchema(
             BlockBodyFields.ATTESTATIONS,
-            SszProgressiveListSchema.create(schemaRegistry.get(ATTESTATION_SCHEMA))),
-        namedSchema(BlockBodyFields.DEPOSITS, SszProgressiveListSchema.create(Deposit.SSZ_SCHEMA)),
+            SszProgressiveListSchema.create(
+                schemaRegistry.get(ATTESTATION_SCHEMA), specConfig.getMaxAttestationsElectra())),
+        namedSchema(
+            BlockBodyFields.DEPOSITS,
+            // Gloas blocks must not contain deposits (spec `Deposits.LIMIT = 0`)
+            SszProgressiveListSchema.create(Deposit.SSZ_SCHEMA, 0)),
         namedSchema(
             BlockBodyFields.VOLUNTARY_EXITS,
-            SszProgressiveListSchema.create(SignedVoluntaryExit.SSZ_SCHEMA)),
+            SszProgressiveListSchema.create(
+                SignedVoluntaryExit.SSZ_SCHEMA, specConfig.getMaxVoluntaryExits())),
         namedSchema(
             BlockBodyFields.SYNC_AGGREGATE,
             SyncAggregateSchema.create(specConfig.getSyncCommitteeSize())),
         namedSchema(
             BlockBodyFields.BLS_TO_EXECUTION_CHANGES,
             SszProgressiveListSchema.create(
-                schemaRegistry.get(SIGNED_BLS_TO_EXECUTION_CHANGE_SCHEMA))),
+                schemaRegistry.get(SIGNED_BLS_TO_EXECUTION_CHANGE_SCHEMA),
+                specConfig.getMaxBlsToExecutionChanges())),
         namedSchema(
             BlockBodyFields.SIGNED_EXECUTION_PAYLOAD_BID,
             schemaRegistry.get(SIGNED_EXECUTION_PAYLOAD_BID_SCHEMA)),
         namedSchema(
             BlockBodyFields.PAYLOAD_ATTESTATIONS,
-            SszProgressiveListSchema.create(schemaRegistry.get(PAYLOAD_ATTESTATION_SCHEMA))),
+            SszProgressiveListSchema.create(
+                schemaRegistry.get(PAYLOAD_ATTESTATION_SCHEMA),
+                specConfig.getMaxPayloadAttestations())),
         namedSchema(
             BlockBodyFields.PARENT_EXECUTION_REQUESTS,
             SszSchema.as(ExecutionRequests.class, schemaRegistry.get(EXECUTION_REQUESTS_SCHEMA))));
@@ -160,6 +177,34 @@ public class BeaconBlockBodySchemaGloasImpl
   @Override
   public BeaconBlockBody createEmpty() {
     return new BeaconBlockBodyGloasImpl(this);
+  }
+
+  /**
+   * Genesis initialisation is not defined by the Gloas spec. This follows the convention shared by
+   * the ethpandaops genesis generator, Lighthouse and Lodestar: the genesis block body is an empty
+   * body whose (unsigned) execution payload bid is the state's {@code
+   * latest_execution_payload_bid}.
+   */
+  @Override
+  public BeaconBlockBody createGenesisBody(final BeaconState genesisState) {
+    final ExecutionPayloadBid latestExecutionPayloadBid =
+        BeaconStateGloas.required(genesisState).getLatestExecutionPayloadBid();
+    final SignedExecutionPayloadBid signedExecutionPayloadBid =
+        getSignedExecutionPayloadBidSchema()
+            .create(latestExecutionPayloadBid, BLSSignature.empty());
+    final BeaconBlockBody emptyBody = createEmpty();
+    final List<SszData> fieldValues = new ArrayList<>(emptyBody.size());
+    for (int i = 0; i < emptyBody.size(); i++) {
+      fieldValues.add(emptyBody.get(i));
+    }
+    fieldValues.set(
+        getFieldIndex(BlockBodyFields.SIGNED_EXECUTION_PAYLOAD_BID), signedExecutionPayloadBid);
+    return createFromFieldValues(fieldValues);
+  }
+
+  private SignedExecutionPayloadBidSchema getSignedExecutionPayloadBidSchema() {
+    return (SignedExecutionPayloadBidSchema)
+        getChildSchema(getFieldIndex(BlockBodyFields.SIGNED_EXECUTION_PAYLOAD_BID));
   }
 
   @Override
@@ -225,10 +270,7 @@ public class BeaconBlockBodySchemaGloasImpl
 
   @Override
   public SszListSchema<SszKZGCommitment, ?> getBlobKzgCommitmentsSchema() {
-    return ((SignedExecutionPayloadBidSchema)
-            getChildSchema(getFieldIndex(BlockBodyFields.SIGNED_EXECUTION_PAYLOAD_BID)))
-        .getMessageSchema()
-        .getBlobKzgCommitmentsSchema();
+    return getSignedExecutionPayloadBidSchema().getMessageSchema().getBlobKzgCommitmentsSchema();
   }
 
   @Override

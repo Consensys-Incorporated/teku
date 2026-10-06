@@ -25,7 +25,7 @@ import org.hyperledger.besu.ethereum.core.MiningConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.BalConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.MainnetProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.CodeCache;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import tech.pegasys.teku.infrastructure.bytes.Bytes20;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -49,7 +49,7 @@ public class MergedGenesisTestBuilder {
             BalConfiguration.DEFAULT,
             new NoOpMetricsSystem());
     final GenesisState genesisState =
-        GenesisState.fromConfig(configFile, protocolSchedule, new CodeCache());
+        GenesisState.fromConfig(configFile, protocolSchedule, new BonsaiCodeCache());
     final Block genesisBlock = genesisState.getBlock();
     final BlockHeader header = genesisBlock.getHeader();
 

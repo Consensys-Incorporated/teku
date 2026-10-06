@@ -50,7 +50,7 @@ public class Peer {
       example = "/ip4/7.7.7.7/tcp/4242/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N",
       description =
           "Multiaddr used in last peer connection. "
-              + "[Read more](https://docs.libp2p.io/reference/glossary/#multiaddr)")
+              + "[Read more](https://libp2p.io/docs/addressing/)")
   public final String address;
 
   @JsonProperty("state")

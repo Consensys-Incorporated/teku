@@ -1,5 +1,5 @@
 <!-- Thanks for sending a pull request! Please check out our contribution guidelines: -->
-<!-- https://github.com/Consensys/teku/blob/master/CONTRIBUTING.md -->
+<!-- https://github.com/Consensys-Incorporated/teku/blob/master/CONTRIBUTING.md -->
 
 ## PR Description
 

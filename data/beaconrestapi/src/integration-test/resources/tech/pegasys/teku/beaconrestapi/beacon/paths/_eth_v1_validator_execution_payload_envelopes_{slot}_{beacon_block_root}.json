@@ -1,0 +1,108 @@
+{
+  "get" : {
+    "tags" : [ "Validator", "Validator Required Api" ],
+    "operationId" : "getExecutionPayloadEnvelope",
+    "summary" : "Get execution payload envelope",
+    "description" : "Retrieves the cached execution payload envelope for the current proposer's slot, to be\nsigned and published via `publishExecutionPayloadEnvelope`.\n\nThe beacon node only caches the envelope for the current slot's locally built payload.\nRequests for older slots or slots where no envelope has been cached will return a 404\nerror. This endpoint does not fetch payloads from the execution layer.\n\nDepending on `Accept` header, the response can be returned either as JSON or as bytes serialized by SSZ.",
+    "parameters" : [ {
+      "name" : "slot",
+      "required" : true,
+      "in" : "path",
+      "schema" : {
+        "type" : "string",
+        "description" : "The slot for which the execution payload envelope is requested.",
+        "example" : "1",
+        "format" : "uint64"
+      }
+    }, {
+      "name" : "beacon_block_root",
+      "required" : true,
+      "in" : "path",
+      "schema" : {
+        "type" : "string",
+        "description" : "The beacon block root for the execution payload envelope.",
+        "example" : "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
+        "format" : "byte"
+      }
+    } ],
+    "responses" : {
+      "200" : {
+        "description" : "Success response",
+        "headers" : {
+          "Eth-Consensus-Version" : {
+            "description" : "Required in response so client can deserialize returned json or ssz data more effectively.",
+            "required" : true,
+            "schema" : {
+              "type" : "string",
+              "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze" ],
+              "example" : "phase0"
+            }
+          }
+        },
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/GetExecutionPayloadEnvelopeResponse"
+            }
+          },
+          "application/octet-stream" : {
+            "schema" : {
+              "type" : "string",
+              "format" : "binary"
+            }
+          }
+        }
+      },
+      "400" : {
+        "description" : "Invalid request - the slot or beacon_block_root is invalid",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "404" : {
+        "description" : "Not found",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "406" : {
+        "description" : "Not acceptable",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "500" : {
+        "description" : "Internal server error",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "503" : {
+        "description" : "Beacon node is currently syncing and not serving requests.",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      }
+    }
+  }
+}

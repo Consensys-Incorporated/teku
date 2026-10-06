@@ -102,8 +102,8 @@ import tech.pegasys.teku.beaconrestapi.handlers.v1.validator.PostAggregateAndPro
 import tech.pegasys.teku.beaconrestapi.handlers.v1.validator.PostAttesterDuties;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.validator.PostBeaconCommitteeSelections;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.validator.PostContributionAndProofs;
+import tech.pegasys.teku.beaconrestapi.handlers.v1.validator.PostPayloadTimelinessCommitteeDuties;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.validator.PostPrepareBeaconProposer;
-import tech.pegasys.teku.beaconrestapi.handlers.v1.validator.PostPtcDuties;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.validator.PostRegisterValidator;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.validator.PostSubscribeToBeaconCommitteeSubnet;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.validator.PostSyncCommitteeSelections;
@@ -126,7 +126,7 @@ import tech.pegasys.teku.beaconrestapi.handlers.v2.validator.GetAggregateAttesta
 import tech.pegasys.teku.beaconrestapi.handlers.v2.validator.GetProposerDutiesV2;
 import tech.pegasys.teku.beaconrestapi.handlers.v2.validator.PostAggregateAndProofsV2;
 import tech.pegasys.teku.beaconrestapi.handlers.v3.validator.GetNewBlockV3;
-import tech.pegasys.teku.beaconrestapi.handlers.v4.validator.GetNewBlockV4;
+import tech.pegasys.teku.beaconrestapi.handlers.v4.validator.PostNewBlockV4;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.events.EventChannels;
@@ -300,7 +300,7 @@ public class JsonTypeDefinitionBeaconRestApi implements BeaconRestApi {
             .endpoint(new GetProposerDuties(dataProvider))
             .endpoint(new GetProposerDutiesV2(dataProvider))
             .endpoint(new GetNewBlockV3(dataProvider, schemaCache))
-            .endpoint(new GetNewBlockV4(dataProvider, schemaCache))
+            .endpoint(new PostNewBlockV4(dataProvider, schemaCache))
             .endpoint(new GetAttestationData(dataProvider, spec))
             .endpoint(new GetAggregateAttestation(dataProvider, spec))
             .endpoint(new GetAggregateAttestationV2(dataProvider, schemaCache))
@@ -313,7 +313,7 @@ public class JsonTypeDefinitionBeaconRestApi implements BeaconRestApi {
             .endpoint(new PostContributionAndProofs(dataProvider, schemaCache))
             .endpoint(new PostPrepareBeaconProposer(dataProvider))
             .endpoint(new PostRegisterValidator(dataProvider))
-            .endpoint(new PostPtcDuties(dataProvider, spec))
+            .endpoint(new PostPayloadTimelinessCommitteeDuties(dataProvider, spec))
             // Obol DVT Methods
             .endpoint(new PostBeaconCommitteeSelections())
             .endpoint(new PostSyncCommitteeSelections())

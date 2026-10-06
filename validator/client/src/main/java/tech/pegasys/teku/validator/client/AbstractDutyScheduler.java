@@ -105,11 +105,21 @@ public abstract class AbstractDutyScheduler implements ValidatorTimingChannel {
   }
 
   private void calculateDuties(final UInt64 epochNumber) {
-    dutiesByEpoch.computeIfAbsent(epochNumber, this::createEpochDuties);
+    calculateDutiesForEpoch(epochNumber);
     final int lookAheadEpochs = getLookAheadEpochs(epochNumber);
     for (int i = 1; i <= lookAheadEpochs; i++) {
-      dutiesByEpoch.computeIfAbsent(epochNumber.plus(i), this::createEpochDuties);
+      calculateDutiesForEpoch(epochNumber.plus(i));
     }
+  }
+
+  private void calculateDutiesForEpoch(final UInt64 epochNumber) {
+    if (shouldScheduleDutiesAtEpoch(epochNumber)) {
+      dutiesByEpoch.computeIfAbsent(epochNumber, this::createEpochDuties);
+    }
+  }
+
+  protected boolean shouldScheduleDutiesAtEpoch(final UInt64 epochNumber) {
+    return true;
   }
 
   private PendingDuties createEpochDuties(final UInt64 epochNumber) {
@@ -140,12 +150,6 @@ public abstract class AbstractDutyScheduler implements ValidatorTimingChannel {
     final int lookAheadEpochs = getLookAheadEpochs(epoch);
     return !signingEpoch.isGreaterThan(epoch.plus(lookAheadEpochs + 1));
   }
-
-  @Override
-  public void onBlockProductionDue(final UInt64 slot) {}
-
-  @Override
-  public void onAttestationCreationDue(final UInt64 slot) {}
 
   protected void onProductionDue(final UInt64 slot) {
     // Check slot being null for the edge case of genesis slot (i.e. slot 0)

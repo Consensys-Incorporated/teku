@@ -59,6 +59,7 @@ public class BatchSync implements Sync {
   private final BatchChain activeBatches;
 
   private Optional<Batch> importingBatch = Optional.empty();
+  private Optional<SafeFuture<BatchImportResult>> importingBatchFuture = Optional.empty();
   private boolean switchingBranches = false;
 
   private SafeFuture<UInt64> commonAncestorSlot;
@@ -273,6 +274,19 @@ public class BatchSync implements Sync {
         .orElse(false);
   }
 
+  /**
+   * Returns true if the batch's last received block reaches the end of its assigned slot range. A
+   * batch can be marked complete purely because a follow-up request came back empty, which does not
+   * guarantee its last block is at {@link Batch#getLastSlot()} - it may still be hiding a block in
+   * the unclaimed remainder of its range.
+   */
+  private boolean batchFullyCoversItsRange(final Batch batch) {
+    return batch
+        .getLastBlock()
+        .map(lastBlock -> lastBlock.getSlot().equals(batch.getLastSlot()))
+        .orElse(false);
+  }
+
   private void checkBatchMatchesStartingPoint(
       final Batch batch, final SignedBeaconBlock firstBlock) {
     final NavigableSet<Batch> previousBatches = activeBatches.batchesBeforeExclusive(batch);
@@ -356,8 +370,18 @@ public class BatchSync implements Sync {
       return;
     }
 
+    // firstBatch can only be exonerated if its last received block reaches the end of its
+    // assigned range and its first block is already confirmed as connecting back to our trusted
+    // chain. A batch is marked complete as soon as a follow-up request comes back empty, which
+    // can happen before its last block reaches getLastSlot(); in that case it may still be hiding
+    // the linking block in the unclaimed remainder of its range. Likewise, without a confirmed
+    // first block, firstBatch's own blocks could belong to a fork that never actually connects to
+    // our chain, in which case excluding it from the contested set would mean it is never
+    // retried. Only a batch verified on both ends can be excluded to avoid penalising its peer.
     final NavigableSet<Batch> contestedBatches =
-        activeBatches.batchesBetweenInclusive(firstBatch, secondBatch);
+        batchFullyCoversItsRange(firstBatch) && firstBatch.isFirstBlockConfirmed()
+            ? activeBatches.batchesBetweenExclusiveStart(firstBatch, secondBatch)
+            : activeBatches.batchesBetweenInclusive(firstBatch, secondBatch);
     LOG.debug(
         "Marking {} batches as contested because {} and {} do not form a chain",
         contestedBatches.size(),
@@ -387,9 +411,19 @@ public class BatchSync implements Sync {
             batch -> {
               lastImportTimerStartPointSeconds = timeProvider.getTimeInSeconds();
               importingBatch = Optional.of(batch);
-              batchImporter
-                  .importBatch(batch)
-                  .thenAcceptAsync(result -> onImportComplete(result, batch), eventThread)
+              final SafeFuture<BatchImportResult> importFuture = batchImporter.importBatch(batch);
+              importingBatchFuture = Optional.of(importFuture);
+              importFuture
+                  .handleAsync(
+                      (result, error) -> {
+                        if (error != null) {
+                          onImportFailed(batch, error);
+                        } else {
+                          onImportComplete(result, batch);
+                        }
+                        return null;
+                      },
+                      eventThread)
                   .propagateExceptionTo(syncResult);
             });
   }
@@ -414,6 +448,23 @@ public class BatchSync implements Sync {
     contestedBatches.forEach(Batch::markAsContested);
   }
 
+  /**
+   * Handles an import which completed exceptionally, for example because it failed unexpectedly.
+   * The batch didn't import, so it is handled as any other failed import - importing state has to
+   * be released either way, otherwise the sync would wait forever for an import that already
+   * finished.
+   */
+  private void onImportFailed(final Batch importedBatch, final Throwable error) {
+    eventThread.checkOnEventThread();
+    if (!isCurrentlyImportingBatch(importedBatch)) {
+      // already released, e.g. the sync was aborted which cancelled the import
+      return;
+    }
+    // an import should never fail exceptionally, so make it visible rather than only retrying
+    LOG.warn("Import of batch {} failed unexpectedly", importedBatch, error);
+    onImportComplete(BatchImportResult.IMPORT_FAILED, importedBatch);
+  }
+
   private void onImportComplete(
       final BatchImporter.BatchImportResult result, final Batch importedBatch) {
     eventThread.checkOnEventThread();
@@ -421,6 +472,7 @@ public class BatchSync implements Sync {
         isCurrentlyImportingBatch(importedBatch),
         "Received import complete for batch that shouldn't have been importing");
     importingBatch = Optional.empty();
+    importingBatchFuture = Optional.empty();
     if (switchingBranches) {
       // We switched to a different chain while this was importing. Can't infer anything about other
       // batches from this result but should still penalise the peer that sent it to us.
@@ -445,7 +497,11 @@ public class BatchSync implements Sync {
     } else if (result == BatchImportResult.EXECUTION_CLIENT_OFFLINE
         || result == BatchImportResult.DATA_NOT_AVAILABLE) {
       if (!scheduledProgressSync) {
-        LOG.warn("Unable to import blocks: {}", result);
+        LOG.warn(
+            "Unable to import blocks ({} - {}): {}",
+            importedBatch.getFirstSlot(),
+            importedBatch.getLastSlot(),
+            result);
         asyncRunner
             .runAfterDelay(
                 () ->
@@ -558,12 +614,15 @@ public class BatchSync implements Sync {
   public void abort() {
     eventThread.checkOnEventThread();
     LOG.warn("Aborting sync {}", this::describeState);
+    final Optional<SafeFuture<BatchImportResult>> importToCancel = importingBatchFuture;
     importingBatch = Optional.empty();
+    importingBatchFuture = Optional.empty();
     activeBatches.removeAll();
     switchingBranches = false;
     commonAncestorSlot = null;
     targetChain = null;
     syncResult.complete(SyncResult.FAILED);
+    importToCancel.ifPresent(importFuture -> importFuture.cancel(true));
   }
 
   private String describeState() {

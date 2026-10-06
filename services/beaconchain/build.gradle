@@ -34,6 +34,7 @@ dependencies {
 	implementation project(':beacon:sync')
 	implementation project(':validator:api')
 	implementation project(':validator:client')
+	implementation project(':builder:rest')
 
 	testImplementation testFixtures(project(':storage'))
 	testImplementation testFixtures(project(':ethereum:spec'))

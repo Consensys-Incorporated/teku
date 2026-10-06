@@ -126,7 +126,8 @@ public class GossipForkSubscriptionsAltair extends GossipForkSubscriptionsPhase0
             metricsSystem,
             spec,
             new SyncCommitteeStateUtils(spec, recentChainData),
-            syncCommitteeSubnetSubscriptions);
+            syncCommitteeSubnetSubscriptions,
+            discoveryNetwork::requestPeerSearch);
     addGossipManager(syncCommitteeMessageGossipManager);
   }
 

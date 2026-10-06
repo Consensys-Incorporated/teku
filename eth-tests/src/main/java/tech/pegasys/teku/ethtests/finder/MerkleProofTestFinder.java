@@ -31,7 +31,7 @@ public class MerkleProofTestFinder implements TestFinder {
   public Stream<TestDefinition> findTests(
       final String fork, final String config, final Path testRoot) throws IOException {
     final Path merkleProofTestDir = testRoot.resolve("merkle_proof");
-    if (!merkleProofTestDir.toFile().exists()) {
+    if (!Files.exists(merkleProofTestDir)) {
       return Stream.empty();
     }
     return Files.list(merkleProofTestDir)
@@ -44,12 +44,12 @@ public class MerkleProofTestFinder implements TestFinder {
       throws IOException {
     final String testType = testRoot.relativize(testCategoryDir).toString();
     return Files.walk(testCategoryDir)
-        .filter(path -> path.resolve(PROOF_DATA_FILE).toFile().exists())
+        .filter(path -> Files.exists(path.resolve(PROOF_DATA_FILE)))
         .map(
             testDir -> {
               final String testName = testCategoryDir.relativize(testDir).toString();
               return new TestDefinition(
-                  fork, config, testType, testName, testRoot.relativize(testDir));
+                  fork, config, testType, testName, testRoot.relativize(testDir).toString());
             });
   }
 }

@@ -41,7 +41,6 @@ import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannel;
 import tech.pegasys.teku.statetransition.blobs.BlockBlobSidecarsTrackerFactory;
 import tech.pegasys.teku.statetransition.blobs.RemoteOrigin;
@@ -50,6 +49,7 @@ import tech.pegasys.teku.statetransition.datacolumns.CurrentSlotProvider;
 import tech.pegasys.teku.statetransition.datacolumns.CustodyGroupCountManager;
 import tech.pegasys.teku.statetransition.datacolumns.DataColumnSidecarELManager;
 import tech.pegasys.teku.statetransition.datacolumns.util.DataColumnSidecarELManagerImpl;
+import tech.pegasys.teku.statetransition.execution.PendingExecutionPayloadBid;
 import tech.pegasys.teku.statetransition.execution.PendingProposerPreferences;
 import tech.pegasys.teku.statetransition.validation.BlobSidecarGossipValidator;
 import tech.pegasys.teku.statetransition.validation.DataColumnSidecarGossipValidator;
@@ -213,13 +213,13 @@ public class PoolFactory {
         payloadAttestation -> payloadAttestation.getData().getSlot());
   }
 
-  public PendingPool<SignedExecutionPayloadBid> createPendingPoolForExecutionPayloadBids(
+  public PendingPool<PendingExecutionPayloadBid> createPendingPoolForExecutionPayloadBids(
       final Spec spec) {
     return createPendingPoolForExecutionPayloadBids(
         spec, DEFAULT_MAX_PENDING_EXECUTION_PAYLOAD_BIDS);
   }
 
-  public PendingPool<SignedExecutionPayloadBid> createPendingPoolForExecutionPayloadBids(
+  public PendingPool<PendingExecutionPayloadBid> createPendingPoolForExecutionPayloadBids(
       final Spec spec, final int maxQueueSize) {
     return new PendingPool<>(
         pendingPoolsSizeGauge,
@@ -228,9 +228,10 @@ public class PoolFactory {
         UInt64.ZERO,
         UInt64.ONE,
         maxQueueSize,
-        SignedExecutionPayloadBid::hashTreeRoot,
-        pendingBid -> Collections.singletonList(pendingBid.getMessage().getParentBlockRoot()),
-        pendingBid -> pendingBid.getMessage().getSlot());
+        pendingBid -> pendingBid.signedBid().hashTreeRoot(),
+        pendingBid ->
+            Collections.singletonList(pendingBid.signedBid().getMessage().getParentBlockRoot()),
+        pendingBid -> pendingBid.signedBid().getMessage().getSlot());
   }
 
   public PendingPool<PendingProposerPreferences> createPendingPoolForProposerPreferences(

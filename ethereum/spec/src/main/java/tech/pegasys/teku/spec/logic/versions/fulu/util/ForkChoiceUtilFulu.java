@@ -59,6 +59,16 @@ public class ForkChoiceUtilFulu extends ForkChoiceUtilDeneb {
     return true;
   }
 
+  /**
+   * From Fulu (EIP-7917) the proposer lookahead fixes proposer assignments before the epoch
+   * boundary, so re-orging a late block at the end of the previous epoch cannot change the current
+   * slot's proposer. The proposer is therefore always stable.
+   */
+  @Override
+  protected boolean isProposerStable(final UInt64 slot) {
+    return true;
+  }
+
   @Override
   public Optional<ForkChoiceUtilFulu> toVersionFulu() {
     return Optional.of(this);

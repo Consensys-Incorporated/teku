@@ -15,11 +15,14 @@ package tech.pegasys.teku.statetransition.execution;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.ethereum.events.SlotEventsChannel;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.subscribers.Subscribers;
@@ -40,8 +43,8 @@ public class DefaultProposerPreferencesManager
 
   private final ProposerPreferencesGossipValidator proposerPreferencesGossipValidator;
   private final PendingPool<PendingProposerPreferences> pendingProposerPreferences;
-  private final ConcurrentNavigableMap<UInt64, ProposerPreferences> acceptedProposerPreferences =
-      new ConcurrentSkipListMap<>();
+  private final ConcurrentNavigableMap<UInt64, Map<Bytes32, ProposerPreferences>>
+      acceptedProposerPreferences = new ConcurrentSkipListMap<>();
   private final Subscribers<OperationAddedSubscriber<SignedProposerPreferences>> subscribers =
       Subscribers.create(true);
 
@@ -65,8 +68,17 @@ public class DefaultProposerPreferencesManager
   }
 
   @Override
-  public Optional<ProposerPreferences> getProposerPreferences(final UInt64 slot) {
-    return Optional.ofNullable(acceptedProposerPreferences.get(slot));
+  public Optional<ProposerPreferences> getProposerPreferences(
+      final UInt64 slot, final Bytes32 dependentRoot) {
+    return Optional.ofNullable(acceptedProposerPreferences.get(slot))
+        .map(preferencesByDependentRoot -> preferencesByDependentRoot.get(dependentRoot));
+  }
+
+  @Override
+  public Collection<ProposerPreferences> getProposerPreferencesForSlot(final UInt64 slot) {
+    return Optional.ofNullable(acceptedProposerPreferences.get(slot))
+        .map(preferencesByDependentRoot -> List.copyOf(preferencesByDependentRoot.values()))
+        .orElse(List.of());
   }
 
   @Override
@@ -117,9 +129,10 @@ public class DefaultProposerPreferencesManager
     switch (result.code()) {
       case ACCEPT -> {
         removePendingPreferences(signedProposerPreferences);
-        acceptedProposerPreferences.put(
-            signedProposerPreferences.getMessage().getProposalSlot(),
-            signedProposerPreferences.getMessage());
+        final ProposerPreferences proposerPreferences = signedProposerPreferences.getMessage();
+        acceptedProposerPreferences
+            .computeIfAbsent(proposerPreferences.getProposalSlot(), __ -> new ConcurrentHashMap<>())
+            .put(proposerPreferences.getDependentRoot(), proposerPreferences);
         subscribers.forEach(
             subscriber ->
                 subscriber.onOperationAdded(signedProposerPreferences, result, fromNetwork));

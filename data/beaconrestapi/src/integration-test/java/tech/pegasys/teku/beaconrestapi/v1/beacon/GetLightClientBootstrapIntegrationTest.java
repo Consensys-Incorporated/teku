@@ -16,6 +16,7 @@ package tech.pegasys.teku.beaconrestapi.v1.beacon;
 import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
 
 import java.io.IOException;
 import okhttp3.Response;
@@ -35,7 +36,7 @@ import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrapSch
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
 
-@TestSpecContext(milestone = {SpecMilestone.ALTAIR, SpecMilestone.ELECTRA})
+@TestSpecContext(allMilestones = true, ignoredMilestones = SpecMilestone.PHASE0)
 public class GetLightClientBootstrapIntegrationTest
     extends AbstractDataBackedRestAPIIntegrationTest {
 
@@ -47,7 +48,8 @@ public class GetLightClientBootstrapIntegrationTest
   }
 
   @TestTemplate
-  void shouldReturnResultIfCreatedSuccessfully() throws IOException {
+  void shouldReturnResultIfCreatedSuccessfully(
+      final TestSpecInvocationContextProvider.SpecContext specContext) throws IOException {
     final BeaconState state =
         safeJoin(dataProvider.getChainDataProvider().getBeaconStateAtHead())
             .orElseThrow()
@@ -60,6 +62,8 @@ public class GetLightClientBootstrapIntegrationTest
 
     final Response response = get(headBlockRoot);
     assertThat(response.code()).isEqualTo(SC_OK);
+    assertThat(response.header(HEADER_CONSENSUS_VERSION))
+        .isEqualTo(specContext.getSpecMilestone().lowerCaseName());
 
     final LightClientBootstrapSchema lightClientBootstrapSchema =
         SchemaDefinitionsAltair.required(spec.getGenesisSchemaDefinitions())
@@ -75,6 +79,13 @@ public class GetLightClientBootstrapIntegrationTest
   void shouldReturnBadRequestIfInvalidPath() throws IOException {
     final Response response =
         getResponse(GetLightClientBootstrap.ROUTE.replace("{block_root}", "foo"));
+    assertBadRequest(response);
+  }
+
+  @TestTemplate
+  void shouldReturnBadRequestIfBlockRootIsNot32Bytes() throws IOException {
+    final Response response =
+        getResponse(GetLightClientBootstrap.ROUTE.replace("{block_root}", "0x1234"));
     assertBadRequest(response);
   }
 

@@ -41,6 +41,8 @@ public class ValidatorOptions {
   @Mixin
   private final ValidatorProposerOptions validatorProposerOptions = new ValidatorProposerOptions();
 
+  @Mixin private final BuilderOptions builderOptions = new BuilderOptions();
+
   @Option(
       names = {"--validators-graffiti"},
       converter = GraffitiConverter.class,
@@ -213,5 +215,6 @@ public class ValidatorOptions {
                 .beaconApiReadinessExecutorThreads(beaconApiReadinessExecutorThreads));
     validatorProposerOptions.configure(builder);
     validatorKeysOptions.configure(builder);
+    builderOptions.configure(builder);
   }
 }

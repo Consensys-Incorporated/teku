@@ -16,6 +16,7 @@ package tech.pegasys.teku.validator.client.restapi.apis;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_ACCEPTED;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_FORBIDDEN;
@@ -30,6 +31,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import java.io.IOException;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.http.HttpErrorResponse;
 import tech.pegasys.teku.infrastructure.restapi.StubRestApiRequest;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -88,16 +90,28 @@ public class SetGasLimitTest {
   }
 
   @Test
+  void shouldReturnNotFoundWhenValidatorIsNotOwned() throws JsonProcessingException {
+    final BLSPublicKey publicKey = dataStructureUtil.randomPublicKey();
+    when(proposerConfigManager.isOwnedValidator(publicKey)).thenReturn(false);
+    request.setPathParameter("pubkey", publicKey.toBytesCompressed().toHexString());
+    request.setRequestBody(new SetGasLimit.SetGasLimitBody(gasLimit));
+
+    handler.handleRequest(request);
+
+    assertThat(request.getResponseCode()).isEqualTo(SC_NOT_FOUND);
+  }
+
+  @Test
   void shouldShareContextIfBellatrixNotEnabled() {
     request.setPathParameter("pubkey", dataStructureUtil.randomPublicKey().toString());
-    request.setRequestBody(
-        new SetFeeRecipient.SetFeeRecipientBody(dataStructureUtil.randomEth1Address()));
+    request.setRequestBody(new SetGasLimit.SetGasLimitBody(gasLimit));
     assertThatThrownBy(
             () -> {
-              SetFeeRecipient handler = new SetFeeRecipient(Optional.empty());
+              SetGasLimit handler = new SetGasLimit(Optional.empty());
               handler.handleRequest(request);
             })
-        .hasMessageContaining("Bellatrix is not currently scheduled");
+        .hasMessageContaining(
+            "Bellatrix is not currently scheduled on this network, unable to set gas limit");
   }
 
   @Test

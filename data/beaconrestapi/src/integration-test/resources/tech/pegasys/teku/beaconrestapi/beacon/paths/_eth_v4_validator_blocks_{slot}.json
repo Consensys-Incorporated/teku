@@ -1,9 +1,9 @@
 {
-  "get" : {
+  "post" : {
     "tags" : [ "Validator", "Validator Required Api" ],
     "operationId" : "produceBlockV4",
     "summary" : "Produce a new block, without signature.",
-    "description" : "Requests a beacon node to produce a valid block, which can then be signed by a validator.\n\nPost-Gloas, proposers submit execution payload bids rather than full execution payloads,\nso there is no longer a concept of blinded or unblinded blocks. Builders release the\npayload later. This endpoint is specific to the post-Gloas forks and is not backwards compatible\nwith previous forks.\n\nWhen self-building (local execution payload), the response will include the full block contents\nincluding the beacon block, execution payload envelope, blobs, and KZG proofs.\nWhen using an external builder bid, only the `BeaconBlock` is returned as the beacon node\ndoes not have access to the builder's execution payload.\n\nThe `Eth-Execution-Payload-Included` header and `execution_payload_included` response field\nindicate which response type was returned.\n",
+    "description" : "Requests a beacon node to produce a valid block, which the validator then signs.\n\nThe beacon node always builds a local payload and MAY consider a p2p bid, so a block is returned\neven when no builder bid is available. The validator client supplies a `BuilderConfig` in the\nrequest body: a list of `BuilderEntry` objects in its `builders` field, one per bid request,\nplus a top-level `min_bid` and `builder_boost_factor` that apply to p2p bids. Each entry\nrequests a bid from its `url`, and the entry applies to the bid that request returns; an empty\n`builder_pubkeys` list accepts any builder, and a bid MUST NOT be accepted unless signed by\none of a non-empty list.\n\nA builder bid, over the builder API or p2p, is rejected if its total payment falls below the\n`min_bid` that applies to it. Every surviving bid is then boosted by the\n`builder_boost_factor` that applies to it, and the\nhighest boosted bid competes with the local build in Gwei. The local build wins a tie.\n\nThe response carries the full block contents only when the beacon node self-built the block and\n`include_payload` is `true`; in every other case, including any builder bid win, it carries\nonly the `BeaconBlock`.\n\nEvery block is published via `POST /eth/v2/beacon/blocks`. A self-built block carries\n`BUILDER_INDEX_SELF_BUILD` as its `builder_index`, and the validator client publishes its\nexecution payload envelope via `POST /eth/v1/beacon/execution_payload_envelopes`. When a\nbuilder bid won, the winning builder releases the envelope instead, and the validator client\nechoes `Eth-Builder-Url` if one was returned.\n\nThis endpoint is specific to the post-Gloas forks and is not backwards compatible with previous\nforks.\n",
     "parameters" : [ {
       "name" : "slot",
       "required" : true,
@@ -30,7 +30,7 @@
       "in" : "query",
       "schema" : {
         "type" : "boolean",
-        "description" : "Controls whether the execution payload envelope and blobs are included in the response\nwhen self-building (using local execution payload).\n\nWhen `true`, the response includes the full block contents: beacon block,\nexecution payload envelope, blobs, and KZG proofs. This enables stateless operation\nwhere the validator client can use multiple beacon nodes (multi-BN setups, distributed validators, failover).\n\nWhen `false`, only the beacon block is returned and the beacon node caches the execution\npayload envelope and blobs internally. The validator client must then fetch them separately\nvia `GET /eth/v1/validator/execution_payload_envelope/{slot}`. This saves\nbandwidth but requires the validator client to publish via the same beacon node that\nproduced the block (stateful operation).\n\nThis parameter only affects self-building scenarios. When using an external builder's bid,\nonly the beacon block is returned regardless of this parameter (the beacon node does not\nhave access to the builder's execution payload)."
+        "description" : "Controls whether the execution payload envelope and blobs are included in the response\nwhen self-building (using local execution payload).\n\nWhen `true`, the response includes the full block contents: beacon block,\nexecution payload envelope, blobs, and KZG proofs. This enables stateless operation\nwhere the validator client can use multiple beacon nodes (multi-BN setups, distributed validators, failover).\n\nWhen `false`, only the beacon block is returned and the beacon node caches the execution\npayload envelope and blobs internally. The validator client must then fetch them separately\nvia `GET /eth/v1/validator/execution_payload_envelopes/{slot}/{beacon_block_root}`. This saves\nbandwidth but requires the validator client to publish via the same beacon node that\nproduced the block (stateful operation).\n\nThis parameter affects the self-built case only. When a builder bid wins, the beacon node\ndoes not hold that payload, so it returns only the beacon block regardless of this\nparameter."
       }
     }, {
       "name" : "graffiti",
@@ -40,15 +40,6 @@
         "description" : "`Bytes32 Hex` Graffiti.",
         "example" : "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
         "format" : "byte"
-      }
-    }, {
-      "name" : "builder_boost_factor",
-      "in" : "query",
-      "schema" : {
-        "type" : "string",
-        "description" : "Percentage multiplier to apply to the builder's payload value when choosing between a\nbuilder payload header and payload from the paired execution node. This parameter is only\nrelevant if the beacon node is connected to a builder, deems it safe to produce a builder\npayload, and receives valid responses from both the builder endpoint _and_ the paired\nexecution node. When these preconditions are met, the server MUST act as follows:\n\n* if `exec_node_payload_value >= builder_boost_factor * (builder_payload_value // 100)`,\n  then return a full (unblinded) block containing the execution node payload.\n* otherwise, return a blinded block containing the builder payload header.\n\nServers must support the following values of the boost factor which encode common\npreferences:\n\n* `builder_boost_factor=0`: prefer the execution node payload unless an error makes it\n  unviable.\n* `builder_boost_factor=100`: default profit maximization mode; choose whichever\n  payload pays more.\n* `builder_boost_factor=2**64 - 1`: prefer the builder payload unless an error or\n  beacon node health check makes it unviable.\n\nServers should use saturating arithmetic or another technique to ensure that large values of\nthe `builder_boost_factor` do not trigger overflows or errors. If this parameter is\nprovided and the beacon node is not configured with a builder then the beacon node MUST\nrespond with a full block, which the caller can choose to reject if it wishes. If this\nparameter is **not** provided then it should be treated as having the default value of 100.\nIf the value is provided but out of range for a 64-bit unsigned integer, then an error\nresponse with status code 400 MUST be returned.",
-        "example" : "1",
-        "format" : "uint64"
       }
     }, {
       "name" : "skip_randao_verification",
@@ -61,7 +52,32 @@
         "maxLength" : 0
       }
     } ],
+    "requestBody" : {
+      "content" : {
+        "application/octet-stream" : {
+          "schema" : {
+            "type" : "string",
+            "format" : "binary"
+          }
+        },
+        "application/json" : {
+          "schema" : {
+            "$ref" : "#/components/schemas/BuilderConfig"
+          }
+        }
+      }
+    },
     "responses" : {
+      "415" : {
+        "description" : "Unsupported media type",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
       "200" : {
         "description" : "Request successful",
         "headers" : {
@@ -95,6 +111,12 @@
             "required" : true,
             "schema" : {
               "type" : "boolean"
+            }
+          },
+          "Eth-Builder-Url" : {
+            "description" : "The url of a winning builder when the bid was retrieved via the builder-API.\nThe validator client MUST echo this value in the Eth-Builder-Url request header when publishing the signed block,\nso the beacon node can forward the block to the same builder via submitSignedBeaconBlock. Absent for a self-built block or a bid won over p2p.",
+            "schema" : {
+              "type" : "string"
             }
           }
         },

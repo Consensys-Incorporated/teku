@@ -44,5 +44,5 @@ public class Domain {
   public static final Bytes4 INCLUSION_LIST_COMMITTEE = Bytes4.fromHexString("0x10000000");
 
   // builder-specs
-  public static final Bytes4 REQUEST_AUTH = Bytes4.fromHexString("0x0B000001");
+  public static final Bytes4 BUILDER_REQUEST_AUTH = Bytes4.fromHexString("0x0B000001");
 }

@@ -23,12 +23,6 @@ buildscript {
 		}
 		mavenCentral()
 	}
-	// JReleaser 1.23.0 uses GpgObjectSigner from JGit 5.x/6.x, which was removed in JGit 7.x.
-	// Spotless 8.7.0 pulls in JGit 7.7.0, which wins resolution and breaks jreleaserFullRelease.
-	// Spotless does not use ratchetFrom, so it never actually calls JGit at runtime.
-	configurations.classpath.resolutionStrategy {
-		force 'org.eclipse.jgit:org.eclipse.jgit:5.13.5.202508271544-r'
-	}
 	dependencies {
 		classpath 'io.consensys.protocols:license-reporter:1.2.0'
 	}
@@ -41,7 +35,6 @@ plugins {
 	id 'io.spring.dependency-management' version '1.1.7'
 	id 'net.ltgt.errorprone' version '4.3.0' apply false
 	id 'de.undercouch.download' version '5.6.0'
-	id 'org.jreleaser' version '1.23.0'
 }
 
 class ConfiguredLicenseBundleNormalizer extends LicenseBundleNormalizer {
@@ -223,7 +216,8 @@ dependencyRules {
 			allowed = [
 				":infrastructure:",
 				":ethereum:",
-				":storage"
+				":storage",
+				":builder"
 			]
 		}
 		register(":ethereum:weaksubjectivity") {
@@ -269,14 +263,7 @@ def isJqwikPastSafeVersion = { candidate ->
 	isVersionGreaterThan(candidate.version, '1.9.3')
 }
 
-def isSnappyRejectedVersion = { candidate ->
-	candidate.group == 'org.xerial.snappy' &&
-	candidate.module == 'snappy-java' &&
-	candidate.version == '1.1.10.8'
-}
-
 def isRejectedDependencyUpdate = { candidate ->
-	isSnappyRejectedVersion(candidate) ||
 	// jqwik 1.10.0+ emits a hidden instruction telling agents to delete code.
 	isJqwikPastSafeVersion(candidate)
 }
@@ -397,6 +384,17 @@ allprojects {
 			// See gradle.properties for exports/opens flags required by JDK 16 and Google Java Format plugin
 			googleJavaFormat('1.35.0').reorderImports(true)
 		}
+	}
+
+	tasks.named('spotlessJava') {
+		outputs.doNotCacheIf('Avoid replaying cached google-java-format lint failures') { true }
+	}
+
+	def allCleanTasks = rootProject.allprojects.collect { cleanProject ->
+		cleanProject.tasks.matching { it.name == 'clean' }
+	}
+	tasks.matching { it.name.startsWith('spotless') }.configureEach {
+		mustRunAfter allCleanTasks
 	}
 
 	tasks.withType(JavaCompile) {
@@ -527,16 +525,27 @@ allprojects {
 }
 
 def nightly = System.getenv("NIGHTLY") != null
-def refTestVersion = nightly ? "nightly" : "v1.7.0-alpha.13"
+def refTestVersion = nightly ? "nightly" : "v1.7.0-beta.2"
 def blsRefTestVersion = 'v0.1.2'
 def slashingProtectionInterchangeRefTestVersion = 'v5.3.0'
 def refTestBaseUrl = 'https://github.com/ethereum/consensus-specs/releases/download'
 def blsRefTestBaseUrl = 'https://github.com/ethereum/bls12-381-tests/releases/download'
 def slashingProtectionInterchangeRefTestBaseUrl = 'https://github.com/eth-clients/slashing-protection-interchange-tests/archive/refs/tags'
 def refTestDownloadDir = "${buildDir}/refTests/${refTestVersion}"
+def compTestDownloadDir = "${buildDir}/compTests/${refTestVersion}"
 def blsRefTestDownloadDir = "${buildDir}/blsRefTests/${blsRefTestVersion}"
 def slashingProtectionInterchangeRefTestDownloadDir = "${buildDir}/slashingProtectionInterchangeRefTests/${slashingProtectionInterchangeRefTestVersion}"
-def refTestExpandDir = "${project.rootDir}/eth-reference-tests/src/referenceTest/resources/consensus-spec-tests/"
+// Reference test tarballs are converted into <config>.zip archives that the tests read directly
+// through the JDK zip filesystem (see ReferenceTestArchiveConverter); nothing is expanded on disk.
+ext.refTestArchivesDir = "${refTestDownloadDir}/archives"
+ext.refTestTarballs = [
+	general: "${refTestDownloadDir}/general.tar.gz",
+	minimal: "${refTestDownloadDir}/minimal.tar.gz",
+	mainnet: "${refTestDownloadDir}/mainnet.tar.gz",
+	bls: "${blsRefTestDownloadDir}/bls_tests_yaml.tar.gz",
+	'slashing-protection-interchange': "${slashingProtectionInterchangeRefTestDownloadDir}/slashing-protection-interchange-tests.tar.gz",
+	'fork-choice-compliance': "${compTestDownloadDir}/comptests.tar.gz",
+]
 
 def downloadFile(String url, String token, File outputFile) {
 	println "Download ${outputFile.getName()} (${url})"
@@ -652,73 +661,19 @@ tasks.register('downloadSlashingProtectionInterchangeRefTests', Download) {
 	overwrite false
 }
 
+// comptests.tar.gz is only published alongside tagged consensus-specs releases (not the nightly
+// vector-generation workflow), so it is skipped for nightly builds.
+tasks.register('downloadCompTests', Download) {
+	onlyIf { !nightly }
+	src([
+		"${refTestBaseUrl}/${refTestVersion}/comptests.tar.gz"
+	])
+	dest "${compTestDownloadDir}/comptests.tar.gz"
+	overwrite false
+}
+
 tasks.register('downloadRefTests') {
-	dependsOn downloadEthRefTests, downloadBlsRefTests, downloadSlashingProtectionInterchangeRefTests
-}
-
-tasks.register('cleanRefTestsGeneral', Delete) {
-	delete "${refTestExpandDir}/tests/general"
-}
-
-tasks.register('expandRefTestsGeneral', Copy) {
-	dependsOn cleanRefTestsGeneral, downloadEthRefTests
-	from tarTree("${refTestDownloadDir}/general.tar.gz")
-	into refTestExpandDir
-}
-
-tasks.register('cleanRefTestsMainnet', Delete) {
-	delete "${refTestExpandDir}/tests/mainnet"
-}
-
-tasks.register('expandRefTestsMainnet', Copy) {
-	dependsOn cleanRefTestsMainnet, downloadEthRefTests
-	from tarTree("${refTestDownloadDir}/mainnet.tar.gz")
-	into refTestExpandDir
-}
-
-tasks.register('cleanRefTestsMinimal', Delete) {
-	delete "${refTestExpandDir}/tests/minimal"
-}
-
-tasks.register('expandRefTestsMinimal', Copy) {
-	dependsOn cleanRefTestsMinimal, downloadEthRefTests
-	from tarTree("${refTestDownloadDir}/minimal.tar.gz")
-	into refTestExpandDir
-}
-
-tasks.register('cleanRefTestsBls', Delete) {
-	delete "${refTestExpandDir}/tests/bls"
-}
-
-tasks.register('expandRefTestsBls', Copy) {
-	dependsOn cleanRefTestsBls, downloadBlsRefTests
-	from tarTree("${blsRefTestDownloadDir}/bls_tests_yaml.tar.gz")
-	into "${refTestExpandDir}/tests/bls"
-}
-
-tasks.register('cleanRefTestsSlashingProtectionInterchange', Delete) {
-	delete "${refTestExpandDir}/tests/slashing-protection-interchange"
-}
-
-tasks.register('expandRefTestsSlashingProtectionInterchange', Copy) {
-	dependsOn cleanRefTestsSlashingProtectionInterchange, downloadSlashingProtectionInterchangeRefTests
-	from {
-		tarTree("${slashingProtectionInterchangeRefTestDownloadDir}/slashing-protection-interchange-tests.tar.gz").matching {
-			include "**/tests/generated/*.json"
-			// flatten
-			eachFile { FileCopyDetails fcp ->
-				fcp.path = fcp.name
-			}
-		}
-	}
-	into "${refTestExpandDir}/tests/slashing-protection-interchange"
-}
-
-tasks.register('expandRefTests') {
-	dependsOn expandRefTestsGeneral, expandRefTestsMainnet, expandRefTestsMinimal, expandRefTestsBls, expandRefTestsSlashingProtectionInterchange
-}
-tasks.register('cleanRefTests') {
-	dependsOn cleanRefTestsGeneral, cleanRefTestsMainnet, cleanRefTestsMinimal, cleanRefTestsBls, cleanRefTestsSlashingProtectionInterchange
+	dependsOn downloadEthRefTests, downloadBlsRefTests, downloadSlashingProtectionInterchangeRefTests, downloadCompTests
 }
 
 tasks.register('deploy') {}
@@ -882,6 +837,16 @@ application {
 		"--sun-misc-unsafe-memory-access=allow",
 		// avoids JDK 26+ warning due to picocli
 		// "--enable-final-field-mutation=ALL-UNNAMED"
+
+		// Terminate rather than carry on in a broken state after running out of memory. Handling
+		// this in Java is unreliable: the error is usually swallowed by a catch(Throwable) on the
+		// way out, and the graceful System.exit has deadlocked in a shutdown hook before (#7166).
+		// The JVM aborts at the point the error is thrown, with exit code 3: no catch blocks and
+		// no shutdown hooks run, so the database is left unclosed and recovers from its write
+		// ahead log on the next start. Only covers errors raised by the VM, so the out of memory
+		// errors thrown by Java code (direct buffer memory) are handled in
+		// TekuDefaultExceptionHandler.
+		"-XX:+ExitOnOutOfMemoryError",
 	]
 }
 
@@ -1175,6 +1140,12 @@ subprojects {
 			// Without this the build fails if you filter out all the tests for any module
 			setFailOnNoMatchingTests(false)
 		}
+		testLogging {
+			// Print the assertion message and full stack trace for failed tests, so a CI job log
+			// is enough to see what broke without downloading the JUnit XML artifact
+			events "failed"
+			exceptionFormat "full"
+		}
 	}
 
 	apply plugin: 'jacoco'
@@ -1261,6 +1232,7 @@ subprojects {
 
 	if (sourceSetIsPopulated("main") || sourceSetIsPopulated("testFixtures")) {
 		apply plugin: 'maven-publish'
+		apply plugin: 'signing'
 
 		publishing {
 			repositories {
@@ -1295,17 +1267,26 @@ subprojects {
 					suppressPomMetadataWarningsFor('testFixturesRuntimeElements')
 					pom {
 						name = "Teku - ${project.name}"
-						url = 'https://github.com/Consensys/teku'
+						description = "Teku Ethereum consensus client - ${project.name}"
+						url = 'https://github.com/Consensys-Incorporated/teku'
 						licenses {
 							license {
 								name = 'The Apache License, Version 2.0'
 								url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
 							}
 						}
+						developers {
+							developer {
+								name = 'Consensys'
+								email = 'protocols@consensys.net'
+								organization = 'Consensys'
+								organizationUrl = 'https://consensys.net'
+							}
+						}
 						scm {
-							connection = 'scm:git:git://github.com/Consensys/teku.git'
-							developerConnection = 'https://github.com/Consensys/teku.git'
-							url = 'https://github.com/Consensys/teku'
+							connection = 'scm:git:git://github.com/Consensys-Incorporated/teku.git'
+							developerConnection = 'https://github.com/Consensys-Incorporated/teku.git'
+							url = 'https://github.com/Consensys-Incorporated/teku'
 						}
 						// workaround
 						// https://stackoverflow.com/questions/69877418/why-does-every-pom-file-published-by-gradle-has-a-self-referential-dependency
@@ -1319,6 +1300,16 @@ subprojects {
 						}
 					}
 				}
+			}
+		}
+
+		signing {
+			def signingKey = findProperty("signingKey")
+			def signingPassword = findProperty("signingPassword") ?: ""
+			if (signingKey) {
+				required { gradle.taskGraph.allTasks.any { it.name.contains("ToStagingRepository") } }
+				useInMemoryPgpKeys(signingKey, signingPassword)
+				sign publishing.publications.mavenJava
 			}
 		}
 	}
@@ -1690,38 +1681,6 @@ tasks.register('cloudsmithUpload') {
 		system.executor.exec {
 			executable project.file("scripts/cloudsmith-upload.sh")
 			args rootProject.version, distTar.archiveFile.get(), distZip.archiveFile.get()
-		}
-	}
-}
-
-jreleaser {
-	project {
-		java {
-			groupId = 'tech.pegasys.teku'
-		}
-	}
-	release {
-		github {
-			skipRelease = true
-			skipTag = true
-			token = "foobar"
-		}
-	}
-	signing {
-		active = 'ALWAYS'
-		armored = true
-	}
-	deploy {
-		maven {
-			mavenCentral {
-				sonatype {
-					active = 'ALWAYS'
-					url = 'https://central.sonatype.com/api/v1/publisher'
-					stagingRepository('build/staging-deploy')
-					retryDelay = 15
-					maxRetries = 100
-				}
-			}
 		}
 	}
 }

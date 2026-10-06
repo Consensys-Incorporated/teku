@@ -16,6 +16,7 @@ package tech.pegasys.teku.validator.coordinator;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 
 import java.util.Collections;
@@ -81,18 +82,18 @@ class ExecutionPayloadFactoryGloasTest {
 
     blobsBundle = dataStructureUtil.randomBlobsBundle(3);
 
+    final ExecutionPayloadEnvelope executionPayload =
+        dataStructureUtil.randomExecutionPayloadEnvelope(slot);
+
     getPayloadResponse =
         new GetPayloadResponse(
-            dataStructureUtil.randomExecutionPayload(slot),
+            executionPayload.getPayload(),
             dataStructureUtil.randomUInt256(),
             blobsBundle,
             false,
             dataStructureUtil.randomExecutionRequests(slot));
 
     setupCachingOfThePayloadResult(slot, getPayloadResponse);
-
-    final ExecutionPayloadEnvelope executionPayload =
-        dataStructureUtil.randomExecutionPayloadEnvelope(slot);
 
     final SignedExecutionPayloadEnvelope signedExecutionPayload =
         schemaDefinitions
@@ -107,6 +108,40 @@ class ExecutionPayloadFactoryGloasTest {
         dataColumnSidecar ->
             assertThat(dataColumnSidecar.getBeaconBlockRoot())
                 .isEqualTo(executionPayload.getBeaconBlockRoot()));
+  }
+
+  @Test
+  public void failsToCreateDataColumnSidecarsWhenPayloadResultIsNotCached() {
+    final UInt64 slot = UInt64.ONE;
+    final SignedExecutionPayloadEnvelope signedExecutionPayload =
+        dataStructureUtil.randomSignedExecutionPayloadEnvelope(slot.longValue());
+
+    when(executionLayerBlockProductionManager.getCachedPayloadResult(slot))
+        .thenReturn(Optional.empty());
+
+    assertThatSafeFuture(executionPayloadFactory.createDataColumnSidecars(signedExecutionPayload))
+        .isCompletedExceptionallyWith(DataColumnSidecarCreationException.class)
+        .hasMessage(DataColumnSidecarCreationException.noCachedBlobData(slot).getMessage());
+  }
+
+  @Test
+  public void failsToCreateDataColumnSidecarsWhenCachedPayloadDoesNotMatchEnvelope() {
+    final UInt64 slot = UInt64.ONE;
+    final SignedExecutionPayloadEnvelope signedExecutionPayload =
+        dataStructureUtil.randomSignedExecutionPayloadEnvelope(slot.longValue());
+    final GetPayloadResponse mismatchedGetPayloadResponse =
+        new GetPayloadResponse(
+            dataStructureUtil.randomExecutionPayload(slot),
+            dataStructureUtil.randomUInt256(),
+            dataStructureUtil.randomBlobsBundle(1),
+            false,
+            dataStructureUtil.randomExecutionRequests(slot));
+
+    setupCachingOfThePayloadResult(slot, mismatchedGetPayloadResponse);
+
+    assertThatSafeFuture(executionPayloadFactory.createDataColumnSidecars(signedExecutionPayload))
+        .isCompletedExceptionallyWith(DataColumnSidecarCreationException.class)
+        .hasMessage(DataColumnSidecarCreationException.cachedPayloadMismatch(slot).getMessage());
   }
 
   private void assertExecutionPayloadCreated(
@@ -131,17 +166,15 @@ class ExecutionPayloadFactoryGloasTest {
 
     setupCachingOfThePayloadResult(slot, getPayloadResponse);
 
-    final UInt64 builderIndex = getBidFromBlock(blockAndState.getBlock()).getBuilderIndex();
-
     final ExecutionPayloadEnvelope executionPayload =
-        safeJoin(
-            executionPayloadFactory.createUnsignedExecutionPayload(builderIndex, blockAndState));
+        safeJoin(executionPayloadFactory.createUnsignedExecutionPayload(blockAndState));
 
     // result assertions
     assertThat(executionPayload.getPayload()).isEqualTo(getPayloadResponse.getExecutionPayload());
     assertThat(executionPayload.getExecutionRequests())
         .isEqualTo(getPayloadResponse.getExecutionRequests().orElseThrow());
-    assertThat(executionPayload.getBuilderIndex()).isEqualTo(builderIndex);
+    assertThat(executionPayload.getBuilderIndex())
+        .isEqualTo(getBidFromBlock(blockAndState.getBlock()).getBuilderIndex());
     assertThat(executionPayload.getBeaconBlockRoot()).isEqualTo(blockAndState.getRoot());
     assertThat(executionPayload.getSlot()).isEqualTo(slot);
   }

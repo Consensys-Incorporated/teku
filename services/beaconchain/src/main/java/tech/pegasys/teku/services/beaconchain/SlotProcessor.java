@@ -343,8 +343,6 @@ public class SlotProcessor {
                     p2pNetwork.getPeerCount()));
   }
 
-  // TODO-GLOAS: make use of TickProcessingPerformance and forkChoiceTrigger similar to
-  // processSlotAttestation
   private void processSlotPayloadAttestation() {
     onTickSlotPayloadAttestation = nodeSlot.getValue();
     forkChoiceNotifier.onPayloadAttestationsDue(onTickSlotPayloadAttestation);

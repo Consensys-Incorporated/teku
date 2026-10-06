@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.spec.config;
 
+import java.util.List;
 import java.util.Optional;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 
@@ -25,8 +26,7 @@ public interface SpecConfigGloas extends SpecConfigFulu, NetworkingSpecConfigGlo
   UInt64 BUILDER_PAYMENT_THRESHOLD_DENOMINATOR = UInt64.valueOf(10);
   int PAYLOAD_BUILDER_VERSION = 0;
   // builder-specs
-  UInt64 MAX_EXECUTION_PAYMENT = UInt64.MAX_VALUE; // 2**64 - 1
-  long MAX_DATA_SIZE = 4096;
+  long MAX_BUILDER_AUTH_DATA_SIZE = 4096;
 
   static SpecConfigGloas required(final SpecConfig specConfig) {
     return specConfig
@@ -44,7 +44,7 @@ public interface SpecConfigGloas extends SpecConfigFulu, NetworkingSpecConfigGlo
 
   int getPayloadDueBps();
 
-  int getPtcSize();
+  int getPayloadTimelinessCommitteeSize();
 
   int getMaxPayloadAttestations();
 
@@ -65,12 +65,15 @@ public interface SpecConfigGloas extends SpecConfigFulu, NetworkingSpecConfigGlo
 
   UInt64 getMaxPerEpochActivationChurnLimitGloas();
 
+  // EIP-8261: Gas limit schedule
+  List<GasLimitScheduleEntry> getGasLimitSchedule();
+
   default int getPayloadTimelyThreshold() {
-    return getPtcSize() / 2;
+    return getPayloadTimelinessCommitteeSize() / 2;
   }
 
   default int getDataAvailabilityTimelyThreshold() {
-    return getPtcSize() / 2;
+    return getPayloadTimelinessCommitteeSize() / 2;
   }
 
   @Override

@@ -37,6 +37,8 @@ public class BlockProductionPerformanceImpl implements BlockProductionPerformanc
   public static final String STATE_TRANSITION = "state_transition";
   public static final String STATE_HASHING = "state_hashing";
   public static final String GET_ATTESTATIONS_FOR_BLOCK = "get_attestations_for_block";
+  public static final String GET_PAYLOAD_ATTESTATIONS_FOR_BLOCK =
+      "get_payload_attestations_for_block";
   public static final String BEACON_BLOCK_BODY_PREPARATION_STARTED =
       "beacon_block_body_preparation_started";
   public static final String TOTAL_PRODUCTION_TIME_LABEL = "total_production_time";
@@ -146,6 +148,11 @@ public class BlockProductionPerformanceImpl implements BlockProductionPerformanc
   @Override
   public void getAttestationsForBlock() {
     performanceTracker.addEvent(GET_ATTESTATIONS_FOR_BLOCK);
+  }
+
+  @Override
+  public void getPayloadAttestationsForBlock() {
+    performanceTracker.addEvent(GET_PAYLOAD_ATTESTATIONS_FOR_BLOCK);
   }
 
   @Override

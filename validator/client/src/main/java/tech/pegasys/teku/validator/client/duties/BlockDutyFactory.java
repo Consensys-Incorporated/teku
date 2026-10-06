@@ -16,6 +16,7 @@ package tech.pegasys.teku.validator.client.duties;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
+import tech.pegasys.teku.validator.client.BuilderConfigProvider;
 import tech.pegasys.teku.validator.client.ForkProvider;
 import tech.pegasys.teku.validator.client.Validator;
 import tech.pegasys.teku.validator.client.duties.execution.ExecutionPayloadBidEventsChannel;
@@ -29,6 +30,7 @@ public class BlockDutyFactory implements DutyFactory<BlockProductionDuty, Duty> 
   private final Spec spec;
   private final ValidatorDutyMetrics validatorDutyMetrics;
   private final ExecutionPayloadBidEventsChannel executionPayloadBidEventsChannelPublisher;
+  private final BuilderConfigProvider builderConfigProvider;
 
   public BlockDutyFactory(
       final ForkProvider forkProvider,
@@ -36,13 +38,15 @@ public class BlockDutyFactory implements DutyFactory<BlockProductionDuty, Duty> 
       final BlockContainerSigner blockContainerSigner,
       final Spec spec,
       final ValidatorDutyMetrics validatorDutyMetrics,
-      final ExecutionPayloadBidEventsChannel executionPayloadBidEventsChannelPublisher) {
+      final ExecutionPayloadBidEventsChannel executionPayloadBidEventsChannelPublisher,
+      final BuilderConfigProvider builderConfigProvider) {
     this.forkProvider = forkProvider;
     this.validatorApiChannel = validatorApiChannel;
     this.blockContainerSigner = blockContainerSigner;
     this.spec = spec;
     this.validatorDutyMetrics = validatorDutyMetrics;
     this.executionPayloadBidEventsChannelPublisher = executionPayloadBidEventsChannelPublisher;
+    this.builderConfigProvider = builderConfigProvider;
   }
 
   @Override
@@ -55,7 +59,8 @@ public class BlockDutyFactory implements DutyFactory<BlockProductionDuty, Duty> 
         blockContainerSigner,
         spec,
         validatorDutyMetrics,
-        executionPayloadBidEventsChannelPublisher);
+        executionPayloadBidEventsChannelPublisher,
+        builderConfigProvider);
   }
 
   @Override

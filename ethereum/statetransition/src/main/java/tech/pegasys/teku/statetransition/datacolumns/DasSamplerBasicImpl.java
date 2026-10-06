@@ -262,16 +262,17 @@ public class DasSamplerBasicImpl implements DasSamplerBasic, SlotEventsChannel {
     if (currentSize < maxRecentlySampledBlocks) {
       return;
     }
-    // First pass: evict completed trackers, oldest-created first. Best-effort: CHM size/iteration
-    // are weakly consistent and concurrent writers may shift counts while we work.
+    // First pass: evict trackers no longer needed for import, oldest-created first. Best-effort:
+    // CHM size/iteration are weakly consistent and concurrent writers may shift counts while we
+    // work.
     final int softExcess = currentSize - maxRecentlySampledBlocks + 1;
     recentlySampledColumnsByRoot.entrySet().stream()
-        .filter(e -> e.getValue().completionFuture().isDone())
+        .filter(e -> isSafeToEvict(e.getValue()))
         .sorted(Comparator.comparingLong(e -> e.getValue().createdAtNanos()))
         .limit(softExcess)
         .forEach(e -> recentlySampledColumnsByRoot.remove(e.getKey(), e.getValue()));
-    // Hard cap: if we're still at 4x the limit even after evicting completed trackers,
-    // force-evict the oldest incomplete ones to prevent unbounded growth.
+    // Hard cap: if we're still at 4x the limit after safe eviction, force-evict the oldest
+    // remaining trackers to prevent unbounded growth.
     final int hardLimit = maxRecentlySampledBlocks * 4;
     final int afterSoft = recentlySampledColumnsByRoot.size();
     if (afterSoft < hardLimit) {
@@ -297,6 +298,12 @@ public class DasSamplerBasicImpl implements DasSamplerBasic, SlotEventsChannel {
                     .completeExceptionally(new RuntimeException("DAS sampling expired (hard cap)"));
               }
             });
+  }
+
+  private boolean isSafeToEvict(final DataColumnSamplingTracker tracker) {
+    return tracker.completionFuture().isCompletedExceptionally()
+        || (tracker.completionFuture().isDone()
+            && isDataAvailabilityAlreadySatisfied(tracker.slot(), tracker.blockRoot()));
   }
 
   private SafeFuture<DataColumnSidecar> retrieveColumnWithSamplingAndCustody(

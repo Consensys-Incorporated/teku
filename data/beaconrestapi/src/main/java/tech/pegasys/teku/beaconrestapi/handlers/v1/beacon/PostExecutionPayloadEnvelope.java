@@ -13,16 +13,16 @@
 
 package tech.pegasys.teku.beaconrestapi.handlers.v1.beacon;
 
+import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.ETH_BLOB_DATA_INCLUDED_TYPE;
 import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.ETH_CONSENSUS_VERSION_TYPE;
-import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.ETH_EXECUTION_PAYLOAD_BLINDED_TYPE;
 import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.PARAMETER_BROADCAST_VALIDATION;
 import static tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.MilestoneDependentTypesUtil.headerBasedSelector;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_ACCEPTED;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_UNSUPPORTED_MEDIA_TYPE;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_BLOB_DATA_INCLUDED;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
-import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_EXECUTION_PAYLOAD_BLINDED;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_BEACON;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_VALIDATOR_REQUIRED;
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.HTTP_ERROR_RESPONSE_TYPE;
@@ -45,7 +45,7 @@ import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
 import tech.pegasys.teku.infrastructure.restapi.openapi.request.HeaderBasedOctetStreamRequestContentTypeDefinition;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.spec.SpecMilestone;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
@@ -71,10 +71,10 @@ public class PostExecutionPayloadEnvelope extends RestApiEndpoint {
             schemaDefinitionsGloas
                 .getSignedExecutionPayloadEnvelopeContentsSchema()
                 .getJsonTypeDefinition();
-    final DeserializableTypeDefinition<SignedBlindedExecutionPayloadEnvelope>
-        signedBlindedExecutionPayloadEnvelopeType =
+    final DeserializableTypeDefinition<SignedExecutionPayloadEnvelope>
+        signedExecutionPayloadEnvelopeType =
             schemaDefinitionsGloas
-                .getSignedBlindedExecutionPayloadEnvelopeSchema()
+                .getSignedExecutionPayloadEnvelopeSchema()
                 .getJsonTypeDefinition();
     final SerializableOneOfTypeDefinition<SszData> requestType =
         new SerializableOneOfTypeDefinitionBuilder<SszData>()
@@ -83,8 +83,8 @@ public class PostExecutionPayloadEnvelope extends RestApiEndpoint {
                 value -> value instanceof SignedExecutionPayloadEnvelopeContents,
                 signedExecutionPayloadEnvelopeContentsType)
             .withType(
-                value -> value instanceof SignedBlindedExecutionPayloadEnvelope,
-                signedBlindedExecutionPayloadEnvelopeType)
+                value -> value instanceof SignedExecutionPayloadEnvelope,
+                signedExecutionPayloadEnvelopeType)
             .build();
 
     return EndpointMetadata.post(ROUTE)
@@ -93,22 +93,24 @@ public class PostExecutionPayloadEnvelope extends RestApiEndpoint {
         .description(
             """
             Instructs the beacon node to broadcast a signed execution payload envelope to the network. \
-            The request body is selected by the Eth-Execution-Payload-Blinded header: false submits \
-            SignedExecutionPayloadEnvelopeContents and true submits SignedBlindedExecutionPayloadEnvelope.""")
+            The request body is selected by the Eth-Blob-Data-Included header: true submits \
+            SignedExecutionPayloadEnvelopeContents (envelope plus blobs and KZG proofs, stateless flow) \
+            and false submits SignedExecutionPayloadEnvelope (stateful flow, the beacon node attaches \
+            the blobs and KZG proofs cached during block production).""")
         .tags(TAG_BEACON, TAG_VALIDATOR_REQUIRED)
         .queryParam(PARAMETER_BROADCAST_VALIDATION)
         .headerRequired(
             ETH_CONSENSUS_VERSION_TYPE.withDescription(
                 "The active consensus version to which the execution payload envelope being submitted belongs."))
         .headerRequired(
-            ETH_EXECUTION_PAYLOAD_BLINDED_TYPE.withDescription(
-                "When false, the body is SignedExecutionPayloadEnvelopeContents. When true, the body is SignedBlindedExecutionPayloadEnvelope."))
+            ETH_BLOB_DATA_INCLUDED_TYPE.withDescription(
+                "When true, the body is SignedExecutionPayloadEnvelopeContents. When false, the body is SignedExecutionPayloadEnvelope."))
         .requestBodyType(
             requestType,
             context ->
-                isExecutionPayloadBlinded(context.getHeaders())
-                    ? signedBlindedExecutionPayloadEnvelopeType
-                    : signedExecutionPayloadEnvelopeContentsType,
+                isBlobDataIncluded(context.getHeaders())
+                    ? signedExecutionPayloadEnvelopeContentsType
+                    : signedExecutionPayloadEnvelopeType,
             HeaderBasedOctetStreamRequestContentTypeDefinition.parseBytes(
                 (bytes, headers) -> deserializeRequestBody(bytes, headers, schemaCache)))
         .response(
@@ -120,11 +122,13 @@ public class PostExecutionPayloadEnvelope extends RestApiEndpoint {
         .response(
             SC_BAD_REQUEST,
             """
-            The signed envelope object is invalid, broadcast validation failed, or a blinded \
-            envelope could not be reconstructed from cache.""",
+            The signed envelope object is invalid, broadcast validation failed, or an envelope \
+            without blob data was submitted but the beacon node has no cached blobs and KZG proofs \
+            to attach.""",
             HTTP_ERROR_RESPONSE_TYPE)
         .response(SC_UNSUPPORTED_MEDIA_TYPE, "Unsupported media type", HTTP_ERROR_RESPONSE_TYPE)
         .withInternalErrorResponse()
+        .withServiceUnavailableResponse()
         .build();
   }
 
@@ -156,10 +160,9 @@ public class PostExecutionPayloadEnvelope extends RestApiEndpoint {
       return validatorDataProvider.publishSignedExecutionPayload(
           signedExecutionPayloadEnvelopeContents, broadcastValidationLevel);
     }
-    if (requestBody
-        instanceof SignedBlindedExecutionPayloadEnvelope signedBlindedExecutionPayloadEnvelope) {
+    if (requestBody instanceof SignedExecutionPayloadEnvelope signedExecutionPayloadEnvelope) {
       return validatorDataProvider.publishSignedExecutionPayload(
-          signedBlindedExecutionPayloadEnvelope, broadcastValidationLevel);
+          signedExecutionPayloadEnvelope, broadcastValidationLevel);
     }
     throw new BadRequestException("Invalid signed execution payload envelope request body");
   }
@@ -173,27 +176,24 @@ public class PostExecutionPayloadEnvelope extends RestApiEndpoint {
             schemaCache,
             Optional.ofNullable(headers.get(HEADER_CONSENSUS_VERSION)),
             (__, schemaDefinitions) -> SchemaDefinitionsGloas.required(schemaDefinitions));
-    if (isExecutionPayloadBlinded(headers)) {
+    if (isBlobDataIncluded(headers)) {
       return schemaDefinitionsGloas
-          .getSignedBlindedExecutionPayloadEnvelopeSchema()
+          .getSignedExecutionPayloadEnvelopeContentsSchema()
           .sszDeserialize(bytes);
     }
-    return schemaDefinitionsGloas
-        .getSignedExecutionPayloadEnvelopeContentsSchema()
-        .sszDeserialize(bytes);
+    return schemaDefinitionsGloas.getSignedExecutionPayloadEnvelopeSchema().sszDeserialize(bytes);
   }
 
-  private static boolean isExecutionPayloadBlinded(final Map<String, String> headers) {
-    final String headerValue = headers.get(HEADER_EXECUTION_PAYLOAD_BLINDED);
+  private static boolean isBlobDataIncluded(final Map<String, String> headers) {
+    final String headerValue = headers.get(HEADER_BLOB_DATA_INCLUDED);
     if (headerValue == null) {
       throw new BadRequestException(
-          String.format(
-              "Missing required header value for (%s)", HEADER_EXECUTION_PAYLOAD_BLINDED));
+          String.format("Missing required header value for (%s)", HEADER_BLOB_DATA_INCLUDED));
     }
     if (!headerValue.equalsIgnoreCase("true") && !headerValue.equalsIgnoreCase("false")) {
       throw new BadRequestException(
           String.format(
-              "Invalid value for (%s) header: %s", HEADER_EXECUTION_PAYLOAD_BLINDED, headerValue));
+              "Invalid value for (%s) header: %s", HEADER_BLOB_DATA_INCLUDED, headerValue));
     }
     return Boolean.parseBoolean(headerValue);
   }

@@ -121,6 +121,9 @@ public class EventSubscriptionManagerTest {
   private final FinalizedCheckpointEvent sampleCheckpointEvent =
       new FinalizedCheckpointEvent(data.randomBytes32(), data.randomBytes32(), epoch, false);
 
+  private final FastConfirmationEvent sampleFastConfirmationEvent =
+      new FastConfirmationEvent(data.randomBytes32(), data.randomUInt64(), data.randomUInt64());
+
   private final SyncState sampleSyncState = SyncState.IN_SYNC;
   private final SignedBeaconBlock sampleBlock = data.randomSignedBeaconBlock(0);
   private final BlobSidecar sampleBlobSidecar = data.randomBlobSidecar();
@@ -240,6 +243,40 @@ public class EventSubscriptionManagerTest {
   }
 
   @Test
+  void shouldPropagateHeadV2EventAsFullBeforeGloas() throws IOException {
+    // fork choice reports every pre-Gloas head as a pending node, but a pre-Gloas block always
+    // carries its execution payload, so the event has to report it as full
+    manager =
+        new EventSubscriptionManager(
+            TestSpecFactory.createMinimalPhase0(),
+            nodeDataProvider,
+            chainDataProvider,
+            syncDataProvider,
+            configProvider,
+            asyncRunner,
+            channels,
+            StubTimeProvider.withTimeInMillis(1000),
+            10);
+    when(req.getQueryString()).thenReturn("&topics=head_v2");
+    manager.registerClient(client1);
+
+    manager.chainHeadUpdated(
+        headV2Event.getData().data().slot(),
+        headV2Event.getData().data().state(),
+        headV2Event.getData().data().block(),
+        false,
+        true,
+        headV2Event.getData().data().currentEpochDependentRoot(),
+        headV2Event.getData().data().nextEpochDependentRoot(),
+        Optional.of(ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING),
+        Optional.empty());
+    asyncRunner.executeQueuedActions();
+
+    assertThat(outputStream.getString()).contains("\"version\":\"phase0\"");
+    assertThat(outputStream.getString()).contains("\"payload_status\":\"full\"");
+  }
+
+  @Test
   void shouldPropagateContributions() {
     when(req.getQueryString()).thenReturn("&topics=contribution_and_proof");
     manager.registerClient(client1);
@@ -279,6 +316,15 @@ public class EventSubscriptionManagerTest {
 
     triggerFinalizedCheckpointEvent();
     checkEvent("finalized_checkpoint", sampleCheckpointEvent);
+  }
+
+  @Test
+  void shouldPropagateFastConfirmationMessages() throws IOException {
+    when(req.getQueryString()).thenReturn("&topics=fast_confirmation");
+    manager.registerClient(client1);
+
+    triggerFastConfirmationEvent();
+    checkEvent("fast_confirmation", sampleFastConfirmationEvent);
   }
 
   @Test
@@ -667,6 +713,14 @@ public class EventSubscriptionManagerTest {
     asyncRunner.executeQueuedActions();
   }
 
+  private void triggerFastConfirmationEvent() {
+    manager.onFastConfirmation(
+        sampleFastConfirmationEvent.getData().block,
+        sampleFastConfirmationEvent.getData().slot,
+        sampleFastConfirmationEvent.getData().currentSlot);
+    asyncRunner.executeQueuedActions();
+  }
+
   private void triggerReorgEvent() {
     manager.chainHeadUpdated(
         chainReorgEvent.getData().getSlot(),
@@ -732,7 +786,8 @@ public class EventSubscriptionManagerTest {
   }
 
   private void triggerExecutionPayloadAvailableEvent() {
-    triggerExecutionPayloadEvent();
+    manager.onExecutionPayloadAvailable(sampleExecutionPayload);
+    asyncRunner.executeQueuedActions();
   }
 
   private void triggerExecutionPayloadBidEvent() {

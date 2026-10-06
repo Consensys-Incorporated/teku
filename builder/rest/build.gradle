@@ -1,0 +1,15 @@
+dependencies {
+	implementation project(':ethereum:spec')
+	implementation project(':ethereum:json-types')
+	implementation project(':infrastructure:async')
+	implementation project(':infrastructure:json')
+	implementation project(':infrastructure:http')
+	implementation project(':infrastructure:logging')
+	implementation 'com.squareup.okhttp3:okhttp'
+
+	integrationTestImplementation testFixtures(project(':ethereum:spec'))
+	integrationTestImplementation testFixtures(project(':infrastructure:async'))
+	integrationTestImplementation 'com.squareup.okhttp3:mockwebserver'
+	integrationTestImplementation 'org.assertj:assertj-core'
+	integrationTestImplementation 'org.mockito:mockito-core'
+}

@@ -18,11 +18,14 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 import static tech.pegasys.teku.infrastructure.logging.Converter.gweiToEth;
 import static tech.pegasys.teku.spec.config.Constants.MAX_SLOTS_TO_TRACK_BUILDERS_BIDS;
+import static tech.pegasys.teku.spec.config.SpecConfigGloas.PAYLOAD_BUILDER_VERSION;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ignore;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.reject;
@@ -30,6 +33,7 @@ import static tech.pegasys.teku.statetransition.validation.InternalValidationRes
 
 import com.google.errorprone.annotations.FormatMethod;
 import it.unimi.dsi.fastutil.ints.IntList;
+import java.util.List;
 import java.util.Optional;
 import org.apache.logging.log4j.Level;
 import org.apache.tuweni.bytes.Bytes;
@@ -38,19 +42,40 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
+import tech.pegasys.teku.infrastructure.ssz.SszMutableList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.TestSpecContext;
+import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferencesSchema;
+import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderExitRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsGloas;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.statetransition.execution.DefaultExecutionPayloadBidManager;
+import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidCircuitBreaker;
+import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidManager.RemoteBidOrigin;
+import tech.pegasys.teku.statetransition.execution.PendingExecutionPayloadBid;
 import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
+import tech.pegasys.teku.statetransition.util.PendingPool;
+import tech.pegasys.teku.statetransition.util.PoolFactory;
 
 @TestSpecContext(milestone = {SpecMilestone.GLOAS})
 public class ExecutionPayloadBidGossipValidatorTest {
@@ -58,6 +83,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
   private static final UInt64 DEFAULT_GAS_LIMIT = UInt64.valueOf(60_000_000);
 
   private final Spec spec = mock(Spec.class);
+  private final ReadOnlyForkChoiceStrategy forkChoiceStrategy =
+      mock(ReadOnlyForkChoiceStrategy.class);
   private final GossipValidationHelper gossipValidationHelper = mock(GossipValidationHelper.class);
   private final ProposerPreferencesManager proposerPreferencesManager =
       mock(ProposerPreferencesManager.class);
@@ -69,11 +96,14 @@ public class ExecutionPayloadBidGossipValidatorTest {
   private UInt64 builderIndex;
   private Bytes32 parentBlockRoot;
   private Bytes32 parentBlockHash;
+  private Bytes32 dependentRoot;
   private BeaconState postState;
+  private SchemaDefinitionsGloas schemaDefinitions;
 
   @BeforeEach
   void setup(final TestSpecInvocationContextProvider.SpecContext specContext) {
     this.dataStructureUtil = specContext.getDataStructureUtil();
+    this.schemaDefinitions = SchemaDefinitionsGloas.required(specContext.getSchemaDefinitions());
     this.bidValidator =
         new ExecutionPayloadBidGossipValidator(
             spec, gossipValidationHelper, proposerPreferencesManager, MIN_BID_INCREMENT_PERCENTAGE);
@@ -90,7 +120,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
                 randomBid.getPrevRandao(),
                 randomBid.getFeeRecipient(),
                 DEFAULT_GAS_LIMIT,
-                randomBid.getBuilderIndex(),
+                UInt64.ZERO,
                 randomBid.getSlot(),
                 randomBid.getValue(),
                 randomBid.getExecutionPayment(),
@@ -101,15 +131,39 @@ public class ExecutionPayloadBidGossipValidatorTest {
     builderIndex = bid.getBuilderIndex();
     parentBlockRoot = bid.getParentBlockRoot();
     parentBlockHash = bid.getParentBlockHash();
-    postState = dataStructureUtil.randomBeaconState();
+    dependentRoot = dataStructureUtil.randomBytes32();
+    when(forkChoiceStrategy.getAncestor(eq(parentBlockRoot), any()))
+        .thenReturn(Optional.of(dependentRoot));
+    // Replace the random builders so that the bid's builder index is in range and every builder
+    // carries PAYLOAD_BUILDER_VERSION; randomBuilder() assigns a random version, which the
+    // payload-builder-version rule would reject.
+    postState =
+        dataStructureUtil
+            .randomBeaconState()
+            .updated(
+                mutableState -> {
+                  final SszMutableList<Builder> builders =
+                      MutableBeaconStateGloas.required(mutableState).getBuilders();
+                  builders.clear();
+                  for (int i = 0; i < 8; i++) {
+                    builders.append(
+                        dataStructureUtil
+                            .builderBuilder()
+                            .version(PAYLOAD_BUILDER_VERSION)
+                            .build());
+                  }
+                });
 
     final ProposerPreferences proposerPreferences = mock(ProposerPreferences.class);
     when(proposerPreferences.getFeeRecipient()).thenReturn(bid.getFeeRecipient());
     when(proposerPreferences.getTargetGasLimit()).thenReturn(bid.getGasLimit());
-    when(proposerPreferencesManager.getProposerPreferences(any()))
+    when(proposerPreferencesManager.getProposerPreferences(bid.getSlot(), dependentRoot))
         .thenReturn(Optional.of(proposerPreferences));
 
     when(gossipValidationHelper.isSlotCurrentOrNext(slot)).thenReturn(true);
+    when(gossipValidationHelper.isWithinParentProposerLookahead(any(), any())).thenReturn(true);
+    when(gossipValidationHelper.getShufflingDependentRoot(parentBlockRoot, slot))
+        .thenReturn(Optional.of(dependentRoot));
     when(gossipValidationHelper.getGasLimitForExecutionPayload(parentBlockRoot, parentBlockHash))
         .thenReturn(Optional.of(bid.getGasLimit()));
     when(gossipValidationHelper.isBidCompatibleWithHead(any())).thenReturn(true);
@@ -118,6 +172,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
     when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
         .thenReturn(SafeFuture.completedFuture(Optional.of(postState)));
     when(gossipValidationHelper.isActiveBuilder(builderIndex, postState, slot)).thenReturn(true);
+    when(spec.isExecutionPayloadEnvelopeAvailableAtSlot(slot.decrement())).thenReturn(true);
     when(gossipValidationHelper.getRandaoMixForCurrentEpoch(postState, slot))
         .thenReturn(bid.getPrevRandao());
     when(gossipValidationHelper.builderHasEnoughBalanceForBid(
@@ -134,6 +189,281 @@ public class ExecutionPayloadBidGossipValidatorTest {
     when(spec.atSlot(slot)).thenReturn(specVersion);
     when(spec.getActiveValidatorIndices(postState, slot))
         .thenReturn(IntList.of(builderIndex.intValue()));
+  }
+
+  @TestTemplate
+  void shouldRetryPendingBidOnlyForMatchingPreferences() {
+    final Spec poolSpec = TestSpecFactory.createMainnetGloas();
+    final PendingPool<PendingExecutionPayloadBid> pool =
+        new PoolFactory(new StubMetricsSystem()).createPendingPoolForExecutionPayloadBids(poolSpec);
+    final DefaultExecutionPayloadBidManager manager =
+        new DefaultExecutionPayloadBidManager(
+            poolSpec,
+            bidValidator,
+            ExecutionPayloadBidCircuitBreaker.NOOP,
+            __ -> {},
+            pool,
+            null,
+            null,
+            () -> Optional.of(forkChoiceStrategy),
+            true);
+    manager.onSlot(slot);
+    when(proposerPreferencesManager.getProposerPreferences(slot, dependentRoot))
+        .thenReturn(Optional.empty());
+    assertThatSafeFuture(manager.validateAndAddBid(signedBid, RemoteBidOrigin.P2P))
+        .isCompletedWithValue(
+            saveBidForFuture(
+                signedBid, "no proposer preferences available; saving for future processing"));
+
+    final SignedProposerPreferencesSchema preferences =
+        schemaDefinitions.getSignedProposerPreferencesSchema();
+    final SignedProposerPreferences unrelated =
+        preferences.create(
+            schemaDefinitions
+                .getProposerPreferencesSchema()
+                .create(
+                    dataStructureUtil.randomBytes32(),
+                    slot,
+                    UInt64.ZERO,
+                    bid.getFeeRecipient(),
+                    bid.getGasLimit()),
+            dataStructureUtil.randomSignature());
+    manager.onOperationAdded(unrelated, ACCEPT, true);
+
+    assertThat(pool.contains(signedBid.hashTreeRoot())).isTrue();
+    final SignedProposerPreferences wrongSlot =
+        preferences.create(
+            schemaDefinitions
+                .getProposerPreferencesSchema()
+                .create(
+                    dependentRoot,
+                    slot.plus(1),
+                    UInt64.ZERO,
+                    bid.getFeeRecipient(),
+                    bid.getGasLimit()),
+            dataStructureUtil.randomSignature());
+    manager.onOperationAdded(wrongSlot, ACCEPT, true);
+    verify(gossipValidationHelper).getShufflingDependentRoot(parentBlockRoot, slot);
+
+    final SignedProposerPreferences matching =
+        preferences.create(
+            schemaDefinitions
+                .getProposerPreferencesSchema()
+                .create(dependentRoot, slot, UInt64.ZERO, bid.getFeeRecipient(), bid.getGasLimit()),
+            dataStructureUtil.randomSignature());
+    when(proposerPreferencesManager.getProposerPreferences(slot, dependentRoot))
+        .thenReturn(Optional.of(matching.getMessage()));
+    manager.onOperationAdded(matching, ACCEPT, true);
+    assertThat(pool.contains(signedBid.hashTreeRoot())).isFalse();
+    verify(gossipValidationHelper, times(2)).getShufflingDependentRoot(parentBlockRoot, slot);
+  }
+
+  @TestTemplate
+  void shouldResolvePendingRootWhenParentBecomesAvailable() {
+    final Spec poolSpec = TestSpecFactory.createMainnetGloas();
+    final PendingPool<PendingExecutionPayloadBid> pool =
+        new PoolFactory(new StubMetricsSystem()).createPendingPoolForExecutionPayloadBids(poolSpec);
+    final DefaultExecutionPayloadBidManager manager =
+        new DefaultExecutionPayloadBidManager(
+            poolSpec,
+            bidValidator,
+            ExecutionPayloadBidCircuitBreaker.NOOP,
+            __ -> {},
+            pool,
+            null,
+            null,
+            () -> Optional.of(forkChoiceStrategy),
+            true);
+    manager.onSlot(slot);
+    when(gossipValidationHelper.getSlotForBlockRoot(parentBlockRoot)).thenReturn(Optional.empty());
+    when(forkChoiceStrategy.getAncestor(eq(parentBlockRoot), any())).thenReturn(Optional.empty());
+    when(proposerPreferencesManager.getProposerPreferences(slot, dependentRoot))
+        .thenReturn(Optional.empty());
+    assertThatSafeFuture(manager.validateAndAddBid(signedBid, RemoteBidOrigin.P2P)).isCompleted();
+    assertThat(pool.get(signedBid.hashTreeRoot()).orElseThrow().dependentRoot()).isEmpty();
+
+    final SignedProposerPreferences unrelated =
+        schemaDefinitions
+            .getSignedProposerPreferencesSchema()
+            .create(
+                schemaDefinitions
+                    .getProposerPreferencesSchema()
+                    .create(
+                        dataStructureUtil.randomBytes32(),
+                        slot,
+                        UInt64.ZERO,
+                        bid.getFeeRecipient(),
+                        bid.getGasLimit()),
+                dataStructureUtil.randomSignature());
+    when(gossipValidationHelper.getSlotForBlockRoot(parentBlockRoot))
+        .thenReturn(Optional.of(slot.decrement()));
+    when(forkChoiceStrategy.getAncestor(eq(parentBlockRoot), any()))
+        .thenReturn(Optional.of(dependentRoot));
+    manager.onOperationAdded(unrelated, ACCEPT, true);
+    assertThat(pool.get(signedBid.hashTreeRoot()).orElseThrow().dependentRoot())
+        .contains(dependentRoot);
+    manager.onOperationAdded(unrelated, ACCEPT, true);
+    verify(gossipValidationHelper).getShufflingDependentRoot(parentBlockRoot, slot);
+
+    // The regular slot retry is retained, even for a bid with cached metadata.
+    manager.onSlot(slot);
+    verify(gossipValidationHelper, times(2)).getShufflingDependentRoot(parentBlockRoot, slot);
+    manager.onSlot(slot.plus(1));
+    assertThat(pool.size()).isZero();
+  }
+
+  @TestTemplate
+  void shouldNotDeriveRootBeforeParentStateIsAvailable() {
+    final SafeFuture<Optional<BeaconState>> stateFuture = new SafeFuture<>();
+    when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
+        .thenReturn(stateFuture);
+
+    final SafeFuture<InternalValidationResult> result = bidValidator.validate(signedBid);
+
+    assertThat(result).isNotDone();
+    verify(gossipValidationHelper, never()).getShufflingDependentRoot(parentBlockRoot, slot);
+    stateFuture.complete(Optional.empty());
+    assertThatSafeFuture(result)
+        .isCompletedWithValue(
+            saveBidForFuture(
+                signedBid,
+                "state for parent block root %s at slot %s is unavailable; saving for future processing",
+                parentBlockRoot,
+                slot.decrement()));
+    verify(gossipValidationHelper, never()).getShufflingDependentRoot(parentBlockRoot, slot);
+    verify(proposerPreferencesManager, never()).getProposerPreferences(any(), any());
+  }
+
+  @TestTemplate
+  void shouldFilterPreferencesRetriesWhileParentStateIsUnavailable() {
+    final Spec poolSpec = TestSpecFactory.createMainnetGloas();
+    final PendingPool<PendingExecutionPayloadBid> pool =
+        new PoolFactory(new StubMetricsSystem()).createPendingPoolForExecutionPayloadBids(poolSpec);
+    final DefaultExecutionPayloadBidManager manager =
+        new DefaultExecutionPayloadBidManager(
+            poolSpec,
+            bidValidator,
+            ExecutionPayloadBidCircuitBreaker.NOOP,
+            __ -> {},
+            pool,
+            null,
+            null,
+            () -> Optional.of(forkChoiceStrategy),
+            true);
+    manager.onSlot(slot);
+    when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+    assertThatSafeFuture(manager.validateAndAddBid(signedBid, RemoteBidOrigin.P2P)).isCompleted();
+    assertThat(pool.get(signedBid.hashTreeRoot()).orElseThrow().dependentRoot())
+        .contains(dependentRoot);
+
+    final SignedProposerPreferences unrelated =
+        schemaDefinitions
+            .getSignedProposerPreferencesSchema()
+            .create(
+                schemaDefinitions
+                    .getProposerPreferencesSchema()
+                    .create(
+                        dataStructureUtil.randomBytes32(),
+                        slot,
+                        UInt64.ZERO,
+                        bid.getFeeRecipient(),
+                        bid.getGasLimit()),
+                dataStructureUtil.randomSignature());
+    manager.onOperationAdded(unrelated, ACCEPT, true);
+    verify(gossipValidationHelper)
+        .getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot);
+    verify(gossipValidationHelper, never()).getShufflingDependentRoot(parentBlockRoot, slot);
+    verify(forkChoiceStrategy).getAncestor(eq(parentBlockRoot), any());
+    assertThat(pool.size()).isEqualTo(1);
+
+    when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(postState)));
+    manager.onSlot(slot);
+    assertThat(pool.size()).isZero();
+    verify(gossipValidationHelper).getShufflingDependentRoot(parentBlockRoot, slot);
+  }
+
+  @TestTemplate
+  void shouldNotRetryPendingBidTwiceWhileMatchingPreferencesValidationIsInFlight() {
+    final Spec poolSpec = TestSpecFactory.createMainnetGloas();
+    final PendingPool<PendingExecutionPayloadBid> pool =
+        new PoolFactory(new StubMetricsSystem()).createPendingPoolForExecutionPayloadBids(poolSpec);
+    final DefaultExecutionPayloadBidManager manager =
+        new DefaultExecutionPayloadBidManager(
+            poolSpec,
+            bidValidator,
+            ExecutionPayloadBidCircuitBreaker.NOOP,
+            __ -> {},
+            pool,
+            null,
+            null,
+            () -> Optional.of(forkChoiceStrategy),
+            true);
+    manager.onSlot(slot);
+    when(proposerPreferencesManager.getProposerPreferences(slot, dependentRoot))
+        .thenReturn(Optional.empty());
+    assertThatSafeFuture(manager.validateAndAddBid(signedBid, RemoteBidOrigin.P2P)).isCompleted();
+    final SignedProposerPreferences matching =
+        schemaDefinitions
+            .getSignedProposerPreferencesSchema()
+            .create(
+                schemaDefinitions
+                    .getProposerPreferencesSchema()
+                    .create(
+                        dependentRoot, slot, UInt64.ZERO, bid.getFeeRecipient(), bid.getGasLimit()),
+                dataStructureUtil.randomSignature());
+    final SafeFuture<Optional<BeaconState>> stateFuture = new SafeFuture<>();
+    when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
+        .thenReturn(stateFuture);
+    manager.onOperationAdded(matching, ACCEPT, true);
+    manager.onOperationAdded(matching, ACCEPT, true);
+    manager.onSlot(slot);
+    assertThat(pool.size()).isZero();
+    verify(gossipValidationHelper, times(2))
+        .getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot);
+    stateFuture.complete(Optional.of(postState));
+    assertThat(pool.get(signedBid.hashTreeRoot()).orElseThrow().dependentRoot())
+        .contains(dependentRoot);
+    verify(gossipValidationHelper, times(2)).getShufflingDependentRoot(parentBlockRoot, slot);
+  }
+
+  @TestTemplate
+  void shouldRetryKnownRootOnBlockAndPayloadImports() {
+    final Spec poolSpec = TestSpecFactory.createMainnetGloas();
+    final PendingPool<PendingExecutionPayloadBid> pool =
+        new PoolFactory(new StubMetricsSystem()).createPendingPoolForExecutionPayloadBids(poolSpec);
+    final DefaultExecutionPayloadBidManager manager =
+        new DefaultExecutionPayloadBidManager(
+            poolSpec,
+            bidValidator,
+            ExecutionPayloadBidCircuitBreaker.NOOP,
+            __ -> {},
+            pool,
+            null,
+            null,
+            () -> Optional.of(forkChoiceStrategy),
+            true);
+    manager.onSlot(slot);
+    when(gossipValidationHelper.getGasLimitForExecutionPayload(parentBlockRoot, parentBlockHash))
+        .thenReturn(Optional.empty());
+    assertThatSafeFuture(manager.validateAndAddBid(signedBid, RemoteBidOrigin.P2P)).isCompleted();
+    assertThat(pool.get(signedBid.hashTreeRoot()).orElseThrow().dependentRoot())
+        .contains(dependentRoot);
+
+    final SignedBeaconBlock parentBlock = mock(SignedBeaconBlock.class);
+    when(parentBlock.getRoot()).thenReturn(parentBlockRoot);
+    manager.onBlockImported(parentBlock, false);
+    verify(gossipValidationHelper, times(2)).getShufflingDependentRoot(parentBlockRoot, slot);
+    assertThat(pool.size()).isEqualTo(1);
+
+    when(gossipValidationHelper.getGasLimitForExecutionPayload(parentBlockRoot, parentBlockHash))
+        .thenReturn(Optional.of(bid.getGasLimit()));
+    final SignedExecutionPayloadEnvelope payload = mock(SignedExecutionPayloadEnvelope.class);
+    when(payload.getBeaconBlockRoot()).thenReturn(parentBlockRoot);
+    manager.onExecutionPayloadImported(payload, false);
+    assertThat(pool.size()).isZero();
+    verify(gossipValidationHelper, times(3)).getShufflingDependentRoot(parentBlockRoot, slot);
   }
 
   @TestTemplate
@@ -169,8 +499,95 @@ public class ExecutionPayloadBidGossipValidatorTest {
   }
 
   @TestTemplate
+  void shouldIgnore_whenBidSlotIsPastParentProposerLookahead() {
+    final UInt64 parentBlockSlot = slot.decrement();
+    when(gossipValidationHelper.isWithinParentProposerLookahead(slot, parentBlockSlot))
+        .thenReturn(false);
+
+    assertThatSafeFuture(bidValidator.validate(signedBid))
+        .isCompletedWithValue(
+            ignoreBid(signedBid, "bid's slot is past the parent's proposer lookahead"));
+  }
+
+  @TestTemplate
+  void shouldReject_whenBlobKzgCommitmentCountExceedsLimit() {
+    final int maxBlobsPerBlock = 0;
+    when(spec.getMaxBlobsPerBlockAtSlot(slot)).thenReturn(Optional.of(maxBlobsPerBlock));
+    final SignedExecutionPayloadBid bidWithTooManyBlobCommitments =
+        signedBidWithBlobKzgCommitments(maxBlobsPerBlock + 1);
+
+    assertThatSafeFuture(bidValidator.validate(bidWithTooManyBlobCommitments))
+        .isCompletedWithValue(
+            rejectBid(
+                bidWithTooManyBlobCommitments,
+                "has %s blob kzg commitments which exceeds the maximum of %s for the slot",
+                maxBlobsPerBlock + 1,
+                maxBlobsPerBlock));
+  }
+
+  @TestTemplate
+  void shouldReject_whenBuilderIndexIsOutOfRange() {
+    final UInt64 invalidBuilderIndex = UInt64.valueOf(8);
+    final SignedExecutionPayloadBid bidWithInvalidBuilderIndex =
+        signedBidForParent(parentBlockHash, parentBlockRoot, invalidBuilderIndex, bid.getValue());
+
+    assertThatSafeFuture(bidValidator.validate(bidWithInvalidBuilderIndex))
+        .isCompletedWithValue(
+            rejectBid(
+                bidWithInvalidBuilderIndex,
+                "builder index %s is out of range for the %s builders in the state",
+                invalidBuilderIndex,
+                8));
+  }
+
+  @TestTemplate
+  void shouldReject_whenBuilderIsNotPayloadBuilder() {
+    final BeaconState stateWithNonPayloadBuilder =
+        stateWithBuilderVersion(PAYLOAD_BUILDER_VERSION + 1);
+    when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(stateWithNonPayloadBuilder)));
+    when(gossipValidationHelper.isActiveBuilder(builderIndex, stateWithNonPayloadBuilder, slot))
+        .thenReturn(true);
+    when(gossipValidationHelper.getRandaoMixForCurrentEpoch(stateWithNonPayloadBuilder, slot))
+        .thenReturn(bid.getPrevRandao());
+
+    assertThatSafeFuture(bidValidator.validate(signedBid))
+        .isCompletedWithValue(
+            rejectBid(
+                signedBid,
+                "builder index %s has version %s but only payload builder version %s may bid",
+                builderIndex,
+                PAYLOAD_BUILDER_VERSION + 1,
+                PAYLOAD_BUILDER_VERSION));
+  }
+
+  @TestTemplate
   void shouldSaveForFuture_whenProposerPreferencesNotSeen() {
-    when(proposerPreferencesManager.getProposerPreferences(slot)).thenReturn(Optional.empty());
+    when(proposerPreferencesManager.getProposerPreferences(slot, dependentRoot))
+        .thenReturn(Optional.empty());
+    assertThatSafeFuture(bidValidator.validate(signedBid))
+        .isCompletedWithValue(
+            saveBidForFuture(
+                signedBid, "no proposer preferences available; saving for future processing"));
+  }
+
+  @TestTemplate
+  void shouldSaveForFuture_whenShufflingDependentRootIsUnavailable() {
+    when(gossipValidationHelper.getShufflingDependentRoot(parentBlockRoot, slot))
+        .thenReturn(Optional.empty());
+
+    assertThatSafeFuture(bidValidator.validate(signedBid))
+        .isCompletedWithValue(
+            saveBidForFuture(
+                signedBid,
+                "shuffling dependent root is unavailable; saving for future processing"));
+  }
+
+  @TestTemplate
+  void shouldSaveForFuture_whenPreferencesDoNotMatchShufflingDependentRoot() {
+    when(proposerPreferencesManager.getProposerPreferences(slot, dependentRoot))
+        .thenReturn(Optional.empty());
+
     assertThatSafeFuture(bidValidator.validate(signedBid))
         .isCompletedWithValue(
             saveBidForFuture(
@@ -182,7 +599,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
     final ProposerPreferences mismatchedPreferences = mock(ProposerPreferences.class);
     when(mismatchedPreferences.getFeeRecipient()).thenReturn(dataStructureUtil.randomEth1Address());
     when(mismatchedPreferences.getTargetGasLimit()).thenReturn(bid.getGasLimit());
-    when(proposerPreferencesManager.getProposerPreferences(slot))
+    when(proposerPreferencesManager.getProposerPreferences(slot, dependentRoot))
         .thenReturn(Optional.of(mismatchedPreferences));
 
     assertThatSafeFuture(bidValidator.validate(signedBid))
@@ -285,9 +702,11 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .isCompletedWithValue(
             ignoreBid(
                 signedBid,
-                "already received for parent block hash %s and parent block root %s",
+                "already received valid bid for slot %s, parent block hash %s, parent block root %s, and builder index %s",
+                slot,
                 parentBlockHash,
-                parentBlockRoot));
+                parentBlockRoot,
+                builderIndex));
   }
 
   @TestTemplate
@@ -404,6 +823,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
                 signedBid,
                 "parent block with root %s is unknown; saving for future processing",
                 parentBlockRoot));
+    verify(gossipValidationHelper, never()).getShufflingDependentRoot(any(), any());
   }
 
   @TestTemplate
@@ -413,6 +833,16 @@ public class ExecutionPayloadBidGossipValidatorTest {
     assertThatSafeFuture(bidValidator.validate(signedBid))
         .isCompletedWithValue(
             rejectBid(signedBid, "slot %s is not greater than parent block slot %s", slot, slot));
+  }
+
+  @TestTemplate
+  void shouldReject_whenBlockHashEqualsParentBlockHash() {
+    final SignedExecutionPayloadBid bidWithMatchingBlockHashes =
+        signedBidWithBlockHash(parentBlockHash);
+
+    assertThatSafeFuture(bidValidator.validate(bidWithMatchingBlockHashes))
+        .isCompletedWithValue(
+            rejectBid(bidWithMatchingBlockHashes, "block hash and parent block hash are the same"));
   }
 
   @TestTemplate
@@ -465,6 +895,94 @@ public class ExecutionPayloadBidGossipValidatorTest {
   }
 
   @TestTemplate
+  void shouldIgnore_whenParentPayloadMayExitBuilder() {
+    final SignedExecutionPayloadBid bidBuildingOnLatestPayload = bidBuildingOnLatestPayload();
+    final Builder builder = getBuilder(builderIndex);
+    final BuilderExitRequest matchingExit =
+        schemaDefinitions
+            .getBuilderExitRequestSchema()
+            .create(builder.getExecutionAddress(), builder.getPublicKey());
+    when(gossipValidationHelper.getRecentlyImportedExecutionPayload(parentBlockRoot))
+        .thenReturn(Optional.of(parentEnvelopeWithExits(matchingExit)));
+    mockBidValidation(bidBuildingOnLatestPayload);
+
+    assertThatSafeFuture(bidValidator.validate(bidBuildingOnLatestPayload))
+        .isCompletedWithValue(
+            ignoreBid(
+                bidBuildingOnLatestPayload, "parent payload may exit builder %s", builderIndex));
+  }
+
+  @TestTemplate
+  void shouldAccept_whenParentPayloadExitDoesNotMatchBothBuilderFields() {
+    final SignedExecutionPayloadBid bidBuildingOnLatestPayload = bidBuildingOnLatestPayload();
+    final Builder builder = getBuilder(builderIndex);
+    final Builder otherBuilder = getBuilder(builderIndex.increment());
+    assertThat(otherBuilder.getPublicKey()).isNotEqualTo(builder.getPublicKey());
+    assertThat(otherBuilder.getExecutionAddress()).isNotEqualTo(builder.getExecutionAddress());
+    final BuilderExitRequest matchingAddressOnly =
+        schemaDefinitions
+            .getBuilderExitRequestSchema()
+            .create(builder.getExecutionAddress(), otherBuilder.getPublicKey());
+    final BuilderExitRequest matchingPublicKeyOnly =
+        schemaDefinitions
+            .getBuilderExitRequestSchema()
+            .create(otherBuilder.getExecutionAddress(), builder.getPublicKey());
+    when(gossipValidationHelper.getRecentlyImportedExecutionPayload(parentBlockRoot))
+        .thenReturn(
+            Optional.of(parentEnvelopeWithExits(matchingAddressOnly, matchingPublicKeyOnly)));
+    mockBidValidation(bidBuildingOnLatestPayload);
+
+    assertThatSafeFuture(bidValidator.validate(bidBuildingOnLatestPayload))
+        .isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldAccept_whenBidDoesNotBuildOnLatestPayload() {
+    final Bytes32 latestPayloadBlockHash = getLatestPayloadBlockHash();
+    final Bytes32 differentParentBlockHash =
+        latestPayloadBlockHash.equals(Bytes32.ZERO) ? Bytes32.fromHexString("0x01") : Bytes32.ZERO;
+    final SignedExecutionPayloadBid bidBuildingOnDifferentPayload =
+        signedBidForParent(differentParentBlockHash, parentBlockRoot, builderIndex, bid.getValue());
+    final Builder builder = getBuilder(builderIndex);
+    final BuilderExitRequest matchingExit =
+        schemaDefinitions
+            .getBuilderExitRequestSchema()
+            .create(builder.getExecutionAddress(), builder.getPublicKey());
+    when(gossipValidationHelper.getRecentlyImportedExecutionPayload(parentBlockRoot))
+        .thenReturn(Optional.of(parentEnvelopeWithExits(matchingExit)));
+    mockBidValidation(bidBuildingOnDifferentPayload);
+
+    assertThatSafeFuture(bidValidator.validate(bidBuildingOnDifferentPayload))
+        .isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldSaveForFuture_whenRequiredParentPayloadIsUnavailable() {
+    final SignedExecutionPayloadBid bidBuildingOnLatestPayload = bidBuildingOnLatestPayload();
+    when(gossipValidationHelper.getRecentlyImportedExecutionPayload(parentBlockRoot))
+        .thenReturn(Optional.empty());
+    mockBidValidation(bidBuildingOnLatestPayload);
+
+    assertThatSafeFuture(bidValidator.validate(bidBuildingOnLatestPayload))
+        .isCompletedWithValue(
+            saveBidForFuture(
+                bidBuildingOnLatestPayload,
+                "parent execution payload is unavailable. Saving for future processing"));
+  }
+
+  @TestTemplate
+  void shouldAccept_whenParentPayloadIsUnavailableForPreGloasParent() {
+    final SignedExecutionPayloadBid bidBuildingOnLatestPayload = bidBuildingOnLatestPayload();
+    when(spec.isExecutionPayloadEnvelopeAvailableAtSlot(slot.decrement())).thenReturn(false);
+    when(gossipValidationHelper.getRecentlyImportedExecutionPayload(parentBlockRoot))
+        .thenReturn(Optional.empty());
+    mockBidValidation(bidBuildingOnLatestPayload);
+
+    assertThatSafeFuture(bidValidator.validate(bidBuildingOnLatestPayload))
+        .isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
   void shouldReject_whenSignatureIsInvalid() {
     when(gossipValidationHelper.isSignatureValidWithRespectToBuilderIndex(
             any(), any(), any(), any()))
@@ -492,9 +1010,11 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .isCompletedWithValue(
             ignoreBid(
                 signedBid,
-                "already received for parent block hash %s and parent block root %s",
+                "already received valid bid for slot %s, parent block hash %s, parent block root %s, and builder index %s",
+                slot,
                 parentBlockHash,
-                parentBlockRoot));
+                parentBlockRoot,
+                builderIndex));
   }
 
   @TestTemplate
@@ -547,9 +1067,11 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .isCompletedWithValue(
             ignoreBid(
                 signedBid,
-                "another bid for parent block hash %s and parent block root %s was processed concurrently",
+                "already received valid bid for slot %s, parent block hash %s, parent block root %s, and builder index %s",
+                slot,
                 parentBlockHash,
-                parentBlockRoot));
+                parentBlockRoot,
+                builderIndex));
   }
 
   @TestTemplate
@@ -591,9 +1113,11 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .isCompletedWithValue(
             ignoreBid(
                 bidForCachedSlot,
-                "already received for parent block hash %s and parent block root %s",
+                "already received valid bid for slot %s, parent block hash %s, parent block root %s, and builder index %s",
+                cachedSlot,
                 parentBlockHash,
-                parentBlockRoot));
+                parentBlockRoot,
+                sameBuilder));
   }
 
   @TestTemplate
@@ -673,7 +1197,9 @@ public class ExecutionPayloadBidGossipValidatorTest {
     final ProposerPreferences matchingPreferences = mock(ProposerPreferences.class);
     when(matchingPreferences.getFeeRecipient()).thenReturn(message.getFeeRecipient());
     when(matchingPreferences.getTargetGasLimit()).thenReturn(message.getGasLimit());
-    when(proposerPreferencesManager.getProposerPreferences(slot))
+    when(gossipValidationHelper.getShufflingDependentRoot(message.getParentBlockRoot(), slot))
+        .thenReturn(Optional.of(dependentRoot));
+    when(proposerPreferencesManager.getProposerPreferences(slot, dependentRoot))
         .thenReturn(Optional.of(matchingPreferences));
     when(gossipValidationHelper.isSlotCurrentOrNext(slot)).thenReturn(true);
     when(gossipValidationHelper.getGasLimitForExecutionPayload(
@@ -768,6 +1294,51 @@ public class ExecutionPayloadBidGossipValidatorTest {
     return dataStructureUtil.randomSignedExecutionPayloadBid(bidWithGasLimit);
   }
 
+  private SignedExecutionPayloadBid signedBidWithBlockHash(final Bytes32 blockHash) {
+    final ExecutionPayloadBid bidWithBlockHash =
+        bid.getSchema()
+            .create(
+                bid.getParentBlockHash(),
+                bid.getParentBlockRoot(),
+                blockHash,
+                bid.getPrevRandao(),
+                bid.getFeeRecipient(),
+                bid.getGasLimit(),
+                bid.getBuilderIndex(),
+                bid.getSlot(),
+                bid.getValue(),
+                bid.getExecutionPayment(),
+                bid.getBlobKzgCommitments(),
+                bid.getExecutionRequestsRoot());
+    return dataStructureUtil.randomSignedExecutionPayloadBid(bidWithBlockHash);
+  }
+
+  private SignedExecutionPayloadBid signedBidWithBlobKzgCommitments(
+      final int blobKzgCommitmentsCount) {
+    final var bidBlobKzgCommitments =
+        schemaDefinitions
+            .getExecutionPayloadBidSchema()
+            .getBlobKzgCommitmentsSchema()
+            .createFromElements(
+                dataStructureUtil.randomBlobKzgCommitments(blobKzgCommitmentsCount).asList());
+    final ExecutionPayloadBid bidWithBlobKzgCommitments =
+        bid.getSchema()
+            .create(
+                bid.getParentBlockHash(),
+                bid.getParentBlockRoot(),
+                bid.getBlockHash(),
+                bid.getPrevRandao(),
+                bid.getFeeRecipient(),
+                bid.getGasLimit(),
+                bid.getBuilderIndex(),
+                bid.getSlot(),
+                bid.getValue(),
+                bid.getExecutionPayment(),
+                bidBlobKzgCommitments,
+                bid.getExecutionRequestsRoot());
+    return dataStructureUtil.randomSignedExecutionPayloadBid(bidWithBlobKzgCommitments);
+  }
+
   private SignedExecutionPayloadBid signedBidForParent(
       final Bytes32 parentHash,
       final Bytes32 parentRoot,
@@ -800,13 +1371,63 @@ public class ExecutionPayloadBidGossipValidatorTest {
     return dataStructureUtil.randomSignedExecutionPayloadBid(bidForParent);
   }
 
+  private BeaconState stateWithBuilderVersion(final int builderVersion) {
+    return postState.updated(
+        mutableState -> {
+          final SszMutableList<Builder> builders =
+              MutableBeaconStateGloas.required(mutableState).getBuilders();
+          builders.set(
+              builderIndex.intValue(),
+              dataStructureUtil.builderBuilder().version(builderVersion).build());
+        });
+  }
+
   private void mockProposerPreferences(
       final SignedExecutionPayloadBid signedBid, final UInt64 targetGasLimit) {
     final ProposerPreferences proposerPreferences = mock(ProposerPreferences.class);
     when(proposerPreferences.getFeeRecipient())
         .thenReturn(signedBid.getMessage().getFeeRecipient());
     when(proposerPreferences.getTargetGasLimit()).thenReturn(targetGasLimit);
-    when(proposerPreferencesManager.getProposerPreferences(signedBid.getMessage().getSlot()))
+    when(proposerPreferencesManager.getProposerPreferences(
+            signedBid.getMessage().getSlot(), dependentRoot))
         .thenReturn(Optional.of(proposerPreferences));
+  }
+
+  private SignedExecutionPayloadBid bidBuildingOnLatestPayload() {
+    return signedBidForParent(
+        getLatestPayloadBlockHash(), parentBlockRoot, builderIndex, bid.getValue());
+  }
+
+  private Bytes32 getLatestPayloadBlockHash() {
+    return BeaconStateGloas.required(postState).getLatestExecutionPayloadBid().getBlockHash();
+  }
+
+  private Builder getBuilder(final UInt64 index) {
+    return BeaconStateGloas.required(postState).getBuilders().get(index.intValue());
+  }
+
+  private SignedExecutionPayloadEnvelope parentEnvelopeWithExits(
+      final BuilderExitRequest... builderExits) {
+    final SignedExecutionPayloadEnvelope randomEnvelope =
+        dataStructureUtil.randomSignedExecutionPayloadEnvelope(slot.longValue());
+    final ExecutionPayloadEnvelope message = randomEnvelope.getMessage();
+    final ExecutionRequestsGloas executionRequests =
+        ExecutionRequestsGloas.required(
+            dataStructureUtil
+                .randomExecutionRequestsBuilder(slot)
+                .builderExits(() -> List.of(builderExits))
+                .build());
+    final ExecutionPayloadEnvelope parentEnvelope =
+        schemaDefinitions
+            .getExecutionPayloadEnvelopeSchema()
+            .create(
+                message.getPayload(),
+                executionRequests,
+                message.getBuilderIndex(),
+                parentBlockRoot,
+                message.getParentBeaconBlockRoot());
+    return schemaDefinitions
+        .getSignedExecutionPayloadEnvelopeSchema()
+        .create(parentEnvelope, randomEnvelope.getSignature());
   }
 }

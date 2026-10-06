@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +37,7 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.config.GasLimitScheduleEntry;
 import tech.pegasys.teku.spec.signatures.Signer;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.api.ValidatorConfig;
@@ -45,8 +47,24 @@ import tech.pegasys.teku.validator.client.proposerconfig.ProposerConfigProvider;
 
 public class ProposerConfigManagerTest {
 
+  private static final UInt64 FIRST_SCHEDULED_GAS_LIMIT = UInt64.valueOf(45_000_000);
+  private static final UInt64 SECOND_SCHEDULED_EPOCH = UInt64.valueOf(10);
+  private static final UInt64 SECOND_SCHEDULED_GAS_LIMIT = UInt64.valueOf(60_000_000);
+
   private final Spec spec = TestSpecFactory.createMinimalBellatrix();
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
+
+  // EIP-8261: a spec defining a gas limit schedule
+  private final Spec gloasSpec =
+      TestSpecFactory.createMinimalGloas(
+          b ->
+              b.gloasBuilder(
+                  gb ->
+                      gb.gasLimitSchedule(
+                          List.of(
+                              new GasLimitScheduleEntry(UInt64.ZERO, FIRST_SCHEDULED_GAS_LIMIT),
+                              new GasLimitScheduleEntry(
+                                  SECOND_SCHEDULED_EPOCH, SECOND_SCHEDULED_GAS_LIMIT)))));
 
   private Validator validatorInConfig;
   private Validator validatorInRuntimeConfig;
@@ -90,7 +108,8 @@ public class ProposerConfigManagerTest {
 
     when(validatorConfig.getProposerDefaultFeeRecipient())
         .thenReturn(Optional.ofNullable(cliDefaultFeeRecipient));
-    when(validatorConfig.getBuilderRegistrationDefaultGasLimit()).thenReturn(defaultGasLimit);
+    when(validatorConfig.getBuilderRegistrationDefaultGasLimit())
+        .thenReturn(Optional.of(defaultGasLimit));
     when(validatorConfig.getBuilderRegistrationTimestampOverride()).thenReturn(Optional.empty());
     when(validatorConfig.getBuilderRegistrationPublicKeyOverride()).thenReturn(Optional.empty());
     when(validatorConfig.isBuilderRegistrationDefaultEnabled()).thenReturn(false);
@@ -101,10 +120,12 @@ public class ProposerConfigManagerTest {
                 validatorInConfig.getPublicKey().toBytesCompressed(),
                 new ProposerConfig.Config(
                     validatorFeeRecipientConfig,
-                    new ProposerConfig.BuilderConfig(true, validatorGasLimitConfig, null))),
+                    new ProposerConfig.BuilderConfig(
+                        true, validatorGasLimitConfig, null, null, null, null))),
             new ProposerConfig.Config(
                 defaultFeeRecipientConfig,
-                new ProposerConfig.BuilderConfig(false, defaultGasLimitConfig, null)));
+                new ProposerConfig.BuilderConfig(
+                    false, defaultGasLimitConfig, null, null, null, null)));
 
     when(proposerConfigProvider.getProposerConfig())
         .thenReturn(SafeFuture.completedFuture(Optional.of(proposerConfig)));
@@ -168,7 +189,10 @@ public class ProposerConfigManagerTest {
 
     proposerConfigManager =
         new ProposerConfigManager(
-            validatorConfig, new RuntimeProposerConfig(Optional.empty()), proposerConfigProvider);
+            validatorConfig,
+            new RuntimeProposerConfig(Optional.empty()),
+            proposerConfigProvider,
+            spec);
 
     assertThat(proposerConfigManager.initialize(ownedValidators)).isCompletedExceptionally();
   }
@@ -226,6 +250,80 @@ public class ProposerConfigManagerTest {
 
     assertThat(proposerConfigManager.getGasLimit(validatorNotInConfig.getPublicKey()))
         .isEqualTo(defaultGasLimit);
+  }
+
+  @Test
+  void getGasLimit_shouldReturnBuiltInDefaultWhenNothingIsConfiguredOrScheduled()
+      throws IOException {
+    when(validatorConfig.getBuilderRegistrationDefaultGasLimit()).thenReturn(Optional.empty());
+    setUpWithNoConfigs(false);
+
+    assertThat(proposerConfigManager.getGasLimit(validatorNotInConfig.getPublicKey()))
+        .isEqualTo(ValidatorConfig.DEFAULT_BUILDER_REGISTRATION_GAS_LIMIT);
+  }
+
+  @Test
+  void getGasLimit_shouldReturnBuiltInDefaultWhenNetworkDefinesNoSchedule() throws IOException {
+    when(validatorConfig.getBuilderRegistrationDefaultGasLimit()).thenReturn(Optional.empty());
+    when(proposerConfigProvider.getProposerConfig())
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+    setUpProposerConfigManager(
+        Optional.empty(), Optional.empty(), TestSpecFactory.createMinimalGloas());
+
+    assertThat(proposerConfigManager.getGasLimit(validatorNotInConfig.getPublicKey()))
+        .isEqualTo(ValidatorConfig.DEFAULT_BUILDER_REGISTRATION_GAS_LIMIT);
+  }
+
+  @Test
+  void getGasLimit_shouldReturnScheduledGasLimitWhenNoDefaultIsConfigured() throws IOException {
+    when(validatorConfig.getBuilderRegistrationDefaultGasLimit()).thenReturn(Optional.empty());
+    setUpWithGasLimitSchedule();
+
+    assertThat(proposerConfigManager.getGasLimit(validatorNotInConfig.getPublicKey()))
+        .isEqualTo(FIRST_SCHEDULED_GAS_LIMIT);
+
+    // the schedule bumps the gas limit at epoch SECOND_SCHEDULED_EPOCH
+    proposerConfigManager.onSlot(
+        gloasSpec.computeStartSlotAtEpoch(SECOND_SCHEDULED_EPOCH).minus(1));
+    assertThat(proposerConfigManager.getGasLimit(validatorNotInConfig.getPublicKey()))
+        .isEqualTo(FIRST_SCHEDULED_GAS_LIMIT);
+
+    proposerConfigManager.onSlot(gloasSpec.computeStartSlotAtEpoch(SECOND_SCHEDULED_EPOCH));
+    assertThat(proposerConfigManager.getGasLimit(validatorNotInConfig.getPublicKey()))
+        .isEqualTo(SECOND_SCHEDULED_GAS_LIMIT);
+  }
+
+  @Test
+  void getGasLimit_shouldReturnScheduledGasLimitForRequestedEpoch() throws IOException {
+    when(validatorConfig.getBuilderRegistrationDefaultGasLimit()).thenReturn(Optional.empty());
+    setUpWithGasLimitSchedule();
+
+    // still in the first scheduled epoch, but asking for a duty in a later one
+    assertThat(proposerConfigManager.getGasLimit(validatorNotInConfig.getPublicKey(), UInt64.ZERO))
+        .isEqualTo(FIRST_SCHEDULED_GAS_LIMIT);
+    assertThat(
+            proposerConfigManager.getGasLimit(
+                validatorNotInConfig.getPublicKey(), SECOND_SCHEDULED_EPOCH))
+        .isEqualTo(SECOND_SCHEDULED_GAS_LIMIT);
+  }
+
+  @Test
+  void getGasLimit_shouldPreferConfiguredDefaultOverScheduledGasLimit() throws IOException {
+    when(validatorConfig.getBuilderRegistrationDefaultGasLimit())
+        .thenReturn(Optional.of(FIRST_SCHEDULED_GAS_LIMIT.times(2)));
+    setUpWithGasLimitSchedule();
+
+    assertThat(proposerConfigManager.getGasLimit(validatorNotInConfig.getPublicKey()))
+        .isEqualTo(FIRST_SCHEDULED_GAS_LIMIT.times(2));
+  }
+
+  @Test
+  void getGasLimit_shouldPreferValidatorSpecificValueOverScheduledGasLimit() throws IOException {
+    when(validatorConfig.getBuilderRegistrationDefaultGasLimit()).thenReturn(Optional.empty());
+    setUpProposerConfigManager(Optional.empty(), Optional.empty(), gloasSpec);
+
+    assertThat(proposerConfigManager.getGasLimit(validatorInConfig.getPublicKey()))
+        .isEqualTo(validatorGasLimitConfig);
   }
 
   @Test
@@ -396,6 +494,12 @@ public class ProposerConfigManagerTest {
         .isInstanceOf(IllegalArgumentException.class);
   }
 
+  private void setUpWithGasLimitSchedule() throws IOException {
+    when(proposerConfigProvider.getProposerConfig())
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+    setUpProposerConfigManager(Optional.empty(), Optional.empty(), gloasSpec);
+  }
+
   private void setUpWithNoConfigs(final boolean builderDefaultEnabled) throws IOException {
     when(proposerConfigProvider.getProposerConfig())
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
@@ -415,7 +519,8 @@ public class ProposerConfigManagerTest {
                 validatorInConfig.getPublicKey().toBytesCompressed(),
                 buildSingleConfigWithProperty(property, value, false)),
             new ProposerConfig.Config(
-                defaultFeeRecipientConfig, new ProposerConfig.BuilderConfig(false, null, null)));
+                defaultFeeRecipientConfig,
+                new ProposerConfig.BuilderConfig(false, null, null, null, null, null)));
 
     when(proposerConfigProvider.getProposerConfig())
         .thenReturn(SafeFuture.completedFuture(Optional.of(proposerConfig)));
@@ -441,23 +546,32 @@ public class ProposerConfigManagerTest {
       case BUILDER_ENABLED ->
           new ProposerConfig.Config(
               isDefault ? defaultFeeRecipientConfig : null,
-              new ProposerConfig.BuilderConfig((Boolean) value, null, null));
+              new ProposerConfig.BuilderConfig((Boolean) value, null, null, null, null, null));
       case BUILDER_GAS_LIMIT ->
           new ProposerConfig.Config(
               isDefault ? defaultFeeRecipientConfig : null,
-              new ProposerConfig.BuilderConfig(isDefault ? false : null, (UInt64) value, null));
+              new ProposerConfig.BuilderConfig(
+                  isDefault ? false : null, (UInt64) value, null, null, null, null));
       case BUILDER_REGISTRATION_OVERRIDE_PUB_KEY ->
           new ProposerConfig.Config(
               isDefault ? defaultFeeRecipientConfig : null,
               new ProposerConfig.BuilderConfig(
                   isDefault ? false : null,
                   null,
-                  new RegistrationOverrides(null, (BLSPublicKey) value)));
+                  new RegistrationOverrides(null, (BLSPublicKey) value),
+                  null,
+                  null,
+                  null));
       case BUILDER_REGISTRATION_OVERRIDE_TIMESTAMP ->
           new ProposerConfig.Config(
               isDefault ? defaultFeeRecipientConfig : null,
               new ProposerConfig.BuilderConfig(
-                  isDefault ? false : null, null, new RegistrationOverrides((UInt64) value, null)));
+                  isDefault ? false : null,
+                  null,
+                  new RegistrationOverrides((UInt64) value, null),
+                  null,
+                  null,
+                  null));
     };
   }
 
@@ -476,6 +590,14 @@ public class ProposerConfigManagerTest {
   private void setUpProposerConfigManager(
       final Optional<Path> runtimeConfigPath, final Optional<String> existingRuntimeData)
       throws IOException {
+    setUpProposerConfigManager(runtimeConfigPath, existingRuntimeData, spec);
+  }
+
+  private void setUpProposerConfigManager(
+      final Optional<Path> runtimeConfigPath,
+      final Optional<String> existingRuntimeData,
+      final Spec spec)
+      throws IOException {
     Optional<Path> storagePath = Optional.empty();
 
     if (runtimeConfigPath.isPresent() && existingRuntimeData.isPresent()) {
@@ -487,7 +609,7 @@ public class ProposerConfigManagerTest {
 
     proposerConfigManager =
         new ProposerConfigManager(
-            validatorConfig, new RuntimeProposerConfig(storagePath), proposerConfigProvider);
+            validatorConfig, new RuntimeProposerConfig(storagePath), proposerConfigProvider, spec);
 
     assertThat(proposerConfigManager.isReadyToProvideProperties()).isFalse();
     assertThat(proposerConfigManager.initialize(ownedValidators)).isCompleted();

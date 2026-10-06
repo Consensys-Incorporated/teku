@@ -1,4 +1,5 @@
-FROM mirror.gcr.io/library/eclipse-temurin:26 AS jre-build
+ARG BASE_IMAGE_PREFIX=mirror.gcr.io/library/
+FROM ${BASE_IMAGE_PREFIX}eclipse-temurin:26 AS jre-build
 
 # Create a custom Java runtime
 RUN $JAVA_HOME/bin/jlink \
@@ -15,7 +16,7 @@ RUN $JAVA_HOME/bin/jlink \
          --no-header-files \
          --output /javaruntime
 
-FROM mirror.gcr.io/library/ubuntu:24.04
+FROM ${BASE_IMAGE_PREFIX}ubuntu:24.04
 ENV JAVA_HOME=/opt/java/openjdk
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 COPY --from=jre-build /javaruntime $JAVA_HOME
@@ -64,7 +65,7 @@ LABEL org.opencontainers.image.title="Teku" \
       org.opencontainers.image.description="Ethereum Consensus Client" \
       org.opencontainers.image.version=$VERSION \
       org.opencontainers.image.url="https://docs.teku.consensys.io/" \
-      org.opencontainers.image.source="https://github.com/Consensys/teku.git" \
+      org.opencontainers.image.source="https://github.com/Consensys-Incorporated/teku.git" \
       org.opencontainers.image.revision=$VCS_REF \
       org.opencontainers.image.vendor="Consensys" \
       org.opencontainers.image.created=$BUILD_DATE \

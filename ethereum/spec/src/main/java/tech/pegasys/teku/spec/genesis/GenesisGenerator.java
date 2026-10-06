@@ -37,6 +37,7 @@ import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.Eth1Data;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBody;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadHeader;
 import tech.pegasys.teku.spec.datastructures.operations.Deposit;
 import tech.pegasys.teku.spec.datastructures.operations.DepositData;
@@ -78,12 +79,11 @@ public class GenesisGenerator {
     final SchemaDefinitions schemaDefinitions = genesisSpec.getSchemaDefinitions();
 
     state = schemaDefinitions.getBeaconStateSchema().createBuilder();
-    final Bytes32 latestBlockRoot =
-        schemaDefinitions.getBeaconBlockBodySchema().createEmpty().hashTreeRoot();
-    final BeaconBlockHeader beaconBlockHeader =
-        new BeaconBlockHeader(
-            SpecConfig.GENESIS_SLOT, ZERO, Bytes32.ZERO, Bytes32.ZERO, latestBlockRoot);
-    state.setLatestBlockHeader(beaconBlockHeader);
+    // Not createGenesisBody(state): the state is still empty here, so a Gloas body would embed a
+    // default execution payload bid. The header is recomputed in updateCandidateState once the
+    // bid is known.
+    state.setLatestBlockHeader(
+        createGenesisBlockHeader(schemaDefinitions.getBeaconBlockBodySchema().createEmpty()));
     state.setFork(genesisFork);
 
     depositDataList =
@@ -204,6 +204,11 @@ public class GenesisGenerator {
                   UInt64.ZERO,
                   schemaDefinitionsGloas.getBlobKzgCommitmentsSchema().of(),
                   schemaDefinitionsGloas.getExecutionRequestsSchema().getDefault().hashTreeRoot()));
+      // The Gloas genesis block body embeds the latest execution payload bid, so the latest block
+      // header must be recomputed now that the bid is set
+      state.setLatestBlockHeader(
+          createGenesisBlockHeader(
+              schemaDefinitionsGloas.getBeaconBlockBodySchema().createGenesisBody(state)));
       stateGloas.setBuilders(
           BeaconStateSchemaGloas.required(state.getBeaconStateSchema()).getBuildersSchema().of());
       stateGloas.setNextWithdrawalBuilderIndex(UInt64.ZERO);
@@ -273,6 +278,12 @@ public class GenesisGenerator {
             validator.getWithdrawableEpoch());
 
     state.getValidators().set(index, modifiedValidator);
+  }
+
+  private static BeaconBlockHeader createGenesisBlockHeader(
+      final BeaconBlockBody genesisBlockBody) {
+    return new BeaconBlockHeader(
+        SpecConfig.GENESIS_SLOT, ZERO, Bytes32.ZERO, Bytes32.ZERO, genesisBlockBody.hashTreeRoot());
   }
 
   public int getActiveValidatorCount() {

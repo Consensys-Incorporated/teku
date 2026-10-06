@@ -40,8 +40,8 @@ import tech.pegasys.teku.ethereum.json.types.beacon.StateValidatorData;
 import tech.pegasys.teku.ethereum.json.types.node.PeerCount;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.BeaconCommitteeSelectionProof;
+import tech.pegasys.teku.ethereum.json.types.validator.PayloadTimelinessCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuties;
-import tech.pegasys.teku.ethereum.json.types.validator.PtcDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeSelectionProof;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeSubnetSubscription;
@@ -52,14 +52,14 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
@@ -85,7 +85,6 @@ import tech.pegasys.teku.validator.remote.apiclient.PostStateValidatorsNotExisti
 import tech.pegasys.teku.validator.remote.apiclient.RateLimitedException;
 import tech.pegasys.teku.validator.remote.typedef.OkHttpValidatorTypeDefClient;
 
-// TODO-GLOAS: https://github.com/Consensys/teku/issues/9997 (not required for devnet-0)
 public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
 
   private static final Logger LOG = LogManager.getLogger();
@@ -98,9 +97,11 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
   private final AsyncRunner asyncRunner;
   private final AsyncRunner readinessAsyncRunner; // getPeerCount and getSyncingStatus will use this
   private final AtomicBoolean usePostValidatorsEndpoint;
+  private final boolean gloasScheduled;
 
   public RemoteValidatorApiHandler(
       final HttpUrl endpoint,
+      final Spec spec,
       final OkHttpValidatorTypeDefClient typeDefClient,
       final AsyncRunner asyncRunner,
       final AsyncRunner readinessAsyncRunner,
@@ -110,6 +111,7 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
     this.readinessAsyncRunner = readinessAsyncRunner;
     this.typeDefClient = typeDefClient;
     this.usePostValidatorsEndpoint = new AtomicBoolean(usePostValidatorsEndpoint);
+    this.gloasScheduled = spec.isMilestoneSupported(SpecMilestone.GLOAS);
   }
 
   @Override
@@ -220,13 +222,19 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
   @Override
   public SafeFuture<Optional<ProposerDuties>> getProposerDuties(
       final UInt64 epoch, final boolean isFuluCompatible) {
+    if (gloasScheduled) {
+      LOG.debug("Calling ProposerDutiesV2, epoch: {}", epoch);
+      return sendRequest(() -> typeDefClient.getProposerDutiesV2(epoch));
+    }
+    LOG.debug("Calling ProposerDuties, epoch: {}, isFuluCompatible: {}", epoch, isFuluCompatible);
     return sendRequest(() -> typeDefClient.getProposerDuties(epoch));
   }
 
   @Override
-  public SafeFuture<Optional<PtcDuties>> getPtcDuties(
+  public SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> getPayloadTimelinessCommitteeDuties(
       final UInt64 epoch, final IntCollection validatorIndices) {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not yet implemented"));
+    return sendRequest(
+        () -> typeDefClient.postPayloadTimelinessCommitteeDuties(epoch, validatorIndices));
   }
 
   @Override
@@ -256,18 +264,16 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
     return sendRequest(
         () ->
             typeDefClient.createUnsignedBlock(
-                slot,
-                randaoReveal,
-                graffiti,
-                builderConfig.map(BuilderConfig::getBuilderBoostFactor)));
+                slot, randaoReveal, graffiti, includePayload, builderConfig));
   }
 
   @Override
   public SafeFuture<SendSignedBlockResult> sendSignedBlock(
       final SignedBlockContainer blockContainer,
-      final BroadcastValidationLevel broadcastValidationLevel) {
+      final BroadcastValidationLevel broadcastValidationLevel,
+      final Optional<String> builderUrl) {
     return sendRequest(
-        () -> typeDefClient.sendSignedBlock(blockContainer, broadcastValidationLevel));
+        () -> typeDefClient.sendSignedBlock(blockContainer, broadcastValidationLevel, builderUrl));
   }
 
   @Override
@@ -285,13 +291,21 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
   @Override
   public SafeFuture<List<SubmitDataError>> sendPayloadAttestationMessages(
       final List<PayloadAttestationMessage> payloadAttestationMessages) {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not yet implemented"));
+    return sendRequest(
+        () -> typeDefClient.sendPayloadAttestationMessages(payloadAttestationMessages));
   }
 
   @Override
   public SafeFuture<List<SubmitDataError>> sendSignedProposerPreferences(
       final List<SignedProposerPreferences> signedProposerPreferences) {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not yet implemented"));
+    return sendRequest(
+        () -> typeDefClient.sendSignedProposerPreferences(signedProposerPreferences));
+  }
+
+  @Override
+  public SafeFuture<List<SubmitDataError>> sendBuilderPreferences(
+      final SszList<BuilderPreferencesEntry> builderPreferences) {
+    return sendRequest(() -> typeDefClient.sendBuilderPreferences(builderPreferences));
   }
 
   @Override
@@ -377,21 +391,16 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
   }
 
   @Override
-  public SafeFuture<Optional<ExecutionPayloadBid>> createUnsignedExecutionPayloadBid(
-      final UInt64 slot, final UInt64 builderIndex) {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not yet implemented"));
-  }
-
-  @Override
   public SafeFuture<Void> publishSignedExecutionPayloadBid(
       final SignedExecutionPayloadBid signedExecutionPayloadBid) {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not yet implemented"));
+    return sendRequest(
+        () -> typeDefClient.publishSignedExecutionPayloadBid(signedExecutionPayloadBid));
   }
 
   @Override
   public SafeFuture<Optional<ExecutionPayloadEnvelope>> createUnsignedExecutionPayload(
-      final UInt64 slot, final UInt64 builderIndex) {
-    return SafeFuture.failedFuture(new UnsupportedOperationException("Not yet implemented"));
+      final UInt64 slot, final Bytes32 beaconBlockRoot) {
+    return sendRequest(() -> typeDefClient.getExecutionPayloadEnvelope(slot, beaconBlockRoot));
   }
 
   @Override
@@ -412,16 +421,6 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
         () ->
             typeDefClient.publishSignedExecutionPayload(
                 signedExecutionPayloadEnvelopeContents, broadcastValidationLevel));
-  }
-
-  @Override
-  public SafeFuture<PublishSignedExecutionPayloadResult> publishSignedExecutionPayload(
-      final SignedBlindedExecutionPayloadEnvelope signedBlindedExecutionPayload,
-      final Optional<BroadcastValidationLevel> broadcastValidationLevel) {
-    return sendRequest(
-        () ->
-            typeDefClient.publishSignedExecutionPayload(
-                signedBlindedExecutionPayload, broadcastValidationLevel));
   }
 
   private SafeFuture<Void> sendRequest(final ExceptionThrowingRunnable requestExecutor) {
@@ -474,6 +473,11 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
         new OkHttpValidatorTypeDefClient(
             httpClient, endpoint, spec, preferSszBlockEncoding, attestationsV2ApisEnabled);
     return new RemoteValidatorApiHandler(
-        endpoint, typeDefClient, asyncRunner, readinessAsyncRunner, usePostValidatorsEndpoint);
+        endpoint,
+        spec,
+        typeDefClient,
+        asyncRunner,
+        readinessAsyncRunner,
+        usePostValidatorsEndpoint);
   }
 }

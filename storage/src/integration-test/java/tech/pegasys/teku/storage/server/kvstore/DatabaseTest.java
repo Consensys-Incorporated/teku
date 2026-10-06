@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
@@ -83,6 +84,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
 import tech.pegasys.teku.spec.datastructures.execution.SlotAndExecutionPayloadSummary;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
@@ -101,6 +103,7 @@ import tech.pegasys.teku.storage.api.GloasForkChoiceRebuildData;
 import tech.pegasys.teku.storage.api.OnDiskStoreData;
 import tech.pegasys.teku.storage.api.StorageUpdate;
 import tech.pegasys.teku.storage.api.StoredBlockMetadata;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 import tech.pegasys.teku.storage.api.WeakSubjectivityUpdate;
 import tech.pegasys.teku.storage.archive.filesystem.FileSystemBlobSidecarsArchiver;
 import tech.pegasys.teku.storage.client.RecentChainData;
@@ -3505,6 +3508,91 @@ public class DatabaseTest {
       setDefaultStorage(
           context.createFileBasedStorage(
               spec, tmpDir, storageMode, storeConfig, storeNonCanonicalBlocks));
+    }
+  }
+
+  @TestTemplate
+  public void bestLightClientUpdates_shouldSurviveRestart(final DatabaseContext context)
+      throws IOException {
+    initialize(context);
+    final LightClientUpdate periodOne = dataStructureUtil.randomLightClientUpdate(ONE);
+    final LightClientUpdate periodTwo =
+        dataStructureUtil.randomLightClientUpdate(UInt64.valueOf(2));
+    final Bytes32 periodOneRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 periodTwoRoot = dataStructureUtil.randomBytes32();
+    database.storeBestLightClientUpdate(ONE, periodOne, periodOneRoot);
+    database.storeBestLightClientUpdate(UInt64.valueOf(2), periodTwo, periodTwoRoot);
+
+    restartStorage();
+
+    assertThat(getBestLightClientUpdates())
+        .containsExactly(Map.entry(ONE, periodOne), Map.entry(UInt64.valueOf(2), periodTwo));
+    assertThat(database.getBestLightClientUpdateSignatureBlockRoot(ONE)).contains(periodOneRoot);
+    assertThat(database.getBestLightClientUpdateSignatureBlockRoot(UInt64.valueOf(2)))
+        .contains(periodTwoRoot);
+    assertThat(safeJoin(storageSystem.chainStorage().getBestLightClientUpdates()))
+        .containsExactly(
+            new StoredLightClientUpdate(ONE, periodOne, periodOneRoot),
+            new StoredLightClientUpdate(UInt64.valueOf(2), periodTwo, periodTwoRoot));
+  }
+
+  @TestTemplate
+  public void storeBestLightClientUpdate_shouldReplaceExistingUpdateForPeriod(
+      final DatabaseContext context) throws IOException {
+    initialize(context);
+    final LightClientUpdate replacement = dataStructureUtil.randomLightClientUpdate(ONE);
+    final Bytes32 replacementRoot = dataStructureUtil.randomBytes32();
+    database.storeBestLightClientUpdate(
+        ONE, dataStructureUtil.randomLightClientUpdate(ONE), dataStructureUtil.randomBytes32());
+    database.storeBestLightClientUpdate(ONE, replacement, replacementRoot);
+
+    restartStorage();
+
+    assertThat(getBestLightClientUpdates()).containsExactly(Map.entry(ONE, replacement));
+    assertThat(database.getBestLightClientUpdateSignatureBlockRoot(ONE)).contains(replacementRoot);
+  }
+
+  @TestTemplate
+  public void pruneBestLightClientUpdatesBefore_shouldDeletePeriodsBelowGivenPeriod(
+      final DatabaseContext context) throws IOException {
+    initialize(context);
+    storeBestLightClientUpdates(0, 1, 2);
+
+    database.pruneBestLightClientUpdatesBefore(UInt64.valueOf(2));
+    restartStorage();
+
+    assertThat(getBestLightClientUpdates()).containsOnlyKeys(UInt64.valueOf(2));
+    assertThat(database.getBestLightClientUpdateSignatureBlockRoot(ZERO)).isEmpty();
+    assertThat(database.getBestLightClientUpdateSignatureBlockRoot(ONE)).isEmpty();
+  }
+
+  @TestTemplate
+  public void removeBestLightClientUpdates_shouldDeleteOnlyGivenPeriods(
+      final DatabaseContext context) throws IOException {
+    initialize(context);
+    storeBestLightClientUpdates(0, 1, 2);
+
+    database.removeBestLightClientUpdates(List.of(ONE));
+    restartStorage();
+
+    assertThat(getBestLightClientUpdates()).containsOnlyKeys(ZERO, UInt64.valueOf(2));
+    assertThat(database.getBestLightClientUpdateSignatureBlockRoot(ONE)).isEmpty();
+  }
+
+  private void storeBestLightClientUpdates(final long... periods) {
+    for (final long period : periods) {
+      database.storeBestLightClientUpdate(
+          UInt64.valueOf(period),
+          dataStructureUtil.randomLightClientUpdate(UInt64.valueOf(period)),
+          dataStructureUtil.randomBytes32());
+    }
+  }
+
+  private Map<UInt64, LightClientUpdate> getBestLightClientUpdates() {
+    try (final Stream<Map.Entry<UInt64, LightClientUpdate>> updates =
+        database.streamBestLightClientUpdates()) {
+      return updates.collect(
+          toMap(Map.Entry::getKey, Map.Entry::getValue, (a, b) -> a, TreeMap::new));
     }
   }
 

@@ -145,6 +145,9 @@ public class RecentExecutionPayloadsFetchService
   public void onExecutionPayloadValidated(final SignedExecutionPayloadEnvelope executionPayload) {}
 
   @Override
+  public void onExecutionPayloadAvailable(final SignedExecutionPayloadEnvelope executionPayload) {}
+
+  @Override
   public void onExecutionPayloadImported(
       final SignedExecutionPayloadEnvelope executionPayload, final boolean executionOptimistic) {
     cancelRecentExecutionPayloadRequest(executionPayload.getBeaconBlockRoot());

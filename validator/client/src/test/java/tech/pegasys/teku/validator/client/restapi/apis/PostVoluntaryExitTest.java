@@ -14,6 +14,7 @@
 package tech.pegasys.teku.validator.client.restapi.apis;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -30,6 +31,7 @@ import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMe
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -41,11 +43,15 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
 import tech.pegasys.teku.spec.datastructures.operations.VoluntaryExit;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.validator.client.KeyManager;
+import tech.pegasys.teku.validator.client.Validator;
 import tech.pegasys.teku.validator.client.VoluntaryExitDataProvider;
 
 public class PostVoluntaryExitTest {
   private final VoluntaryExitDataProvider provider = mock(VoluntaryExitDataProvider.class);
-  private final PostVoluntaryExit handler = new PostVoluntaryExit(provider);
+  private final KeyManager keyManager = mock(KeyManager.class);
+  private final Validator validator = mock(Validator.class);
+  private final PostVoluntaryExit handler = new PostVoluntaryExit(provider, keyManager);
   private final Spec spec = TestSpecFactory.createMinimal(SpecMilestone.CAPELLA);
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
   private final StubRestApiRequest request = new StubRestApiRequest(handler.getMetadata());
@@ -53,6 +59,22 @@ public class PostVoluntaryExitTest {
   final VoluntaryExit message = new VoluntaryExit(UInt64.valueOf(123), UInt64.ZERO);
   final SignedVoluntaryExit signedVoluntaryExit =
       new SignedVoluntaryExit(message, dataStructureUtil.randomSignature());
+
+  @BeforeEach
+  void setUp() {
+    when(keyManager.getValidatorByPublicKey(any())).thenReturn(Optional.of(validator));
+  }
+
+  @Test
+  void shouldReturnNotFoundWhenValidatorIsNotOwned() throws JsonProcessingException {
+    final BLSPublicKey publicKey = dataStructureUtil.randomPublicKey();
+    when(keyManager.getValidatorByPublicKey(publicKey)).thenReturn(Optional.empty());
+    request.setPathParameter(PUBKEY, publicKey.toString());
+
+    handler.handleRequest(request);
+
+    assertThat(request.getResponseCode()).isEqualTo(SC_NOT_FOUND);
+  }
 
   @Test
   void shouldCallProviderWhenEpochNotProvided() throws JsonProcessingException {

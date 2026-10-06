@@ -32,6 +32,7 @@ import tech.pegasys.teku.statetransition.datacolumns.DataColumnSidecarManager;
 import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoiceNotifier;
 import tech.pegasys.teku.statetransition.forkchoice.ProposersDataManager;
+import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
 import tech.pegasys.teku.statetransition.payloadattestation.PayloadAttestationPool;
 import tech.pegasys.teku.statetransition.synccommittee.SyncCommitteeContributionPool;
 import tech.pegasys.teku.statetransition.validatorcache.ActiveValidatorChannel;
@@ -124,6 +125,7 @@ public class DataProvider {
     private IntSupplier rejectedExecutionSupplier;
     private BlobSidecarReconstructionProvider blobSidecarReconstructionProvider;
     private BlobReconstructionProvider blobReconstructionProvider;
+    private LightClientUpdateStore lightClientUpdateStore;
     private DataColumnSidecarManager dataColumnSidecarManager;
     private CustodyGroupCountManager custodyGroupCountManager;
     private PayloadAttestationPool payloadAttestationPool;
@@ -241,6 +243,11 @@ public class DataProvider {
       return this;
     }
 
+    public Builder lightClientUpdateStore(final LightClientUpdateStore lightClientUpdateStore) {
+      this.lightClientUpdateStore = lightClientUpdateStore;
+      return this;
+    }
+
     public Builder dataColumnSidecarManager(
         final DataColumnSidecarManager dataColumnSidecarManager) {
       this.dataColumnSidecarManager = dataColumnSidecarManager;
@@ -277,7 +284,8 @@ public class DataProvider {
               combinedChainDataClient,
               rewardCalculator,
               blobSidecarReconstructionProvider,
-              blobReconstructionProvider);
+              blobReconstructionProvider,
+              lightClientUpdateStore);
       final SyncDataProvider syncDataProvider =
           new SyncDataProvider(syncService, rejectedExecutionSupplier);
       final ValidatorDataProvider validatorDataProvider =

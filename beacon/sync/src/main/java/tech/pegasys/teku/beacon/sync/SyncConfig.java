@@ -29,8 +29,8 @@ public class SyncConfig {
   public static final int DEFAULT_FORWARD_SYNC_MAX_PENDING_BATCHES = 5;
 
   /**
-   * Must be >= FORWARD_SYNC_BATCH_SIZE * FORWARD_SYNC_MAX_PENDING_BATCHES to avoid evicting
-   * completed trackers before the sync pipeline imports them.
+   * Sized for the default linear forward-sync pipeline. Trackers still needed for import may exceed
+   * this soft limit, up to the sampler's hard limit.
    */
   public static final int DEFAULT_MAX_RECENTLY_SAMPLED_BLOCKS = 128;
 

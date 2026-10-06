@@ -18,6 +18,7 @@ import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.BEACON_BLOCK_S
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.BLOB_SCHEMA;
 
 import java.util.List;
+import java.util.Optional;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema3;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
@@ -26,14 +27,15 @@ import tech.pegasys.teku.kzg.KZGProof;
 import tech.pegasys.teku.spec.config.SpecConfigFulu;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.Blob;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
-import tech.pegasys.teku.spec.datastructures.blocks.BlockContentsWithBlobsSchema;
+import tech.pegasys.teku.spec.datastructures.blocks.BlockContentsSchema;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGProof;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGProofSchema;
 import tech.pegasys.teku.spec.schemas.registry.SchemaRegistry;
 
 public class BlockContentsSchemaFulu
     extends ContainerSchema3<BlockContentsFulu, BeaconBlock, SszList<SszKZGProof>, SszList<Blob>>
-    implements BlockContentsWithBlobsSchema<BlockContentsFulu> {
+    implements BlockContentsSchema<BlockContentsFulu> {
 
   public BlockContentsSchemaFulu(
       final String containerName,
@@ -41,7 +43,7 @@ public class BlockContentsSchemaFulu
       final SchemaRegistry schemaRegistry) {
     super(
         containerName,
-        namedSchema("block", schemaRegistry.get(BEACON_BLOCK_SCHEMA)),
+        namedSchema(FIELD_BLOCK, schemaRegistry.get(BEACON_BLOCK_SCHEMA)),
         namedSchema(
             FIELD_KZG_PROOFS,
             SszListSchema.create(
@@ -55,7 +57,10 @@ public class BlockContentsSchemaFulu
 
   @Override
   public BlockContentsFulu create(
-      final BeaconBlock beaconBlock, final List<KZGProof> kzgProofs, final List<Blob> blobs) {
+      final BeaconBlock beaconBlock,
+      final List<KZGProof> kzgProofs,
+      final List<Blob> blobs,
+      final Optional<ExecutionPayloadEnvelope> executionPayloadEnvelope) {
     return new BlockContentsFulu(this, beaconBlock, kzgProofs, blobs);
   }
 

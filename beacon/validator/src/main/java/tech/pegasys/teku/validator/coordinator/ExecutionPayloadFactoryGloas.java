@@ -25,12 +25,12 @@ import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.Blob;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockAndState;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
 import tech.pegasys.teku.spec.datastructures.execution.BlobAndCellProofs;
 import tech.pegasys.teku.spec.datastructures.execution.BlobsBundle;
 import tech.pegasys.teku.spec.datastructures.execution.GetPayloadResponse;
+import tech.pegasys.teku.spec.datastructures.type.SszKZGProof;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerBlockProductionManager;
 import tech.pegasys.teku.spec.logic.common.util.ExecutionPayloadProposalUtil.ExecutionPayloadProposalData;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas;
@@ -50,7 +50,7 @@ public class ExecutionPayloadFactoryGloas implements ExecutionPayloadFactory {
 
   @Override
   public SafeFuture<ExecutionPayloadEnvelope> createUnsignedExecutionPayload(
-      final UInt64 builderIndex, final BeaconBlockAndState blockAndState) {
+      final BeaconBlockAndState blockAndState) {
     final UInt64 proposalSlot = blockAndState.getSlot();
     final SchemaDefinitionsGloas schemaDefinitions =
         SchemaDefinitionsGloas.required(spec.atSlot(proposalSlot).getSchemaDefinitions());
@@ -66,30 +66,31 @@ public class ExecutionPayloadFactoryGloas implements ExecutionPayloadFactory {
                             .createFromBlobsBundle(
                                 getPayloadResponse.getBlobsBundle().orElseThrow())));
     return spec.createNewUnsignedExecutionPayload(
-        proposalSlot, builderIndex, blockAndState, executionPayloadProposalDataFuture);
-  }
-
-  @Override
-  public SafeFuture<SignedExecutionPayloadEnvelope> unblindSignedExecutionPayload(
-      final SignedBlindedExecutionPayloadEnvelope signedBlindedExecutionPayload) {
-    final UInt64 slot = signedBlindedExecutionPayload.getSlot();
-    final SchemaDefinitionsGloas schemaDefinitions =
-        SchemaDefinitionsGloas.required(spec.atSlot(slot).getSchemaDefinitions());
-    return getCachedGetPayloadResponseFuture(slot)
-        .thenApply(
-            getPayloadResponse ->
-                signedBlindedExecutionPayload.unblind(
-                    schemaDefinitions, getPayloadResponse.getExecutionPayload()));
+        proposalSlot, blockAndState, executionPayloadProposalDataFuture);
   }
 
   @Override
   public SafeFuture<List<DataColumnSidecar>> createDataColumnSidecars(
       final SignedExecutionPayloadEnvelope signedExecutionPayload) {
     final UInt64 slot = signedExecutionPayload.getMessage().getSlot();
-    return getCachedGetPayloadResponseFuture(slot)
+    return SafeFuture.<GetPayloadResponse>of(
+            () ->
+                executionLayerBlockProductionManager
+                    .getCachedPayloadResult(slot)
+                    .orElseThrow(() -> DataColumnSidecarCreationException.noCachedBlobData(slot))
+                    .getPayloadResponseFutureFromLocalFlowRequired())
         .thenApply(
             getPayloadResponse -> {
-              final BlobsBundle blobsBundle = getPayloadResponse.getBlobsBundle().orElseThrow();
+              if (!getPayloadResponse
+                  .getExecutionPayload()
+                  .hashTreeRoot()
+                  .equals(signedExecutionPayload.getMessage().getPayload().hashTreeRoot())) {
+                throw DataColumnSidecarCreationException.cachedPayloadMismatch(slot);
+              }
+              final BlobsBundle blobsBundle =
+                  getPayloadResponse
+                      .getBlobsBundle()
+                      .orElseThrow(() -> DataColumnSidecarCreationException.noCachedBlobData(slot));
               return createDataColumnSidecars(
                   signedExecutionPayload, blobsBundle.getBlobs(), blobsBundle.getProofs());
             });
@@ -103,7 +104,7 @@ public class ExecutionPayloadFactoryGloas implements ExecutionPayloadFactory {
             signedExecutionPayloadEnvelopeContents.getSignedExecutionPayloadEnvelope(),
             signedExecutionPayloadEnvelopeContents.getBlobs().stream().toList(),
             signedExecutionPayloadEnvelopeContents.getKzgProofs().stream()
-                .map(sszKzgProof -> sszKzgProof.getKZGProof())
+                .map(SszKZGProof::getKZGProof)
                 .toList()));
   }
 

@@ -1,8 +1,8 @@
 {
   "get" : {
-    "tags" : [ "Beacon", "Experimental" ],
+    "tags" : [ "Beacon" ],
     "operationId" : "getLightClientBootstrap",
-    "summary" : "Get light client bootstrap data for the requested block root.",
+    "summary" : "Get `LightClientBootstrap` structure for a requested block root.",
     "description" : "Requests the LightClientBootstrap structure corresponding to a given post-Altair beacon block root. Depending on the `Accept` header it can be returned either as JSON or SSZ-serialized bytes.",
     "parameters" : [ {
       "name" : "block_root",
@@ -17,6 +17,17 @@
     "responses" : {
       "200" : {
         "description" : "Request successful",
+        "headers" : {
+          "Eth-Consensus-Version" : {
+            "description" : "Required in response so client can deserialize returned json or ssz data more effectively.",
+            "required" : true,
+            "schema" : {
+              "type" : "string",
+              "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze" ],
+              "example" : "phase0"
+            }
+          }
+        },
         "content" : {
           "application/json" : {
             "schema" : {
@@ -50,30 +61,6 @@
             }
           }
         }
-      },
-      "501" : {
-        "description" : "Not implemented",
-        "content" : {
-          "application/json" : {
-            "schema" : {
-              "$ref" : "#/components/schemas/HttpErrorResponse"
-            }
-          }
-        }
-      },
-      "503" : {
-        "description" : "Service unavailable",
-        "content" : {
-          "application/json" : {
-            "schema" : {
-              "$ref" : "#/components/schemas/HttpErrorResponse"
-            }
-          }
-        }
-      },
-      "204" : {
-        "description" : "Data is unavailable because the chain has not yet reached genesis",
-        "content" : { }
       },
       "400" : {
         "description" : "The request could not be processed, check the response for more information.",

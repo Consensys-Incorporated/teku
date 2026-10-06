@@ -46,6 +46,11 @@ Teku is an open-source Ethereum consensus client written in Java, implementing a
 # Run reference tests (consensus spec tests)
 ./gradlew referenceTest
 
+# Reference test fixtures are read straight from zip archives (build/refTests/<version>/archives/,
+# produced by convertRefTests); nothing is expanded on disk. To run against a plain directory of
+# vectors instead (e.g. generated from a local consensus-specs checkout):
+./gradlew referenceTest -Dteku.ref-test.root-dir=/path/to/tests
+
 # Run one reference suite manually (example)
 ENV_TEST_TYPE=fork_choice/on_attestation ENV_SPEC=minimal ENV_MILESTONE=gloas ./gradlew --no-daemon :eth-reference-tests:referenceTest --tests tech.pegasys.teku.reference.ManualReferenceTestRunner -x generateReferenceTestClasses
 
@@ -341,6 +346,7 @@ Each module has its own test suite under `src/test/java` and test fixtures under
   - Bad: `tech.pegasys.teku.spec.logic.common.util.DataColumnSidecarValidationHelper helper = ...`
 - **Async operations**: Use `SafeFuture` and `AsyncRunner` instead of raw CompletableFuture. Never use `.join()` or `.get()` to block on futures — these block threads and defeat the purpose of async programming. Instead, compose futures using `thenApply`, `thenCompose`, `thenCombine`, `thenComposeCombined`, etc.
 - **Immutability**: Prefer immutable data structures (record types, SszData implementations)
+- **Final variables**: Declare method parameters and local variables as `final`. Declare fields as `final` unless they are intentionally mutable or populated by serialization frameworks.
 - **Error handling**: Use checked exceptions for recoverable errors, unchecked for programming errors
 - **Testing**: All code must have automated test coverage (no manual tests)
 - **Commit messages**: Imperative mood, present tense ("Add feature" not "Added feature")
@@ -397,6 +403,11 @@ Circular dependencies are prevented by build-time dependency checks (DepCheckPlu
 3. Run `./gradlew test` to run unit tests
 4. Run module-specific tests: `./gradlew :<module>:test`
 5. Run `./gradlew build` for full verification before committing
+
+## Agent Behaviour Rules
+
+- **No git actions without explicit instruction.** Never run `git commit`, `git commit --amend`, or `git push` unless the user explicitly asks. Stage changes and stop — let the user decide when to commit.
+- **No co-author lines.** Do not add `Co-Authored-By:` trailers to commit messages.
 
 ## Running Teku Locally
 

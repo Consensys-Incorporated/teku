@@ -255,6 +255,17 @@ public class AttestationProductionDuty implements Duty {
         attestationData.getSlot(),
         slot);
 
+    // UInt64.MAX_VALUE can never be a legitimate epoch. Reject it here so a malicious or broken
+    // beacon node can't get it signed and persisted as a slashing-protection floor, where it is
+    // indistinguishable from "never signed" on the next read - see
+    // https://github.com/Consensys-Incorporated/teku-internal/issues/334
+    checkArgument(
+        !attestationData.getSource().getEpoch().equals(UInt64.MAX_VALUE),
+        "Unsigned attestation source epoch must not be UInt64.MAX_VALUE");
+    checkArgument(
+        !attestationData.getTarget().getEpoch().equals(UInt64.MAX_VALUE),
+        "Unsigned attestation target epoch must not be UInt64.MAX_VALUE");
+
     spec.atSlot(slot)
         .getAttestationUtil()
         .validateCommitteeIndexValue(attestationData.getIndex())

@@ -15,10 +15,17 @@ package tech.pegasys.teku.spec.config.builder;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BiConsumer;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.spec.config.GasLimitScheduleEntry;
+import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.config.SpecConfigAndParent;
 import tech.pegasys.teku.spec.config.SpecConfigFulu;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
@@ -30,11 +37,6 @@ public class GloasBuilder extends BaseForkBuilder
   private Integer attestationDueBpsGloas;
   private Integer contributionDueBpsGloas;
   private Integer maxRequestPayloads;
-  private Integer maxSignedAggregateAndProofSize;
-  private Integer maxAttesterSlashingSize;
-  private Integer maxDataColumnSidecarSize;
-  private Integer maxPartialDataColumnSidecarSize;
-  private Integer maxSignedExecutionPayloadBidSize;
   private Integer minBuilderWithdrawabilityDelay;
   private Integer payloadAttestationDueBps;
   private Integer payloadDueBps;
@@ -54,11 +56,15 @@ public class GloasBuilder extends BaseForkBuilder
   private Integer consolidationChurnLimitQuotient;
   private UInt64 maxPerEpochActivationChurnLimitGloas;
 
+  // EIP-8261: Gas limit schedule
+  private final List<GasLimitScheduleEntry> gasLimitSchedule = new ArrayList<>();
+
   GloasBuilder() {}
 
   @Override
   public SpecConfigAndParent<SpecConfigGloas> build(
       final SpecConfigAndParent<SpecConfigFulu> specConfigAndParent) {
+    verifyGasLimitScheduleEpochs(specConfigAndParent.specConfig().getGloasForkEpoch());
     return SpecConfigAndParent.of(
         new SpecConfigGloasImpl(
             specConfigAndParent.specConfig(),
@@ -80,11 +86,7 @@ public class GloasBuilder extends BaseForkBuilder
             churnLimitQuotientGloas,
             consolidationChurnLimitQuotient,
             maxPerEpochActivationChurnLimitGloas,
-            maxSignedAggregateAndProofSize,
-            maxAttesterSlashingSize,
-            maxDataColumnSidecarSize,
-            maxPartialDataColumnSidecarSize,
-            maxSignedExecutionPayloadBidSize),
+            gasLimitSchedule),
         specConfigAndParent);
   }
 
@@ -109,38 +111,6 @@ public class GloasBuilder extends BaseForkBuilder
   public GloasBuilder maxRequestPayloads(final Integer maxRequestPayloads) {
     checkNotNull(maxRequestPayloads);
     this.maxRequestPayloads = maxRequestPayloads;
-    return this;
-  }
-
-  public GloasBuilder maxSignedAggregateAndProofSize(final Integer maxSignedAggregateAndProofSize) {
-    checkNotNull(maxSignedAggregateAndProofSize);
-    this.maxSignedAggregateAndProofSize = maxSignedAggregateAndProofSize;
-    return this;
-  }
-
-  public GloasBuilder maxAttesterSlashingSize(final Integer maxAttesterSlashingSize) {
-    checkNotNull(maxAttesterSlashingSize);
-    this.maxAttesterSlashingSize = maxAttesterSlashingSize;
-    return this;
-  }
-
-  public GloasBuilder maxDataColumnSidecarSize(final Integer maxDataColumnSidecarSize) {
-    checkNotNull(maxDataColumnSidecarSize);
-    this.maxDataColumnSidecarSize = maxDataColumnSidecarSize;
-    return this;
-  }
-
-  public GloasBuilder maxPartialDataColumnSidecarSize(
-      final Integer maxPartialDataColumnSidecarSize) {
-    checkNotNull(maxPartialDataColumnSidecarSize);
-    this.maxPartialDataColumnSidecarSize = maxPartialDataColumnSidecarSize;
-    return this;
-  }
-
-  public GloasBuilder maxSignedExecutionPayloadBidSize(
-      final Integer maxSignedExecutionPayloadBidSize) {
-    checkNotNull(maxSignedExecutionPayloadBidSize);
-    this.maxSignedExecutionPayloadBidSize = maxSignedExecutionPayloadBidSize;
     return this;
   }
 
@@ -232,6 +202,42 @@ public class GloasBuilder extends BaseForkBuilder
     return this;
   }
 
+  public GloasBuilder gasLimitSchedule(final List<GasLimitScheduleEntry> gasLimitSchedule) {
+    checkNotNull(gasLimitSchedule);
+    verifyGasLimitSchedule(gasLimitSchedule);
+    this.gasLimitSchedule.clear();
+    gasLimitSchedule.stream()
+        .sorted(Comparator.comparing(GasLimitScheduleEntry::epoch))
+        .forEach(this.gasLimitSchedule::add);
+    return this;
+  }
+
+  /** The schedule is sorted by epoch, so only the lowest epoch needs checking. */
+  private void verifyGasLimitScheduleEpochs(final UInt64 gloasForkEpoch) {
+    if (gasLimitSchedule.isEmpty() || gloasForkEpoch.equals(SpecConfig.FAR_FUTURE_EPOCH)) {
+      // nothing to check, or Gloas is not scheduled yet on this network
+      return;
+    }
+    final UInt64 lowestEpoch = gasLimitSchedule.getFirst().epoch();
+    if (lowestEpoch.isLessThan(gloasForkEpoch)) {
+      throw new IllegalArgumentException(
+          String.format(
+              "Gas limit schedule contains an entry for epoch %s, which is before the Gloas fork epoch %s.",
+              lowestEpoch, gloasForkEpoch));
+    }
+  }
+
+  private void verifyGasLimitSchedule(final List<GasLimitScheduleEntry> gasLimitSchedule) {
+    final Set<UInt64> seenEpochs = new HashSet<>();
+    for (final GasLimitScheduleEntry entry : gasLimitSchedule) {
+      if (!seenEpochs.add(entry.epoch())) {
+        throw new IllegalArgumentException(
+            String.format(
+                "There are duplicate entries for epoch %s in gas limit schedule.", entry.epoch()));
+      }
+    }
+  }
+
   @Override
   public void validate() {
     defaultValuesIfRequired(this);
@@ -245,11 +251,6 @@ public class GloasBuilder extends BaseForkBuilder
     constants.put("attestationDueBpsGloas", attestationDueBpsGloas);
     constants.put("contributionDueBpsGloas", contributionDueBpsGloas);
     constants.put("maxRequestPayloads", maxRequestPayloads);
-    constants.put("maxSignedAggregateAndProofSize", maxSignedAggregateAndProofSize);
-    constants.put("maxAttesterSlashingSize", maxAttesterSlashingSize);
-    constants.put("maxDataColumnSidecarSize", maxDataColumnSidecarSize);
-    constants.put("maxPartialDataColumnSidecarSize", maxPartialDataColumnSidecarSize);
-    constants.put("maxSignedExecutionPayloadBidSize", maxSignedExecutionPayloadBidSize);
     constants.put("minBuilderWithdrawabilityDelay", minBuilderWithdrawabilityDelay);
     constants.put("payloadAttestationDueBps", payloadAttestationDueBps);
     constants.put("payloadDueBps", payloadDueBps);
@@ -270,11 +271,5 @@ public class GloasBuilder extends BaseForkBuilder
   }
 
   @Override
-  public void addOverridableItemsToRawConfig(final BiConsumer<String, Object> rawConfig) {
-    rawConfig.accept("MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE", maxSignedAggregateAndProofSize);
-    rawConfig.accept("MAX_ATTESTER_SLASHING_SIZE", maxAttesterSlashingSize);
-    rawConfig.accept("MAX_DATA_COLUMN_SIDECAR_SIZE", maxDataColumnSidecarSize);
-    rawConfig.accept("MAX_PARTIAL_DATA_COLUMN_SIDECAR_SIZE", maxPartialDataColumnSidecarSize);
-    rawConfig.accept("MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE", maxSignedExecutionPayloadBidSize);
-  }
+  public void addOverridableItemsToRawConfig(final BiConsumer<String, Object> rawConfig) {}
 }

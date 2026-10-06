@@ -34,12 +34,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.apache.commons.io.IOUtils;
+import org.assertj.core.api.AssertionsForInterfaceTypes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.networks.Eth2Network;
 
 public class SpecConfigLoaderTest {
@@ -72,6 +75,78 @@ public class SpecConfigLoaderTest {
   public void shouldMaintainConfigNameBackwardsCompatibility(final String name) {
     final SpecConfig config = SpecConfigLoader.loadConfig(name).specConfig();
     assertThat(config.getRawConfig().get("CONFIG_NAME")).isEqualTo(name);
+  }
+
+  @Test
+  public void shouldLoadConfigWithoutGasLimitSchedule(@TempDir final Path tempDir)
+      throws Exception {
+    // a config predating EIP-8261 must still load: the field is optional
+    final Path configFile = writeMainnetConfigWithout(tempDir, "GAS_LIMIT_SCHEDULE:");
+
+    final SpecConfig config = SpecConfigLoader.loadConfigStrict(configFile.toString()).specConfig();
+
+    AssertionsForInterfaceTypes.assertThat(SpecConfigGloas.required(config).getGasLimitSchedule())
+        .isEmpty();
+  }
+
+  @Test
+  public void shouldLoadConfigWithGasLimitSchedule(@TempDir final Path tempDir) throws Exception {
+    final Path configFile = writeMainnetConfigWithout(tempDir, "GLOAS_FORK_EPOCH:");
+    try (final FileWriter writer =
+        new FileWriter(configFile.toFile(), StandardCharsets.UTF_8, true)) {
+      writer.write(
+          """
+
+          GLOAS_FORK_EPOCH: 500000
+          GAS_LIMIT_SCHEDULE:
+            - EPOCH: 510000
+              GAS_LIMIT: 45000000
+            - EPOCH: 500000
+              GAS_LIMIT: 60000000
+          """);
+    }
+
+    final SpecConfig config = SpecConfigLoader.loadConfigStrict(configFile.toString()).specConfig();
+
+    // entries are sorted by epoch
+    AssertionsForInterfaceTypes.assertThat(SpecConfigGloas.required(config).getGasLimitSchedule())
+        .containsExactly(
+            new GasLimitScheduleEntry(UInt64.valueOf(500000), UInt64.valueOf(60_000_000)),
+            new GasLimitScheduleEntry(UInt64.valueOf(510000), UInt64.valueOf(45_000_000)));
+  }
+
+  @Test
+  public void shouldNotVerifyGasLimitScheduleWhenGloasIsNotScheduled(@TempDir final Path tempDir)
+      throws Exception {
+    final Path configFile = writeMainnetConfigWithout(tempDir, "GAS_LIMIT_SCHEDULE:");
+    try (final FileWriter writer =
+        new FileWriter(configFile.toFile(), StandardCharsets.UTF_8, true)) {
+      writer.write(
+          """
+
+          GAS_LIMIT_SCHEDULE:
+            - EPOCH: 500000
+              GAS_LIMIT: 60000000
+          """);
+    }
+
+    final SpecConfig config = SpecConfigLoader.loadConfigStrict(configFile.toString()).specConfig();
+
+    assertThat(config.getGloasForkEpoch()).isEqualTo(SpecConfig.FAR_FUTURE_EPOCH);
+    AssertionsForInterfaceTypes.assertThat(SpecConfigGloas.required(config).getGasLimitSchedule())
+        .hasSize(1);
+  }
+
+  /** Copies the bundled mainnet config, dropping the (single line) entry starting with the key. */
+  private Path writeMainnetConfigWithout(final Path tempDir, final String key) throws IOException {
+    final Path configFile = tempDir.resolve("config.yaml");
+    try (final InputStream inputStream = getMainnetConfigAsStream()) {
+      final String config = IOUtils.toString(inputStream, StandardCharsets.UTF_8);
+      Files.writeString(
+          configFile,
+          config.lines().filter(line -> !line.startsWith(key)).collect(Collectors.joining("\n")));
+    }
+    return configFile;
   }
 
   @Test

@@ -1,0 +1,109 @@
+/*
+ * Copyright Consensys Software Inc., 2026
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ */
+
+package tech.pegasys.teku.validator.coordinator.publisher;
+
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
+
+import java.util.Optional;
+import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.builder.rest.StakedBuilderClient;
+import tech.pegasys.teku.builder.rest.StakedBuilderClientProvider;
+import tech.pegasys.teku.ethereum.performance.trackers.BlockPublishingPerformance;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.networking.eth2.gossip.BlockGossipChannel;
+import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
+import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
+import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.statetransition.block.BlockImportChannel;
+import tech.pegasys.teku.statetransition.block.BlockImportChannel.BlockImportAndBroadcastValidationResults;
+import tech.pegasys.teku.validator.api.SendSignedBlockResult;
+import tech.pegasys.teku.validator.coordinator.BlockFactory;
+import tech.pegasys.teku.validator.coordinator.DutyMetrics;
+
+class BlockPublisherGloasTest {
+
+  private final BlockGossipChannel blockGossipChannel = mock(BlockGossipChannel.class);
+  private final BlockImportChannel blockImportChannel = mock(BlockImportChannel.class);
+  private final StakedBuilderClientProvider stakedBuilderClientProvider =
+      mock(StakedBuilderClientProvider.class);
+
+  private final BlockPublisherGloas blockPublisherGloas =
+      new BlockPublisherGloas(
+          mock(BlockFactory.class),
+          blockGossipChannel,
+          blockImportChannel,
+          mock(DutyMetrics.class),
+          stakedBuilderClientProvider);
+
+  private final Spec spec = TestSpecFactory.createMinimalGloas();
+  private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
+
+  @Test
+  void sendSignedBlock_shouldPublishBlock() {
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock();
+
+    when(blockGossipChannel.publishBlock(block)).thenReturn(SafeFuture.COMPLETE);
+    when(blockImportChannel.importBlock(block, BroadcastValidationLevel.NOT_REQUIRED))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                new BlockImportAndBroadcastValidationResults(
+                    SafeFuture.completedFuture(BlockImportResult.successful(block)))));
+
+    assertThatSafeFuture(
+            blockPublisherGloas.sendSignedBlock(
+                block,
+                BroadcastValidationLevel.NOT_REQUIRED,
+                BlockPublishingPerformance.NOOP,
+                Optional.empty()))
+        .isCompletedWithValue(SendSignedBlockResult.success(block.getRoot()));
+
+    verify(blockGossipChannel).publishBlock(block);
+    verifyNoInteractions(stakedBuilderClientProvider);
+  }
+
+  @Test
+  void sendSignedBlock_withBuilderUrl_shouldSendBlockToBuilder() {
+    final String builderUrl = "http://builder.example.com";
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock();
+    final StakedBuilderClient builderClient = mock(StakedBuilderClient.class);
+
+    when(stakedBuilderClientProvider.getClient(builderUrl)).thenReturn(builderClient);
+    when(builderClient.submitSignedBeaconBlock(block)).thenReturn(SafeFuture.COMPLETE);
+    when(blockGossipChannel.publishBlock(block)).thenReturn(SafeFuture.COMPLETE);
+    when(blockImportChannel.importBlock(block, BroadcastValidationLevel.NOT_REQUIRED))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                new BlockImportAndBroadcastValidationResults(
+                    SafeFuture.completedFuture(BlockImportResult.successful(block)))));
+
+    assertThatSafeFuture(
+            blockPublisherGloas.sendSignedBlock(
+                block,
+                BroadcastValidationLevel.NOT_REQUIRED,
+                BlockPublishingPerformance.NOOP,
+                Optional.of(builderUrl)))
+        .isCompletedWithValue(SendSignedBlockResult.success(block.getRoot()));
+
+    verify(blockGossipChannel).publishBlock(block);
+    verify(stakedBuilderClientProvider).getClient(builderUrl);
+    verify(builderClient).submitSignedBeaconBlock(block);
+  }
+}

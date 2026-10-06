@@ -1,0 +1,26 @@
+{
+  "title" : "GetLightClientFinalityUpdateResponse",
+  "type" : "object",
+  "required" : [ "version", "data" ],
+  "properties" : {
+    "version" : {
+      "type" : "string",
+      "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze" ]
+    },
+    "data" : {
+      "title" : "LightClientFinalityUpdate",
+      "type" : "object",
+      "oneOf" : [ {
+        "$ref" : "#/components/schemas/LightClientFinalityUpdateAltair"
+      }, {
+        "$ref" : "#/components/schemas/LightClientFinalityUpdateCapella"
+      }, {
+        "$ref" : "#/components/schemas/LightClientFinalityUpdateDeneb"
+      }, {
+        "$ref" : "#/components/schemas/LightClientFinalityUpdateElectra"
+      }, {
+        "$ref" : "#/components/schemas/LightClientFinalityUpdateGloas"
+      } ]
+    }
+  }
+}

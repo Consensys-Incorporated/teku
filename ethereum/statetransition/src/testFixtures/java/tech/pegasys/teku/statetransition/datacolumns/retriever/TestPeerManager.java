@@ -31,6 +31,16 @@ public class TestPeerManager implements DataColumnPeerManager, DataColumnReqResp
     connectedPeers.put(peer.getNodeId(), peer);
   }
 
+  /**
+   * Drops the peer the way the real network layer does: its in-flight requests fail with {@link
+   * DasPeerDisconnectedException} and listeners see it leave the custody peer set.
+   */
+  public void disconnectPeer(final TestPeer peer) {
+    connectedPeers.remove(peer.getNodeId());
+    peer.onDisconnect();
+    dataColumnPeerManagerStub.removePeer(peer);
+  }
+
   @Override
   public SafeFuture<DataColumnSidecar> requestDataColumnSidecar(
       final UInt256 nodeId, final DataColumnSlotAndIdentifier columnIdentifier) {

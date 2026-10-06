@@ -35,6 +35,7 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.networks.Eth2Network;
 import tech.pegasys.teku.storage.api.CombinedStorageChannel;
 import tech.pegasys.teku.storage.api.Eth1DepositStorageChannel;
+import tech.pegasys.teku.storage.api.LightClientUpdateChannel;
 import tech.pegasys.teku.storage.api.SidecarUpdateChannel;
 import tech.pegasys.teku.storage.api.VoteUpdateChannel;
 import tech.pegasys.teku.storage.archive.BlobSidecarsArchiver;
@@ -93,6 +94,12 @@ public class StorageService extends Service implements StorageServiceFacade {
                       1,
                       DEFAULT_MAX_QUEUE_SIZE,
                       Thread.NORM_PRIORITY - 1);
+              final AsyncRunner storageMetricsAsyncRunner =
+                  serviceConfig.createAsyncRunner(
+                      "storageMetricsAsyncRunner",
+                      1,
+                      DEFAULT_MAX_QUEUE_SIZE,
+                      Thread.NORM_PRIORITY - 2);
               final VersionedDatabaseFactory dbFactory =
                   new VersionedDatabaseFactory(
                       serviceConfig.getMetricsSystem(),
@@ -143,7 +150,8 @@ public class StorageService extends Service implements StorageServiceFacade {
                             config.getBlockPruningLimit(),
                             "block",
                             pruningTimingsLabelledGauge,
-                            pruningActiveLabelledGauge));
+                            pruningActiveLabelledGauge,
+                            config.getPruningWarnTimeout()));
               }
               if (config.getDataStorageMode().storesFinalizedStates()
                   && config.getRetainedSlots() > 0) {
@@ -185,6 +193,7 @@ public class StorageService extends Service implements StorageServiceFacade {
                             blobSidecarsArchiver,
                             serviceConfig.getMetricsSystem(),
                             storagePrunerAsyncRunner,
+                            storageMetricsAsyncRunner,
                             serviceConfig.getTimeProvider(),
                             config.getBlobsPruningInterval(),
                             config.getBlobsPruningLimit(),
@@ -192,7 +201,8 @@ public class StorageService extends Service implements StorageServiceFacade {
                             "blob_sidecar",
                             pruningTimingsLabelledGauge,
                             pruningActiveLabelledGauge,
-                            config.isStoreNonCanonicalBlocksEnabled()));
+                            config.isStoreNonCanonicalBlocksEnabled(),
+                            config.getPruningWarnTimeout()));
               }
               if (config.getSpec().isMilestoneSupported(SpecMilestone.FULU)) {
                 dataColumnSidecarPruner =
@@ -202,13 +212,15 @@ public class StorageService extends Service implements StorageServiceFacade {
                             database,
                             serviceConfig.getMetricsSystem(),
                             storagePrunerAsyncRunner,
+                            storageMetricsAsyncRunner,
                             serviceConfig.getTimeProvider(),
                             config.getDataColumnPruningInterval(),
                             config.getDataColumnPruningLimit(),
                             dataColumnSidecarsStorageCountersEnabled,
                             "data_column_sidecar",
                             pruningTimingsLabelledGauge,
-                            pruningActiveLabelledGauge));
+                            pruningActiveLabelledGauge,
+                            config.getPruningWarnTimeout()));
               }
               chainStorage =
                   ChainStorage.create(
@@ -240,7 +252,8 @@ public class StorageService extends Service implements StorageServiceFacade {
               eventChannels
                   .subscribe(Eth1DepositStorageChannel.class, depositStorage)
                   .subscribe(VoteUpdateChannel.class, batchingVoteUpdateChannel)
-                  .subscribe(SidecarUpdateChannel.class, chainStorage);
+                  .subscribe(SidecarUpdateChannel.class, chainStorage)
+                  .subscribe(LightClientUpdateChannel.class, chainStorage);
             })
         .thenCompose(
             __ ->
@@ -292,12 +305,18 @@ public class StorageService extends Service implements StorageServiceFacade {
                 config.getStatePruningLimit(),
                 "state",
                 pruningTimingsLabelledGauge,
-                pruningActiveLabelledGauge));
+                pruningActiveLabelledGauge,
+                config.getPruningWarnTimeout()));
   }
 
   @VisibleForTesting
   public Optional<StatePruner> getStatePruner() {
     return statePruner;
+  }
+
+  @VisibleForTesting
+  public Optional<DataColumnSidecarPruner> getDataColumnSidecarPruner() {
+    return dataColumnSidecarPruner;
   }
 
   @Override

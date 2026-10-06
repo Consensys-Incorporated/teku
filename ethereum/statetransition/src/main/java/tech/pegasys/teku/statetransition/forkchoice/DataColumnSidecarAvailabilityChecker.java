@@ -13,7 +13,6 @@
 
 package tech.pegasys.teku.statetransition.forkchoice;
 
-import com.google.common.annotations.VisibleForTesting;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
@@ -41,7 +40,7 @@ public class DataColumnSidecarAvailabilityChecker implements AvailabilityChecker
   private final RecentChainData recentChainData;
   private final SignedBeaconBlock block;
   private final Optional<SignedExecutionPayloadEnvelope> signedEnvelope;
-  private final Duration waitForSamplerCompletionTimeout;
+  private static final long BATCH_SYNC_TIMEOUT_BOOST = 5L;
 
   public DataColumnSidecarAvailabilityChecker(
       final DataAvailabilitySampler dataAvailabilitySampler,
@@ -71,22 +70,6 @@ public class DataColumnSidecarAvailabilityChecker implements AvailabilityChecker
     this.recentChainData = recentChainData;
     this.block = block;
     this.signedEnvelope = signedEnvelope;
-    this.waitForSamplerCompletionTimeout = calculateCompletionTimeout(spec, block.getSlot());
-  }
-
-  @VisibleForTesting
-  DataColumnSidecarAvailabilityChecker(
-      final DataAvailabilitySampler dataAvailabilitySampler,
-      final Spec spec,
-      final RecentChainData recentChainData,
-      final SignedBeaconBlock block,
-      final Duration waitForSamplerCompletionTimeout) {
-    this.dataAvailabilitySampler = dataAvailabilitySampler;
-    this.spec = spec;
-    this.recentChainData = recentChainData;
-    this.block = block;
-    this.signedEnvelope = Optional.empty();
-    this.waitForSamplerCompletionTimeout = waitForSamplerCompletionTimeout;
   }
 
   @Override
@@ -115,7 +98,7 @@ public class DataColumnSidecarAvailabilityChecker implements AvailabilityChecker
             .checkDataAvailability(block.getSlot(), block.getRoot())
             .propagateTo(localFuture);
         localFuture
-            .orTimeout(waitForSamplerCompletionTimeout)
+            .orTimeout(calculateCompletionTimeout(spec, block.getSlot()))
             .thenApply(DataAndValidationResult::validResult)
             .exceptionallyCompose(
                 error ->
@@ -174,7 +157,16 @@ public class DataColumnSidecarAvailabilityChecker implements AvailabilityChecker
         recentChainData.getStore(), block.getSlot());
   }
 
-  static Duration calculateCompletionTimeout(final Spec spec, final UInt64 slot) {
+  private Duration calculateCompletionTimeout(final Spec spec, final UInt64 slot) {
+    if (recentChainData.getCurrentSlot().isEmpty()) {
+      return Duration.ofMillis(spec.getSlotDurationMillis(slot));
+    }
+    final UInt64 currentSlot = recentChainData.getCurrentSlot().get();
+    final UInt64 recentEpochSlot = currentSlot.minusMinZero(spec.getSlotsPerEpoch(currentSlot));
+    // BatchSync downloads 125 slots simultaneously. We should increase timeout accordingly
+    if (slot.isLessThan(recentEpochSlot)) {
+      return Duration.ofMillis(spec.getSlotDurationMillis(slot) * BATCH_SYNC_TIMEOUT_BOOST);
+    }
     return Duration.ofMillis(spec.getSlotDurationMillis(slot));
   }
 }

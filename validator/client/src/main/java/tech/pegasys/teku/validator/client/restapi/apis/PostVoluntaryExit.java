@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.validator.client.restapi.apis;
 
+import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.validator.client.restapi.ValidatorRestApi.TAG_VOLUNTARY_EXIT;
 import static tech.pegasys.teku.validator.client.restapi.ValidatorTypes.EPOCH_QUERY_TYPE;
@@ -30,6 +31,7 @@ import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
+import tech.pegasys.teku.validator.client.KeyManager;
 import tech.pegasys.teku.validator.client.VoluntaryExitDataProvider;
 
 public class PostVoluntaryExit extends RestApiEndpoint {
@@ -46,8 +48,9 @@ public class PostVoluntaryExit extends RestApiEndpoint {
               .build();
 
   private final VoluntaryExitDataProvider provider;
+  private final KeyManager keyManager;
 
-  public PostVoluntaryExit(final VoluntaryExitDataProvider provider) {
+  public PostVoluntaryExit(final VoluntaryExitDataProvider provider, final KeyManager keyManager) {
     super(
         EndpointMetadata.post(ROUTE)
             .operationId("signVoluntaryExit")
@@ -66,11 +69,17 @@ public class PostVoluntaryExit extends RestApiEndpoint {
             .withForbiddenResponse()
             .build());
     this.provider = provider;
+    this.keyManager = keyManager;
   }
 
   @Override
   public void handleRequest(final RestApiRequest request) throws JsonProcessingException {
     final BLSPublicKey publicKey = request.getPathParameter(PARAM_PUBKEY_TYPE);
+    if (keyManager.getValidatorByPublicKey(publicKey).isEmpty()) {
+      request.respondError(SC_NOT_FOUND, "Validator public key not found");
+      return;
+    }
+
     final Optional<UInt64> maybeEpoch = request.getOptionalQueryParameter(EPOCH_QUERY_TYPE);
     final SafeFuture<SignedVoluntaryExit> future =
         provider.getSignedVoluntaryExit(publicKey, maybeEpoch);

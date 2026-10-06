@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
@@ -49,6 +51,8 @@ import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 public class DataColumnSidecarsByRootMessageHandler
     extends PeerRequiredLocalMessageHandler<
         DataColumnSidecarsByRootRequestMessage, DataColumnSidecar> {
+
+  private static final Logger LOG = LogManager.getLogger();
 
   private static final int ROOT_SLOT_CACHE_SIZE = 256;
 
@@ -174,11 +178,28 @@ public class DataColumnSidecarsByRootMessageHandler
           .thenCompose(
               maybeBlock -> {
                 if (maybeBlock.isEmpty()) {
+                  LOG.debug(
+                      "Cannot reconstruct pruned data column sidecar slot {} index {} blockRoot {}: "
+                          + "block not available",
+                      identifier.slot(),
+                      identifier.columnIndex(),
+                      identifier.blockRoot());
                   return SafeFuture.completedFuture(Optional.empty());
                 }
 
-                return dataColumnSidecarArchiveReconstructor.reconstructDataColumnSidecar(
-                    maybeBlock.get(), identifier.columnIndex(), messageId);
+                return dataColumnSidecarArchiveReconstructor
+                    .reconstructDataColumnSidecar(
+                        maybeBlock.get(), identifier.columnIndex(), messageId)
+                    .thenPeek(
+                        maybeSidecar ->
+                            maybeSidecar.ifPresent(
+                                sidecar ->
+                                    LOG.debug(
+                                        "Serving reconstructed data column sidecar slot {} index {} "
+                                            + "blockRoot {} for by-root request",
+                                        sidecar.getSlot(),
+                                        sidecar.getIndex(),
+                                        identifier.blockRoot())));
               });
     }
 

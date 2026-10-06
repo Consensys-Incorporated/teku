@@ -13,9 +13,13 @@
 
 package tech.pegasys.teku.statetransition.validation;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
@@ -37,7 +41,7 @@ import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
-import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
+import tech.pegasys.teku.spec.datastructures.epbs.BlockRootAndBuilderIndex;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
@@ -95,13 +99,15 @@ public class ExecutionPayloadGossipValidatorTest {
     when(gossipValidationHelper.isBeforeFinalizedSlot(slot)).thenReturn(false);
     when(gossipValidationHelper.retrieveBlockByRoot(blockRoot))
         .thenReturn(SafeFuture.completedFuture(Optional.of(beaconBlock)));
-    when(gossipValidationHelper.getStateAtSlotAndBlockRoot(any(SlotAndBlockRoot.class)))
+    when(gossipValidationHelper.getStateAtBlockRoot(any(Bytes32.class)))
         .thenReturn(SafeFuture.completedFuture(Optional.of(postState)));
     final SpecVersion specVersion = mock(SpecVersion.class);
     final MiscHelpers miscHelpers = mock(MiscHelpers.class);
     final Bytes32 signingRoot = Bytes32.random();
     when(miscHelpers.computeSigningRoot(eq(envelope), any())).thenReturn(signingRoot);
     when(specVersion.miscHelpers()).thenReturn(miscHelpers);
+    // Real config so the execution request and withdrawal limit rules see actual limits
+    when(specVersion.getConfig()).thenReturn(specContext.getSpec().atSlot(slot).getConfig());
     when(spec.atSlot(slot)).thenReturn(specVersion);
     when(gossipValidationHelper.isSignatureValidWithRespectToBuilderIndex(
             any(), any(), any(), any()))
@@ -111,6 +117,46 @@ public class ExecutionPayloadGossipValidatorTest {
   @TestTemplate
   void shouldAcceptWhenValid() {
     assertThatSafeFuture(validator.validate(signedEnvelope)).isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldReportWhetherPayloadIsSeen() {
+    assertThat(validator.isPayloadSeen(blockRoot)).isFalse();
+
+    assertThatSafeFuture(validator.validate(signedEnvelope)).isCompletedWithValue(ACCEPT);
+
+    assertThat(validator.isPayloadSeen(blockRoot)).isTrue();
+    assertThat(validator.isPayloadSeen(dataStructureUtil.randomBytes32())).isFalse();
+  }
+
+  @TestTemplate
+  void shouldCheckPayloadSeenWhileAnotherPayloadIsValidated() {
+    final SignedExecutionPayloadEnvelope firstSignedEnvelope = spy(signedEnvelope);
+    final ExecutionPayloadEnvelope firstEnvelope = spy(envelope);
+    final BlockRootAndBuilderIndex firstKey = spy(envelope.getBlockRootAndBuilderIndex());
+    doReturn(firstEnvelope).when(firstSignedEnvelope).getMessage();
+    doReturn(firstKey).when(firstEnvelope).getBlockRootAndBuilderIndex();
+    final SignedExecutionPayloadEnvelope secondSignedEnvelope =
+        createSignedEnvelopeWithBlockRoot(dataStructureUtil.randomBytes32());
+    final SignedExecutionPayloadEnvelope thirdSignedEnvelope =
+        createSignedEnvelopeWithBlockRoot(dataStructureUtil.randomBytes32());
+
+    assertThatSafeFuture(validator.validate(firstSignedEnvelope)).isCompletedWithValue(ACCEPT);
+    assertThatSafeFuture(validator.validate(secondSignedEnvelope)).isCompletedWithValue(ACCEPT);
+
+    // Insert between iterator steps to deterministically reproduce a concurrent validation
+    doAnswer(
+            invocation -> {
+              assertThatSafeFuture(validator.validate(thirdSignedEnvelope))
+                  .isCompletedWithValue(ACCEPT);
+              return blockRoot;
+            })
+        .doReturn(blockRoot)
+        .when(firstKey)
+        .blockRoot();
+
+    assertThat(validator.isPayloadSeen(dataStructureUtil.randomBytes32())).isFalse();
+    assertThat(validator.isPayloadSeen(thirdSignedEnvelope.getBeaconBlockRoot())).isTrue();
   }
 
   @TestTemplate
@@ -240,7 +286,7 @@ public class ExecutionPayloadGossipValidatorTest {
 
   @TestTemplate
   void shouldSaveForFutureIfStateIsUnavailable() {
-    when(gossipValidationHelper.getStateAtSlotAndBlockRoot(any(SlotAndBlockRoot.class)))
+    when(gossipValidationHelper.getStateAtBlockRoot(any(Bytes32.class)))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
     assertThatSafeFuture(validator.validate(signedEnvelope)).isCompletedWithValue(SAVE_FOR_FUTURE);
   }
@@ -326,5 +372,23 @@ public class ExecutionPayloadGossipValidatorTest {
             validator.validate(
                 signedEnvelope, Optional.of(BroadcastValidationLevel.CONSENSUS_AND_EQUIVOCATION)))
         .isCompletedWithValue(ACCEPT);
+  }
+
+  private SignedExecutionPayloadEnvelope createSignedEnvelopeWithBlockRoot(final Bytes32 root) {
+    final ExecutionPayloadEnvelope newEnvelope =
+        envelope
+            .getSchema()
+            .create(
+                envelope.getPayload(),
+                envelope.getExecutionRequests(),
+                envelope.getBuilderIndex(),
+                root,
+                envelope.getParentBeaconBlockRoot());
+    when(gossipValidationHelper.getSlotForBlockRoot(root)).thenReturn(Optional.of(slot));
+    when(gossipValidationHelper.retrieveBlockByRoot(root))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(beaconBlock)));
+    when(spec.atSlot(slot).miscHelpers().computeSigningRoot(eq(newEnvelope), any()))
+        .thenReturn(dataStructureUtil.randomBytes32());
+    return signedEnvelope.getSchema().create(newEnvelope, signedEnvelope.getSignature());
   }
 }

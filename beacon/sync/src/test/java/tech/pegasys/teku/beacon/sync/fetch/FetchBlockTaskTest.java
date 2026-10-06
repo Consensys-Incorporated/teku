@@ -46,6 +46,57 @@ public class FetchBlockTaskTest extends AbstractFetchTaskTest {
   }
 
   @Test
+  public void run_emptyResponseFails() {
+    final Bytes32 blockRoot = dataStructureUtil.randomBytes32();
+    final FetchBlockTask task = new FetchBlockTask(eth2P2PNetwork, blockRoot);
+
+    final Eth2Peer peer = registerNewPeer(1);
+    when(peer.requestBlockByRoot(blockRoot))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+
+    final SafeFuture<FetchResult<SignedBeaconBlock>> result = task.run();
+    assertThat(result).isDone();
+    final FetchResult<SignedBeaconBlock> fetchResult = result.getNow(null);
+    assertThat(fetchResult.getPeer()).hasValue(peer);
+    assertThat(fetchResult.isSuccessful()).isFalse();
+    assertThat(fetchResult.getStatus()).isEqualTo(Status.FETCH_FAILED);
+    assertThat(fetchResult.getResult()).isEmpty();
+  }
+
+  @Test
+  public void run_wrongBlockRootFailsAndCanRetry() {
+    final SignedBeaconBlock expectedBlock = dataStructureUtil.randomSignedBeaconBlock(10);
+    final SignedBeaconBlock wrongBlock = dataStructureUtil.randomSignedBeaconBlock(11);
+    final Bytes32 blockRoot = expectedBlock.getRoot();
+    final FetchBlockTask task = new FetchBlockTask(eth2P2PNetwork, blockRoot);
+
+    final Eth2Peer peer = registerNewPeer(1);
+    when(peer.requestBlockByRoot(blockRoot))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(wrongBlock)));
+
+    final SafeFuture<FetchResult<SignedBeaconBlock>> result = task.run();
+    assertThat(result).isDone();
+    final FetchResult<SignedBeaconBlock> fetchResult = result.getNow(null);
+    assertThat(fetchResult.getPeer()).hasValue(peer);
+    assertThat(fetchResult.isSuccessful()).isFalse();
+    assertThat(fetchResult.getStatus()).isEqualTo(Status.FETCH_FAILED);
+    assertThat(fetchResult.getResult()).isEmpty();
+    assertThat(task.getNumberOfRetries()).isEqualTo(0);
+
+    final Eth2Peer peer2 = registerNewPeer(2);
+    when(peer2.requestBlockByRoot(blockRoot))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(expectedBlock)));
+
+    final SafeFuture<FetchResult<SignedBeaconBlock>> retryResult = task.run();
+    assertThat(retryResult).isDone();
+    final FetchResult<SignedBeaconBlock> retryFetchResult = retryResult.getNow(null);
+    assertThat(retryFetchResult.getPeer()).hasValue(peer2);
+    assertThat(retryFetchResult.isSuccessful()).isTrue();
+    assertThat(retryFetchResult.getResult()).hasValue(expectedBlock);
+    assertThat(task.getNumberOfRetries()).isEqualTo(1);
+  }
+
+  @Test
   public void run_noPeers() {
     final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(10);
     final Bytes32 blockRoot = block.getMessage().hashTreeRoot();

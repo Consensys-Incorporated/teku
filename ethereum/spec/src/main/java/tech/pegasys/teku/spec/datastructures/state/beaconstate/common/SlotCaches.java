@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.spec.datastructures.state.beaconstate.common;
 
+import java.util.Optional;
 import org.apache.tuweni.units.bigints.UInt256;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 
@@ -28,6 +29,8 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 public class SlotCaches {
   private volatile UInt64 blockProposerRewards = UInt64.ZERO;
   private volatile UInt256 blockExecutionValue = UInt256.ZERO;
+  // the URL of the builder from which the bid was retrieved when proposing the block
+  private volatile Optional<String> builderUrl = Optional.empty();
 
   private static final SlotCaches NO_OP_INSTANCE =
       new SlotCaches() {
@@ -38,14 +41,21 @@ public class SlotCaches {
         public void setBlockExecutionValue(final UInt256 blockExecutionValue) {}
 
         @Override
+        public void setBuilderUrl(final String builderUrl) {}
+
+        @Override
         public SlotCaches copy() {
           return this;
         }
       };
 
-  private SlotCaches(final UInt64 blockProposerRewards, final UInt256 blockExecutionValue) {
+  private SlotCaches(
+      final UInt64 blockProposerRewards,
+      final UInt256 blockExecutionValue,
+      final Optional<String> builderUrl) {
     this.blockProposerRewards = blockProposerRewards;
     this.blockExecutionValue = blockExecutionValue;
+    this.builderUrl = builderUrl;
   }
 
   private SlotCaches() {}
@@ -68,6 +78,10 @@ public class SlotCaches {
     return blockExecutionValue;
   }
 
+  public Optional<String> getBuilderUrl() {
+    return builderUrl;
+  }
+
   public void increaseBlockProposerRewards(final UInt64 delta) {
     // state transition is single threaded, so no need to do an atomic update
     this.blockProposerRewards = this.blockProposerRewards.plus(delta);
@@ -77,8 +91,12 @@ public class SlotCaches {
     this.blockExecutionValue = blockExecutionValue;
   }
 
+  public void setBuilderUrl(final String builderUrl) {
+    this.builderUrl = Optional.of(builderUrl);
+  }
+
   public SlotCaches copy() {
-    return new SlotCaches(blockProposerRewards, blockExecutionValue);
+    return new SlotCaches(blockProposerRewards, blockExecutionValue, builderUrl);
   }
 
   // Called at the end of every slot transition (processSlot)
@@ -86,6 +104,7 @@ public class SlotCaches {
   public void onSlotProcessed() {
     this.blockProposerRewards = UInt64.ZERO;
     this.blockExecutionValue = UInt256.ZERO;
+    this.builderUrl = Optional.empty();
   }
 
   // Called at the end of every slot transition (processBlock)

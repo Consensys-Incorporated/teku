@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.validator.client;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -27,6 +28,7 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.validator.client.duties.SlotBasedScheduledDuties;
 
@@ -45,8 +47,7 @@ class PtcDutySchedulerTest {
 
   private final SlotBasedScheduledDuties<?, ?> duties = createScheduledDuties();
 
-  private final PtcDutyScheduler dutyScheduler =
-      new PtcDutyScheduler(metricsSystem, dutyLoader, spec);
+  private PayloadTimelinessCommitteeDutyScheduler dutyScheduler;
 
   @BeforeEach
   public void setUp() {
@@ -60,6 +61,7 @@ class PtcDutySchedulerTest {
 
   @Test
   void shouldPerformProductionWhenPayloadAttestationCreationDue() {
+    dutyScheduler = createDutyScheduler(spec);
     final UInt64 epoch = spec.computeEpochAtSlot(SLOT);
     // calculate pending duties
     dutyScheduler.onSlot(SLOT);
@@ -69,6 +71,45 @@ class PtcDutySchedulerTest {
     dutyScheduler.onPayloadAttestationCreationDue(SLOT);
 
     verify(duties).performProductionDuty(SLOT);
+  }
+
+  @Test
+  void shouldNotRequestDutiesBeforeGloas() {
+    final UInt64 gloasForkEpoch = UInt64.valueOf(3);
+    final Spec transitionSpec = TestSpecFactory.createMinimalWithGloasForkEpoch(gloasForkEpoch);
+    final PayloadTimelinessCommitteeDutyScheduler transitionDutyScheduler =
+        createDutyScheduler(transitionSpec);
+
+    transitionDutyScheduler.onSlot(transitionSpec.computeStartSlotAtEpoch(UInt64.ONE));
+
+    assertThat(requestedDutiesByEpoch).isEmpty();
+  }
+
+  @Test
+  void shouldOnlyRequestGloasDutiesWhenLookaheadIncludesGloas() {
+    final UInt64 gloasForkEpoch = UInt64.valueOf(3);
+    final Spec transitionSpec = TestSpecFactory.createMinimalWithGloasForkEpoch(gloasForkEpoch);
+    final PayloadTimelinessCommitteeDutyScheduler transitionDutyScheduler =
+        createDutyScheduler(transitionSpec);
+
+    transitionDutyScheduler.onSlot(
+        transitionSpec.computeStartSlotAtEpoch(gloasForkEpoch.decrement()));
+
+    assertThat(requestedDutiesByEpoch).containsOnlyKeys(gloasForkEpoch);
+  }
+
+  @Test
+  void shouldRequestCurrentAndLookaheadDutiesAtGloas() {
+    dutyScheduler = createDutyScheduler(spec);
+    final UInt64 gloasForkEpoch = spec.getForkSchedule().getFork(SpecMilestone.GLOAS).getEpoch();
+
+    dutyScheduler.onSlot(spec.computeStartSlotAtEpoch(gloasForkEpoch));
+
+    assertThat(requestedDutiesByEpoch).containsOnlyKeys(gloasForkEpoch, gloasForkEpoch.increment());
+  }
+
+  private PayloadTimelinessCommitteeDutyScheduler createDutyScheduler(final Spec spec) {
+    return new PayloadTimelinessCommitteeDutyScheduler(metricsSystem, dutyLoader, spec);
   }
 
   private SlotBasedScheduledDuties<?, ?> createScheduledDuties() {

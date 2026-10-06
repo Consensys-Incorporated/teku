@@ -133,6 +133,17 @@ public class Eth2NetworkOptions {
   private OptionalLong dataColumnSidecarRecoveryMaxDelayMillis = OptionalLong.empty();
 
   @Option(
+      names = {"--Xlight-client-server-enabled"},
+      paramLabel = "<BOOLEAN>",
+      description = "Generate and serve light client updates",
+      arity = "0..1",
+      fallbackValue = "true",
+      showDefaultValue = Visibility.ALWAYS,
+      hidden = true)
+  private boolean lightClientServerEnabled =
+      Eth2NetworkConfiguration.DEFAULT_LIGHT_CLIENT_SERVER_ENABLED;
+
+  @Option(
       names = {"--Xfork-choice-late-block-reorg-enabled"},
       paramLabel = "<BOOLEAN>",
       description = "Allow late blocks to be reorged out if they meet the requirements.",
@@ -142,6 +153,17 @@ public class Eth2NetworkOptions {
       hidden = true)
   private boolean forkChoiceLateBlockReorgEnabled =
       Eth2NetworkConfiguration.DEFAULT_FORK_CHOICE_LATE_BLOCK_REORG_ENABLED;
+
+  @Option(
+      names = {"--Xfast-confirmation-enabled"},
+      paramLabel = "<BOOLEAN>",
+      description = "Enable the experimental fast confirmation rule.",
+      arity = "0..1",
+      fallbackValue = "true",
+      showDefaultValue = Visibility.ALWAYS,
+      hidden = true)
+  private boolean fastConfirmationEnabled =
+      Eth2NetworkConfiguration.DEFAULT_FAST_CONFIRMATION_ENABLED;
 
   @Option(
       names = {"--Xprepare-block-production-enabled"},
@@ -561,6 +583,8 @@ public class Eth2NetworkOptions {
         .asyncP2pMaxThreads(asyncP2pMaxThreads)
         .asyncBeaconChainMaxThreads(asyncBeaconChainMaxThreads)
         .forkChoiceLateBlockReorgEnabled(forkChoiceLateBlockReorgEnabled)
+        .lightClientServerEnabled(lightClientServerEnabled)
+        .fastConfirmationEnabled(fastConfirmationEnabled)
         .prepareBlockProductionEnabled(prepareBlockProductionEnabled)
         .aggregatingAttestationPoolProfilingEnabled(aggregatingAttestationPoolProfilingEnabled)
         .aggregatingAttestationPoolV2BlockAggregationTimeLimit(

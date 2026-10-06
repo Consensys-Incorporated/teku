@@ -21,6 +21,7 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.builder.ValidatorRegistration;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderRequestAuth;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
@@ -70,6 +71,8 @@ public interface Signer {
 
   SafeFuture<BLSSignature> signProposerPreferences(
       ProposerPreferences proposerPreferences, ForkInfo forkInfo);
+
+  SafeFuture<BLSSignature> signBuilderRequestAuth(BuilderRequestAuth builderRequestAuth);
 
   default boolean isLocal() {
     return getSigningServiceUrl().isEmpty();

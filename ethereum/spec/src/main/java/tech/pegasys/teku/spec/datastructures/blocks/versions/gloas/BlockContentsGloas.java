@@ -40,12 +40,12 @@ public class BlockContentsGloas
         SszList<Blob>>
     implements BlockContainer {
 
-  BlockContentsGloas(final BlockContentsGloasSchema type, final TreeNode backingNode) {
+  BlockContentsGloas(final BlockContentsSchemaGloas type, final TreeNode backingNode) {
     super(type, backingNode);
   }
 
   BlockContentsGloas(
-      final BlockContentsGloasSchema schema,
+      final BlockContentsSchemaGloas schema,
       final BeaconBlock beaconBlock,
       final ExecutionPayloadEnvelope executionPayloadEnvelope,
       final SszList<SszKZGProof> kzgProofs,
@@ -58,8 +58,9 @@ public class BlockContentsGloas
     return getField0();
   }
 
-  public ExecutionPayloadEnvelope getExecutionPayloadEnvelope() {
-    return getField1();
+  @Override
+  public Optional<ExecutionPayloadEnvelope> getExecutionPayloadEnvelope() {
+    return Optional.of(getField1());
   }
 
   @Override

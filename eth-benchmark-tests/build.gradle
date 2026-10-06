@@ -25,6 +25,8 @@ dependencies {
 	jmhImplementation testFixtures(project(':ethereum:weaksubjectivity'))
 	jmhImplementation testFixtures(project(':infrastructure:async'))
 	jmhImplementation testFixtures(project('::networking:eth2'))
+	jmhImplementation 'io.netty:netty-handler'
+	jmhImplementation 'io.airlift:aircompressor-v3'
 
 	testFixturesImplementation project(':infrastructure:async')
 	testFixturesImplementation project(':infrastructure:bls')

@@ -22,6 +22,7 @@ import static tech.pegasys.teku.spec.networks.Eth2Network.EPHEMERY;
 
 import com.google.common.collect.ImmutableList;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -43,7 +44,6 @@ public class Eth2NetworkConfigurationTest {
 
   @ParameterizedTest(name = "{0}")
   @MethodSource("getDefinedNetworks")
-  @SuppressWarnings("deprecation")
   public void build_shouldBuildKnownNetworks(
       final Eth2Network network, final NetworkDefinition networkDefinition) {
     final Eth2NetworkConfiguration networkConfig =
@@ -52,34 +52,45 @@ public class Eth2NetworkConfigurationTest {
         Eth2NetworkConfiguration.builder();
     networkDefinition.configure(networkConfigBuilder);
 
-    if (!network.configName().equals(EPHEMERY.configName())) {
-      assertThat(networkConfig.getConstants()).isEqualTo(network.configName());
-    } else {
-      assertThat(networkConfig.getConstants()).isEqualTo(EPHEMERY_CONFIG_URL);
-    }
     assertThat(networkConfigBuilder.build()).isEqualTo(networkConfig);
     assertThat(networkConfig.getNetworkBoostrapConfig().isUsingCustomInitialState()).isFalse();
   }
 
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("getDefinedNetworks")
+  public void testBuilderApplyNetworkDefaultsSetsContents(
+      final Eth2Network network, final NetworkDefinition unused)
+      throws IllegalAccessException, NoSuchFieldException {
+    final Eth2NetworkConfiguration.Builder networkConfigBuilder =
+        Eth2NetworkConfiguration.builder();
+
+    networkConfigBuilder.applyNetworkDefaults(network);
+
+    Field constantsField = Eth2NetworkConfiguration.Builder.class.getDeclaredField("constants");
+    constantsField.setAccessible(true);
+    if (network == EPHEMERY) {
+      assertThat(constantsField.get(networkConfigBuilder)).isEqualTo(EPHEMERY_CONFIG_URL);
+    } else {
+      assertThat(constantsField.get(networkConfigBuilder)).isEqualTo(network.configName());
+    }
+    constantsField.setAccessible(false);
+  }
+
   @Test
-  @SuppressWarnings("deprecation")
   public void builder_usingConstantsUrl() {
     final URL url =
         getClass().getClassLoader().getResource("tech/pegasys/teku/networks/test-constants.yaml");
     final Eth2NetworkConfiguration config =
         Eth2NetworkConfiguration.builder(url.toString()).build();
-    assertThat(config.getConstants()).isEqualTo(url.toString());
     assertThat(config.getSpec().getGenesisSpecConfig().getMaxCommitteesPerSlot()).isEqualTo(4);
   }
 
   @Test
-  @SuppressWarnings("deprecation")
   public void constants_usingConstantsUrl() {
     final URL url =
         getClass().getClassLoader().getResource("tech/pegasys/teku/networks/test-constants.yaml");
     final Eth2NetworkConfiguration config =
         Eth2NetworkConfiguration.builder().constants(url.toString()).build();
-    assertThat(config.getConstants()).isEqualTo(url.toString());
     assertThat(config.getSpec().getGenesisSpecConfig().getMaxCommitteesPerSlot()).isEqualTo(4);
   }
 

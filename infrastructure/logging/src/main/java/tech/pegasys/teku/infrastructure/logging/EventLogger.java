@@ -152,6 +152,20 @@ public class EventLogger {
     info("Syncing completed", Color.GREEN);
   }
 
+  public void notInSyncWithoutPeers() {
+    warn(
+        "No connected peers, so the chain head cannot be trusted to be current. Remaining in syncing state until a peer connects",
+        Color.YELLOW);
+  }
+
+  public void syncStoppedWhileBehindHead(final long slotsBehind) {
+    warn(
+        String.format(
+            "Syncing stopped while the chain head is still %d slots behind. Remaining in syncing state until a sync can make progress",
+            slotsBehind),
+        Color.YELLOW);
+  }
+
   public void headNoLongerOptimisticWhileSyncing() {
     info("Execution Client syncing complete. Continuing to sync beacon chain blocks", Color.YELLOW);
   }

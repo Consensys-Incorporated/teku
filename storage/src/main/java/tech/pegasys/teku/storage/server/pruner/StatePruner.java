@@ -42,6 +42,7 @@ public class StatePruner extends Service {
   private final SettableLabelledGauge pruningTimingsLabelledGauge;
   private final SettableLabelledGauge pruningActiveLabelledGauge;
   private final String pruningMetricsType;
+  private final Duration pruningWarnTimeout;
   // caching last pruned slot to avoid hitting the db multiple times
   private Optional<UInt64> maybeLastPrunedSlot = Optional.empty();
 
@@ -56,7 +57,8 @@ public class StatePruner extends Service {
       final long pruneLimit,
       final String pruningMetricsType,
       final SettableLabelledGauge pruningTimingsLabelledGauge,
-      final SettableLabelledGauge pruningActiveLabelledGauge) {
+      final SettableLabelledGauge pruningActiveLabelledGauge,
+      final Duration pruningWarnTimeout) {
     this.spec = spec;
     this.database = database;
     this.asyncRunner = asyncRunner;
@@ -66,6 +68,7 @@ public class StatePruner extends Service {
     this.pruningActiveLabelledGauge = pruningActiveLabelledGauge;
     this.slotsToRetain = slotsToRetain;
     this.pruneLimit = pruneLimit;
+    this.pruningWarnTimeout = pruningWarnTimeout;
   }
 
   @Override
@@ -77,9 +80,16 @@ public class StatePruner extends Service {
                   pruningActiveLabelledGauge.set(1, pruningMetricsType);
                   final long start = System.currentTimeMillis();
                   pruneStates();
-                  pruningTimingsLabelledGauge.set(
-                      System.currentTimeMillis() - start, pruningMetricsType);
+                  final long elapsed = System.currentTimeMillis() - start;
+                  pruningTimingsLabelledGauge.set(elapsed, pruningMetricsType);
                   pruningActiveLabelledGauge.set(0, pruningMetricsType);
+                  if (elapsed > pruningWarnTimeout.toMillis()) {
+                    LOG.warn(
+                        "Pruning task for {} took {} ms, exceeding the warn threshold of {} ms",
+                        pruningMetricsType,
+                        elapsed,
+                        pruningWarnTimeout.toMillis());
+                  }
                 },
                 Duration.ZERO,
                 pruneInterval,
@@ -108,9 +118,14 @@ public class StatePruner extends Service {
     }
     LOG.debug("Initiating pruning of finalized states prior to slot {}.", earliestSlotToKeep);
     try {
+      final long start = System.currentTimeMillis();
       maybeLastPrunedSlot =
           database.pruneFinalizedStates(
               maybeLastPrunedSlot, earliestSlotToKeep.decrement(), pruneLimit);
+      LOG.debug(
+          "Pruning of finalized states prior to slot {} completed in {} ms.",
+          earliestSlotToKeep,
+          System.currentTimeMillis() - start);
     } catch (final ShuttingDownException | RejectedExecutionException ex) {
       LOG.debug("Shutting down", ex);
     }

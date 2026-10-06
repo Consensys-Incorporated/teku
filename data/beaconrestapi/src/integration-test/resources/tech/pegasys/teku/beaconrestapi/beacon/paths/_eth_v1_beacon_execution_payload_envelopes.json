@@ -1,93 +1,127 @@
 {
-  "post" : {
-    "tags" : [ "Beacon", "Validator Required Api" ],
-    "operationId" : "publishExecutionPayloadEnvelope",
-    "summary" : "Publish signed execution payload envelope",
-    "description" : "Instructs the beacon node to broadcast a signed execution payload envelope to the network. The request body is selected by the Eth-Execution-Payload-Blinded header: false submits SignedExecutionPayloadEnvelopeContents and true submits SignedBlindedExecutionPayloadEnvelope.",
-    "parameters" : [ {
-      "name" : "broadcast_validation",
-      "in" : "query",
-      "schema" : {
-        "type" : "string",
-        "description" : "Level of validation that must be applied to a block before it is broadcast. Possible values:\n- **`gossip`** (default): lightweight gossip checks only\n- **`consensus`**: full consensus checks, including validation of all signatures and   blocks fields _except_ for the execution payload transactions.\n- **`consensus_and_equivocation`**: the same as `consensus`, with an extra equivocation   check immediately before the block is broadcast. If the block is found to be an\n  equivocation it fails validation.\nIf the block fails the requested level of a validation a 400 status MUST be returned immediately and the block MUST NOT be broadcast to the network.\nIf validation succeeds, the block must still be fully verified before it is incorporated into the state and a 20x status is returned to the caller.",
-        "example" : "consensus_and_equivocation",
-        "format" : "string",
-        "enum" : [ "gossip", "consensus", "consensus_and_equivocation" ]
+  "post": {
+    "tags": [
+      "Beacon",
+      "Validator Required Api"
+    ],
+    "operationId": "publishExecutionPayloadEnvelope",
+    "summary": "Publish signed execution payload envelope",
+    "description": "Instructs the beacon node to broadcast a signed execution payload envelope to the network. The request body is selected by the Eth-Blob-Data-Included header: true submits SignedExecutionPayloadEnvelopeContents (envelope plus blobs and KZG proofs, stateless flow) and false submits SignedExecutionPayloadEnvelope (stateful flow, the beacon node attaches the blobs and KZG proofs cached during block production).",
+    "parameters": [
+      {
+        "name": "broadcast_validation",
+        "in": "query",
+        "schema": {
+          "type": "string",
+          "description": "Level of validation that must be applied to a block before it is broadcast. Possible values:\n- **`gossip`** (default): lightweight gossip checks only\n- **`consensus`**: full consensus checks, including validation of all signatures and   blocks fields _except_ for the execution payload transactions.\n- **`consensus_and_equivocation`**: the same as `consensus`, with an extra equivocation   check immediately before the block is broadcast. If the block is found to be an\n  equivocation it fails validation.\nIf the block fails the requested level of a validation a 400 status MUST be returned immediately and the block MUST NOT be broadcast to the network.\nIf validation succeeds, the block must still be fully verified before it is incorporated into the state and a 20x status is returned to the caller.",
+          "example": "consensus_and_equivocation",
+          "format": "string",
+          "enum": [
+            "gossip",
+            "consensus",
+            "consensus_and_equivocation"
+          ]
+        }
+      },
+      {
+        "name": "Eth-Blob-Data-Included",
+        "required": true,
+        "in": "header",
+        "schema": {
+          "type": "boolean",
+          "description": "When true, the body is SignedExecutionPayloadEnvelopeContents. When false, the body is SignedExecutionPayloadEnvelope."
+        }
+      },
+      {
+        "name": "Eth-Consensus-Version",
+        "required": true,
+        "in": "header",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "phase0",
+            "altair",
+            "bellatrix",
+            "capella",
+            "deneb",
+            "electra",
+            "fulu",
+            "gloas",
+            "heze"
+          ],
+          "description": "The active consensus version to which the execution payload envelope being submitted belongs."
+        }
       }
-    }, {
-      "name" : "Eth-Consensus-Version",
-      "required" : true,
-      "in" : "header",
-      "schema" : {
-        "type" : "string",
-        "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze" ],
-        "description" : "The active consensus version to which the execution payload envelope being submitted belongs."
-      }
-    }, {
-      "name" : "Eth-Execution-Payload-Blinded",
-      "required" : true,
-      "in" : "header",
-      "schema" : {
-        "type" : "boolean",
-        "description" : "When false, the body is SignedExecutionPayloadEnvelopeContents. When true, the body is SignedBlindedExecutionPayloadEnvelope."
-      }
-    } ],
-    "requestBody" : {
-      "content" : {
-        "application/octet-stream" : {
-          "schema" : {
-            "type" : "string",
-            "format" : "binary"
+    ],
+    "requestBody": {
+      "content": {
+        "application/octet-stream": {
+          "schema": {
+            "type": "string",
+            "format": "binary"
           }
         },
-        "application/json" : {
-          "schema" : {
-            "title" : "SignedExecutionPayloadEnvelopeRequest",
-            "type" : "object",
-            "oneOf" : [ {
-              "$ref" : "#/components/schemas/SignedExecutionPayloadEnvelopeContents"
-            }, {
-              "$ref" : "#/components/schemas/SignedBlindedExecutionPayloadEnvelope"
-            } ]
+        "application/json": {
+          "schema": {
+            "title": "SignedExecutionPayloadEnvelopeRequest",
+            "type": "object",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SignedExecutionPayloadEnvelopeContents"
+              },
+              {
+                "$ref": "#/components/schemas/SignedExecutionPayloadEnvelope"
+              }
+            ]
           }
         }
       }
     },
-    "responses" : {
-      "415" : {
-        "description" : "Unsupported media type",
-        "content" : {
-          "application/json" : {
-            "schema" : {
-              "$ref" : "#/components/schemas/HttpErrorResponse"
+    "responses": {
+      "415": {
+        "description": "Unsupported media type",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/HttpErrorResponse"
             }
           }
         }
       },
-      "200" : {
-        "description" : "The envelope was validated successfully and has been broadcast. It has also been integrated into the beacon node's database.",
-        "content" : { }
+      "200": {
+        "description": "The envelope was validated successfully and has been broadcast. It has also been integrated into the beacon node's database.",
+        "content": {}
       },
-      "202" : {
-        "description" : "The envelope could not be integrated into the beacon node's database as it failed validation, but was successfully broadcast.",
-        "content" : { }
+      "202": {
+        "description": "The envelope could not be integrated into the beacon node's database as it failed validation, but was successfully broadcast.",
+        "content": {}
       },
-      "400" : {
-        "description" : "The signed envelope object is invalid, broadcast validation failed, or a blinded envelope could not be reconstructed from cache.",
-        "content" : {
-          "application/json" : {
-            "schema" : {
-              "$ref" : "#/components/schemas/HttpErrorResponse"
+      "400": {
+        "description": "The signed envelope object is invalid, broadcast validation failed, or an envelope without blob data was submitted but the beacon node has no cached blobs and KZG proofs to attach.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/HttpErrorResponse"
             }
           }
         }
       },
-      "500" : {
-        "description" : "Internal server error",
-        "content" : {
-          "application/json" : {
-            "schema" : {
-              "$ref" : "#/components/schemas/HttpErrorResponse"
+      "500": {
+        "description": "Internal server error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "503": {
+        "description": "Beacon node is currently syncing and not serving requests.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/HttpErrorResponse"
             }
           }
         }

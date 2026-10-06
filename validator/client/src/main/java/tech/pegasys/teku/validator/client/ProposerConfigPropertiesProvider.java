@@ -25,6 +25,12 @@ public interface ProposerConfigPropertiesProvider {
 
   UInt64 getGasLimit(BLSPublicKey publicKey);
 
+  /**
+   * The gas limit to use for a duty in the given epoch, which may differ from the one for the
+   * current epoch when the network schedules a gas limit change (EIP-8261).
+   */
+  UInt64 getGasLimit(BLSPublicKey publicKey, UInt64 epoch);
+
   Optional<UInt64> getBuilderRegistrationTimestampOverride(BLSPublicKey publicKey);
 
   Optional<BLSPublicKey> getBuilderRegistrationPublicKeyOverride(BLSPublicKey publicKey);

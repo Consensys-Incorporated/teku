@@ -19,7 +19,6 @@ import static tech.pegasys.teku.spec.config.SpecConfig.GENESIS_EPOCH;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -28,16 +27,11 @@ import java.util.stream.Collectors;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.tuweni.bytes.Bytes32;
-import tech.pegasys.teku.api.response.ValidatorStatus;
-import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.signingrecord.ValidatorSigningRecord;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.logging.ValidatorLogger;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
-import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
-import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.signatures.SlashingProtector;
 import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
 import tech.pegasys.teku.validator.client.Validator;
@@ -168,46 +162,4 @@ public class SlashingProtectionLogger implements ValidatorTimingChannel {
     this.currentSlot = Optional.of(slot);
     tryToLog();
   }
-
-  @Override
-  public void onHeadUpdate(
-      final UInt64 slot,
-      final Bytes32 previousDutyDependentRoot,
-      final Bytes32 currentDutyDependentRoot,
-      final Bytes32 headBlockRoot) {}
-
-  @Override
-  public void onPossibleMissedEvents() {}
-
-  @Override
-  public void onBlockProductionDue(final UInt64 slot) {}
-
-  @Override
-  public void onAttestationCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onAttestationAggregationDue(final UInt64 slot) {}
-
-  @Override
-  public void onSyncCommitteeCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onContributionCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onPayloadAttestationCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onValidatorsAdded() {}
-
-  @Override
-  public void onAttesterSlashing(final AttesterSlashing attesterSlashing) {}
-
-  @Override
-  public void onProposerSlashing(final ProposerSlashing proposerSlashing) {}
-
-  @Override
-  public void onUpdatedValidatorStatuses(
-      final Map<BLSPublicKey, ValidatorStatus> newValidatorStatuses,
-      final boolean possibleMissingEvents) {}
 }

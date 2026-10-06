@@ -112,8 +112,14 @@ public class SpecConfigReader {
           .put(Bytes.class, fromString(Bytes::fromHexString))
           .put(Bytes4.class, fromString(Bytes4::fromHexString))
           .put(Bytes32.class, fromString(Bytes32::fromHexStringStrict))
-          .put(List.class, this::blobScheduleFromList)
           .put(Eth1Address.class, fromString(Eth1Address::fromHexString))
+          .build();
+
+  /** Parsers for config items which cannot be resolved from the setter type alone. */
+  private final ImmutableMap<String, Function<Object, ?>> parsersByKey =
+      ImmutableMap.<String, Function<Object, ?>>builder()
+          .put("BLOB_SCHEDULE", this::blobScheduleFromList)
+          .put("GAS_LIMIT_SCHEDULE", this::gasLimitScheduleFromList)
           .build();
 
   final SpecConfigBuilder configBuilder = SpecConfig.builder();
@@ -299,6 +305,27 @@ public class SpecConfigReader {
     return blobSchedule;
   }
 
+  @SuppressWarnings("unchecked")
+  private Object gasLimitScheduleFromList(final Object o) {
+    final List<GasLimitScheduleEntry> gasLimitSchedule = new ArrayList<>();
+    final List<?> schedule = (List<?>) o;
+    for (Object entry : schedule) {
+      if (entry instanceof Map) {
+        final Map<String, String> data = (Map<String, String>) entry;
+        if (!data.containsKey("EPOCH") || !data.containsKey("GAS_LIMIT") || data.size() != 2) {
+          throw new IllegalArgumentException("Map does not look like a gas limit schedule");
+        }
+        gasLimitSchedule.add(
+            new GasLimitScheduleEntry(
+                UInt64.valueOf(data.get("EPOCH")), UInt64.valueOf(data.get("GAS_LIMIT"))));
+
+      } else {
+        throw new IllegalArgumentException("Could not parse entry gas limit schedule");
+      }
+    }
+    return gasLimitSchedule;
+  }
+
   private Stream<Method> streamConfigSetters(final Class<?> builderClass) {
     // Ignore any setters that aren't for individual config entries
     final Set<String> ignoredSetters = Set.of("rawConfig");
@@ -332,7 +359,8 @@ public class SpecConfigReader {
   }
 
   private Object parseValue(final Class<?> valueType, final String key, final Object value) {
-    final Function<Object, ?> parser = parsers.get(valueType);
+    final Function<Object, ?> parser =
+        parsersByKey.containsKey(key) ? parsersByKey.get(key) : parsers.get(valueType);
     if (parser == null) {
       throw new IllegalStateException("Missing parser for constant type: " + valueType);
     }

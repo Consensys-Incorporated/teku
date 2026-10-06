@@ -22,8 +22,8 @@ import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.api.exceptions.BadRequestException;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuties;
+import tech.pegasys.teku.ethereum.json.types.validator.PayloadTimelinessCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuties;
-import tech.pegasys.teku.ethereum.json.types.validator.PtcDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.SyncCommitteeSubnetSubscription;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -33,9 +33,11 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
@@ -84,6 +86,7 @@ public class ValidatorDataProvider {
     return combinedChainDataClient.isStoreAvailable();
   }
 
+  // used to maintain block v3 compatibility
   public SafeFuture<Optional<BlockContainerAndMetaData>> produceBlock(
       final UInt64 slot,
       final BLSSignature randao,
@@ -92,6 +95,17 @@ public class ValidatorDataProvider {
     checkBlockProducingParameters(slot, randao);
     return validatorApiChannel.createUnsignedBlock(
         slot, randao, graffiti, requestedBuilderBoostFactor);
+  }
+
+  public SafeFuture<Optional<BlockContainerAndMetaData>> produceBlock(
+      final UInt64 slot,
+      final BLSSignature randao,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final BuilderConfig builderConfig) {
+    checkBlockProducingParameters(slot, randao);
+    return validatorApiChannel.createUnsignedBlock(
+        slot, randao, graffiti, includePayload, Optional.of(builderConfig));
   }
 
   private void checkBlockProducingParameters(final UInt64 slot, final BLSSignature randao) {
@@ -149,6 +163,11 @@ public class ValidatorDataProvider {
     return validatorApiChannel.sendSignedProposerPreferences(signedProposerPreferences);
   }
 
+  public SafeFuture<List<SubmitDataError>> submitBuilderPreferences(
+      final SszList<BuilderPreferencesEntry> builderPreferences) {
+    return validatorApiChannel.sendBuilderPreferences(builderPreferences);
+  }
+
   public SafeFuture<Optional<PayloadAttestationData>> createPayloadAttestationData(
       final UInt64 slot) {
     if (!isStoreAvailable()) {
@@ -157,17 +176,27 @@ public class ValidatorDataProvider {
     return validatorApiChannel.createPayloadAttestationData(slot);
   }
 
+  public SafeFuture<Optional<ExecutionPayloadEnvelope>> createUnsignedExecutionPayload(
+      final UInt64 slot, final Bytes32 beaconBlockRoot) {
+    if (!isStoreAvailable()) {
+      return SafeFuture.failedFuture(new ChainDataUnavailableException());
+    }
+    return validatorApiChannel.createUnsignedExecutionPayload(slot, beaconBlockRoot);
+  }
+
   public SafeFuture<SendSignedBlockResult> submitSignedBlock(
       final SignedBlockContainer signedBlockContainer,
-      final BroadcastValidationLevel broadcastValidationLevel) {
-    return validatorApiChannel.sendSignedBlock(signedBlockContainer, broadcastValidationLevel);
+      final BroadcastValidationLevel broadcastValidationLevel,
+      final Optional<String> builderUrl) {
+    return validatorApiChannel.sendSignedBlock(
+        signedBlockContainer, broadcastValidationLevel, builderUrl);
   }
 
   public SafeFuture<SendSignedBlockResult> submitSignedBlindedBlock(
       final SignedBlockContainer signedBlindedBlockContainer,
       final BroadcastValidationLevel broadcastValidationLevel) {
     return validatorApiChannel.sendSignedBlock(
-        signedBlindedBlockContainer, broadcastValidationLevel);
+        signedBlindedBlockContainer, broadcastValidationLevel, Optional.empty());
   }
 
   public SafeFuture<Void> publishSignedExecutionPayloadBid(
@@ -230,8 +259,10 @@ public class ValidatorDataProvider {
     return SafeFuture.of(() -> validatorApiChannel.getAttestationDuties(epoch, indices));
   }
 
-  public SafeFuture<Optional<PtcDuties>> getPtcDuties(final UInt64 epoch, final IntList indices) {
-    return SafeFuture.of(() -> validatorApiChannel.getPtcDuties(epoch, indices));
+  public SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> getPayloadTimelinessCommitteeDuties(
+      final UInt64 epoch, final IntList indices) {
+    return SafeFuture.of(
+        () -> validatorApiChannel.getPayloadTimelinessCommitteeDuties(epoch, indices));
   }
 
   public SafeFuture<Optional<ProposerDuties>> getProposerDuties(final UInt64 epoch) {
@@ -274,13 +305,6 @@ public class ValidatorDataProvider {
       final Optional<BroadcastValidationLevel> broadcastValidationLevel) {
     return validatorApiChannel.publishSignedExecutionPayload(
         envelopeContents, broadcastValidationLevel);
-  }
-
-  public SafeFuture<PublishSignedExecutionPayloadResult> publishSignedExecutionPayload(
-      final SignedBlindedExecutionPayloadEnvelope blindedEnvelope,
-      final Optional<BroadcastValidationLevel> broadcastValidationLevel) {
-    return validatorApiChannel.publishSignedExecutionPayload(
-        blindedEnvelope, broadcastValidationLevel);
   }
 
   public SafeFuture<Void> registerValidators(

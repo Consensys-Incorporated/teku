@@ -22,7 +22,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.BlockContainer;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
-import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContentsWithBlobsSchema;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContentsSchema;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGProof;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsDeneb;
@@ -80,7 +80,7 @@ public class BlockContainerSignerDeneb implements BlockContainerSigner {
         .thenApply(signature -> SignedBeaconBlock.create(spec, unsignedBlock, signature));
   }
 
-  private SignedBlockContentsWithBlobsSchema<?> getSignedBlockContentsSchema(final UInt64 slot) {
+  private SignedBlockContentsSchema<?> getSignedBlockContentsSchema(final UInt64 slot) {
     return SchemaDefinitionsDeneb.required(spec.atSlot(slot).getSchemaDefinitions())
         .getSignedBlockContentsSchema();
   }

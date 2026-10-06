@@ -13,7 +13,6 @@
 
 package tech.pegasys.teku.reference.phase0.gossip;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.reference.TestDataUtils.createAnchorFromState;
 import static tech.pegasys.teku.reference.TestDataUtils.loadSsz;
 import static tech.pegasys.teku.reference.TestDataUtils.loadStateFromSsz;
@@ -37,7 +36,6 @@ import tech.pegasys.teku.statetransition.synccommittee.SignedContributionAndProo
 import tech.pegasys.teku.statetransition.synccommittee.SyncCommitteeStateUtils;
 import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
-import tech.pegasys.teku.statetransition.validation.ValidationResultCode;
 import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.storage.server.StateStorageMode;
 import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystemBuilder;
@@ -92,32 +90,8 @@ public class GossipSyncCommitteeContributionAndProofTestExecutor implements Test
 
       final InternalValidationResult result = validator.validate(signedContributionAndProof).join();
 
-      switch (message.getExpected()) {
-        case "valid" ->
-            assertThat(result.code())
-                .describedAs(
-                    "Expected contribution %s to be valid but got %s: %s",
-                    message.getMessage(), result.code(), result.getDescription().orElse(""))
-                .isEqualTo(ValidationResultCode.ACCEPT);
-        case "reject" ->
-            assertThat(result.code())
-                .describedAs(
-                    "Expected contribution %s to be rejected but got %s: %s",
-                    message.getMessage(), result.code(), result.getDescription().orElse(""))
-                .isEqualTo(ValidationResultCode.REJECT);
-        case "ignore" ->
-            assertThat(result.code())
-                .describedAs(
-                    "Expected contribution %s to be ignored but got %s: %s",
-                    message.getMessage(), result.code(), result.getDescription().orElse(""))
-                .isIn(ValidationResultCode.IGNORE, ValidationResultCode.SAVE_FOR_FUTURE);
-        default ->
-            throw new AssertionError(
-                "Unexpected expected value: "
-                    + message.getExpected()
-                    + " for message: "
-                    + message.getMessage());
-      }
+      GossipTestContext.assertValidationResult(
+          "contribution " + message.getMessage(), message.getExpected(), result);
     }
   }
 

@@ -173,7 +173,7 @@ public interface BlockProcessor {
       MutableBeaconState state, Optional<ExecutionPayloadSummary> payloadSummary)
       throws BlockProcessingException;
 
-  UInt64 processExecutionPayloadBid(MutableBeaconState state, SignedExecutionPayloadBid signedBid)
+  void processExecutionPayloadBid(MutableBeaconState state, SignedExecutionPayloadBid signedBid)
       throws BlockProcessingException;
 
   void processPayloadAttestations(

@@ -140,7 +140,7 @@ public class GetNewBlockV3 extends RestApiEndpoint {
                         blockContainerAndMetaData -> {
                           request.header(
                               HEADER_CONSENSUS_VERSION,
-                              blockContainerAndMetaData.specMilestone().lowerCaseName());
+                              blockContainerAndMetaData.milestone().lowerCaseName());
                           request.header(
                               HEADER_EXECUTION_PAYLOAD_BLINDED,
                               Boolean.toString(
@@ -173,7 +173,7 @@ public class GetNewBlockV3 extends RestApiEndpoint {
 
     return SerializableTypeDefinition.<BlockContainerAndMetaData>object()
         .name("ProduceBlockV3Response")
-        .withField("version", MILESTONE_TYPE, BlockContainerAndMetaData::specMilestone)
+        .withField("version", MILESTONE_TYPE, BlockContainerAndMetaData::milestone)
         .withField(
             EXECUTION_PAYLOAD_BLINDED,
             BOOLEAN_TYPE,

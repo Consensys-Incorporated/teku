@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.cli.options;
 
+import java.util.Optional;
 import picocli.CommandLine.Help.Visibility;
 import picocli.CommandLine.Option;
 import tech.pegasys.teku.cli.converter.UInt64Converter;
@@ -60,12 +61,13 @@ public class ValidatorProposerOptions {
   @Option(
       names = {"--validators-builder-registration-default-gas-limit"},
       paramLabel = "<uint64>",
-      showDefaultValue = Visibility.ALWAYS,
-      description = "Change the default gas limit used for the validators registration.",
+      description =
+          "Change the default gas limit used for the validators registration. "
+              + "When not set, the gas limit scheduled by the network for the current epoch is used, "
+              + "defaulting to 60000000 when the network defines no schedule.",
       arity = "1",
       converter = UInt64Converter.class)
-  private UInt64 builderRegistrationDefaultGasLimit =
-      ValidatorConfig.DEFAULT_BUILDER_REGISTRATION_GAS_LIMIT;
+  private UInt64 builderRegistrationDefaultGasLimit = null;
 
   @Option(
       names = {"--Xvalidators-builder-registration-sending-batch-size"},
@@ -107,7 +109,8 @@ public class ValidatorProposerOptions {
                 .proposerConfigSource(proposerConfig)
                 .refreshProposerConfigFromSource(proposerConfigRefreshEnabled)
                 .builderRegistrationDefaultEnabled(builderRegistrationDefaultEnabled)
-                .builderRegistrationDefaultGasLimit(builderRegistrationDefaultGasLimit)
+                .builderRegistrationDefaultGasLimit(
+                    Optional.ofNullable(builderRegistrationDefaultGasLimit))
                 .builderRegistrationSendingBatchSize(builderRegistrationSendingBatchSize)
                 .builderRegistrationTimestampOverride(builderRegistrationTimestampOverride)
                 .builderRegistrationPublicKeyOverride(builderRegistrationPublicKeyOverride));

@@ -19,10 +19,10 @@ import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionPerformance;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
-import tech.pegasys.teku.spec.schemas.ApiSchemas;
 
 final class BlockProductionTestUtil {
 
@@ -34,7 +34,8 @@ final class BlockProductionTestUtil {
       final BeaconState blockSlotState,
       final BLSSignature randaoReveal,
       final Optional<Bytes32> graffiti,
-      final Optional<UInt64> requestedBuilderBoostFactor,
+      final boolean includePayload,
+      final Optional<BuilderConfig> builderConfig,
       final BlockProductionPerformance blockProductionPerformance) {
     final Bytes32 parentRoot = spec.getBlockRootAtSlot(blockSlotState, proposalSlot.decrement());
     return blockProductionContext(
@@ -42,7 +43,8 @@ final class BlockProductionTestUtil {
         blockSlotState,
         randaoReveal,
         graffiti,
-        requestedBuilderBoostFactor,
+        includePayload,
+        builderConfig,
         blockProductionPerformance);
   }
 
@@ -53,6 +55,24 @@ final class BlockProductionTestUtil {
       final Optional<Bytes32> graffiti,
       final Optional<UInt64> requestedBuilderBoostFactor,
       final BlockProductionPerformance blockProductionPerformance) {
+    return blockProductionContext(
+        parentRoot,
+        blockSlotState,
+        randaoReveal,
+        graffiti,
+        false,
+        requestedBuilderBoostFactor.map(BuilderConfig::withBuilderBoostFactor),
+        blockProductionPerformance);
+  }
+
+  static BlockProductionContext blockProductionContext(
+      final Bytes32 parentRoot,
+      final BeaconState blockSlotState,
+      final BLSSignature randaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final Optional<BuilderConfig> builderConfig,
+      final BlockProductionPerformance blockProductionPerformance) {
     return new BlockProductionContext(
         blockSlotState.getSlot(),
         blockSlotState,
@@ -60,7 +80,8 @@ final class BlockProductionTestUtil {
         parentExecutionBlockHash(blockSlotState),
         randaoReveal,
         graffiti,
-        requestedBuilderBoostFactor.map(ApiSchemas.BUILDER_CONFIG_SCHEMA::create),
+        includePayload,
+        builderConfig,
         blockProductionPerformance);
   }
 

@@ -15,6 +15,7 @@ package tech.pegasys.teku.networking.eth2.rpc.core;
 
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.UnaryOperator;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.networking.p2p.rpc.RpcResponseHandler;
 import tech.pegasys.teku.networking.p2p.rpc.RpcResponseListener;
@@ -41,10 +42,15 @@ public class Eth2RpcResponseHandler<TResponse, TExpectedResult>
   }
 
   public static <T> Eth2RpcResponseHandler<T, Optional<T>> expectOptionalResponse() {
+    return expectOptionalResponse(UnaryOperator.identity());
+  }
+
+  public static <T> Eth2RpcResponseHandler<T, Optional<T>> expectOptionalResponse(
+      final UnaryOperator<RpcResponseListener<T>> listenerWrapper) {
     final AtomicReference<T> firstResponse = new AtomicReference<>();
     final AtomicReference<InvalidRpcResponseException> errorCapture = new AtomicReference<>();
     final RpcResponseListener<T> listener =
-        createSingleResponseListener(firstResponse, errorCapture);
+        listenerWrapper.apply(createSingleResponseListener(firstResponse, errorCapture));
 
     final SafeFuture<Void> completed = new SafeFuture<>();
     final SafeFuture<Optional<T>> resultFuture =

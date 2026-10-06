@@ -9,7 +9,7 @@
       "in" : "query",
       "schema" : {
         "type" : "string",
-        "description" : "Event types to subscribe to. Supported event types: [`attestation`, `attester_slashing`, `blob_sidecar`, `block_gossip`, `block`, `bls_to_execution_change`, `chain_reorg`, `contribution_and_proof`, `data_column_sidecar`, `execution_payload_available`, `execution_payload_bid`, `execution_payload_gossip`, `execution_payload`, `finalized_checkpoint`, `head_v2`, `head`, `payload_attestation_message`, `payload_attributes`, `proposer_preferences`, `proposer_slashing`, `single_attestation`, `sync_state`, `voluntary_exit`]",
+        "description" : "Event types to subscribe to. Supported event types: [`attestation`, `attester_slashing`, `blob_sidecar`, `block_gossip`, `block`, `bls_to_execution_change`, `chain_reorg`, `contribution_and_proof`, `data_column_sidecar`, `execution_payload_available`, `execution_payload_bid`, `execution_payload_gossip`, `execution_payload`, `fast_confirmation`, `finalized_checkpoint`, `head_v2`, `head`, `payload_attestation_message`, `payload_attributes`, `proposer_preferences`, `proposer_slashing`, `single_attestation`, `sync_state`, `voluntary_exit`]",
         "example" : "head"
       }
     } ],
@@ -39,7 +39,7 @@
         "content" : { }
       },
       "400" : {
-        "description" : "The request could not be processed, check the response for more information.",
+        "description" : "The topics supplied could not be parsed",
         "content" : {
           "application/json" : {
             "schema" : {

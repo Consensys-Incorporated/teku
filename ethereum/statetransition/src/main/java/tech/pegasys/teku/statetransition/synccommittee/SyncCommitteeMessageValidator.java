@@ -81,9 +81,10 @@ public class SyncCommitteeMessageValidator {
     }
     final SyncCommitteeUtil syncCommitteeUtil = maybeSyncCommitteeUtil.get();
 
-    // [IGNORE] The message's slot is for the current slot(with a MAXIMUM_GOSSIP_CLOCK_DISPARITY
-    // allowance),
-    // i.e. sync_committee_message.slot == current_slot.
+    /*
+     * [IGNORE] The message's slot is for the current slot(with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance),
+     * i.e. sync_committee_message.slot == current_slot
+     */
     if (!gossipValidationHelper.isSlotCurrent(message.getSlot())) {
       LOG.trace(
           "Ignoring sync committee message from validator {}, "
@@ -95,10 +96,12 @@ public class SyncCommitteeMessageValidator {
       return completedFuture(IGNORE);
     }
 
-    // [IGNORE] There has been no other valid sync committee message for the declared slot for
-    // the validator referenced by sync_committee_message.validator_index for this subnet.
-    // Note this validation is _per topic_ so that for a given `slot`, multiple messages could be
-    // forwarded with the same `validator_index` as long as the `subnet_id`s are distinct.
+    /*
+     * [IGNORE] There has been no other valid sync committee message for the declared slot for
+     * the validator referenced by sync_committee_message.validator_index for this subnet.
+     * Note this validation is _per topic_ so that for a given `slot`, multiple messages could be
+     * forwarded with the same `validator_index` as long as the `subnet_id`s are distinct.
+     */
     final Optional<UniquenessKey> uniquenessKey;
     if (validatableMessage.getReceivedSubnetId().isPresent()) {
       final UniquenessKey key =
@@ -139,9 +142,11 @@ public class SyncCommitteeMessageValidator {
     final SyncSubcommitteeAssignments assignedSubcommittees =
         validatableMessage.calculateAssignments(spec, state);
 
-    // [REJECT] The validator producing this sync_committee_message is in the current sync
-    // committee, i.e. state.validators[sync_committee_message.validator_index].pubkey in
-    // state.current_sync_committee.pubkeys.
+    /*
+     * [REJECT] The validator producing this sync_committee_message is in the current sync
+     * committee, i.e. state.validators[sync_committee_message.validator_index].pubkey in
+     * state.current_sync_committee.pubkeys.
+     */
     if (assignedSubcommittees.isEmpty()) {
       return completedFuture(
           reject(
@@ -161,14 +166,17 @@ public class SyncCommitteeMessageValidator {
                         .mapToObj(subnetId -> getUniquenessKey(message, subnetId))
                         .toList());
 
-    // [IGNORE] There has been no other valid sync committee message for the declared slot for the
-    // validator referenced by sync_committee_message.validator_index.
+    /*
+     * [IGNORE] There has been no other valid sync committee message for the declared slot for the
+     * validator referenced by sync_committee_message.validator_index.
+     */
     if (seenIndices.containsAll(uniquenessKeys)) {
       return completedFuture(IGNORE);
     }
 
-    // [REJECT] The subnet_id is correct, i.e. subnet_id in
-    // compute_subnets_for_sync_committee(state, sync_committee_message.validator_index).
+    /*
+     * [REJECT] The subnet_id is correct, i.e. subnet_id in compute_subnets_for_sync_committee(state, sync_committee_message.validator_index).
+     */
     if (validatableMessage.getReceivedSubnetId().isPresent()
         && !assignedSubcommittees
             .getAssignedSubcommittees()
@@ -184,13 +192,14 @@ public class SyncCommitteeMessageValidator {
           reject("Rejecting sync committee message because the validator index is unknown"));
     }
 
-    // [REJECT] The message is valid for the message beacon_block_root for the validator
-    // referenced by validator_index.
     final ForkInfo forkInfo =
         new ForkInfo(spec.fork(messageEpoch), state.getGenesisValidatorsRoot());
     final Bytes32 signingRoot =
         syncCommitteeUtil.getSyncCommitteeMessageSigningRoot(
             message.getBeaconBlockRoot(), messageEpoch, forkInfo);
+    /*
+     * [REJECT] The signature is valid
+     */
     return signatureVerifier
         .verify(maybeValidatorPublicKey.get(), signingRoot, message.getSignature())
         .thenApply(

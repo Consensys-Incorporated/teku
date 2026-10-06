@@ -41,14 +41,13 @@ import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecarSch
 import tech.pegasys.teku.spec.datastructures.blobs.versions.fulu.CellSchema;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.fulu.MatrixEntrySchema;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockSchema;
-import tech.pegasys.teku.spec.datastructures.blocks.BlockContentsWithBlobsSchema;
+import tech.pegasys.teku.spec.datastructures.blocks.BlockContentsSchema;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlockSchema;
-import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContentsWithBlobsSchema;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContentsSchema;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBody;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBodySchema;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.bellatrix.BlindedBeaconBlockBodyBellatrix;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.bellatrix.BlindedBeaconBlockBodySchemaBellatrix;
-import tech.pegasys.teku.spec.datastructures.blocks.versions.gloas.BlockContentsGloasSchema;
 import tech.pegasys.teku.spec.datastructures.builder.BlobsBundleSchema;
 import tech.pegasys.teku.spec.datastructures.builder.BuilderBid;
 import tech.pegasys.teku.spec.datastructures.builder.BuilderBidSchema;
@@ -123,7 +122,7 @@ import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPending
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPaymentSchema;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingWithdrawal;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingWithdrawalSchema;
-import tech.pegasys.teku.spec.datastructures.state.versions.gloas.PtcWindowSchema;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.PayloadTimelinessCommitteeWindowSchema;
 
 public class SchemaTypes {
   // PHASE0
@@ -221,9 +220,9 @@ public class SchemaTypes {
   public static final SchemaId<BlobSidecarsByRootRequestMessageSchema>
       BLOB_SIDECARS_BY_ROOT_REQUEST_MESSAGE_SCHEMA =
           create("BLOB_SIDECARS_BY_ROOT_REQUEST_MESSAGE_SCHEMA");
-  public static final SchemaId<BlockContentsWithBlobsSchema<?>> BLOCK_CONTENTS_SCHEMA =
+  public static final SchemaId<BlockContentsSchema<?>> BLOCK_CONTENTS_SCHEMA =
       create("BLOCK_CONTENTS_SCHEMA");
-  public static final SchemaId<SignedBlockContentsWithBlobsSchema<?>> SIGNED_BLOCK_CONTENTS_SCHEMA =
+  public static final SchemaId<SignedBlockContentsSchema<?>> SIGNED_BLOCK_CONTENTS_SCHEMA =
       create("SIGNED_BLOCK_CONTENTS_SCHEMA");
   public static final SchemaId<BlobsBundleSchema<?>> BLOBS_BUNDLE_SCHEMA =
       create("BLOBS_BUNDLE_SCHEMA");
@@ -307,8 +306,6 @@ public class SchemaTypes {
           create("BLINDED_EXECUTION_PAYLOAD_ENVELOPE_SCHEMA");
   public static final SchemaId<SignedExecutionPayloadEnvelopeSchema>
       SIGNED_EXECUTION_PAYLOAD_ENVELOPE_SCHEMA = create("SIGNED_EXECUTION_PAYLOAD_ENVELOPE_SCHEMA");
-  public static final SchemaId<BlockContentsGloasSchema> BLOCK_CONTENTS_GLOAS_SCHEMA =
-      create("BLOCK_CONTENTS_GLOAS_SCHEMA");
   public static final SchemaId<SignedExecutionPayloadEnvelopeContentsSchema>
       SIGNED_EXECUTION_PAYLOAD_ENVELOPE_CONTENTS_SCHEMA =
           create("SIGNED_EXECUTION_PAYLOAD_ENVELOPE_CONTENTS_SCHEMA");
@@ -321,7 +318,8 @@ public class SchemaTypes {
       BUILDER_PENDING_PAYMENTS_SCHEMA = create("BUILDER_PENDING_PAYMENTS_SCHEMA");
   public static final SchemaId<SszListSchema<BuilderPendingWithdrawal, ?>>
       BUILDER_PENDING_WITHDRAWALS_SCHEMA = create("BUILDER_PENDING_WITHDRAWALS_SCHEMA");
-  public static final SchemaId<PtcWindowSchema> PTC_WINDOW_SCHEMA = create("PTC_WINDOW_SCHEMA");
+  public static final SchemaId<PayloadTimelinessCommitteeWindowSchema> PTC_WINDOW_SCHEMA =
+      create("PTC_WINDOW_SCHEMA");
   public static final SchemaId<ExecutionPayloadEnvelopesByRootRequestMessageSchema>
       EXECUTION_PAYLOAD_ENVELOPES_BY_ROOT_REQUEST_MESSAGE_SCHEMA =
           create("EXECUTION_PAYLOAD_ENVELOPES_BY_ROOT_REQUEST_MESSAGE_SCHEMA");

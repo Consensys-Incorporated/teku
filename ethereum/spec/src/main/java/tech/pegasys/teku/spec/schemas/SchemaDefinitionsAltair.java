@@ -43,7 +43,6 @@ import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrapSch
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdateSchema;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientHeaderSchema;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdateSchema;
-import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdateResponseSchema;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdateSchema;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.metadata.MetadataMessageSchema;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.status.StatusMessageSchema;
@@ -83,7 +82,6 @@ public class SchemaDefinitionsAltair extends AbstractSchemaDefinitions {
   private final LightClientHeaderSchema<?> lightClientHeaderSchema;
   private final LightClientBootstrapSchema lightClientBootstrapSchema;
   private final LightClientUpdateSchema lightClientUpdateSchema;
-  private final LightClientUpdateResponseSchema lightClientUpdateResponseSchema;
   private final LightClientFinalityUpdateSchema lightClientFinalityUpdateSchema;
   private final LightClientOptimisticUpdateSchema lightClientOptimisticUpdateSchema;
 
@@ -110,7 +108,6 @@ public class SchemaDefinitionsAltair extends AbstractSchemaDefinitions {
     this.lightClientHeaderSchema = schemaRegistry.get(LIGHT_CLIENT_HEADER_SCHEMA);
     this.lightClientBootstrapSchema = schemaRegistry.get(LIGHT_CLIENT_BOOTSTRAP_SCHEMA);
     this.lightClientUpdateSchema = schemaRegistry.get(LIGHT_CLIENT_UPDATE_SCHEMA);
-    this.lightClientUpdateResponseSchema = new LightClientUpdateResponseSchema(schemaRegistry);
     this.lightClientFinalityUpdateSchema = schemaRegistry.get(LIGHT_CLIENT_FINALITY_UPDATE_SCHEMA);
     this.lightClientOptimisticUpdateSchema =
         schemaRegistry.get(LIGHT_CLIENT_OPTIMISTIC_UPDATE_SCHEMA);
@@ -256,10 +253,6 @@ public class SchemaDefinitionsAltair extends AbstractSchemaDefinitions {
 
   public LightClientUpdateSchema getLightClientUpdateSchema() {
     return lightClientUpdateSchema;
-  }
-
-  public LightClientUpdateResponseSchema getLightClientUpdateResponseSchema() {
-    return lightClientUpdateResponseSchema;
   }
 
   public LightClientFinalityUpdateSchema getLightClientFinalityUpdateSchema() {

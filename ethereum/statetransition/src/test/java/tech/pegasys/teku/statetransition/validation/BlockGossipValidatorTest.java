@@ -54,6 +54,7 @@ import tech.pegasys.teku.statetransition.forkchoice.ForkChoiceStateProvider;
 import tech.pegasys.teku.statetransition.forkchoice.MergeTransitionBlockValidator;
 import tech.pegasys.teku.statetransition.forkchoice.NoopForkChoiceNotifier;
 import tech.pegasys.teku.statetransition.forkchoice.TickProcessor;
+import tech.pegasys.teku.statetransition.forkchoice.fastconfirmation.FastConfirmationTracker;
 import tech.pegasys.teku.statetransition.util.DebugDataDumper;
 import tech.pegasys.teku.statetransition.validation.BlockGossipValidator.EquivocationCheckResult;
 import tech.pegasys.teku.storage.api.LateBlockReorgPreparationHandler;
@@ -109,6 +110,7 @@ public class BlockGossipValidatorTest {
             new ForkChoiceStateProvider(eventThread, recentChainData),
             new TickProcessor(spec, recentChainData),
             mock(MergeTransitionBlockValidator.class),
+            FastConfirmationTracker.NOOP,
             DEFAULT_FORK_CHOICE_LATE_BLOCK_REORG_ENABLED,
             LateBlockReorgPreparationHandler.NOOP,
             mock(DebugDataDumper.class),
@@ -432,15 +434,14 @@ public class BlockGossipValidatorTest {
   }
 
   @TestTemplate
-  void shouldRejectBlockWithNotValidatedExecutionPayloadBidParentHash(
-      final SpecContext specContext) {
+  void shouldRejectBidNotBuildingOnTheParentsExecutionHead(final SpecContext specContext) {
     specContext.assumeGloasActive();
     final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
     final SignedBlockAndState signedBlockAndState =
         storageSystem.chainBuilder().generateBlockAtSlot(nextSlot);
     storageSystem.chainUpdater().setCurrentSlot(nextSlot);
 
-    final Bytes32 notValidatedParentBlockHash = Bytes32.random();
+    final Bytes32 unrelatedParentBlockHash = Bytes32.random();
 
     final SignedBeaconBlock invalidBlock =
         createBlockWithModifiedExecutionPayloadBid(
@@ -449,7 +450,7 @@ public class BlockGossipValidatorTest {
                 originalExecutionPayloadBid
                     .getSchema()
                     .create(
-                        notValidatedParentBlockHash,
+                        unrelatedParentBlockHash,
                         originalExecutionPayloadBid.getParentBlockRoot(),
                         originalExecutionPayloadBid.getBlockHash(),
                         originalExecutionPayloadBid.getPrevRandao(),
@@ -466,8 +467,7 @@ public class BlockGossipValidatorTest {
             result ->
                 result.equals(
                     InternalValidationResult.reject(
-                        "The parent block hash %s from the bid is not present or hasn't been passed validation",
-                        notValidatedParentBlockHash)));
+                        "Bid does not build on the parent's execution head")));
   }
 
   @TestTemplate
@@ -655,8 +655,15 @@ public class BlockGossipValidatorTest {
         emptyParentChildBlock, blockGossipValidator.validate(emptyParentChildBlock, true));
   }
 
+  /**
+   * The consensus-spec gossip rules don't require an EMPTY parent to carry default {@code
+   * parent_execution_requests} -- that rule only applies during state transition (see {@code
+   * BlockProcessorGloas#processParentExecutionPayload}), which is exercised separately. At gossip
+   * time, a block building on an EMPTY parent with non-default parent execution requests (as long
+   * as they respect {@code verify_execution_requests_limits}) must be accepted.
+   */
   @TestTemplate
-  void shouldRejectGloasBlockBuildingOnEmptyParentWithParentExecutionRequests(
+  void shouldAcceptGloasBlockBuildingOnEmptyParentWithNonDefaultParentExecutionRequests(
       final SpecContext specContext) {
     specContext.assumeGloasActive();
 
@@ -671,7 +678,7 @@ public class BlockGossipValidatorTest {
         storageSystem.chainBuilder().generateBlockAtSlot(childSlot);
     final ExecutionRequests parentExecutionRequests =
         specContext.getDataStructureUtil().randomExecutionRequests(parentSlot);
-    final SignedBeaconBlock invalidEmptyParentChildBlock =
+    final SignedBeaconBlock emptyParentChildBlockWithParentExecutionRequests =
         createBlockWithModifiedExecutionPayloadBid(
             childBlockAndState,
             originalExecutionPayloadBid ->
@@ -693,52 +700,9 @@ public class BlockGossipValidatorTest {
             parentExecutionRequests);
     storageSystem.chainUpdater().setCurrentSlot(childSlot);
 
-    assertThat(blockGossipValidator.validate(invalidEmptyParentChildBlock, true))
-        .isCompletedWithValueMatching(
-            result ->
-                result.equals(
-                    InternalValidationResult.reject(
-                        "No execution requests were expected for an EMPTY parent")));
-  }
-
-  @TestTemplate
-  void shouldRejectGloasBlockBuildingOnFullParentWithIncorrectParentExecutionRequests(
-      final SpecContext specContext) {
-    specContext.assumeGloasActive();
-
-    final UInt64 parentSlot = recentChainData.getHeadSlot().plus(ONE);
-    final SignedBlockAndState parentBlockAndState =
-        storageSystem.chainBuilder().generateBlockAtSlot(parentSlot);
-    storageSystem.chainUpdater().saveBlock(parentBlockAndState);
-    final ExecutionPayloadBid parentBid =
-        parentBlockAndState
-            .getBlock()
-            .getMessage()
-            .getBody()
-            .getOptionalSignedExecutionPayloadBid()
-            .orElseThrow()
-            .getMessage();
-
-    final UInt64 childSlot = parentSlot.plus(ONE);
-    final SignedBlockAndState childBlockAndState =
-        storageSystem.chainBuilder().generateBlockAtSlot(childSlot);
-    final ExecutionRequests incorrectParentExecutionRequests =
-        SchemaDefinitionsGloas.required(spec.atSlot(childSlot).getSchemaDefinitions())
-            .getExecutionRequestsSchema()
-            .getDefault();
-    final SignedBeaconBlock invalidFullParentChildBlock =
-        createBlockWithModifiedExecutionPayloadBid(
-            childBlockAndState, Function.identity(), incorrectParentExecutionRequests);
-    storageSystem.chainUpdater().setCurrentSlot(childSlot);
-
-    assertThat(incorrectParentExecutionRequests.hashTreeRoot())
-        .isNotEqualTo(parentBid.getExecutionRequestsRoot());
-    assertThat(blockGossipValidator.validate(invalidFullParentChildBlock, true))
-        .isCompletedWithValueMatching(
-            result ->
-                result.equals(
-                    InternalValidationResult.reject(
-                        "The execution requests root in the latest committed bid does not match the parent execution requests in the block")));
+    assertResultIsAccept(
+        emptyParentChildBlockWithParentExecutionRequests,
+        blockGossipValidator.validate(emptyParentChildBlockWithParentExecutionRequests, true));
   }
 
   @TestTemplate

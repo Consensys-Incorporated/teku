@@ -148,7 +148,7 @@ public class LogCaptor implements AutoCloseable {
 
   private static class CapturingAppender implements Appender {
     private static final PatternLayout LAYOUT =
-        PatternLayout.newBuilder().withPattern("%msg").build();
+        PatternLayout.newBuilder().setPattern("%msg").build();
     private final List<LogEvent> logs = new ArrayList<>();
     private final String name;
 

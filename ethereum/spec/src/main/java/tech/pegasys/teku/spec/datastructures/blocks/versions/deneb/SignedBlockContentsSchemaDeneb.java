@@ -16,17 +16,15 @@ package tech.pegasys.teku.spec.datastructures.blocks.versions.deneb;
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.BLOB_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.SIGNED_BEACON_BLOCK_SCHEMA;
 
-import java.util.List;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema3;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
-import tech.pegasys.teku.kzg.KZGProof;
 import tech.pegasys.teku.spec.config.SpecConfigDeneb;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.Blob;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlockSchema;
-import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContentsWithBlobsSchema;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContentsSchema;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGProof;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGProofSchema;
 import tech.pegasys.teku.spec.schemas.registry.SchemaRegistry;
@@ -34,7 +32,7 @@ import tech.pegasys.teku.spec.schemas.registry.SchemaRegistry;
 public class SignedBlockContentsSchemaDeneb
     extends ContainerSchema3<
         SignedBlockContentsDeneb, SignedBeaconBlock, SszList<SszKZGProof>, SszList<Blob>>
-    implements SignedBlockContentsWithBlobsSchema<SignedBlockContentsDeneb> {
+    implements SignedBlockContentsSchema<SignedBlockContentsDeneb> {
 
   public SignedBlockContentsSchemaDeneb(
       final String containerName,
@@ -42,7 +40,7 @@ public class SignedBlockContentsSchemaDeneb
       final SchemaRegistry schemaRegistry) {
     super(
         containerName,
-        namedSchema("signed_block", schemaRegistry.get(SIGNED_BEACON_BLOCK_SCHEMA)),
+        namedSchema(FIELD_SIGNED_BLOCK, schemaRegistry.get(SIGNED_BEACON_BLOCK_SCHEMA)),
         namedSchema(
             FIELD_KZG_PROOFS,
             SszListSchema.create(
@@ -51,14 +49,6 @@ public class SignedBlockContentsSchemaDeneb
             FIELD_BLOBS,
             SszListSchema.create(
                 schemaRegistry.get(BLOB_SCHEMA), specConfig.getMaxBlobCommitmentsPerBlock())));
-  }
-
-  @Override
-  public SignedBlockContentsDeneb create(
-      final SignedBeaconBlock signedBeaconBlock,
-      final List<KZGProof> kzgProofs,
-      final List<Blob> blobs) {
-    return new SignedBlockContentsDeneb(this, signedBeaconBlock, kzgProofs, blobs);
   }
 
   @Override

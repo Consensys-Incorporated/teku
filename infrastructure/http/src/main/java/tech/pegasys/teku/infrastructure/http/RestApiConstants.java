@@ -200,13 +200,13 @@ public class RestApiConstants {
 
               When `false`, only the beacon block is returned and the beacon node caches the execution
               payload envelope and blobs internally. The validator client must then fetch them separately
-              via `GET /eth/v1/validator/execution_payload_envelope/{slot}`. This saves
+              via `GET /eth/v1/validator/execution_payload_envelopes/{slot}/{beacon_block_root}`. This saves
               bandwidth but requires the validator client to publish via the same beacon node that
               produced the block (stateful operation).
 
-              This parameter only affects self-building scenarios. When using an external builder's bid,
-              only the beacon block is returned regardless of this parameter (the beacon node does not
-              have access to the builder's execution payload).""";
+              This parameter affects the self-built case only. When a builder bid wins, the beacon node
+              does not hold that payload, so it returns only the beacon block regardless of this
+              parameter.""";
 
   public static final String BUILDER_BOOST_FACTOR = "builder_boost_factor";
   public static final String BUILDER_BOOST_FACTOR_DESCRIPTION =
@@ -243,11 +243,13 @@ public class RestApiConstants {
 
   public static final String HEADER_CONSENSUS_VERSION = "Eth-Consensus-Version";
   public static final String HEADER_EXECUTION_PAYLOAD_BLINDED = "Eth-Execution-Payload-Blinded";
+  public static final String HEADER_BLOB_DATA_INCLUDED = "Eth-Blob-Data-Included";
   public static final String HEADER_EXECUTION_PAYLOAD_VALUE = "Eth-Execution-Payload-Value";
   public static final String HEADER_CONSENSUS_BLOCK_VALUE = "Eth-Consensus-Block-Value";
   public static final String HEADER_CONTENT_DISPOSITION = "Content-Disposition";
   public static final String HEADER_CONTENT_ENCODING = "Content-Encoding";
   public static final String HEADER_INCLUDE_PAYLOAD = "Eth-Execution-Payload-Included";
+  public static final String HEADER_BUILDER_URL = "Eth-Builder-Url";
 
   public static final String CACHE_NONE = "max-age=0";
 

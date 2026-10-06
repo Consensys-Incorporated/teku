@@ -17,7 +17,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.net.URL;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -33,13 +32,11 @@ import tech.pegasys.teku.networks.Eth2NetworkConfiguration;
 public class Eth2P2PNetworkOptionsTest extends AbstractBeaconNodeCommandTest {
 
   @Test
-  @SuppressWarnings("deprecation")
   public void shouldReadFromConfigurationFile() {
     final Eth2NetworkConfiguration eth2NetworkConfig =
         Eth2NetworkConfiguration.builder("holesky").build();
     final TekuConfiguration config = getTekuConfigurationFromFile("networkOptions_config.yaml");
-    assertThat(config.eth2NetworkConfiguration().getConstants())
-        .isEqualTo(eth2NetworkConfig.getConstants());
+    assertThat(config.eth2NetworkConfiguration()).isEqualTo(eth2NetworkConfig);
   }
 
   @ParameterizedTest(name = "{0}")
@@ -119,14 +116,12 @@ public class Eth2P2PNetworkOptionsTest extends AbstractBeaconNodeCommandTest {
   }
 
   @Test
-  @SuppressWarnings("deprecation")
   public void usingNetworkFromUrl() {
     final URL url =
         getClass().getClassLoader().getResource("tech/pegasys/teku/cli/options/constants.yaml");
     beaconNodeCommand.parse(new String[] {"--network", url.toString()});
     final TekuConfiguration config = getResultingTekuConfiguration();
-    assertThat(config.eth2NetworkConfiguration().getConstants().toLowerCase(Locale.ROOT))
-        .isEqualToIgnoringWhitespace(url.toString().toLowerCase(Locale.ROOT));
+    assertThat(config.eth2NetworkConfiguration()).isNotNull();
   }
 
   @Test

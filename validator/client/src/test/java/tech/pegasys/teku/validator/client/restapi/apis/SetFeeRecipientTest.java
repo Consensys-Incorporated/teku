@@ -16,6 +16,7 @@ package tech.pegasys.teku.validator.client.restapi.apis;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_ACCEPTED;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_FORBIDDEN;
@@ -30,6 +31,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import java.io.IOException;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.infrastructure.restapi.StubRestApiRequest;
 import tech.pegasys.teku.spec.Spec;
@@ -81,6 +83,19 @@ public class SetFeeRecipientTest {
   @Test
   void metadata_shouldHandle500() throws JsonProcessingException {
     verifyMetadataErrorResponse(handler, SC_INTERNAL_SERVER_ERROR);
+  }
+
+  @Test
+  void shouldReturnNotFoundWhenValidatorIsNotOwned() throws JsonProcessingException {
+    final BLSPublicKey publicKey = dataStructureUtil.randomPublicKey();
+    when(proposerConfigManager.isOwnedValidator(publicKey)).thenReturn(false);
+    request.setPathParameter("pubkey", publicKey.toBytesCompressed().toHexString());
+    request.setRequestBody(
+        new SetFeeRecipient.SetFeeRecipientBody(dataStructureUtil.randomEth1Address()));
+
+    handler.handleRequest(request);
+
+    assertThat(request.getResponseCode()).isEqualTo(SC_NOT_FOUND);
   }
 
   @Test

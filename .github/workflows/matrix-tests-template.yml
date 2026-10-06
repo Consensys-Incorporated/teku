@@ -26,24 +26,112 @@ on:
       runner:
         type: string
         required: false
-        default: gha-runner-scale-set-ubuntu-24-amd64-xxl
+        default: ubuntu-latest-128
       gradle_args:
         type: string
         required: false
         default: ''
+      retry_attempts:
+        type: number
+        required: false
+        default: 1
+      shard_count:
+        type: number
+        required: false
+        default: 12
 
 permissions:
   actions: read     # download the assemble output as an artifacts
   contents: read
 
 jobs:
+  planShards:
+    runs-on: ubuntu-24.04
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: 'recursive'
+
+      - name: Restore cached test timings
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: test-timing-${{ inputs.stage_key }}.json
+          key: test-timing-${{ inputs.stage_key }}-nonexistent
+          restore-keys: |
+            test-timing-${{ inputs.stage_key }}-
+
+      # Greedy LPT (longest-processing-time-first) bin-packing of test classes across
+      # shards, using timings cached by capture-test-timings on the last master run.
+      # Classes with no cached timing (new classes, or no cache yet) get the average of
+      # known classes so the plan stays balanced instead of dumping them all in shard 0.
+      - name: Compute shard plan
+        id: plan
+        shell: bash
+        env:
+          STAGE_KEY: ${{ inputs.stage_key }}
+          SHARD_COUNT: ${{ inputs.shard_count }}
+          SRC_PATTERN: ${{ inputs.src_pattern }}
+          SRC_ROOT: ${{ inputs.src_root }}
+        run: |
+          find . -type f -name "*.java" -path "$SRC_PATTERN" \
+            | sed "s@.*/$SRC_ROOT/@@" \
+            | sed 's@/@.@g' \
+            | sed 's/.\{5\}$//' \
+            | sort > classes.txt
+
+          python3 <<'PY'
+          import json, os
+
+          stage = os.environ["STAGE_KEY"]
+          shards = int(os.environ["SHARD_COUNT"])
+
+          with open("classes.txt") as f:
+              classes = [line.strip() for line in f if line.strip()]
+
+          timing_file = f"test-timing-{stage}.json"
+          timings = {}
+          if os.path.exists(timing_file):
+              with open(timing_file) as f:
+                  timings = json.load(f)
+
+          known = [timings[c] for c in classes if c in timings]
+          default_time = (sum(known) / len(known)) if known else 1.0
+
+          weighted = sorted(
+              ((c, timings.get(c, default_time)) for c in classes), key=lambda x: -x[1]
+          )
+          bin_totals = [0.0] * shards
+          plan = {str(i): [] for i in range(shards)}
+          for classname, duration in weighted:
+              target = min(range(shards), key=lambda i: bin_totals[i])
+              bin_totals[target] += duration
+              plan[str(target)].append(classname)
+
+          with open("plan.json", "w") as f:
+              json.dump(plan, f)
+          print(f"planned {len(classes)} classes across {shards} shards ({len(known)} with known timing)")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"shards={json.dumps(list(range(shards)))}\n")
+          PY
+
+      - name: Upload shard plan
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ inputs.stage_key }}-shard-plan
+          path: plan.json
+          retention-days: 1
+
   matrix-tests-template:
+    needs: planShards
     runs-on: ${{ inputs.runner }}
     strategy:
       fail-fast: false
       matrix:
-        shard: [0,1,2,3,4,5,6,7,8,9,10,11]   # parallel shards
-        total: [12]
+        # [0 .. shard_count-1], emitted by planShards
+        shard: ${{ fromJSON(needs.planShards.outputs.shards) }}
 
     steps:
       - name: Checkout
@@ -53,6 +141,9 @@ jobs:
           fetch-depth: 0  # Full history
           fetch-tags: true
 
+      - name: Prepare
+        uses: ./.github/actions/prepare
+
       - name: Download assemble-output
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -60,13 +151,36 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ inputs.assemble_output_run_id }}
           name: assemble-output
-          merge-multiple: true
+          path: ${{ runner.temp }}
+      - name: Unpack assemble-output
+        shell: bash
+        run: |
+          tar --use-compress-program=zstd -xf "$RUNNER_TEMP/assemble-output.tar.zst" -C "$GITHUB_WORKSPACE"
+          rm "$RUNNER_TEMP/assemble-output.tar.zst"
+
+      - name: Download shard plan
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ inputs.stage_key }}-shard-plan
           path: ${{ github.workspace }}
 
-      - name: Prepare
-        uses: ./.github/actions/prepare
+      # only acceptance tests need the docker image and login
+      - name: Download Teku docker image
+        if: ${{ inputs.stage_key == 'acceptance' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.assemble_output_run_id }}
+          name: teku-docker-image
+          path: ${{ runner.temp }}
 
-      # only acceptance tests need the docker login
+      - name: Load Teku docker image
+        if: ${{ inputs.stage_key == 'acceptance' }}
+        shell: bash
+        run: |
+          zstd -dc "${{ runner.temp }}/teku-docker-image.tar.zst" | docker load && rm "${{ runner.temp }}/teku-docker-image.tar.zst" && docker images consensys/teku
+
       # 4.0.0
       - name: Login to dockerhub
         uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2
@@ -77,41 +191,50 @@ jobs:
           username: "cddockeruser"
           password: "fa8651f2-88be-48b7-98ce-e711bd376252"
 
-      - name: Compute shard ${{ matrix.shard }} of ${{ matrix.total }} for ${{ inputs.stage_name }}
+      - name: Compute shard ${{ matrix.shard }} of ${{ inputs.shard_count }} for ${{ inputs.stage_name }}
         id: shard
         shell: bash
         run: |
-          SRC_PATTERN="${{ inputs.src_pattern }}" # e.g. */src/test/java/* or */src/property-test/java/* etc 
-          # 1) Collect test classes by pattern = FQNs
-          CLASSNAMES=$(find . -type f -name "*.java" -path "$SRC_PATTERN" \
-            | sed "s@.*/${{ inputs.src_root }}/@@" \
-            | sed 's@/@.@g' \
-            | sed 's/.\{5\}$//' \
-            | sort )
-          # 2) Modulo split i.e (NR-1) % shards == shard
-          CLASSES_FOR_SHARD=$(printf "%s\n" "$CLASSNAMES" \
-            | awk -v shards=${{ matrix.total }} -v shard=${{ matrix.shard }} '((NR-1) % shards) == shard')
+          # Classes for this shard come from the timing-based plan built by planShards.
+          CLASSES_FOR_SHARD=$(python3 -c "
+          import json
+          plan = json.load(open('plan.json'))
+          print('\n'.join(plan.get('${{ matrix.shard }}', [])))
+          ")
           if [ -z "$CLASSES_FOR_SHARD" ]; then
             echo "args=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # 3) Build --tests args
+          # Build --tests args
           GRADLE_ARGS=$(printf "%s\n" "$CLASSES_FOR_SHARD" | awk '{printf "--tests %s ", $0}')
           echo "Prepared arguments for Gradle (${{ inputs.stage_name }}): $GRADLE_ARGS"
           echo "args=$GRADLE_ARGS" >> "$GITHUB_OUTPUT"
 
       - name: Run ${{ inputs.stage_name }} (shard)
         if: steps.shard.outputs.args != ''
-        run: |
-          ./gradlew --no-daemon --parallel ${{ inputs.gradle_args }} ${{ inputs.gradle_task }} ${{ steps.shard.outputs.args }}
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4.0.0
+        with:
+          timeout_minutes: 30
+          max_attempts: ${{ inputs.retry_attempts }}
+          command: ./gradlew --no-daemon --parallel ${{ inputs.gradle_args }} ${{ inputs.gradle_task }} ${{ steps.shard.outputs.args }}
+
+      - name: Merge JUnit XML for ${{ inputs.stage_name }}
+        if: always()
+        uses: ./.github/actions/merge-junit-xml
+        with:
+          output: build/test-results/merged/TEST-${{ inputs.stage_key }}-${{ matrix.shard }}.xml
 
       - name: Upload JUnit XML + HTML for ${{ inputs.stage_name }}
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ inputs.stage_key }}-reports-${{ matrix.shard }}
+          # XML only: nothing reads the HTML report, and the merged XML keeps each test's
+          # captured output, which is what test-reports.yml and capture-test-timings consume.
           path: |
-            **/build/test-results/**/TEST-*.xml
-            **/build/reports/tests/**
+            build/test-results/merged/TEST-*.xml
           if-no-files-found: ignore
           retention-days: 1
+          # A rerun of one failed shard would otherwise add a second artifact with the same
+          # name next to the stale one, and test-reports.yml / capture-test-timings download both.
+          overwrite: true

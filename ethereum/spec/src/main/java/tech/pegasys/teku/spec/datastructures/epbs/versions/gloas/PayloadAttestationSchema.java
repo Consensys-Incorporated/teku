@@ -37,7 +37,9 @@ public class PayloadAttestationSchema
     super(
         "PayloadAttestation",
         ACTIVE_FIELDS,
-        namedSchema("aggregation_bits", SszBitvectorSchema.create(specConfig.getPtcSize())),
+        namedSchema(
+            "aggregation_bits",
+            SszBitvectorSchema.create(specConfig.getPayloadTimelinessCommitteeSize())),
         namedSchema("data", schemaRegistry.get(PAYLOAD_ATTESTATION_DATA_SCHEMA)),
         namedSchema("signature", SszSignatureSchema.INSTANCE));
   }

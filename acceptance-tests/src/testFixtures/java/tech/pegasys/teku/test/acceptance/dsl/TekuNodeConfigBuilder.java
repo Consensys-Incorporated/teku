@@ -599,6 +599,13 @@ public class TekuNodeConfigBuilder {
     return this;
   }
 
+  public TekuNodeConfigBuilder withFastConfirmationEnabled() {
+    mustBe(NodeType.BEACON_NODE);
+    LOG.debug("Xfast-confirmation-enabled=true");
+    configMap.put("Xfast-confirmation-enabled", true);
+    return this;
+  }
+
   public TekuNodeConfigBuilder withStubExecutionEngine(final String terminalBlockHash) {
     mustBe(NodeType.BEACON_NODE);
     final String endpoint = "unsafe-test-stub:" + terminalBlockHash;

@@ -38,7 +38,6 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
-import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
@@ -291,49 +290,37 @@ public class BlockGossipValidator {
     };
   }
 
+  /**
+   * Validates the execution payload bid's parent (defined by {@code bid.parent_block_hash}) against
+   * the parent's state and payload status.
+   *
+   * <p>[New in Gloas:EIP7732] If the parent block is full, the parent payload must be verified (MAY
+   * be queued until the parent payload is verified, i.e. SAVE_FOR_FUTURE).
+   *
+   * <p>[New in Gloas:EIP7732] If the parent is not full, the bid must build on the parent's
+   * execution head, i.e. {@code bid.parent_block_hash == parent_state.latest_block_hash}.
+   */
   private Optional<InternalValidationResult> validateExecutionPayloadBidParent(
       final SignedBeaconBlock block,
       final BeaconStateGloas parentState,
       final ExecutionPayloadBid executionPayloadBid) {
     final MiscHelpersGloas miscHelpersGloas =
         MiscHelpersGloas.required(spec.atSlot(block.getSlot()).miscHelpers());
-    final Optional<ExecutionRequests> maybeParentExecutionRequests =
-        block.getMessage().getBody().getOptionalParentExecutionRequests();
-    if (maybeParentExecutionRequests.isEmpty()) {
-      return Optional.of(reject("Missing parent execution requests"));
-    }
 
-    final ExecutionRequests parentExecutionRequests = maybeParentExecutionRequests.get();
-    // Gloas process_parent_execution_payload treats a parent as FULL when the child bid references
-    // the latest committed FULL parent bid. Check this before EMPTY because the FULL bid hash can
-    // equal latest_block_hash at Gloas genesis or fork transition.
     if (miscHelpersGloas.isBidBuildingOnFullParent(parentState, executionPayloadBid)) {
-      if (!miscHelpersGloas.isExecutionRequestsRootMatchingLatestBid(
-          parentState, parentExecutionRequests)) {
-        return Optional.of(
-            reject(
-                "The execution requests root in the latest committed bid does not match the parent execution requests in the block"));
-      }
-      final boolean parentExecutionPayloadKnown =
+      final boolean parentExecutionPayloadVerified =
           gossipValidationHelper.isBlockHashKnown(
               executionPayloadBid.getParentBlockHash(), block.getParentRoot());
-      if (!parentExecutionPayloadKnown) {
+      if (!parentExecutionPayloadVerified) {
         return Optional.of(InternalValidationResult.SAVE_FOR_FUTURE);
       }
       return Optional.empty();
     }
 
-    if (miscHelpersGloas.isBidBuildingOnEmptyParent(parentState, executionPayloadBid)) {
-      if (!parentExecutionRequests.isDefault()) {
-        return Optional.of(reject("No execution requests were expected for an EMPTY parent"));
-      }
-      return Optional.empty();
+    if (!executionPayloadBid.getParentBlockHash().equals(parentState.getLatestBlockHash())) {
+      return Optional.of(reject("Bid does not build on the parent's execution head"));
     }
-
-    return Optional.of(
-        reject(
-            "The parent block hash %s from the bid is not present or hasn't been passed validation",
-            executionPayloadBid.getParentBlockHash()));
+    return Optional.empty();
   }
 
   synchronized EquivocationCheckResult performBlockEquivocationCheck(

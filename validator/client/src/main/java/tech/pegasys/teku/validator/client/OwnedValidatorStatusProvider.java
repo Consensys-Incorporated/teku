@@ -28,7 +28,6 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.api.response.ValidatorStatus;
 import tech.pegasys.teku.bls.BLSPublicKey;
@@ -40,8 +39,6 @@ import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.subscribers.Subscribers;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
-import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
-import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 import tech.pegasys.teku.validator.client.loader.OwnedValidators;
 
@@ -108,13 +105,6 @@ public class OwnedValidatorStatusProvider implements ValidatorStatusProvider {
   }
 
   @Override
-  public void onHeadUpdate(
-      final UInt64 slot,
-      final Bytes32 previousDutyDependentRoot,
-      final Bytes32 currentDutyDependentRoot,
-      final Bytes32 headBlockRoot) {}
-
-  @Override
   public void onPossibleMissedEvents() {
     updateValidatorStatuses(true);
   }
@@ -123,35 +113,6 @@ public class OwnedValidatorStatusProvider implements ValidatorStatusProvider {
   public void onValidatorsAdded() {
     updateValidatorStatuses(false);
   }
-
-  @Override
-  public void onBlockProductionDue(final UInt64 slot) {}
-
-  @Override
-  public void onAttestationCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onAttestationAggregationDue(final UInt64 slot) {}
-
-  @Override
-  public void onSyncCommitteeCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onContributionCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onPayloadAttestationCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onAttesterSlashing(final AttesterSlashing attesterSlashing) {}
-
-  @Override
-  public void onProposerSlashing(final ProposerSlashing proposerSlashing) {}
-
-  @Override
-  public void onUpdatedValidatorStatuses(
-      final Map<BLSPublicKey, ValidatorStatus> newValidatorStatuses,
-      final boolean possibleMissingEvents) {}
 
   @Override
   public void subscribeValidatorStatusesUpdates(final ValidatorStatusSubscriber subscriber) {

@@ -84,6 +84,12 @@ public class OperationValidatorPhase0 implements OperationValidator {
   }
 
   @Override
+  public Optional<OperationInvalidReason> validateVoluntaryExitForGossip(
+      final Fork fork, final BeaconState state, final SignedVoluntaryExit signedExit) {
+    return voluntaryExitValidator.validateForGossip(fork, state, signedExit);
+  }
+
+  @Override
   public Optional<OperationInvalidReason> validateBlsToExecutionChange(
       final Fork fork, final BeaconState state, final BlsToExecutionChange blsToExecutionChange) {
     return Optional.of(() -> "Bls to execution changes are not valid before Capella fork");

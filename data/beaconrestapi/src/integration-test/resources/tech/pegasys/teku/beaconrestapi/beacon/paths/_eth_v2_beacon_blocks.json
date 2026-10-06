@@ -23,6 +23,13 @@
         "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze" ],
         "description" : "Version of the block being submitted."
       }
+    }, {
+      "name" : "Eth-Builder-Url",
+      "in" : "header",
+      "schema" : {
+        "type" : "string",
+        "description" : "The url of a winning builder when the bid was retrieved via the builder-API."
+      }
     } ],
     "requestBody" : {
       "content" : {

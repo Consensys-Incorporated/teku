@@ -189,6 +189,10 @@ public class SszTestExecutor<T extends SszData> implements TestExecutor {
               new SszTestExecutor<>(
                   schemas ->
                       SchemaDefinitionsBellatrix.required(schemas).getExecutionPayloadSchema()))
+
+          // TODO introduced in reference tests 1.7.0.beta.1
+          // to be enabled when migrating to ssz engine api
+          .put("ssz_static/NewPayloadRequest", IGNORE_TESTS)
           .put("ssz_static/PowBlock", IGNORE_TESTS)
 
           // Capella Types

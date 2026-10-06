@@ -38,10 +38,12 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import org.apache.logging.log4j.Level;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import org.mockito.ArgumentCaptor;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
@@ -58,6 +60,7 @@ import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.DataColumnSidecarsByRootRequestMessage;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.DataColumnSidecarsByRootRequestMessageSchema;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.DataColumnsByRootIdentifier;
@@ -524,6 +527,72 @@ public class DataColumnSidecarsByRootMessageHandlerTest {
     verify(dataColumnSidecarArchiveReconstructor, times(4))
         .reconstructDataColumnSidecar(any(), any(), anyInt());
     verify(dataColumnSidecarArchiveReconstructor).onRequestCompleted(anyInt());
+  }
+
+  @TestTemplate
+  public void shouldSendReconstructedArchiveDataColumnSidecars() {
+    // four requested (custodied) columns whose canonical sidecars are pruned but reconstruct
+    final DataColumnsByRootIdentifier[] dataColumnsByRootIdentifiers =
+        generateDataColumnsByRootIdentifiers(4, 1);
+
+    when(combinedChainDataClient.getSidecar(any(DataColumnSlotAndIdentifier.class)))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+    when(dataColumnSidecarArchiveReconstructor.isSidecarPruned(any(), any())).thenReturn(true);
+    when(dataColumnSidecarArchiveReconstructor.reconstructDataColumnSidecar(any(), any(), anyInt()))
+        .thenAnswer(
+            invocation -> {
+              final SignedBeaconBlock block = invocation.getArgument(0);
+              final UInt64 index = invocation.getArgument(1);
+              return SafeFuture.completedFuture(
+                  Optional.of(dataStructureUtil.randomDataColumnSidecar(block, index)));
+            });
+
+    final LogCaptor logCaptor =
+        LogCaptor.forClass(DataColumnSidecarsByRootMessageHandler.class, Level.DEBUG);
+    handler.onIncomingMessage(
+        protocolId, peer, messageSchema.of(dataColumnsByRootIdentifiers), callback);
+
+    // reconstruction and serving of each column is observable in the logs at debug level
+    assertThat(logCaptor.getDebugLogs())
+        .filteredOn(log -> log.contains("Serving reconstructed data column sidecar"))
+        .hasSize(4);
+    logCaptor.close();
+
+    verify(peer).approveDataColumnSidecarsRequest(any(), eq(Long.valueOf(4)));
+    // all four columns reconstructed and served, so no downward adjustment happens
+    verify(peer, never()).adjustDataColumnSidecarsRequest(any(), anyLong());
+    verify(callback, times(4)).respond(datacolumnSidecarCaptor.capture());
+    verify(callback).completeSuccessfully();
+    verify(dataColumnSidecarArchiveReconstructor, times(4))
+        .reconstructDataColumnSidecar(any(), any(), anyInt());
+    verify(dataColumnSidecarArchiveReconstructor).onRequestCompleted(anyInt());
+
+    // every served sidecar is a genuine reconstruction of the requested column index
+    assertThat(datacolumnSidecarCaptor.getAllValues())
+        .hasSize(4)
+        .allSatisfy(sidecar -> assertThat(sidecar.getIndex()).isEqualTo(ZERO));
+  }
+
+  @TestTemplate
+  public void shouldNotReconstructWhenBlockIsMissing() {
+    final DataColumnsByRootIdentifier[] dataColumnsByRootIdentifiers =
+        generateDataColumnsByRootIdentifiers(4, 1);
+
+    when(combinedChainDataClient.getSidecar(any(DataColumnSlotAndIdentifier.class)))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+    when(dataColumnSidecarArchiveReconstructor.isSidecarPruned(any(), any())).thenReturn(true);
+    // block for the requested root is not available, so reconstruction cannot run
+    when(combinedChainDataClient.getBlockByBlockRoot(any()))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+
+    handler.onIncomingMessage(
+        protocolId, peer, messageSchema.of(dataColumnsByRootIdentifiers), callback);
+
+    verify(peer).adjustDataColumnSidecarsRequest(any(), eq(Long.valueOf(0)));
+    verify(callback, never()).respond(any());
+    verify(callback).completeSuccessfully();
+    verify(dataColumnSidecarArchiveReconstructor, never())
+        .reconstructDataColumnSidecar(any(), any(), anyInt());
   }
 
   @TestTemplate

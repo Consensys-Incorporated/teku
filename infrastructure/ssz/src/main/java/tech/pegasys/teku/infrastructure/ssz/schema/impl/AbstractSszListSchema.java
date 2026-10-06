@@ -28,6 +28,7 @@ import tech.pegasys.teku.infrastructure.json.types.DeserializableArrayTypeDefini
 import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
+import tech.pegasys.teku.infrastructure.ssz.schema.ListSchemaUtil;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszPrimitiveSchemas;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszProgressiveByteListSchema;
@@ -88,7 +89,7 @@ public abstract class AbstractSszListSchema<
     }
     this.compatibleVectorSchema =
         new SszVectorSchemaImpl<>(elementSchema, getMaxLength(), true, getHints());
-    this.sszLengthBounds = computeSszLengthBounds(elementSchema, maxLength);
+    this.sszLengthBounds = ListSchemaUtil.computeListSszLengthBounds(elementSchema, maxLength);
     this.jsonTypeDefinition =
         new DeserializableArrayTypeDefinition<>(
             getElementSchema().getJsonTypeDefinition(), this::createFromElements);
@@ -370,20 +371,6 @@ public abstract class AbstractSszListSchema<
   @Override
   public SszLengthBounds getSszLengthBounds() {
     return sszLengthBounds;
-  }
-
-  private static SszLengthBounds computeSszLengthBounds(
-      final SszSchema<?> elementSchema, final long maxLength) {
-    SszLengthBounds elementLengthBounds = elementSchema.getSszLengthBounds();
-    // if elements are of dynamic size the offset size should be added for every element
-    SszLengthBounds elementAndOffsetLengthBounds =
-        elementLengthBounds.addBytes(elementSchema.isFixedSize() ? 0 : SSZ_LENGTH_SIZE);
-    SszLengthBounds maxLenBounds =
-        SszLengthBounds.ofBits(0, elementAndOffsetLengthBounds.mul(maxLength).getMaxBits());
-    // adding 1 boundary bit for BitlistImpl
-    return maxLenBounds
-        .addBits(elementSchema.equals(SszPrimitiveSchemas.BIT_SCHEMA) ? 1 : 0)
-        .ceilToBytes();
   }
 
   @Override

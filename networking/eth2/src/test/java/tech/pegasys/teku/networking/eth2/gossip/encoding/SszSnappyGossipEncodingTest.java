@@ -102,18 +102,6 @@ public class SszSnappyGossipEncodingTest {
   }
 
   @Test
-  public void roundTrip_blockWithAircompressor() throws DecodingException {
-    final SignedBeaconBlock original = dataStructureUtil.randomSignedBeaconBlock(1);
-
-    final Bytes encoded = GossipEncoding.SSZ_SNAPPY_AIRCOMPRESSOR.encode(original);
-    final SignedBeaconBlock decoded =
-        decode(
-            topicName, GossipEncoding.SSZ_SNAPPY_AIRCOMPRESSOR, encoded, signedBeaconBlockSchema);
-
-    assertThat(decoded).isEqualTo(original);
-  }
-
-  @Test
   public void decode_emptyValue() {
     assertThatThrownBy(() -> decode(topicName, encoding, Bytes.EMPTY, beaconStateSchema))
         .isInstanceOf(DecodingException.class);

@@ -13,14 +13,9 @@
 
 package tech.pegasys.teku.validator.client.duties.synccommittee;
 
-import java.util.Map;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
-import tech.pegasys.teku.api.response.ValidatorStatus;
-import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
-import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
-import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
 
 public class ChainHeadTracker implements ValidatorTimingChannel {
@@ -50,42 +45,4 @@ public class ChainHeadTracker implements ValidatorTimingChannel {
     this.headBlockSlot = slot;
     this.headBlockRoot = Optional.of(headBlockRoot);
   }
-
-  @Override
-  public void onSlot(final UInt64 slot) {}
-
-  @Override
-  public void onPossibleMissedEvents() {}
-
-  @Override
-  public void onValidatorsAdded() {}
-
-  @Override
-  public void onBlockProductionDue(final UInt64 slot) {}
-
-  @Override
-  public void onAttestationCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onAttestationAggregationDue(final UInt64 slot) {}
-
-  @Override
-  public void onSyncCommitteeCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onContributionCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onPayloadAttestationCreationDue(final UInt64 slot) {}
-
-  @Override
-  public void onAttesterSlashing(final AttesterSlashing attesterSlashing) {}
-
-  @Override
-  public void onProposerSlashing(final ProposerSlashing proposerSlashing) {}
-
-  @Override
-  public void onUpdatedValidatorStatuses(
-      final Map<BLSPublicKey, ValidatorStatus> newValidatorStatuses,
-      final boolean possibleMissingEvents) {}
 }

@@ -14,7 +14,7 @@
 package tech.pegasys.teku.networking.eth2.gossip.topics;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 
@@ -22,14 +22,22 @@ import io.libp2p.core.pubsub.ValidationResult;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.gossip.VoluntaryExitGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers.Eth2TopicHandler;
+import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
+import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.generator.VoluntaryExitGenerator;
 import tech.pegasys.teku.statetransition.util.DebugDataDumper;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
+import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystemBuilder;
 import tech.pegasys.teku.storage.storageSystem.StorageSystem;
 
@@ -71,17 +79,69 @@ public class VoluntaryExitTopicHandlerTest extends AbstractTopicHandlerTest<Sign
     assertThat(result).isCompletedWithValue(ValidationResult.Valid);
   }
 
+  // exit epochs falling in Capella, Deneb and Electra respectively
+  @ParameterizedTest(name = "exitEpoch={0}")
+  @ValueSource(ints = {1, 2, 3})
+  public void handleMessage_acceptsPastEpochExitOnFuluTopic(final int exitEpoch) {
+    final UInt64 fuluEpoch = UInt64.valueOf(4);
+    final Spec fuluSpec =
+        TestSpecFactory.createMinimalWithCapellaDenebElectraAndFuluForkEpoch(
+            UInt64.ONE, UInt64.valueOf(2), UInt64.valueOf(3), fuluEpoch);
+    final StorageSystem fuluStorage =
+        InMemoryStorageSystemBuilder.create().numberOfValidators(5).specProvider(fuluSpec).build();
+    fuluStorage.chainUpdater().initializeGenesis();
+    final UInt64 headSlot = fuluSpec.computeStartSlotAtEpoch(UInt64.valueOf(65));
+    fuluStorage
+        .chainUpdater()
+        .updateBestBlock(fuluStorage.chainUpdater().advanceChainUntil(headSlot));
+    final RecentChainData fuluChainData = fuluStorage.recentChainData();
+    final BeaconState state = safeJoin(fuluChainData.getBestState().orElseThrow());
+    assertThat(fuluSpec.atSlot(state.getSlot()).getMilestone()).isEqualTo(SpecMilestone.FULU);
+
+    final SignedVoluntaryExit exit =
+        new VoluntaryExitGenerator(fuluSpec, fuluStorage.chainBuilder().getValidatorKeys())
+            .withEpoch(state, exitEpoch, 3);
+    assertThat(fuluSpec.verifyVoluntaryExitSignature(state, exit, BLSSignatureVerifier.SIMPLE))
+        .isTrue();
+    assertThat(fuluSpec.validateVoluntaryExit(state, exit)).isEmpty();
+
+    final Eth2TopicHandler<SignedVoluntaryExit> fuluHandler =
+        new VoluntaryExitGossipManager(
+                fuluChainData,
+                asyncRunner,
+                gossipNetwork,
+                gossipEncoding,
+                fuluChainData.getForkInfo(fuluEpoch).orElseThrow(),
+                fuluChainData.getForkDigest(fuluEpoch),
+                processor,
+                fuluSpec.getNetworkingConfig(),
+                DebugDataDumper.NOOP)
+            .getTopicHandler();
+    when(processor.process(exit, Optional.empty()))
+        .thenReturn(SafeFuture.completedFuture(InternalValidationResult.ACCEPT));
+
+    final Bytes serialized = gossipEncoding.encode(exit);
+    final SafeFuture<ValidationResult> result =
+        fuluHandler.handleMessage(fuluHandler.prepareMessage(serialized, Optional.empty()));
+    asyncRunner.executeQueuedActions();
+
+    assertThat(result).isCompletedWithValue(ValidationResult.Valid);
+    verify(processor).process(exit, Optional.empty());
+  }
+
   @Test
-  public void handleMessage_invalidExit_wrongFork() {
+  public void handleMessage_exitFromEarlierFork_rejectedByProcessor() {
     final SignedVoluntaryExit exit =
         exitGenerator.withEpoch(
             getBestState(), spec.computeEpochAtSlot(wrongForkSlot).intValue(), 3);
+    when(processor.process(exit, Optional.empty()))
+        .thenReturn(SafeFuture.completedFuture(InternalValidationResult.reject("Invalid exit")));
     Bytes serialized = gossipEncoding.encode(exit);
     final SafeFuture<ValidationResult> result =
         topicHandler.handleMessage(topicHandler.prepareMessage(serialized, Optional.empty()));
     asyncRunner.executeQueuedActions();
     assertThat(result).isCompletedWithValue(ValidationResult.Invalid);
-    verifyNoInteractions(processor);
+    verify(processor).process(exit, Optional.empty());
   }
 
   @Test

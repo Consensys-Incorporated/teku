@@ -133,7 +133,7 @@ public class ValidatorRestApi {
         .endpoint(new SetGasLimit(proposerConfigManager))
         .endpoint(new DeleteFeeRecipient(proposerConfigManager))
         .endpoint(new DeleteGasLimit(proposerConfigManager))
-        .endpoint(new PostVoluntaryExit(voluntaryExitDataProvider))
+        .endpoint(new PostVoluntaryExit(voluntaryExitDataProvider, keyManager))
         .endpoint(new GetGraffiti(keyManager))
         .endpoint(new SetGraffiti(keyManager, graffitiManager))
         .endpoint(new DeleteGraffiti(keyManager, graffitiManager))

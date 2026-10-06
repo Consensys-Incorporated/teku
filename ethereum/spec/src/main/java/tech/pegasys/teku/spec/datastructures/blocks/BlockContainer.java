@@ -20,6 +20,7 @@ import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.Blob;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGProof;
 
 /**
@@ -37,6 +38,10 @@ public interface BlockContainer extends SszData, SszContainer {
 
   default Bytes32 getRoot() {
     return getBlock().getRoot();
+  }
+
+  default Optional<ExecutionPayloadEnvelope> getExecutionPayloadEnvelope() {
+    return Optional.empty();
   }
 
   default Optional<SszList<SszKZGProof>> getKzgProofs() {

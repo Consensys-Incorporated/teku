@@ -149,14 +149,14 @@ public class PostBlindedAndUnblindedBlockTest extends AbstractDataBackedRestAPII
   private void prepareResponse(final SignedBeaconBlock request, final Version version) {
     if (version == V2) {
       when(validatorApiChannel.sendSignedBlock(
-              request, BroadcastValidationLevel.CONSENSUS_AND_EQUIVOCATION))
+              request, BroadcastValidationLevel.CONSENSUS_AND_EQUIVOCATION, Optional.empty()))
           .thenReturn(SafeFuture.completedFuture(SendSignedBlockResult.success(request.getRoot())));
     } else {
       final BroadcastValidationLevel broadcastValidationLevel =
           request.isBlinded()
               ? BroadcastValidationLevel.NOT_REQUIRED
               : BroadcastValidationLevel.GOSSIP;
-      when(validatorApiChannel.sendSignedBlock(request, broadcastValidationLevel))
+      when(validatorApiChannel.sendSignedBlock(request, broadcastValidationLevel, Optional.empty()))
           .thenReturn(SafeFuture.completedFuture(SendSignedBlockResult.success(request.getRoot())));
     }
   }
@@ -164,14 +164,14 @@ public class PostBlindedAndUnblindedBlockTest extends AbstractDataBackedRestAPII
   private void prepareResponse(final SignedBlockContainer request, final Version version) {
     if (version == V2) {
       when(validatorApiChannel.sendSignedBlock(
-              request, BroadcastValidationLevel.CONSENSUS_AND_EQUIVOCATION))
+              request, BroadcastValidationLevel.CONSENSUS_AND_EQUIVOCATION, Optional.empty()))
           .thenReturn(SafeFuture.completedFuture(SendSignedBlockResult.success(request.getRoot())));
     } else {
       final BroadcastValidationLevel broadcastValidationLevel =
           request.isBlinded()
               ? BroadcastValidationLevel.NOT_REQUIRED
               : BroadcastValidationLevel.GOSSIP;
-      when(validatorApiChannel.sendSignedBlock(request, broadcastValidationLevel))
+      when(validatorApiChannel.sendSignedBlock(request, broadcastValidationLevel, Optional.empty()))
           .thenReturn(SafeFuture.completedFuture(SendSignedBlockResult.success(request.getRoot())));
     }
   }

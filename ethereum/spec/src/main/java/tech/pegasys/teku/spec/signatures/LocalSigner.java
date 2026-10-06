@@ -27,6 +27,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.builder.ValidatorRegistration;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderRequestAuth;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
@@ -150,6 +151,12 @@ public class LocalSigner implements Signer {
       final ProposerPreferences proposerPreferences, final ForkInfo forkInfo) {
     return sign(
         signingRootUtil.signingRootForSignProposerPreferences(proposerPreferences, forkInfo));
+  }
+
+  @Override
+  public SafeFuture<BLSSignature> signBuilderRequestAuth(
+      final BuilderRequestAuth builderRequestAuth) {
+    return sign(signingRootUtil.signingRootForSignBuilderRequestAuth(builderRequestAuth));
   }
 
   private SafeFuture<Bytes> signingRootFromSyncCommitteeUtils(

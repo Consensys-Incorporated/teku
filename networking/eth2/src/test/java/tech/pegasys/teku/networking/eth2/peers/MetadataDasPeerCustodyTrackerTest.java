@@ -27,7 +27,10 @@ import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.metadata.Meta
 
 class MetadataDasPeerCustodyTrackerTest {
 
-  private final MetadataDasPeerCustodyTracker tracker = new MetadataDasPeerCustodyTracker();
+  private static final int NUMBER_OF_CUSTODY_GROUPS = 128;
+
+  private final MetadataDasPeerCustodyTracker tracker =
+      new MetadataDasPeerCustodyTracker(NUMBER_OF_CUSTODY_GROUPS);
   private final Eth2Peer peer = mock(Eth2Peer.class);
   private final MetadataMessage metadata = mock(MetadataMessage.class);
 
@@ -40,6 +43,18 @@ class MetadataDasPeerCustodyTrackerTest {
     metadataUpdateSubscriber().onPeerMetadataUpdate(peer, metadata);
 
     assertThat(tracker.getCustodyGroupCountForPeer(nodeId)).isEqualTo(7);
+  }
+
+  @Test
+  void metadataUpdate_withCustodyGroupCountExceedingMax_isIgnored() {
+    final UInt256 nodeId = UInt256.valueOf(99);
+    when(peer.getDiscoveryNodeId()).thenReturn(Optional.of(nodeId));
+    when(metadata.getOptionalCustodyGroupCount())
+        .thenReturn(Optional.of(UInt64.valueOf(NUMBER_OF_CUSTODY_GROUPS + 1)));
+
+    metadataUpdateSubscriber().onPeerMetadataUpdate(peer, metadata);
+
+    assertThat(tracker.getCustodyGroupCountForPeer(nodeId)).isZero();
   }
 
   @Test

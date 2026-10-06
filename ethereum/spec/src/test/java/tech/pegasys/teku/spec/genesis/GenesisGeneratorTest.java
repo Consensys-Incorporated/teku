@@ -32,6 +32,9 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBody;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBodySchema;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodyGloas;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadHeader;
 import tech.pegasys.teku.spec.datastructures.interop.MockStartDepositGenerator;
 import tech.pegasys.teku.spec.datastructures.operations.Deposit;
@@ -40,6 +43,7 @@ import tech.pegasys.teku.spec.datastructures.operations.DepositWithIndex;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.bellatrix.BeaconStateBellatrix;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.util.DepositGenerator;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
@@ -194,5 +198,34 @@ class GenesisGeneratorTest {
     assertThat(actualState).isInstanceOf(BeaconStateBellatrix.class);
     assertThat(BeaconStateBellatrix.required(actualState).getLatestExecutionPayloadHeader())
         .hasValue(payloadHeader);
+  }
+
+  @Test
+  public void shouldEmbedLatestExecutionPayloadBidInGloasGenesisBlockBody() {
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final Bytes32 eth1BlockHash = dataStructureUtil.randomBytes32();
+    final List<Deposit> deposits =
+        new MockStartDepositGenerator(gloasSpec, new DepositGenerator(gloasSpec, true))
+            .createDeposits(VALIDATOR_KEYS).stream().map(Deposit::new).toList();
+
+    final BeaconState genesisState =
+        gloasSpec.initializeBeaconStateFromEth1(
+            eth1BlockHash, UInt64.ZERO, deposits, Optional.empty());
+
+    final BeaconStateGloas genesisStateGloas = BeaconStateGloas.required(genesisState);
+    assertThat(genesisStateGloas.getLatestExecutionPayloadBid().getParentBlockHash())
+        .isEqualTo(eth1BlockHash);
+
+    final BeaconBlockBodySchema<?> bodySchema =
+        gloasSpec.getGenesisSchemaDefinitions().getBeaconBlockBodySchema();
+    final BeaconBlockBody genesisBlockBody = bodySchema.createGenesisBody(genesisState);
+    assertThat(
+            BeaconBlockBodyGloas.required(genesisBlockBody)
+                .getSignedExecutionPayloadBid()
+                .getMessage())
+        .isEqualTo(genesisStateGloas.getLatestExecutionPayloadBid());
+    assertThat(genesisState.getLatestBlockHeader().getBodyRoot())
+        .isEqualTo(genesisBlockBody.hashTreeRoot())
+        .isNotEqualTo(bodySchema.createEmpty().hashTreeRoot());
   }
 }

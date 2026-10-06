@@ -13,8 +13,10 @@
 
 package tech.pegasys.teku.validator.client.duties.execution;
 
+import java.util.Optional;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.logging.ValidatorLogger;
@@ -25,6 +27,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloa
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
+import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 import tech.pegasys.teku.validator.client.Validator;
@@ -56,13 +59,16 @@ public class ExecutionPayloadDuty implements ExecutionPayloadBidEventsChannel {
 
   @Override
   public void onSelfBuiltBidIncludedInBlock(
-      final Validator validator, final ForkInfo forkInfo, final ExecutionPayloadBid bid) {
+      final Validator validator,
+      final ForkInfo forkInfo,
+      final ExecutionPayloadBid bid,
+      final Bytes32 beaconBlockRoot) {
     // execution payload is produced and broadcast
     asyncRunner
         .runAsync(
             () ->
                 performExecutionPayloadDuty(
-                    validator, forkInfo, bid.getSlot(), bid.getBuilderIndex()))
+                    validator, forkInfo, bid.getSlot(), bid.getBuilderIndex(), beaconBlockRoot))
         .finishStackTrace();
   }
 
@@ -70,9 +76,10 @@ public class ExecutionPayloadDuty implements ExecutionPayloadBidEventsChannel {
       final Validator validator,
       final ForkInfo forkInfo,
       final UInt64 slot,
-      final UInt64 builderIndex) {
+      final UInt64 builderIndex,
+      final Bytes32 beaconBlockRoot) {
     validatorApiChannel
-        .createUnsignedExecutionPayload(slot, builderIndex)
+        .createUnsignedExecutionPayload(slot, beaconBlockRoot)
         .thenApply(
             executionPayload ->
                 executionPayload.orElseThrow(
@@ -103,7 +110,8 @@ public class ExecutionPayloadDuty implements ExecutionPayloadBidEventsChannel {
   private SafeFuture<Void> publishSignedExecutionPayload(
       final SignedExecutionPayloadEnvelope signedExecutionPayload) {
     return validatorApiChannel
-        .publishSignedExecutionPayload(signedExecutionPayload)
+        .publishSignedExecutionPayload(
+            signedExecutionPayload, Optional.of(BroadcastValidationLevel.GOSSIP))
         .thenAccept(
             result -> {
               final ExecutionPayloadEnvelope executionPayload = signedExecutionPayload.getMessage();

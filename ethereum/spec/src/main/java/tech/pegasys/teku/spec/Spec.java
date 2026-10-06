@@ -89,6 +89,7 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 import tech.pegasys.teku.spec.datastructures.forkchoice.MutableStore;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.operations.AggregateAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
@@ -575,6 +576,18 @@ public class Spec {
         .sszDeserialize(serializedSidecar);
   }
 
+  public LightClientUpdate deserializeUpdate(final Bytes serializedUpdate, final UInt64 slot) {
+    return atSlot(slot)
+        .getSchemaDefinitions()
+        .toVersionAltair()
+        .orElseThrow(
+            () ->
+                new IllegalStateException(
+                    "Altair milestone is required to deserialize light client update"))
+        .getLightClientUpdateSchema()
+        .sszDeserialize(serializedUpdate);
+  }
+
   // BeaconState
   public UInt64 getCurrentEpoch(final BeaconState state) {
     return atState(state).beaconStateAccessors().getCurrentEpoch(state);
@@ -932,9 +945,8 @@ public class Spec {
   /**
    * Dispatched on the state's fork rather than an epoch taken from the slashing, so that pool and
    * gossip validation apply the same milestone's rules that block processing later will. The slots
-   * inside a slashing are attacker controlled and unbounded, and from Gloas the attesting indices
-   * bound is enforced in the validation logic rather than by the SSZ schema - so dispatching on
-   * them would let a slashing naming a pre-Gloas epoch skip that bound.
+   * inside a slashing are attacker controlled and unbounded, so dispatching on them would let the
+   * sender pick an arbitrarily old milestone's validation rules.
    */
   public Optional<OperationInvalidReason> validateAttesterSlashing(
       final BeaconState state, final AttesterSlashing attesterSlashing) {
@@ -955,6 +967,13 @@ public class Spec {
     return atState(state)
         .getOperationValidator()
         .validateVoluntaryExit(state.getFork(), state, signedExit);
+  }
+
+  public Optional<OperationInvalidReason> validateVoluntaryExitForGossip(
+      final BeaconState state, final SignedVoluntaryExit signedExit) {
+    return atState(state)
+        .getOperationValidator()
+        .validateVoluntaryExitForGossip(state.getFork(), state, signedExit);
   }
 
   public Optional<OperationInvalidReason> validateBlsToExecutionChange(
@@ -1017,7 +1036,6 @@ public class Spec {
   // Execution Payload Proposal
   public SafeFuture<ExecutionPayloadEnvelope> createNewUnsignedExecutionPayload(
       final UInt64 proposalSlot,
-      final UInt64 builderIndex,
       final BeaconBlockAndState blockAndState,
       final SafeFuture<ExecutionPayloadProposalData> executionPayloadProposalDataFuture) {
     return atSlot(proposalSlot)
@@ -1026,8 +1044,7 @@ public class Spec {
             () ->
                 new IllegalStateException(
                     "Attempting to use execution payload proposal util when spec does not have execution payload proposal util"))
-        .createNewUnsignedExecutionPayload(
-            builderIndex, blockAndState, executionPayloadProposalDataFuture);
+        .createNewUnsignedExecutionPayload(blockAndState, executionPayloadProposalDataFuture);
   }
 
   // Blind Block Utils
@@ -1473,14 +1490,33 @@ public class Spec {
         .orElse(false);
   }
 
+  public boolean isPayloadAttestationAvailableAtSlot(final UInt64 slot) {
+    return atSlot(slot)
+        .miscHelpers()
+        .toVersionGloas()
+        .map(MiscHelpersGloas::isPayloadAttestationAvailable)
+        .orElse(false);
+  }
+
   // Electra Utils
   public boolean isFormerDepositMechanismDisabled(final BeaconState state) {
     return atState(state).miscHelpers().isFormerDepositMechanismDisabled(state);
   }
 
   // Gloas Utils
-  public boolean isProposerPreferencesAvailableAtEpoch(final UInt64 epoch) {
+  public boolean areProposerAndBuilderPreferencesRequiredAtEpoch(final UInt64 epoch) {
     return atEpoch(epoch).miscHelpers().toVersionGloas().isPresent();
+  }
+
+  /**
+   * EIP-8261: the gas limit scheduled for the given epoch, empty when the epoch is pre-Gloas or the
+   * network has no gas limit schedule defined for it.
+   */
+  public Optional<UInt64> getScheduledGasLimit(final UInt64 epoch) {
+    return atEpoch(epoch)
+        .miscHelpers()
+        .toVersionGloas()
+        .flatMap(miscHelpers -> miscHelpers.getScheduledGasLimit(epoch));
   }
 
   // Deneb private helpers

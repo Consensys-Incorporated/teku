@@ -1,4 +1,4 @@
-version: v1.7.0-alpha.13
+version: v1.7.0-beta.2
 style: full
 
 specrefs:
@@ -17,9 +17,6 @@ specrefs:
     configs:
       # Not implemented: heze
       - MIN_SLOTS_FOR_INCLUSION_LISTS_REQUESTS#heze
-
-      # Renamed after v1.7.0-alpha.13
-      - MAX_BYTES_PER_INCLUSION_LIST#heze
 
     constants:
       # Not defined as a constant, unnecessary
@@ -49,10 +46,12 @@ specrefs:
       - PartialDataColumnHeader#gloas
       - PartialDataColumnPartsMetadata#fulu
       - PartialDataColumnSidecar#fulu
+      - OptionalPartialDataColumnHeader#fulu
 
       # Not implemented: gloas
       - PartialDataColumnGroupID#gloas
       - PartialDataColumnSidecar#gloas
+      - PartialDataColumnPartsMetadata#gloas
 
       # Not implemented yet: EIP-7688 progressive SSZ transition
       - Attestation#gloas
@@ -62,6 +61,126 @@ specrefs:
       - BeaconState#heze
       - ExecutionPayloadBid#heze
       - SignedExecutionPayloadBid#heze
+      - InclusionListBits#heze
+      - InclusionListCommittee#heze
+      - SignedInclusionLists#heze
+
+      # alpha.14 promoted pyspec List/Vector/BitList/BitVector/ByteList/Progressive*
+      # type aliases to named ssz_objects. Teku models these as generic SSZ schema
+      # type parameters (e.g. SszListSchema, SszVectorSchema, SszBitvectorSchema)
+      # rather than as dedicated Java classes, so there is no single stable source
+      # to anchor to.
+      - AggregationBits#phase0
+      - AggregationBits#electra
+      - AggregationBits#gloas
+      - Attestations#phase0
+      - Attestations#electra
+      - Attestations#gloas
+      - AttesterSlashings#phase0
+      - AttesterSlashings#electra
+      - AttesterSlashings#gloas
+      - AttestingIndices#phase0
+      - AttestingIndices#electra
+      - AttestingIndices#gloas
+      - Attnets#phase0
+      - BLSToExecutionChanges#capella
+      - BLSToExecutionChanges#gloas
+      - Balances#phase0
+      - Balances#gloas
+      - BeaconBlockRoots#phase0
+      - BeaconBlockRoots#deneb
+      - BlobKZGCommitments#deneb
+      - BlobKZGCommitments#gloas
+      - Blobs#deneb
+      - BlockAccessList#gloas
+      - BlockRoots#phase0
+      - BuilderDepositRequests#gloas
+      - BuilderExitRequests#gloas
+      - BuilderPendingPayments#gloas
+      - BuilderPendingWithdrawals#gloas
+      - Builders#gloas
+      - CellKZGProofs#fulu
+      - Cells#fulu
+      - CellsBitList#fulu
+      - CellsBitList#gloas
+      - CommitteeBits#electra
+      - ConsolidationRequests#electra
+      - ConsolidationRequests#gloas
+      - CurrentSyncCommitteeBranch#altair
+      - CurrentSyncCommitteeBranch#electra
+      - CurrentSyncCommitteeBranch#gloas
+      - CustodyColumnBits#gloas
+      - DataColumnIndices#fulu
+      - DataColumnsByRootIdentifiers#fulu
+      - DepositDataList#phase0
+      - DepositProof#phase0
+      - DepositRequests#electra
+      - DepositRequests#gloas
+      - Deposits#phase0
+      - Deposits#gloas
+      - EpochParticipation#altair
+      - EpochParticipation#gloas
+      - ErrorMessage#phase0
+      - Eth1DataVotes#phase0
+      - ExecutionBranch#capella
+      - ExecutionBranch#gloas
+      - ExecutionPayloadAvailability#gloas
+      - ExecutionPayloadEnvelopeRoots#gloas
+      - ExtraData#bellatrix
+      - FinalityBranch#altair
+      - FinalityBranch#electra
+      - FinalityBranch#gloas
+      - HistoricalRoots#phase0
+      - HistoricalSummaries#capella
+      - InactivityScores#altair
+      - InactivityScores#gloas
+      - JustificationBits#phase0
+      - KZGCommitmentInclusionProof#deneb
+      - KZGCommitmentsInclusionProof#fulu
+      - KZGProofs#deneb
+      - KZGProofs#gloas
+      - LightClientUpdates#altair
+      - LogsBloom#bellatrix
+      - NextSyncCommitteeBranch#altair
+      - NextSyncCommitteeBranch#electra
+      - NextSyncCommitteeBranch#gloas
+      - PayloadTimelinessCommittee#gloas
+      - PayloadTimelinessCommitteeIndices#gloas
+      - PayloadTimelinessCommitteeBits#gloas
+      - PayloadAttestations#gloas
+      - PendingAttestations#phase0
+      - PendingConsolidations#electra
+      - PendingConsolidations#gloas
+      - PendingDeposits#electra
+      - PendingDeposits#gloas
+      - PendingPartialWithdrawals#electra
+      - PendingPartialWithdrawals#gloas
+      - Proofs#fulu
+      - ProposerIndices#fulu
+      - ProposerLookahead#fulu
+      - ProposerSlashings#phase0
+      - ProposerSlashings#gloas
+      - RandaoMixes#phase0
+      - SignedBeaconBlocks#phase0
+      - SignedBeaconBlocks#deneb
+      - SignedExecutionPayloadEnvelopes#gloas
+      - Slashings#phase0
+      - StateRoots#phase0
+      - SyncCommitteeBits#altair
+      - SyncCommitteePubkeys#altair
+      - SyncSubcommitteeBits#altair
+      - Syncnets#altair
+      - Transactions#bellatrix
+      - Transactions#gloas
+      - Validators#phase0
+      - Validators#gloas
+      - VersionedHashes#deneb
+      - VoluntaryExits#phase0
+      - VoluntaryExits#gloas
+      - WithdrawalRequests#electra
+      - WithdrawalRequests#gloas
+      - Withdrawals#capella
+      - Withdrawals#gloas
 
     dataclasses:
       # Not defined, implemented differently
@@ -80,11 +199,13 @@ specrefs:
       - Seen#electra
       - Seen#fulu
       - Seen#gloas
+      - Seen#heze
 
       # Not implemented: heze
       - GetInclusionListResponse#heze
       - InclusionListStore#heze
       - PayloadAttributes#heze
+      - InclusionListEntry#heze
 
     functions:
       # Unnecessary
@@ -136,23 +257,26 @@ specrefs:
       - upgrade_lc_store_to_gloas#gloas
       - upgrade_lc_update_to_gloas#gloas
 
-      # Not implemented: fast confirmation
-      - on_fast_confirmation#phase0
 
       # Not implemented: fulu
       - verify_partial_data_column_header_inclusion_proof#fulu
       - verify_partial_data_column_sidecar_kzg_proofs#fulu
       - validate_partial_data_column_sidecar_gossip#fulu
 
+
       # Not implemented: gloas
-      - get_proposer_head#gloas
-      - is_bid_compatible_with_head#gloas
-      - is_valid_dependent_root#gloas
+      - validate_partial_data_column_sidecar_gossip#gloas
+      - compute_max_partial_data_column_sidecar_size#gloas
 
       # Not implemented yet: EIP-7688 progressive SSZ transition
       - upgrade_attestation_to_gloas#gloas
       - upgrade_attester_slashing_to_gloas#gloas
       - upgrade_indexed_attestation_to_gloas#gloas
+
+      # Not implemented yet: the CustodyColumnBits-returning helper is not built;
+      # Teku only has the underlying custody group/column index computation
+      # (MiscHelpersFulu#computeCustodyColumnIndices), not the bitvector form (alpha.14)
+      - get_custody_column_bits#gloas
 
       # Not implemented: heze
       - get_forkchoice_store#heze
@@ -173,11 +297,13 @@ specrefs:
       - should_extend_payload#heze
       - upgrade_to_heze#heze
       - get_inclusion_list_due_ms#heze
+      - get_signed_inclusion_list#heze
+      - validate_execution_payload_bid_gossip#heze
+      - validate_inclusion_list_gossip#heze
 
     presets:
       # Not implemented yet: EIP-7688 progressive SSZ sizing work
       - MAX_ATTESTER_SLASHING_SIZE#gloas
-      - MAX_DATA_COLUMN_SIDECAR_SIZE#gloas
       - MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE#gloas
       - MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE#gloas
       - MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE_HEZE#heze

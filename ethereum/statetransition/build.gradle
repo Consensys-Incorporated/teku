@@ -7,6 +7,7 @@ idea {
 dependencies {
 	api project(':ethereum:events')
 
+	implementation 'com.google.errorprone:error_prone_annotations'
 	implementation project(':ethereum:performance-trackers')
 	implementation project(':ethereum:execution-types')
 	implementation project(':ethereum:dataproviders')
@@ -24,6 +25,7 @@ dependencies {
 	implementation project(':infrastructure:serviceutils')
 	implementation project(':storage')
 	implementation project(':storage:api')
+	implementation project(':builder:rest')
 
 	implementation 'io.consensys.tuweni:tuweni-units'
 	implementation 'org.hyperledger.besu.internal:besu-metrics-core'

@@ -27,7 +27,7 @@ import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.status.versio
 public class RpcRequestEncoderTest {
   private static final Bytes RECORDED_STATUS_REQUEST_BYTES =
       Bytes.fromHexString(
-          "0x54ff060000734e61507059002d00007e8c1ea2540000aa01007c30a903798306695d21d1faa76363a0070677130835e503760b0e84479b7819e6114b");
+          "0x54ff060000734e61507059003300007e8c1ea2540000aa01009c30a903798306695d21d1faa76363a0070677130835e503760b0e84479b7819e60000000000000000");
   private static final StatusMessagePhase0 RECORDED_STATUS_MESSAGE_DATA =
       new StatusMessagePhase0(
           new Bytes4(Bytes.of(0, 0, 0, 0)),

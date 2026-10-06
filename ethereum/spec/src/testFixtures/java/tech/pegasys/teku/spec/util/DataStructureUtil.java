@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.spec.util;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static ethereum.ckzg4844.CKZG4844JNI.BYTES_PER_CELL;
 import static java.util.stream.Collectors.toList;
@@ -20,10 +21,13 @@ import static tech.pegasys.teku.ethereum.pow.api.DepositConstants.DEPOSIT_CONTRA
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ZERO;
 import static tech.pegasys.teku.kzg.KZG.CELLS_PER_EXT_BLOB;
 import static tech.pegasys.teku.spec.constants.NetworkConstants.SYNC_COMMITTEE_SUBNET_COUNT;
+import static tech.pegasys.teku.spec.schemas.ApiSchemas.BUILDER_CONFIG_SCHEMA;
+import static tech.pegasys.teku.spec.schemas.ApiSchemas.BUILDER_ENTRY_SCHEMA;
+import static tech.pegasys.teku.spec.schemas.ApiSchemas.BUILDER_PREFERENCES_ENTRY_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.ApiSchemas.BUILDER_PREFERENCES_REQUEST_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.ApiSchemas.BUILDER_PREFERENCES_SCHEMA;
-import static tech.pegasys.teku.spec.schemas.ApiSchemas.REQUEST_AUTH_SCHEMA;
-import static tech.pegasys.teku.spec.schemas.ApiSchemas.SIGNED_REQUEST_AUTH_SCHEMA;
+import static tech.pegasys.teku.spec.schemas.ApiSchemas.BUILDER_REQUEST_AUTH_SCHEMA;
+import static tech.pegasys.teku.spec.schemas.ApiSchemas.SIGNED_BUILDER_REQUEST_AUTH_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.ApiSchemas.SIGNED_VALIDATOR_REGISTRATIONS_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.ApiSchemas.SIGNED_VALIDATOR_REGISTRATION_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.ApiSchemas.VALIDATOR_REGISTRATION_SCHEMA;
@@ -61,6 +65,7 @@ import tech.pegasys.teku.infrastructure.bytes.Bytes20;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.bytes.Bytes8;
 import tech.pegasys.teku.infrastructure.ssz.Merkleizable;
+import tech.pegasys.teku.infrastructure.ssz.SszContainer;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.SszMutableList;
@@ -75,9 +80,12 @@ import tech.pegasys.teku.infrastructure.ssz.collections.SszUInt64List;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszUInt64Vector;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszByte;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBytes32;
-import tech.pegasys.teku.infrastructure.ssz.primitive.SszBytes4;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
+import tech.pegasys.teku.infrastructure.ssz.schema.AbstractSszProgressiveListSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszContainerSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszFieldName;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszProgressiveListSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszVectorSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszBitlistSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszBitvectorSchema;
@@ -135,7 +143,6 @@ import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.deneb.Bea
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.deneb.BeaconBlockBodySchemaDeneb;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodyGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodySchemaGloas;
-import tech.pegasys.teku.spec.datastructures.blocks.versions.gloas.BlockContentsGloas;
 import tech.pegasys.teku.spec.datastructures.builder.BlobsBundleSchema;
 import tech.pegasys.teku.spec.datastructures.builder.BuilderBid;
 import tech.pegasys.teku.spec.datastructures.builder.BuilderBidBuilder;
@@ -144,10 +151,13 @@ import tech.pegasys.teku.spec.datastructures.builder.ExecutionPayloadAndBlobsBun
 import tech.pegasys.teku.spec.datastructures.builder.SignedBuilderBid;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 import tech.pegasys.teku.spec.datastructures.builder.ValidatorRegistration;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderEntry;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferences;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesEntry;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderPreferencesRequest;
-import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.RequestAuth;
-import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.SignedRequestAuth;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderRequestAuth;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.SignedBuilderRequestAuth;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.BlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBidSchema;
@@ -195,12 +205,11 @@ import tech.pegasys.teku.spec.datastructures.lightclient.LightClientHeaderSchema
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdateSchema;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
-import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdateResponse;
-import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdateResponseSchema;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdateSchema;
 import tech.pegasys.teku.spec.datastructures.lightclient.versions.capella.LightClientHeaderSchemaCapella;
 import tech.pegasys.teku.spec.datastructures.lightclient.versions.gloas.LightClientHeaderSchemaGloas;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
+import tech.pegasys.teku.spec.datastructures.metadata.LightClientUpdateWithContext;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.BlobIdentifier;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.EnrForkId;
 import tech.pegasys.teku.spec.datastructures.operations.AggregateAndProof;
@@ -355,6 +364,10 @@ public final class DataStructureUtil {
     return UInt256.fromBytes(randomBytes(32));
   }
 
+  public UInt256 randomUInt256(final long bound) {
+    return UInt256.valueOf(randomPositiveLong(bound));
+  }
+
   public Eth1Address randomEth1Address() {
     return Eth1Address.fromHexString(randomBytes32().slice(0, 20).toHexString());
   }
@@ -407,6 +420,50 @@ public final class DataStructureUtil {
   public <T extends SszData> SszList<T> randomSszList(
       final SszListSchema<T, ?> schema, final Supplier<T> valueGenerator, final long numItems) {
     return randomSszList(schema, numItems, valueGenerator);
+  }
+
+  /**
+   * Builds a progressive list larger than its schema's max length, bypassing the construction
+   * check, so tests can exercise the limit enforced on deserialization.
+   */
+  public <T extends SszData> SszList<T> randomOversizedProgressiveSszList(
+      final SszListSchema<T, ?> schema, final Supplier<T> valueGenerator, final int numItems) {
+    checkArgument(
+        schema instanceof AbstractSszProgressiveListSchema<?, ?>,
+        "Expected a progressive list schema but got %s",
+        schema);
+    checkArgument(
+        numItems > schema.getMaxLength(),
+        "%s items do not exceed the max length %s",
+        numItems,
+        schema.getMaxLength());
+    final SszProgressiveListSchema<T> unlimited =
+        SszProgressiveListSchema.create(
+            schema.getElementSchema(),
+            ((AbstractSszProgressiveListSchema<?, ?>) schema).getHints());
+    final List<T> elements = Stream.generate(valueGenerator).limit(numItems).toList();
+    return schema.createFromBackingNode(unlimited.createTreeFromElements(elements));
+  }
+
+  /**
+   * Returns a copy of the container whose progressive list field is replaced by an oversized list,
+   * see {@link #randomOversizedProgressiveSszList}.
+   */
+  @SuppressWarnings("unchecked")
+  public <C extends SszContainer, T extends SszData> C withOversizedProgressiveListField(
+      final C container,
+      final SszFieldName fieldName,
+      final Supplier<T> valueGenerator,
+      final int numItems) {
+    final SszContainerSchema<C> schema = (SszContainerSchema<C>) container.getSchema();
+    final int fieldIndex = schema.getFieldIndex(fieldName);
+    final SszListSchema<T, ?> listSchema = (SszListSchema<T, ?>) schema.getChildSchema(fieldIndex);
+    final SszList<T> oversized =
+        randomOversizedProgressiveSszList(listSchema, valueGenerator, numItems);
+    return schema.createFromBackingNode(
+        container
+            .getBackingNode()
+            .updated(schema.getChildGeneralizedIndex(fieldIndex), oversized.getBackingNode()));
   }
 
   public <T extends SszData> SszList<T> randomFullSszList(
@@ -1310,25 +1367,24 @@ public final class DataStructureUtil {
   }
 
   public BlockContainerAndMetaData randomBlockContainerAndMetaData(final UInt64 slotNum) {
-    return new BlockContainerAndMetaData(
-        randomBeaconBlock(slotNum),
-        spec.atSlot(slotNum).getMilestone(),
-        randomUInt256(),
-        randomUInt256());
+    final BeaconBlock block = randomBeaconBlock(slotNum);
+    return randomBlockContainerAndMetaData(block, slotNum);
   }
 
   public BlockContainerAndMetaData randomBlindedBlockContainerAndMetaData(final UInt64 slotNum) {
-    return new BlockContainerAndMetaData(
-        randomBlindedBeaconBlock(slotNum),
-        spec.atSlot(slotNum).getMilestone(),
-        randomUInt256(),
-        randomUInt256());
+    final BeaconBlock blindedBlock = randomBlindedBeaconBlock(slotNum);
+    return randomBlockContainerAndMetaData(blindedBlock, slotNum);
   }
 
   public BlockContainerAndMetaData randomBlockContainerAndMetaData(
       final BlockContainer blockContainer, final UInt64 slotNum) {
-    return new BlockContainerAndMetaData(
-        blockContainer, spec.atSlot(slotNum).getMilestone(), randomUInt256(), randomUInt256());
+    final SpecMilestone milestone = spec.atSlot(slotNum).getMilestone();
+    return BlockContainerAndMetaData.builder()
+        .blockContainer(blockContainer)
+        .milestone(milestone)
+        .executionPayloadValue(randomUInt256())
+        .consensusBlockValue(randomUInt256())
+        .build();
   }
 
   public BeaconBlock randomBlindedBeaconBlock(final UInt64 slot) {
@@ -2121,13 +2177,14 @@ public final class DataStructureUtil {
         IntStream.range(0, size).mapToObj(__ -> randomSignedValidatorRegistration()).toList());
   }
 
-  public RequestAuth randomRequestAuth() {
-    return REQUEST_AUTH_SCHEMA.create(
-        randomBytes(randomPositiveInt((int) SpecConfigGloas.MAX_DATA_SIZE)), randomSlot());
+  public BuilderRequestAuth randomBuilderRequestAuth() {
+    return BUILDER_REQUEST_AUTH_SCHEMA.create(
+        randomBytes(randomPositiveInt((int) SpecConfigGloas.MAX_BUILDER_AUTH_DATA_SIZE)),
+        randomSlot());
   }
 
-  public SignedRequestAuth randomSignedRequestAuth() {
-    return SIGNED_REQUEST_AUTH_SCHEMA.create(randomRequestAuth(), randomSignature());
+  public SignedBuilderRequestAuth randomSignedBuilderRequestAuth() {
+    return SIGNED_BUILDER_REQUEST_AUTH_SCHEMA.create(randomBuilderRequestAuth(), randomSignature());
   }
 
   public BuilderPreferences randomBuilderPreferences() {
@@ -2136,7 +2193,36 @@ public final class DataStructureUtil {
 
   public BuilderPreferencesRequest randomBuilderPreferencesRequest() {
     return BUILDER_PREFERENCES_REQUEST_SCHEMA.create(
-        randomBuilderPreferences(), randomSignedRequestAuth());
+        randomBuilderPreferences(), randomSignedBuilderRequestAuth());
+  }
+
+  public BuilderConfig randomBuilderConfig(final int numberOfBuilderEntries) {
+    return BUILDER_CONFIG_SCHEMA.create(
+        randomUInt64(),
+        randomUInt64(100),
+        IntStream.range(0, numberOfBuilderEntries).mapToObj(__ -> randomBuilderEntry()).toList());
+  }
+
+  public BuilderEntry randomBuilderEntry() {
+    return BUILDER_ENTRY_SCHEMA.create(
+        Bytes.of(randomUrl().getBytes(StandardCharsets.UTF_8)),
+        randomSignedBuilderRequestAuth(),
+        List.of(),
+        randomUInt64(),
+        randomUInt64(),
+        randomUInt64(100));
+  }
+
+  public BuilderPreferencesEntry randomBuilderPreferencesEntry() {
+    return BUILDER_PREFERENCES_ENTRY_SCHEMA.create(
+        randomPublicKey(),
+        Bytes.of(randomUrl().getBytes(StandardCharsets.UTF_8)),
+        randomSignedBuilderRequestAuth(),
+        randomUInt64());
+  }
+
+  private String randomUrl() {
+    return "https://" + randomString(6) + ".com";
   }
 
   public ForkChoiceState randomForkChoiceState(final boolean optimisticHead) {
@@ -2526,12 +2612,9 @@ public final class DataStructureUtil {
         .create(randomBeaconBlockHeader(slot, UInt64.ZERO));
   }
 
-  public LightClientUpdateResponse randomLightClientUpdateResponse(final UInt64 slot) {
-    final LightClientUpdateResponseSchema schema =
-        getAltairSchemaDefinitions(slot).getLightClientUpdateResponseSchema();
-
-    return schema.create(
-        SszUInt64.of(randomUInt64()), SszBytes4.of(randomBytes4()), randomLightClientUpdate(slot));
+  public LightClientUpdateWithContext randomLightClientUpdateWithContext(final UInt64 slot) {
+    return new LightClientUpdateWithContext(
+        randomBytes4(), spec.atSlot(slot).getMilestone(), randomLightClientUpdate(slot));
   }
 
   public Withdrawal randomWithdrawal() {
@@ -2674,7 +2757,7 @@ public final class DataStructureUtil {
     final BlobSchema blobSchema = getDenebSchemaDefinitions(randomSlot()).getBlobSchema();
     List<Bytes> blobElements =
         Stream.generate(this::randomBlobElement).limit(blobSchema.getLength() / 32).toList();
-    return blobSchema.create(Bytes.wrap(blobElements));
+    return blobSchema.create(Bytes.concatenate(blobElements));
   }
 
   private Bytes randomBlobElement() {
@@ -2905,7 +2988,13 @@ public final class DataStructureUtil {
     final List<KZGProof> kzgProofs = randomKZGProofs(numberOfBlobs);
     return getDenebSchemaDefinitions(slot)
         .getBlockContentsSchema()
-        .create(beaconBlock, kzgProofs, blobs);
+        .create(
+            beaconBlock,
+            kzgProofs,
+            blobs,
+            spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS)
+                ? Optional.of(randomExecutionPayloadEnvelope(slot))
+                : Optional.empty());
   }
 
   public RandomBlobSidecarBuilder createRandomBlobSidecarBuilder() {
@@ -3669,12 +3758,16 @@ public final class DataStructureUtil {
 
   public ExecutionPayloadEnvelope randomExecutionPayloadEnvelopeForBlock(
       final SignedBeaconBlock block) {
+    return randomExecutionPayloadEnvelopeForBlock(block.getMessage());
+  }
+
+  public ExecutionPayloadEnvelope randomExecutionPayloadEnvelopeForBlock(final BeaconBlock block) {
     return getGloasSchemaDefinitions(block.getSlot())
         .getExecutionPayloadEnvelopeSchema()
         .create(
             randomExecutionPayload(block.getSlot()),
             randomExecutionRequests(block.getSlot()),
-            BeaconBlockBodyGloas.required(block.getMessage().getBody())
+            BeaconBlockBodyGloas.required(block.getBody())
                 .getSignedExecutionPayloadBid()
                 .getMessage()
                 .getBuilderIndex(),
@@ -3691,25 +3784,6 @@ public final class DataStructureUtil {
             randomBuilderIndex(),
             randomBytes32(),
             randomBytes32());
-  }
-
-  public BlockContentsGloas randomBlockContentsGloas(final UInt64 slot) {
-    final BlobsBundle blobsBundle = randomBlobsBundle(1);
-    return getGloasSchemaDefinitions(slot)
-        .getBlockContentsGloasSchema()
-        .create(
-            randomBeaconBlock(slot),
-            randomExecutionPayloadEnvelope(slot),
-            blobsBundle.getProofs(),
-            blobsBundle.getBlobs());
-  }
-
-  public BlockContainerAndMetaData randomBlockContentsGloasAndMetaData(final UInt64 slot) {
-    return new BlockContainerAndMetaData(
-        randomBlockContentsGloas(slot),
-        spec.atSlot(slot).getMilestone(),
-        randomUInt256(),
-        randomUInt256());
   }
 
   public SignedExecutionPayloadEnvelope randomSignedExecutionPayloadEnvelope(final long slot) {
@@ -3813,7 +3887,7 @@ public final class DataStructureUtil {
     return getConstant(
         specConfig ->
             SpecConfigGloas.required(spec.forMilestone(SpecMilestone.GLOAS).getConfig())
-                .getPtcSize());
+                .getPayloadTimelinessCommitteeSize());
   }
 
   int getKzgCommitmentsInclusionProofDepth() {

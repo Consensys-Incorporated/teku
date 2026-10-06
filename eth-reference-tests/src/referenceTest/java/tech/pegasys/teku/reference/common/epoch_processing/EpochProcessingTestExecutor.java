@@ -15,10 +15,18 @@ package tech.pegasys.teku.reference.common.epoch_processing;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static tech.pegasys.teku.reference.TestDataUtils.loadStateFromSsz;
 
 import com.google.common.collect.ImmutableMap;
+import java.nio.file.Files;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.IntStream;
+import org.junit.jupiter.api.function.Executable;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
+import tech.pegasys.teku.infrastructure.async.ExceptionThrowingFunction;
 import tech.pegasys.teku.reference.TestExecutor;
 import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
@@ -29,6 +37,19 @@ import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.SlotProces
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.StateTransitionException;
 
 public class EpochProcessingTestExecutor implements TestExecutor {
+
+  private static final String PRE_STATE_FILE = "pre.ssz_snappy";
+  private static final String POST_STATE_FILE = "post.ssz_snappy";
+  static final String PRE_EPOCH_STATE_FILE = "pre_epoch.ssz_snappy";
+  private static final String POST_EPOCH_STATE_FILE = "post_epoch.ssz_snappy";
+
+  // These vectors put PendingAttestations with empty aggregation bits in the state, which no valid
+  // block can produce. The spec never reads them at epoch 0, but Teku builds validator statuses
+  // from them up front and rejects the bitlist size, so only the per-operation check is run.
+  static final Set<String> SKIP_FULL_EPOCH_CHECK =
+      Set.of(
+          "phase0 - minimal - epoch_processing/participation_record_updates - updated_participation_record",
+          "phase0 - mainnet - epoch_processing/participation_record_updates - updated_participation_record");
 
   public static final ImmutableMap<String, TestExecutor> EPOCH_PROCESSING_TEST_TYPES =
       ImmutableMap.<String, TestExecutor>builder()
@@ -106,34 +127,88 @@ public class EpochProcessingTestExecutor implements TestExecutor {
 
   @Override
   public void runTest(final TestDefinition testDefinition) throws Exception {
-    final BeaconState preState = loadStateFromSsz(testDefinition, "pre.ssz_snappy");
-    final String postStateFileName = "post.ssz_snappy";
-
     final SpecVersion genesisSpec = testDefinition.getSpec().getGenesisSpec();
     final EpochProcessor epochProcessor = genesisSpec.getEpochProcessor();
     final ValidatorStatusFactory validatorStatusFactory = genesisSpec.getValidatorStatusFactory();
     final EpochProcessingExecutor processor =
         new EpochProcessingExecutor(epochProcessor, validatorStatusFactory);
 
-    if (testDefinition.getTestDirectory().resolve(postStateFileName).toFile().exists()) {
-      final BeaconState expectedPostState = loadStateFromSsz(testDefinition, postStateFileName);
-      final BeaconState result = executeOperation(preState, processor);
+    // Run both checks and report both failures: a full epoch failure alone points at an
+    // interaction between sub-transitions rather than at the operation under test.
+    assertAll(
+        () -> assertIsolatedOperationTransition(testDefinition, processor),
+        () -> assertFullEpochTransition(testDefinition, epochProcessor));
+  }
 
-      assertThat(result).isEqualTo(expectedPostState);
+  private void assertIsolatedOperationTransition(
+      final TestDefinition testDefinition, final EpochProcessingExecutor processor)
+      throws Throwable {
+    assertTransition(
+        testDefinition,
+        PRE_STATE_FILE,
+        POST_STATE_FILE,
+        preState -> preState.updated(state -> processor.executeOperation(operation, state)));
+  }
+
+  private static void assertFullEpochTransition(
+      final TestDefinition testDefinition, final EpochProcessor epochProcessor) throws Throwable {
+    // Some vectors don't ship full epoch states (see consensus-specs #4155)
+    if (!Files.exists(testDefinition.getTestDirectory().resolve(PRE_EPOCH_STATE_FILE))) {
+      return;
+    }
+    final Executable fullEpochCheck =
+        () ->
+            assertTransition(
+                testDefinition,
+                PRE_EPOCH_STATE_FILE,
+                POST_EPOCH_STATE_FILE,
+                epochProcessor::processEpoch);
+    if (!SKIP_FULL_EPOCH_CHECK.contains(testDefinition.getDisplayName())) {
+      fullEpochCheck.execute();
+      return;
+    }
+    // Keep skipped vectors failing for the known reason only, so the list can't go stale or hide
+    // a different failure
+    assertThat(catchThrowable(fullEpochCheck::execute))
+        .describedAs("full epoch check passes now, remove it from SKIP_FULL_EPOCH_CHECK")
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Aggregation bitlist size");
+  }
+
+  /** Expects the transition to fail when the post state file is absent, as the vectors do. */
+  private static void assertTransition(
+      final TestDefinition testDefinition,
+      final String preStateFileName,
+      final String postStateFileName,
+      final ExceptionThrowingFunction<BeaconState, BeaconState> transition)
+      throws Throwable {
+    final BeaconState preState = loadStateFromSsz(testDefinition, preStateFileName);
+    if (Files.exists(testDefinition.getTestDirectory().resolve(postStateFileName))) {
+      final BeaconState expectedPostState = loadStateFromSsz(testDefinition, postStateFileName);
+      final BeaconState actualPostState = transition.apply(preState);
+      // Only name the differing fields: rendering whole states on failure exhausts the heap when
+      // one bug fails many tests at once.
+      final List<String> differingFields =
+          IntStream.range(0, expectedPostState.size())
+              .filter(
+                  i ->
+                      !actualPostState
+                          .get(i)
+                          .hashTreeRoot()
+                          .equals(expectedPostState.get(i).hashTreeRoot()))
+              .mapToObj(i -> expectedPostState.getSchema().getFieldNames().get(i))
+              .toList();
+      assertThat(differingFields)
+          .describedAs("%s -> %s: differing state fields", preStateFileName, postStateFileName)
+          .isEmpty();
     } else {
-      assertThatThrownBy(() -> executeOperation(preState, processor))
-          // Currently the only
+      assertThatThrownBy(() -> transition.apply(preState))
+          .describedAs("%s -> exception", preStateFileName)
           .isInstanceOfAny(
               StateTransitionException.class,
               SlotProcessingException.class,
               EpochProcessingException.class,
               ArithmeticException.class);
     }
-  }
-
-  private BeaconState executeOperation(
-      final BeaconState preState, final EpochProcessingExecutor processor)
-      throws EpochProcessingException {
-    return preState.updated(state -> processor.executeOperation(operation, state));
   }
 }

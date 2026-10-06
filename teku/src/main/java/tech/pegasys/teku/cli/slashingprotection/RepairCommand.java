@@ -162,7 +162,7 @@ public class RepairCommand implements Runnable {
     SUB_COMMAND_LOG.display("block slot -> " + slot);
     SUB_COMMAND_LOG.display("attestation source/target -> " + epoch);
     SUB_COMMAND_LOG.display("Are you sure you wish to continue (yes/no)? ");
-    Scanner scanner = new Scanner(System.in, Charset.defaultCharset().name());
+    final Scanner scanner = new Scanner(System.in, Charset.defaultCharset());
     final String confirmation = scanner.next();
 
     if (!confirmation.equalsIgnoreCase("yes")) {

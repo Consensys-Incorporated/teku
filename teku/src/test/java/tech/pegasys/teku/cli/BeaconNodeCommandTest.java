@@ -27,6 +27,7 @@ import static tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory.BEACON
 import static tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory.EVENTBUS;
 import static tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory.LIBP2P;
 import static tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory.NETWORK;
+import static tech.pegasys.teku.networking.eth2.P2PConfig.DEFAULT_P2P_TARGET_SUBNET_SUBSCRIBER_COUNT;
 import static tech.pegasys.teku.networking.p2p.discovery.DiscoveryConfig.DEFAULT_P2P_PEERS_LOWER_BOUND;
 import static tech.pegasys.teku.networking.p2p.discovery.DiscoveryConfig.DEFAULT_P2P_PEERS_UPPER_BOUND;
 import static tech.pegasys.teku.networking.p2p.discovery.DiscoveryConfig.DEFAULT_RANDOMLY_SELECTED_PEER_COUNT_PERCENTAGE;
@@ -73,6 +74,7 @@ import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
 import tech.pegasys.teku.infrastructure.logging.LoggingConfig;
 import tech.pegasys.teku.infrastructure.logging.LoggingConfig.LoggingConfigBuilder;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.nat.NatMethod;
 import tech.pegasys.teku.networks.Eth2NetworkConfiguration;
 import tech.pegasys.teku.spec.Spec;
@@ -479,6 +481,27 @@ public class BeaconNodeCommandTest extends AbstractBeaconNodeCommandTest {
   }
 
   @Test
+  public void shouldParseBuilderOptions() {
+    final String[] args = {
+      "--Xbuilder-min-bid",
+      "42",
+      "--Xbuilder-boost-factor",
+      "80",
+      "--Xbuilder-max-execution-payment",
+      "67",
+      "--Xbuilder-urls",
+      "https://foobar.com,https://plataberget.com"
+    };
+    beaconNodeCommand.parse(args);
+    final ValidatorConfig validatorConfig =
+        beaconNodeCommand.tekuConfiguration().validatorClient().getValidatorConfig();
+    assertThat(validatorConfig.getBuilderMinBid()).isEqualTo(UInt64.valueOf(42));
+    assertThat(validatorConfig.getBuilderBoostFactor()).isEqualTo(UInt64.valueOf(80));
+    assertThat(validatorConfig.getBuilderMaxExecutionPayment()).isEqualTo(UInt64.valueOf(67));
+    assertThat(validatorConfig.getBuilderUrls()).hasSize(2);
+  }
+
+  @Test
   @Disabled("used for ad-hoc reconciliation between CLI and docs")
   public void verifyCliOptionsAndDocsConsistency() throws IOException {
     beaconNodeCommand.parse(new String[] {"--help"});
@@ -660,7 +683,7 @@ public class BeaconNodeCommandTest extends AbstractBeaconNodeCommandTest {
         .data(b -> b.dataBasePath(dataPath))
         .p2p(
             b ->
-                b.targetSubnetSubscriberCount(2)
+                b.targetSubnetSubscriberCount(DEFAULT_P2P_TARGET_SUBNET_SUBSCRIBER_COUNT)
                     .peerBlocksRateLimit(500)
                     .peerBlobSidecarsRateLimit(2000)
                     .peerRequestLimit(100))

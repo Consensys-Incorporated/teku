@@ -212,6 +212,27 @@ public class SpecConfigReaderTest {
   }
 
   @Test
+  public void read_listOfGasLimitSchedules() {
+    final Map<String, Object> data = new HashMap<>();
+    data.put(
+        "GAS_LIMIT_SCHEDULE",
+        List.of(
+            Map.of("EPOCH", "1", "GAS_LIMIT", "60000000"),
+            Map.of("EPOCH", "3", "GAS_LIMIT", "45000000")));
+
+    assertDoesNotThrow(() -> reader.loadFromMap(data, true));
+  }
+
+  @Test
+  public void read_invalidGasLimitScheduleThrowsException() {
+    final Map<String, Object> data = new HashMap<>();
+    data.put("GAS_LIMIT_SCHEDULE", List.of(Map.of("EPOCH", "1", "MAX_BLOBS_PER_BLOCK", "2")));
+    assertThatThrownBy(() -> reader.loadFromMap(data, true))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("GAS_LIMIT_SCHEDULE");
+  }
+
+  @Test
   public void read_localConfigFile_notLoadingDefaults(@TempDir final Path tempDir)
       throws IOException {
     Files.writeString(

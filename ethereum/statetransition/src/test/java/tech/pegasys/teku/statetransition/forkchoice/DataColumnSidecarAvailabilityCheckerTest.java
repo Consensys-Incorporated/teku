@@ -20,10 +20,12 @@ import static org.mockito.Mockito.when;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.infrastructure.async.DelayedExecutorAsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -47,10 +49,11 @@ class DataColumnSidecarAvailabilityCheckerTest {
 
   @BeforeEach
   void setup() {
-    checker =
-        new DataColumnSidecarAvailabilityChecker(
-            das, spec, recentChainData, block, Duration.ofSeconds(10));
+    checker = new DataColumnSidecarAvailabilityChecker(das, spec, recentChainData, block);
     when(block.getMessage()).thenReturn(beaconBlock);
+    when(block.getSlot()).thenReturn(UInt64.ONE);
+    when(spec.getSlotDurationMillis(any())).thenReturn(10_000);
+    when(recentChainData.getCurrentSlot()).thenReturn(Optional.empty());
   }
 
   @Test
@@ -118,10 +121,10 @@ class DataColumnSidecarAvailabilityCheckerTest {
     when(das.checkDataAvailability(any(), any())).thenReturn(new SafeFuture<>());
     when(recentChainData.getStore()).thenReturn(store);
     when(spec.isAvailabilityOfDataColumnSidecarsRequiredAtSlot(any(), any())).thenReturn(true);
+    when(spec.getSlotDurationMillis(any())).thenReturn(1);
 
     final DataColumnSidecarAvailabilityChecker timedOutChecker =
-        new DataColumnSidecarAvailabilityChecker(
-            das, spec, recentChainData, block, Duration.ofMillis(1));
+        new DataColumnSidecarAvailabilityChecker(das, spec, recentChainData, block);
 
     assertThat(timedOutChecker.initiateDataAvailabilityCheck()).isTrue();
 
@@ -139,10 +142,10 @@ class DataColumnSidecarAvailabilityCheckerTest {
     when(das.checkDataAvailability(any(), any())).thenReturn(new SafeFuture<>());
     when(recentChainData.getStore()).thenReturn(store);
     when(spec.isAvailabilityOfDataColumnSidecarsRequiredAtSlot(any(), any())).thenReturn(false);
+    when(spec.getSlotDurationMillis(any())).thenReturn(1);
 
     final DataColumnSidecarAvailabilityChecker timedOutChecker =
-        new DataColumnSidecarAvailabilityChecker(
-            das, spec, recentChainData, block, Duration.ofMillis(1));
+        new DataColumnSidecarAvailabilityChecker(das, spec, recentChainData, block);
 
     assertThat(timedOutChecker.initiateDataAvailabilityCheck()).isTrue();
 
@@ -160,10 +163,10 @@ class DataColumnSidecarAvailabilityCheckerTest {
     when(das.checkDataAvailability(any(), any())).thenReturn(sharedTrackerFuture);
     when(recentChainData.getStore()).thenReturn(store);
     when(spec.isAvailabilityOfDataColumnSidecarsRequiredAtSlot(any(), any())).thenReturn(true);
+    when(spec.getSlotDurationMillis(any())).thenReturn(1);
 
     final DataColumnSidecarAvailabilityChecker timedOutChecker =
-        new DataColumnSidecarAvailabilityChecker(
-            das, spec, recentChainData, block, Duration.ofMillis(1));
+        new DataColumnSidecarAvailabilityChecker(das, spec, recentChainData, block);
     timedOutChecker.initiateDataAvailabilityCheck();
 
     // wait for the checker to time out
@@ -173,5 +176,47 @@ class DataColumnSidecarAvailabilityCheckerTest {
 
     // the shared tracker future must not have been completed by the timeout
     assertThat(sharedTrackerFuture).isNotDone();
+  }
+
+  @Test
+  void shouldNotExtendTimeoutForBlockExactlyOneEpochOld() {
+    final UInt64 currentSlot = UInt64.valueOf(33);
+    final UpdatableStore store = mock(UpdatableStore.class);
+    when(recentChainData.getCurrentSlot()).thenReturn(Optional.of(currentSlot));
+    when(recentChainData.getStore()).thenReturn(store);
+    when(spec.getSlotsPerEpoch(currentSlot)).thenReturn(32);
+    when(spec.getSlotDurationMillis(UInt64.ONE)).thenReturn(1);
+    when(spec.isAvailabilityOfDataColumnSidecarsRequiredAtSlot(store, UInt64.ONE)).thenReturn(true);
+    when(das.checkSamplingEligibility(block.getMessage()))
+        .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.REQUIRED);
+    when(das.checkDataAvailability(UInt64.ONE, block.getRoot())).thenReturn(new SafeFuture<>());
+
+    assertThat(checker.initiateDataAvailabilityCheck()).isTrue();
+
+    assertThat(checker.getAvailabilityCheckResult())
+        .succeedsWithin(Duration.ofSeconds(1))
+        .satisfies(result -> assertThat(result.isNotAvailable()).isTrue());
+  }
+
+  @Test
+  void shouldExtendTimeoutForBlockOlderThanOneEpoch() {
+    final List<UInt64> sampledColumns = List.of(UInt64.ONE);
+    when(block.getSlot()).thenReturn(UInt64.ONE);
+    when(recentChainData.getCurrentSlot()).thenReturn(Optional.of(UInt64.valueOf(34)));
+    when(spec.getSlotsPerEpoch(UInt64.valueOf(34))).thenReturn(32);
+    when(spec.getSlotDurationMillis(UInt64.ONE)).thenReturn(100);
+    when(das.checkSamplingEligibility(block.getMessage()))
+        .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.REQUIRED);
+    when(das.checkDataAvailability(UInt64.ONE, block.getRoot()))
+        .thenReturn(
+            DelayedExecutorAsyncRunner.create()
+                .runAfterDelay(
+                    () -> SafeFuture.completedFuture(sampledColumns), Duration.ofMillis(250)));
+
+    assertThat(checker.initiateDataAvailabilityCheck()).isTrue();
+
+    assertThat(checker.getAvailabilityCheckResult())
+        .succeedsWithin(Duration.ofSeconds(1))
+        .isEqualTo(DataAndValidationResult.validResult(sampledColumns));
   }
 }

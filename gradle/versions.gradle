@@ -1,20 +1,21 @@
 dependencyManagement {
 	imports {
-		mavenBom 'io.netty:netty-bom:4.2.16.Final'
+		mavenBom 'io.netty:netty-bom:4.2.18.Final'
 		// Remove these pins when Javalin uses Jetty 12.1.11 or later.
 		// Jetty 12.1.11 fixes https://github.com/jetty/jetty.project/issues/15226.
 		mavenBom 'org.eclipse.jetty:jetty-bom:12.1.11'
 		mavenBom 'org.eclipse.jetty.ee10:jetty-ee10-bom:12.1.11'
 	}
 	dependencies {
-		dependency 'com.fasterxml.jackson.core:jackson-databind:2.22.1'
-		dependencySet(group: 'com.fasterxml.jackson.dataformat', version: '2.22.1') {
+		dependency 'com.fasterxml.jackson.core:jackson-databind:2.22.3'
+		dependencySet(group: 'com.fasterxml.jackson.dataformat', version: '2.22.3') {
 			entry 'jackson-dataformat-yaml'
 			entry 'jackson-dataformat-toml'
 		}
-		dependency 'com.fasterxml.jackson.module:jackson-module-blackbird:2.22.1'
+		dependency 'com.fasterxml.jackson.module:jackson-module-blackbird:2.22.3'
 
-		dependencySet(group: 'com.google.errorprone', version: '2.45.0') {
+		dependencySet(group: 'com.google.errorprone', version: '2.50.0') {
+			entry 'error_prone_annotations'
 			entry 'error_prone_check_api'
 			entry 'error_prone_core'
 		}
@@ -24,11 +25,11 @@ dependencyManagement {
 		dependencySet(group: 'com.google.code.findbugs', version: '3.0.2') {
 			entry 'jsr305'
 		}
-		dependency 'com.google.guava:guava:33.6.0-jre'
+		dependency 'com.google.guava:guava:33.7.2-jre'
 
-		dependency 'org.yaml:snakeyaml:2.6'
+		dependency 'org.yaml:snakeyaml:2.7'
 
-		dependency 'org.jsoup:jsoup:1.23.1'
+		dependency 'org.jsoup:jsoup:1.23.2'
 
 		dependency 'com.launchdarkly:okhttp-eventsource:4.3.0'
 
@@ -40,28 +41,28 @@ dependencyManagement {
 
 		dependency 'info.picocli:picocli:4.7.7'
 
-		dependencySet(group: 'io.javalin', version: '7.2.2') {
+		dependencySet(group: 'io.javalin', version: '7.2.3') {
 			entry 'javalin'
 			entry 'javalin-rendering-thymeleaf'
 		}
 
-		dependency 'io.libp2p:jvm-libp2p:1.3.5-RELEASE'
-		dependency 'tech.pegasys:jblst:0.3.17'
+		dependency 'io.libp2p:jvm-libp2p:1.3.7-RELEASE'
+		dependency 'tech.pegasys:jblst:0.3.18'
 		dependency 'io.consensys.protocols:jc-kzg-4844:2.1.8'
 		dependency 'io.github.crate-crypto:java-eth-kzg:0.10.0'
 
 		dependency 'org.hdrhistogram:HdrHistogram:2.2.2'
 
-		dependency 'org.jetbrains.kotlin:kotlin-stdlib:2.4.10'
+		dependency 'org.jetbrains.kotlin:kotlin-stdlib:2.4.20'
 
 		dependency 'org.mock-server:mockserver-junit-jupiter:5.15.0'
 
-		dependencySet(group: 'io.swagger.core.v3', version: '2.2.52') {
+		dependencySet(group: 'io.swagger.core.v3', version: '2.2.55') {
 			entry 'swagger-annotations'
 		}
 
 		// On update don't forget to change version in tech.pegasys.teku.infrastructure.restapi.SwaggerUIBuilder
-		dependency 'org.webjars:swagger-ui:5.32.11'
+		dependency 'org.webjars:swagger-ui:5.33.1'
 
 		dependency 'org.thymeleaf:thymeleaf:3.1.5.RELEASE'
 		dependencySet(group: 'com.github.oshi', version: '6.12.0') {
@@ -71,7 +72,7 @@ dependencyManagement {
 
 		dependency 'it.unimi.dsi:fastutil:8.5.19'
 
-		dependencySet(group: 'io.consensys.tuweni', version: '2.7.2') {
+		dependencySet(group: 'io.consensys.tuweni', version: '2.8.0') {
 			entry 'tuweni-bytes'
 			entry 'tuweni-crypto'
 			entry 'tuweni-ssz'
@@ -79,7 +80,7 @@ dependencyManagement {
 		}
 
 		dependency 'org.apache.commons:commons-text:1.15.0'
-		dependency 'org.apache.commons:commons-lang3:3.20.0'
+		dependency 'org.apache.commons:commons-lang3:3.21.0'
 		dependency 'commons-io:commons-io:2.22.0'
 		dependency 'org.commonjava.mimeparse:mimeparse:0.1.3.3'
 
@@ -96,11 +97,11 @@ dependencyManagement {
 
 		dependency 'org.awaitility:awaitility:4.3.0'
 
-		dependencySet(group: 'org.bouncycastle', version: '1.85') {
+		dependencySet(group: 'org.bouncycastle', version: '1.86') {
 			entry 'bcpkix-jdk18on'
+			entry 'bcprov-jdk18on'
 			entry 'bcutil-jdk18on' // already used by dependencies, fixes offline building
 		}
-		dependency 'org.bouncycastle:bcprov-jdk18on:1.85.2' // patch .2 fix only available for bc provider
 
 		dependencySet(group: 'org.junit.jupiter', version: '5.14.4') {
 			entry 'junit-jupiter-api'
@@ -112,7 +113,7 @@ dependencyManagement {
 
 		dependency 'net.java.dev.jna:jna:5.19.1'
 
-		dependencySet(group: 'org.mockito', version: '5.23.0') {
+		dependencySet(group: 'org.mockito', version: '5.24.0') {
 			entry 'mockito-core'
 			entry 'mockito-junit-jupiter'
 		}
@@ -129,17 +130,16 @@ dependencyManagement {
 			entry 'core'
 		}
 
-		dependency 'org.xerial.snappy:snappy-java:1.1.10.7'
-		dependency 'io.airlift:aircompressor-v3:3.7'
+		dependency 'io.airlift:aircompressor-v3:3.10'
 
 		dependency 'io.prometheus:prometheus-metrics-bom:1.5.1'
 
-		dependencySet(group: 'org.hyperledger.besu.internal', version: '26.6.1') {
+		dependencySet(group: 'org.hyperledger.besu.internal', version: '26.9.0') {
 			entry 'besu-metrics-core'
 			entry 'besu-ethereum-core'
 			entry 'besu-config'
 		}
-		dependencySet(group: 'org.hyperledger.besu', version: '26.6.1') {
+		dependencySet(group: 'org.hyperledger.besu', version: '26.9.0') {
 			entry 'besu-datatypes'
 			entry 'besu-evm'
 			entry 'besu-plugin-api'
@@ -150,9 +150,9 @@ dependencyManagement {
 			entry "junit-jupiter"
 		}
 
-		dependency 'io.consensys.protocols:discovery:26.6.0'
+		dependency 'io.consensys.protocols:discovery:26.8.0'
 
-		dependencySet(group: 'org.jupnp', version: '3.0.4') {
+		dependencySet(group: 'org.jupnp', version: '3.0.5') {
 			entry "org.jupnp"
 			entry "org.jupnp.support"
 		}

@@ -343,6 +343,16 @@
     FULU_FORK_VERSION: Version = '0x06000000'
     </spec>
 
+- name: GAS_LIMIT_SCHEDULE#gloas
+  sources:
+    - file: ethereum/spec/src/main/resources/tech/pegasys/teku/spec/config/configs/mainnet.yaml
+      search: "GAS_LIMIT_SCHEDULE:"
+  spec: |
+    <spec config_var="GAS_LIMIT_SCHEDULE" fork="gloas" hash="28e945d9">
+    GAS_LIMIT_SCHEDULE: tuple[frozendict[str, Any], ...] = (
+    )
+    </spec>
+
 - name: GENESIS_DELAY#phase0
   sources:
     - file: ethereum/spec/src/main/resources/tech/pegasys/teku/spec/config/configs/mainnet.yaml

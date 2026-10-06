@@ -7,15 +7,15 @@
 ## Unreleased Changes
 
 ### Breaking Changes
- - Promoted `--Xvalidators-external-signer-concurrent-limit` to non-experimental `--validators-external-signer-concurrent-limit`, and imposed maximum limit of 1024
- - Removed the `--deposit-snapshot-enabled` and `--Xdeposit-snapshot` CLI options along with the bundled deposit tree snapshots.
 
 ### Additions and Improvements
- - Added native support for the [Plataberget testnet](https://plataberget.dev/). Use `--network=plataberget` to join the network.
- - `--validator-keys` now accepts `<KEY_DIR>:<PASS_FILE>`, using a single password file for all keystores found in the directory.
- - Improved debug/beacon/states endpoint to allow searching of the finalized state root, to assist third party products searching on roots.
+ - Added gossipsub metrics `libp2p_gossip_gossipsub_*` (off by default; enable them with `--Xmetrics-additional-categories=LIBP2P_GOSSIP`).
+ - Block production now resends `forkchoiceUpdated` when the execution layer returned no `payloadId` (e.g. `SYNCING`) for the one sent ahead of the proposal slot, instead of missing the proposal. A warning is logged when no `payloadId` is returned.
 
 ### Bug Fixes
- - Fixed `data_column_sidecar` gossip decoding to use the schema of the topic's fork instead of the highest supported milestone. Previously, on networks with Gloas scheduled, every Fulu-era column sidecar received via gossip failed deserialization.
- - Fixed a regression where archive nodes using `leveldb-tree` storage would take an extremely long time to start up.
- - Post-Electra, the `committee_index` query parameter in `GET /eth/v1/validator/attestation_data` is now ignored instead of rejected when non-zero, matching the behaviour of other consensus clients.
+ - The validator client now sends the required `Eth-Consensus-Version` header when submitting gloas proposer preferences to the beacon node.
+ - The validator client now sends the required `Eth-Consensus-Version` header when submitting gloas payload attestation messages to the beacon node.
+ - The ENR `eth2` field now advertises the current fork version as `next_fork_version` when a BPO fork is scheduled before the next hard fork, as the Fulu p2p specification requires.
+ - A block production request that fails no longer keeps its preparation for the slot, so a retry within the same slot starts from a fresh preparation.
+ - Fixed valid voluntary exits and slashings referring to an earlier fork being rejected on gossip, which wrongly penalised the peers forwarding them.
+ - Peers discovered with both QUIC and TCP addresses are now dialed over TCP when the QUIC dial fails, instead of being retried over QUIC only. [#11397](https://github.com/Consensys/teku/issues/11397)

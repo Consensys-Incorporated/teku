@@ -20,7 +20,7 @@ import pubsub.pb.Rpc;
 
 /**
  * Validates Gossip messages at the level of Protobuf structures Rejects messages with prohibited
- * Gossip fields: {@code from, signature, seqno}
+ * Gossip fields: {@code from, signature, seqno, key}
  */
 public class GossipWireValidator implements PubsubRouterMessageValidator {
 
@@ -41,6 +41,9 @@ public class GossipWireValidator implements PubsubRouterMessageValidator {
     }
     if (message.hasSeqno()) {
       throw new InvalidGossipMessageException("The message has prohibited 'seqno' field");
+    }
+    if (message.hasKey()) {
+      throw new InvalidGossipMessageException("The message has prohibited 'key' field");
     }
   }
 }

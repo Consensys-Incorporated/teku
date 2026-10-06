@@ -60,6 +60,7 @@ import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
 import tech.pegasys.teku.statetransition.execution.ReceivedExecutionPayloadBidEventsChannel;
 import tech.pegasys.teku.statetransition.execution.ReceivedExecutionPayloadEventsChannel;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoiceUpdatedResultSubscriber.ForkChoiceUpdatedResultNotification;
+import tech.pegasys.teku.statetransition.forkchoice.fastconfirmation.FastConfirmationEventChannel;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 import tech.pegasys.teku.storage.api.ChainHeadChannel;
 import tech.pegasys.teku.storage.api.FinalizedCheckpointChannel;
@@ -70,7 +71,8 @@ public class EventSubscriptionManager
         FinalizedCheckpointChannel,
         ReceivedBlockEventsChannel,
         ReceivedExecutionPayloadEventsChannel,
-        ReceivedExecutionPayloadBidEventsChannel {
+        ReceivedExecutionPayloadBidEventsChannel,
+        FastConfirmationEventChannel {
   private static final Logger LOG = LogManager.getLogger();
 
   private final Spec spec;
@@ -104,6 +106,7 @@ public class EventSubscriptionManager
     eventChannels.subscribe(ReceivedBlockEventsChannel.class, this);
     eventChannels.subscribe(ReceivedExecutionPayloadEventsChannel.class, this);
     eventChannels.subscribe(ReceivedExecutionPayloadBidEventsChannel.class, this);
+    eventChannels.subscribe(FastConfirmationEventChannel.class, this);
     syncDataProvider.subscribeToSyncStateChanges(this::onSyncStateChange);
     nodeDataProvider.subscribeToReceivedBlobSidecar(this::onNewBlobSidecar);
     nodeDataProvider.subscribeToAttesterSlashing(this::onNewAttesterSlashing);
@@ -203,6 +206,14 @@ public class EventSubscriptionManager
   }
 
   @Override
+  public void onFastConfirmation(
+      final Bytes32 confirmedRoot, final UInt64 confirmedSlot, final UInt64 currentSlot) {
+    notifySubscribersOfEvent(
+        EventType.fast_confirmation,
+        new FastConfirmationEvent(confirmedRoot, confirmedSlot, currentSlot));
+  }
+
+  @Override
   public void onBlockValidated(final SignedBeaconBlock block) {
     onNewBlockGossip(block);
   }
@@ -218,12 +229,17 @@ public class EventSubscriptionManager
   }
 
   @Override
+  public void onExecutionPayloadAvailable(final SignedExecutionPayloadEnvelope executionPayload) {
+    final ExecutionPayloadAvailableEvent executionPayloadAvailableEvent =
+        new ExecutionPayloadAvailableEvent(
+            executionPayload.getSlot(), executionPayload.getBeaconBlockRoot());
+    notifySubscribersOfEvent(EventType.execution_payload_available, executionPayloadAvailableEvent);
+  }
+
+  @Override
   public void onExecutionPayloadImported(
       final SignedExecutionPayloadEnvelope executionPayload, final boolean executionOptimistic) {
     onNewExecutionPayload(executionPayload, executionOptimistic);
-    // TODO-GLOAS: potentially we can emit this event earlier when blob availability and
-    // verification is complete (before importing)
-    onExecutionPayloadAvailable(executionPayload);
   }
 
   @Override
@@ -347,14 +363,6 @@ public class EventSubscriptionManager
     final ExecutionPayloadEvent executionPayloadEvent =
         new ExecutionPayloadEvent(executionPayload, executionOptimistic);
     notifySubscribersOfEvent(EventType.execution_payload, executionPayloadEvent);
-  }
-
-  protected void onExecutionPayloadAvailable(
-      final SignedExecutionPayloadEnvelope executionPayload) {
-    final ExecutionPayloadAvailableEvent executionPayloadAvailableEvent =
-        new ExecutionPayloadAvailableEvent(
-            executionPayload.getSlot(), executionPayload.getBeaconBlockRoot());
-    notifySubscribersOfEvent(EventType.execution_payload_available, executionPayloadAvailableEvent);
   }
 
   protected void onExecutionPayloadBid(final SignedExecutionPayloadBid executionPayloadBid) {

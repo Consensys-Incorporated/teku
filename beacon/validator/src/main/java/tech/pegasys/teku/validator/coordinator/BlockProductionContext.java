@@ -34,6 +34,7 @@ public record BlockProductionContext(
     Bytes32 parentExecutionBlockHash,
     BLSSignature randaoReveal,
     Optional<Bytes32> graffiti,
+    boolean includePayload,
     Optional<BuilderConfig> builderConfig,
     BlockProductionPerformance blockProductionPerformance) {
 
@@ -44,6 +45,7 @@ public record BlockProductionContext(
       final ChainHead parentChainHead,
       final BLSSignature randaoReveal,
       final Optional<Bytes32> graffiti,
+      final boolean includePayload,
       final Optional<BuilderConfig> builderConfig,
       final BlockProductionPerformance blockProductionPerformance) {
     checkArgument(
@@ -64,6 +66,7 @@ public record BlockProductionContext(
         parentChainHead.getExecutionBlockHash(),
         randaoReveal,
         graffiti,
+        includePayload,
         builderConfig,
         blockProductionPerformance);
   }

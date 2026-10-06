@@ -50,6 +50,7 @@ public class StorageConfiguration {
   public static final int DEFAULT_BLOBS_PRUNING_LIMIT = 12;
 
   public static final int DEFAULT_DATA_COLUMN_PRUNING_LIMIT = 64;
+  public static final Duration DEFAULT_PRUNING_WARN_TIMEOUT = Duration.ofSeconds(60);
 
   // Max limit we have tested so far without seeing perf degradation
   public static final int MAX_STATE_PRUNE_LIMIT = 100;
@@ -76,6 +77,7 @@ public class StorageConfiguration {
   private final int stateRebuildTimeoutSeconds;
   private final boolean forceClearDb;
   private final boolean rocksdbBlobDbEnabled;
+  private final Duration pruningWarnTimeout;
 
   private StorageConfiguration(
       final Eth1Address eth1DepositContract,
@@ -97,7 +99,8 @@ public class StorageConfiguration {
       final int statePruningLimit,
       final Spec spec,
       final boolean forceClearDb,
-      final boolean rocksdbBlobDbEnabled) {
+      final boolean rocksdbBlobDbEnabled,
+      final Duration pruningWarnTimeout) {
     this.eth1DepositContract = eth1DepositContract;
     this.dataStorageMode = dataStorageMode;
     this.dataStorageFrequency = dataStorageFrequency;
@@ -118,6 +121,7 @@ public class StorageConfiguration {
     this.spec = spec;
     this.forceClearDb = forceClearDb;
     this.rocksdbBlobDbEnabled = rocksdbBlobDbEnabled;
+    this.pruningWarnTimeout = pruningWarnTimeout;
   }
 
   public static Builder builder() {
@@ -204,6 +208,10 @@ public class StorageConfiguration {
     return rocksdbBlobDbEnabled;
   }
 
+  public Duration getPruningWarnTimeout() {
+    return pruningWarnTimeout;
+  }
+
   public static final class Builder {
     private static final Logger LOG = LogManager.getLogger();
     private Eth1Address eth1DepositContract;
@@ -227,6 +235,7 @@ public class StorageConfiguration {
     private int statePruningLimit = DEFAULT_STATE_PRUNING_LIMIT;
     private boolean forceClearDb = false;
     private boolean rocksdbBlobDbEnabled = DEFAULT_ROCKSDB_BLOB_DB_ENABLED;
+    private Duration pruningWarnTimeout = DEFAULT_PRUNING_WARN_TIMEOUT;
 
     private Builder() {}
 
@@ -390,6 +399,11 @@ public class StorageConfiguration {
       return this;
     }
 
+    public Builder pruningWarnTimeout(final Duration pruningWarnTimeout) {
+      this.pruningWarnTimeout = pruningWarnTimeout;
+      return this;
+    }
+
     public StorageConfiguration build() {
       determineDataStorageMode();
       validateStatePruningConfiguration();
@@ -413,7 +427,8 @@ public class StorageConfiguration {
           statePruningLimit,
           spec,
           forceClearDb,
-          rocksdbBlobDbEnabled);
+          rocksdbBlobDbEnabled,
+          pruningWarnTimeout);
     }
 
     private void determineDataStorageMode() {

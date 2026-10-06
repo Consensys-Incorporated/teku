@@ -24,7 +24,10 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.apache.logging.log4j.LogManager;
@@ -73,6 +76,8 @@ public class MiscHelpersGloas extends MiscHelpersFulu {
 
   private final SpecConfigGloas specConfigGloas;
   private final SchemaDefinitionsGloas schemaDefinitionsGloas;
+  // EIP-8261: the gas limit schedule, navigable by epoch
+  private final NavigableMap<UInt64, UInt64> epochToScheduledGasLimit = new TreeMap<>();
 
   public MiscHelpersGloas(
       final SpecConfigGloas specConfig,
@@ -81,6 +86,9 @@ public class MiscHelpersGloas extends MiscHelpersFulu {
     super(specConfig, predicates, schemaDefinitionsGloas);
     this.specConfigGloas = specConfig;
     this.schemaDefinitionsGloas = schemaDefinitionsGloas;
+    specConfig
+        .getGasLimitSchedule()
+        .forEach(entry -> epochToScheduledGasLimit.put(entry.epoch(), entry.gasLimit()));
   }
 
   public UInt64 convertBuilderIndexToValidatorIndex(final UInt64 builderIndex) {
@@ -91,6 +99,15 @@ public class MiscHelpersGloas extends MiscHelpersFulu {
     return UInt64.valueOf(validatorIndex.longValue() & ~BUILDER_INDEX_FLAG.longValue());
   }
 
+  /**
+   * get_scheduled_gas_limit
+   *
+   * <p>EIP-8261: returns the scheduled gas limit at a given epoch, if any.
+   */
+  public Optional<UInt64> getScheduledGasLimit(final UInt64 epoch) {
+    return Optional.ofNullable(epochToScheduledGasLimit.floorEntry(epoch)).map(Map.Entry::getValue);
+  }
+
   @Override
   public boolean isAvailabilityOfBlobSidecarsRequiredAtEpoch(
       final UInt64 currentEpoch, final UInt64 epoch) {
@@ -98,6 +115,10 @@ public class MiscHelpersGloas extends MiscHelpersFulu {
   }
 
   public boolean isExecutionPayloadEnvelopeAvailable() {
+    return true;
+  }
+
+  public boolean isPayloadAttestationAvailable() {
     return true;
   }
 
@@ -239,12 +260,6 @@ public class MiscHelpersGloas extends MiscHelpersFulu {
                 .slot(anyExistingSidecar.getSlot())
                 .beaconBlockRoot(anyExistingSidecar.getBeaconBlockRoot()),
         extendedMatrix);
-  }
-
-  public boolean isBidBuildingOnEmptyParent(
-      final BeaconStateGloas state, final ExecutionPayloadBid bid) {
-    return bid.getParentBlockHash().equals(state.getLatestBlockHash())
-        && !bid.getParentBlockHash().equals(state.getLatestExecutionPayloadBid().getBlockHash());
   }
 
   public boolean isBidBuildingOnFullParent(

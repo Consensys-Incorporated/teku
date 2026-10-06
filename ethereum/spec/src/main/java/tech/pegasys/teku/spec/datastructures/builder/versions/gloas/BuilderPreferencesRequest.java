@@ -17,12 +17,12 @@ import tech.pegasys.teku.infrastructure.ssz.containers.Container2;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 
 public class BuilderPreferencesRequest
-    extends Container2<BuilderPreferencesRequest, BuilderPreferences, SignedRequestAuth> {
+    extends Container2<BuilderPreferencesRequest, BuilderPreferences, SignedBuilderRequestAuth> {
 
   BuilderPreferencesRequest(
       final BuilderPreferencesRequestSchema schema,
       final BuilderPreferences preferences,
-      final SignedRequestAuth auth) {
+      final SignedBuilderRequestAuth auth) {
     super(schema, preferences, auth);
   }
 
@@ -35,7 +35,7 @@ public class BuilderPreferencesRequest
     return getField0();
   }
 
-  public SignedRequestAuth getAuth() {
+  public SignedBuilderRequestAuth getAuth() {
     return getField1();
   }
 

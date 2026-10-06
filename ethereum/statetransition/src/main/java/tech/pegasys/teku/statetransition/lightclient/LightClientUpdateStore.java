@@ -14,83 +14,182 @@
 package tech.pegasys.teku.statetransition.lightclient;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiPredicate;
+import java.util.function.Predicate;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
+import tech.pegasys.teku.storage.api.LightClientUpdateChannel;
+import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 
 public class LightClientUpdateStore {
-  private final Spec spec;
+  private static final Logger LOG = LogManager.getLogger();
 
-  // TODO: bound this once updates are persisted
-  private final ConcurrentNavigableMap<UInt64, LightClientUpdate> bestUpdatesByPeriod =
-      new ConcurrentSkipListMap<>();
-  private final AtomicReference<Optional<LightClientFinalityUpdate>> latestFinalityUpdate =
-      new AtomicReference<>(Optional.empty());
-  private final AtomicReference<Optional<LightClientOptimisticUpdate>> latestOptimisticUpdate =
-      new AtomicReference<>(Optional.empty());
+  private final Spec spec;
+  private final LightClientUpdateChannel channel;
+
+  private final ConcurrentNavigableMap<UInt64, StoredUpdate<LightClientUpdate>>
+      bestUpdatesByPeriod = new ConcurrentSkipListMap<>();
+  private final AtomicReference<Optional<StoredUpdate<LightClientFinalityUpdate>>>
+      latestFinalityUpdate = new AtomicReference<>(Optional.empty());
+  private final AtomicReference<Optional<StoredUpdate<LightClientOptimisticUpdate>>>
+      latestOptimisticUpdate = new AtomicReference<>(Optional.empty());
 
   public LightClientUpdateStore(final Spec spec) {
-    this.spec = spec;
+    this(spec, LightClientUpdateChannel.NOOP);
   }
 
-  public void addUpdate(final LightClientUpdate update) {
+  public LightClientUpdateStore(final Spec spec, final LightClientUpdateChannel channel) {
+    this.spec = spec;
+    this.channel = channel;
+  }
+
+  public synchronized void addUpdate(
+      final LightClientUpdate update,
+      final Bytes32 signatureBlockRoot,
+      final BiPredicate<UInt64, Bytes32> isCanonical) {
+    final UInt64 signatureSlot = update.getSignatureSlot().get();
     final UInt64 attestedPeriod =
         syncCommitteePeriodAtSlot(update.getAttestedHeader().getBeacon().getSlot());
-    if (!attestedPeriod.equals(syncCommitteePeriodAtSlot(update.getSignatureSlot().get()))) {
+    if (!attestedPeriod.equals(syncCommitteePeriodAtSlot(signatureSlot))) {
       return;
     }
 
-    bestUpdatesByPeriod.merge(
-        attestedPeriod,
-        update,
-        (existingUpdate, incomingUpdate) ->
-            isBetterUpdate(incomingUpdate, existingUpdate) ? incomingUpdate : existingUpdate);
+    if (!isCanonical.test(signatureSlot, signatureBlockRoot)) {
+      return;
+    }
+
+    final StoredUpdate<LightClientUpdate> candidate =
+        new StoredUpdate<>(update, signatureSlot, signatureBlockRoot);
+    final StoredUpdate<LightClientUpdate> best =
+        bestUpdatesByPeriod.merge(
+            attestedPeriod,
+            candidate,
+            (existing, incoming) ->
+                isBetterUpdate(incoming.update(), existing.update()) ? incoming : existing);
+
+    if (best.equals(candidate)) {
+      channel
+          .onNewBestLightClientUpdate(attestedPeriod, update, signatureBlockRoot)
+          .finishError(LOG);
+    }
   }
 
-  public void addFinalityUpdate(final LightClientFinalityUpdate finalityUpdate) {
+  public synchronized void loadUpdates(final Collection<StoredLightClientUpdate> updates) {
+    updates.forEach(
+        stored -> {
+          final StoredUpdate<LightClientUpdate> candidate =
+              new StoredUpdate<>(
+                  stored.update(),
+                  stored.update().getSignatureSlot().get(),
+                  stored.signatureBlockRoot());
+          final StoredUpdate<LightClientUpdate> existing =
+              bestUpdatesByPeriod.putIfAbsent(stored.period(), candidate);
+          if (existing != null && isBetterUpdate(candidate.update(), existing.update())) {
+            bestUpdatesByPeriod.put(stored.period(), candidate);
+            channel
+                .onNewBestLightClientUpdate(
+                    stored.period(), stored.update(), stored.signatureBlockRoot())
+                .finishError(LOG);
+          }
+        });
+  }
+
+  public synchronized void removeNonCanonicalUpdates(
+      final UInt64 fromPeriod, final BiPredicate<UInt64, Bytes32> isCanonical) {
+    final Predicate<StoredUpdate<?>> canonical =
+        stored -> isCanonical.test(stored.signatureSlot(), stored.signatureBlockRoot());
+
+    final List<UInt64> removedPeriods = new ArrayList<>();
+    bestUpdatesByPeriod
+        .tailMap(fromPeriod)
+        .entrySet()
+        .removeIf(
+            entry -> {
+              if (canonical.test(entry.getValue())) {
+                return false;
+              }
+              removedPeriods.add(entry.getKey());
+              return true;
+            });
+    latestFinalityUpdate.updateAndGet(current -> current.filter(canonical));
+    latestOptimisticUpdate.updateAndGet(current -> current.filter(canonical));
+
+    if (!removedPeriods.isEmpty()) {
+      channel.onRemoveBestLightClientUpdates(removedPeriods).finishError(LOG);
+    }
+  }
+
+  public synchronized void addFinalityUpdate(
+      final LightClientFinalityUpdate finalityUpdate,
+      final Bytes32 signatureBlockRoot,
+      final BiPredicate<UInt64, Bytes32> isCanonical) {
+    final UInt64 signatureSlot = finalityUpdate.getSignatureSlot().get();
+    if (!isCanonical.test(signatureSlot, signatureBlockRoot)) {
+      return;
+    }
+
+    final StoredUpdate<LightClientFinalityUpdate> incoming =
+        new StoredUpdate<>(finalityUpdate, signatureSlot, signatureBlockRoot);
+
     latestFinalityUpdate.updateAndGet(
-        currentFinalityUpdate -> {
-          if (currentFinalityUpdate.isEmpty()) {
-            return Optional.of(finalityUpdate);
+        current -> {
+          if (current.isEmpty()) {
+            return Optional.of(incoming);
           }
 
           return isLaterUpdate(
                   finalityUpdate.getAttestedHeader().getBeacon().getSlot(),
-                  finalityUpdate.getSignatureSlot().get(),
-                  currentFinalityUpdate.get().getAttestedHeader().getBeacon().getSlot(),
-                  currentFinalityUpdate.get().getSignatureSlot().get())
-              ? Optional.of(finalityUpdate)
-              : currentFinalityUpdate;
+                  incoming.signatureSlot(),
+                  current.get().update().getAttestedHeader().getBeacon().getSlot(),
+                  current.get().signatureSlot())
+              ? Optional.of(incoming)
+              : current;
         });
   }
 
-  public void addOptimisticUpdate(final LightClientOptimisticUpdate optimisticUpdate) {
+  public synchronized void addOptimisticUpdate(
+      final LightClientOptimisticUpdate optimisticUpdate,
+      final Bytes32 signatureBlockRoot,
+      final BiPredicate<UInt64, Bytes32> isCanonical) {
+    final UInt64 signatureSlot = optimisticUpdate.getSignatureSlot().get();
+    if (!isCanonical.test(signatureSlot, signatureBlockRoot)) {
+      return;
+    }
+
+    final StoredUpdate<LightClientOptimisticUpdate> incoming =
+        new StoredUpdate<>(optimisticUpdate, signatureSlot, signatureBlockRoot);
+
     latestOptimisticUpdate.updateAndGet(
-        currentOptimisticUpdate -> {
-          if (currentOptimisticUpdate.isEmpty()) {
-            return Optional.of(optimisticUpdate);
+        current -> {
+          if (current.isEmpty()) {
+            return Optional.of(incoming);
           }
 
           return isLaterUpdate(
                   optimisticUpdate.getAttestedHeader().getBeacon().getSlot(),
-                  optimisticUpdate.getSignatureSlot().get(),
-                  currentOptimisticUpdate.get().getAttestedHeader().getBeacon().getSlot(),
-                  currentOptimisticUpdate.get().getSignatureSlot().get())
-              ? Optional.of(optimisticUpdate)
-              : currentOptimisticUpdate;
+                  incoming.signatureSlot(),
+                  current.get().update().getAttestedHeader().getBeacon().getSlot(),
+                  current.get().signatureSlot())
+              ? Optional.of(incoming)
+              : current;
         });
   }
 
   public List<LightClientUpdate> getBestUpdatesInRange(final UInt64 startPeriod, final int count) {
-    final ConcurrentNavigableMap<UInt64, LightClientUpdate> updatesInRange =
+    final ConcurrentNavigableMap<UInt64, StoredUpdate<LightClientUpdate>> updatesInRange =
         bestUpdatesByPeriod.subMap(startPeriod, true, startPeriod.plus(count), false);
     if (updatesInRange.isEmpty()) {
       return List.of();
@@ -99,23 +198,31 @@ public class LightClientUpdateStore {
     final UInt64 earliestPeriod = updatesInRange.firstKey();
     final List<LightClientUpdate> consecutiveUpdates = new ArrayList<>();
 
-    for (final Map.Entry<UInt64, LightClientUpdate> entry : updatesInRange.entrySet()) {
+    for (final Map.Entry<UInt64, StoredUpdate<LightClientUpdate>> entry :
+        updatesInRange.entrySet()) {
       if (!entry.getKey().equals(earliestPeriod.plus(consecutiveUpdates.size()))) {
         break;
       }
-      consecutiveUpdates.add(entry.getValue());
+      consecutiveUpdates.add(entry.getValue().update());
     }
 
     return consecutiveUpdates;
   }
 
+  public synchronized void pruneUpdatesBefore(final UInt64 period) {
+    bestUpdatesByPeriod.headMap(period).clear();
+    channel.onPruneBestLightClientUpdatesBefore(period).finishError(LOG);
+  }
+
   public Optional<LightClientFinalityUpdate> getLatestFinalityUpdate() {
-    return latestFinalityUpdate.get();
+    return latestFinalityUpdate.get().map(StoredUpdate::update);
   }
 
   public Optional<LightClientOptimisticUpdate> getLatestOptimisticUpdate() {
-    return latestOptimisticUpdate.get();
+    return latestOptimisticUpdate.get().map(StoredUpdate::update);
   }
+
+  private record StoredUpdate<T>(T update, UInt64 signatureSlot, Bytes32 signatureBlockRoot) {}
 
   /** {@code is_better_update}. */
   private boolean isBetterUpdate(
@@ -194,7 +301,7 @@ public class LightClientUpdateStore {
   }
 
   /** {@code is_finality_update}. */
-  private boolean isFinalityUpdate(final LightClientUpdate update) {
+  public static boolean isFinalityUpdate(final LightClientUpdate update) {
     return !update.getFinalityBranch().isDefault();
   }
 

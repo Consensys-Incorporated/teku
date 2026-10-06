@@ -1,19 +1,18 @@
 import fs from "fs";
+import path from "path";
 import fetch from "node-fetch";
-import ghpages from "gh-pages";
 import config from "./config.js";
 
 const log = (...args) => console.log(...args); // eslint-disable-line no-console
 
-/**
- * Main function to prepare and publish openapi spec to gh-pages branch
- */
 async function main() {
   try {
     const cfg = config.getConfig();
-    const {distDir, specs, versions, ghPagesConfig} = cfg;
+    const {distDir, specs, versions} = cfg;
 
     prepareDistDir(distDir);
+
+    copyIndexHtml(distDir);
 
     specs.forEach(function (spec) {
       copySpecFileToDist(spec);
@@ -28,32 +27,26 @@ async function main() {
       saveVersionsJson(updatedVersionsJson, versions.dist);
     }
 
-    log("Publishing following files: ");
+    log("Prepared following files for publishing: ");
     fs.readdirSync(distDir).forEach((file) => {
       log(file);
     });
-
-    cleanGhPagesCache();
-    await publishToGHPages(distDir, ghPagesConfig);
-    log(
-        `OpenAPI specs [${specs[0].version}] published to [${ghPagesConfig.branch}] using user [${ghPagesConfig.user.name}]`
-    );
   } catch (err) {
-    log(`ERROR: OpenAPI spec failed to publish: ${err.message}`);
+    log(`ERROR: OpenAPI spec failed to prepare: ${err.message}`);
     log(config);
     process.exit(1);
   }
 }
 
-/**
- * Re-create dist dir
- * @param {string} dirPath
- */
 function prepareDistDir(dirPath) {
   if (fs.existsSync(dirPath)) {
     fs.rmdirSync(dirPath, {recursive: true});
   }
   fs.mkdirSync(dirPath, {recursive: true});
+}
+
+function copyIndexHtml(distDir) {
+  fs.copyFileSync(new URL("./index.html", import.meta.url).pathname, path.join(distDir, "index.html"));
 }
 
 function copySpecFileToDist(spec) {
@@ -64,9 +57,6 @@ function copySpecFileToDist(spec) {
   }
 }
 
-/**
- * Fetch versions.json
- */
 async function fetchVersions(versionsUrl) {
   const response = await fetch(versionsUrl);
   if (response.ok) {
@@ -79,11 +69,6 @@ async function fetchVersions(versionsUrl) {
   );
 }
 
-/**
- * update versions
- * @param versionsJson
- * @param {string} specVersion
- */
 function updateVersions(versionsJson, specVersion) {
   versionsJson[specVersion] = {
     spec: specVersion,
@@ -100,23 +85,4 @@ function saveVersionsJson(versionsJson, versionsDist) {
   fs.writeFileSync(versionsDist, JSON.stringify(versionsJson, null, 1));
 }
 
-function cleanGhPagesCache() {
-  ghpages.clean();
-}
-
-/**
- * Publish dist folder to gh-pages branch
- */
-async function publishToGHPages(distDir, ghPagesConfig) {
-  return new Promise((resolve, reject) => {
-    ghpages.publish(distDir, ghPagesConfig, (err) => {
-      if (err) {
-        reject(err);
-      }
-      resolve();
-    });
-  });
-}
-
-// start execution of main method
 main();

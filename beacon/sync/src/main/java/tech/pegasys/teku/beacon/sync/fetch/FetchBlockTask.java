@@ -50,16 +50,31 @@ public class FetchBlockTask extends AbstractFetchTask<Bytes32, SignedBeaconBlock
   @Override
   SafeFuture<FetchResult<SignedBeaconBlock>> fetch(final Eth2Peer peer) {
     return peer.requestBlockByRoot(blockRoot)
-        .thenApply(
-            maybeBlock ->
-                maybeBlock
-                    .map(block -> FetchResult.createSuccessful(peer, block))
-                    .orElseGet(() -> FetchResult.createFailed(peer, Status.FETCH_FAILED)))
+        .thenApply(maybeBlock -> createFetchResult(peer, maybeBlock))
         .exceptionally(
             err -> {
               LOG.debug(
                   "Failed to fetch block by root {} from peer {}", blockRoot, peer.getId(), err);
               return FetchResult.createFailed(peer, Status.FETCH_FAILED);
             });
+  }
+
+  private FetchResult<SignedBeaconBlock> createFetchResult(
+      final Eth2Peer peer, final Optional<SignedBeaconBlock> maybeBlock) {
+    if (maybeBlock.isEmpty()) {
+      return FetchResult.createFailed(peer, Status.FETCH_FAILED);
+    }
+
+    final SignedBeaconBlock block = maybeBlock.get();
+    if (!block.getRoot().equals(blockRoot)) {
+      LOG.debug(
+          "Failed to fetch block by root {} from peer {}: returned block with root {}",
+          blockRoot,
+          peer.getId(),
+          block.getRoot());
+      return FetchResult.createFailed(peer, Status.FETCH_FAILED);
+    }
+
+    return FetchResult.createSuccessful(peer, block);
   }
 }

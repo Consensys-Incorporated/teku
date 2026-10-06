@@ -207,7 +207,7 @@ public class DataColumnSidecarCustodyImpl
   }
 
   // TODO: remove this code, issue #
-  // https://github.com/ConsenSys/teku/issues/10105?issue=Consensys%7Cteku%7C10229
+  // https://github.com/Consensys-Incorporated/teku/issues/10105?issue=Consensys%7Cteku%7C10229
   @VisibleForTesting
   SafeFuture<Void> advanceFirstIncompleteSlot(final UInt64 finalizedEpoch) {
     final UInt64 firstNonFinalizedSlot = spec.computeStartSlotAtEpoch(finalizedEpoch).increment();

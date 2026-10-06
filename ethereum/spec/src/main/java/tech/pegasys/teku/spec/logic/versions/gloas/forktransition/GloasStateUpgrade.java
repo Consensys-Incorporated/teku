@@ -31,6 +31,7 @@ import tech.pegasys.teku.infrastructure.ssz.SszMutableList;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
+import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadHeader;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.common.BeaconStateFields;
@@ -120,10 +121,9 @@ public class GloasStateUpgrade implements StateUpgrade<BeaconStateFulu> {
               state.setNextSyncCommittee(preStateFulu.getNextSyncCommittee());
 
               // New in Gloas
-              final Bytes32 latestBlockHash =
-                  preStateFulu.getLatestExecutionPayloadHeaderRequired().getBlockHash();
-              final UInt64 latestGasLimit =
-                  preStateFulu.getLatestExecutionPayloadHeaderRequired().getGasLimit();
+              final ExecutionPayloadHeader latestExecutionPayloadHeader =
+                  preStateFulu.getLatestExecutionPayloadHeaderRequired();
+              final Bytes32 latestBlockHash = latestExecutionPayloadHeader.getBlockHash();
               state.setLatestBlockHash(latestBlockHash);
 
               state.setNextWithdrawalIndex(preStateFulu.getNextWithdrawalIndex());
@@ -178,14 +178,14 @@ public class GloasStateUpgrade implements StateUpgrade<BeaconStateFulu> {
                   schemaDefinitions
                       .getExecutionPayloadBidSchema()
                       .create(
-                          Bytes32.ZERO,
-                          Bytes32.ZERO,
+                          latestExecutionPayloadHeader.getParentHash(),
+                          preState.getLatestBlockHeader().getParentRoot(),
                           latestBlockHash,
-                          Bytes32.ZERO,
+                          latestExecutionPayloadHeader.getPrevRandao(),
                           Bytes20.ZERO,
-                          latestGasLimit,
-                          UInt64.ZERO,
-                          UInt64.ZERO,
+                          latestExecutionPayloadHeader.getGasLimit(),
+                          SpecConfigGloas.BUILDER_INDEX_SELF_BUILD,
+                          preState.getLatestBlockHeader().getSlot(),
                           UInt64.ZERO,
                           UInt64.ZERO,
                           schemaDefinitions.getBlobKzgCommitmentsSchema().of(),
@@ -215,8 +215,11 @@ public class GloasStateUpgrade implements StateUpgrade<BeaconStateFulu> {
         "Starting onboarding builders at fork from {} pending deposits",
         state.getPendingDeposits().size());
     final List<PendingDeposit> pendingDeposits = new ArrayList<>();
-    // Avoids re-scanning pending deposits and re-verifying signatures for repeated pubkeys
-    final Set<BLSPublicKey> verifiedPendingValidatorPubkeys = new HashSet<>();
+    // Pubkeys with at least one already-queued pending deposit carrying a valid signature, i.e. the
+    // pubkeys for which isPendingValidator(pendingDeposits, pubkey) would return true. Maintained
+    // incrementally so the query is an O(1) lookup instead of an O(queue) rescan-and-verify, which
+    // is quadratic when a pubkey is repeated across many deposits.
+    final Set<BLSPublicKey> pendingValidatorPubkeys = new HashSet<>();
 
     for (final PendingDeposit deposit : state.getPendingDeposits()) {
       final BLSPublicKey pubkey = deposit.getPublicKey();
@@ -239,19 +242,21 @@ public class GloasStateUpgrade implements StateUpgrade<BeaconStateFulu> {
               // deposit for a new validator with this pubkey, keep this deposit in the pending
               // queue to be applied to that validator later.
               () -> {
-                // Deposits without builder credentials stay in the pending queue
+                // Deposits without builder credentials stay in the pending queue. Such a deposit is
+                // the only kind that can newly make its pubkey a pending validator, so verify its
+                // signature once here and record the pubkey rather than rescanning the queue later.
                 if (!predicates.isBuilderWithdrawalCredential(deposit.getWithdrawalCredentials())) {
                   pendingDeposits.add(deposit);
+                  if (miscHelpers.isValidDepositSignature(
+                      pubkey,
+                      deposit.getWithdrawalCredentials(),
+                      deposit.getAmount(),
+                      deposit.getSignature())) {
+                    pendingValidatorPubkeys.add(pubkey);
+                  }
                   return;
                 }
-                boolean isPendingValidator;
-                if (verifiedPendingValidatorPubkeys.contains(pubkey)) {
-                  isPendingValidator = true;
-                } else {
-                  isPendingValidator = miscHelpers.isPendingValidator(pendingDeposits, pubkey);
-                }
-                if (isPendingValidator) {
-                  verifiedPendingValidatorPubkeys.add(pubkey);
+                if (pendingValidatorPubkeys.contains(pubkey)) {
                   pendingDeposits.add(deposit);
                   return;
                 }

@@ -16,6 +16,7 @@ package tech.pegasys.teku.validator.client.restapi.apis;
 import static tech.pegasys.teku.ethereum.execution.types.Eth1Address.ETH1ADDRESS_TYPE;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_ACCEPTED;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
+import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_SERVICE_UNAVAILABLE;
 import static tech.pegasys.teku.validator.client.restapi.ValidatorRestApi.TAG_FEE_RECIPIENT;
 import static tech.pegasys.teku.validator.client.restapi.ValidatorTypes.PARAM_PUBKEY_TYPE;
@@ -78,13 +79,19 @@ public class SetFeeRecipient extends RestApiEndpoint {
   public void handleRequest(final RestApiRequest request) throws JsonProcessingException {
     final BLSPublicKey publicKey = request.getPathParameter(PARAM_PUBKEY_TYPE);
     final SetFeeRecipientBody body = request.getRequestBody();
+    final ProposerConfigManager manager =
+        proposerConfigManager.orElseThrow(
+            () ->
+                new IllegalArgumentException(
+                    "Bellatrix is not currently scheduled on this network, unable to set fee recipient."));
+
+    if (!manager.isOwnedValidator(publicKey)) {
+      request.respondError(SC_NOT_FOUND, "Validator public key not found");
+      return;
+    }
+
     try {
-      proposerConfigManager
-          .orElseThrow(
-              () ->
-                  new IllegalArgumentException(
-                      "Bellatrix is not currently scheduled on this network, unable to set fee recipient."))
-          .setFeeRecipient(publicKey, body.getEth1Address());
+      manager.setFeeRecipient(publicKey, body.getEth1Address());
     } catch (SetFeeRecipientException e) {
       request.respondError(SC_BAD_REQUEST, e.getMessage());
       return;

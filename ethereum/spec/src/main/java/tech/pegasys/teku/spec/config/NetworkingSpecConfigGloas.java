@@ -16,14 +16,4 @@ package tech.pegasys.teku.spec.config;
 public interface NetworkingSpecConfigGloas extends NetworkingSpecConfigDeneb {
 
   int getMaxRequestPayloads();
-
-  int getMaxSignedAggregateAndProofSize();
-
-  int getMaxAttesterSlashingSize();
-
-  int getMaxDataColumnSidecarSize();
-
-  int getMaxPartialDataColumnSidecarSize();
-
-  int getMaxSignedExecutionPayloadBidSize();
 }

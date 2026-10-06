@@ -46,7 +46,6 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.SpecVersion;
-import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.MinimalBeaconBlockSummary;
@@ -230,18 +229,22 @@ public abstract class RecentChainData
     return spec.computeTimeAtSlot(slot, genesisTime);
   }
 
+  /**
+   * True when our head is close enough to {@code slot} that we can still be considered in sync with
+   * it. The tolerance is {@code MAX_SEED_LOOKAHEAD} epochs, the point beyond which we can no longer
+   * cheaply compute the state at {@code slot} from our head.
+   */
+  public boolean isHeadCloseToSlot(final UInt64 slot) {
+    final SpecVersion specVersion = spec.atSlot(slot);
+    final int maxLookaheadSlots =
+        specVersion.getSlotsPerEpoch() * specVersion.getConfig().getMaxSeedLookahead();
+    return slot.minusMinZero(getHeadSlot()).isLessThanOrEqualTo(maxLookaheadSlots);
+  }
+
   @VisibleForTesting
   boolean isCloseToInSync(final UInt64 currentTimeSeconds) {
-    final SpecVersion specVersion = spec.getGenesisSpec();
-    final MiscHelpers miscHelpers = specVersion.miscHelpers();
-    final SpecConfig specConfig = specVersion.getConfig();
-    final UInt64 networkSlot = miscHelpers.computeSlotAtTime(getGenesisTime(), currentTimeSeconds);
-
-    final int maxLookaheadEpochs = specConfig.getMaxSeedLookahead();
-    final int slotsPerEpoch = specVersion.getSlotsPerEpoch();
-    final int maxLookaheadSlots = slotsPerEpoch * maxLookaheadEpochs;
-
-    return networkSlot.minusMinZero(getHeadSlot()).isLessThanOrEqualTo(maxLookaheadSlots);
+    final MiscHelpers miscHelpers = spec.getGenesisSpec().miscHelpers();
+    return isHeadCloseToSlot(miscHelpers.computeSlotAtTime(getGenesisTime(), currentTimeSeconds));
   }
 
   public boolean isCloseToInSync() {
