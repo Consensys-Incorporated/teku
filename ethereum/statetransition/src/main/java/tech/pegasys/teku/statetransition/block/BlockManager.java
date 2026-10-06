@@ -115,7 +115,7 @@ public class BlockManager extends Service
       final BlockEventsListener blockEventsListener,
       final Supplier<ExecutionPayloadEventsListener> executionPayloadEventsListenerSupplier,
       final PendingBlockPool pendingBlockPool,
-      final FutureBlocks futureBlocks,
+      final FutureBlockPool futureBlocks,
       final Map<Bytes32, BlockImportResult> invalidBlockRoots,
       final BlockValidator blockValidator,
       final TimeProvider timeProvider,
@@ -584,17 +584,17 @@ public class BlockManager extends Service
   }
 
   private static final class FutureBlockTracker {
-    private final FutureBlocks futureBlocks;
-    // keyed by slot so that roots of blocks evicted from FutureBlocks are still pruned
+    private final FutureBlockPool futureBlocks;
+    // keyed by slot so that roots of blocks evicted from FutureBlockPool are still pruned
     private final NavigableMap<UInt64, Set<Bytes32>> gossipRetryRootsBySlot = new TreeMap<>();
 
-    private FutureBlockTracker(final FutureBlocks futureBlocks) {
+    private FutureBlockTracker(final FutureBlockPool futureBlocks) {
       this.futureBlocks = futureBlocks;
     }
 
     synchronized void add(
         final SignedBeaconBlock block, final boolean needsGossipValidationOnRetry) {
-      // FutureBlocks drops blocks that are beyond the future-slot tolerance or its capacity, so
+      // FutureBlockPool drops blocks that are beyond the future-slot tolerance or its capacity, so
       // only
       // remember the retry mode when the block actually made it into the queue.
       if (futureBlocks.add(block) && needsGossipValidationOnRetry) {

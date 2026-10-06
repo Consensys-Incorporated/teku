@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.statetransition.block;
 
+import com.google.common.annotations.VisibleForTesting;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -39,14 +40,14 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
  * is reached, blocks from the furthest future slot are evicted first, since blocks closest to the
  * current slot are the ones about to be imported.
  */
-public class FutureBlocks {
+public class FutureBlockPool {
   private static final Logger LOG = LogManager.getLogger();
   public static final UInt64 FUTURE_SLOT_TOLERANCE = UInt64.valueOf(2);
   private static final String METRIC_TYPE = "blocks";
-  static final String RESULT_QUEUED = "queued";
-  static final String RESULT_DEQUEUED = "dequeued";
-  static final String RESULT_EVICTED = "evicted";
-  static final String RESULT_DROPPED = "dropped";
+  private static final String RESULT_LABEL_QUEUED = "queued";
+  private static final String RESULT_LABEL_DEQUEUED = "dequeued";
+  private static final String RESULT_LABEL_EVICTED = "evicted";
+  private static final String RESULT_LABEL_DROPPED = "dropped";
 
   private final int maxBlocksPerSlot;
   private final long maxTotalBytes;
@@ -64,20 +65,7 @@ public class FutureBlocks {
   private int size = 0;
   private long totalBytes = 0;
 
-  public FutureBlocks(
-      final int maxBlocksPerSlot,
-      final long maxTotalBytes,
-      final SettableLabelledGauge futureItemsCounter,
-      final LabelledMetric<Counter> resultCounter) {
-    this(
-        maxBlocksPerSlot,
-        maxTotalBytes,
-        block -> block.getSchema().getSszSize(block.getBackingNode()),
-        futureItemsCounter,
-        resultCounter);
-  }
-
-  FutureBlocks(
+  public FutureBlockPool(
       final int maxBlocksPerSlot,
       final long maxTotalBytes,
       final ToLongFunction<SignedBeaconBlock> blockSizeFunction,
@@ -93,10 +81,10 @@ public class FutureBlocks {
     this.maxTotalBytes = maxTotalBytes;
     this.blockSizeFunction = blockSizeFunction;
     this.futureItemsCounter = futureItemsCounter;
-    this.queuedCounter = resultCounter.labels(RESULT_QUEUED);
-    this.dequeuedCounter = resultCounter.labels(RESULT_DEQUEUED);
-    this.evictedCounter = resultCounter.labels(RESULT_EVICTED);
-    this.droppedCounter = resultCounter.labels(RESULT_DROPPED);
+    this.queuedCounter = resultCounter.labels(RESULT_LABEL_QUEUED);
+    this.dequeuedCounter = resultCounter.labels(RESULT_LABEL_DEQUEUED);
+    this.evictedCounter = resultCounter.labels(RESULT_LABEL_EVICTED);
+    this.droppedCounter = resultCounter.labels(RESULT_LABEL_DROPPED);
   }
 
   /** Creates the counter of future blocks by what happened to them, labelled by result. */
@@ -143,26 +131,30 @@ public class FutureBlocks {
       return false;
     }
 
+    // a full slot always gives up its oldest block, so count that block's size as freed capacity
+    final boolean slotIsFull = blocksAtSlot != null && blocksAtSlot.size() >= maxBlocksPerSlot;
+    final long slotEvictionBytes = slotIsFull ? blocksAtSlot.values().iterator().next() : 0;
+
     // make room by evicting blocks from slots further in the future than this block, but only if
     // that frees enough capacity, so that nothing is evicted for a block that is then dropped
-    if (maxTotalBytes - totalBytes < blockSize) {
+    if (maxTotalBytes - totalBytes + slotEvictionBytes < blockSize) {
       final long evictableBytes =
           queuedBlocks.tailMap(slot, false).values().stream()
               .flatMap(blocks -> blocks.values().stream())
               .mapToLong(Long::longValue)
               .sum();
-      if (maxTotalBytes - totalBytes + evictableBytes < blockSize) {
+      if (maxTotalBytes - totalBytes + slotEvictionBytes + evictableBytes < blockSize) {
         LOG.trace("Dropping future block at slot {} because no capacity is available", slot);
         droppedCounter.inc();
         return false;
       }
-      while (maxTotalBytes - totalBytes < blockSize) {
-        removeOldestBlockAtSlot(queuedBlocks.lastKey());
-      }
     }
 
-    if (blocksAtSlot != null && blocksAtSlot.size() >= maxBlocksPerSlot) {
+    if (slotIsFull) {
       removeOldestBlockAtSlot(slot);
+    }
+    while (maxTotalBytes - totalBytes < blockSize) {
+      removeOldestBlockAtSlot(queuedBlocks.lastKey());
     }
     LOG.trace("Save future block at slot {} for later import: {}", slot, block);
     queuedBlocks.computeIfAbsent(slot, __ -> new LinkedHashMap<>()).put(block, blockSize);
@@ -209,6 +201,21 @@ public class FutureBlocks {
 
   synchronized long getTotalBytes() {
     return totalBytes;
+  }
+
+  @VisibleForTesting
+  public int getMaxBlocksPerSlot() {
+    return maxBlocksPerSlot;
+  }
+
+  @VisibleForTesting
+  public long getMaxTotalBytes() {
+    return maxTotalBytes;
+  }
+
+  @VisibleForTesting
+  public ToLongFunction<SignedBeaconBlock> getBlockSizeFunction() {
+    return blockSizeFunction;
   }
 
   private void removeOldestBlockAtSlot(final UInt64 slot) {

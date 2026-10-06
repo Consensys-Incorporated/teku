@@ -33,7 +33,7 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
-class FutureBlocksTest {
+class FutureBlockPoolTest {
 
   private final Spec spec = TestSpecFactory.createMinimalPhase0();
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
@@ -44,8 +44,9 @@ class FutureBlocksTest {
 
   @Test
   void add_acceptsBlocksUpToTolerance() {
-    final FutureBlocks futureBlocks = create(16, 100);
-    final SignedBeaconBlock block = block(currentSlot.plus(FutureBlocks.FUTURE_SLOT_TOLERANCE), 10);
+    final FutureBlockPool futureBlocks = create(16, 100);
+    final SignedBeaconBlock block =
+        block(currentSlot.plus(FutureBlockPool.FUTURE_SLOT_TOLERANCE), 10);
 
     assertThat(futureBlocks.add(block)).isTrue();
     assertThat(futureBlocks.contains(block)).isTrue();
@@ -56,9 +57,9 @@ class FutureBlocksTest {
 
   @Test
   void add_rejectsBlocksBeyondTolerance() {
-    final FutureBlocks futureBlocks = create(16, 100);
+    final FutureBlockPool futureBlocks = create(16, 100);
     final SignedBeaconBlock block =
-        block(currentSlot.plus(FutureBlocks.FUTURE_SLOT_TOLERANCE).plus(1), 10);
+        block(currentSlot.plus(FutureBlockPool.FUTURE_SLOT_TOLERANCE).plus(1), 10);
 
     assertThat(futureBlocks.add(block)).isFalse();
     assertThat(futureBlocks.contains(block)).isFalse();
@@ -68,7 +69,7 @@ class FutureBlocksTest {
 
   @Test
   void add_duplicateIsAcceptedButNotCountedTwice() {
-    final FutureBlocks futureBlocks = create(16, 100);
+    final FutureBlockPool futureBlocks = create(16, 100);
     final SignedBeaconBlock block = block(currentSlot.plus(1), 60);
 
     assertThat(futureBlocks.add(block)).isTrue();
@@ -81,7 +82,7 @@ class FutureBlocksTest {
 
   @Test
   void add_evictsOldestBlockAtSlotWhenSlotIsFull() {
-    final FutureBlocks futureBlocks = create(2, 100);
+    final FutureBlockPool futureBlocks = create(2, 100);
     final SignedBeaconBlock blockA = block(currentSlot.plus(1), 10);
     final SignedBeaconBlock blockB = block(currentSlot.plus(1), 10);
     final SignedBeaconBlock blockC = block(currentSlot.plus(1), 10);
@@ -103,7 +104,7 @@ class FutureBlocksTest {
 
   @Test
   void add_rejectsBlockLargerThanLimit() {
-    final FutureBlocks futureBlocks = create(16, 100);
+    final FutureBlockPool futureBlocks = create(16, 100);
 
     assertThat(futureBlocks.add(block(currentSlot.plus(1), 101))).isFalse();
     assertThat(futureBlocks.size()).isZero();
@@ -113,7 +114,7 @@ class FutureBlocksTest {
 
   @Test
   void add_evictsBlocksFromFurthestSlotFirst() {
-    final FutureBlocks futureBlocks = create(16, 100);
+    final FutureBlockPool futureBlocks = create(16, 100);
     final SignedBeaconBlock nextSlotBlock = block(currentSlot.plus(1), 40);
     final SignedBeaconBlock furthestSlotBlockA = block(currentSlot.plus(2), 30);
     final SignedBeaconBlock furthestSlotBlockB = block(currentSlot.plus(2), 30);
@@ -134,8 +135,64 @@ class FutureBlocksTest {
   }
 
   @Test
+  void add_replacesOldestBlockAtFullSlotWhenAtSizeLimit() {
+    final FutureBlockPool futureBlocks = create(2, 100);
+    final SignedBeaconBlock oldestBlock = block(currentSlot.plus(1), 50);
+    final SignedBeaconBlock otherBlock = block(currentSlot.plus(1), 50);
+    assertThat(futureBlocks.add(oldestBlock)).isTrue();
+    assertThat(futureBlocks.add(otherBlock)).isTrue();
+
+    final SignedBeaconBlock newBlock = block(currentSlot.plus(1), 10);
+    assertThat(futureBlocks.add(newBlock)).isTrue();
+
+    assertThat(futureBlocks.contains(oldestBlock)).isFalse();
+    assertThat(futureBlocks.contains(otherBlock)).isTrue();
+    assertThat(futureBlocks.contains(newBlock)).isTrue();
+    assertThat(futureBlocks.size()).isEqualTo(2);
+    assertThat(futureBlocks.getTotalBytes()).isEqualTo(60);
+    assertResultCounts(3, 0, 1, 0);
+  }
+
+  @Test
+  void add_combinesFullSlotAndFurthestSlotEvictionToMakeRoom() {
+    final FutureBlockPool futureBlocks = create(2, 100);
+    final SignedBeaconBlock oldestBlock = block(currentSlot.plus(1), 30);
+    final SignedBeaconBlock otherBlock = block(currentSlot.plus(1), 30);
+    final SignedBeaconBlock furthestSlotBlock = block(currentSlot.plus(2), 40);
+    assertThat(futureBlocks.add(oldestBlock)).isTrue();
+    assertThat(futureBlocks.add(otherBlock)).isTrue();
+    assertThat(futureBlocks.add(furthestSlotBlock)).isTrue();
+
+    final SignedBeaconBlock newBlock = block(currentSlot.plus(1), 60);
+    assertThat(futureBlocks.add(newBlock)).isTrue();
+
+    assertThat(futureBlocks.contains(oldestBlock)).isFalse();
+    assertThat(futureBlocks.contains(furthestSlotBlock)).isFalse();
+    assertThat(futureBlocks.contains(otherBlock)).isTrue();
+    assertThat(futureBlocks.contains(newBlock)).isTrue();
+    assertThat(futureBlocks.getTotalBytes()).isEqualTo(90);
+    assertResultCounts(4, 0, 2, 0);
+  }
+
+  @Test
+  void add_rejectsBlockAtFullSlotWithoutEvictingWhenNotEnoughCapacityCanBeFreed() {
+    final FutureBlockPool futureBlocks = create(2, 100);
+    final SignedBeaconBlock oldestBlock = block(currentSlot.plus(1), 50);
+    final SignedBeaconBlock otherBlock = block(currentSlot.plus(1), 50);
+    assertThat(futureBlocks.add(oldestBlock)).isTrue();
+    assertThat(futureBlocks.add(otherBlock)).isTrue();
+
+    assertThat(futureBlocks.add(block(currentSlot.plus(1), 60))).isFalse();
+
+    assertThat(futureBlocks.contains(oldestBlock)).isTrue();
+    assertThat(futureBlocks.contains(otherBlock)).isTrue();
+    assertThat(futureBlocks.getTotalBytes()).isEqualTo(100);
+    assertResultCounts(2, 0, 0, 1);
+  }
+
+  @Test
   void add_rejectsBlockWithoutEvictingWhenNotEnoughCapacityCanBeFreed() {
-    final FutureBlocks futureBlocks = create(16, 100);
+    final FutureBlockPool futureBlocks = create(16, 100);
     final SignedBeaconBlock nextSlotBlock = block(currentSlot.plus(1), 60);
     final SignedBeaconBlock furthestSlotBlock = block(currentSlot.plus(2), 30);
     assertThat(futureBlocks.add(nextSlotBlock)).isTrue();
@@ -152,7 +209,7 @@ class FutureBlocksTest {
 
   @Test
   void prune_returnsBlocksNoLongerInTheFutureAndReleasesCapacity() {
-    final FutureBlocks futureBlocks = create(16, 100);
+    final FutureBlockPool futureBlocks = create(16, 100);
     final SignedBeaconBlock nextSlotBlock = block(currentSlot.plus(1), 60);
     final SignedBeaconBlock laterBlock = block(currentSlot.plus(2), 40);
     assertThat(futureBlocks.add(nextSlotBlock)).isTrue();
@@ -170,39 +227,29 @@ class FutureBlocksTest {
   }
 
   @Test
-  void defaultSizeFunction_usesSszSize() {
-    final FutureBlocks futureBlocks = new FutureBlocks(16, Long.MAX_VALUE, gauge, resultCounter());
-    futureBlocks.onSlot(currentSlot);
-    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(currentSlot.plus(1));
-
-    assertThat(futureBlocks.add(block)).isTrue();
-
-    assertThat(futureBlocks.getTotalBytes()).isEqualTo(block.sszSerialize().size());
-  }
-
-  @Test
   void constructor_rejectsNonPositiveMaxBlocksPerSlot() {
-    assertThatThrownBy(() -> new FutureBlocks(0, 100, gauge, resultCounter()))
+    assertThatThrownBy(() -> new FutureBlockPool(0, 100, blockSizes::get, gauge, resultCounter()))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("Max future blocks per slot must be positive");
   }
 
   @Test
   void constructor_rejectsNegativeMaxTotalBytes() {
-    assertThatThrownBy(() -> new FutureBlocks(16, -1, gauge, resultCounter()))
+    assertThatThrownBy(() -> new FutureBlockPool(16, -1, blockSizes::get, gauge, resultCounter()))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("Max total future blocks bytes must not be negative");
   }
 
-  private FutureBlocks create(final int maxBlocksPerSlot, final long maxTotalBytes) {
-    final FutureBlocks futureBlocks =
-        new FutureBlocks(maxBlocksPerSlot, maxTotalBytes, blockSizes::get, gauge, resultCounter());
+  private FutureBlockPool create(final int maxBlocksPerSlot, final long maxTotalBytes) {
+    final FutureBlockPool futureBlocks =
+        new FutureBlockPool(
+            maxBlocksPerSlot, maxTotalBytes, blockSizes::get, gauge, resultCounter());
     futureBlocks.onSlot(currentSlot);
     return futureBlocks;
   }
 
   private LabelledMetric<Counter> resultCounter() {
-    return FutureBlocks.createResultCounter(metricsSystem);
+    return FutureBlockPool.createResultCounter(metricsSystem);
   }
 
   private long resultCount(final String result) {
@@ -212,12 +259,10 @@ class FutureBlocksTest {
 
   private void assertResultCounts(
       final long queued, final long dequeued, final long evicted, final long dropped) {
-    assertThat(resultCount(FutureBlocks.RESULT_QUEUED)).describedAs("queued").isEqualTo(queued);
-    assertThat(resultCount(FutureBlocks.RESULT_DEQUEUED))
-        .describedAs("dequeued")
-        .isEqualTo(dequeued);
-    assertThat(resultCount(FutureBlocks.RESULT_EVICTED)).describedAs("evicted").isEqualTo(evicted);
-    assertThat(resultCount(FutureBlocks.RESULT_DROPPED)).describedAs("dropped").isEqualTo(dropped);
+    assertThat(resultCount("queued")).describedAs("queued").isEqualTo(queued);
+    assertThat(resultCount("dequeued")).describedAs("dequeued").isEqualTo(dequeued);
+    assertThat(resultCount("evicted")).describedAs("evicted").isEqualTo(evicted);
+    assertThat(resultCount("dropped")).describedAs("dropped").isEqualTo(dropped);
   }
 
   private SignedBeaconBlock block(final UInt64 slot, final long size) {

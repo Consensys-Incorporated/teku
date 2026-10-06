@@ -45,7 +45,7 @@ import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannel;
 import tech.pegasys.teku.statetransition.blobs.BlockBlobSidecarsTrackerFactory;
 import tech.pegasys.teku.statetransition.blobs.RemoteOrigin;
 import tech.pegasys.teku.statetransition.block.BlockImportChannel;
-import tech.pegasys.teku.statetransition.block.FutureBlocks;
+import tech.pegasys.teku.statetransition.block.FutureBlockPool;
 import tech.pegasys.teku.statetransition.datacolumns.CurrentSlotProvider;
 import tech.pegasys.teku.statetransition.datacolumns.CustodyGroupCountManager;
 import tech.pegasys.teku.statetransition.datacolumns.DataColumnSidecarELManager;
@@ -104,7 +104,7 @@ public class PoolFactory {
             "type",
             "subtype");
 
-    this.futureBlocksResultCounter = FutureBlocks.createResultCounter(metricsSystem);
+    this.futureBlocksResultCounter = FutureBlockPool.createResultCounter(metricsSystem);
   }
 
   public PendingPool<SignedBeaconBlock> createPendingPoolForBlocks(final Spec spec) {
@@ -168,12 +168,13 @@ public class PoolFactory {
         getMaxPendingBlockBytes(spec));
   }
 
-  public FutureBlocks createFutureBlockPool(
+  public FutureBlockPool createFutureBlockPool(
       final Spec spec, final SettableLabelledGauge futureItemsCounter) {
-    return new FutureBlocks(
+    return new FutureBlockPool(
         DEFAULT_MAX_FUTURE_BLOCKS_PER_SLOT,
         (long) spec.getNetworkingConfig().getMaxPayloadSize()
             * DEFAULT_FUTURE_BLOCK_BYTES_MULTIPLIER,
+        block -> block.getSchema().getSszSize(block.getBackingNode()),
         futureItemsCounter,
         futureBlocksResultCounter);
   }

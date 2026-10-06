@@ -144,12 +144,13 @@ public class BlockManagerTest {
   private PendingPool<SignedBeaconBlock> pendingBlocks;
   private PendingBlockPool pendingBlockPool;
   private final StubMetricsSystem futureBlocksMetricsSystem = new StubMetricsSystem();
-  private final FutureBlocks futureBlocks =
-      new FutureBlocks(
+  private final FutureBlockPool futureBlocks =
+      new FutureBlockPool(
           4,
           Long.MAX_VALUE,
+          block -> 0L,
           mock(SettableLabelledGauge.class),
-          FutureBlocks.createResultCounter(futureBlocksMetricsSystem));
+          FutureBlockPool.createResultCounter(futureBlocksMetricsSystem));
   private final Map<Bytes32, BlockImportResult> invalidBlockRoots =
       LimitedMap.createSynchronizedLRU(500);
 
@@ -619,7 +620,7 @@ public class BlockManagerTest {
   @Test
   public void onProposedBlock_tooFarInFuture_shouldNotQueueOrRetryGossipValidation() {
     incrementSlot();
-    final UInt64 tooFarSlot = currentSlot.plus(FutureBlocks.FUTURE_SLOT_TOLERANCE).plus(1);
+    final UInt64 tooFarSlot = currentSlot.plus(FutureBlockPool.FUTURE_SLOT_TOLERANCE).plus(1);
     final SignedBeaconBlock futureBlock =
         localChain.chainBuilder().generateBlockAtSlot(tooFarSlot).getBlock();
 

@@ -16,38 +16,31 @@ package tech.pegasys.teku.statetransition.util;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
-import java.util.ArrayList;
-import java.util.List;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.metrics.SettableLabelledGauge;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
-import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
-import tech.pegasys.teku.statetransition.block.FutureBlocks;
+import tech.pegasys.teku.statetransition.block.FutureBlockPool;
 
 class PoolFactoryTest {
 
   private final Spec spec = TestSpecFactory.createMinimalPhase0();
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
   private final PoolFactory poolFactory = new PoolFactory(new StubMetricsSystem());
-  private final FutureBlocks futureBlocks =
-      poolFactory.createFutureBlockPool(spec, mock(SettableLabelledGauge.class));
 
   @Test
-  void createFutureBlockPool_limitsBlocksPerSlot() {
-    futureBlocks.onSlot(UInt64.ZERO);
-    final List<SignedBeaconBlock> blocks = new ArrayList<>();
-    for (int i = 0; i < 5; i++) {
-      final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(1);
-      blocks.add(block);
-      assertThat(futureBlocks.add(block)).isTrue();
-    }
+  void createFutureBlockPool_isConfiguredWithLimitsAndSszSize() {
+    final FutureBlockPool futureBlockPool =
+        poolFactory.createFutureBlockPool(spec, mock(SettableLabelledGauge.class));
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(1);
 
-    assertThat(futureBlocks.size()).isEqualTo(4);
-    assertThat(futureBlocks.contains(blocks.getFirst())).isFalse();
-    assertThat(futureBlocks.contains(blocks.getLast())).isTrue();
+    assertThat(futureBlockPool.getMaxBlocksPerSlot()).isEqualTo(4);
+    assertThat(futureBlockPool.getMaxTotalBytes())
+        .isEqualTo(4L * spec.getNetworkingConfig().getMaxPayloadSize());
+    assertThat(futureBlockPool.getBlockSizeFunction().applyAsLong(block))
+        .isEqualTo(block.sszSerialize().size());
   }
 }
