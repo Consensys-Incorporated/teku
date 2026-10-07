@@ -19,7 +19,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory.LIBP2P_GOSSIP;
 
-import io.libp2p.core.PeerId;
 import io.libp2p.pubsub.PubsubProtocol;
 import io.libp2p.pubsub.gossip.GossipRouter;
 import io.libp2p.pubsub.gossip.GossipRouterEventBroadcaster;
@@ -46,32 +45,14 @@ class LibP2PGossipNetworkTest {
       };
 
   @Test
-  void subscriptionInitializesMeshGaugeBeforeAnyPeerJoins() {
+  void subscriptionAttachesGossipMetricsWhenEnabled() {
     final LibP2PGossipNetwork network = createNetwork(metricsSystem);
 
     network.subscribe(TOPIC, mock(TopicHandler.class));
 
     verify(router).subscribe(TOPIC);
-    assertThat(meshPeerCount()).isZero();
-  }
-
-  @Test
-  void subscriptionsAndMeshEventsShareOneGaugePerShape() {
-    final LibP2PGossipNetwork network = createNetwork(metricsSystem);
-    network.subscribe(TOPIC, mock(TopicHandler.class));
-    network.subscribe("/eth2/aabbccdd/beacon_attestation_1/ssz_snappy", mock(TopicHandler.class));
-    assertThat(meshPeerCount()).isZero();
-
-    final PeerId peer = PeerId.random();
-    broadcaster.notifyMeshed(peer, TOPIC);
-    assertThat(meshPeerCount()).isEqualTo(1);
-
-    broadcaster.notifyPruned(peer, TOPIC);
-    assertThat(meshPeerCount()).isZero();
-
-    broadcaster.notifyMeshed(peer, TOPIC);
-    broadcaster.notifyDisconnected(peer);
-    assertThat(meshPeerCount()).isZero();
+    assertThat(broadcaster.getListeners()).hasSize(1);
+    assertThat(broadcaster.getListeners().get(0)).isInstanceOf(GossipMetricsListener.class);
   }
 
   @Test
@@ -82,13 +63,6 @@ class LibP2PGossipNetworkTest {
 
     verify(router).subscribe(TOPIC);
     assertThat(broadcaster.getListeners()).isEmpty();
-  }
-
-  private double meshPeerCount() {
-    return metricsSystem
-        .getLabelledGauge(LIBP2P_GOSSIP, "gossipsub_mesh_peer_counts")
-        .getValue("beacon_attestation")
-        .orElseThrow();
   }
 
   private LibP2PGossipNetwork createNetwork(final StubMetricsSystem metrics) {

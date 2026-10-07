@@ -15,8 +15,10 @@ package tech.pegasys.teku.spec.logic.versions.gloas.block;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static tech.pegasys.teku.spec.config.SpecConfig.FAR_FUTURE_EPOCH;
 
 import java.util.List;
+import java.util.function.Supplier;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.bls.BLSSignature;
@@ -29,6 +31,8 @@ import tech.pegasys.teku.spec.constants.ParticipationFlags;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
+import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
+import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderExitRequest;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.IndexedAttestationLight;
@@ -36,10 +40,14 @@ import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateSchemaGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPayment;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPaymentSchema;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingWithdrawal;
 import tech.pegasys.teku.spec.logic.common.block.AbstractBlockProcessor;
+import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateMutators.ValidatorExitContext;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.BlockProcessingException;
 import tech.pegasys.teku.spec.logic.versions.altair.block.BlockProcessorAltair.AttestationProcessingResult;
 import tech.pegasys.teku.spec.logic.versions.altair.helpers.MiscHelpersAltair;
@@ -204,6 +212,88 @@ class BlockProcessorGloasTest {
         ignored -> indexedAttestation;
     return new MismatchedParentFixture(state, attestation, indexedAttestationProvider, parentSlot);
   }
+
+  @Test
+  void applyParentExecutionPayload_shouldRejectBuilderExitWhenEvictedPaymentIsRequeued() {
+    // The parent is older than the previous epoch, so its payment was evicted from
+    // builder_pending_payments. The payment must be re-queued before the parent's requests are
+    // processed so that the exit guard sees it as pending and rejects the exit.
+    final UInt64 value = UInt64.valueOf(50_000_000);
+    final ParentPayloadFixture fixture = parentPayloadFixture(value);
+
+    assertThat(fixture.state().getBuilderPendingWithdrawals()).isEmpty();
+
+    blockProcessor()
+        .applyParentExecutionPayload(
+            fixture.state(), fixture.requests(), exitContextSupplier(fixture.state()));
+
+    final List<BuilderPendingWithdrawal> pendingWithdrawals =
+        fixture.state().getBuilderPendingWithdrawals().asList();
+    assertThat(pendingWithdrawals).hasSize(1);
+    assertThat(pendingWithdrawals.getFirst().getAmount()).isEqualTo(value);
+    assertThat(pendingWithdrawals.getFirst().getBuilderIndex()).isEqualTo(UInt64.ZERO);
+    assertThat(fixture.state().getBuilders().get(0).getWithdrawableEpoch())
+        .isEqualTo(FAR_FUTURE_EPOCH);
+  }
+
+  @Test
+  void applyParentExecutionPayload_shouldAcceptBuilderExitWhenParentBidHadNoPayment() {
+    final ParentPayloadFixture fixture = parentPayloadFixture(UInt64.ZERO);
+
+    blockProcessor()
+        .applyParentExecutionPayload(
+            fixture.state(), fixture.requests(), exitContextSupplier(fixture.state()));
+
+    assertThat(fixture.state().getBuilderPendingWithdrawals()).isEmpty();
+    final UInt64 expectedWithdrawableEpoch =
+        spec.getCurrentEpoch(fixture.state()).plus(config.getMinBuilderWithdrawabilityDelay());
+    assertThat(fixture.state().getBuilders().get(0).getWithdrawableEpoch())
+        .isEqualTo(expectedWithdrawableEpoch);
+  }
+
+  private ParentPayloadFixture parentPayloadFixture(final UInt64 bidValue) {
+    // state in epoch 2, parent in epoch 0 (older than the previous epoch)
+    final UInt64 stateSlot = UInt64.valueOf(2L * slotsPerEpoch + 1);
+    final UInt64 parentSlot = UInt64.valueOf(slotsPerEpoch - 1);
+    final UInt64 builderIndex = UInt64.ZERO;
+    final Builder builder = dataStructureUtil.builderBuilder().depositEpoch(UInt64.ZERO).build();
+
+    final MutableBeaconStateGloas state =
+        BeaconStateGloas.required(dataStructureUtil.randomBeaconState(stateSlot))
+            .createWritableCopy();
+    final BeaconStateSchemaGloas stateSchema =
+        BeaconStateSchemaGloas.required(state.getBeaconStateSchema());
+    // builder placement is finalized, so the builder is active
+    state.setFinalizedCheckpoint(new Checkpoint(UInt64.ONE, dataStructureUtil.randomBytes32()));
+    state.getBuilders().setAll(List.of(builder));
+    state.setBuilderPendingPayments(stateSchema.getBuilderPendingPaymentsSchema().getDefault());
+    state.getBuilderPendingWithdrawals().clear();
+    state.setLatestBlockHeader(
+        new BeaconBlockHeader(parentSlot, UInt64.ZERO, Bytes32.ZERO, Bytes32.ZERO, Bytes32.ZERO));
+    state.setLatestExecutionPayloadBid(
+        dataStructureUtil.randomExecutionPayloadBid(
+            dataStructureUtil.randomBytes32(), parentSlot, builderIndex, bidValue, UInt64.ZERO));
+
+    final BuilderExitRequest exitRequest =
+        schemaDefinitions
+            .getBuilderExitRequestSchema()
+            .create(builder.getExecutionAddress(), builder.getPublicKey());
+    final ExecutionRequests requests =
+        schemaDefinitions
+            .getExecutionRequestsSchema()
+            .createBuilder()
+            .builderExits(() -> List.of(exitRequest))
+            .build();
+
+    assertThat(spec.computeEpochAtSlot(parentSlot)).isLessThan(spec.getPreviousEpoch(state));
+    return new ParentPayloadFixture(state, requests);
+  }
+
+  private Supplier<ValidatorExitContext> exitContextSupplier(final BeaconState state) {
+    return spec.getGenesisSpec().beaconStateMutators().createValidatorExitContextSupplier(state);
+  }
+
+  private record ParentPayloadFixture(MutableBeaconStateGloas state, ExecutionRequests requests) {}
 
   private MiscHelpersAltair miscHelpersAltair() {
     return spec.getGenesisSpec().miscHelpers().toVersionAltair().orElseThrow();
