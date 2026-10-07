@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.Set;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
@@ -306,6 +307,56 @@ public class PendingPoolTest {
   }
 
   @Test
+  public void totalWeightGauge_shouldTrackAddsEvictionsAndRemovals() {
+    final PendingPool<PendingTestItem> weightedPendingPool = createWeightedPendingPool(10);
+    assertThat(weightedPoolBytes()).hasValue(0);
+
+    final PendingTestItem olderItem = createPendingTestItem(6, currentSlot);
+    final PendingTestItem newerItem = createPendingTestItem(4, currentSlot.plus(UInt64.ONE));
+    weightedPendingPool.add(olderItem);
+    weightedPendingPool.add(newerItem);
+    assertThat(weightedPoolBytes()).hasValue(10);
+
+    // evicts the older item to make room
+    weightedPendingPool.add(createPendingTestItem(5, currentSlot.plus(UInt64.ONE)));
+    assertThat(weightedPoolBytes()).hasValue(9);
+
+    weightedPendingPool.remove(newerItem);
+    assertThat(weightedPoolBytes()).hasValue(5);
+  }
+
+  @Test
+  public void createPendingPoolForBlocks_shouldReportTotalSszBytes() {
+    assertThat(pendingPoolBytes("blocks")).hasValue(0);
+    final SignedBeaconBlock block =
+        dataStructureUtil.randomSignedBeaconBlock(currentSlot.longValue());
+
+    pendingPool.add(block);
+    assertThat(pendingPoolBytes("blocks")).hasValue(block.sszSerialize().size());
+
+    pendingPool.remove(block);
+    assertThat(pendingPoolBytes("blocks")).hasValue(0);
+  }
+
+  @Test
+  public void createPendingBlockPool_shouldReportBytesForBothInnerPools() {
+    final StubMetricsSystem blockPoolMetricsSystem = new StubMetricsSystem();
+    new PoolFactory(blockPoolMetricsSystem)
+        .createPendingBlockPool(spec, historicalTolerance, futureTolerance, maxItems);
+
+    assertThat(
+            blockPoolMetricsSystem
+                .getLabelledGauge(TekuMetricCategory.BEACON, "pending_pool_bytes")
+                .getValue("blocks"))
+        .hasValue(0);
+    assertThat(
+            blockPoolMetricsSystem
+                .getLabelledGauge(TekuMetricCategory.BEACON, "pending_pool_bytes")
+                .getValue("blocks_waiting_for_parent_execution_payload"))
+        .hasValue(0);
+  }
+
+  @Test
   public void createPendingPoolForBlocks_shouldLimitTotalWeightFromGossipPayloadSize() {
     final int maxPayloadSize = 1024;
     final Spec specWithSmallGossipPayload =
@@ -316,7 +367,7 @@ public class PendingPoolTest {
             .createPendingPoolForBlocks(
                 specWithSmallGossipPayload, historicalTolerance, futureTolerance, maxItems);
 
-    assertThat(blockPendingPool.getMaxTotalWeight()).isEqualTo(maxPayloadSize * 10L);
+    assertThat(blockPendingPool.getMaxTotalWeight()).isEqualTo(maxPayloadSize * 4L);
   }
 
   @Test
@@ -406,6 +457,18 @@ public class PendingPoolTest {
     return new Checkpoint(epoch, root);
   }
 
+  private OptionalDouble weightedPoolBytes() {
+    return metricsSystem
+        .getLabelledGauge(TekuMetricCategory.BEACON, "weighted_pending_pool_bytes")
+        .getValue("weighted_items");
+  }
+
+  private OptionalDouble pendingPoolBytes(final String type) {
+    return metricsSystem
+        .getLabelledGauge(TekuMetricCategory.BEACON, "pending_pool_bytes")
+        .getValue(type);
+  }
+
   private PendingPool<PendingTestItem> createWeightedPendingPool(final long maxTotalWeight) {
     final PendingPool<PendingTestItem> weightedPendingPool =
         new PendingPool<>(
@@ -422,6 +485,13 @@ public class PendingPoolTest {
             maxItems,
             maxTotalWeight,
             PendingTestItem::weight,
+            Optional.of(
+                SettableLabelledGauge.create(
+                    metricsSystem,
+                    TekuMetricCategory.BEACON,
+                    "weighted_pending_pool_bytes",
+                    "Total weight of items in weighted pending pool",
+                    "type")),
             PendingTestItem::root,
             PendingTestItem::requiredRoots,
             PendingTestItem::slot);
