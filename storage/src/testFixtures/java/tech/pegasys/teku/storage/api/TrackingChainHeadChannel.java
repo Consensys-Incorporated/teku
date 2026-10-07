@@ -24,6 +24,7 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 
 public class TrackingChainHeadChannel implements ChainHeadChannel {
   private final List<ReorgEvent> reorgEvents = new ArrayList<>();
+  private final List<ReorgContext> reorgContexts = new ArrayList<>();
   private final List<HeadEvent> headEvents = new ArrayList<>();
 
   @Override
@@ -46,16 +47,19 @@ public class TrackingChainHeadChannel implements ChainHeadChannel {
             executionOptimistic,
             previousDutyDependentRoot,
             currentDutyDependentRoot));
-    optionalReorgContext.ifPresent(
-        context ->
-            reorgEvents.add(
-                new ReorgEvent(
-                    bestBlockRoot,
-                    slot,
-                    stateRoot,
-                    context.getOldBestBlockRoot(),
-                    context.getOldBestStateRoot(),
-                    context.getCommonAncestorSlot())));
+    optionalReorgContext.ifPresent(reorgContexts::add);
+    optionalReorgContext
+        .filter(ReorgContext::isBlockReorg)
+        .ifPresent(
+            context ->
+                reorgEvents.add(
+                    new ReorgEvent(
+                        bestBlockRoot,
+                        slot,
+                        stateRoot,
+                        context.oldBestBlockRoot(),
+                        context.oldBestStateRoot(),
+                        context.commonAncestorSlot())));
   }
 
   public List<HeadEvent> getHeadEvents() {
@@ -64,6 +68,10 @@ public class TrackingChainHeadChannel implements ChainHeadChannel {
 
   public List<ReorgEvent> getReorgEvents() {
     return reorgEvents;
+  }
+
+  public List<ReorgContext> getReorgContexts() {
+    return reorgContexts;
   }
 
   public static class HeadEvent {

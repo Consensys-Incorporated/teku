@@ -126,9 +126,16 @@ public class LogCaptor implements AutoCloseable {
   }
 
   public static LogCaptor forClass(final Class<?> clazz, final Level level) {
-    final LoggerContext context = LoggerContext.getContext(false);
-    final ExtendedLogger logger = context.getLogger(clazz);
+    return forLogger(LoggerContext.getContext(false).getLogger(clazz), level);
+  }
 
+  /** Captures a logger addressed by name rather than by class, e.g. the event or status log. */
+  public static LogCaptor forLoggerName(final String loggerName, final Level level) {
+    return forLogger(LoggerContext.getContext(false).getLogger(loggerName), level);
+  }
+
+  private static LogCaptor forLogger(final ExtendedLogger logger, final Level level) {
+    final LoggerContext context = LoggerContext.getContext(false);
     final CapturingAppender appender =
         new CapturingAppender("LogCaptorAppender" + UNIQUEIFIER.incrementAndGet());
     final LoggerConfig loggerConfig = context.getConfiguration().getLoggerConfig(logger.getName());

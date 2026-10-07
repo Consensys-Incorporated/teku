@@ -13,11 +13,17 @@
 
 package tech.pegasys.teku.beacon.sync.events;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY;
 import static tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL;
+import static tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING;
 
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
@@ -26,6 +32,7 @@ import org.mockito.Mockito;
 import tech.pegasys.teku.infrastructure.logging.EventLogger;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.storage.api.ChainHeadChannel;
 import tech.pegasys.teku.storage.api.ReorgContext;
@@ -353,7 +360,11 @@ class CoalescingChainHeadChannelTest {
             bestBlockRoot,
             slot,
             commonAncestorRoot,
-            commonAncestorSlot);
+            commonAncestorSlot,
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty());
   }
 
   @Test
@@ -421,5 +432,194 @@ class CoalescingChainHeadChannelTest {
             Optional.empty(),
             reorgContext2);
     verifyNoMoreInteractions(delegate);
+  }
+
+  @Test
+  void shouldLogPayloadReorg() {
+    final UInt64 slot = dataStructureUtil.randomUInt64();
+    final Bytes32 bestBlockRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 payloadBlockHash = dataStructureUtil.randomBytes32();
+    final Bytes32 parentPayloadBlockHash = dataStructureUtil.randomBytes32();
+    final Optional<ReorgContext> reorgContext =
+        Optional.of(
+            ReorgContext.payloadReorg(
+                bestBlockRoot,
+                slot,
+                dataStructureUtil.randomBytes32(),
+                payloadBlockHash,
+                parentPayloadBlockHash));
+
+    sendHeadUpdate(slot, bestBlockRoot, PAYLOAD_STATUS_EMPTY, reorgContext);
+
+    verify(eventLogger, times(1))
+        .payloadReorgEvent(bestBlockRoot, slot, payloadBlockHash, parentPayloadBlockHash);
+    verify(eventLogger, never())
+        .reorgEvent(any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+    verify(delegate)
+        .chainHeadUpdated(
+            eq(slot),
+            any(),
+            eq(bestBlockRoot),
+            anyBoolean(),
+            anyBoolean(),
+            any(),
+            any(),
+            eq(Optional.of(PAYLOAD_STATUS_EMPTY)),
+            eq(reorgContext));
+  }
+
+  @Test
+  void shouldNotLogPayloadReorgWhileSyncing() {
+    final UInt64 slot = dataStructureUtil.randomUInt64();
+    final Bytes32 bestBlockRoot = dataStructureUtil.randomBytes32();
+    final Optional<ReorgContext> reorgContext =
+        Optional.of(
+            ReorgContext.payloadReorg(
+                bestBlockRoot,
+                slot,
+                dataStructureUtil.randomBytes32(),
+                dataStructureUtil.randomBytes32(),
+                dataStructureUtil.randomBytes32()));
+
+    channel.onSyncingChange(true);
+    sendHeadUpdate(slot, bestBlockRoot, PAYLOAD_STATUS_EMPTY, reorgContext);
+    channel.onSyncingChange(false);
+
+    verifyNoInteractions(eventLogger);
+    verify(delegate)
+        .chainHeadUpdated(
+            eq(slot),
+            any(),
+            eq(bestBlockRoot),
+            anyBoolean(),
+            anyBoolean(),
+            any(),
+            any(),
+            eq(Optional.of(PAYLOAD_STATUS_EMPTY)),
+            eq(reorgContext));
+  }
+
+  @Test
+  void shouldPassPayloadStatusesOfBlockReorgToLogger() {
+    final UInt64 slot = dataStructureUtil.randomUInt64();
+    final Bytes32 bestBlockRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 oldBestBlockRoot = dataStructureUtil.randomBytes32();
+    final UInt64 oldBestBlockSlot = dataStructureUtil.randomUInt64();
+    final Bytes32 commonAncestorRoot = dataStructureUtil.randomBytes32();
+    final UInt64 commonAncestorSlot = dataStructureUtil.randomUInt64();
+    final Optional<ReorgContext> reorgContext =
+        Optional.of(
+            ReorgContext.blockReorg(
+                oldBestBlockRoot,
+                oldBestBlockSlot,
+                dataStructureUtil.randomBytes32(),
+                PAYLOAD_STATUS_FULL,
+                dataStructureUtil.randomBytes32(),
+                dataStructureUtil.randomBytes32(),
+                commonAncestorSlot,
+                commonAncestorRoot,
+                PAYLOAD_STATUS_FULL,
+                PAYLOAD_STATUS_EMPTY));
+
+    sendHeadUpdate(slot, bestBlockRoot, PAYLOAD_STATUS_EMPTY, reorgContext);
+
+    verify(eventLogger, times(1))
+        .reorgEvent(
+            oldBestBlockRoot,
+            oldBestBlockSlot,
+            bestBlockRoot,
+            slot,
+            commonAncestorRoot,
+            commonAncestorSlot,
+            Optional.of("EMPTY"),
+            Optional.of("FULL"),
+            Optional.of("FULL"),
+            Optional.of("EMPTY"));
+    verify(eventLogger, never()).payloadReorgEvent(any(), any(), any(), any());
+  }
+
+  @Test
+  void shouldPassCommonAncestorPayloadStatusOfBothBranchesToLogger() {
+    final UInt64 slot = dataStructureUtil.randomUInt64();
+    final Bytes32 bestBlockRoot = dataStructureUtil.randomBytes32();
+    final Optional<ReorgContext> reorgContext =
+        Optional.of(
+            ReorgContext.blockReorg(
+                dataStructureUtil.randomBytes32(),
+                dataStructureUtil.randomUInt64(),
+                dataStructureUtil.randomBytes32(),
+                PAYLOAD_STATUS_EMPTY,
+                dataStructureUtil.randomBytes32(),
+                dataStructureUtil.randomBytes32(),
+                dataStructureUtil.randomUInt64(),
+                dataStructureUtil.randomBytes32(),
+                PAYLOAD_STATUS_FULL,
+                PAYLOAD_STATUS_FULL));
+
+    sendHeadUpdate(slot, bestBlockRoot, PAYLOAD_STATUS_FULL, reorgContext);
+
+    verify(eventLogger, times(1))
+        .reorgEvent(
+            any(),
+            any(),
+            eq(bestBlockRoot),
+            eq(slot),
+            any(),
+            any(),
+            eq(Optional.of("FULL")),
+            eq(Optional.of("EMPTY")),
+            eq(Optional.of("FULL")),
+            eq(Optional.of("FULL")));
+  }
+
+  @Test
+  void shouldNotPassPendingPayloadStatusesToLogger() {
+    final UInt64 slot = dataStructureUtil.randomUInt64();
+    final Bytes32 bestBlockRoot = dataStructureUtil.randomBytes32();
+    final Optional<ReorgContext> reorgContext =
+        Optional.of(
+            ReorgContext.blockReorg(
+                dataStructureUtil.randomBytes32(),
+                dataStructureUtil.randomUInt64(),
+                dataStructureUtil.randomBytes32(),
+                PAYLOAD_STATUS_PENDING,
+                dataStructureUtil.randomBytes32(),
+                dataStructureUtil.randomBytes32(),
+                dataStructureUtil.randomUInt64(),
+                dataStructureUtil.randomBytes32(),
+                PAYLOAD_STATUS_PENDING,
+                PAYLOAD_STATUS_EMPTY));
+
+    sendHeadUpdate(slot, bestBlockRoot, PAYLOAD_STATUS_PENDING, reorgContext);
+
+    verify(eventLogger, times(1))
+        .reorgEvent(
+            any(),
+            any(),
+            eq(bestBlockRoot),
+            eq(slot),
+            any(),
+            any(),
+            eq(Optional.empty()),
+            eq(Optional.empty()),
+            eq(Optional.empty()),
+            eq(Optional.of("EMPTY")));
+  }
+
+  private void sendHeadUpdate(
+      final UInt64 slot,
+      final Bytes32 bestBlockRoot,
+      final ForkChoicePayloadStatus payloadStatus,
+      final Optional<ReorgContext> reorgContext) {
+    channel.chainHeadUpdated(
+        slot,
+        dataStructureUtil.randomBytes32(),
+        bestBlockRoot,
+        false,
+        false,
+        dataStructureUtil.randomBytes32(),
+        dataStructureUtil.randomBytes32(),
+        Optional.of(payloadStatus),
+        reorgContext);
   }
 }

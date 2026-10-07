@@ -287,6 +287,34 @@ public class EventSubscriptionManagerTest {
   }
 
   @Test
+  void shouldNotPropagateChainReorgForPayloadReorg() {
+    when(req.getQueryString()).thenReturn("&topics=chain_reorg,head");
+    manager.registerClient(client1);
+
+    manager.chainHeadUpdated(
+        headEvent.getData().getSlot(),
+        headEvent.getData().getState(),
+        headEvent.getData().getBlock(),
+        false,
+        false,
+        headEvent.getData().getPreviousDutyDependentRoot(),
+        headEvent.getData().getCurrentDutyDependentRoot(),
+        Optional.of(ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY),
+        Optional.of(
+            ReorgContext.payloadReorg(
+                headEvent.getData().getBlock(),
+                headEvent.getData().getSlot(),
+                headEvent.getData().getState(),
+                Bytes32.random(),
+                Bytes32.random())));
+    asyncRunner.executeQueuedActions();
+
+    final List<String> events = outputStream.getEvents();
+    assertThat(events).hasSize(1);
+    assertThat(events.get(0)).contains("event: head\n");
+  }
+
+  @Test
   void shouldPropagateHeadAndReorg() {
     when(req.getQueryString()).thenReturn("&topics=chain_reorg,head");
     manager.registerClient(client1);

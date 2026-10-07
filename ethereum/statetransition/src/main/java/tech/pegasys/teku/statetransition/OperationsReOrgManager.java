@@ -77,22 +77,25 @@ public class OperationsReOrgManager implements ChainHeadChannel, LateBlockReorgP
       final Bytes32 currentDutyDependentRoot,
       final Optional<ForkChoicePayloadStatus> payloadStatus,
       final Optional<ReorgContext> optionalReorgContext) {
-    optionalReorgContext.ifPresent(
-        reorgContext -> {
-          final NavigableMap<UInt64, Bytes32> notCanonicalBlockRoots =
-              recentChainData.getAncestorsOnFork(
-                  reorgContext.getCommonAncestorSlot(), reorgContext.getOldBestBlockRoot());
-          final NavigableMap<UInt64, Bytes32> nowCanonicalBlockRoots =
-              recentChainData.getAncestorsOnFork(
-                  reorgContext.getCommonAncestorSlot(), bestBlockRoot);
+    // Payload reorgs keep every block canonical: nothing to re-queue or remove
+    optionalReorgContext
+        .filter(ReorgContext::isBlockReorg)
+        .ifPresent(
+            reorgContext -> {
+              final NavigableMap<UInt64, Bytes32> notCanonicalBlockRoots =
+                  recentChainData.getAncestorsOnFork(
+                      reorgContext.commonAncestorSlot(), reorgContext.oldBestBlockRoot());
+              final NavigableMap<UInt64, Bytes32> nowCanonicalBlockRoots =
+                  recentChainData.getAncestorsOnFork(
+                      reorgContext.commonAncestorSlot(), bestBlockRoot);
 
-          if (!notCanonicalBlockRoots.isEmpty()) {
-            attestationPool.onReorg(reorgContext.getCommonAncestorSlot());
-          }
-          processNonCanonicalBlockOperations(notCanonicalBlockRoots.values())
-              .alwaysRun(() -> processCanonicalBlockOperations(nowCanonicalBlockRoots.values()))
-              .finishError(LOG);
-        });
+              if (!notCanonicalBlockRoots.isEmpty()) {
+                attestationPool.onReorg(reorgContext.commonAncestorSlot());
+              }
+              processNonCanonicalBlockOperations(notCanonicalBlockRoots.values())
+                  .alwaysRun(() -> processCanonicalBlockOperations(nowCanonicalBlockRoots.values()))
+                  .finishError(LOG);
+            });
   }
 
   @Override
