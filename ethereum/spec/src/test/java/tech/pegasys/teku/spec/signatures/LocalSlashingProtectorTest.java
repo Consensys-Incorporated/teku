@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -71,6 +72,33 @@ class LocalSlashingProtectorTest {
 
   protected SlashingProtector getSlashingProtector() {
     return slashingProtectionStorage;
+  }
+
+  @Test
+  void shouldUseImportedRecordForValidatorThatHasAlreadySigned() throws Exception {
+    final ValidatorSigningRecord importedRecord =
+        new ValidatorSigningRecord(
+            Optional.of(GENESIS_VALIDATORS_ROOT),
+            UInt64.valueOf(5000),
+            UInt64.valueOf(905),
+            UInt64.valueOf(906));
+    when(dataWriter.read(signingRecordPath))
+        .thenReturn(Optional.empty())
+        .thenReturn(Optional.of(importedRecord.toBytes()));
+
+    assertThat(
+            getSlashingProtector()
+                .maySignAttestation(
+                    validator, GENESIS_VALIDATORS_ROOT, UInt64.ONE, UInt64.valueOf(2)))
+        .isCompletedWithValue(true);
+
+    assertThat(getSlashingProtector().importSigningRecord(validator, Optional::empty)).isEmpty();
+
+    assertThat(
+            getSlashingProtector()
+                .maySignAttestation(
+                    validator, GENESIS_VALIDATORS_ROOT, UInt64.valueOf(2), UInt64.valueOf(3)))
+        .isCompletedWithValue(false);
   }
 
   static List<Arguments> blockCases() {
