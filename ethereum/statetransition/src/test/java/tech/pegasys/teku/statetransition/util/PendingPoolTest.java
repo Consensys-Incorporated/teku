@@ -33,9 +33,11 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.statetransition.block.ParentExecutionPayloadDependency;
 import tech.pegasys.teku.statetransition.execution.PendingExecutionPayloadBid;
 
 public class PendingPoolTest {
+  private static final String PAYLOAD_POOL = "blocks_waiting_for_parent_execution_payload";
   private final Spec spec = TestSpecFactory.createDefault();
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
   private final UInt64 historicalTolerance = UInt64.valueOf(5);
@@ -339,21 +341,44 @@ public class PendingPoolTest {
   }
 
   @Test
-  public void createPendingBlockPool_shouldReportBytesForBothInnerPools() {
+  public void createPendingBlockPool_shouldReportBytesForEachInnerPoolIndependently() {
     final StubMetricsSystem blockPoolMetricsSystem = new StubMetricsSystem();
-    new PoolFactory(blockPoolMetricsSystem)
-        .createPendingBlockPool(spec, historicalTolerance, futureTolerance, maxItems);
+    final PendingBlockPool pendingBlockPool =
+        new PoolFactory(blockPoolMetricsSystem)
+            .createPendingBlockPool(spec, historicalTolerance, futureTolerance, maxItems);
+    pendingBlockPool.onSlot(currentSlot);
+    final SignedBeaconBlock blockWaitingForParent =
+        dataStructureUtil.randomSignedBeaconBlock(currentSlot.longValue());
+    final SignedBeaconBlock blockWaitingForPayload =
+        dataStructureUtil.randomSignedBeaconBlock(currentSlot.longValue());
+    final long blockWaitingForParentSize = blockWaitingForParent.sszSerialize().size();
+    final long blockWaitingForPayloadSize = blockWaitingForPayload.sszSerialize().size();
 
-    assertThat(
-            blockPoolMetricsSystem
-                .getLabelledGauge(TekuMetricCategory.BEACON, "pending_pool_bytes")
-                .getValue("blocks"))
-        .hasValue(0);
-    assertThat(
-            blockPoolMetricsSystem
-                .getLabelledGauge(TekuMetricCategory.BEACON, "pending_pool_bytes")
-                .getValue("blocks_waiting_for_parent_execution_payload"))
-        .hasValue(0);
+    assertThat(pendingPoolBytes(blockPoolMetricsSystem, "blocks")).hasValue(0);
+    assertThat(pendingPoolBytes(blockPoolMetricsSystem, PAYLOAD_POOL)).hasValue(0);
+
+    pendingBlockPool.addForMissingParent(blockWaitingForParent);
+    assertThat(pendingPoolBytes(blockPoolMetricsSystem, "blocks"))
+        .hasValue(blockWaitingForParentSize);
+    assertThat(pendingPoolBytes(blockPoolMetricsSystem, PAYLOAD_POOL)).hasValue(0);
+
+    pendingBlockPool.addForMissingParentExecutionPayload(
+        blockWaitingForPayload,
+        new ParentExecutionPayloadDependency(
+            blockWaitingForPayload.getParentRoot(), dataStructureUtil.randomBytes32()));
+    assertThat(pendingPoolBytes(blockPoolMetricsSystem, "blocks"))
+        .hasValue(blockWaitingForParentSize);
+    assertThat(pendingPoolBytes(blockPoolMetricsSystem, PAYLOAD_POOL))
+        .hasValue(blockWaitingForPayloadSize);
+
+    pendingBlockPool.remove(blockWaitingForParent);
+    assertThat(pendingPoolBytes(blockPoolMetricsSystem, "blocks")).hasValue(0);
+    assertThat(pendingPoolBytes(blockPoolMetricsSystem, PAYLOAD_POOL))
+        .hasValue(blockWaitingForPayloadSize);
+
+    pendingBlockPool.remove(blockWaitingForPayload);
+    assertThat(pendingPoolBytes(blockPoolMetricsSystem, "blocks")).hasValue(0);
+    assertThat(pendingPoolBytes(blockPoolMetricsSystem, PAYLOAD_POOL)).hasValue(0);
   }
 
   @Test
@@ -464,6 +489,11 @@ public class PendingPoolTest {
   }
 
   private OptionalDouble pendingPoolBytes(final String type) {
+    return pendingPoolBytes(metricsSystem, type);
+  }
+
+  private static OptionalDouble pendingPoolBytes(
+      final StubMetricsSystem metricsSystem, final String type) {
     return metricsSystem
         .getLabelledGauge(TekuMetricCategory.BEACON, "pending_pool_bytes")
         .getValue(type);
