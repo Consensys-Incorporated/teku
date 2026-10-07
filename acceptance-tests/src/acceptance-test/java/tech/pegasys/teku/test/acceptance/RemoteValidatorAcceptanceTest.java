@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.test.acceptance;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.test.acceptance.dsl.TekuNodeConfigBuilder.DEFAULT_NETWORK_NAME;
 
 import java.io.IOException;
@@ -25,7 +26,6 @@ import tech.pegasys.teku.test.acceptance.dsl.TekuValidatorNode;
 
 public class RemoteValidatorAcceptanceTest extends AcceptanceTestBase {
   private static final int VALIDATOR_COUNT = 8;
-
   private TekuBeaconNode beaconNode;
   private TekuValidatorNode validatorClient;
 
@@ -157,5 +157,18 @@ public class RemoteValidatorAcceptanceTest extends AcceptanceTestBase {
     validatorClient.waitForLogMessageContaining("Published aggregate");
     validatorClient.waitForLogMessageContaining("Published sync_signature");
     validatorClient.waitForLogMessageContaining("Published sync_contribution");
+    assertHeadEventsWereReceived();
+  }
+
+  /**
+   * Duties are also driven by the slot timer, so they complete even when the event stream delivers
+   * nothing at all. The validator client reports a stream which was opened and then failed without
+   * delivering any head event, and on a healthy connection that must never happen.
+   */
+  private void assertHeadEventsWereReceived() {
+    assertThat(
+            validatorClient.getFilteredOutputContaining(
+                "No head events were received from the beacon node event stream"))
+        .isEmpty();
   }
 }
