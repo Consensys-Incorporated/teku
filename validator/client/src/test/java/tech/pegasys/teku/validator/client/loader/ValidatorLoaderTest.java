@@ -23,6 +23,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.google.common.io.Resources;
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.net.MalformedURLException;
@@ -39,6 +40,7 @@ import java.util.Optional;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,16 +51,20 @@ import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.bls.keystore.KeyStoreLoader;
 import tech.pegasys.teku.bls.keystore.model.KeyStoreData;
+import tech.pegasys.teku.data.SlashingProtectionImporter;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
+import tech.pegasys.teku.infrastructure.io.SyncDataAccessor;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.service.serviceutils.layout.DataDirLayout;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.signatures.DeletableSigner;
+import tech.pegasys.teku.spec.signatures.LocalSlashingProtector;
 import tech.pegasys.teku.spec.signatures.SlashingProtector;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.api.FileBackedGraffitiProvider;
@@ -85,6 +91,9 @@ class ValidatorLoaderTest {
       BLSPublicKey.fromSSZBytes(
           Bytes.fromHexString(
               "0xb89bebc699769726a318c8e9971bd3171297c61aea4a6578a7a4f94b547dcba5bac16a89108b6b6a1fe3695d1a874a0b"));
+
+  private static final Bytes32 GENESIS_VALIDATORS_ROOT =
+      Bytes32.fromHexString("0x0000000000000000000000000000000000000000000000000000000000123456");
 
   private static final URL SIGNER_URL;
 
@@ -847,6 +856,84 @@ class ValidatorLoaderTest {
     final OwnedValidators validators = validatorLoader.getOwnedValidators();
     assertThat(validators.getValidatorCount()).isEqualTo(0);
     checkGraffitiProviderTypes(validators.getValidators(), FileBackedGraffitiProvider.class);
+  }
+
+  @Test
+  void shouldApplyImportedSlashingProtectionToAlreadyLoadedValidator(@TempDir final Path tempDir)
+      throws Exception {
+    final DataDirLayout dataDirLayout = new SimpleDataDirLayout(tempDir);
+    final Path slashingProtectionPath =
+        ValidatorClientService.getSlashingProtectionPath(dataDirLayout);
+    Files.createDirectories(slashingProtectionPath);
+    final LocalSlashingProtector localSlashingProtector =
+        new LocalSlashingProtector(
+            SyncDataAccessor.create(slashingProtectionPath), slashingProtectionPath);
+    final ValidatorLoader validatorLoader =
+        ValidatorLoader.create(
+            spec,
+            ValidatorConfig.builder().build(),
+            disabledInteropConfig,
+            httpClientFactory,
+            localSlashingProtector,
+            slashingProtectionLogger,
+            publicKeyLoader,
+            asyncRunner,
+            metricsSystem,
+            Optional.of(dataDirLayout),
+            (publicKey) -> Optional.empty());
+    validatorLoader.loadValidators();
+
+    final String keystoreString =
+        Resources.toString(Resources.getResource("pbkdf2TestVector.json"), StandardCharsets.UTF_8);
+    final KeyStoreData keyStoreData = KeyStoreLoader.loadFromString(keystoreString);
+    assertThat(
+            validatorLoader
+                .loadLocalMutableValidator(keyStoreData, "testpassword", Optional.empty(), true)
+                .getPostKeyResult()
+                .getImportStatus())
+        .isEqualTo(ImportStatus.IMPORTED);
+
+    // signing once puts the record in the protector's cache
+    assertThat(
+            localSlashingProtector.maySignAttestation(
+                PUBLIC_KEY1, GENESIS_VALIDATORS_ROOT, UInt64.ONE, UInt64.valueOf(2)))
+        .isCompletedWithValue(true);
+
+    // the operator re-imports the loaded key with history from the client it was migrated from
+    final SlashingProtectionImporter importer =
+        new SlashingProtectionImporter(slashingProtectionPath);
+    assertThat(importer.initialise(new ByteArrayInputStream(interchangeData(PUBLIC_KEY1))))
+        .isEmpty();
+    validatorLoader.loadLocalMutableValidator(
+        keyStoreData, "testpassword", Optional.of(importer), true);
+
+    assertThat(
+            localSlashingProtector.maySignAttestation(
+                PUBLIC_KEY1, GENESIS_VALIDATORS_ROOT, UInt64.valueOf(2), UInt64.valueOf(3)))
+        .isCompletedWithValue(false);
+  }
+
+  private static byte[] interchangeData(final BLSPublicKey publicKey) {
+    return String.format(
+            """
+            {
+              "metadata": {
+                "interchange_format_version": "5",
+                "genesis_validators_root": "%s"
+              },
+              "data": [
+                {
+                  "pubkey": "%s",
+                  "signed_blocks": [{ "slot": "5000" }],
+                  "signed_attestations": [
+                    { "source_epoch": "905", "target_epoch": "906" }
+                  ]
+                }
+              ]
+            }
+            """,
+            GENESIS_VALIDATORS_ROOT, publicKey.toBytesCompressed().toHexString())
+        .getBytes(StandardCharsets.UTF_8);
   }
 
   static void writeKeystore(final Path tempDir) throws Exception {
