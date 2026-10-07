@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
@@ -92,6 +93,32 @@ public class LocalSlashingProtectorConcurrentAccess implements SlashingProtector
     try {
       record.lock();
       return Optional.of(record.getSigningRecord());
+    } finally {
+      record.unlock();
+    }
+  }
+
+  @Override
+  public Optional<String> importSigningRecord(
+      final BLSPublicKey validator, final Supplier<Optional<String>> recordUpdate) {
+    final LocalSlashingProtectionRecord record = records.get(validator);
+    if (record == null) {
+      // nothing is cached, so the updated record is read from file when the validator next signs
+      return recordUpdate.get();
+    }
+    record.lock();
+    try {
+      final Optional<String> error = recordUpdate.get();
+      if (error.isPresent()) {
+        return error;
+      }
+      final Optional<ValidatorSigningRecord> updatedRecord =
+          getValidatorSigningRecordFromFile(validator);
+      if (updatedRecord.isEmpty()) {
+        return Optional.of("Failed to read back the updated slashing protection record");
+      }
+      record.setSigningRecord(updatedRecord.get());
+      return Optional.empty();
     } finally {
       record.unlock();
     }
