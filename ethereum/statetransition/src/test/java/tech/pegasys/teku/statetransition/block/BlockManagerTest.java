@@ -78,6 +78,7 @@ import tech.pegasys.teku.infrastructure.collections.LimitedMap;
 import tech.pegasys.teku.infrastructure.logging.EventLogger;
 import tech.pegasys.teku.infrastructure.metrics.SettableLabelledGauge;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
+import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.ssz.InvalidValueSchemaException;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
 import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
@@ -111,7 +112,6 @@ import tech.pegasys.teku.statetransition.forkchoice.ForkChoice;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoiceNotifier;
 import tech.pegasys.teku.statetransition.forkchoice.MergeTransitionBlockValidator;
 import tech.pegasys.teku.statetransition.forkchoice.NoopForkChoiceNotifier;
-import tech.pegasys.teku.statetransition.util.FutureItems;
 import tech.pegasys.teku.statetransition.util.PendingBlockPool;
 import tech.pegasys.teku.statetransition.util.PendingPool;
 import tech.pegasys.teku.statetransition.util.PoolFactory;
@@ -143,8 +143,14 @@ public class BlockManagerTest {
       mock(ExecutionPayloadEventsListener.class);
   private PendingPool<SignedBeaconBlock> pendingBlocks;
   private PendingBlockPool pendingBlockPool;
-  private final FutureItems<SignedBeaconBlock> futureBlocks =
-      FutureItems.create(SignedBeaconBlock::getSlot, mock(SettableLabelledGauge.class), "blocks");
+  private final StubMetricsSystem futureBlocksMetricsSystem = new StubMetricsSystem();
+  private final FutureBlockPool futureBlocks =
+      new FutureBlockPool(
+          4,
+          Long.MAX_VALUE,
+          block -> 0L,
+          mock(SettableLabelledGauge.class),
+          FutureBlockPool.createResultCounter(futureBlocksMetricsSystem));
   private final Map<Bytes32, BlockImportResult> invalidBlockRoots =
       LimitedMap.createSynchronizedLRU(500);
 
@@ -609,6 +615,29 @@ public class BlockManagerTest {
     Waiter.waitFor(() -> assertThat(invalidBlockRoots).isEmpty());
     Waiter.waitFor(() -> assertThat(futureBlocks.size()).isEqualTo(0));
     verify(blockEventsListenerRouter).onBlockImported(futureBlock);
+  }
+
+  @Test
+  public void onProposedBlock_tooFarInFuture_shouldNotQueueOrRetryGossipValidation() {
+    incrementSlot();
+    final UInt64 tooFarSlot = currentSlot.plus(FutureBlockPool.FUTURE_SLOT_TOLERANCE).plus(1);
+    final SignedBeaconBlock futureBlock =
+        localChain.chainBuilder().generateBlockAtSlot(tooFarSlot).getBlock();
+
+    when(blockValidator.validateGossip(eq(futureBlock)))
+        .thenReturn(SafeFuture.completedFuture(InternalValidationResult.SAVE_FOR_FUTURE));
+
+    assertThatSafeFuture(blockManager.validateAndImportBlock(futureBlock, Optional.empty()))
+        .isCompletedWithValue(InternalValidationResult.SAVE_FOR_FUTURE);
+    Waiter.waitFor(() -> assertThat(futureBlocksResultCount("dropped")).isEqualTo(1));
+    assertThat(futureBlocks.size()).isZero();
+    assertThat(futureBlocks.contains(futureBlock)).isFalse();
+
+    incrementSlotTo(tooFarSlot);
+
+    // the dropped block is neither dequeued nor re-validated once its slot arrives
+    assertThat(futureBlocksResultCount("dequeued")).isZero();
+    verify(blockValidator, times(1)).validateGossip(eq(futureBlock));
   }
 
   @Test
@@ -1281,6 +1310,11 @@ public class BlockManagerTest {
 
   private void assertImportBlockSuccessfully(final SignedBeaconBlock block) {
     assertThatBlockImport(block).isCompletedWithValueMatching(BlockImportResult::isSuccessful);
+  }
+
+  private long futureBlocksResultCount(final String result) {
+    return futureBlocksMetricsSystem.getLabelledCounterValue(
+        TekuMetricCategory.BEACON, "future_blocks_total", result);
   }
 
   private void incrementSlotTo(final UInt64 toSlotInclusive) {
