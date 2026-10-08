@@ -28,11 +28,14 @@
       "format" : "byte"
     },
     "parent_payload_status" : {
-      "nullable" : true,
-      "allOf" : [ {
+      "anyOf" : [ {
         "type" : "string",
         "enum" : [ "empty", "full", "pending" ],
         "description" : "The payload status of the parent fork choice node. Null if the parent is not retained in the fork choice tree."
+      }, {
+        "type" : "object",
+        "nullable" : true,
+        "enum" : [ null ]
       } ]
     },
     "justified_checkpoint" : {

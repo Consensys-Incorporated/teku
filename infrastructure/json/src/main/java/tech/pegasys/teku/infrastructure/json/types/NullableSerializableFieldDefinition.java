@@ -52,13 +52,19 @@ class NullableSerializableFieldDefinition<TObject, TField>
 
   @Override
   public void writeOpenApiField(final JsonGenerator gen) throws IOException {
-    // OpenAPI 3.0 marks a schema as nullable with a sibling property, which a $ref can't carry, so
-    // the field's type is wrapped in allOf
+    // OpenAPI 3.0 nullable only applies beside an explicit type. A separate null-only
+    // alternative preserves enum constraints and works with references without modifying them.
     gen.writeFieldName(name);
     gen.writeStartObject();
-    gen.writeBooleanField("nullable", true);
-    gen.writeArrayFieldStart("allOf");
+    gen.writeArrayFieldStart("anyOf");
     type.serializeOpenApiTypeOrReference(gen);
+    gen.writeStartObject();
+    gen.writeStringField("type", "object");
+    gen.writeBooleanField("nullable", true);
+    gen.writeArrayFieldStart("enum");
+    gen.writeNull();
+    gen.writeEndArray();
+    gen.writeEndObject();
     gen.writeEndArray();
     gen.writeEndObject();
   }

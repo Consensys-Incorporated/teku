@@ -18,6 +18,8 @@ import static org.assertj.core.api.Assertions.entry;
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.STRING_TYPE;
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.UINT64_TYPE;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.MoreObjects;
 import java.util.Objects;
 import java.util.Optional;
@@ -96,7 +98,63 @@ class SerializableObjectTypeDefinitionBuilderTest {
     assertThat(json)
         .isEqualTo(
             "{\"type\":\"object\",\"required\":[\"nullable\"],\"properties\":"
-                + "{\"nullable\":{\"nullable\":true,\"allOf\":[{\"type\":\"string\"}]}}}");
+                + "{\"nullable\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"nullable\":true,\"enum\":[null]}]}}}");
+  }
+
+  @Test
+  void shouldDescribeNullableEnumWithoutAllowingOtherValues() throws Exception {
+    final SerializableTypeDefinition<Optional<TestEnum>> type =
+        SerializableTypeDefinition.<Optional<TestEnum>>object()
+            .withNullableField(
+                "value", DeserializableTypeDefinition.enumOf(TestEnum.class), value -> value)
+            .build();
+    final JsonNode field =
+        new ObjectMapper()
+            .readTree(JsonUtil.serialize(type::serializeOpenApiType))
+            .path("properties")
+            .path("value");
+    assertThat(field.path("anyOf").size()).isEqualTo(2);
+    assertThat(field.path("anyOf").get(0).path("enum").get(0).asText()).isEqualTo("VALUE");
+    assertNullOnlySchema(field.path("anyOf").get(1));
+    assertThat(JsonUtil.serialize(Optional.empty(), type)).isEqualTo("{\"value\":null}");
+    assertThat(JsonUtil.serialize(Optional.of(TestEnum.VALUE), type))
+        .isEqualTo("{\"value\":\"VALUE\"}");
+  }
+
+  @Test
+  void shouldDescribeNullableReferenceWithoutChangingReferencedType() throws Exception {
+    final SerializableTypeDefinition<String> referenced =
+        SerializableTypeDefinition.object(String.class)
+            .name("ReferencedType")
+            .withField("value", STRING_TYPE, value -> value)
+            .build();
+    final SerializableTypeDefinition<WithOptionalValue> type =
+        SerializableTypeDefinition.object(WithOptionalValue.class)
+            .withNullableField("value", referenced, WithOptionalValue::getValue)
+            .build();
+    final JsonNode field =
+        new ObjectMapper()
+            .readTree(JsonUtil.serialize(type::serializeOpenApiType))
+            .path("properties")
+            .path("value");
+    assertThat(field.path("anyOf").size()).isEqualTo(2);
+    assertThat(field.path("anyOf").get(0).path("$ref").asText())
+        .isEqualTo("#/components/schemas/ReferencedType");
+    assertNullOnlySchema(field.path("anyOf").get(1));
+    assertThat(type.getReferencedTypeDefinitions()).contains(referenced);
+    assertThat(JsonUtil.serialize(new WithOptionalValue(Optional.of("foo")), type))
+        .isEqualTo("{\"value\":{\"value\":\"foo\"}}");
+  }
+
+  private void assertNullOnlySchema(final JsonNode schema) {
+    assertThat(schema.path("type").asText()).isEqualTo("object");
+    assertThat(schema.path("nullable").asBoolean()).isTrue();
+    assertThat(schema.path("enum").size()).isEqualTo(1);
+    assertThat(schema.path("enum").get(0).isNull()).isTrue();
+  }
+
+  private enum TestEnum {
+    VALUE
   }
 
   @Test

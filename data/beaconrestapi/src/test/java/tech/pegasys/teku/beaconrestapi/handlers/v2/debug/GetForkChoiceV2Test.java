@@ -26,6 +26,8 @@ import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMe
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMetadataErrorResponse;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.io.Resources;
 import java.io.IOException;
 import java.util.List;
@@ -33,6 +35,8 @@ import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import tech.pegasys.teku.api.ForkChoiceDataV2;
 import tech.pegasys.teku.api.ForkChoiceNodeDataV2;
 import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerTest;
@@ -139,5 +143,36 @@ class GetForkChoiceV2Test extends AbstractMigratedBeaconHandlerTest {
   @Test
   void metadata_shouldHandle204() {
     verifyMetadataEmptyResponse(handler, SC_NO_CONTENT);
+  }
+
+  @ParameterizedTest
+  @EnumSource(ForkChoicePayloadStatus.class)
+  void shouldSerializeParentPayloadStatus(final ForkChoicePayloadStatus status) throws IOException {
+    final ForkChoiceNodeDataV2 node =
+        new ForkChoiceNodeDataV2(
+            ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING,
+            pendingNode,
+            pendingNode.getParentRoot(),
+            Optional.of(status),
+            UInt64.ZERO,
+            UInt64.ZERO,
+            UInt64.ZERO);
+    final ForkChoiceDataV2 data =
+        new ForkChoiceDataV2(
+            response.getJustifiedCheckpoint(), response.getFinalizedCheckpoint(), List.of(node));
+    final JsonNode json =
+        new ObjectMapper().readTree(getResponseStringFromMetadata(handler, SC_OK, data));
+    assertThat(
+            json.path("data")
+                .path("fork_choice_nodes")
+                .get(0)
+                .path("parent_payload_status")
+                .asText())
+        .isEqualTo(
+            switch (status) {
+              case PAYLOAD_STATUS_PENDING -> "pending";
+              case PAYLOAD_STATUS_EMPTY -> "empty";
+              case PAYLOAD_STATUS_FULL -> "full";
+            });
   }
 }
