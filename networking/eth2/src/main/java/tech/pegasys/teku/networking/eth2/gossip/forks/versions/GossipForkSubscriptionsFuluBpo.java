@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.networking.eth2.gossip.forks.versions;
 
+import java.util.Optional;
 import java.util.function.Supplier;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
@@ -26,6 +27,8 @@ import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionProof;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.SignedBlsToExecutionChange;
@@ -61,6 +64,10 @@ public class GossipForkSubscriptionsFuluBpo extends GossipForkSubscriptionsFulu 
           signedContributionAndProofOperationProcessor,
       final OperationProcessor<ValidatableSyncCommitteeMessage>
           syncCommitteeMessageOperationProcessor,
+      final Optional<OperationProcessor<LightClientFinalityUpdate>>
+          lightClientFinalityUpdateProcessor,
+      final Optional<OperationProcessor<LightClientOptimisticUpdate>>
+          lightClientOptimisticUpdateProcessor,
       final OperationProcessor<SignedBlsToExecutionChange>
           signedBlsToExecutionChangeOperationProcessor,
       final OperationProcessor<DataColumnSidecar> dataColumnSidecarOperationProcessor,
@@ -87,6 +94,8 @@ public class GossipForkSubscriptionsFuluBpo extends GossipForkSubscriptionsFulu 
         voluntaryExitProcessor,
         signedContributionAndProofOperationProcessor,
         syncCommitteeMessageOperationProcessor,
+        lightClientFinalityUpdateProcessor,
+        lightClientOptimisticUpdateProcessor,
         signedBlsToExecutionChangeOperationProcessor,
         dataColumnSidecarOperationProcessor,
         debugDataDumper,

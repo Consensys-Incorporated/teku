@@ -13,9 +13,11 @@
 
 package tech.pegasys.teku.networking.eth2.gossip.forks.versions;
 
+import java.util.Optional;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
+import tech.pegasys.teku.networking.eth2.gossip.LightClientUpdateGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.SignedContributionAndProofGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.SyncCommitteeMessageGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.encoding.GossipEncoding;
@@ -23,9 +25,12 @@ import tech.pegasys.teku.networking.eth2.gossip.subnets.SyncCommitteeSubnetSubsc
 import tech.pegasys.teku.networking.eth2.gossip.topics.OperationProcessor;
 import tech.pegasys.teku.networking.p2p.discovery.DiscoveryNetwork;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.config.NetworkingSpecConfig;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
@@ -44,7 +49,15 @@ public class GossipForkSubscriptionsAltair extends GossipForkSubscriptionsPhase0
       signedContributionAndProofOperationProcessor;
   private final OperationProcessor<ValidatableSyncCommitteeMessage>
       syncCommitteeMessageOperationProcessor;
+  private final Optional<OperationProcessor<LightClientFinalityUpdate>>
+      lightClientFinalityUpdateProcessor;
+  private final Optional<OperationProcessor<LightClientOptimisticUpdate>>
+      lightClientOptimisticUpdateProcessor;
   private SyncCommitteeMessageGossipManager syncCommitteeMessageGossipManager;
+  private Optional<LightClientUpdateGossipManager<LightClientFinalityUpdate>>
+      lightClientFinalityUpdateGossipManager = Optional.empty();
+  private Optional<LightClientUpdateGossipManager<LightClientOptimisticUpdate>>
+      lightClientOptimisticUpdateGossipManager = Optional.empty();
   private SignedContributionAndProofGossipManager syncCommitteeContributionGossipManager;
 
   public GossipForkSubscriptionsAltair(
@@ -65,6 +78,10 @@ public class GossipForkSubscriptionsAltair extends GossipForkSubscriptionsPhase0
           signedContributionAndProofOperationProcessor,
       final OperationProcessor<ValidatableSyncCommitteeMessage>
           syncCommitteeMessageOperationProcessor,
+      final Optional<OperationProcessor<LightClientFinalityUpdate>>
+          lightClientFinalityUpdateProcessor,
+      final Optional<OperationProcessor<LightClientOptimisticUpdate>>
+          lightClientOptimisticUpdateProcessor,
       final DebugDataDumper debugDataDumper) {
     super(
         fork,
@@ -84,6 +101,45 @@ public class GossipForkSubscriptionsAltair extends GossipForkSubscriptionsPhase0
     this.signedContributionAndProofOperationProcessor =
         signedContributionAndProofOperationProcessor;
     this.syncCommitteeMessageOperationProcessor = syncCommitteeMessageOperationProcessor;
+    this.lightClientFinalityUpdateProcessor = lightClientFinalityUpdateProcessor;
+    this.lightClientOptimisticUpdateProcessor = lightClientOptimisticUpdateProcessor;
+  }
+
+  void addLightClientGossipManagers(final ForkInfo forkInfo, final Bytes4 forkDigest) {
+    final SchemaDefinitionsAltair schemaDefinitions =
+        SchemaDefinitionsAltair.required(spec.atEpoch(getActivationEpoch()).getSchemaDefinitions());
+    final NetworkingSpecConfig networkingConfig =
+        spec.atEpoch(getActivationEpoch()).getConfig().getNetworkingConfig();
+    lightClientFinalityUpdateGossipManager =
+        lightClientFinalityUpdateProcessor.map(
+            processor ->
+                LightClientUpdateGossipManager.createFinality(
+                    recentChainData,
+                    schemaDefinitions,
+                    asyncRunner,
+                    discoveryNetwork,
+                    gossipEncoding,
+                    forkInfo,
+                    forkDigest,
+                    processor,
+                    networkingConfig,
+                    debugDataDumper));
+    lightClientOptimisticUpdateGossipManager =
+        lightClientOptimisticUpdateProcessor.map(
+            processor ->
+                LightClientUpdateGossipManager.createOptimistic(
+                    recentChainData,
+                    schemaDefinitions,
+                    asyncRunner,
+                    discoveryNetwork,
+                    gossipEncoding,
+                    forkInfo,
+                    forkDigest,
+                    processor,
+                    networkingConfig,
+                    debugDataDumper));
+    lightClientFinalityUpdateGossipManager.ifPresent(this::addGossipManager);
+    lightClientOptimisticUpdateGossipManager.ifPresent(this::addGossipManager);
   }
 
   void addSignedContributionAndProofGossipManager(
@@ -136,6 +192,17 @@ public class GossipForkSubscriptionsAltair extends GossipForkSubscriptionsPhase0
     super.addGossipManagers(forkInfo, forkDigest);
     addSignedContributionAndProofGossipManager(forkInfo, forkDigest);
     addSyncCommitteeMessageGossipManager(forkInfo, forkDigest);
+    addLightClientGossipManagers(forkInfo, forkDigest);
+  }
+
+  @Override
+  public void publishLightClientFinalityUpdate(final LightClientFinalityUpdate message) {
+    lightClientFinalityUpdateGossipManager.ifPresent(manager -> manager.publish(message));
+  }
+
+  @Override
+  public void publishLightClientOptimisticUpdate(final LightClientOptimisticUpdate message) {
+    lightClientOptimisticUpdateGossipManager.ifPresent(manager -> manager.publish(message));
   }
 
   @Override

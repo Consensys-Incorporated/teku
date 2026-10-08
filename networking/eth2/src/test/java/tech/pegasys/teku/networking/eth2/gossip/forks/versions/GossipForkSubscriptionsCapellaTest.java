@@ -82,6 +82,8 @@ class GossipForkSubscriptionsCapellaTest {
         noopOperationProcessor,
         noopOperationProcessor,
         noopOperationProcessor,
+        Optional.empty(),
+        Optional.empty(),
         noopOperationProcessor,
         DebugDataDumper.NOOP);
   }
