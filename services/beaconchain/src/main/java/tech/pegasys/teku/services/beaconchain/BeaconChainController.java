@@ -273,6 +273,8 @@ import tech.pegasys.teku.statetransition.validation.ProposerPreferencesGossipVal
 import tech.pegasys.teku.statetransition.validation.ProposerSlashingValidator;
 import tech.pegasys.teku.statetransition.validation.SignedBlsToExecutionChangeValidator;
 import tech.pegasys.teku.statetransition.validation.VoluntaryExitValidator;
+import tech.pegasys.teku.statetransition.validation.lightclient.LightClientFinalityUpdateGossipValidator;
+import tech.pegasys.teku.statetransition.validation.lightclient.LightClientOptimisticUpdateGossipValidator;
 import tech.pegasys.teku.statetransition.validation.signatures.AggregatingSignatureVerificationService;
 import tech.pegasys.teku.statetransition.validation.signatures.SignatureVerificationService;
 import tech.pegasys.teku.statetransition.validatorcache.ActiveValidatorCache;
@@ -413,6 +415,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
   protected volatile DasReqRespLogger dasReqRespLogger;
   protected volatile LightClientUpdateStore lightClientUpdateStore;
   protected volatile LightClientServerService lightClientServerService;
+  protected volatile SyncCommitteeSubscriptionManager syncCommitteeSubscriptionManager;
   protected volatile KZG kzg;
   protected volatile BlobSidecarManager blobSidecarManager;
   protected volatile BlobSidecarGossipValidator blobSidecarValidator;
@@ -1911,7 +1914,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
                 executionPayloadManager,
                 metricsSystem,
                 timeProvider));
-    SyncCommitteeSubscriptionManager syncCommitteeSubscriptionManager =
+    syncCommitteeSubscriptionManager =
         beaconConfig.p2pConfig().isSubscribeAllSubnetsEnabled()
             ? new AllSyncCommitteeSubscriptions(p2pNetwork, spec)
             : new SyncCommitteeSubscriptionManager(p2pNetwork);
@@ -2189,7 +2192,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
       dataColumnSidecarArchiveReconstructor = DataColumnSidecarArchiveReconstructor.NOOP;
     }
 
-    this.p2pNetwork =
+    final Eth2P2PNetworkBuilder p2pNetworkBuilder =
         createEth2P2PNetworkBuilder()
             .config(beaconConfig.p2pConfig())
             .eventChannels(eventChannels)
@@ -2233,8 +2236,31 @@ public class BeaconChainController extends Service implements BeaconChainControl
             .requiredCheckpoint(weakSubjectivityValidator.getWSCheckpoint())
             .specProvider(spec)
             .recordMessageArrival(true)
-            .p2pDebugDataDumper(debugDataDumper)
-            .build();
+            .p2pDebugDataDumper(debugDataDumper);
+
+    final Optional<LightClientFinalityUpdateGossipValidator> lightClientFinalityUpdateValidator =
+        Optional.ofNullable(lightClientServerService)
+            .map(
+                __ ->
+                    new LightClientFinalityUpdateGossipValidator(
+                        spec, recentChainData, lightClientUpdateStore));
+    final Optional<LightClientOptimisticUpdateGossipValidator>
+        lightClientOptimisticUpdateValidator =
+            Optional.ofNullable(lightClientServerService)
+                .map(
+                    __ ->
+                        new LightClientOptimisticUpdateGossipValidator(
+                            spec, recentChainData, lightClientUpdateStore));
+    lightClientFinalityUpdateValidator.ifPresent(
+        validator ->
+            p2pNetworkBuilder.gossipedLightClientFinalityUpdateProcessor(
+                (update, arrivalTimestamp) -> validator.validate(update)));
+    lightClientOptimisticUpdateValidator.ifPresent(
+        validator ->
+            p2pNetworkBuilder.gossipedLightClientOptimisticUpdateProcessor(
+                (update, arrivalTimestamp) -> validator.validate(update)));
+
+    this.p2pNetwork = p2pNetworkBuilder.build();
 
     syncCommitteeMessagePool.subscribeOperationAdded(
         new LocalOperationAcceptedFilter<>(p2pNetwork::publishSyncCommitteeMessage));
@@ -2254,6 +2280,24 @@ public class BeaconChainController extends Service implements BeaconChainControl
         new LocalOperationAcceptedFilter<>(p2pNetwork::publishProposerPreferences));
     executionPayloadBidManager.subscribeOperationAdded(
         new LocalOperationAcceptedFilter<>(p2pNetwork::publishExecutionPayloadBid));
+    lightClientFinalityUpdateValidator.ifPresent(
+        validator ->
+            lightClientServerService.subscribeToFinalityUpdatesToPublish(
+                update -> {
+                  if (hasLocalSyncCommitteeDutyAt(update.getSignatureSlot().get())
+                      && validator.markForwarded(update)) {
+                    p2pNetwork.publishLightClientFinalityUpdate(update);
+                  }
+                }));
+    lightClientOptimisticUpdateValidator.ifPresent(
+        validator ->
+            lightClientServerService.subscribeToOptimisticUpdatesToPublish(
+                update -> {
+                  if (hasLocalSyncCommitteeDutyAt(update.getSignatureSlot().get())
+                      && validator.markForwarded(update)) {
+                    p2pNetwork.publishLightClientOptimisticUpdate(update);
+                  }
+                }));
 
     eventChannels.subscribe(
         CustodyGroupCountChannel.class,
@@ -2271,6 +2315,22 @@ public class BeaconChainController extends Service implements BeaconChainControl
                 () ->
                     new InvalidConfigurationException(
                         "Failed to get NodeId from Discovery System"));
+  }
+
+  /**
+   * Light client data is only broadcast by nodes with a validator in the current sync committee at
+   * the slot of the block carrying the sync aggregate.
+   */
+  private boolean hasLocalSyncCommitteeDutyAt(final UInt64 slot) {
+    final SyncCommitteeSubscriptionManager subscriptionManager = syncCommitteeSubscriptionManager;
+    if (subscriptionManager == null) {
+      return false;
+    }
+    final UInt64 periodEndSlot =
+        spec.computeStartSlotAtEpoch(
+            spec.getSyncCommitteeUtilRequired(slot)
+                .computeFirstEpochOfNextSyncCommitteePeriod(spec.computeEpochAtSlot(slot)));
+    return subscriptionManager.hasDutyActiveAt(slot, periodEndSlot);
   }
 
   protected Eth2P2PNetworkBuilder createEth2P2PNetworkBuilder() {
