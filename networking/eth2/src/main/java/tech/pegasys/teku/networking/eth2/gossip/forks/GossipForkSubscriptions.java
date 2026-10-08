@@ -25,6 +25,8 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionProof;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.SignedBlsToExecutionChange;
@@ -118,5 +120,13 @@ public interface GossipForkSubscriptions {
 
   default void publishProposerPreferences(final SignedProposerPreferences message) {
     // since Gloas
+  }
+
+  default void publishLightClientFinalityUpdate(final LightClientFinalityUpdate message) {
+    // since Altair
+  }
+
+  default void publishLightClientOptimisticUpdate(final LightClientOptimisticUpdate message) {
+    // since Altair
   }
 }

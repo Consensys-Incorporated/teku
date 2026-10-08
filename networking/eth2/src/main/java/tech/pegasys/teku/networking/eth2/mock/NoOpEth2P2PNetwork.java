@@ -21,6 +21,8 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.metadata.MetadataMessage;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
@@ -105,4 +107,11 @@ public class NoOpEth2P2PNetwork extends MockP2PNetwork<Eth2Peer> implements Eth2
   @Override
   public void publishProposerPreferences(
       final SignedProposerPreferences signedProposerPreferences) {}
+
+  @Override
+  public void publishLightClientFinalityUpdate(final LightClientFinalityUpdate finalityUpdate) {}
+
+  @Override
+  public void publishLightClientOptimisticUpdate(
+      final LightClientOptimisticUpdate optimisticUpdate) {}
 }
