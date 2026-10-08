@@ -17,16 +17,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static tech.pegasys.teku.infrastructure.ssz.schema.TreeNodeAssert.assertThatTreeNode;
 
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import tech.pegasys.teku.infrastructure.crypto.Hash;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
@@ -531,6 +536,54 @@ public class SszProgressiveListSchemaTest {
 
     assertThatTreeNode(result).isTreeEqual(node);
     assertThat(UINT64_LIST_SCHEMA.createFromBackingNode(result).size()).isZero();
+  }
+
+  @ParameterizedTest(name = "{0} elements of {1}")
+  @MethodSource("partialChunkCases")
+  <T extends SszData> void storeAndLoadBackingNodes_partialPrimitiveChunkSerializesCanonically(
+      final int elementCount,
+      final SszSchema<T> elementSchema,
+      final IntFunction<T> elementFactory) {
+    final SszProgressiveListSchema<T> schema = SszProgressiveListSchema.create(elementSchema);
+    final SszList<T> original =
+        schema.createFromElements(
+            IntStream.range(0, elementCount).mapToObj(elementFactory).toList());
+    final InMemoryStoringTreeNodeStore nodeStore = new InMemoryStoringTreeNodeStore();
+    final long rootGIndex = 34;
+
+    schema.storeBackingNodes(nodeStore, 15, rootGIndex, original.getBackingNode());
+    final SszList<T> restored =
+        schema.createFromBackingNode(
+            schema.loadBackingNodes(nodeStore, original.hashTreeRoot(), rootGIndex));
+
+    final Bytes expected = original.sszSerialize();
+    assertThat(restored.sszSerialize()).isEqualTo(expected);
+    final ByteArrayOutputStream output = new ByteArrayOutputStream();
+    assertThat(restored.sszSerialize(output)).isEqualTo(expected.size());
+    assertThat(Bytes.wrap(output.toByteArray())).isEqualTo(expected);
+    assertThat(schema.getSszSize(restored.getBackingNode())).isEqualTo(expected.size());
+    assertThat(restored.hashTreeRoot()).isEqualTo(original.hashTreeRoot());
+  }
+
+  private static Stream<Arguments> partialChunkCases() {
+    // bytes: 32 elements per chunk; uint64: 4 elements per chunk
+    final Stream<Arguments> byteCases =
+        IntStream.rangeClosed(1, 70)
+            .mapToObj(
+                count ->
+                    Arguments.of(
+                        count,
+                        SszPrimitiveSchemas.BYTE_SCHEMA,
+                        (IntFunction<SszByte>) value -> SszByte.of((byte) value)));
+    final Stream<Arguments> uint64Cases =
+        IntStream.rangeClosed(1, 20)
+            .mapToObj(
+                count ->
+                    Arguments.of(
+                        count,
+                        SszPrimitiveSchemas.UINT64_SCHEMA,
+                        (IntFunction<SszUInt64>) value -> SszUInt64.of(UInt64.valueOf(value + 1))));
+    return Stream.concat(byteCases, uint64Cases);
   }
 
   @SuppressWarnings("unchecked")
