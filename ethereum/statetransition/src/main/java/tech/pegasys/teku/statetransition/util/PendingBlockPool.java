@@ -34,6 +34,7 @@ public class PendingBlockPool implements SlotEventsChannel, FinalizedCheckpointC
 
   PendingBlockPool(
       final SettableLabelledGauge pendingPoolsSizeGauge,
+      final SettableLabelledGauge pendingPoolsBytesGauge,
       final Spec spec,
       final UInt64 historicalBlockTolerance,
       final UInt64 futureBlockTolerance,
@@ -50,6 +51,7 @@ public class PendingBlockPool implements SlotEventsChannel, FinalizedCheckpointC
             maxBlocksWaitingForParent,
             maxPendingBlockBytes,
             PendingBlockPool::getSszSize,
+            Optional.of(pendingPoolsBytesGauge),
             block -> block.getMessage().hashTreeRoot(),
             block -> Collections.singleton(block.getParentRoot()),
             SignedBeaconBlock::getSlot);
@@ -63,6 +65,7 @@ public class PendingBlockPool implements SlotEventsChannel, FinalizedCheckpointC
             maxBlocksWaitingForParentExecutionPayload,
             maxPendingBlockBytes,
             PendingParentExecutionPayloadBlock::getSszSize,
+            Optional.of(pendingPoolsBytesGauge),
             PendingParentExecutionPayloadBlock::hashTreeRoot,
             pendingBlock ->
                 Collections.singleton(pendingBlock.dependency().parentBeaconBlockRoot()),
