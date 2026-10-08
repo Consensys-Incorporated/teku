@@ -82,13 +82,11 @@ public class LibP2PGossipNetworkBuilder {
     final GossipTopicHandlers topicHandlers = new GossipTopicHandlers();
     final GossipRouter router =
         createGossipRouter(gossipConfig, networkingSpecConfig, gossipTopicFilter, topicHandlers);
-    final Optional<GossipMetricsListener> gossipMetricsListener =
-        GossipMetricsListener.attachTo(metricsSystem, router);
+    GossipMetricsListener.attachTo(metricsSystem, router);
     final Gossip gossip = createGossip(router, logWireGossip);
     final PubsubPublisherApi publisher = gossip.createPublisher(null, NULL_SEQNO_GENERATOR);
 
-    return new LibP2PGossipNetwork(
-        metricsSystem, gossip, publisher, topicHandlers, gossipMetricsListener);
+    return new LibP2PGossipNetwork(metricsSystem, gossip, publisher, topicHandlers);
   }
 
   private void validate() {

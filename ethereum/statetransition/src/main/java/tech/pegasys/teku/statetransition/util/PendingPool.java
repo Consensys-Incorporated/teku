@@ -65,6 +65,7 @@ public class PendingPool<T> extends AbstractIgnoringFutureHistoricalSlot {
   private final Function<T, UInt64> targetSlotFunction;
   private final ToLongFunction<T> itemWeightFunction;
   private final SettableLabelledGauge sizeGauge;
+  private final Optional<SettableLabelledGauge> totalWeightGauge;
 
   PendingPool(
       final SettableLabelledGauge sizeGauge,
@@ -85,6 +86,7 @@ public class PendingPool<T> extends AbstractIgnoringFutureHistoricalSlot {
         maxItems,
         Long.MAX_VALUE,
         __ -> 1L,
+        Optional.empty(),
         hashTreeRootFunction,
         requiredBlockRootsFunction,
         targetSlotFunction);
@@ -99,6 +101,7 @@ public class PendingPool<T> extends AbstractIgnoringFutureHistoricalSlot {
       final int maxItems,
       final long maxTotalWeight,
       final ToLongFunction<T> itemWeightFunction,
+      final Optional<SettableLabelledGauge> totalWeightGauge,
       final Function<T, Bytes32> hashTreeRootFunction,
       final Function<T, Collection<Bytes32>> requiredBlockRootsFunction,
       final Function<T, UInt64> targetSlotFunction) {
@@ -114,11 +117,13 @@ public class PendingPool<T> extends AbstractIgnoringFutureHistoricalSlot {
     this.requiredBlockRootsFunction = requiredBlockRootsFunction;
     this.targetSlotFunction = targetSlotFunction;
     this.sizeGauge = sizeGauge;
+    this.totalWeightGauge = totalWeightGauge;
     initMetricsLabel(); // Init the label so it appears in metrics immediately
   }
 
   public void initMetricsLabel() {
     sizeGauge.set(0, itemType);
+    totalWeightGauge.ifPresent(gauge -> gauge.set(0, itemType));
   }
 
   public synchronized void add(final T item) {
@@ -179,6 +184,7 @@ public class PendingPool<T> extends AbstractIgnoringFutureHistoricalSlot {
     pendingItems.put(itemRoot, item);
     pendingItemWeights.put(itemRoot, itemWeight);
     totalWeight += itemWeight;
+    updateTotalWeightGauge();
     orderedPendingItems.add(toSlotAndRoot(item));
     LOG.trace("Save unattached item at slot {} for future import: {}", slot, item);
     sizeGauge.set(pendingItems.size(), itemType);
@@ -204,6 +210,7 @@ public class PendingPool<T> extends AbstractIgnoringFutureHistoricalSlot {
     final Long removedWeight = pendingItemWeights.remove(itemRoot);
     if (removedWeight != null) {
       totalWeight -= removedWeight;
+      updateTotalWeightGauge();
     }
 
     final Collection<Bytes32> requiredRoots = requiredBlockRootsFunction.apply(removedItem);
@@ -358,6 +365,10 @@ public class PendingPool<T> extends AbstractIgnoringFutureHistoricalSlot {
     final UInt64 slot = targetSlotFunction.apply(item);
     final Bytes32 root = hashTreeRootFunction.apply(item);
     return new SlotAndRoot(slot, root);
+  }
+
+  private void updateTotalWeightGauge() {
+    totalWeightGauge.ifPresent(gauge -> gauge.set(totalWeight, itemType));
   }
 
   private long getItemWeight(final T item) {

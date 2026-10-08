@@ -65,6 +65,7 @@ import tech.pegasys.teku.statetransition.blobs.BlockEventsListenerRouter;
 import tech.pegasys.teku.statetransition.block.BlockImportChannel;
 import tech.pegasys.teku.statetransition.block.BlockImporter;
 import tech.pegasys.teku.statetransition.block.BlockManager;
+import tech.pegasys.teku.statetransition.block.FutureBlockPool;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
 import tech.pegasys.teku.statetransition.datacolumns.DasSamplerBasic;
 import tech.pegasys.teku.statetransition.datacolumns.DataAvailabilitySampler;
@@ -73,7 +74,6 @@ import tech.pegasys.teku.statetransition.execution.ReceivedExecutionPayloadEvent
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoice;
 import tech.pegasys.teku.statetransition.forkchoice.MergeTransitionBlockValidator;
 import tech.pegasys.teku.statetransition.forkchoice.NoopForkChoiceNotifier;
-import tech.pegasys.teku.statetransition.util.FutureItems;
 import tech.pegasys.teku.statetransition.util.PendingAttestationPool;
 import tech.pegasys.teku.statetransition.util.PendingBlockPool;
 import tech.pegasys.teku.statetransition.util.PendingPool;
@@ -164,8 +164,8 @@ public class SyncingNodeManager {
         pendingAttestationPool.getAttestationsWaitingForBlock();
     final PendingPool<PayloadAttestationMessage> pendingPayloadAttestations =
         poolFactory.createPendingPoolForPayloadAttestations(spec, 100);
-    final FutureItems<SignedBeaconBlock> futureBlocks =
-        FutureItems.create(SignedBeaconBlock::getSlot, mock(SettableLabelledGauge.class), "blocks");
+    final FutureBlockPool futureBlocks =
+        poolFactory.createFutureBlockPool(spec, mock(SettableLabelledGauge.class));
     final Map<Bytes32, BlockImportResult> invalidBlockRoots = LimitedMap.createSynchronizedLRU(500);
 
     final BlockImporter blockImporter =
