@@ -48,6 +48,8 @@ public class PayloadAttributesEvent extends Event<PayloadAttributesData> {
               "parent_beacon_block_root",
               BYTES32_TYPE,
               payloadAttributes -> payloadAttributes.parentBeaconBlockRoot)
+          .withOptionalField("slot_number", UINT64_TYPE, PayloadAttributes::slotNumber)
+          .withOptionalField("target_gas_limit", UINT64_TYPE, PayloadAttributes::targetGasLimit)
           .build();
 
   private static final SerializableTypeDefinition<PayloadAttributesEvent.Data> DATA_TYPE =
@@ -63,6 +65,12 @@ public class PayloadAttributesEvent extends Event<PayloadAttributesData> {
               "parent_block_hash",
               BYTES32_TYPE,
               PayloadAttributesEvent.Data::parentExecutionBlockHash)
+          .withOptionalField(
+              "safe_block_hash", BYTES32_TYPE, PayloadAttributesEvent.Data::safeExecutionBlockHash)
+          .withOptionalField(
+              "finalized_block_hash",
+              BYTES32_TYPE,
+              PayloadAttributesEvent.Data::finalizedExecutionBlockHash)
           .withField("proposer_index", UINT64_TYPE, data -> data.proposerIndex)
           .withField(
               "payload_attributes",
@@ -89,6 +97,8 @@ public class PayloadAttributesEvent extends Event<PayloadAttributesData> {
       Bytes32 parentBlockRoot,
       Optional<UInt64> parentExecutionBlockNumber,
       Bytes32 parentExecutionBlockHash,
+      Optional<Bytes32> safeExecutionBlockHash,
+      Optional<Bytes32> finalizedExecutionBlockHash,
       UInt64 proposerIndex,
       PayloadAttributes payloadAttributes) {}
 
@@ -97,26 +107,36 @@ public class PayloadAttributesEvent extends Event<PayloadAttributesData> {
       Bytes32 prevRandao,
       Eth1Address suggestedFeeRecipient,
       Optional<List<Withdrawal>> withdrawals,
-      Optional<Bytes32> parentBeaconBlockRoot) {}
+      Optional<Bytes32> parentBeaconBlockRoot,
+      Optional<UInt64> slotNumber,
+      Optional<UInt64> targetGasLimit) {}
 
   /**
    * @param forkChoiceState The fork choice state before sending the fCu so can use it to get
-   *     parent_block_number (pre-gloas) and parent_block_hash
+   *     parent_block_number (pre-gloas), parent_block_hash, and safe_block_hash and
+   *     finalized_block_hash (gloas onwards)
    */
   static PayloadAttributesEvent create(
       final SpecMilestone milestone,
       final PayloadBuildingAttributes payloadAttributes,
       final ForkChoiceState forkChoiceState) {
+    final boolean isGloasOrLater = milestone.isGreaterThanOrEqualTo(SpecMilestone.GLOAS);
     final PayloadAttributesData data =
         new PayloadAttributesData(
             milestone,
             new PayloadAttributesEvent.Data(
                 payloadAttributes.proposalSlot(),
                 payloadAttributes.parentBeaconBlock().blockRoot(),
-                milestone.isGreaterThanOrEqualTo(SpecMilestone.GLOAS)
+                isGloasOrLater
                     ? Optional.empty()
                     : Optional.of(forkChoiceState.headExecutionBlockNumber()),
                 forkChoiceState.headExecutionBlockHash(),
+                isGloasOrLater
+                    ? Optional.of(forkChoiceState.safeExecutionBlockHash())
+                    : Optional.empty(),
+                isGloasOrLater
+                    ? Optional.of(forkChoiceState.finalizedExecutionBlockHash())
+                    : Optional.empty(),
                 payloadAttributes.proposerIndex(),
                 // based on PayloadAttributesV<N> as defined by the execution-apis specification
                 new PayloadAttributes(
@@ -126,6 +146,12 @@ public class PayloadAttributesEvent extends Event<PayloadAttributesData> {
                     payloadAttributes.withdrawals(),
                     milestone.isGreaterThanOrEqualTo(SpecMilestone.DENEB)
                         ? Optional.of(payloadAttributes.parentBeaconBlock().blockRoot())
+                        : Optional.empty(),
+                    isGloasOrLater
+                        ? Optional.of(payloadAttributes.proposalSlot())
+                        : Optional.empty(),
+                    isGloasOrLater
+                        ? Optional.of(payloadAttributes.targetGasLimit())
                         : Optional.empty())));
     return new PayloadAttributesEvent(data);
   }

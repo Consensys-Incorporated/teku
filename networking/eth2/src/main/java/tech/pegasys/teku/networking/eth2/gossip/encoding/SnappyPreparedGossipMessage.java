@@ -43,7 +43,7 @@ class SnappyPreparedGossipMessage implements PreparedGossipMessage {
   private final Optional<UInt64> arrivalTimestamp;
 
   private final Supplier<DecodedMessageResult> decodedResult =
-      Suppliers.memoize(this::getDecodedMessage);
+      Suppliers.memoize(this::decodeMessage);
 
   static SnappyPreparedGossipMessage createUnknown(
       final String topic,
@@ -120,6 +120,10 @@ class SnappyPreparedGossipMessage implements PreparedGossipMessage {
 
   @Override
   public DecodedMessageResult getDecodedMessage() {
+    return decodedResult.get();
+  }
+
+  private DecodedMessageResult decodeMessage() {
     try {
       if (valueType == null) {
         return DecodedMessageResult.failed();
@@ -138,7 +142,7 @@ class SnappyPreparedGossipMessage implements PreparedGossipMessage {
   }
 
   private Optional<Bytes> getUncompressed() {
-    return decodedResult.get().getDecodedMessage();
+    return getDecodedMessage().getDecodedMessage();
   }
 
   private Bytes uncompressPayload(final long maxUncompressedLength) throws DecodingException {

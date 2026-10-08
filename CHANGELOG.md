@@ -9,6 +9,6 @@
 ### Breaking Changes
 
 ### Additions and Improvements
- - Lowered the memory limit for blocks waiting on a missing parent, and added the `beacon_pending_pool_bytes` metric reporting the size in bytes of blocks in each pending block pool.
+ - Scheduled Gloas fork for the HOODI network at epoch 132352, which is 26 Oct 2026 17:42:48 UTC.
 
 ### Bug Fixes
