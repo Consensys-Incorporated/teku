@@ -134,15 +134,32 @@ public class PeerManager implements ConnectionHandler {
   }
 
   public SafeFuture<Peer> connect(final MultiaddrPeerAddress peer, final Network network) {
-    return pendingConnections
-        .computeIfAbsent(peer.getId(), __ -> doConnect(peer, network))
-        .whenComplete((result, error) -> pendingConnections.remove(peer.getId()));
+    final SafeFuture<Peer> pendingConnection =
+        pendingConnections.computeIfAbsent(peer.getId(), __ -> doConnect(peer, network));
+    // Remove only our own attempt: a later caller may have already started a new one
+    return pendingConnection.whenComplete(
+        (result, error) -> pendingConnections.remove(peer.getId(), pendingConnection));
   }
 
   private SafeFuture<Peer> doConnect(final MultiaddrPeerAddress peer, final Network network) {
     LOG.debug("Connecting to {}", peer);
 
     return SafeFuture.of(() -> network.connect(peer.getMultiaddr()))
+        .exceptionallyCompose(
+            error ->
+                peer.getFallbackMultiaddr()
+                    // A duplicate connection means the peer is already connected, nothing to retry
+                    .filter(__ -> !isPeerAlreadyConnected(error))
+                    .map(
+                        fallbackMultiaddr -> {
+                          LOG.debug(
+                              "Failed to connect to {} ({}), retrying via {}",
+                              peer,
+                              Throwables.getRootCause(error).getMessage(),
+                              fallbackMultiaddr);
+                          return SafeFuture.of(() -> network.connect(fallbackMultiaddr));
+                        })
+                    .orElseGet(() -> SafeFuture.failedFuture(error)))
         .thenApply(
             connection -> {
               final LibP2PNodeId nodeId =
@@ -169,10 +186,14 @@ public class PeerManager implements ConnectionHandler {
   }
 
   private CompletionStage<Peer> handleConcurrentConnectionInitiation(final Throwable error) {
-    final Throwable rootCause = Throwables.getRootCause(error);
-    return rootCause instanceof PeerAlreadyConnectedException
-        ? SafeFuture.completedFuture(((PeerAlreadyConnectedException) rootCause).getPeer())
+    return isPeerAlreadyConnected(error)
+        ? SafeFuture.completedFuture(
+            ((PeerAlreadyConnectedException) Throwables.getRootCause(error)).getPeer())
         : SafeFuture.failedFuture(error);
+  }
+
+  private static boolean isPeerAlreadyConnected(final Throwable error) {
+    return Throwables.getRootCause(error) instanceof PeerAlreadyConnectedException;
   }
 
   public Optional<Peer> getPeer(final NodeId id) {

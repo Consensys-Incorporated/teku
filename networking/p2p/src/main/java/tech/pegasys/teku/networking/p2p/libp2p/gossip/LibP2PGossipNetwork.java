@@ -77,7 +77,7 @@ public class LibP2PGossipNetwork implements GossipNetwork {
     final Topic libP2PTopic = new Topic(topic);
     final GossipHandler gossipHandler =
         new GossipHandler(metricsSystem, libP2PTopic, publisher, topicHandler);
-    PubsubSubscription subscription = gossip.subscribe(gossipHandler, libP2PTopic);
+    final PubsubSubscription subscription = gossip.subscribe(gossipHandler, libP2PTopic);
     return new LibP2PTopicChannel(gossipHandler, subscription);
   }
 

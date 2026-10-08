@@ -51,17 +51,11 @@ public class SszGenericProgressiveListTestExecutor extends AbstractSszGenericTes
 
   @Override
   protected String parseString(final TestDefinition testDefinition, final String value) {
-    switch (getElementType(testDefinition)) {
-      case "uint8" -> {
-        return Byte.toString((byte) Integer.parseUnsignedInt(value));
-      }
-      case "uint256" -> {
-        return UInt256.valueOf(new BigInteger(value)).toString();
-      }
-      default -> {
-        return value;
-      }
-    }
+    return switch (getElementType(testDefinition)) {
+      case "uint8" -> Byte.toString((byte) Integer.parseUnsignedInt(value));
+      case "uint256" -> UInt256.valueOf(new BigInteger(value)).toString();
+      default -> value;
+    };
   }
 
   // proglist_{element_type}_{mode}_{index}

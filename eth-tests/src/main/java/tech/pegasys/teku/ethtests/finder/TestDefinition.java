@@ -94,7 +94,7 @@ public class TestDefinition {
     final Eth2Network network =
         switch (configName) {
           case TestSpecConfig.MAINNET -> Eth2Network.MAINNET;
-          case TestSpecConfig.MINIMAL -> Eth2Network.MINIMAL;
+          case TestSpecConfig.MINIMAL, "fork-choice-compliance" -> Eth2Network.MINIMAL;
           default -> throw new IllegalArgumentException("Unknown configName: " + configName);
         };
     final SpecMilestone milestone = getMilestone();
@@ -139,13 +139,21 @@ public class TestDefinition {
 
   public Path getTestDirectory() {
     Path directory = ReferenceTestRoot.fromSystemProperties().getSpecDirectory(configName);
-    if (!fork.isEmpty()) {
-      directory = directory.resolve(fork);
+    if (configName.equals("fork-choice-compliance")) {
+      return directory
+          .resolve("tests")
+          .resolve("minimal")
+          .resolve(fork)
+          .resolve(pathFromPhaseTestDir);
+    } else {
+      if (!fork.isEmpty()) {
+        directory = directory.resolve(fork);
+      }
+      if (!pathFromPhaseTestDir.isEmpty()) {
+        directory = directory.resolve(pathFromPhaseTestDir);
+      }
+      return directory;
     }
-    if (!pathFromPhaseTestDir.isEmpty()) {
-      directory = directory.resolve(pathFromPhaseTestDir);
-    }
-    return directory;
   }
 
   /// some reference tests ship a partial `config.yaml` overriding a handful of constants on top of

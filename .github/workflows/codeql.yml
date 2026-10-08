@@ -45,7 +45,9 @@ on:
 jobs:
   analyze:
     name: Analyze
-    runs-on: ubuntu-latest
+    # Compiling under the CodeQL tracer is the slow part (18 of the 21 minutes on a 4-cpu
+    # runner), so use the same 32-cpu runner as assemble.
+    runs-on: ubuntu-latest-128
     permissions:
       actions: read
       contents: read
@@ -64,11 +66,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Set up Java
-        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
-        with:
-          distribution: temurin
-          java-version: 25
+      # JDK 25 plus the shared read-only Gradle home cache, so dependencies are not re-downloaded
+      - name: Prepare
+        uses: ./.github/actions/prepare
 
       # Initializes the CodeQL tools for scanning.
       # 4
@@ -76,6 +76,7 @@ jobs:
         uses: github/codeql-action/init@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4
         with:
           languages: ${{ matrix.language }}
+          build-mode: manual
           # If you wish to specify custom queries, you can do so here or in a config file.
           # By default, queries listed here will override any specified in a config file.
           # Prefix the list here with "+" to use these queries and those in the config file.
@@ -83,21 +84,16 @@ jobs:
           # For more details on CodeQL's query packs, refer to: https://docs.github.com/en/code-security/code-scanning/automatically-scanning-your-code-for-vulnerabilities-and-errors/configuring-code-scanning#using-queries-in-ql-packs
           queries: security-extended,security-and-quality
 
+      # autobuild ran Gradle's default build, which also compiled every test, test fixture, JMH
+      # and generated reference test source set under the tracer. Only production code needs
+      # analysing, so compile just that. --no-daemon keeps javac inside the traced process tree,
+      # and --no-build-cache makes javac actually run: with the shared Gradle home restored every
+      # compileJava comes FROM-CACHE, the tracer sees nothing and database finalize fails.
+      - name: Compile production sources
+        shell: bash
+        run: |
+          ./gradlew --no-daemon --no-build-cache compileJava
 
-      # Autobuild attempts to build any compiled languages (C/C++, C#, Go, Java, or Swift).
-      # If this step fails, then you should remove it and run the build manually (see below)
-      # 4
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4
-      # ℹ️ Command-line programs to run using the OS shell.
-      # 📚 See https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idstepsrun
-
-      #   If the Autobuild fails above, remove it and uncomment the following three lines.
-      #   modify them (or add more) to build your code if your project, please refer to the EXAMPLE below for guidance.
-
-      # - run: |
-      #     echo "Run, Build Application using script"
-      #     ./location_of_script_within_repo/buildscript.sh
       # 4
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4

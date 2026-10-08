@@ -51,8 +51,9 @@ public class ExecutionPayloadGossipValidator {
   private final BlockGossipValidator blockGossipValidator;
   private final SigningRootUtil signingRootUtil;
 
+  // isPayloadSeen iterates while envelope validation may add entries
   private final Set<BlockRootAndBuilderIndex> seenPayloads =
-      LimitedSet.createSynchronizedLRU(VALID_EXECUTION_PAYLOAD_SET_SIZE);
+      LimitedSet.createSynchronizedIterable(VALID_EXECUTION_PAYLOAD_SET_SIZE);
 
   private final Map<Bytes32, BlockImportResult> invalidBlockRoots;
 

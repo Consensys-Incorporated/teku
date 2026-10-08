@@ -19,6 +19,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -234,6 +235,127 @@ public class PeerManagerTest {
 
     verify(reputationManager).reportInitiatedConnectionSuccessful(peerAddress);
     verify(reputationManager, never()).reportInitiatedConnectionFailed(peerAddress);
+  }
+
+  @Test
+  public void shouldDialFallbackAddressWhenPrimaryDialFails() {
+    final Connection connection = mock(Connection.class);
+    final Session secureSession =
+        new Session(
+            PeerId.random(), PeerId.random(), EcdsaKt.generateEcdsaKeyPair().component2(), null);
+    when(connection.secureSession()).thenReturn(secureSession);
+    when(connection.closeFuture()).thenReturn(new SafeFuture<>());
+    final Multiaddr quicMultiaddr = Multiaddr.fromString("/ip4/127.0.0.1/udp/9000/quic-v1");
+    final Multiaddr tcpMultiaddr = Multiaddr.fromString("/ip4/127.0.0.1/tcp/9000");
+    final MultiaddrPeerAddress peerAddress =
+        new MultiaddrPeerAddress(new MockNodeId(1), quicMultiaddr, Optional.of(tcpMultiaddr));
+    when(network.connect(quicMultiaddr))
+        .thenReturn(CompletableFuture.failedFuture(new RuntimeException("QUIC unreachable")));
+    final SafeFuture<Connection> tcpConnectionFuture = new SafeFuture<>();
+    when(network.connect(tcpMultiaddr)).thenReturn(tcpConnectionFuture);
+
+    final SafeFuture<Peer> result = peerManager.connect(peerAddress, network);
+    verify(network).connect(tcpMultiaddr);
+    peerManager.handleConnection(connection);
+    tcpConnectionFuture.complete(connection);
+    assertThat(result).isCompleted();
+
+    verify(reputationManager).reportInitiatedConnectionSuccessful(peerAddress);
+    verify(reputationManager, never()).reportInitiatedConnectionFailed(peerAddress);
+  }
+
+  @Test
+  public void shouldNotDialFallbackAddressWhilePrimaryDialIsPendingOrSucceeds() {
+    final Connection connection = mock(Connection.class);
+    final Session secureSession =
+        new Session(
+            PeerId.random(), PeerId.random(), EcdsaKt.generateEcdsaKeyPair().component2(), null);
+    when(connection.secureSession()).thenReturn(secureSession);
+    when(connection.closeFuture()).thenReturn(new SafeFuture<>());
+    final Multiaddr quicMultiaddr = Multiaddr.fromString("/ip4/127.0.0.1/udp/9000/quic-v1");
+    final Multiaddr tcpMultiaddr = Multiaddr.fromString("/ip4/127.0.0.1/tcp/9000");
+    final MultiaddrPeerAddress peerAddress =
+        new MultiaddrPeerAddress(new MockNodeId(1), quicMultiaddr, Optional.of(tcpMultiaddr));
+    final SafeFuture<Connection> quicConnectionFuture = new SafeFuture<>();
+    when(network.connect(quicMultiaddr)).thenReturn(quicConnectionFuture);
+
+    final SafeFuture<Peer> result = peerManager.connect(peerAddress, network);
+    assertThat(result).isNotDone();
+    verify(network, never()).connect(tcpMultiaddr);
+
+    peerManager.handleConnection(connection);
+    quicConnectionFuture.complete(connection);
+    assertThat(result).isCompleted();
+    verify(network, never()).connect(tcpMultiaddr);
+    verify(reputationManager).reportInitiatedConnectionSuccessful(peerAddress);
+  }
+
+  @Test
+  public void shouldNotDialFallbackAddressWhenPeerIsAlreadyConnected() {
+    final Peer existingPeer = mock(Peer.class);
+    when(existingPeer.getId()).thenReturn(new MockNodeId(1));
+    final Multiaddr quicMultiaddr = Multiaddr.fromString("/ip4/127.0.0.1/udp/9000/quic-v1");
+    final Multiaddr tcpMultiaddr = Multiaddr.fromString("/ip4/127.0.0.1/tcp/9000");
+    final MultiaddrPeerAddress peerAddress =
+        new MultiaddrPeerAddress(new MockNodeId(1), quicMultiaddr, Optional.of(tcpMultiaddr));
+    final RuntimeException error =
+        new RuntimeException(new PeerAlreadyConnectedException(existingPeer));
+    when(network.connect(quicMultiaddr)).thenReturn(CompletableFuture.failedFuture(error));
+
+    final SafeFuture<Peer> result = peerManager.connect(peerAddress, network);
+    assertThat(result).isCompletedWithValue(existingPeer);
+
+    verify(network, never()).connect(tcpMultiaddr);
+    verify(reputationManager, never()).reportInitiatedConnectionFailed(peerAddress);
+  }
+
+  @Test
+  public void shouldReportFailureWhenPrimaryAndFallbackDialsFail() {
+    final Multiaddr quicMultiaddr = Multiaddr.fromString("/ip4/127.0.0.1/udp/9000/quic-v1");
+    final Multiaddr tcpMultiaddr = Multiaddr.fromString("/ip4/127.0.0.1/tcp/9000");
+    final MultiaddrPeerAddress peerAddress =
+        new MultiaddrPeerAddress(new MockNodeId(1), quicMultiaddr, Optional.of(tcpMultiaddr));
+    when(network.connect(quicMultiaddr))
+        .thenReturn(CompletableFuture.failedFuture(new RuntimeException("QUIC unreachable")));
+    when(network.connect(tcpMultiaddr))
+        .thenReturn(CompletableFuture.failedFuture(new RuntimeException("TCP unreachable")));
+
+    final SafeFuture<Peer> result = peerManager.connect(peerAddress, network);
+    assertThat(result).isCompletedExceptionally();
+
+    verify(network).connect(quicMultiaddr);
+    verify(network).connect(tcpMultiaddr);
+    verify(reputationManager).reportInitiatedConnectionFailed(peerAddress);
+    verify(reputationManager, never()).reportInitiatedConnectionSuccessful(peerAddress);
+  }
+
+  @Test
+  public void connect_shouldNotDropNewPendingConnectionWhenPreviousAttemptCompletes() {
+    final Multiaddr multiaddr = Multiaddr.fromString("/ip4/127.0.0.1/tcp/9000");
+    final MultiaddrPeerAddress peerAddress = new MultiaddrPeerAddress(new MockNodeId(1), multiaddr);
+    final SafeFuture<Connection> firstDial = new SafeFuture<>();
+    final SafeFuture<Connection> secondDial = new SafeFuture<>();
+    when(network.connect(multiaddr)).thenReturn(firstDial).thenReturn(secondDial);
+
+    // Two callers share the first pending attempt, each registering its own cleanup
+    final SafeFuture<Peer> firstCaller = peerManager.connect(peerAddress, network);
+    final SafeFuture<Peer> secondCaller = peerManager.connect(peerAddress, network);
+    // A new attempt starts as soon as the second caller observes the failure, i.e. after the
+    // second caller's cleanup ran but before the first caller's cleanup runs
+    final List<SafeFuture<Peer>> laterCallers = new ArrayList<>();
+    final SafeFuture<Void> thirdCaller =
+        secondCaller
+            .exceptionally(__ -> null)
+            .thenRun(() -> laterCallers.add(peerManager.connect(peerAddress, network)));
+
+    firstDial.completeExceptionally(new RuntimeException("Nope"));
+    assertThat(firstCaller).isCompletedExceptionally();
+    assertThat(thirdCaller).isCompleted();
+
+    // The new attempt must still be pending, so another caller joins it instead of dialing again
+    laterCallers.add(peerManager.connect(peerAddress, network));
+    verify(network, times(2)).connect(multiaddr);
+    assertThat(laterCallers).allMatch(future -> !future.isDone());
   }
 
   @Test

@@ -135,7 +135,7 @@ public class DataColumnReqRespBatchingImpl implements DataColumnReqResp {
     byRootStream.consume(createResponseHandler(nodeRequests));
   }
 
-  int getMaxBlobsForRequests(final List<RequestEntry> nodeRequests) {
+  private int getMaxBlobsForRequests(final List<RequestEntry> nodeRequests) {
     final UInt64 lastSlot = nodeRequests.getLast().columnIdentifier.slot();
     final Optional<Integer> maybeMaxBlobs = spec.getMaxBlobsPerBlockAtSlot(lastSlot);
     return maybeMaxBlobs.orElseGet(

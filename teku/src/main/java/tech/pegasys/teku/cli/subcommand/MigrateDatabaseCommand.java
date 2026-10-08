@@ -194,7 +194,7 @@ public class MigrateDatabaseCommand implements Runnable {
 
   private boolean confirmYes(final String question) {
     SUB_COMMAND_LOG.display(question);
-    Scanner scanner = new Scanner(System.in, Charset.defaultCharset().name());
+    final Scanner scanner = new Scanner(System.in, Charset.defaultCharset());
     final String confirmation = scanner.next();
     return confirmation.equalsIgnoreCase("yes");
   }

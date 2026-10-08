@@ -23,6 +23,11 @@ public enum TekuMetricCategory implements MetricCategory {
   EVENTBUS("eventbus"),
   EXECUTOR("executor"),
   LIBP2P("libp2p"),
+  /**
+   * Experimental gossipsub router internals. Deliberately absent from {@link #defaultCategories()}.
+   * Eventually will be promoted to "regular" LIBP2P.
+   */
+  LIBP2P_GOSSIP("libp2p_gossip"),
   NETWORK("network"),
   STORAGE("storage"),
   STORAGE_HOT_DB("storage_hot"),

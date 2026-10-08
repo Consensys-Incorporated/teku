@@ -51,7 +51,10 @@ public class AttesterSlashingGossipManager extends AbstractGossipManager<Atteste
             .getSchemaDefinitions()
             .getAttesterSlashingSchema(),
         message -> Optional.of(message.getAttestation1().getData().getSlot()),
-        message -> spec.computeEpochAtSlot(message.getAttestation1().getData().getSlot()),
+        // A validator stays slashable however old the offence is, so slashings are always
+        // considered to match the fork of the topic they arrived on (ie disable fork checking at
+        // this level)
+        message -> forkInfo.getFork().getEpoch(),
         spec.getNetworkingConfig(),
         GossipFailureLogger.createNonSuppressing(GossipTopicName.ATTESTER_SLASHING.toString()),
         debugDataDumper);

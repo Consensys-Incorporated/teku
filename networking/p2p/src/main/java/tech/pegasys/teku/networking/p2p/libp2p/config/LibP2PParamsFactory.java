@@ -38,6 +38,11 @@ public class LibP2PParamsFactory {
   private static final int MAX_TOPICS_PER_PUBLISHED_MESSAGE = 1;
   private static final int MAX_IHAVE_MESSAGE_IDS = 5000;
   private static final int MAX_IDONTWANT_MESSAGE_IDS = 5000;
+  // Inbound protobuf field-count budget, backstopping the 256 KiB control-byte budget against
+  // empty-envelope allocation amplification. Half the jvm-libp2p default: real Ethereum shapes
+  // hit the byte budget first (<= ~27k fields), and the outbound IHAVE estimate (4 fields per
+  // id) keeps an all-subnets heartbeat (~5.5k ids) in one RPC. Lower values split it.
+  private static final int MAX_TOTAL_FIELDS = 32768;
 
   public static GossipParams createGossipParams(
       final GossipConfig gossipConfig, final NetworkingSpecConfig networkingSpecConfig) {
@@ -93,7 +98,8 @@ public class LibP2PParamsFactory {
         .maxPeersSentInPruneMsg(0)
         .maxPeersAcceptedInPruneMsg(0)
         .maxIHaveLength(MAX_IHAVE_MESSAGE_IDS)
-        .maxIDontWantMessageIds(MAX_IDONTWANT_MESSAGE_IDS);
+        .maxIDontWantMessageIds(MAX_IDONTWANT_MESSAGE_IDS)
+        .maxTotalFields(MAX_TOTAL_FIELDS);
   }
 
   public static GossipScoreParams createGossipScoreParams(final GossipScoringConfig config) {

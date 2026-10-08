@@ -39,6 +39,7 @@ public interface OpenApiTypeDefinition {
     return Stream.concat(Stream.of(this), getReferencedTypeDefinitions().stream()).collect(toSet());
   }
 
+  @SuppressWarnings("ReferenceEquality")
   default boolean isEquivalentToDeserializableType(final DeserializableTypeDefinition<?> type) {
     return this == type;
   }

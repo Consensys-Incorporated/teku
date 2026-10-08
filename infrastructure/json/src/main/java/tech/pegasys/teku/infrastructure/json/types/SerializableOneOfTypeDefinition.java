@@ -54,7 +54,7 @@ public class SerializableOneOfTypeDefinition<TObject>
   }
 
   @Override
-  @SuppressWarnings("ReferenceComparison")
+  @SuppressWarnings({"ReferenceComparison", "ReferenceEquality"})
   public boolean isEquivalentToDeserializableType(final DeserializableTypeDefinition<?> type) {
     for (SerializableTypeDefinition<?> current : types.values()) {
       if (current == type) {

@@ -407,10 +407,8 @@ public class SimpleSidecarRetriever
 
     // Preferring peers with the best response rate, then preferring less busy peers among equals
     final Comparator<ConnectedPeer> comparator =
-        Comparator.comparing(ConnectedPeer::getResponseScore)
-            .thenComparing(
-                (ConnectedPeer peer) ->
-                    ongoingRequestsTracker.getAvailableRequestCount(peer.nodeId));
+        Comparator.comparingInt(ConnectedPeer::getResponseScore)
+            .thenComparingInt(peer -> ongoingRequestsTracker.getAvailableRequestCount(peer.nodeId));
     return matchingPeers.max(comparator);
   }
 

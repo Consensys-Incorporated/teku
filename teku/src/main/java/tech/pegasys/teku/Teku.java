@@ -63,14 +63,13 @@ public final class Teku {
   }
 
   private static Node start(final TekuConfiguration config, final NodeMode nodeMode) {
-    final Node node;
-
-    switch (nodeMode) {
-      case BOOTNODE_ONLY -> node = new Bootnode(config);
-      case VC_ONLY -> node = new ValidatorNode(config);
-      case COMBINED -> node = new BeaconNode(config);
-      default -> throw new IllegalStateException("Expected node mode to be set");
-    }
+    final Node node =
+        switch (nodeMode) {
+          case BOOTNODE_ONLY -> new Bootnode(config);
+          case VC_ONLY -> new ValidatorNode(config);
+          case COMBINED -> new BeaconNode(config);
+          default -> throw new IllegalStateException("Expected node mode to be set");
+        };
 
     // Check that BLS is available before starting to ensure we get a nice error message if it's not
     if (BlstLoader.INSTANCE.isEmpty()) {
@@ -105,7 +104,7 @@ public final class Teku {
     return (ValidatorNode) start(config, NodeMode.VC_ONLY);
   }
 
-  private static class CLIException extends RuntimeException {
+  static class CLIException extends RuntimeException {
     private final int resultCode;
 
     public CLIException(final int resultCode) {

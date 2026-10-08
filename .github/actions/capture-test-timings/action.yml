@@ -51,7 +51,8 @@ runs:
                 root = ET.parse(report).getroot()
             except ET.ParseError:
                 continue
-            for testcase in root.findall("testcase"):
+            # Shards upload one merged <testsuites> file (merge-junit-xml), so testcases are nested
+            for testcase in root.iter("testcase"):
                 classname = testcase.get("classname")
                 if not classname:
                     continue

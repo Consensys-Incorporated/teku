@@ -14,23 +14,31 @@
 package tech.pegasys.teku.validator.remote.typedef.handlers;
 
 import static java.util.Collections.emptyMap;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
 import static tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition.listOf;
 import static tech.pegasys.teku.validator.remote.apiclient.ValidatorApiMethod.SEND_PAYLOAD_ATTESTATION_MESSAGES;
 import static tech.pegasys.teku.validator.remote.typedef.FailureListResponse.getFailureListResponseResponseHandler;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.validator.api.SubmitDataError;
 import tech.pegasys.teku.validator.remote.typedef.FailureListResponse;
 
 public class SendPayloadAttestationMessagesRequest extends AbstractTypeDefRequest {
+  private final Spec spec;
+
   public SendPayloadAttestationMessagesRequest(
-      final HttpUrl baseEndpoint, final OkHttpClient okHttpClient) {
+      final Spec spec, final HttpUrl baseEndpoint, final OkHttpClient okHttpClient) {
     super(baseEndpoint, okHttpClient);
+    this.spec = spec;
   }
 
   public List<SubmitDataError> submit(
@@ -38,11 +46,15 @@ public class SendPayloadAttestationMessagesRequest extends AbstractTypeDefReques
     if (payloadAttestationMessages.isEmpty()) {
       return Collections.emptyList();
     }
+    final UInt64 slot = payloadAttestationMessages.getFirst().getData().getSlot();
+    final SpecMilestone milestone = spec.atSlot(slot).getMilestone();
     final DeserializableTypeDefinition<PayloadAttestationMessage> jsonTypeDefinition =
         payloadAttestationMessages.getFirst().getSchema().getJsonTypeDefinition();
     return postJson(
             SEND_PAYLOAD_ATTESTATION_MESSAGES,
             emptyMap(),
+            emptyMap(),
+            Map.of(HEADER_CONSENSUS_VERSION, milestone.lowerCaseName()),
             payloadAttestationMessages,
             listOf(jsonTypeDefinition),
             getFailureListResponseResponseHandler())

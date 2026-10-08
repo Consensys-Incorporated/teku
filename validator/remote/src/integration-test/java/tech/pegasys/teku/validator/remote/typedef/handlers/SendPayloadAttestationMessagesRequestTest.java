@@ -27,6 +27,7 @@ import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import tech.pegasys.teku.api.exceptions.RemoteServiceNotAvailableException;
+import tech.pegasys.teku.infrastructure.http.RestApiConstants;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
 import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -45,7 +46,7 @@ public class SendPayloadAttestationMessagesRequestTest extends AbstractTypeDefRe
 
   @BeforeEach
   public void setup() {
-    request = new SendPayloadAttestationMessagesRequest(mockWebServer.url("/"), okHttpClient);
+    request = new SendPayloadAttestationMessagesRequest(spec, mockWebServer.url("/"), okHttpClient);
     payloadAttestationMessages = List.of(dataStructureUtil.randomPayloadAttestationMessage());
   }
 
@@ -64,6 +65,8 @@ public class SendPayloadAttestationMessagesRequestTest extends AbstractTypeDefRe
     assertThat(recordedRequest.getMethod()).isEqualTo("POST");
     assertThat(recordedRequest.getPath())
         .contains(ValidatorApiMethod.SEND_PAYLOAD_ATTESTATION_MESSAGES.getPath(emptyMap()));
+    assertThat(recordedRequest.getHeader(RestApiConstants.HEADER_CONSENSUS_VERSION))
+        .isEqualTo(specMilestone.lowerCaseName());
   }
 
   @TestTemplate

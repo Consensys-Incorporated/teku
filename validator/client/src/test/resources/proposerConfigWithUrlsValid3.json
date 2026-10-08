@@ -1,0 +1,31 @@
+{
+  "proposer_config": {
+    "0xa057816155ad77931185101128655c0191bd0214c201ca48ed887f6c4c6adf334070efcd75140eada5ac83a92506dd7a": {
+      "fee_recipient": "0x50155530FCE8a85ec7055A5F8b2bE214B3DaeFd3",
+      "builder": {
+        "enabled": true,
+        "urls": {
+          "https://builder-a.example.com": {
+            "auth_data": "0x68747470733a2f2f6275696c6465722d612e6578616d706c652e636f6d",
+            "builder_pubkeys": [
+              "0x93247f2209abcacf57b75a51dafae777f9dd38bc7053d1af526f220a7489a6d3a2753e5f3e8b1cfe39b56f43611df74a",
+              "0xa057816155ad77931185101128655c0191bd0214c201ca48ed887f6c4c6adf334070efcd75140eada5ac83a92506dd7a"
+            ],
+            "min_bid": "2000000000",
+            "builder_boost_factor": "110",
+            "max_execution_payment": "250000000"
+          },
+          "https://builder-b.example.com": {
+            "builder_boost_factor": "80"
+          }
+        }
+      }
+    }
+  },
+  "default_config": {
+    "fee_recipient": "0x6e35733c5af9B61374A128e6F85f553aF09ff89A",
+    "builder": {
+      "enabled": true
+    }
+  }
+}

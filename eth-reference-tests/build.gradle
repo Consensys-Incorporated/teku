@@ -8,6 +8,7 @@ configurations {
 dependencies {
 	refTestGenerator project(':eth-tests')
 
+	referenceTestImplementation 'com.google.errorprone:error_prone_annotations'
 	referenceTestImplementation project(':beacon:validator')
 	referenceTestImplementation project(':ethereum:networks')
 	referenceTestImplementation project(':ethereum:spec')
@@ -69,6 +70,12 @@ def convertRefTestOptions = [
 		'--add-prefix',
 		'slashing-protection-interchange/'
 	],
+	'fork-choice-compliance': [
+		'--include',
+		'tests/.+/fork_choice_compliance/.*',
+		'--add-prefix',
+		'fork-choice-compliance/'
+	]
 ]
 def convertRefTestDownloadTasks = [
 	general: ':downloadEthRefTests',
@@ -76,6 +83,7 @@ def convertRefTestDownloadTasks = [
 	mainnet: ':downloadEthRefTests',
 	bls: ':downloadBlsRefTests',
 	'slashing-protection-interchange': ':downloadSlashingProtectionInterchangeRefTests',
+	'fork-choice-compliance': ':downloadCompTests',
 ]
 def convertRefTestTasks = rootProject.ext.refTestTarballs.collect { config, tarball ->
 	def taskSuffix = config.split('-').collect { it.capitalize() }.join()

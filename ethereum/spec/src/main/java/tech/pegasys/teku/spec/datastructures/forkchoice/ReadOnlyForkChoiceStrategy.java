@@ -96,6 +96,17 @@ public interface ReadOnlyForkChoiceStrategy {
 
   List<ProtoNodeData> getBlockData();
 
+  /**
+   * Returns the data for every fork choice node, each paired with the data of its parent fork
+   * choice node when the parent is retained. Implementations that don't track parent nodes report
+   * no parent.
+   */
+  default List<ProtoNodeDataWithParent> getBlockDataWithParent() {
+    return getBlockData().stream()
+        .map(node -> new ProtoNodeDataWithParent(node, Optional.empty()))
+        .toList();
+  }
+
   boolean contains(Bytes32 blockRoot);
 
   Optional<Boolean> isOptimistic(Bytes32 blockRoot);

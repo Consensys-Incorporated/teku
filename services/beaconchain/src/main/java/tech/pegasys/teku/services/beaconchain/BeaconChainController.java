@@ -173,6 +173,7 @@ import tech.pegasys.teku.statetransition.block.BlockImportMetrics;
 import tech.pegasys.teku.statetransition.block.BlockImporter;
 import tech.pegasys.teku.statetransition.block.BlockManager;
 import tech.pegasys.teku.statetransition.block.FailedExecutionPool;
+import tech.pegasys.teku.statetransition.block.FutureBlockPool;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
 import tech.pegasys.teku.statetransition.datacolumns.BlobKzgCommitmentsProvider;
 import tech.pegasys.teku.statetransition.datacolumns.CanonicalBlockResolver;
@@ -1052,7 +1053,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
               poolFactory.createPendingPoolForExecutionPayloadBids(spec),
               builderBidFetcher,
               executionPayloadBidSelector,
-              recentChainData::getForkChoiceStrategy);
+              recentChainData::getForkChoiceStrategy,
+              beaconConfig.executionLayerConfig().getConsiderP2PBidsDuringBlockProduction());
       proposerPreferencesManager.subscribeOperationAdded(defaultExecutionPayloadBidManager);
       eventChannels.subscribe(SlotEventsChannel.class, defaultExecutionPayloadBidManager);
       eventChannels.subscribe(ReceivedBlockEventsChannel.class, defaultExecutionPayloadBidManager);
@@ -2435,8 +2437,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
 
   public void initBlockManager() {
     LOG.debug("BeaconChainController.initBlockManager()");
-    final FutureItems<SignedBeaconBlock> futureBlocks =
-        FutureItems.create(SignedBeaconBlock::getSlot, futureItemsMetric, "blocks");
+    final FutureBlockPool futureBlocks = poolFactory.createFutureBlockPool(spec, futureItemsMetric);
     blockGossipValidator =
         new BlockGossipValidator(spec, gossipValidationHelper, receivedBlockEventsChannelPublisher);
     final BlockValidator blockValidator = new BlockValidator(blockGossipValidator);

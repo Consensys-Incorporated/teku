@@ -22,6 +22,7 @@ import com.fasterxml.jackson.databind.module.SimpleModule;
 import java.io.IOException;
 import java.net.URL;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes48;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.exceptions.ExceptionUtil;
@@ -43,6 +44,7 @@ public class ProposerConfigLoader {
     module.addDeserializer(BLSPublicKey.class, new BLSPublicKeyDeserializer());
     module.addSerializer(BLSPublicKey.class, new BLSPublicKeySerializer());
     module.addKeyDeserializer(Bytes48.class, new Bytes48KeyDeserializer());
+    module.addDeserializer(Bytes.class, new BytesDeserializer());
 
     objectMapper.registerModule(module);
   }

@@ -1,4 +1,5 @@
 dependencies {
+	implementation 'com.google.errorprone:error_prone_annotations'
 	implementation project(':ethereum:statetransition')
 	implementation project(':ethereum:spec')
 	implementation testFixtures(project(':ethereum:spec'))

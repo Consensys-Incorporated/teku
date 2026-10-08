@@ -36,6 +36,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeDataWithParent;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.spec.datastructures.forkchoice.SlotAndForkChoiceNode;
@@ -799,6 +800,24 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
     protoArrayLock.readLock().lock();
     try {
       return protoArray.getNodes().stream().map(ProtoNode::getBlockData).toList();
+    } finally {
+      protoArrayLock.readLock().unlock();
+    }
+  }
+
+  @Override
+  public List<ProtoNodeDataWithParent> getBlockDataWithParent() {
+    protoArrayLock.readLock().lock();
+    try {
+      return protoArray.getNodes().stream()
+          .map(
+              node ->
+                  new ProtoNodeDataWithParent(
+                      node.getBlockData(),
+                      node.getParentIndex()
+                          .map(protoArray::getNodeByIndex)
+                          .map(ProtoNode::getBlockData)))
+          .toList();
     } finally {
       protoArrayLock.readLock().unlock();
     }
