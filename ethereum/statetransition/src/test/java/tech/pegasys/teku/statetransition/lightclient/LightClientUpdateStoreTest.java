@@ -376,11 +376,14 @@ public class LightClientUpdateStoreTest {
         dataStructureUtil.randomLightClientFinalityUpdate(
             periodOneStartSlot().increment(), periodOneStartSlot());
 
-    store.addFinalityUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
-    store.addFinalityUpdate(newer, dataStructureUtil.randomBytes32(), CANONICAL);
+    assertThat(store.addFinalityUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL))
+        .isTrue();
+    assertThat(store.addFinalityUpdate(newer, dataStructureUtil.randomBytes32(), CANONICAL))
+        .isTrue();
     assertThat(store.getLatestFinalityUpdate()).contains(newer);
 
-    store.addFinalityUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
+    assertThat(store.addFinalityUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL))
+        .isFalse();
     assertThat(store.getLatestFinalityUpdate()).contains(newer);
   }
 
@@ -418,11 +421,14 @@ public class LightClientUpdateStoreTest {
     final LightClientOptimisticUpdate newer =
         dataStructureUtil.randomLightClientOptimisticUpdate(periodOneStartSlot().increment());
 
-    store.addOptimisticUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
-    store.addOptimisticUpdate(newer, dataStructureUtil.randomBytes32(), CANONICAL);
+    assertThat(store.addOptimisticUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL))
+        .isTrue();
+    assertThat(store.addOptimisticUpdate(newer, dataStructureUtil.randomBytes32(), CANONICAL))
+        .isTrue();
     assertThat(store.getLatestOptimisticUpdate()).contains(newer);
 
-    store.addOptimisticUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
+    assertThat(store.addOptimisticUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL))
+        .isFalse();
     assertThat(store.getLatestOptimisticUpdate()).contains(newer);
   }
 
