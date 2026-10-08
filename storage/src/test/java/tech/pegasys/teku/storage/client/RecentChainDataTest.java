@@ -58,6 +58,7 @@ import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.generator.ChainBuilder.BlockOptions;
 import tech.pegasys.teku.spec.generator.ChainProperties;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.storage.api.ReorgContext;
 import tech.pegasys.teku.storage.api.TrackingChainHeadChannel.HeadEvent;
 import tech.pegasys.teku.storage.api.TrackingChainHeadChannel.ReorgEvent;
 import tech.pegasys.teku.storage.server.StateStorageMode;
@@ -538,7 +539,124 @@ class RecentChainDataTest {
 
   @Test
   public void updateHead_headUpdatesWhenSwitchingFromEmptyToFullNodeInGloas() {
-    // Locally re-initialize with a Gloas spec; do not touch the class fields.
+    final GloasChain chain = setUpGloasChainWithBlockAndPayload();
+    final RecentChainData gloasRecentChainData = chain.storageSystem().recentChainData();
+
+    // Set head on the EMPTY node.
+    gloasRecentChainData.updateHead(
+        ForkChoiceNode.createEmpty(chain.block().getRoot()), chain.block().getSlot());
+    final Bytes32 emptyExecutionHash =
+        gloasRecentChainData.getChainHead().orElseThrow().getExecutionBlockHash();
+    chain.storageSystem().chainHeadChannel().getHeadEvents().clear();
+
+    // Switch head to the FULL node identity (same root, different payloadStatus + execHash).
+    gloasRecentChainData.updateHead(
+        ForkChoiceNode.createFull(chain.block().getRoot()), chain.block().getSlot());
+
+    assertThat(chain.storageSystem().chainHeadChannel().getHeadEvents()).hasSize(1);
+    final ChainHead newHead = gloasRecentChainData.getChainHead().orElseThrow();
+    assertThat(newHead.getPayloadStatus()).isEqualTo(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+    assertThat(newHead.getExecutionBlockHash()).isNotEqualTo(emptyExecutionHash);
+    // EMPTY -> FULL is the payload arriving, not a reorg
+    assertThat(chain.storageSystem().chainHeadChannel().getReorgContexts()).isEmpty();
+    assertThat(getReorgCountMetric(chain.storageSystem())).isZero();
+    assertThat(getPayloadReorgCountMetric(chain.storageSystem())).isZero();
+  }
+
+  @Test
+  public void updateHead_payloadReorgContextWhenSwitchingFromFullToEmptyNodeInGloas() {
+    final GloasChain chain = setUpGloasChainWithBlockAndPayload();
+    final RecentChainData gloasRecentChainData = chain.storageSystem().recentChainData();
+    final Bytes32 blockRoot = chain.block().getRoot();
+    final UInt64 blockSlot = chain.block().getSlot();
+
+    gloasRecentChainData.updateHead(ForkChoiceNode.createFull(blockRoot), blockSlot);
+    final ChainHead fullHead = gloasRecentChainData.getChainHead().orElseThrow();
+    chain.storageSystem().chainHeadChannel().getHeadEvents().clear();
+
+    gloasRecentChainData.updateHead(ForkChoiceNode.createEmpty(blockRoot), blockSlot);
+    final ChainHead emptyHead = gloasRecentChainData.getChainHead().orElseThrow();
+
+    assertThat(chain.storageSystem().chainHeadChannel().getHeadEvents()).hasSize(1);
+    // A payload reorg is not a block reorg
+    assertThat(chain.storageSystem().chainHeadChannel().getReorgEvents()).isEmpty();
+    assertThat(getReorgCountMetric(chain.storageSystem())).isZero();
+    assertThat(getPayloadReorgCountMetric(chain.storageSystem())).isEqualTo(1);
+
+    final List<ReorgContext> reorgContexts =
+        chain.storageSystem().chainHeadChannel().getReorgContexts();
+    assertThat(reorgContexts).hasSize(1);
+    final ReorgContext reorgContext = reorgContexts.getFirst();
+    assertThat(reorgContext.isPayloadReorg()).isTrue();
+    assertThat(reorgContext.isBlockReorg()).isFalse();
+    assertThat(reorgContext.oldBestBlockRoot()).isEqualTo(blockRoot);
+    assertThat(reorgContext.oldBestBlockSlot()).isEqualTo(blockSlot);
+    assertThat(reorgContext.oldBestStateRoot()).isEqualTo(chain.block().getStateRoot());
+    assertThat(reorgContext.oldBestPayloadStatus())
+        .isEqualTo(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+    assertThat(reorgContext.oldBestExecutionBlockHash())
+        .isEqualTo(fullHead.getExecutionBlockHash());
+    assertThat(reorgContext.newBestExecutionBlockHash())
+        .isEqualTo(emptyHead.getExecutionBlockHash());
+    assertThat(reorgContext.commonAncestorRoot()).isEqualTo(blockRoot);
+    assertThat(reorgContext.commonAncestorSlot()).isEqualTo(blockSlot);
+    assertThat(reorgContext.commonAncestorPayloadStatusOnOldBranch())
+        .isEqualTo(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+    assertThat(reorgContext.commonAncestorPayloadStatusOnNewBranch())
+        .isEqualTo(ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY);
+  }
+
+  @Test
+  public void updateHead_blockReorgContextCarriesCommonAncestorPayloadStatusesInGloas() {
+    final GloasChain chain = setUpGloasChainWithBlockAndPayload();
+    final RecentChainData gloasRecentChainData = chain.storageSystem().recentChainData();
+    final Bytes32 parentRoot = chain.block().getRoot();
+
+    // Child block built on the FULL parent (the chain builder reveals the parent payload)
+    final SignedBlockAndState child = chain.chainBuilder().generateBlockAtSlot(2);
+    final StoreTransaction tx = gloasRecentChainData.startStoreTransaction();
+    tx.putBlockAndState(child, chain.spec().calculateBlockCheckpoints(child.getState()));
+    tx.commit().join();
+
+    gloasRecentChainData.updateHead(ForkChoiceNode.createEmpty(child.getRoot()), child.getSlot());
+    chain.storageSystem().chainHeadChannel().getHeadEvents().clear();
+
+    // Reorg the child out, landing on the EMPTY variant of its parent at an empty slot:
+    // a block reorg that also reorgs the parent payload.
+    gloasRecentChainData.updateHead(ForkChoiceNode.createEmpty(parentRoot), child.getSlot());
+
+    assertThat(chain.storageSystem().chainHeadChannel().getReorgEvents()).hasSize(1);
+    assertThat(getReorgCountMetric(chain.storageSystem())).isEqualTo(1);
+    assertThat(getPayloadReorgCountMetric(chain.storageSystem())).isZero();
+
+    final List<ReorgContext> reorgContexts =
+        chain.storageSystem().chainHeadChannel().getReorgContexts();
+    assertThat(reorgContexts).hasSize(1);
+    final ReorgContext reorgContext = reorgContexts.getFirst();
+    assertThat(reorgContext.isBlockReorg()).isTrue();
+    assertThat(reorgContext.oldBestBlockRoot()).isEqualTo(child.getRoot());
+    assertThat(reorgContext.oldBestPayloadStatus())
+        .isEqualTo(ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY);
+    assertThat(reorgContext.commonAncestorRoot()).isEqualTo(parentRoot);
+    assertThat(reorgContext.commonAncestorSlot()).isEqualTo(chain.block().getSlot());
+    assertThat(reorgContext.commonAncestorPayloadStatusOnOldBranch())
+        .isEqualTo(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+    assertThat(reorgContext.commonAncestorPayloadStatusOnNewBranch())
+        .isEqualTo(ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY);
+  }
+
+  private record GloasChain(
+      Spec spec,
+      StorageSystem storageSystem,
+      ChainBuilder chainBuilder,
+      SignedBlockAndState block) {}
+
+  /**
+   * Locally initializes a Gloas storage system (the class fields are left untouched) with genesis,
+   * the block at slot 1 and its execution payload imported, so that the BASE (PENDING), EMPTY and
+   * FULL proto-nodes exist for that block. No head is set for the block yet.
+   */
+  private GloasChain setUpGloasChainWithBlockAndPayload() {
     final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
     final StorageSystem gloasStorage =
         InMemoryStorageSystemBuilder.create()
@@ -555,29 +673,11 @@ class RecentChainDataTest {
     final SignedExecutionPayloadEnvelope executionPayload =
         gloasChainBuilder.getExecutionPayloadAtSlot(block.getSlot()).orElseThrow();
 
-    // Import block only — creates BASE (PENDING) + EMPTY proto-nodes; FULL is not present yet.
-    StoreTransaction tx = gloasRecentChainData.startStoreTransaction();
+    final StoreTransaction tx = gloasRecentChainData.startStoreTransaction();
     tx.putBlockAndState(block, gloasSpec.calculateBlockCheckpoints(block.getState()));
-    tx.commit().join();
-
-    // Set head on the EMPTY node.
-    gloasRecentChainData.updateHead(ForkChoiceNode.createEmpty(block.getRoot()), block.getSlot());
-    final Bytes32 emptyExecutionHash =
-        gloasRecentChainData.getChainHead().orElseThrow().getExecutionBlockHash();
-    gloasStorage.chainHeadChannel().getHeadEvents().clear();
-
-    // Import the execution payload — creates the FULL proto-node with the real exec block hash.
-    tx = gloasRecentChainData.startStoreTransaction();
     tx.putExecutionPayload(executionPayload, false);
     tx.commit().join();
-
-    // Switch head to the FULL node identity (same root, different payloadStatus + execHash).
-    gloasRecentChainData.updateHead(ForkChoiceNode.createFull(block.getRoot()), block.getSlot());
-
-    assertThat(gloasStorage.chainHeadChannel().getHeadEvents()).hasSize(1);
-    final ChainHead newHead = gloasRecentChainData.getChainHead().orElseThrow();
-    assertThat(newHead.getPayloadStatus()).isEqualTo(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
-    assertThat(newHead.getExecutionBlockHash()).isNotEqualTo(emptyExecutionHash);
+    return new GloasChain(gloasSpec, gloasStorage, gloasChainBuilder, block);
   }
 
   @Test
@@ -666,6 +766,19 @@ class RecentChainDataTest {
                 latestBlockAndState.getRoot(),
                 latestBlockAndState.getStateRoot(),
                 ONE));
+    // Pre-Gloas block reorgs carry no payload information
+    final List<ReorgContext> reorgContexts = storageSystem.chainHeadChannel().getReorgContexts();
+    assertThat(reorgContexts).hasSize(1);
+    final ReorgContext reorgContext = reorgContexts.getFirst();
+    assertThat(reorgContext.isBlockReorg()).isTrue();
+    assertThat(reorgContext.isPayloadReorg()).isFalse();
+    assertThat(reorgContext.oldBestPayloadStatus())
+        .isEqualTo(ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING);
+    assertThat(reorgContext.commonAncestorPayloadStatusOnOldBranch())
+        .isEqualTo(ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING);
+    assertThat(reorgContext.commonAncestorPayloadStatusOnNewBranch())
+        .isEqualTo(ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING);
+    assertThat(getPayloadReorgCountMetric(storageSystem)).isZero();
   }
 
   @Test
@@ -1379,5 +1492,11 @@ class RecentChainDataTest {
     return storageSystem
         .getMetricsSystem()
         .getLabelledCounterValue(TekuMetricCategory.BEACON, "reorgs_total");
+  }
+
+  private long getPayloadReorgCountMetric(final StorageSystem storageSystem) {
+    return storageSystem
+        .getMetricsSystem()
+        .getLabelledCounterValue(TekuMetricCategory.BEACON, "payload_reorgs_total");
   }
 }

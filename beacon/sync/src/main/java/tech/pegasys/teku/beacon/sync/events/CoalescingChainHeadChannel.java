@@ -48,15 +48,7 @@ public class CoalescingChainHeadChannel implements ChainHeadChannel, SyncSubscri
       final Optional<ForkChoicePayloadStatus> payloadStatus,
       final Optional<ReorgContext> optionalReorgContext) {
     if (!syncing) {
-      optionalReorgContext.ifPresent(
-          reorg ->
-              eventLogger.reorgEvent(
-                  reorg.getOldBestBlockRoot(),
-                  reorg.getOldBestBlockSlot(),
-                  bestBlockRoot,
-                  slot,
-                  reorg.getCommonAncestorRoot(),
-                  reorg.getCommonAncestorSlot()));
+      optionalReorgContext.ifPresent(reorg -> logReorg(reorg, slot, bestBlockRoot, payloadStatus));
       delegate.chainHeadUpdated(
           slot,
           stateRoot,
@@ -96,6 +88,44 @@ public class CoalescingChainHeadChannel implements ChainHeadChannel, SyncSubscri
                               payloadStatus,
                               optionalReorgContext)));
     }
+  }
+
+  private void logReorg(
+      final ReorgContext reorg,
+      final UInt64 slot,
+      final Bytes32 bestBlockRoot,
+      final Optional<ForkChoicePayloadStatus> payloadStatus) {
+    if (reorg.isPayloadReorg()) {
+      eventLogger.payloadReorgEvent(
+          bestBlockRoot,
+          slot,
+          reorg.oldBestExecutionBlockHash(),
+          reorg.newBestExecutionBlockHash());
+      return;
+    }
+    eventLogger.reorgEvent(
+        reorg.oldBestBlockRoot(),
+        reorg.oldBestBlockSlot(),
+        bestBlockRoot,
+        slot,
+        reorg.commonAncestorRoot(),
+        reorg.commonAncestorSlot(),
+        payloadStatus.flatMap(CoalescingChainHeadChannel::toLoggedPayloadStatus),
+        toLoggedPayloadStatus(reorg.oldBestPayloadStatus()),
+        toLoggedPayloadStatus(reorg.commonAncestorPayloadStatusOnOldBranch()),
+        toLoggedPayloadStatus(reorg.commonAncestorPayloadStatusOnNewBranch()));
+  }
+
+  /**
+   * The event logger cannot depend on the spec types, so the payload status is passed by name.
+   * PENDING carries no information (pre-Gloas, or unresolved) and is not displayed.
+   */
+  private static Optional<String> toLoggedPayloadStatus(final ForkChoicePayloadStatus status) {
+    return switch (status) {
+      case PAYLOAD_STATUS_PENDING -> Optional.empty();
+      case PAYLOAD_STATUS_EMPTY -> Optional.of("EMPTY");
+      case PAYLOAD_STATUS_FULL -> Optional.of("FULL");
+    };
   }
 
   @Override
@@ -182,8 +212,8 @@ public class CoalescingChainHeadChannel implements ChainHeadChannel, SyncSubscri
       return this.reorgContext.isEmpty()
           || reorgContext
               .orElseThrow()
-              .getCommonAncestorSlot()
-              .isLessThan(this.reorgContext.orElseThrow().getCommonAncestorSlot());
+              .commonAncestorSlot()
+              .isLessThan(this.reorgContext.orElseThrow().commonAncestorSlot());
     }
   }
 }

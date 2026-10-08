@@ -179,7 +179,8 @@ public class LightClientServerService
       final Optional<ForkChoicePayloadStatus> payloadStatus,
       final Optional<ReorgContext> optionalReorgContext) {
 
-    if (optionalReorgContext.isEmpty()) {
+    // Light client updates are keyed by block: only block reorgs can orphan them
+    if (optionalReorgContext.filter(ReorgContext::isBlockReorg).isEmpty()) {
       return;
     }
 

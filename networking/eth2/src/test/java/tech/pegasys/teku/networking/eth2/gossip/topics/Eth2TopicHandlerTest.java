@@ -24,6 +24,7 @@ import io.libp2p.core.pubsub.ValidationResult;
 import java.util.Optional;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -125,9 +126,9 @@ public class Eth2TopicHandlerTest {
     final Bytes invalidBytes = Bytes.fromHexString("0x0102");
     final SafeFuture<ValidationResult> result =
         topicHandler.handleMessage(topicHandler.prepareMessage(invalidBytes, Optional.empty()));
+    asyncRunner.executeQueuedActions();
     verify(debugDataDumper)
         .saveGossipMessageDecodingError(eq(topicHandler.getTopic()), any(), any(), any());
-    asyncRunner.executeQueuedActions();
 
     assertThatSafeFuture(result).isCompletedWithValue(ValidationResult.Invalid);
   }
@@ -148,9 +149,9 @@ public class Eth2TopicHandlerTest {
 
     final SafeFuture<ValidationResult> result =
         topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
+    asyncRunner.executeQueuedActions();
     verify(debugDataDumper)
         .saveGossipMessageDecodingError(eq(topicHandler.getTopic()), any(), any(), any());
-    asyncRunner.executeQueuedActions();
 
     assertThatSafeFuture(result).isCompletedWithValue(ValidationResult.Invalid);
   }
@@ -171,9 +172,9 @@ public class Eth2TopicHandlerTest {
 
     final SafeFuture<ValidationResult> result =
         topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
+    asyncRunner.executeQueuedActions();
     verify(debugDataDumper)
         .saveGossipMessageDecodingError(eq(topicHandler.getTopic()), any(), any(), any());
-    asyncRunner.executeQueuedActions();
 
     assertThatSafeFuture(result).isCompletedWithValue(ValidationResult.Invalid);
   }
@@ -194,9 +195,9 @@ public class Eth2TopicHandlerTest {
 
     final SafeFuture<ValidationResult> result =
         topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
+    asyncRunner.executeQueuedActions();
     verify(debugDataDumper)
         .saveGossipMessageDecodingError(eq(topicHandler.getTopic()), any(), any(), any());
-    asyncRunner.executeQueuedActions();
 
     assertThatSafeFuture(result).isCompletedWithValue(ValidationResult.Invalid);
   }
@@ -314,6 +315,32 @@ public class Eth2TopicHandlerTest {
     asyncRunner.executeQueuedActions();
 
     assertThatSafeFuture(result).isCompletedWithValue(ValidationResult.Invalid);
+  }
+
+  @Test
+  public void handleMessage_shouldDeserializeOnAsyncRunner() {
+    final AtomicInteger deserializeCount = new AtomicInteger();
+    final MockEth2TopicHandler topicHandler =
+        new MockEth2TopicHandler(
+            recentChainData,
+            spec,
+            asyncRunner,
+            (b, __) -> SafeFuture.completedFuture(InternalValidationResult.ACCEPT),
+            debugDataDumper);
+    topicHandler.setDeserializer(
+        message -> {
+          deserializeCount.incrementAndGet();
+          return GossipEncoding.SSZ_SNAPPY.decodeMessage(
+              message, spec.getGenesisSchemaDefinitions().getSignedBeaconBlockSchema());
+        });
+
+    final SafeFuture<ValidationResult> result =
+        topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
+    assertThat(deserializeCount).hasValue(0);
+
+    asyncRunner.executeQueuedActions();
+    assertThat(deserializeCount).hasValue(1);
+    assertThatSafeFuture(result).isCompletedWithValue(ValidationResult.Valid);
   }
 
   @Test

@@ -301,20 +301,76 @@ public class EventLogger {
     info(slotPayloadEventLog, Color.GRAY);
   }
 
+  /**
+   * Logs a block reorg. The payload status annotations are only present from Gloas, where the new
+   * head, the previous head and the common ancestor on each branch carry a payload status.
+   *
+   * @param commonAncestorPayloadStatusOnOldBranch the payload status of the common ancestor along
+   *     the branch of the previous head
+   * @param commonAncestorPayloadStatusOnNewBranch the payload status of the common ancestor along
+   *     the branch of the new head; when it differs from the old branch the transition is shown
+   *     (e.g. {@code [FULL -> EMPTY]})
+   */
   public void reorgEvent(
       final Bytes32 previousHeadRoot,
       final UInt64 previousHeadSlot,
       final Bytes32 newHeadRoot,
       final UInt64 newHeadSlot,
       final Bytes32 commonAncestorRoot,
-      final UInt64 commonAncestorSlot) {
-    String reorgEventLog =
+      final UInt64 commonAncestorSlot,
+      final Optional<String> newHeadPayloadStatus,
+      final Optional<String> previousHeadPayloadStatus,
+      final Optional<String> commonAncestorPayloadStatusOnOldBranch,
+      final Optional<String> commonAncestorPayloadStatusOnNewBranch) {
+    final String reorgEventLog =
         String.format(
-            "Reorg Event *** New Head: %s, Previous Head: %s, Common Ancestor: %s",
+            "Reorg Event *** New Head: %s%s, Previous Head: %s%s, Common Ancestor: %s%s",
             LogFormatter.formatBlock(newHeadSlot, newHeadRoot),
+            formatPayloadStatusAnnotation(newHeadPayloadStatus),
             LogFormatter.formatBlock(previousHeadSlot, previousHeadRoot),
-            LogFormatter.formatBlock(commonAncestorSlot, commonAncestorRoot));
+            formatPayloadStatusAnnotation(previousHeadPayloadStatus),
+            LogFormatter.formatBlock(commonAncestorSlot, commonAncestorRoot),
+            formatPayloadStatusAnnotation(
+                formatPayloadStatusChange(
+                    commonAncestorPayloadStatusOnOldBranch,
+                    commonAncestorPayloadStatusOnNewBranch)));
     info(reorgEventLog, Color.YELLOW);
+  }
+
+  /**
+   * Logs a payload reorg: the head block is unchanged but its payload is no longer part of the
+   * canonical chain (fork-choice payload status changed from FULL to EMPTY).
+   *
+   * @param headRoot the head block root
+   * @param headSlot the head block slot
+   * @param previousExecutionHead the block hash of the reorged payload
+   * @param newExecutionHead the block hash the execution head moved back to
+   */
+  public void payloadReorgEvent(
+      final Bytes32 headRoot,
+      final UInt64 headSlot,
+      final Bytes32 previousExecutionHead,
+      final Bytes32 newExecutionHead) {
+    final String payloadReorgEventLog =
+        String.format(
+            "Reorg Event *** Payload Reorg, Head: %s, Previous Execution Head: %s, New Execution Head: %s",
+            LogFormatter.formatBlock(headSlot, headRoot),
+            LogFormatter.formatHashRoot(previousExecutionHead),
+            LogFormatter.formatHashRoot(newExecutionHead));
+    info(payloadReorgEventLog, Color.YELLOW);
+  }
+
+  private static String formatPayloadStatusAnnotation(final Optional<String> payloadStatus) {
+    return payloadStatus.map(status -> " [" + status + "]").orElse("");
+  }
+
+  /** A single status when both branches agree, otherwise the transition from old to new. */
+  private static Optional<String> formatPayloadStatusChange(
+      final Optional<String> oldStatus, final Optional<String> newStatus) {
+    return oldStatus.flatMap(
+        oldName ->
+            newStatus.map(
+                newName -> oldName.equals(newName) ? oldName : oldName + " -> " + newName));
   }
 
   public void networkUpgradeActivated(

@@ -152,20 +152,23 @@ public class EventSubscriptionManager
       final Bytes32 currentDutyDependentRoot,
       final Optional<ForkChoicePayloadStatus> payloadStatus,
       final Optional<ReorgContext> optionalReorgContext) {
-    optionalReorgContext.ifPresent(
-        context -> {
-          final ChainReorgEvent reorgEvent =
-              new ChainReorgEvent(
-                  slot,
-                  slot.minus(context.getCommonAncestorSlot()),
-                  context.getOldBestBlockRoot(),
-                  bestBlockRoot,
-                  context.getOldBestStateRoot(),
-                  stateRoot,
-                  configProvider.computeEpochAtSlot(slot),
-                  executionOptimistic);
-          notifySubscribersOfEvent(EventType.chain_reorg, reorgEvent);
-        });
+    // chain_reorg is a block reorg event; a payload reorg is reported through head_v2 only
+    optionalReorgContext
+        .filter(ReorgContext::isBlockReorg)
+        .ifPresent(
+            context -> {
+              final ChainReorgEvent reorgEvent =
+                  new ChainReorgEvent(
+                      slot,
+                      slot.minus(context.commonAncestorSlot()),
+                      context.oldBestBlockRoot(),
+                      bestBlockRoot,
+                      context.oldBestStateRoot(),
+                      stateRoot,
+                      configProvider.computeEpochAtSlot(slot),
+                      executionOptimistic);
+              notifySubscribersOfEvent(EventType.chain_reorg, reorgEvent);
+            });
 
     final HeadEvent headEvent =
         new HeadEvent(

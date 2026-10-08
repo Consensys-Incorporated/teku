@@ -160,11 +160,10 @@ public class VoluntaryExitTopicHandlerTest extends AbstractTopicHandlerTest<Sign
   public void handleMessage_invalidSSZ() {
     Bytes serialized = Bytes.fromHexString("0x1234");
 
-    final ValidationResult result =
-        topicHandler
-            .handleMessage(topicHandler.prepareMessage(serialized, Optional.empty()))
-            .join();
-    assertThat(result).isEqualTo(ValidationResult.Invalid);
+    final SafeFuture<ValidationResult> result =
+        topicHandler.handleMessage(topicHandler.prepareMessage(serialized, Optional.empty()));
+    asyncRunner.executeQueuedActions();
+    assertThat(result).isCompletedWithValue(ValidationResult.Invalid);
   }
 
   @Test
