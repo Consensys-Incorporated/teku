@@ -7,7 +7,6 @@
 ## Unreleased Changes
 
 ### Breaking Changes
- - Updated `GET /eth/v2/debug/fork_choice` to the finalized Beacon API schema, including parent payload statuses and per-node checkpoints. Teku-specific node fields now reside in `extra_data`, and `justified_root` is replaced by `justified_checkpoint.root`. The V1 endpoint is deprecated but remains available.
 
 ### Additions and Improvements
  - Added gossipsub metrics `libp2p_gossip_gossipsub_*` (off by default; enable them with `--Xmetrics-additional-categories=LIBP2P_GOSSIP`).
