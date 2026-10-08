@@ -22,6 +22,7 @@ import com.google.common.annotations.VisibleForTesting;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -45,6 +46,7 @@ import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannel;
 import tech.pegasys.teku.statetransition.blobs.BlockBlobSidecarsTrackerFactory;
 import tech.pegasys.teku.statetransition.blobs.RemoteOrigin;
 import tech.pegasys.teku.statetransition.block.BlockImportChannel;
+import tech.pegasys.teku.statetransition.block.FutureBlockPool;
 import tech.pegasys.teku.statetransition.datacolumns.CurrentSlotProvider;
 import tech.pegasys.teku.statetransition.datacolumns.CustodyGroupCountManager;
 import tech.pegasys.teku.statetransition.datacolumns.DataColumnSidecarELManager;
@@ -64,14 +66,22 @@ public class PoolFactory {
   // Two mainnet epochs for the current lookahead, with 4x overhead for dependent-root reorgs
   private static final int DEFAULT_MAX_PENDING_PROPOSER_PREFERENCES = 256;
   private static final int DEFAULT_MAX_PENDING_EXECUTION_PAYLOAD_BIDS = 1000;
-  private static final int DEFAULT_PENDING_BLOCK_BYTES_MULTIPLIER = 10;
+  // Gloas blocks retain roughly 4-5x their SSZ size on the heap, so this bounds each pending block
+  // pool to a few hundred MB while leaving headroom over observed usage
+  private static final int DEFAULT_PENDING_BLOCK_BYTES_MULTIPLIER = 4;
+  // Honest nodes only see a block or two ahead of the current slot, while future blocks are queued
+  // before their signature is verified, so keep the budget small
+  private static final int DEFAULT_FUTURE_BLOCK_BYTES_MULTIPLIER = 4;
+  private static final int DEFAULT_MAX_FUTURE_BLOCKS_PER_SLOT = 4;
   private static final int EL_RECOVERY_TASKS_LIMIT = 10;
   private static final Duration EL_BLOBS_FETCHING_DELAY = Duration.ofMillis(500);
   private static final int EL_BLOBS_FETCHING_MAX_RETRIES = 3;
 
   private final SettableLabelledGauge pendingPoolsSizeGauge;
+  private final SettableLabelledGauge pendingPoolsBytesGauge;
   private final SettableLabelledGauge blockBlobSidecarsTrackersPoolSizeGauge;
   private final LabelledMetric<Counter> blockBlobSidecarsTrackersPoolStats;
+  private final LabelledMetric<Counter> futureBlocksResultCounter;
 
   public PoolFactory(final MetricsSystem metricsSystem) {
     this.pendingPoolsSizeGauge =
@@ -80,6 +90,14 @@ public class PoolFactory {
             TekuMetricCategory.BEACON,
             "pending_pool_size",
             "Number of items in pending pool",
+            "type");
+
+    this.pendingPoolsBytesGauge =
+        SettableLabelledGauge.create(
+            metricsSystem,
+            TekuMetricCategory.BEACON,
+            "pending_pool_bytes",
+            "Total SSZ size in bytes of blocks in pending pool",
             "type");
 
     this.blockBlobSidecarsTrackersPoolSizeGauge =
@@ -97,6 +115,8 @@ public class PoolFactory {
             "Block-blobs trackers pool statistics",
             "type",
             "subtype");
+
+    this.futureBlocksResultCounter = FutureBlockPool.createResultCounter(metricsSystem);
   }
 
   public PendingPool<SignedBeaconBlock> createPendingPoolForBlocks(final Spec spec) {
@@ -121,6 +141,7 @@ public class PoolFactory {
         maxItems,
         getMaxPendingBlockBytes(spec),
         block -> block.getSchema().getSszSize(block.getBackingNode()),
+        Optional.of(pendingPoolsBytesGauge),
         block -> block.getMessage().hashTreeRoot(),
         block -> Collections.singleton(block.getParentRoot()),
         SignedBeaconBlock::getSlot);
@@ -152,12 +173,24 @@ public class PoolFactory {
       final int maxBlocksWaitingForParentExecutionPayload) {
     return new PendingBlockPool(
         pendingPoolsSizeGauge,
+        pendingPoolsBytesGauge,
         spec,
         historicalBlockTolerance,
         futureBlockTolerance,
         maxBlocksWaitingForParent,
         maxBlocksWaitingForParentExecutionPayload,
         getMaxPendingBlockBytes(spec));
+  }
+
+  public FutureBlockPool createFutureBlockPool(
+      final Spec spec, final SettableLabelledGauge futureItemsCounter) {
+    return new FutureBlockPool(
+        DEFAULT_MAX_FUTURE_BLOCKS_PER_SLOT,
+        (long) spec.getNetworkingConfig().getMaxPayloadSize()
+            * DEFAULT_FUTURE_BLOCK_BYTES_MULTIPLIER,
+        block -> block.getSchema().getSszSize(block.getBackingNode()),
+        futureItemsCounter,
+        futureBlocksResultCounter);
   }
 
   private long getMaxPendingBlockBytes(final Spec spec) {

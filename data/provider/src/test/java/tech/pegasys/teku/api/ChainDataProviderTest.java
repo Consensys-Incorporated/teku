@@ -79,6 +79,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.execution.versions.capella.Withdrawal;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeDataWithParent;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeValidationStatus;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
@@ -183,7 +184,8 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
     when(recentChainData.getJustifiedCheckpoint()).thenReturn(Optional.of(justifiedCheckpoint));
     when(recentChainData.getFinalizedCheckpoint()).thenReturn(Optional.of(finalizedCheckpoint));
     when(recentChainData.getForkChoiceStrategy()).thenReturn(Optional.of(forkChoiceStrategy));
-    when(forkChoiceStrategy.getBlockData()).thenReturn(List.of(node));
+    when(forkChoiceStrategy.getBlockDataWithParent())
+        .thenReturn(List.of(new ProtoNodeDataWithParent(node, Optional.empty())));
     when(forkChoiceStrategy.getPayloadAttesterCount(blockRoot)).thenReturn(UInt64.valueOf(4));
     when(forkChoiceStrategy.getPayloadAvailabilityYesCount(blockRoot))
         .thenReturn(UInt64.valueOf(2));
@@ -202,6 +204,75 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
     assertThat(forkChoiceNode.getPayloadAttesterCount()).isEqualTo(UInt64.valueOf(4));
     assertThat(forkChoiceNode.getPayloadAvailabilityYesCount()).isEqualTo(UInt64.valueOf(2));
     assertThat(forkChoiceNode.getPayloadDataAvailabilityYesCount()).isEqualTo(UInt64.valueOf(3));
+    // no retained parent
+    assertThat(forkChoiceNode.getParentRoot()).isEqualTo(node.getParentRoot());
+    assertThat(forkChoiceNode.getParentPayloadStatus()).isEmpty();
+  }
+
+  @Test
+  public void getForkChoiceDataV2_shouldReturnGloasParentRootsAndParentPayloadStatuses() {
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final CombinedChainDataClient chainDataClient = mock(CombinedChainDataClient.class);
+    final RecentChainData recentChainData = mock(RecentChainData.class);
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy = mock(ReadOnlyForkChoiceStrategy.class);
+    final Checkpoint checkpoint = new Checkpoint(UInt64.ZERO, Bytes32.fromHexString("0x1111"));
+    final Bytes32 parentBlockRoot = Bytes32.fromHexString("0x2222");
+    final Bytes32 blockRoot = Bytes32.fromHexString("0x3333");
+    final ProtoNodeData parentFullNode =
+        gloasNode(UInt64.ONE, parentBlockRoot, ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+    final ProtoNodeData pendingNode =
+        gloasNode(UInt64.valueOf(2), blockRoot, ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING);
+    final ProtoNodeData emptyNode =
+        gloasNode(UInt64.valueOf(2), blockRoot, ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY);
+    final ChainDataProvider provider =
+        new ChainDataProvider(
+            gloasSpec,
+            recentChainData,
+            chainDataClient,
+            rewardCalculatorMock,
+            mockBlobSidecarReconstructionProvider,
+            mockBlobReconstructionProvider,
+            new LightClientUpdateStore(spec));
+    when(chainDataClient.isStoreAvailable()).thenReturn(true);
+    when(recentChainData.getJustifiedCheckpoint()).thenReturn(Optional.of(checkpoint));
+    when(recentChainData.getFinalizedCheckpoint()).thenReturn(Optional.of(checkpoint));
+    when(recentChainData.getForkChoiceStrategy()).thenReturn(Optional.of(forkChoiceStrategy));
+    when(forkChoiceStrategy.getBlockDataWithParent())
+        .thenReturn(
+            List.of(
+                new ProtoNodeDataWithParent(pendingNode, Optional.of(parentFullNode)),
+                new ProtoNodeDataWithParent(emptyNode, Optional.of(pendingNode))));
+    when(forkChoiceStrategy.getPayloadAttesterCount(any())).thenReturn(ZERO);
+    when(forkChoiceStrategy.getPayloadAvailabilityYesCount(any())).thenReturn(ZERO);
+    when(forkChoiceStrategy.getPayloadDataAvailabilityYesCount(any())).thenReturn(ZERO);
+
+    final List<ForkChoiceNodeDataV2> nodes = provider.getForkChoiceDataV2().getNodes();
+
+    // the PENDING node's parent is the parent block's FULL node
+    assertThat(nodes.get(0).getParentRoot()).isEqualTo(parentBlockRoot);
+    assertThat(nodes.get(0).getParentPayloadStatus())
+        .contains(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+    // the EMPTY node's parent is the same block's PENDING node
+    assertThat(nodes.get(1).getParentRoot()).isEqualTo(blockRoot);
+    assertThat(nodes.get(1).getParentPayloadStatus())
+        .contains(ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING);
+  }
+
+  private ProtoNodeData gloasNode(
+      final UInt64 slot, final Bytes32 blockRoot, final ForkChoicePayloadStatus payloadStatus) {
+    final Checkpoint checkpoint = new Checkpoint(UInt64.ZERO, Bytes32.fromHexString("0x1111"));
+    return new ProtoNodeData(
+        slot,
+        blockRoot,
+        Bytes32.fromHexString("0x2222"),
+        Bytes32.fromHexString("0x5555"),
+        ZERO,
+        Bytes32.fromHexString("0x6666"),
+        ZERO,
+        ProtoNodeValidationStatus.VALID,
+        new BlockCheckpoints(checkpoint, checkpoint, checkpoint, checkpoint),
+        ZERO,
+        payloadStatus);
   }
 
   @Test

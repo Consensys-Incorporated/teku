@@ -26,12 +26,17 @@ import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMe
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMetadataErrorResponse;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.io.Resources;
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import tech.pegasys.teku.api.ForkChoiceDataV2;
 import tech.pegasys.teku.api.ForkChoiceNodeDataV2;
 import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerTest;
@@ -44,32 +49,56 @@ import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 
 class GetForkChoiceV2Test extends AbstractMigratedBeaconHandlerTest {
 
+  private final ProtoNodeData pendingNode =
+      new ProtoNodeData(
+          UInt64.valueOf(32),
+          Bytes32.fromHexString("0x3333"),
+          Bytes32.fromHexString("0x4444"),
+          Bytes32.fromHexString("0x5555"),
+          UInt64.valueOf(42),
+          Bytes32.fromHexString("0x6666"),
+          UInt64.ZERO,
+          ProtoNodeValidationStatus.OPTIMISTIC,
+          new BlockCheckpoints(
+              new Checkpoint(UInt64.valueOf(10), Bytes32.fromHexString("0x7777")),
+              new Checkpoint(UInt64.valueOf(11), Bytes32.fromHexString("0x8888")),
+              new Checkpoint(UInt64.valueOf(12), Bytes32.fromHexString("0x9999")),
+              new Checkpoint(UInt64.valueOf(13), Bytes32.fromHexString("0x0000"))),
+          UInt64.valueOf(409600000000L),
+          ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING);
+
   private final ForkChoiceDataV2 response =
       new ForkChoiceDataV2(
           new Checkpoint(UInt64.ONE, Bytes32.fromHexString("0x1111")),
           new Checkpoint(UInt64.ZERO, Bytes32.fromHexString("0x2222")),
           List.of(
+              // a PENDING node whose parent is the parent block's FULL node
               new ForkChoiceNodeDataV2(
                   ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING,
-                  new ProtoNodeData(
-                      UInt64.valueOf(32),
-                      Bytes32.fromHexString("0x3333"),
-                      Bytes32.fromHexString("0x4444"),
-                      Bytes32.fromHexString("0x5555"),
-                      UInt64.valueOf(42),
-                      Bytes32.fromHexString("0x6666"),
-                      UInt64.ZERO,
-                      ProtoNodeValidationStatus.OPTIMISTIC,
-                      new BlockCheckpoints(
-                          new Checkpoint(UInt64.valueOf(10), Bytes32.fromHexString("0x7777")),
-                          new Checkpoint(UInt64.valueOf(11), Bytes32.fromHexString("0x8888")),
-                          new Checkpoint(UInt64.valueOf(12), Bytes32.fromHexString("0x9999")),
-                          new Checkpoint(UInt64.valueOf(13), Bytes32.fromHexString("0x0000"))),
-                      UInt64.valueOf(409600000000L),
-                      ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING),
+                  pendingNode,
+                  Bytes32.fromHexString("0x4444"),
+                  Optional.of(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL),
                   UInt64.valueOf(4),
                   UInt64.valueOf(2),
-                  UInt64.valueOf(3))));
+                  UInt64.valueOf(3)),
+              // the same block's EMPTY node, whose parent is its PENDING node
+              new ForkChoiceNodeDataV2(
+                  ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY,
+                  pendingNode,
+                  Bytes32.fromHexString("0x3333"),
+                  Optional.of(ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING),
+                  UInt64.valueOf(4),
+                  UInt64.valueOf(2),
+                  UInt64.valueOf(3)),
+              // a node whose parent is not retained
+              new ForkChoiceNodeDataV2(
+                  ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL,
+                  pendingNode,
+                  Bytes32.fromHexString("0x4444"),
+                  Optional.empty(),
+                  UInt64.ZERO,
+                  UInt64.ZERO,
+                  UInt64.ZERO)));
 
   @BeforeEach
   void setup() {
@@ -114,5 +143,36 @@ class GetForkChoiceV2Test extends AbstractMigratedBeaconHandlerTest {
   @Test
   void metadata_shouldHandle204() {
     verifyMetadataEmptyResponse(handler, SC_NO_CONTENT);
+  }
+
+  @ParameterizedTest
+  @EnumSource(ForkChoicePayloadStatus.class)
+  void shouldSerializeParentPayloadStatus(final ForkChoicePayloadStatus status) throws IOException {
+    final ForkChoiceNodeDataV2 node =
+        new ForkChoiceNodeDataV2(
+            ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING,
+            pendingNode,
+            pendingNode.getParentRoot(),
+            Optional.of(status),
+            UInt64.ZERO,
+            UInt64.ZERO,
+            UInt64.ZERO);
+    final ForkChoiceDataV2 data =
+        new ForkChoiceDataV2(
+            response.getJustifiedCheckpoint(), response.getFinalizedCheckpoint(), List.of(node));
+    final JsonNode json =
+        new ObjectMapper().readTree(getResponseStringFromMetadata(handler, SC_OK, data));
+    assertThat(
+            json.path("data")
+                .path("fork_choice_nodes")
+                .get(0)
+                .path("parent_payload_status")
+                .asText())
+        .isEqualTo(
+            switch (status) {
+              case PAYLOAD_STATUS_PENDING -> "pending";
+              case PAYLOAD_STATUS_EMPTY -> "empty";
+              case PAYLOAD_STATUS_FULL -> "full";
+            });
   }
 }
