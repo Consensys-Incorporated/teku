@@ -360,20 +360,39 @@ public class ChainDataProvider {
 
   private List<ForkChoiceNodeDataV2> getForkChoiceNodeDataV2(
       final ReadOnlyForkChoiceStrategy forkChoiceStrategy) {
-    return forkChoiceStrategy.getBlockData().stream()
+    return forkChoiceStrategy.getBlockDataWithParent().stream()
         .map(
-            node ->
-                new ForkChoiceNodeDataV2(
-                    getForkChoicePayloadStatusV2(node),
-                    node,
-                    forkChoiceStrategy.getPayloadAttesterCount(node.getRoot()),
-                    forkChoiceStrategy.getPayloadAvailabilityYesCount(node.getRoot()),
-                    forkChoiceStrategy.getPayloadDataAvailabilityYesCount(node.getRoot())))
+            nodeWithParent -> {
+              final ProtoNodeData node = nodeWithParent.node();
+              return new ForkChoiceNodeDataV2(
+                  getForkChoicePayloadStatusV2(node),
+                  node,
+                  getParentRootV2(node),
+                  nodeWithParent.parent().map(this::getForkChoicePayloadStatusV2),
+                  forkChoiceStrategy.getPayloadAttesterCount(node.getRoot()),
+                  forkChoiceStrategy.getPayloadAvailabilityYesCount(node.getRoot()),
+                  forkChoiceStrategy.getPayloadDataAvailabilityYesCount(node.getRoot()));
+            })
         .toList();
   }
 
+  /**
+   * From Gloas, a block's {@code EMPTY} and {@code FULL} nodes have the same block's {@code
+   * PENDING} node as parent, so their parent root is the block's own root.
+   */
+  private Bytes32 getParentRootV2(final ProtoNodeData node) {
+    final boolean isGloasEmptyOrFullNode =
+        isGloasOrLater(node.getSlot())
+            && node.getPayloadStatus() != ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING;
+    return isGloasEmptyOrFullNode ? node.getRoot() : node.getParentRoot();
+  }
+
+  private boolean isGloasOrLater(final UInt64 slot) {
+    return spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS);
+  }
+
   private ForkChoicePayloadStatus getForkChoicePayloadStatusV2(final ProtoNodeData node) {
-    return spec.atSlot(node.getSlot()).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS)
+    return isGloasOrLater(node.getSlot())
         ? node.getPayloadStatus()
         : ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL;
   }

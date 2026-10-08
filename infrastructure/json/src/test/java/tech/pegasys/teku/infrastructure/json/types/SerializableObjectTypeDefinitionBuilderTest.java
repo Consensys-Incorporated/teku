@@ -64,6 +64,42 @@ class SerializableObjectTypeDefinitionBuilderTest {
   }
 
   @Test
+  void shouldIncludeNullableFieldWithValue() throws Exception {
+    final SerializableTypeDefinition<WithOptionalValue> type =
+        SerializableTypeDefinition.object(WithOptionalValue.class)
+            .withNullableField("nullable", STRING_TYPE, WithOptionalValue::getValue)
+            .build();
+
+    final String json = JsonUtil.serialize(new WithOptionalValue(Optional.of("foo")), type);
+    assertThat(JsonTestUtil.parse(json)).containsExactly(entry("nullable", "foo"));
+  }
+
+  @Test
+  void shouldWriteNullForNullableFieldWithNoValue() throws Exception {
+    final SerializableTypeDefinition<WithOptionalValue> type =
+        SerializableTypeDefinition.object(WithOptionalValue.class)
+            .withNullableField("nullable", STRING_TYPE, WithOptionalValue::getValue)
+            .build();
+
+    final String json = JsonUtil.serialize(new WithOptionalValue(Optional.empty()), type);
+    assertThat(json).isEqualTo("{\"nullable\":null}");
+  }
+
+  @Test
+  void shouldDescribeNullableFieldAsRequiredAndNullable() throws Exception {
+    final SerializableTypeDefinition<WithOptionalValue> type =
+        SerializableTypeDefinition.object(WithOptionalValue.class)
+            .withNullableField("nullable", STRING_TYPE, WithOptionalValue::getValue)
+            .build();
+
+    final String json = JsonUtil.serialize(type::serializeOpenApiType);
+    assertThat(json)
+        .isEqualTo(
+            "{\"type\":\"object\",\"required\":[\"nullable\"],\"properties\":"
+                + "{\"nullable\":{\"nullable\":true,\"allOf\":[{\"type\":\"string\"}]}}}");
+  }
+
+  @Test
   void shouldGetReferencedTypesRecursively() {
     final SerializableTypeDefinition<String> type1 =
         SerializableTypeDefinition.object(String.class).name("Type1").build();

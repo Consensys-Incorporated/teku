@@ -68,6 +68,19 @@ public class SerializableObjectTypeDefinitionBuilder<TObject> {
     return this;
   }
 
+  /** Adds a required field that is written as {@code null} when the getter returns empty. */
+  public <TField> SerializableObjectTypeDefinitionBuilder<TObject> withNullableField(
+      final String name,
+      final SerializableTypeDefinition<TField> type,
+      final Function<TObject, Optional<TField>> getter) {
+    checkArgument(
+        !this.fields.containsKey(name),
+        "Field %s was already defined, attempting to add twice.",
+        name);
+    this.fields.put(name, new NullableSerializableFieldDefinition<>(name, getter, type));
+    return this;
+  }
+
   public SerializableTypeDefinition<TObject> build() {
     return new SerializableObjectTypeDefinition<>(name, title.or(() -> name), description, fields);
   }
