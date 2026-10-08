@@ -16,6 +16,8 @@ package tech.pegasys.teku.networking.eth2.gossip.subnets;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectIterator;
+import java.util.NavigableSet;
+import java.util.TreeSet;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.ethereum.events.SlotEventsChannel;
@@ -27,12 +29,16 @@ public class SyncCommitteeSubscriptionManager implements SlotEventsChannel {
   private final Int2ObjectMap<UInt64> subcommitteeToUnsubscribeSlot = new Int2ObjectOpenHashMap<>();
   final Eth2P2PNetwork p2PNetwork;
 
+  /** Unsubscribe slots of requested subscriptions, i.e. when a local sync committee duty ends. */
+  private final NavigableSet<UInt64> dutyEndSlots = new TreeSet<>();
+
   public SyncCommitteeSubscriptionManager(final Eth2P2PNetwork p2PNetwork) {
     this.p2PNetwork = p2PNetwork;
   }
 
   @Override
   public synchronized void onSlot(final UInt64 slot) {
+    pruneDutyEndSlots(slot);
     final ObjectIterator<Int2ObjectMap.Entry<UInt64>> iterator =
         subcommitteeToUnsubscribeSlot.int2ObjectEntrySet().iterator();
     while (iterator.hasNext()) {
@@ -46,6 +52,7 @@ public class SyncCommitteeSubscriptionManager implements SlotEventsChannel {
   }
 
   public synchronized void subscribe(final int committeeSubnet, final UInt64 unsubscribeSlot) {
+    recordDutyEndSlot(unsubscribeSlot);
     final UInt64 currentUnsubscribeSlot =
         subcommitteeToUnsubscribeSlot.getOrDefault(committeeSubnet, null);
     if (currentUnsubscribeSlot == null) {
@@ -62,5 +69,21 @@ public class SyncCommitteeSubscriptionManager implements SlotEventsChannel {
           unsubscribeSlot.toString());
       subcommitteeToUnsubscribeSlot.put(committeeSubnet, unsubscribeSlot);
     }
+  }
+
+  /**
+   * @return true if a local validator has a sync committee duty that is active at {@code slot} and
+   *     ends no later than {@code latestEndSlot}
+   */
+  public synchronized boolean hasDutyActiveAt(final UInt64 slot, final UInt64 latestEndSlot) {
+    return !dutyEndSlots.subSet(slot, false, latestEndSlot, true).isEmpty();
+  }
+
+  protected synchronized void recordDutyEndSlot(final UInt64 unsubscribeSlot) {
+    dutyEndSlots.add(unsubscribeSlot);
+  }
+
+  protected synchronized void pruneDutyEndSlots(final UInt64 slot) {
+    dutyEndSlots.headSet(slot, true).clear();
   }
 }

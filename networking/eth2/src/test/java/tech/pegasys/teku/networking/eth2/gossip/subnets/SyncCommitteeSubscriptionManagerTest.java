@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.networking.eth2.gossip.subnets;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -70,5 +71,23 @@ public class SyncCommitteeSubscriptionManagerTest {
     verify(network).unsubscribeFromSyncCommitteeSubnetId(2);
     verify(network).unsubscribeFromSyncCommitteeSubnetId(3);
     verify(network, never()).unsubscribeFromSyncCommitteeSubnetId(4);
+  }
+
+  @Test
+  void hasDutyActiveAt_shouldOnlyCountDutiesEndingWithinRange() {
+    manager.subscribe(1, UInt64.valueOf(16));
+    manager.subscribe(2, UInt64.valueOf(32));
+
+    assertThat(manager.hasDutyActiveAt(UInt64.valueOf(10), UInt64.valueOf(16))).isTrue();
+    assertThat(manager.hasDutyActiveAt(UInt64.valueOf(16), UInt64.valueOf(24))).isFalse();
+    assertThat(manager.hasDutyActiveAt(UInt64.valueOf(20), UInt64.valueOf(32))).isTrue();
+  }
+
+  @Test
+  void hasDutyActiveAt_shouldForgetEndedDuties() {
+    manager.subscribe(1, UInt64.valueOf(16));
+    manager.onSlot(UInt64.valueOf(16));
+
+    assertThat(manager.hasDutyActiveAt(UInt64.ZERO, UInt64.valueOf(16))).isFalse();
   }
 }
