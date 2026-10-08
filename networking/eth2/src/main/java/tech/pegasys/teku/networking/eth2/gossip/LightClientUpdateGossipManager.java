@@ -32,11 +32,6 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
 import tech.pegasys.teku.statetransition.util.DebugDataDumper;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
-/**
- * Gossip manager for the {@code light_client_finality_update} and {@code
- * light_client_optimistic_update} topics. The fork digest context epoch of both is the epoch of
- * {@code attested_header.beacon.slot}.
- */
 public class LightClientUpdateGossipManager<T extends SszData> extends AbstractGossipManager<T> {
 
   private LightClientUpdateGossipManager(

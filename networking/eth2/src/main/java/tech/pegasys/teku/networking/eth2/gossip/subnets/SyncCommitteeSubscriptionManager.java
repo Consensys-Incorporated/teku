@@ -29,7 +29,6 @@ public class SyncCommitteeSubscriptionManager implements SlotEventsChannel {
   private final Int2ObjectMap<UInt64> subcommitteeToUnsubscribeSlot = new Int2ObjectOpenHashMap<>();
   final Eth2P2PNetwork p2PNetwork;
 
-  /** Unsubscribe slots of requested subscriptions, i.e. when a local sync committee duty ends. */
   private final NavigableSet<UInt64> dutyEndSlots = new TreeSet<>();
 
   public SyncCommitteeSubscriptionManager(final Eth2P2PNetwork p2PNetwork) {
@@ -71,10 +70,6 @@ public class SyncCommitteeSubscriptionManager implements SlotEventsChannel {
     }
   }
 
-  /**
-   * @return true if a local validator has a sync committee duty that is active at {@code slot} and
-   *     ends no later than {@code latestEndSlot}
-   */
   public synchronized boolean hasDutyActiveAt(final UInt64 slot, final UInt64 latestEndSlot) {
     return !dutyEndSlots.subSet(slot, false, latestEndSlot, true).isEmpty();
   }

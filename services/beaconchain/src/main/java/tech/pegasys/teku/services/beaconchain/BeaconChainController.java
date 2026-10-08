@@ -2317,10 +2317,6 @@ public class BeaconChainController extends Service implements BeaconChainControl
                         "Failed to get NodeId from Discovery System"));
   }
 
-  /**
-   * Light client data is only broadcast by nodes with a validator in the current sync committee at
-   * the slot of the block carrying the sync aggregate.
-   */
   private boolean hasLocalSyncCommitteeDutyAt(final UInt64 slot) {
     final SyncCommitteeSubscriptionManager subscriptionManager = syncCommitteeSubscriptionManager;
     if (subscriptionManager == null) {

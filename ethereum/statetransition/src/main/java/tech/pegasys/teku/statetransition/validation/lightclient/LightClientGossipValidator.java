@@ -20,7 +20,6 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
-/** Gossip validation shared by the light client finality and optimistic update topics. */
 abstract class LightClientGossipValidator<T> {
   private final Spec spec;
   private final RecentChainData recentChainData;

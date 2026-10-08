@@ -76,7 +76,6 @@ public class LightClientUpdateGossipIntegrationTest {
           assertThat(node1.network().getPeerCount()).isEqualTo(1);
           assertThat(node2.network().getPeerCount()).isEqualTo(1);
         });
-    // Wait for subscriptions to complete (jvm-libp2p does this asynchronously)
     Thread.sleep(2000);
 
     final LightClientFinalityUpdate finalityUpdate =
