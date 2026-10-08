@@ -24,9 +24,11 @@ import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.ints.IntSet;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.LongStream;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
@@ -566,14 +568,145 @@ class FastConfirmationCalculatorTest {
   }
 
   @Test
+  void shouldReturnZeroCommitteeWeightWhenStartAfterEnd() {
+    final BeaconState state = genesisState();
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(state, 0);
+
+    assertThat(
+            calculator.computeCommitteeWeightBetweenSlots(
+                state, UInt64.valueOf(5), UInt64.valueOf(4)))
+        .isEqualTo(UInt64.ZERO);
+  }
+
+  @Test
+  void shouldReturnTotalActiveBalanceAsCommitteeWeightWhenFullEpochCovered() {
+    final BeaconState state = genesisState();
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(state, 0);
+
+    assertThat(calculator.computeCommitteeWeightBetweenSlots(state, UInt64.ONE, UInt64.valueOf(15)))
+        .isEqualTo(spec.getTotalActiveBalance(state));
+  }
+
+  @Test
+  void shouldComputeExactCommitteeWeightWithinSingleEpoch() {
+    final BeaconState state = genesisState();
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(state, 0);
+
+    assertThat(
+            calculator.computeCommitteeWeightBetweenSlots(
+                state, UInt64.valueOf(2), UInt64.valueOf(4)))
+        .isEqualTo(committeeWeight(state, 2, 4));
+  }
+
+  @Test
+  void shouldNotDoubleCountValidatorsAssignedInBothEpochsOfTheRange() {
+    final BeaconState state = genesisState();
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(state, 0);
+
+    // Slots 1..14 do not cover a full epoch, but with 8 validators and 8 slots per epoch at least
+    // six validators are assigned both in epoch 0 (slots 1..7) and in epoch 1 (slots 8..14).
+    final UInt64 weight =
+        calculator.computeCommitteeWeightBetweenSlots(state, UInt64.ONE, UInt64.valueOf(14));
+
+    assertThat(weight).isEqualTo(committeeWeight(state, 1, 14));
+    assertThat(weight).isLessThan(committeeWeight(state, 1, 7).plus(committeeWeight(state, 8, 14)));
+  }
+
+  @Test
+  void shouldCountActiveSlashedButNotInactiveValidatorsInCommitteeWeight() {
+    final BeaconState headState = genesisState();
+    final int slashed = firstCommitteeMember(headState, UInt64.valueOf(2));
+    final int exited = firstCommitteeMember(headState, UInt64.valueOf(9));
+    // A balance source distinct from the head state: committees still shuffle from the head state,
+    // while activity and balances come from the balance source.
+    final BeaconState balanceSource =
+        withExitedValidator(withSlashedValidator(headState, slashed), exited);
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(headState, 0);
+
+    final UInt64 weight =
+        calculator.computeCommitteeWeightBetweenSlots(
+            balanceSource, UInt64.ONE, UInt64.valueOf(14));
+
+    assertThat(weight).isEqualTo(committeeWeight(headState, balanceSource, 1, 14));
+    // The slashed validator is still counted, the exited one is not.
+    assertThat(weight)
+        .isEqualTo(
+            calculator
+                .computeCommitteeWeightBetweenSlots(headState, UInt64.ONE, UInt64.valueOf(14))
+                .minus(effectiveBalance(headState, exited)));
+  }
+
+  @Test
+  void shouldCountActiveSlashedValidatorsWhenBalanceSourceIsThePulledUpHeadState() {
+    final int slashed = firstCommitteeMember(genesisState(), UInt64.valueOf(3));
+    final BeaconState state = withSlashedValidator(genesisState(), slashed);
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(state, 0);
+
+    assertThat(
+            calculator.computeCommitteeWeightBetweenSlots(
+                state, UInt64.valueOf(3), UInt64.valueOf(3)))
+        .isEqualTo(effectiveBalance(state, slashed))
+        .isEqualTo(committeeWeight(state, 3, 3));
+  }
+
+  @Test
+  void shouldFloorCommitteeWeightAtEffectiveBalanceIncrementWhenNoParticipantIsActive() {
+    final BeaconState headState = genesisState();
+    final int member = firstCommitteeMember(headState, UInt64.valueOf(3));
+    final BeaconState balanceSource = withExitedValidator(headState, member);
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(headState, 0);
+
+    // get_total_balance of an empty set is EFFECTIVE_BALANCE_INCREMENT, not zero.
+    assertThat(
+            calculator.computeCommitteeWeightBetweenSlots(
+                balanceSource, UInt64.valueOf(3), UInt64.valueOf(3)))
+        .isEqualTo(spec.getGenesisSpecConfig().getEffectiveBalanceIncrement())
+        .isEqualTo(committeeWeight(headState, balanceSource, 3, 3));
+  }
+
+  @Test
+  void shouldMatchSpecCommitteeWeightForEverySlotRange() {
+    final BeaconState headState = genesisState();
+    final BeaconState balanceSource =
+        withSlashedValidator(headState, firstCommitteeMember(headState, UInt64.valueOf(6)));
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(headState, 0);
+
+    // Every range within epochs 0..1, queried in an order that reuses the per-slot caches.
+    for (long startSlot = 0; startSlot < 16; startSlot++) {
+      for (long endSlot = startSlot; endSlot < 16; endSlot++) {
+        for (final BeaconState source : List.of(headState, balanceSource)) {
+          assertThat(
+                  calculator.computeCommitteeWeightBetweenSlots(
+                      source, UInt64.valueOf(startSlot), UInt64.valueOf(endSlot)))
+              .describedAs("range [%s, %s]", startSlot, endSlot)
+              .isEqualTo(committeeWeight(headState, source, startSlot, endSlot));
+        }
+      }
+    }
+  }
+
+  @Test
+  void shouldMemoizeCommitteeWeightPerSlotRange() {
+    final BeaconState state = genesisState();
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(state, 0);
+
+    // Identity, not just equality: the second call must return the memoized instance.
+    assertThat(
+            calculator.computeCommitteeWeightBetweenSlots(
+                state, UInt64.valueOf(6), UInt64.valueOf(9)))
+        .isSameAs(
+            calculator.computeCommitteeWeightBetweenSlots(
+                state, UInt64.valueOf(6), UInt64.valueOf(9)));
+  }
+
+  @Test
   void shouldComputeAdversarialWeightAsByzantineFractionWhenNoEquivocation() {
     buildLinearChain(11);
     final BeaconState balanceSource = genesisState();
     final FastConfirmationCalculator calculator = calculatorWithHeadState(balanceSource, 10);
 
-    final UInt64 total = spec.getTotalActiveBalance(balanceSource);
     final UInt64 expected =
-        estimate(total, 3, 6)
+        committeeWeight(balanceSource, 3, 6)
             .dividedBy(100)
             .times(FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
     assertThat(
@@ -652,9 +785,8 @@ class FastConfirmationCalculatorTest {
     when(store.getVoteSnapshot()).thenReturn(voteSnapshot(Map.of(voter, vote(parent))));
     final FastConfirmationCalculator calculator = calculatorWithHeadState(balanceSource, 10);
 
-    final UInt64 total = spec.getTotalActiveBalance(balanceSource);
     final UInt64 adversarial =
-        estimate(total, 3, 3)
+        committeeWeight(balanceSource, 3, 3)
             .dividedBy(100)
             .times(FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
     final UInt64 expected = effectiveBalance(balanceSource, voter).minus(adversarial);
@@ -669,13 +801,12 @@ class FastConfirmationCalculatorTest {
     // Block chain[3] (slot 3), parent chain[2] (slot 2): no empty slot, so no support discount.
     final FastConfirmationCalculator calculator = calculatorWithHeadState(balanceSource, 5);
 
-    final UInt64 total = spec.getTotalActiveBalance(balanceSource);
     // parentSlot + 1 = 3 .. currentSlot - 1 = 4
-    final UInt64 maximumSupport = estimate(total, 3, 4);
+    final UInt64 maximumSupport = committeeWeight(balanceSource, 3, 4);
     final UInt64 proposerScore = spec.getProposerBoostAmount(balanceSource);
     // Not crossing an epoch boundary, so the adversarial range starts at the block slot (3).
     final UInt64 adversarial =
-        estimate(total, 3, 4)
+        committeeWeight(balanceSource, 3, 4)
             .dividedBy(100)
             .times(FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
     final UInt64 expected =
@@ -800,7 +931,7 @@ class FastConfirmationCalculatorTest {
 
     final UInt64 total = spec.getTotalActiveBalance(calculator.getPulledUpHeadState());
     // epochStart(epoch 1) = 8, currentSlot - 1 = 11
-    final UInt64 ffgWeightTillNow = estimate(total, 8, 11);
+    final UInt64 ffgWeightTillNow = committeeWeight(balanceSource, 8, 11);
     final UInt64 expected =
         total
             .minusMinZero(ffgWeightTillNow)
@@ -961,10 +1092,51 @@ class FastConfirmationCalculatorTest {
     assertThat(calculator.getLatestConfirmed()).isEqualTo(chain.get(10));
   }
 
-  private UInt64 estimate(
-      final UInt64 totalActiveBalance, final long startSlot, final long endSlot) {
-    return FastConfirmationRuleUtil.estimateCommitteeWeightBetweenSlots(
-        spec, totalActiveBalance, UInt64.valueOf(startSlot), UInt64.valueOf(endSlot));
+  private UInt64 committeeWeight(
+      final BeaconState state, final long startSlot, final long endSlot) {
+    return committeeWeight(state, state, startSlot, endSlot);
+  }
+
+  /**
+   * Spec-shaped {@code compute_committee_weight_between_slots}: materializes the union of the
+   * range's committees (shuffled from {@code shufflingSource}), keeps the validators active in
+   * {@code balanceSource} and sums their effective balances with {@code get_total_balance}.
+   */
+  private UInt64 committeeWeight(
+      final BeaconState shufflingSource,
+      final BeaconState balanceSource,
+      final long startSlot,
+      final long endSlot) {
+    if (startSlot > endSlot) {
+      return UInt64.ZERO;
+    }
+    if (FastConfirmationRuleUtil.isFullValidatorSetCovered(
+        spec, UInt64.valueOf(startSlot), UInt64.valueOf(endSlot))) {
+      return spec.getTotalActiveBalance(balanceSource);
+    }
+    final Set<Integer> participants = new HashSet<>();
+    for (long slot = startSlot; slot <= endSlot; slot++) {
+      final UInt64 committeeSlot = UInt64.valueOf(slot);
+      final UInt64 committeesCount =
+          spec.getCommitteeCountPerSlot(shufflingSource, spec.computeEpochAtSlot(committeeSlot));
+      for (UInt64 index = UInt64.ZERO;
+          index.isLessThan(committeesCount);
+          index = index.increment()) {
+        participants.addAll(spec.getBeaconCommittee(shufflingSource, committeeSlot, index));
+      }
+    }
+    final UInt64 epoch = spec.getCurrentEpoch(balanceSource);
+    final List<Integer> activeParticipants =
+        participants.stream()
+            .filter(
+                index ->
+                    spec.atEpoch(epoch)
+                        .predicates()
+                        .isActiveValidator(balanceSource.getValidators().get(index), epoch))
+            .toList();
+    return spec.atEpoch(epoch)
+        .beaconStateAccessors()
+        .getTotalBalance(balanceSource, activeParticipants);
   }
 
   private Map<Integer, VoteTracker> allValidatorsVotingFor(
@@ -1161,6 +1333,14 @@ class FastConfirmationCalculatorTest {
 
   private int firstCommitteeMember(final BeaconState state, final UInt64 slot) {
     return spec.getBeaconCommittee(state, slot, UInt64.ZERO).getInt(0);
+  }
+
+  private BeaconState withExitedValidator(final BeaconState state, final int index) {
+    return state.updated(
+        mutable ->
+            mutable
+                .getValidators()
+                .set(index, mutable.getValidators().get(index).withExitEpoch(UInt64.ZERO)));
   }
 
   private BeaconState withSlashedValidator(final BeaconState state, final int index) {

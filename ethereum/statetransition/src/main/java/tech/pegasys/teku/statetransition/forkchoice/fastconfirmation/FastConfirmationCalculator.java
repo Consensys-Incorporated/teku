@@ -84,6 +84,8 @@ class FastConfirmationCalculator {
   // sees at most two source states, and value equality on BeaconState would hash the whole state.
   private final Map<UInt64, IntSet> slotCommitteeBySlot = new HashMap<>();
   private final Map<SlotRange, IntSet> committeeByRange = new HashMap<>();
+  private final IdentityHashMap<BeaconState, CommitteeWeights> committeeWeightsBySource =
+      new IdentityHashMap<>();
   private final IdentityHashMap<BeaconState, Map<SlotRange, UInt64>> adversarialWeightBySource =
       new IdentityHashMap<>();
   private final IdentityHashMap<BeaconState, Map<Bytes32, UInt64>> safetyThresholdBySource =
@@ -415,6 +417,30 @@ class FastConfirmationCalculator {
   }
 
   /**
+   * Implements {@code compute_committee_weight_between_slots}: the total effective balance (per
+   * {@code balanceSource}) of the validators assigned to any committee of the inclusive slot range
+   * that are active in {@code balanceSource}'s current epoch. Unlike the scoring passes, slashed
+   * validators are counted as long as they are active.
+   *
+   * <p>Computed without materializing the union of the range's committees, see {@link
+   * CommitteeWeights}. Memoized per (balance source, slot range).
+   */
+  UInt64 computeCommitteeWeightBetweenSlots(
+      final BeaconState balanceSource, final UInt64 startSlot, final UInt64 endSlot) {
+    // Sanity check
+    if (startSlot.isGreaterThan(endSlot)) {
+      return UInt64.ZERO;
+    }
+    // If an entire epoch is covered by the range, return the total active balance
+    if (FastConfirmationRuleUtil.isFullValidatorSetCovered(spec, startSlot, endSlot)) {
+      return spec.getTotalActiveBalance(balanceSource);
+    }
+    return committeeWeightsBySource
+        .computeIfAbsent(balanceSource, CommitteeWeights::new)
+        .getWeightBetweenSlots(startSlot, endSlot);
+  }
+
+  /**
    * Implements {@code get_equivocation_score}: the total effective balance (per {@code
    * balanceSource}) of active, equivocating validators assigned to the inclusive slot range. Per
    * spec, slashed validators are not filtered out here (they are very likely already equivocating).
@@ -422,8 +448,8 @@ class FastConfirmationCalculator {
    * <p>Iterates the (almost always empty) equivocator set and checks each member's committee
    * assignment, rather than materializing the committees of the whole slot range and filtering them
    * for equivocators as the spec does. The result is identical — both select the validators that
-   * are equivocating and assigned to the range — but no slot committee is computed at all in the
-   * common no-equivocation case, which makes {@code compute_adversarial_weight} pure arithmetic.
+   * are equivocating and assigned to the range — but no committee union is built at all in the
+   * common no-equivocation case.
    */
   UInt64 getEquivocationScore(
       final BeaconState balanceSource, final UInt64 startSlot, final UInt64 endSlot) {
@@ -490,10 +516,8 @@ class FastConfirmationCalculator {
 
   private UInt64 calculateAdversarialWeight(
       final BeaconState balanceSource, final UInt64 startSlot, final UInt64 endSlot) {
-    final UInt64 totalActiveBalance = spec.getTotalActiveBalance(balanceSource);
     final UInt64 maximumWeight =
-        FastConfirmationRuleUtil.estimateCommitteeWeightBetweenSlots(
-            spec, totalActiveBalance, startSlot, endSlot);
+        computeCommitteeWeightBetweenSlots(balanceSource, startSlot, endSlot);
     final UInt64 maxAdversarialWeight =
         maximumWeight
             .dividedBy(100)
@@ -564,11 +588,9 @@ class FastConfirmationCalculator {
   private UInt64 calculateSafetyThreshold(
       final Bytes32 blockRoot, final BeaconState balanceSource) {
     final UInt64 parentSlot = getBlockSlot(getBlockParentRoot(blockRoot));
-    final UInt64 totalActiveBalance = spec.getTotalActiveBalance(balanceSource);
     final UInt64 proposerScore = spec.getProposerBoostAmount(balanceSource);
     final UInt64 maximumSupport =
-        FastConfirmationRuleUtil.estimateCommitteeWeightBetweenSlots(
-            spec, totalActiveBalance, parentSlot.plus(1), currentSlot.minus(1));
+        computeCommitteeWeightBetweenSlots(balanceSource, parentSlot.plus(1), currentSlot.minus(1));
     final UInt64 supportDiscount = getSupportDiscount(balanceSource, blockRoot);
     final UInt64 adversarialWeight = getAdversarialWeight(balanceSource, blockRoot);
 
@@ -720,8 +742,7 @@ class FastConfirmationCalculator {
 
     // Total FFG weight already assigned up to, but excluding, the current slot.
     final UInt64 ffgWeightTillNow =
-        FastConfirmationRuleUtil.estimateCommitteeWeightBetweenSlots(
-            spec, totalActiveBalance, epochStart, lastSlot);
+        computeCommitteeWeightBetweenSlots(balanceSource, epochStart, lastSlot);
     final UInt64 remainingFfgWeight = totalActiveBalance.minusMinZero(ffgWeightTillNow);
     final UInt64 remainingHonestFfgWeight =
         remainingFfgWeight
@@ -1089,6 +1110,122 @@ class FastConfirmationCalculator {
         .getBlockData(blockRoot)
         .map(ProtoNodeData::getCheckpoints)
         .orElseThrow(() -> new IllegalStateException("Missing checkpoints for " + blockRoot));
+  }
+
+  /**
+   * Committee weights against one balance source, for slot ranges that do not cover a full epoch.
+   *
+   * <p>Each active validator sits in exactly one slot committee per epoch, so within an epoch the
+   * weight of a range is the sum of its slot committee weights, each computed once and shared by
+   * every range containing the slot. Such a range spans at most two consecutive epochs (spanning
+   * three would cover the middle one), and only there can a validator appear twice: once in the
+   * start epoch part and once in the end epoch part. The union's weight is then the sum of the slot
+   * weights minus the weight of that intersection, which again splits per start-epoch slot because
+   * start-epoch committees are disjoint. The intersection terms depend only on the end slot, which
+   * is {@code currentSlot - 1} for nearly every range a slot queries, so they are shared across
+   * blocks too.
+   */
+  private final class CommitteeWeights {
+    private final UInt64 balanceSourceEpoch;
+    private final SszList<Validator> validators;
+    // The flat zeroed-balances list (see getScoringBalances). Not used for the pulled-up head
+    // state, which changes every slot: building its one-shot list would read the whole registry
+    // (see computeCurrentTargetScore), while its only range here reads the current epoch's
+    // committees so far.
+    private final Optional<List<UInt64>> scoringBalances;
+    private final UInt64 minimumWeight;
+    private final Map<UInt64, Long> weightBySlot = new HashMap<>();
+    private final Map<SlotRange, Long> intersectionWeightBySlotAndEnd = new HashMap<>();
+    private final Map<SlotRange, UInt64> weightByRange = new HashMap<>();
+
+    // Identity comparison, like the identity-keyed per-source maps: value equality would hash the
+    // whole state.
+    @SuppressWarnings("ReferenceComparison")
+    private CommitteeWeights(final BeaconState balanceSource) {
+      this.balanceSourceEpoch = spec.getCurrentEpoch(balanceSource);
+      this.validators = balanceSource.getValidators();
+      this.scoringBalances =
+          balanceSource == states.pulledUpHeadState()
+              ? Optional.empty()
+              : Optional.of(getScoringBalances(balanceSource));
+      this.minimumWeight =
+          spec.atSlot(balanceSource.getSlot()).getConfig().getEffectiveBalanceIncrement();
+    }
+
+    /** Requires {@code startSlot <= endSlot} and a range not covering a full epoch. */
+    UInt64 getWeightBetweenSlots(final UInt64 startSlot, final UInt64 endSlot) {
+      return weightByRange.computeIfAbsent(
+          new SlotRange(startSlot, endSlot),
+          range -> calculateWeightBetweenSlots(range.startSlot(), range.endSlot()));
+    }
+
+    private UInt64 calculateWeightBetweenSlots(final UInt64 startSlot, final UInt64 endSlot) {
+      // Plain longs: the total stake in Gwei is far below 2^63, so the sums cannot overflow.
+      long weight = 0;
+      for (UInt64 slot = startSlot; slot.isLessThanOrEqualTo(endSlot); slot = slot.increment()) {
+        weight += getSlotWeight(slot);
+      }
+      final UInt64 endEpochStart = spec.computeStartSlotAtEpoch(spec.computeEpochAtSlot(endSlot));
+      // Crossing into the end epoch: remove validators counted in both epoch parts.
+      for (UInt64 slot = startSlot; slot.isLessThan(endEpochStart); slot = slot.increment()) {
+        weight -= getIntersectionWeight(slot, endSlot);
+      }
+      // get_total_balance never returns less than EFFECTIVE_BALANCE_INCREMENT.
+      return UInt64.valueOf(weight).max(minimumWeight);
+    }
+
+    private long getSlotWeight(final UInt64 slot) {
+      return weightBySlot.computeIfAbsent(
+          slot,
+          __ -> {
+            long weight = 0;
+            for (final int index : getSlotCommittee(slot)) {
+              weight += getActiveBalance(index);
+            }
+            return weight;
+          });
+    }
+
+    /**
+     * Weight of the {@code slot} committee members (a start-epoch slot) that are also assigned to
+     * the end-epoch part of the range, {@code [start of endSlot's epoch, endSlot]}.
+     */
+    private long getIntersectionWeight(final UInt64 slot, final UInt64 endSlot) {
+      return intersectionWeightBySlotAndEnd.computeIfAbsent(
+          new SlotRange(slot, endSlot),
+          __ -> {
+            final IntSet endEpochPart =
+                getCommitteeBetweenSlots(
+                    spec.computeStartSlotAtEpoch(spec.computeEpochAtSlot(endSlot)), endSlot);
+            long weight = 0;
+            for (final int index : getSlotCommittee(slot)) {
+              if (endEpochPart.contains(index)) {
+                weight += getActiveBalance(index);
+              }
+            }
+            return weight;
+          });
+    }
+
+    /** Effective balance of the validator if it is active in the balance source, otherwise 0. */
+    private long getActiveBalance(final int index) {
+      // Committees are shuffled from the head state, whose registry can be ahead of the source's.
+      if (index >= validators.size()) {
+        return 0;
+      }
+      if (scoringBalances.isPresent()) {
+        final UInt64 balance = scoringBalances.get().get(index);
+        if (!balance.isZero()) {
+          return balance.longValue();
+        }
+        // Zero: inactive or slashed. Only an active slashed validator counts here, which is rare
+        // enough for the validator to be read.
+      }
+      final Validator validator = validators.get(index);
+      return isActiveValidator(validator, balanceSourceEpoch)
+          ? validator.getEffectiveBalance().longValue()
+          : 0;
+    }
   }
 
   /** Inclusive slot range used as a memoization key. */
