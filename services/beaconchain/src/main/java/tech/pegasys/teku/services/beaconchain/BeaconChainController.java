@@ -1728,7 +1728,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
     }
     LOG.debug("BeaconChainController.initLightClientServerService()");
     lightClientServerService =
-        new LightClientServerService(spec, lightClientUpdateStore, combinedChainDataClient);
+        new LightClientServerService(
+            spec, lightClientUpdateStore, combinedChainDataClient, beaconAsyncRunner, timeProvider);
     eventChannels
         .subscribe(ReceivedBlockEventsChannel.class, lightClientServerService)
         .subscribe(FinalizedCheckpointChannel.class, lightClientServerService)
