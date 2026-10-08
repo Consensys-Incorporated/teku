@@ -34,6 +34,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.api.ForkChoiceData;
 import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerTest;
+import tech.pegasys.teku.infrastructure.restapi.OpenApiTestUtil;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.blocks.BlockCheckpoints;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
@@ -42,6 +43,12 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeValidationStatu
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 
 class GetForkChoiceTest extends AbstractMigratedBeaconHandlerTest {
+
+  @Test
+  void shouldMarkEndpointDeprecated() throws Exception {
+    assertThat(OpenApiTestUtil.serializeEndpointMetadata(new GetForkChoice(chainDataProvider)))
+        .contains("\"deprecated\":true");
+  }
 
   private final ForkChoiceData responseMap =
       new ForkChoiceData(

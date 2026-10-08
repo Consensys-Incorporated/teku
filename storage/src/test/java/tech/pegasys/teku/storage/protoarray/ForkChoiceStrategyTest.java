@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -51,6 +52,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeDataWithParent;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeValidationStatus;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
@@ -643,6 +645,90 @@ public class ForkChoiceStrategyTest extends AbstractBlockMetadataStoreTest {
     assertThat(boundaryFullNodeIndex).isPresent();
     assertThat(boundaryBaseNode(fixture).getParentIndex()).isEmpty();
     assertThat(childBaseNode(fixture).getParentIndex()).isEqualTo(boundaryFullNodeIndex);
+  }
+
+  @Test
+  void getBlockDataWithParent_shouldPairGloasNodesWithTheirParentNodes() {
+    final GloasBoundaryFixture fixture = createGloasBoundaryFixture();
+    fixture
+        .strategy()
+        .applyUpdate(
+            List.of(
+                BlockAndCheckpoints.fromBlockAndState(fixture.spec(), fixture.boundary()),
+                BlockAndCheckpoints.fromBlockAndState(fixture.spec(), fixture.child())),
+            Map.of(fixture.boundary().getRoot(), fixture.boundaryExecutionPayload()),
+            emptySet(),
+            emptyMap(),
+            fixture.finalizedCheckpoint(),
+            Optional.of(fixture.boundaryBlockAndCheckpoints()));
+    final Bytes32 boundaryRoot = fixture.boundary().getRoot();
+    final Bytes32 childRoot = fixture.child().getRoot();
+
+    final Map<ForkChoiceNode, Optional<ForkChoiceNode>> parentByNode =
+        fixture.strategy().getBlockDataWithParent().stream()
+            .collect(
+                Collectors.toMap(
+                    nodeWithParent -> toForkChoiceNode(nodeWithParent.node()),
+                    nodeWithParent -> nodeWithParent.parent().map(this::toForkChoiceNode)));
+
+    // the finalized boundary block is the anchor, so its PENDING node has no retained parent
+    assertThat(parentByNode.get(ForkChoiceNode.createBase(boundaryRoot))).isEmpty();
+    // a block's EMPTY and FULL nodes have the same block's PENDING node as parent
+    assertThat(parentByNode.get(ForkChoiceNode.createEmpty(boundaryRoot)))
+        .contains(ForkChoiceNode.createBase(boundaryRoot));
+    assertThat(parentByNode.get(ForkChoiceNode.createFull(boundaryRoot)))
+        .contains(ForkChoiceNode.createBase(boundaryRoot));
+    assertThat(parentByNode.get(ForkChoiceNode.createEmpty(childRoot)))
+        .contains(ForkChoiceNode.createBase(childRoot));
+    // a block's PENDING node has the parent block's node it builds on, here the FULL one
+    assertThat(parentByNode.get(ForkChoiceNode.createBase(childRoot)))
+        .contains(ForkChoiceNode.createFull(boundaryRoot));
+  }
+
+  @Test
+  void getBlockDataWithParent_shouldUseBidParentBlockHashForGloasPendingAndEmptyNodes() {
+    final GloasBoundaryFixture fixture = createGloasBoundaryFixture();
+    fixture
+        .strategy()
+        .applyUpdate(
+            List.of(
+                BlockAndCheckpoints.fromBlockAndState(fixture.spec(), fixture.boundary()),
+                BlockAndCheckpoints.fromBlockAndState(fixture.spec(), fixture.child())),
+            Map.of(fixture.boundary().getRoot(), fixture.boundaryExecutionPayload()),
+            emptySet(),
+            emptyMap(),
+            fixture.finalizedCheckpoint(),
+            Optional.of(fixture.boundaryBlockAndCheckpoints()));
+    final Bytes32 childRoot = fixture.child().getRoot();
+    final Bytes32 bidParentBlockHash =
+        fixture
+            .child()
+            .getBlock()
+            .getMessage()
+            .getBody()
+            .getOptionalSignedExecutionPayloadBid()
+            .orElseThrow()
+            .getMessage()
+            .getParentBlockHash();
+
+    final Map<ForkChoiceNode, Bytes32> executionBlockHashByNode =
+        fixture.strategy().getBlockDataWithParent().stream()
+            .map(ProtoNodeDataWithParent::node)
+            .collect(
+                Collectors.toMap(this::toForkChoiceNode, ProtoNodeData::getExecutionBlockHash));
+
+    assertThat(executionBlockHashByNode.get(ForkChoiceNode.createBase(childRoot)))
+        .isEqualTo(bidParentBlockHash);
+    assertThat(executionBlockHashByNode.get(ForkChoiceNode.createEmpty(childRoot)))
+        .isEqualTo(bidParentBlockHash);
+  }
+
+  private ForkChoiceNode toForkChoiceNode(final ProtoNodeData node) {
+    return switch (node.getPayloadStatus()) {
+      case PAYLOAD_STATUS_PENDING -> ForkChoiceNode.createBase(node.getRoot());
+      case PAYLOAD_STATUS_EMPTY -> ForkChoiceNode.createEmpty(node.getRoot());
+      case PAYLOAD_STATUS_FULL -> ForkChoiceNode.createFull(node.getRoot());
+    };
   }
 
   @Test
