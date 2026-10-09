@@ -266,6 +266,7 @@ public class BeaconStateMutators {
                     validator
                         .getWithdrawableEpoch()
                         .max(epoch.plus(specConfig.getEpochsPerSlashingsVector()))));
+    BeaconStateCache.getTransitionCaches(state).getTotalActiveUnslashedBalance().clear();
 
     int index = epoch.mod(specConfig.getEpochsPerSlashingsVector()).intValue();
     state

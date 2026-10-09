@@ -155,10 +155,28 @@ public abstract class BeaconStateAccessors {
             epoch -> getTotalBalance(state, getActiveValidatorIndices(state, epoch)));
   }
 
+  /** compute_proposer_score */
   public UInt64 getProposerBoostAmount(final BeaconState state) {
-    final UInt64 committeeWeight =
-        getTotalActiveBalance(state).dividedBy(config.getSlotsPerEpoch());
-    return committeeWeight.times(config.getProposerScoreBoost()).dividedBy(100);
+    return calculateCommitteeFraction(state, config.getProposerScoreBoost());
+  }
+
+  /** Total effective balance of the current epoch's active validators that are not slashed. */
+  public UInt64 getTotalActiveUnslashedBalance(final BeaconState state) {
+    return BeaconStateCache.getTransitionCaches(state)
+        .getTotalActiveUnslashedBalance()
+        .get(
+            getCurrentEpoch(state),
+            epoch -> {
+              final SszList<Validator> validators = state.getValidators();
+              UInt64 total = UInt64.ZERO;
+              for (final int index : getActiveValidatorIndices(state, epoch)) {
+                final Validator validator = validators.get(index);
+                if (!validator.isSlashed()) {
+                  total = total.plus(validator.getEffectiveBalance());
+                }
+              }
+              return total.max(config.getEffectiveBalanceIncrement());
+            });
   }
 
   public Bytes32 getSeed(final BeaconState state, final UInt64 epoch, final Bytes4 domainType)
@@ -180,7 +198,7 @@ public abstract class BeaconStateAccessors {
   public UInt64 calculateCommitteeFraction(
       final BeaconState beaconState, final int committeePercent) {
     final UInt64 committeeWeight =
-        getTotalActiveBalance(beaconState).dividedBy(config.getSlotsPerEpoch());
+        getTotalActiveUnslashedBalance(beaconState).dividedBy(config.getSlotsPerEpoch());
     return committeeWeight.times(committeePercent).dividedBy(100);
   }
 
