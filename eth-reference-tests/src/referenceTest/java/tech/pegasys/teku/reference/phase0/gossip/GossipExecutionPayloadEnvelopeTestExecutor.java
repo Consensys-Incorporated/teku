@@ -76,8 +76,6 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
                 .map(BlockEntryAndBlock::block)
                 .toList());
 
-    ctx.forkChoice.onTick(UInt64.valueOf(metaData.getCurrentTimeMs()), Optional.empty());
-
     final Map<Bytes32, BlockImportResult> invalidBlockRoots = new HashMap<>();
 
     for (final BlockEntryAndBlock blockEntryAndBlock : blocks) {
@@ -87,6 +85,9 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
       if (block.getRoot().equals(ctx.anchorPoint.getRoot())) {
         continue;
       }
+      ctx.forkChoice.onTick(
+          spec.computeTimeMillisAtSlot(block.getSlot(), ctx.recentChainData.getGenesisTimeMillis()),
+          Optional.empty());
       final BlockImportResult importResult =
           safeJoin(
               ctx.forkChoice.onBlock(
@@ -137,8 +138,6 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
             spec, gossipValidationHelper, blockGossipValidator, invalidBlockRoots);
 
     for (final GossipExecutionPayloadEnvelopeMetaData.Message message : metaData.getMessages()) {
-      ctx.forkChoice.onTick(UInt64.valueOf(message.getCurrentTimeMs()), Optional.empty());
-
       final SignedExecutionPayloadEnvelope signedEnvelope =
           loadSsz(testDefinition, message.getMessage() + ".ssz_snappy", schema::sszDeserialize);
       final InternalValidationResult result = safeJoin(validator.validate(signedEnvelope));
@@ -158,9 +157,6 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
     @JsonProperty(value = "messages", required = true)
     private List<Message> messages;
 
-    @JsonProperty(value = "current_time_ms", required = true)
-    private long currentTimeMs;
-
     @JsonProperty(value = "bls_setting", defaultValue = "0")
     private int blsSetting;
 
@@ -177,10 +173,6 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
 
     public List<Message> getMessages() {
       return messages;
-    }
-
-    public long getCurrentTimeMs() {
-      return currentTimeMs;
     }
 
     public BlsSetting getBlsSetting() {
@@ -208,9 +200,6 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private static class Message {
 
-      @JsonProperty(value = "current_time_ms", required = true)
-      private long currentTimeMs;
-
       @JsonProperty(value = "message", required = true)
       private String message;
 
@@ -219,10 +208,6 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
 
       @JsonProperty(value = "reason")
       private String reason;
-
-      public long getCurrentTimeMs() {
-        return currentTimeMs;
-      }
 
       public String getMessage() {
         return message;

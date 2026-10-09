@@ -45,7 +45,7 @@ public class SimplePeerSelectionStrategy implements PeerSelectionStrategy {
       return emptyList();
     }
     return candidates.get().stream()
-        .map(network::createPeerAddress)
+        .flatMap(candidate -> network.createPeerAddress(candidate).stream())
         .limit(peersToAdd)
         .collect(toList());
   }

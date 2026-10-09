@@ -100,7 +100,7 @@ public class BlockTopicHandlerTest extends AbstractTopicHandlerTest<SignedBeacon
     Bytes serialized = gossipEncoding.encode(prevForkBlock);
     final SafeFuture<ValidationResult> result =
         topicHandler.handleMessage(topicHandler.prepareMessage(serialized, Optional.empty()));
-    assertThat(asyncRunner.countDelayedActions()).isEqualTo(0);
+    asyncRunner.executeQueuedActions();
     assertThat(result).isCompletedWithValue(ValidationResult.Invalid);
     verifyNoInteractions(processor);
   }

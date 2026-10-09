@@ -19,6 +19,7 @@ import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
@@ -35,6 +36,7 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.SignedBlsToExecutionChange;
@@ -197,6 +199,37 @@ public class OperationsReOrgManagerTest {
   }
 
   @Test
+  void shouldIgnorePayloadReorgs() {
+    final BeaconBlock head = dataStructureUtil.randomBeaconBlock(10);
+
+    operationsReOrgManager.chainHeadUpdated(
+        head.getSlot(),
+        head.getStateRoot(),
+        head.hashTreeRoot(),
+        false,
+        false,
+        dataStructureUtil.randomBytes32(),
+        dataStructureUtil.randomBytes32(),
+        Optional.of(ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY),
+        Optional.of(
+            ReorgContext.payloadReorg(
+                head.hashTreeRoot(),
+                head.getSlot(),
+                head.getStateRoot(),
+                dataStructureUtil.randomBytes32(),
+                dataStructureUtil.randomBytes32())));
+
+    verifyNoInteractions(
+        recentChainData,
+        attestationPool,
+        attestationManager,
+        exitOperationPool,
+        proposerSlashingOperationPool,
+        attesterSlashingOperationPool,
+        blsToExecutionOperationPool);
+  }
+
+  @Test
   void shouldOnlyRemoveOperations() {
     BeaconBlock block1 = dataStructureUtil.randomBeaconBlock(10);
     BeaconBlock block2 = dataStructureUtil.randomBeaconBlock(11);
@@ -210,7 +243,8 @@ public class OperationsReOrgManagerTest {
         .thenReturn(nowCanonicalBlockRoots);
 
     // reOrged old chain
-    when(recentChainData.getAncestorsOnFork(commonAncestorSlot, Bytes32.ZERO))
+    final Bytes32 oldHeadRoot = dataStructureUtil.randomBytes32();
+    when(recentChainData.getAncestorsOnFork(commonAncestorSlot, oldHeadRoot))
         .thenReturn(new TreeMap<>());
 
     when(recentChainData.retrieveBlockByRoot(block1.hashTreeRoot()))
@@ -230,7 +264,7 @@ public class OperationsReOrgManagerTest {
         dataStructureUtil.randomBytes32(),
         dataStructureUtil.randomBytes32(),
         Optional.empty(),
-        ReorgContext.of(Bytes32.ZERO, UInt64.ZERO, Bytes32.ZERO, commonAncestorSlot, Bytes32.ZERO));
+        ReorgContext.of(oldHeadRoot, UInt64.ZERO, Bytes32.ZERO, commonAncestorSlot, Bytes32.ZERO));
 
     verify(recentChainData).getAncestorsOnFork(commonAncestorSlot, block2.hashTreeRoot());
 

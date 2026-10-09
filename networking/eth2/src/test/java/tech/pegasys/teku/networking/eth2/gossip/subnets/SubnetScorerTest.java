@@ -212,7 +212,8 @@ class SubnetScorerTest {
       return new DiscoveryPeer(
           pubKey,
           DEFAULT_NODE_RECORD_CONVERTER.convertPublicKeyToNodeId(pubKey),
-          new InetSocketAddress(InetAddress.getByAddress(new byte[] {127, 0, 0, 1}), 9000),
+          Optional.of(
+              new InetSocketAddress(InetAddress.getByAddress(new byte[] {127, 0, 0, 1}), 9000)),
           Optional.empty(),
           Optional.empty(),
           attSubnets,

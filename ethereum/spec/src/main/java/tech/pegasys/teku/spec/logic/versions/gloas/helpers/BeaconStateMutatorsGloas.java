@@ -16,11 +16,13 @@ package tech.pegasys.teku.spec.logic.versions.gloas.helpers;
 import static com.google.common.base.Preconditions.checkArgument;
 import static tech.pegasys.teku.spec.config.SpecConfig.FAR_FUTURE_EPOCH;
 
+import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.infrastructure.ssz.SszMutableList;
+import tech.pegasys.teku.infrastructure.ssz.SszMutableVector;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
@@ -31,6 +33,7 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.Mu
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPayment;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateMutators;
+import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateMutators.ValidatorExitContext;
 import tech.pegasys.teku.spec.logic.versions.electra.helpers.BeaconStateMutatorsElectra;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 
@@ -94,6 +97,30 @@ public class BeaconStateMutatorsGloas extends BeaconStateMutatorsElectra {
     }
 
     return state.getEarliestExitEpoch();
+  }
+
+  /**
+   * slash_validator
+   *
+   * <p>Gloas also removes the pending builder payments for blocks proposed by the slashed
+   * validator.
+   */
+  @Override
+  public void slashValidator(
+      final MutableBeaconState state,
+      final int slashedIndex,
+      final Supplier<ValidatorExitContext> validatorExitContextSupplier) {
+    super.slashValidator(state, slashedIndex, validatorExitContextSupplier);
+
+    final SszMutableVector<BuilderPendingPayment> builderPendingPayments =
+        MutableBeaconStateGloas.required(state).getBuilderPendingPayments();
+    final UInt64 slashedValidatorIndex = UInt64.valueOf(slashedIndex);
+    for (int paymentIndex = 0; paymentIndex < builderPendingPayments.size(); paymentIndex++) {
+      final BuilderPendingPayment payment = builderPendingPayments.get(paymentIndex);
+      if (payment.getProposerIndex().equals(slashedValidatorIndex)) {
+        builderPendingPayments.set(paymentIndex, payment.getSchema().getDefault());
+      }
+    }
   }
 
   /**

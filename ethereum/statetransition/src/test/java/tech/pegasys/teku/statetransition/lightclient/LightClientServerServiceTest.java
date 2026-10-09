@@ -340,6 +340,16 @@ public class LightClientServerServiceTest {
   }
 
   @TestTemplate
+  public void chainHeadUpdated_shouldIgnorePayloadReorgs() {
+    final Chain chain = generateChain();
+    service.onBlockImported(chain.signature().getBlock(), false);
+
+    notifyChainHeadUpdated(orphanEverything(), payloadReorg());
+
+    assertThat(store.getBestUpdatesInRange(UInt64.ZERO, 1)).hasSize(1);
+  }
+
+  @TestTemplate
   public void chainHeadUpdated_shouldIgnoreHeadAdvancesThatAreNotReorgs() {
     final Chain chain = generateChain();
     service.onBlockImported(chain.signature().getBlock(), false);
@@ -485,6 +495,16 @@ public class LightClientServerServiceTest {
         (slot, root) -> false,
         asyncRunner,
         timeProvider);
+  }
+
+  private Optional<ReorgContext> payloadReorg() {
+    return Optional.of(
+        ReorgContext.payloadReorg(
+            dataStructureUtil.randomBytes32(),
+            UInt64.ONE,
+            dataStructureUtil.randomBytes32(),
+            dataStructureUtil.randomBytes32(),
+            dataStructureUtil.randomBytes32()));
   }
 
   private Optional<ReorgContext> reorg() {

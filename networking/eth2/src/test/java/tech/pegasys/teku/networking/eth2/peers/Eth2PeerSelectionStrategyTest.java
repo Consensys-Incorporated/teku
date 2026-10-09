@@ -80,7 +80,7 @@ class Eth2PeerSelectionStrategyTest {
         .thenAnswer(
             invocation -> {
               final DiscoveryPeer peer = invocation.getArgument(0);
-              return new PeerAddress(new MockNodeId(peer.getPublicKey()));
+              return Optional.of(new PeerAddress(new MockNodeId(peer.getPublicKey())));
             });
   }
 
@@ -180,6 +180,33 @@ class Eth2PeerSelectionStrategyTest {
                 peerPools,
                 () -> List.of(DISCOVERY_PEER1, DISCOVERY_PEER2, DISCOVERY_PEER3)))
         .containsExactly(PEER2);
+  }
+
+  @Test
+  void selectPeersToConnect_shouldSkipCandidateWithNoDialableAddress() {
+    final Eth2PeerSelectionStrategy strategy = createStrategy(1, 1, 0);
+    when(network.createPeerAddress(DISCOVERY_PEER1)).thenReturn(Optional.empty());
+
+    assertThat(
+            strategy.selectPeersToConnect(
+                network, peerPools, () -> List.of(DISCOVERY_PEER1, DISCOVERY_PEER2)))
+        .containsExactly(PEER2);
+  }
+
+  @Test
+  void selectPeersToConnect_shouldSkipRandomCandidateWithNoDialableAddress() {
+    final Eth2PeerSelectionStrategy strategy = createStrategy(0, 4, 1);
+    withShuffleOrder(DISCOVERY_PEER1, DISCOVERY_PEER2);
+    when(network.createPeerAddress(DISCOVERY_PEER1)).thenReturn(Optional.empty());
+
+    assertThat(
+            strategy.selectPeersToConnect(
+                network, peerPools, () -> List.of(DISCOVERY_PEER1, DISCOVERY_PEER2)))
+        .containsExactly(PEER2);
+    assertThat(peerPools.getPeerConnectionType(PEER1.getId()))
+        .isNotEqualTo(PeerConnectionType.RANDOMLY_SELECTED);
+    assertThat(peerPools.getPeerConnectionType(PEER2.getId()))
+        .isEqualTo(PeerConnectionType.RANDOMLY_SELECTED);
   }
 
   @Test
@@ -475,7 +502,9 @@ class Eth2PeerSelectionStrategyTest {
     return new DiscoveryPeer(
         peerId,
         peerId,
-        new InetSocketAddress(InetAddress.getLoopbackAddress(), peerId.trimLeadingZeros().toInt()),
+        Optional.of(
+            new InetSocketAddress(
+                InetAddress.getLoopbackAddress(), peerId.trimLeadingZeros().toInt())),
         Optional.empty(),
         ENR_FORK_ID,
         SCHEMA_DEFINITIONS.getAttnetsENRFieldSchema().ofBits(attnets),

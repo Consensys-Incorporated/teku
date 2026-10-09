@@ -23,7 +23,11 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.state.BeaconStateTestBuilder;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.BeaconStateElectra;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPayment;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateMutators;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
@@ -86,6 +90,88 @@ class BeaconStateMutatorsGloasTest {
             state -> stateMutatorsGloas.computeExitEpochAndUpdateChurn(state, exitBalance));
 
     assertThat(postState.getEarliestExitEpoch()).isEqualTo(expectedEarliestExitEpoch.plus(1));
+  }
+
+  @Test
+  public void slashValidator_shouldClearEveryPendingPaymentProposedBySlashedValidator() {
+    final int slotsPerEpoch = configGloas.getSlotsPerEpoch();
+    final int slashedIndex = 3;
+    final UInt64 otherProposer = UInt64.valueOf(7);
+    // Payments for the slashed proposer in both the previous and current epoch halves, plus one
+    // from another proposer in each half that must survive.
+    final int previousEpochPayment = 1;
+    final int currentEpochPayment = slotsPerEpoch + 2;
+    final int otherPreviousEpochPayment = 4;
+    final int otherCurrentEpochPayment = slotsPerEpoch + 5;
+    final BuilderPendingPayment otherPayment = paymentWithProposer(otherProposer);
+
+    final BeaconState preState =
+        dataStructureUtil
+            .randomBeaconState(UInt64.valueOf(2L * slotsPerEpoch + 1))
+            .updated(
+                mutable -> {
+                  final MutableBeaconStateGloas state = MutableBeaconStateGloas.required(mutable);
+                  final BuilderPendingPayment slashedPayment =
+                      paymentWithProposer(UInt64.valueOf(slashedIndex));
+                  state.getBuilderPendingPayments().set(previousEpochPayment, slashedPayment);
+                  state.getBuilderPendingPayments().set(currentEpochPayment, slashedPayment);
+                  state.getBuilderPendingPayments().set(otherPreviousEpochPayment, otherPayment);
+                  state.getBuilderPendingPayments().set(otherCurrentEpochPayment, otherPayment);
+                });
+
+    final BeaconStateGloas postState = slash(preState, slashedIndex);
+
+    assertThat(postState.getValidators().get(slashedIndex).isSlashed()).isTrue();
+    final BuilderPendingPayment emptyPayment =
+        schemaDefinitionsGloas.getBuilderPendingPaymentSchema().getDefault();
+    assertThat(postState.getBuilderPendingPayments().get(previousEpochPayment))
+        .isEqualTo(emptyPayment);
+    assertThat(postState.getBuilderPendingPayments().get(currentEpochPayment))
+        .isEqualTo(emptyPayment);
+    assertThat(postState.getBuilderPendingPayments().get(otherPreviousEpochPayment))
+        .isEqualTo(otherPayment);
+    assertThat(postState.getBuilderPendingPayments().get(otherCurrentEpochPayment))
+        .isEqualTo(otherPayment);
+  }
+
+  @Test
+  public void slashValidator_shouldKeepPaymentsWhenSlashedValidatorProposedNone() {
+    final int slashedIndex = 3;
+    final BuilderPendingPayment otherPayment = paymentWithProposer(UInt64.valueOf(7));
+    final BeaconState preState =
+        dataStructureUtil
+            .randomBeaconState(UInt64.valueOf(2L * configGloas.getSlotsPerEpoch() + 1))
+            .updated(
+                mutable ->
+                    MutableBeaconStateGloas.required(mutable)
+                        .getBuilderPendingPayments()
+                        .set(0, otherPayment));
+    final BeaconStateGloas preStateGloas = BeaconStateGloas.required(preState);
+
+    final BeaconStateGloas postState = slash(preState, slashedIndex);
+
+    assertThat(postState.getValidators().get(slashedIndex).isSlashed()).isTrue();
+    assertThat(postState.getBuilderPendingPayments())
+        .isEqualTo(preStateGloas.getBuilderPendingPayments());
+  }
+
+  private BeaconStateGloas slash(final BeaconState preState, final int slashedIndex) {
+    return BeaconStateGloas.required(
+        preState.updated(
+            state ->
+                stateMutatorsGloas.slashValidator(
+                    state,
+                    slashedIndex,
+                    stateMutatorsGloas.createValidatorExitContextSupplier(state))));
+  }
+
+  private BuilderPendingPayment paymentWithProposer(final UInt64 proposerIndex) {
+    return schemaDefinitionsGloas
+        .getBuilderPendingPaymentSchema()
+        .create(
+            UInt64.valueOf(1000),
+            dataStructureUtil.randomBuilderPendingWithdrawal(),
+            proposerIndex);
   }
 
   private UInt64 computedActivationExitEpoch(final BeaconStateElectra state) {

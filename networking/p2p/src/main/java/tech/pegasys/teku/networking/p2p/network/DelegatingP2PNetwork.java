@@ -41,7 +41,7 @@ public abstract class DelegatingP2PNetwork<T extends Peer> implements P2PNetwork
   }
 
   @Override
-  public PeerAddress createPeerAddress(final DiscoveryPeer discoveryPeer) {
+  public Optional<PeerAddress> createPeerAddress(final DiscoveryPeer discoveryPeer) {
     return network.createPeerAddress(discoveryPeer);
   }
 

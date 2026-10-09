@@ -25,7 +25,7 @@ import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.EnrForkId;
 public class DiscoveryPeer {
   private final Bytes publicKey;
   private final Bytes nodeId;
-  private final InetSocketAddress nodeAddress;
+  private final Optional<InetSocketAddress> tcpAddress;
   private final Optional<InetSocketAddress> quicAddress;
   private final Optional<EnrForkId> enrForkId;
   private final SszBitvector persistentAttestationSubnets;
@@ -36,7 +36,7 @@ public class DiscoveryPeer {
   public DiscoveryPeer(
       final Bytes publicKey,
       final Bytes nodeId,
-      final InetSocketAddress nodeAddress,
+      final Optional<InetSocketAddress> tcpAddress,
       final Optional<InetSocketAddress> quicAddress,
       final Optional<EnrForkId> enrForkId,
       final SszBitvector persistentAttestationSubnets,
@@ -45,7 +45,7 @@ public class DiscoveryPeer {
       final Optional<Bytes4> nextForkDigest) {
     this.publicKey = publicKey;
     this.nodeId = nodeId;
-    this.nodeAddress = nodeAddress;
+    this.tcpAddress = tcpAddress;
     this.quicAddress = quicAddress;
     this.enrForkId = enrForkId;
     this.persistentAttestationSubnets = persistentAttestationSubnets;
@@ -62,8 +62,8 @@ public class DiscoveryPeer {
     return nodeId;
   }
 
-  public InetSocketAddress getNodeAddress() {
-    return nodeAddress;
+  public Optional<InetSocketAddress> getTcpAddress() {
+    return tcpAddress;
   }
 
   public Optional<InetSocketAddress> getQuicAddress() {
@@ -100,7 +100,7 @@ public class DiscoveryPeer {
     }
     DiscoveryPeer that = (DiscoveryPeer) o;
     return Objects.equal(getPublicKey(), that.getPublicKey())
-        && Objects.equal(getNodeAddress(), that.getNodeAddress())
+        && Objects.equal(getTcpAddress(), that.getTcpAddress())
         && Objects.equal(getQuicAddress(), that.getQuicAddress())
         && Objects.equal(getEnrForkId(), that.getEnrForkId())
         && Objects.equal(getPersistentAttestationSubnets(), that.getPersistentAttestationSubnets())
@@ -113,7 +113,7 @@ public class DiscoveryPeer {
   public int hashCode() {
     return Objects.hashCode(
         getPublicKey(),
-        getNodeAddress(),
+        getTcpAddress(),
         getQuicAddress(),
         getEnrForkId(),
         getPersistentAttestationSubnets(),
@@ -126,7 +126,7 @@ public class DiscoveryPeer {
   public String toString() {
     return MoreObjects.toStringHelper(this)
         .add("publicKey", publicKey)
-        .add("nodeAddress", nodeAddress)
+        .add("tcpAddress", tcpAddress)
         .add("quicAddress", quicAddress)
         .add("enrForkId", enrForkId)
         .add("persistentSubnets", persistentAttestationSubnets)

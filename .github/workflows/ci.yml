@@ -230,9 +230,12 @@ jobs:
         id: ref-cache-key
         shell: bash
         run: |
-          # Derive the cache key from the reference test version definitions, the converter and the
-          # per-archive conversion options, so unrelated root build.gradle edits don't bust the cache.
-          LINES=$(grep -E '^def (refTestVersion|blsRefTestVersion|slashingProtectionInterchangeRefTestVersion)' build.gradle)
+          # Derive the cache key from the reference test version definitions, the set of archives
+          # built, the converter and the per-archive conversion options, so unrelated root
+          # build.gradle edits don't bust the cache. The archive set matters because the cached
+          # directory is used as-is when it is restored: the tests mount every <config>.zip in it,
+          # so a key that ignored the set would keep serving an archive after it was switched off.
+          LINES=$(grep -E '^def (refTestVersion|blsRefTestVersion|slashingProtectionInterchangeRefTestVersion|compTestsAvailable)' build.gradle)
           if [ -z "$LINES" ]; then
             echo "Could not find reference test version definitions in build.gradle" >&2
             exit 1

@@ -527,9 +527,40 @@ class FastConfirmationCalculatorTest {
 
     // Range [0,1] covers voterForBlock (counts) and voterForOther (wrong root); slot 3 is excluded.
     assertThat(
-            calculator.getBlockSupportBetweenSlots(
-                balanceSource, blockRoot, UInt64.ZERO, UInt64.ONE))
+            calculator.getNodeSupportBetweenSlots(
+                balanceSource, ForkChoiceNode.createBase(blockRoot), UInt64.ZERO, UInt64.ONE))
         .isEqualTo(effectiveBalance(balanceSource, voterForBlock));
+  }
+
+  @Test
+  void shouldCountNodeSupportOnlyFromVotersSupportingTheSamePayloadVariant() {
+    final BeaconState balanceSource = genesisState();
+    final int fullVoter = firstCommitteeMember(balanceSource, UInt64.ZERO); // slot 0
+    final int emptyVoter = firstCommitteeMember(balanceSource, UInt64.ONE); // slot 1
+    final Bytes32 blockRoot = Bytes32.random();
+    when(store.getVoteSnapshot())
+        .thenReturn(
+            voteSnapshot(
+                Map.of(
+                    fullVoter, vote(blockRoot, 0L, true),
+                    emptyVoter, vote(blockRoot, 1L, false))));
+    // Under Gloas a vote resolves to the FULL or EMPTY variant of the block it voted for,
+    // depending on whether the voter saw the payload.
+    when(forkChoice.getSupportedNode(any(), any(), any(), anyBoolean()))
+        .thenAnswer(
+            invocation ->
+                Optional.of(
+                    invocation.<Boolean>getArgument(3)
+                        ? ForkChoiceNode.createFull(invocation.<Bytes32>getArgument(1))
+                        : ForkChoiceNode.createEmpty(invocation.<Bytes32>getArgument(1))));
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(balanceSource, 0);
+
+    // Both voters are in range and voted for the same block root, but only the one that saw the
+    // payload supports the FULL node.
+    assertThat(
+            calculator.getNodeSupportBetweenSlots(
+                balanceSource, ForkChoiceNode.createFull(blockRoot), UInt64.ZERO, UInt64.ONE))
+        .isEqualTo(effectiveBalance(balanceSource, fullVoter));
   }
 
   @Test
@@ -542,8 +573,8 @@ class FastConfirmationCalculatorTest {
     final FastConfirmationCalculator calculator = calculatorWithHeadState(balanceSource, 0);
 
     assertThat(
-            calculator.getBlockSupportBetweenSlots(
-                balanceSource, blockRoot, UInt64.ZERO, UInt64.ZERO))
+            calculator.getNodeSupportBetweenSlots(
+                balanceSource, ForkChoiceNode.createBase(blockRoot), UInt64.ZERO, UInt64.ZERO))
         .isEqualTo(UInt64.ZERO);
   }
 
@@ -647,9 +678,47 @@ class FastConfirmationCalculatorTest {
     when(forkChoice.blockSlot(parent)).thenReturn(Optional.of(UInt64.valueOf(2)));
     when(forkChoice.blockSlot(block)).thenReturn(Optional.of(UInt64.valueOf(4)));
     when(forkChoice.blockParentRoot(block)).thenReturn(Optional.of(parent));
+    // Pre-Gloas, walking back from a block's node yields the parent's base (PENDING) node.
+    when(forkChoice.getAncestorNode(ForkChoiceNode.createBase(block), UInt64.valueOf(2)))
+        .thenReturn(Optional.of(ForkChoiceNode.createBase(parent)));
     // A slot-3 committee member supports the parent across the empty slot.
     final int voter = firstCommitteeMember(balanceSource, UInt64.valueOf(3));
     when(store.getVoteSnapshot()).thenReturn(voteSnapshot(Map.of(voter, vote(parent))));
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(balanceSource, 10);
+
+    final UInt64 total = spec.getTotalActiveBalance(balanceSource);
+    final UInt64 adversarial =
+        estimate(total, 3, 3)
+            .dividedBy(100)
+            .times(FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
+    final UInt64 expected = effectiveBalance(balanceSource, voter).minus(adversarial);
+    assertThat(calculator.computeEmptySlotSupportDiscount(balanceSource, block))
+        .isEqualTo(expected);
+  }
+
+  @Test
+  void shouldDiscountParentSupportForThePayloadVariantTheBlockBuiltOn() {
+    final BeaconState balanceSource = genesisState();
+    // Block at slot 4 whose parent is at slot 2 leaves slot 3 empty.
+    final Bytes32 parent = Bytes32.random();
+    final Bytes32 block = Bytes32.random();
+    when(forkChoice.blockSlot(parent)).thenReturn(Optional.of(UInt64.valueOf(2)));
+    when(forkChoice.blockSlot(block)).thenReturn(Optional.of(UInt64.valueOf(4)));
+    when(forkChoice.blockParentRoot(block)).thenReturn(Optional.of(parent));
+    // The block was built on the FULL variant of its parent, so that is the node whose support
+    // across the empty slot is discountable -- not the parent's PENDING node.
+    when(forkChoice.getAncestorNode(ForkChoiceNode.createBase(block), UInt64.valueOf(2)))
+        .thenReturn(Optional.of(ForkChoiceNode.createFull(parent)));
+    when(forkChoice.getSupportedNode(any(), any(), any(), anyBoolean()))
+        .thenAnswer(
+            invocation ->
+                Optional.of(
+                    invocation.<Boolean>getArgument(3)
+                        ? ForkChoiceNode.createFull(invocation.<Bytes32>getArgument(1))
+                        : ForkChoiceNode.createEmpty(invocation.<Bytes32>getArgument(1))));
+    // A slot-3 committee member supports the parent's FULL variant across the empty slot.
+    final int voter = firstCommitteeMember(balanceSource, UInt64.valueOf(3));
+    when(store.getVoteSnapshot()).thenReturn(voteSnapshot(Map.of(voter, vote(parent, 3L, true))));
     final FastConfirmationCalculator calculator = calculatorWithHeadState(balanceSource, 10);
 
     final UInt64 total = spec.getTotalActiveBalance(balanceSource);
@@ -1149,6 +1218,18 @@ class FastConfirmationCalculatorTest {
   private VoteTracker vote(final Bytes32 root, final long slot) {
     return new VoteTracker(
         Bytes32.ZERO, root, false, false, UInt64.valueOf(slot), false, UInt64.ZERO, false);
+  }
+
+  private VoteTracker vote(final Bytes32 root, final long slot, final boolean fullPayloadHint) {
+    return new VoteTracker(
+        Bytes32.ZERO,
+        root,
+        false,
+        false,
+        UInt64.valueOf(slot),
+        fullPayloadHint,
+        UInt64.ZERO,
+        false);
   }
 
   private VoteTracker equivocatingVote(final Bytes32 root) {

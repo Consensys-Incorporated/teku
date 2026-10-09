@@ -142,7 +142,8 @@ public class Eth2PeerSelectionStrategy implements PeerSelectionStrategy {
 
   private Optional<PeerAddress> checkCandidate(
       final DiscoveryPeer candidate, final P2PNetwork<?> network) {
-    return Optional.of(network.createPeerAddress(candidate))
+    return network
+        .createPeerAddress(candidate)
         .filter(reputationManager::isConnectionInitiationAllowed)
         .filter(peerAddress -> !network.isConnected(peerAddress));
   }

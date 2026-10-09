@@ -120,7 +120,7 @@ public class GossipPayloadAttestationMessageTestExecutor implements TestExecutor
     // even when that time is earlier than the store's time (which only moves forward). This is
     // necessary for disparity-boundary tests where blocks must be imported after their slot starts
     // but messages are validated at a time before the slot starts.
-    final UInt64[] validationTimeMs = {UInt64.valueOf(metaData.getCurrentTimeMs())};
+    final UInt64[] validationTimeMs = {UInt64.ZERO};
     final GossipValidationHelper gossipValidationHelper =
         new GossipValidationHelper(spec, ctx.recentChainData, ctx.metricsSystem) {
           @Override
@@ -166,9 +166,6 @@ public class GossipPayloadAttestationMessageTestExecutor implements TestExecutor
     @JsonProperty(value = "messages", required = true)
     private List<Message> messages;
 
-    @JsonProperty(value = "current_time_ms", required = true)
-    private long currentTimeMs;
-
     @JsonProperty(value = "bls_setting", defaultValue = "0")
     private int blsSetting;
 
@@ -178,10 +175,6 @@ public class GossipPayloadAttestationMessageTestExecutor implements TestExecutor
 
     public List<Message> getMessages() {
       return messages;
-    }
-
-    public long getCurrentTimeMs() {
-      return currentTimeMs;
     }
 
     public BlsSetting getBlsSetting() {

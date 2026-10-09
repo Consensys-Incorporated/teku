@@ -63,9 +63,10 @@ public interface P2PNetwork<T extends Peer> extends GossipNetwork {
    *
    * @param discoveryPeer the discovery peer to convert
    * @return a {@link PeerAddress} which is supported by {@link #connect(PeerAddress)} for
-   *     initiating connections
+   *     initiating connections, or empty if the peer advertises neither a QUIC address this network
+   *     can dial nor a TCP address
    */
-  PeerAddress createPeerAddress(DiscoveryPeer discoveryPeer);
+  Optional<PeerAddress> createPeerAddress(DiscoveryPeer discoveryPeer);
 
   long subscribeConnect(PeerConnectedSubscriber<T> subscriber);
 

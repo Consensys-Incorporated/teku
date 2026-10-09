@@ -42,7 +42,7 @@ public class MultiaddrPeerAddressTest {
   @Test
   public void fromDiscoveryPeer_shouldFallBackToTcpWhenDialingQuic() throws Exception {
     final MultiaddrPeerAddress result =
-        MultiaddrPeerAddress.fromDiscoveryPeer(createPeer(Optional.of(9100)), true);
+        MultiaddrPeerAddress.fromDiscoveryPeer(createPeer(Optional.of(9100)), true).orElseThrow();
     assertThat(result.getMultiaddr()).isEqualTo(QUIC_MULTIADDR);
     assertThat(result.getFallbackMultiaddr()).contains(TCP_MULTIADDR);
   }
@@ -50,7 +50,7 @@ public class MultiaddrPeerAddressTest {
   @Test
   public void fromDiscoveryPeer_shouldHaveNoFallbackWhenPeerHasNoQuicAddress() throws Exception {
     final MultiaddrPeerAddress result =
-        MultiaddrPeerAddress.fromDiscoveryPeer(createPeer(Optional.empty()), true);
+        MultiaddrPeerAddress.fromDiscoveryPeer(createPeer(Optional.empty()), true).orElseThrow();
     assertThat(result.getMultiaddr()).isEqualTo(TCP_MULTIADDR);
     assertThat(result.getFallbackMultiaddr()).isEmpty();
   }
@@ -58,9 +58,29 @@ public class MultiaddrPeerAddressTest {
   @Test
   public void fromDiscoveryPeer_shouldHaveNoFallbackWhenLocalNodeQuicDisabled() throws Exception {
     final MultiaddrPeerAddress result =
-        MultiaddrPeerAddress.fromDiscoveryPeer(createPeer(Optional.of(9100)), false);
+        MultiaddrPeerAddress.fromDiscoveryPeer(createPeer(Optional.of(9100)), false).orElseThrow();
     assertThat(result.getMultiaddr()).isEqualTo(TCP_MULTIADDR);
     assertThat(result.getFallbackMultiaddr()).isEmpty();
+  }
+
+  @Test
+  public void fromDiscoveryPeer_shouldDialQuicWithoutFallbackWhenPeerHasNoTcpAddress()
+      throws Exception {
+    final MultiaddrPeerAddress result =
+        MultiaddrPeerAddress.fromDiscoveryPeer(
+                createPeer(Optional.empty(), Optional.of(9100)), true)
+            .orElseThrow();
+    assertThat(result.getMultiaddr()).isEqualTo(QUIC_MULTIADDR);
+    assertThat(result.getFallbackMultiaddr()).isEmpty();
+  }
+
+  @Test
+  public void fromDiscoveryPeer_shouldBeEmptyWhenLocalNodeCannotDialQuicOnlyPeer()
+      throws Exception {
+    assertThat(
+            MultiaddrPeerAddress.fromDiscoveryPeer(
+                createPeer(Optional.empty(), Optional.of(9100)), false))
+        .isEmpty();
   }
 
   @Test
@@ -71,11 +91,16 @@ public class MultiaddrPeerAddressTest {
   }
 
   private static DiscoveryPeer createPeer(final Optional<Integer> quicPort) throws Exception {
+    return createPeer(Optional.of(9000), quicPort);
+  }
+
+  private static DiscoveryPeer createPeer(
+      final Optional<Integer> tcpPort, final Optional<Integer> quicPort) throws Exception {
     final InetAddress ip = InetAddress.getByAddress(new byte[] {127, 0, 0, 1});
     return new DiscoveryPeer(
         PUB_KEY,
         Bytes32.ZERO,
-        new InetSocketAddress(ip, 9000),
+        tcpPort.map(port -> new InetSocketAddress(ip, port)),
         quicPort.map(port -> new InetSocketAddress(ip, port)),
         Optional.empty(),
         SCHEMA_DEFINITIONS.getAttnetsENRFieldSchema().getDefault(),

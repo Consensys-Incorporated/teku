@@ -103,7 +103,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/block/AbstractBlockProcessor.java
       search: public void applyDeposit(
   spec: |
-    <spec fn="apply_deposit" fork="phase0" hash="9d7c9ab6">
+    <spec fn="apply_deposit" fork="phase0" hash="f2338c57">
     def apply_deposit(
         state: BeaconState,
         pubkey: BLSPubkey,
@@ -111,7 +111,7 @@
         amount: Gwei,
         signature: BLSSignature,
     ) -> None:
-        validator_pubkeys = [v.pubkey for v in state.validators]
+        validator_pubkeys = [validator.pubkey for validator in state.validators]
         if pubkey not in validator_pubkeys:
             # Verify the deposit signature (proof of possession) which is not checked by the deposit contract
             deposit_message = DepositMessage(
@@ -135,7 +135,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/electra/block/BlockProcessorElectra.java
       search: public void applyDeposit(
   spec: |
-    <spec fn="apply_deposit" fork="electra" hash="21c72370">
+    <spec fn="apply_deposit" fork="electra" hash="f6b34cd7">
     def apply_deposit(
         state: BeaconState,
         pubkey: BLSPubkey,
@@ -143,7 +143,7 @@
         amount: Gwei,
         signature: BLSSignature,
     ) -> None:
-        validator_pubkeys = [v.pubkey for v in state.validators]
+        validator_pubkeys = [validator.pubkey for validator in state.validators]
         if pubkey not in validator_pubkeys:
             # Verify the deposit signature (proof of possession) which is not checked by the deposit contract
             if is_valid_deposit_signature(pubkey, withdrawal_credentials, amount, signature):
@@ -193,7 +193,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/block/BlockProcessorGloas.java
       search: public void applyParentExecutionPayload(
   spec: |
-    <spec fn="apply_parent_execution_payload" fork="gloas" hash="8d4722c5">
+    <spec fn="apply_parent_execution_payload" fork="gloas" hash="de5916a9">
     def apply_parent_execution_payload(
         state: BeaconState,
         requests: ExecutionRequests,
@@ -207,19 +207,8 @@
         assert len(requests.builder_deposits) <= MAX_BUILDER_DEPOSIT_REQUESTS_PER_PAYLOAD
         assert len(requests.builder_exits) <= MAX_BUILDER_EXIT_REQUESTS_PER_PAYLOAD
 
-        # Process execution requests from parent's payload. The execution
-        # requests are processed at state.slot (child's slot), not the parent's slot.
-        def for_ops(operations: Sequence[Any], fn: Callable[[BeaconState, Any], None]) -> None:
-            for operation in operations:
-                fn(state, operation)
-
-        for_ops(requests.deposits, process_deposit_request)
-        for_ops(requests.withdrawals, process_withdrawal_request)
-        for_ops(requests.consolidations, process_consolidation_request)
-        for_ops(requests.builder_deposits, process_builder_deposit_request)
-        for_ops(requests.builder_exits, process_builder_exit_request)
-
-        # Settle the builder payment
+        # Settle the builder payment before the requests so that a builder exit
+        # request is rejected while the payment is pending
         if parent_epoch == get_current_epoch(state):
             payment_index = SLOTS_PER_EPOCH + parent_slot % SLOTS_PER_EPOCH
             settle_builder_payment(state, payment_index)
@@ -237,6 +226,18 @@
                 )
             )
 
+        # Process execution requests from parent's payload. The execution
+        # requests are processed at state.slot (child's slot), not the parent's slot.
+        def for_ops(operations: Sequence[Any], fn: Callable[[BeaconState, Any], None]) -> None:
+            for operation in operations:
+                fn(state, operation)
+
+        for_ops(requests.deposits, process_deposit_request)
+        for_ops(requests.withdrawals, process_withdrawal_request)
+        for_ops(requests.consolidations, process_consolidation_request)
+        for_ops(requests.builder_deposits, process_builder_deposit_request)
+        for_ops(requests.builder_exits, process_builder_exit_request)
+
         # Update parent payload availability and latest block hash
         state.execution_payload_availability[parent_slot % SLOTS_PER_HISTORICAL_ROOT] = Boolean(True)
         state.latest_block_hash = parent_bid.block_hash
@@ -247,12 +248,12 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/electra/statetransition/epoch/EpochProcessorElectra.java
       search: public void applyPendingDeposits(
   spec: |
-    <spec fn="apply_pending_deposit" fork="electra" hash="e60b5fed">
+    <spec fn="apply_pending_deposit" fork="electra" hash="6ac3a622">
     def apply_pending_deposit(state: BeaconState, deposit: PendingDeposit) -> None:
         """
         Applies ``deposit`` to the ``state``.
         """
-        validator_pubkeys = [v.pubkey for v in state.validators]
+        validator_pubkeys = [validator.pubkey for validator in state.validators]
         if deposit.pubkey not in validator_pubkeys:
             # Verify the deposit signature (proof of possession) which is not checked by the deposit contract
             if is_valid_deposit_signature(
@@ -293,6 +294,17 @@
                 )
             else:
                 decrease_balance(state, withdrawal.validator_index, withdrawal.amount)
+    </spec>
+
+- name: block_should_be_finalized#phase0
+  sources: []
+  spec: |
+    <spec fn="block_should_be_finalized" fork="phase0" hash="d10c5a16">
+    def block_should_be_finalized(store: Store, block_root: Root) -> bool:
+        block_slot = get_block_slot(store, block_root)
+        next_checkpoint_epoch = compute_epoch_at_slot(block_slot + SLOTS_PER_EPOCH - 1)
+        earliest_finality_slot = compute_start_slot_at_epoch(next_checkpoint_epoch + 2)
+        return earliest_finality_slot <= get_current_slot(store)
     </spec>
 
 - name: block_to_light_client_header#altair
@@ -432,9 +444,14 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/helpers/BeaconStateAccessors.java
       search: public UInt64 calculateCommitteeFraction(
   spec: |
-    <spec fn="calculate_committee_fraction" fork="phase0" hash="cfd9ac06">
+    <spec fn="calculate_committee_fraction" fork="phase0" hash="67f1f47d">
     def calculate_committee_fraction(state: BeaconState, committee_percent: Uint64) -> Gwei:
-        committee_weight = get_total_active_balance(state) // Uint64(SLOTS_PER_EPOCH)
+        unslashed_and_active_indices: set[ValidatorIndex] = set()
+        for index in get_active_validator_indices(state, get_current_epoch(state)):
+            if not state.validators[index].slashed:
+                unslashed_and_active_indices.add(index)
+        total_balance = get_total_balance(state, unslashed_and_active_indices)
+        committee_weight = total_balance // Uint64(SLOTS_PER_EPOCH)
         return (committee_weight * committee_percent) // 100
     </spec>
 
@@ -568,12 +585,13 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/fulu/helpers/MiscHelpersFulu.java
       search: public List<UInt64> computeColumnsForCustodyGroup(
   spec: |
-    <spec fn="compute_columns_for_custody_group" fork="fulu" hash="af24b659">
+    <spec fn="compute_columns_for_custody_group" fork="fulu" hash="a56bd22e">
     def compute_columns_for_custody_group(custody_group: CustodyIndex) -> Sequence[ColumnIndex]:
         assert custody_group < NUMBER_OF_CUSTODY_GROUPS
         columns_per_group = NUMBER_OF_COLUMNS // NUMBER_OF_CUSTODY_GROUPS
         return [
-            ColumnIndex(NUMBER_OF_CUSTODY_GROUPS * i + custody_group) for i in range(columns_per_group)
+            ColumnIndex(NUMBER_OF_CUSTODY_GROUPS * index + custody_group)
+            for index in range(columns_per_group)
         ]
     </spec>
 
@@ -582,7 +600,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/helpers/MiscHelpers.java
       search: public IntList computeCommittee(
   spec: |
-    <spec fn="compute_committee" fork="phase0" hash="23ad35aa">
+    <spec fn="compute_committee" fork="phase0" hash="fe5ddb42">
     def compute_committee(
         indices: Sequence[ValidatorIndex], seed: Bytes32, index: Uint64, count: Uint64
     ) -> Sequence[ValidatorIndex]:
@@ -592,8 +610,8 @@
         start = (len(indices) * index) // count
         end = (len(indices) * Uint64(index + 1)) // count
         return [
-            indices[compute_shuffled_index(Uint64(i), Uint64(len(indices)), seed)]
-            for i in range(start, end)
+            indices[compute_shuffled_index(Uint64(index), Uint64(len(indices)), seed)]
+            for index in range(start, end)
         ]
     </spec>
 
@@ -638,11 +656,11 @@
       search: public Bytes32 computeDomain\($
       regex: true
   spec: |
-    <spec fn="compute_domain" fork="phase0" hash="a78b32e4">
+    <spec fn="compute_domain" fork="phase0" hash="b934a9bd">
     def compute_domain(
         domain_type: DomainType,
-        fork_version: Optional[Version] = None,
-        genesis_validators_root: Optional[Root] = None,
+        fork_version: Version | None = None,
+        genesis_validators_root: Root | None = None,
     ) -> Domain:
         """
         Return the domain for the ``domain_type`` and ``fork_version``.
@@ -660,7 +678,7 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/fastconfirmation/FastConfirmationCalculator.java
       search: UInt64 computeEmptySlotSupportDiscount(final BeaconState balanceSource, final Bytes32 blockRoot) {
   spec: |
-    <spec fn="compute_empty_slot_support_discount" fork="phase0" hash="83f61f26">
+    <spec fn="compute_empty_slot_support_discount" fork="phase0" hash="42d401de">
     def compute_empty_slot_support_discount(
         store: Store, balance_source: BeaconState, block_root: Root
     ) -> Gwei:
@@ -675,10 +693,11 @@
             return Gwei(0)
 
         # Discount votes supporting the parent block if they are from the committees of empty slots
-        parent_support_in_empty_slots = get_block_support_between_slots(
+        parent_node = get_ancestor(store, get_node_for_root(block_root), parent_block.slot)
+        parent_support_in_empty_slots = get_node_support_between_slots(
             store,
             balance_source,
-            block.parent_root,
+            parent_node,
             parent_block.slot + 1,
             block.slot - 1,
         )
@@ -1226,12 +1245,26 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/config/builder/SpecConfigBuilder.java
       search: private Integer computeMinEpochsForBlockRequests()
   spec: |
-    <spec fn="compute_min_epochs_for_block_requests" fork="phase0" hash="bfc43a5c">
-    def compute_min_epochs_for_block_requests() -> Uint64:
+    <spec fn="compute_min_epochs_for_block_requests" fork="phase0" hash="eaa0817a">
+    def compute_min_epochs_for_block_requests() -> Epoch:
         """
         Return the minimum epoch range over which a node must serve blocks.
         """
-        return Uint64(MIN_VALIDATOR_WITHDRAWABILITY_DELAY + CHURN_LIMIT_QUOTIENT // 2)
+        return MIN_VALIDATOR_WITHDRAWABILITY_DELAY + CHURN_LIMIT_QUOTIENT // 2
+    </spec>
+
+- name: compute_min_epochs_for_block_requests#gloas
+  sources: []
+  spec: |
+    <spec fn="compute_min_epochs_for_block_requests" fork="gloas" hash="00c63385">
+    def compute_min_epochs_for_block_requests() -> Epoch:
+        """
+        Return the minimum epoch range over which a node must serve blocks.
+        """
+        # [Modified in Gloas:EIP8061]
+        numerator = 3 * CHURN_LIMIT_QUOTIENT_GLOAS * CONSOLIDATION_CHURN_LIMIT_QUOTIENT
+        denominator = 2 * CONSOLIDATION_CHURN_LIMIT_QUOTIENT + 3 * CHURN_LIMIT_QUOTIENT_GLOAS
+        return MIN_VALIDATOR_WITHDRAWABILITY_DELAY + (numerator // denominator) // 2
     </spec>
 
 - name: compute_new_state_root#phase0
@@ -1256,7 +1289,7 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/attestation/PooledAttestationWithData.java
       search: public Attestation toAttestation(
   spec: |
-    <spec fn="compute_on_chain_aggregate" fork="electra" hash="e6142045">
+    <spec fn="compute_on_chain_aggregate" fork="electra" hash="f8d5b525">
     def compute_on_chain_aggregate(network_aggregates: Sequence[Attestation]) -> Attestation:
         aggregates = sorted(
             network_aggregates, key=lambda a: get_committee_indices(a.committee_bits)[0]
@@ -1268,9 +1301,11 @@
             for b in a.aggregation_bits:
                 aggregation_bits.append(b)
 
-        signature = bls.Aggregate([a.signature for a in aggregates])
+        signature = bls.Aggregate([aggregate.signature for aggregate in aggregates])
 
-        committee_indices = [get_committee_indices(a.committee_bits)[0] for a in aggregates]
+        committee_indices = [
+            get_committee_indices(aggregate.committee_bits)[0] for aggregate in aggregates
+        ]
         committee_flags = [(index in committee_indices) for index in range(MAX_COMMITTEES_PER_SLOT)]
         committee_bits = CommitteeBits(data=committee_flags)
 
@@ -1342,7 +1377,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/fulu/helpers/MiscHelpersFulu.java
       search: public List<Integer> computeProposerIndices(
   spec: |
-    <spec fn="compute_proposer_indices" fork="fulu" hash="86cdf258">
+    <spec fn="compute_proposer_indices" fork="fulu" hash="6af78368">
     def compute_proposer_indices(
         state: BeaconState, epoch: Epoch, seed: Bytes32, indices: Sequence[ValidatorIndex]
     ) -> ProposerIndices:
@@ -1350,7 +1385,7 @@
         Return the proposer indices for the given ``epoch``.
         """
         start_slot = compute_start_slot_at_epoch(epoch)
-        seeds = [sha256(seed + uint_to_bytes(start_slot + i)) for i in range(SLOTS_PER_EPOCH)]
+        seeds = [sha256(seed + uint_to_bytes(start_slot + index)) for index in range(SLOTS_PER_EPOCH)]
         return ProposerIndices(data=[compute_proposer_index(state, indices, seed) for seed in seeds])
     </spec>
 
@@ -1359,7 +1394,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/helpers/MiscHelpersGloas.java
       search: public List<Integer> computeProposerIndices(
   spec: |
-    <spec fn="compute_proposer_indices" fork="gloas" hash="f86052af">
+    <spec fn="compute_proposer_indices" fork="gloas" hash="87b9ff2d">
     def compute_proposer_indices(
         state: BeaconState, epoch: Epoch, seed: Bytes32, indices: Sequence[ValidatorIndex]
     ) -> ProposerIndices:
@@ -1367,7 +1402,7 @@
         Return the proposer indices for the given ``epoch``.
         """
         start_slot = compute_start_slot_at_epoch(epoch)
-        seeds = [sha256(seed + uint_to_bytes(start_slot + i)) for i in range(SLOTS_PER_EPOCH)]
+        seeds = [sha256(seed + uint_to_bytes(start_slot + index)) for index in range(SLOTS_PER_EPOCH)]
         # [Modified in Gloas:EIP7732]
         return ProposerIndices(
             data=[
@@ -1388,10 +1423,9 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/helpers/BeaconStateAccessors.java
       search: public UInt64 getProposerBoostAmount(final BeaconState state) {
   spec: |
-    <spec fn="compute_proposer_score" fork="phase0" hash="06f308f2">
+    <spec fn="compute_proposer_score" fork="phase0" hash="67f295a9">
     def compute_proposer_score(state: BeaconState) -> Gwei:
-        committee_weight = get_total_active_balance(state) // Uint64(SLOTS_PER_EPOCH)
-        return (committee_weight * PROPOSER_SCORE_BOOST) // 100
+        return calculate_committee_fraction(state, PROPOSER_SCORE_BOOST)
     </spec>
 
 - name: compute_ptc#gloas
@@ -1495,18 +1529,18 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/helpers/MiscHelpers.java
       search: public void shuffleList(final int[] input, final Bytes32 seed) {
   spec: |
-    <spec fn="compute_shuffled_permutation" fork="phase0" hash="80a40af8">
+    <spec fn="compute_shuffled_permutation" fork="phase0" hash="3d7842fa">
     def compute_shuffled_permutation(index_count: Uint64, seed: Bytes32) -> Sequence[Uint64]:
         """
         Return the full shuffled permutation corresponding to ``seed`` (and ``index_count``).
         """
         # Swap or not (https://link.springer.com/content/pdf/10.1007%2F978-3-642-32009-5_1.pdf)
         # See the 'generalized domain' algorithm on page 3
-        indices = [Uint64(i) for i in range(index_count)]
+        indices = [Uint64(index) for index in range(index_count)]
         for current_round in range(SHUFFLE_ROUND_COUNT):
             round_bytes = uint_to_bytes(Uint8(current_round))
             pivot = bytes_to_uint64(sha256(seed + round_bytes)[0:8]) % index_count
-            source_by_bucket: Dict[Uint64, Bytes32] = {}
+            source_by_bucket: dict[Uint64, Bytes32] = {}
             for i in range(index_count):
                 flip = (pivot + index_count - indices[i]) % index_count
                 position = max(indices[i], flip)
@@ -1580,13 +1614,41 @@
         )
     </spec>
 
+- name: compute_slot_at_time#phase0
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/helpers/MiscHelpers.java
+      search: public UInt64 computeSlotAtTime(final UInt64 genesisTime, final UInt64 currentTime) {
+  spec: |
+    <spec fn="compute_slot_at_time" fork="phase0" hash="95588197">
+    def compute_slot_at_time(genesis_time: Uint64, time: Uint64) -> Slot:
+        """
+        Return the slot at Unix time ``time``.
+        """
+        genesis_time_ms = seconds_to_milliseconds(genesis_time)
+        time_ms = seconds_to_milliseconds(time)
+        return compute_slot_at_time_ms(genesis_time_ms, time_ms)
+    </spec>
+
+- name: compute_slot_at_time_ms#phase0
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/helpers/MiscHelpers.java
+      search: public UInt64 computeSlotAtTimeMillis(
+  spec: |
+    <spec fn="compute_slot_at_time_ms" fork="phase0" hash="81a60052">
+    def compute_slot_at_time_ms(genesis_time_ms: Uint64, time_ms: Uint64) -> Slot:
+        """
+        Return the slot at Unix time ``time_ms``.
+        """
+        return Slot((time_ms - genesis_time_ms) // SLOT_DURATION_MS)
+    </spec>
+
 - name: compute_slots_since_epoch_start#phase0
   sources:
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/util/ForkChoiceUtil.java
       search: private UInt64 computeSlotsSinceEpochStart(
   spec: |
-    <spec fn="compute_slots_since_epoch_start" fork="phase0" hash="8cd580dc">
-    def compute_slots_since_epoch_start(slot: Slot) -> int:
+    <spec fn="compute_slots_since_epoch_start" fork="phase0" hash="5057850f">
+    def compute_slots_since_epoch_start(slot: Slot) -> Slot:
         return slot - compute_start_slot_at_epoch(compute_epoch_at_slot(slot))
     </spec>
 
@@ -1657,10 +1719,10 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/util/SyncCommitteeUtil.java
       search: public IntSet getSyncSubcommittees(final IntSet committeeIndices) {
   spec: |
-    <spec fn="compute_subnets_for_sync_committee" fork="altair" hash="f154ad24">
+    <spec fn="compute_subnets_for_sync_committee" fork="altair" hash="5ae00f3c">
     def compute_subnets_for_sync_committee(
         state: BeaconState, validator_index: ValidatorIndex
-    ) -> Set[SubnetID]:
+    ) -> set[SubnetID]:
         next_slot_epoch = compute_epoch_at_slot(state.slot + 1)
         if compute_sync_committee_period(get_current_epoch(state)) == compute_sync_committee_period(
             next_slot_epoch
@@ -1735,10 +1797,14 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/helpers/MiscHelpers.java
       search: public UInt64 computeTimeAtSlot(
   spec: |
-    <spec fn="compute_time_at_slot" fork="phase0" hash="c654b2ca">
-    def compute_time_at_slot(state: BeaconState, slot: Slot) -> Uint64:
-        slots_since_genesis = slot - GENESIS_SLOT
-        return Uint64(state.genesis_time + slots_since_genesis * SLOT_DURATION_MS // 1000)
+    <spec fn="compute_time_at_slot" fork="phase0" hash="eac07c67">
+    def compute_time_at_slot(genesis_time: Uint64, slot: Slot) -> Uint64:
+        """
+        Return the time in seconds at the start of the given slot.
+        """
+        genesis_time_ms = seconds_to_milliseconds(genesis_time)
+        time_ms = compute_time_at_slot_ms(genesis_time_ms, slot)
+        return milliseconds_to_seconds(time_ms)
     </spec>
 
 - name: compute_time_at_slot_ms#phase0
@@ -1746,13 +1812,12 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/helpers/MiscHelpers.java
       search: public UInt64 computeTimeMillisAtSlot(
   spec: |
-    <spec fn="compute_time_at_slot_ms" fork="phase0" hash="21f923d4">
-    def compute_time_at_slot_ms(store: Store, slot: Slot) -> Uint64:
+    <spec fn="compute_time_at_slot_ms" fork="phase0" hash="4bd09ec2">
+    def compute_time_at_slot_ms(genesis_time_ms: Uint64, slot: Slot) -> Uint64:
         """
         Return the time in milliseconds at the start of the given slot.
         """
-        slots_since_genesis = slot - GENESIS_SLOT
-        return Uint64(store.genesis_time * 1000 + slots_since_genesis * SLOT_DURATION_MS)
+        return Uint64(genesis_time_ms + slot * SLOT_DURATION_MS)
     </spec>
 
 - name: compute_weak_subjectivity_period#phase0
@@ -1938,13 +2003,13 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/util/LightClientUtil.java
       search: public LightClientUpdate createLightClientUpdate(
   spec: |
-    <spec fn="create_light_client_update" fork="altair" hash="6448aee9">
+    <spec fn="create_light_client_update" fork="altair" hash="259a8786">
     def create_light_client_update(
         state: BeaconState,
         block: SignedBeaconBlock,
         attested_state: BeaconState,
         attested_block: SignedBeaconBlock,
-        finalized_block: Optional[SignedBeaconBlock],
+        finalized_block: SignedBeaconBlock | None,
     ) -> LightClientUpdate:
         assert compute_epoch_at_slot(attested_state.slot) >= ALTAIR_FORK_EPOCH
         assert (
@@ -2136,27 +2201,27 @@
         return bls.FastAggregateVerify(pubkeys, message, signature)
     </spec>
 
-- name: filter_block_tree#phase0
+- name: filter_node_tree#phase0
   sources:
     - file: storage/src/main/java/tech/pegasys/teku/storage/protoarray/ProtoArray.java
       search: public boolean nodeIsViableForHead(final ProtoNode node) {
   spec: |
-    <spec fn="filter_block_tree" fork="phase0" hash="4a61f03a">
-    def filter_block_tree(store: Store, block_root: Root, blocks: Dict[Root, BeaconBlock]) -> bool:
-        block = store.blocks[block_root]
-        children = [root for root in store.blocks if store.blocks[root].parent_root == block_root]
+    <spec fn="filter_node_tree" fork="phase0" hash="e431eca4">
+    def filter_node_tree(store: Store, node: ForkChoiceNode) -> Sequence[ForkChoiceNode]:
+        children = get_node_children(store, node)
 
         # If any children branches contain expected finalized/justified checkpoints,
-        # add to filtered block-tree and signal viability to parent.
+        # include this node and those descendants in the filtered node tree.
         if any(children):
-            filter_block_tree_result = [filter_block_tree(store, child, blocks) for child in children]
-            if any(filter_block_tree_result):
-                blocks[block_root] = block
-                return True
-            return False
+            viable_nodes: list[ForkChoiceNode] = []
+            for child in children:
+                viable_nodes.extend(filter_node_tree(store, child))
+            if any(viable_nodes):
+                return viable_nodes + [node]
+            return []
 
         current_epoch = get_current_store_epoch(store)
-        voting_source = get_voting_source(store, block_root)
+        voting_source = get_voting_source(store, node.root)
 
         # The voting source should be either at the same height as the store's justified checkpoint or
         # not more than two epochs ago
@@ -2168,7 +2233,7 @@
 
         finalized_checkpoint_block = get_checkpoint_block(
             store,
-            block_root,
+            node.root,
             store.finalized_checkpoint.epoch,
         )
 
@@ -2177,13 +2242,12 @@
             or store.finalized_checkpoint.root == finalized_checkpoint_block
         )
 
-        # If expected finalized/justified, add to viable block-tree and signal viability to parent.
+        # If expected finalized/justified, add to viable node tree and signal viability to parent.
         if correct_justified and correct_finalized:
-            blocks[block_root] = block
-            return True
+            return [node]
 
         # Otherwise, branch not viable
-        return False
+        return []
     </spec>
 
 - name: finalized_root_gindex_at_slot#altair
@@ -2348,13 +2412,15 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/helpers/BeaconStateAccessors.java
       search: public IntList getActiveValidatorIndices(
   spec: |
-    <spec fn="get_active_validator_indices" fork="phase0" hash="b515ea11">
+    <spec fn="get_active_validator_indices" fork="phase0" hash="e9d21b54">
     def get_active_validator_indices(state: BeaconState, epoch: Epoch) -> Sequence[ValidatorIndex]:
         """
         Return the sequence of active validator indices at ``epoch``.
         """
         return [
-            ValidatorIndex(i) for i, v in enumerate(state.validators) if is_active_validator(v, epoch)
+            ValidatorIndex(index)
+            for index, validator in enumerate(state.validators)
+            if is_active_validator(validator, epoch)
         ]
     </spec>
 
@@ -2510,10 +2576,10 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/phase0/statetransition/epoch/RewardsAndPenaltiesCalculatorPhase0.java
       search: public void applyAttestationComponentDelta(
   spec: |
-    <spec fn="get_attestation_component_deltas" fork="phase0" hash="dffb146e">
+    <spec fn="get_attestation_component_deltas" fork="phase0" hash="9600b970">
     def get_attestation_component_deltas(
         state: BeaconState, attestations: Sequence[PendingAttestation]
-    ) -> Tuple[Sequence[Gwei], Sequence[Gwei]]:
+    ) -> tuple[Sequence[Gwei], Sequence[Gwei]]:
         """
         Helper with shared logic for use by get source, target, and head deltas functions
         """
@@ -2542,8 +2608,8 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/phase0/statetransition/epoch/RewardsAndPenaltiesCalculatorPhase0.java
       search: public RewardAndPenaltyDeltas getDeltas() throws IllegalArgumentException {
   spec: |
-    <spec fn="get_attestation_deltas" fork="phase0" hash="17fcc0d9">
-    def get_attestation_deltas(state: BeaconState) -> Tuple[Sequence[Gwei], Sequence[Gwei]]:
+    <spec fn="get_attestation_deltas" fork="phase0" hash="a8ed8792">
+    def get_attestation_deltas(state: BeaconState) -> tuple[Sequence[Gwei], Sequence[Gwei]]:
         """
         Return attestation reward/penalty deltas for each validator.
         """
@@ -2554,13 +2620,19 @@
         _, inactivity_penalties = get_inactivity_penalty_deltas(state)
 
         rewards = [
-            source_rewards[i] + target_rewards[i] + head_rewards[i] + inclusion_delay_rewards[i]
-            for i in range(len(state.validators))
+            source_rewards[index]
+            + target_rewards[index]
+            + head_rewards[index]
+            + inclusion_delay_rewards[index]
+            for index in range(len(state.validators))
         ]
 
         penalties = [
-            source_penalties[i] + target_penalties[i] + head_penalties[i] + inactivity_penalties[i]
-            for i in range(len(state.validators))
+            source_penalties[index]
+            + target_penalties[index]
+            + head_penalties[index]
+            + inactivity_penalties[index]
+            for index in range(len(state.validators))
         ]
 
         return rewards, penalties
@@ -2743,21 +2815,23 @@
     - file: storage/src/main/java/tech/pegasys/teku/storage/protoarray/ProtoArrayScoreCalculator.java
       search: private static void computeDelta(
   spec: |
-    <spec fn="get_attestation_score" fork="phase0" hash="0a9ceb6e">
+    <spec fn="get_attestation_score" fork="phase0" hash="b33ba4c3">
     def get_attestation_score(store: Store, node: ForkChoiceNode, state: BeaconState) -> Gwei:
         unslashed_and_active_indices = [
-            i
-            for i in get_active_validator_indices(state, get_current_epoch(state))
-            if not state.validators[i].slashed
+            index
+            for index in get_active_validator_indices(state, get_current_epoch(state))
+            if not state.validators[index].slashed
         ]
         return Gwei(
             sum(
-                state.validators[i].effective_balance
-                for i in unslashed_and_active_indices
+                state.validators[index].effective_balance
+                for index in unslashed_and_active_indices
                 if (
-                    i in store.latest_messages
-                    and i not in store.equivocating_indices
-                    and is_ancestor(store, get_supported_node(store, store.latest_messages[i]), node)
+                    index in store.latest_messages
+                    and index not in store.equivocating_indices
+                    and is_ancestor(
+                        store, get_supported_node(store, store.latest_messages[index]), node
+                    )
                 )
             )
         )
@@ -2798,13 +2872,17 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/util/AttestationUtil.java
       search: public List<UInt64> getAttestingIndices(
   spec: |
-    <spec fn="get_attesting_indices" fork="phase0" hash="c012d980">
-    def get_attesting_indices(state: BeaconState, attestation: Attestation) -> Set[ValidatorIndex]:
+    <spec fn="get_attesting_indices" fork="phase0" hash="09e9b4d3">
+    def get_attesting_indices(state: BeaconState, attestation: Attestation) -> set[ValidatorIndex]:
         """
         Return the set of attesting indices corresponding to ``data`` and ``bits``.
         """
         committee = get_beacon_committee(state, attestation.data.slot, attestation.data.index)
-        return {index for i, index in enumerate(committee) if attestation.aggregation_bits[i]}
+        return {
+            validator_index
+            for index, validator_index in enumerate(committee)
+            if attestation.aggregation_bits[index]
+        }
     </spec>
 
 - name: get_attesting_indices#electra
@@ -2812,20 +2890,20 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/electra/util/AttestationUtilElectra.java
       search: public List<UInt64> getAttestingIndices(
   spec: |
-    <spec fn="get_attesting_indices" fork="electra" hash="392a5a7e">
-    def get_attesting_indices(state: BeaconState, attestation: Attestation) -> Set[ValidatorIndex]:
+    <spec fn="get_attesting_indices" fork="electra" hash="b91efdf8">
+    def get_attesting_indices(state: BeaconState, attestation: Attestation) -> set[ValidatorIndex]:
         """
         Return the set of attesting indices corresponding to ``aggregation_bits`` and ``committee_bits``.
         """
-        output: Set[ValidatorIndex] = set()
+        output: set[ValidatorIndex] = set()
         committee_indices = get_committee_indices(attestation.committee_bits)
         committee_offset = 0
         for committee_index in committee_indices:
             committee = get_beacon_committee(state, attestation.data.slot, committee_index)
             committee_attesters = {
                 attester_index
-                for i, attester_index in enumerate(committee)
-                if attestation.aggregation_bits[committee_offset + i]
+                for index, attester_index in enumerate(committee)
+                if attestation.aggregation_bits[committee_offset + index]
             }
             output = output.union(committee_attesters)
 
@@ -3116,51 +3194,24 @@
         return store.blocks[block_root].slot
     </spec>
 
-- name: get_block_support_between_slots#phase0
+- name: get_builder_balance_after_withdrawals#gloas
   sources:
-    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/fastconfirmation/FastConfirmationCalculator.java
-      search: UInt64 getBlockSupportBetweenSlots(
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/withdrawals/WithdrawalsHelpersGloas.java
+      search: private UInt64 getBuilderBalanceAfterWithdrawals(
   spec: |
-    <spec fn="get_block_support_between_slots" fork="phase0" hash="a9987209">
-    def get_block_support_between_slots(
-        store: Store,
-        balance_source: BeaconState,
-        block_root: Root,
-        start_slot: Slot,
-        end_slot: Slot,
+    <spec fn="get_builder_balance_after_withdrawals" fork="gloas" hash="517947a4">
+    def get_builder_balance_after_withdrawals(
+        state: BeaconState, builder_index: BuilderIndex, withdrawals: Sequence[Withdrawal]
     ) -> Gwei:
-        """
-        Return support of the block by validators assigned to slots
-        between ``start_slot`` and ``end_slot`` (inclusive of both).
-        """
-        participants: Set[ValidatorIndex] = set()
-        for slot in range(start_slot, end_slot + 1):
-            participants.update(get_slot_committee(store, Slot(slot)))
-
-        # Keep validators that were active at the balance_source epoch to be consistent
-        # with get_total_active_balance() computation, also filter out slashed validators
-        unslashed_and_active_indices = [
-            i
-            for i in participants
-            if (
-                not balance_source.validators[i].slashed
-                and is_active_validator(balance_source.validators[i], get_current_epoch(balance_source))
-            )
-        ]
-
-        return Gwei(
+        validator_index = convert_builder_index_to_validator_index(builder_index)
+        withdrawn = Gwei(
             sum(
-                balance_source.validators[i].effective_balance
-                for i in unslashed_and_active_indices
-                # Check that validator has voted in the support of the block
-                # and has not been slashed
-                if (
-                    i in store.latest_messages
-                    and store.latest_messages[i].root == block_root
-                    and i not in store.equivocating_indices
-                )
+                withdrawal.amount
+                for withdrawal in withdrawals
+                if withdrawal.validator_index == validator_index
             )
         )
+        return saturating_sub(state.builders[builder_index].balance, withdrawn)
     </spec>
 
 - name: get_builder_payment_quorum_threshold#gloas
@@ -3168,14 +3219,14 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/helpers/BeaconStateAccessorsGloas.java
       search: public UInt64 getBuilderPaymentQuorumThreshold(
   spec: |
-    <spec fn="get_builder_payment_quorum_threshold" fork="gloas" hash="deb18056">
-    def get_builder_payment_quorum_threshold(state: BeaconState) -> Uint64:
+    <spec fn="get_builder_payment_quorum_threshold" fork="gloas" hash="ecd00d82">
+    def get_builder_payment_quorum_threshold(state: BeaconState) -> Gwei:
         """
         Calculate the quorum threshold for builder payments.
         """
         per_slot_balance = get_total_active_balance(state) // Uint64(SLOTS_PER_EPOCH)
         quorum = per_slot_balance * BUILDER_PAYMENT_THRESHOLD_NUMERATOR
-        return Uint64(quorum // BUILDER_PAYMENT_THRESHOLD_DENOMINATOR)
+        return quorum // BUILDER_PAYMENT_THRESHOLD_DENOMINATOR
     </spec>
 
 - name: get_builder_withdrawals#gloas
@@ -3183,12 +3234,12 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/withdrawals/WithdrawalsHelpersGloas.java
       search: protected int processBuilderWithdrawals(
   spec: |
-    <spec fn="get_builder_withdrawals" fork="gloas" hash="f8aade6a">
+    <spec fn="get_builder_withdrawals" fork="gloas" hash="e920ef37">
     def get_builder_withdrawals(
         state: BeaconState,
         withdrawal_index: WithdrawalIndex,
         prior_withdrawals: Sequence[Withdrawal],
-    ) -> Tuple[Sequence[Withdrawal], WithdrawalIndex, Uint64]:
+    ) -> tuple[Sequence[Withdrawal], WithdrawalIndex, Uint64]:
         withdrawals_limit = MAX_WITHDRAWALS_PER_PAYLOAD - 1
         assert len(prior_withdrawals) <= withdrawals_limit
 
@@ -3220,12 +3271,12 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/withdrawals/WithdrawalsHelpersGloas.java
       search: protected int processBuildersSweepWithdrawals(
   spec: |
-    <spec fn="get_builders_sweep_withdrawals" fork="gloas" hash="2363c4b1">
+    <spec fn="get_builders_sweep_withdrawals" fork="gloas" hash="d23af7b7">
     def get_builders_sweep_withdrawals(
         state: BeaconState,
         withdrawal_index: WithdrawalIndex,
         prior_withdrawals: Sequence[Withdrawal],
-    ) -> Tuple[Sequence[Withdrawal], WithdrawalIndex, Uint64]:
+    ) -> tuple[Sequence[Withdrawal], WithdrawalIndex, Uint64]:
         epoch = get_current_epoch(state)
         builders_limit = min(len(state.builders), MAX_BUILDERS_PER_WITHDRAWALS_SWEEP)
         withdrawals_limit = MAX_WITHDRAWALS_PER_PAYLOAD - 1
@@ -3241,13 +3292,14 @@
                 break
 
             builder = state.builders[builder_index]
-            if builder.withdrawable_epoch <= epoch and builder.balance > 0:
+            balance = get_builder_balance_after_withdrawals(state, builder_index, all_withdrawals)
+            if builder.withdrawable_epoch <= epoch and balance > 0:
                 withdrawals.append(
                     Withdrawal(
                         index=withdrawal_index,
                         validator_index=convert_builder_index_to_validator_index(builder_index),
                         address=builder.execution_address,
-                        amount=builder.balance,
+                        amount=balance,
                     )
                 )
                 withdrawal_index += 1
@@ -3311,10 +3363,10 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/util/ValidatorsUtil.java
       search: public Optional<CommitteeAssignment> getCommitteeAssignment(
   spec: |
-    <spec fn="get_committee_assignment" fork="phase0" hash="6b98c893">
+    <spec fn="get_committee_assignment" fork="phase0" hash="0e3bb59a">
     def get_committee_assignment(
         state: BeaconState, epoch: Epoch, validator_index: ValidatorIndex
-    ) -> Optional[Tuple[Sequence[ValidatorIndex], CommitteeIndex, Slot]]:
+    ) -> tuple[Sequence[ValidatorIndex], CommitteeIndex, Slot] | None:
         """
         Return the committee assignment in the ``epoch`` for ``validator_index``.
         ``assignment`` returned is a tuple of the following form:
@@ -3489,9 +3541,9 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/Spec.java
       search: public UInt64 getCurrentSlot(final UInt64 currentTime, final UInt64 genesisTime)
   spec: |
-    <spec fn="get_current_slot" fork="phase0" hash="65512a01">
+    <spec fn="get_current_slot" fork="phase0" hash="f18dc306">
     def get_current_slot(store: Store) -> Slot:
-        return GENESIS_SLOT + get_slots_since_genesis(store)
+        return get_slots_since_genesis(store)
     </spec>
 
 - name: get_current_store_epoch#phase0
@@ -3524,7 +3576,7 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/fastconfirmation/FastConfirmationCalculator.java
       search: UInt64 getCurrentTargetScore() {
   spec: |
-    <spec fn="get_current_target_score" fork="phase0" hash="aaef2a7c">
+    <spec fn="get_current_target_score" fork="phase0" hash="a5a45460">
     def get_current_target_score(store: Store) -> Gwei:
         """
         Return the estimate of FFG support of the current epoch target by using LMD-GHOST votes.
@@ -3532,22 +3584,22 @@
         target = get_current_target(store)
         state = get_pulled_up_head_state(store)
         unslashed_and_active_indices = [
-            i
-            for i in get_active_validator_indices(state, get_current_epoch(state))
-            if not state.validators[i].slashed
+            index
+            for index in get_active_validator_indices(state, get_current_epoch(state))
+            if not state.validators[index].slashed
         ]
         return Gwei(
             sum(
-                state.validators[i].effective_balance
-                for i in unslashed_and_active_indices
+                state.validators[index].effective_balance
+                for index in unslashed_and_active_indices
                 if (
-                    i in store.latest_messages
-                    and i not in store.equivocating_indices
+                    index in store.latest_messages
+                    and index not in store.equivocating_indices
                     and target
                     == get_checkpoint_for_block(
                         store,
-                        store.latest_messages[i].root,
-                        get_latest_message_epoch(store.latest_messages[i]),
+                        store.latest_messages[index].root,
+                        get_latest_message_epoch(store.latest_messages[index]),
                     )
                 )
             )
@@ -3574,13 +3626,13 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/fulu/helpers/MiscHelpersFulu.java
       search: public Set<UInt64> computeCustodyColumnIndices(
   spec: |
-    <spec fn="get_custody_groups" fork="fulu" hash="a18e8aa3">
+    <spec fn="get_custody_groups" fork="fulu" hash="767e375a">
     def get_custody_groups(node_id: NodeID, custody_group_count: Uint64) -> Sequence[CustodyIndex]:
         assert custody_group_count <= NUMBER_OF_CUSTODY_GROUPS
 
         # Skip computation if all groups are custodied
         if custody_group_count == NUMBER_OF_CUSTODY_GROUPS:
-            return [CustodyIndex(i) for i in range(NUMBER_OF_CUSTODY_GROUPS)]
+            return [CustodyIndex(index) for index in range(NUMBER_OF_CUSTODY_GROUPS)]
 
         current_id = Uint256(node_id)
         custody_groups: list[CustodyIndex] = []
@@ -3605,12 +3657,12 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/fulu/helpers/MiscHelpersFulu.java
       search: protected List<DataColumnSidecar> constructDataColumnSidecarsInternal(
   spec: |
-    <spec fn="get_data_column_sidecars" fork="fulu" hash="49611941">
+    <spec fn="get_data_column_sidecars" fork="fulu" hash="fbb6a110">
     def get_data_column_sidecars(
         signed_block_header: SignedBeaconBlockHeader,
         kzg_commitments: BlobKZGCommitments,
         kzg_commitments_inclusion_proof: KZGCommitmentsInclusionProof,
-        cells_and_kzg_proofs: Sequence[Tuple[Cells, Proofs]],
+        cells_and_kzg_proofs: Sequence[tuple[Cells, Proofs]],
     ) -> Sequence[DataColumnSidecar]:
         """
         Given a signed block header and the commitments, inclusion proof, cells/proofs associated with
@@ -3646,7 +3698,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/util/DataColumnSidecarUtilGloas.java
       search: public List<DataColumnSidecar> constructDataColumnSidecars(
   spec: |
-    <spec fn="get_data_column_sidecars" fork="gloas" hash="f2d210db">
+    <spec fn="get_data_column_sidecars" fork="gloas" hash="9fff4007">
     def get_data_column_sidecars(
         # [Modified in Gloas:EIP7732]
         # Removed `signed_block_header`
@@ -3658,7 +3710,7 @@
         # Removed `kzg_commitments`
         # [Modified in Gloas:EIP7732]
         # Removed `kzg_commitments_inclusion_proof`
-        cells_and_kzg_proofs: Sequence[Tuple[Cells, Proofs]],
+        cells_and_kzg_proofs: Sequence[tuple[Cells, Proofs]],
     ) -> Sequence[DataColumnSidecar]:
         """
         Given a beacon block root and the cells/proofs associated with each blob
@@ -3690,10 +3742,10 @@
     - file: beacon/validator/src/main/java/tech/pegasys/teku/validator/coordinator/BlockOperationSelectorFactory.java
       search: createDataColumnSidecarsSelector()
   spec: |
-    <spec fn="get_data_column_sidecars_from_block" fork="fulu" hash="a1d6f5ff">
+    <spec fn="get_data_column_sidecars_from_block" fork="fulu" hash="91b4f7c7">
     def get_data_column_sidecars_from_block(
         signed_block: SignedBeaconBlock,
-        cells_and_kzg_proofs: Sequence[Tuple[Cells, Proofs]],
+        cells_and_kzg_proofs: Sequence[tuple[Cells, Proofs]],
     ) -> Sequence[DataColumnSidecar]:
         """
         Given a signed block and the cells/proofs associated with each blob in the
@@ -3720,10 +3772,10 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/util/DataColumnSidecarUtilGloas.java
       search: public List<DataColumnSidecar> constructDataColumnSidecars(
   spec: |
-    <spec fn="get_data_column_sidecars_from_block" fork="gloas" hash="5ad6b3a7">
+    <spec fn="get_data_column_sidecars_from_block" fork="gloas" hash="00e34aeb">
     def get_data_column_sidecars_from_block(
         signed_block: SignedBeaconBlock,
-        cells_and_kzg_proofs: Sequence[Tuple[Cells, Proofs]],
+        cells_and_kzg_proofs: Sequence[tuple[Cells, Proofs]],
     ) -> Sequence[DataColumnSidecar]:
         """
         Given a signed block and the cells/proofs associated with each blob in the
@@ -3744,10 +3796,10 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/datacolumns/util/DataColumnSidecarELManagerImpl.java
       search: private void publishRecoveredDataColumnSidecars(
   spec: |
-    <spec fn="get_data_column_sidecars_from_column_sidecar" fork="fulu" hash="92223ca3">
+    <spec fn="get_data_column_sidecars_from_column_sidecar" fork="fulu" hash="e49f8d13">
     def get_data_column_sidecars_from_column_sidecar(
         sidecar: DataColumnSidecar,
-        cells_and_kzg_proofs: Sequence[Tuple[Cells, Proofs]],
+        cells_and_kzg_proofs: Sequence[tuple[Cells, Proofs]],
     ) -> Sequence[DataColumnSidecar]:
         """
         Given a data column sidecar and the cells/proofs associated with each blob corresponding
@@ -3770,10 +3822,10 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/util/DataColumnSidecarUtilGloas.java
       search: public List<DataColumnSidecar> reconstructAllDataColumnSidecars(
   spec: |
-    <spec fn="get_data_column_sidecars_from_column_sidecar" fork="gloas" hash="a2a33bc7">
+    <spec fn="get_data_column_sidecars_from_column_sidecar" fork="gloas" hash="845263b3">
     def get_data_column_sidecars_from_column_sidecar(
         sidecar: DataColumnSidecar,
-        cells_and_kzg_proofs: Sequence[Tuple[Cells, Proofs]],
+        cells_and_kzg_proofs: Sequence[tuple[Cells, Proofs]],
     ) -> Sequence[DataColumnSidecar]:
         """
         Given a data column sidecar and the cells/proofs associated with each blob
@@ -3793,10 +3845,8 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/helpers/BeaconStateAccessors.java
       search: public Bytes32 getDomain(final ForkInfo forkInfo, final Bytes4 domainType, final UInt64 epoch)
   spec: |
-    <spec fn="get_domain" fork="phase0" hash="e60c5fbc">
-    def get_domain(
-        state: BeaconState, domain_type: DomainType, epoch: Optional[Epoch] = None
-    ) -> Domain:
+    <spec fn="get_domain" fork="phase0" hash="a04c51fb">
+    def get_domain(state: BeaconState, domain_type: DomainType, epoch: Epoch | None = None) -> Domain:
         """
         Return the signature domain (fork version concatenated with domain type) of a message.
         """
@@ -3812,14 +3862,14 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/statetransition/epoch/status/ValidatorStatus.java
       search: public boolean isEligibleValidator() {
   spec: |
-    <spec fn="get_eligible_validator_indices" fork="phase0" hash="22a24ce4">
+    <spec fn="get_eligible_validator_indices" fork="phase0" hash="e266c51e">
     def get_eligible_validator_indices(state: BeaconState) -> Sequence[ValidatorIndex]:
         previous_epoch = get_previous_epoch(state)
         return [
             ValidatorIndex(index)
-            for index, v in enumerate(state.validators)
-            if is_active_validator(v, previous_epoch)
-            or (v.slashed and previous_epoch + 1 < v.withdrawable_epoch)
+            for index, validator in enumerate(state.validators)
+            if is_active_validator(validator, previous_epoch)
+            or (validator.slashed and previous_epoch + 1 < validator.withdrawable_epoch)
         ]
     </spec>
 
@@ -3840,7 +3890,7 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/fastconfirmation/FastConfirmationCalculator.java
       search: UInt64 getEquivocationScore(
   spec: |
-    <spec fn="get_equivocation_score" fork="phase0" hash="4e9bace4">
+    <spec fn="get_equivocation_score" fork="phase0" hash="0de04dec">
     def get_equivocation_score(
         store: Store,
         balance_source: BeaconState,
@@ -3851,20 +3901,23 @@
         Return total weight of equivocating participants of all committees
         in the slots between ``start_slot`` and ``end_slot`` (inclusive of both).
         """
-        committee_indices: Set[ValidatorIndex] = set()
+        committee_indices: set[ValidatorIndex] = set()
         for slot in range(start_slot, end_slot + 1):
             committee_indices.update(get_slot_committee(store, Slot(slot)))
 
         # Keep equivocating validators that were active at the balance_source epoch to be consistent
         # with get_total_active_balance() computation
         active_equivocating_indices = [
-            i
-            for i in committee_indices.intersection(store.equivocating_indices)
-            if is_active_validator(balance_source.validators[i], get_current_epoch(balance_source))
+            index
+            for index in committee_indices.intersection(store.equivocating_indices)
+            if is_active_validator(balance_source.validators[index], get_current_epoch(balance_source))
         ]
 
         return Gwei(
-            sum(balance_source.validators[i].effective_balance for i in active_equivocating_indices)
+            sum(
+                balance_source.validators[index].effective_balance
+                for index in active_equivocating_indices
+            )
         )
     </spec>
 
@@ -3976,9 +4029,9 @@
       search: ^  SafeFuture<GetPayloadResponse> engineGetPayload\(
       regex: true
   spec: |
-    <spec fn="get_execution_payload" fork="bellatrix" hash="d5ab13cc">
+    <spec fn="get_execution_payload" fork="bellatrix" hash="5065ff92">
     def get_execution_payload(
-        payload_id: Optional[PayloadId], execution_engine: ExecutionEngine
+        payload_id: PayloadId | None, execution_engine: ExecutionEngine
     ) -> ExecutionPayload:
         if payload_id is None:
             # Pre-merge, empty payload
@@ -4126,9 +4179,9 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/datastructures/execution/ExecutionRequestsDataCodec.java
       search: public List<Bytes> encode(
   spec: |
-    <spec fn="get_execution_requests_list" fork="electra" hash="7fecfd3a">
+    <spec fn="get_execution_requests_list" fork="electra" hash="3331055e">
     def get_execution_requests_list(execution_requests: ExecutionRequests) -> Sequence[bytes]:
-        requests: Sequence[Tuple[Bytes1, List]] = [
+        requests: Sequence[tuple[Bytes1, List]] = [
             (DEPOSIT_REQUEST_TYPE, execution_requests.deposits),
             (WITHDRAWAL_REQUEST_TYPE, execution_requests.withdrawals),
             (CONSOLIDATION_REQUEST_TYPE, execution_requests.consolidations),
@@ -4146,9 +4199,9 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/datastructures/execution/ExecutionRequestsDataCodec.java
       search: public List<Bytes> encode(
   spec: |
-    <spec fn="get_execution_requests_list" fork="gloas" hash="a2274ff3">
+    <spec fn="get_execution_requests_list" fork="gloas" hash="5a935310">
     def get_execution_requests_list(execution_requests: ExecutionRequests) -> Sequence[bytes]:
-        requests: Sequence[Tuple[Bytes1, ProgressiveList]] = [
+        requests: Sequence[tuple[Bytes1, ProgressiveList]] = [
             (DEPOSIT_REQUEST_TYPE, execution_requests.deposits),
             (WITHDRAWAL_REQUEST_TYPE, execution_requests.withdrawals),
             (CONSOLIDATION_REQUEST_TYPE, execution_requests.consolidations),
@@ -4303,23 +4356,42 @@
         )
     </spec>
 
-- name: get_filtered_block_tree#phase0
+- name: get_filtered_node_tree#phase0
   sources:
     - file: storage/src/main/java/tech/pegasys/teku/storage/protoarray/ProtoArray.java
       search: public ProtoNode findOptimisticHead(
     - file: storage/src/main/java/tech/pegasys/teku/storage/protoarray/ProtoArray.java
       search: public boolean nodeIsViableForHead(final ProtoNode node) {
   spec: |
-    <spec fn="get_filtered_block_tree" fork="phase0" hash="31b703b4">
-    def get_filtered_block_tree(store: Store) -> Dict[Root, BeaconBlock]:
+    <spec fn="get_filtered_node_tree" fork="phase0" hash="7c3ab6c4">
+    def get_filtered_node_tree(store: Store) -> Sequence[ForkChoiceNode]:
         """
-        Retrieve a filtered block tree from ``store``, only returning branches
+        Retrieve a filtered node tree from ``store``, only returning branches
         whose leaf state's justified/finalized info agrees with that in ``store``.
         """
-        base = store.justified_checkpoint.root
-        blocks: Dict[Root, BeaconBlock] = {}
-        filter_block_tree(store, base, blocks)
-        return blocks
+        base = ForkChoiceNode(root=store.justified_checkpoint.root)
+        return filter_node_tree(store, base)
+    </spec>
+
+- name: get_filtered_node_tree#gloas
+  sources:
+    - file: storage/src/main/java/tech/pegasys/teku/storage/protoarray/ProtoArray.java
+      search: public ProtoNode findOptimisticHead(
+    - file: storage/src/main/java/tech/pegasys/teku/storage/protoarray/ProtoArray.java
+      search: public boolean nodeIsViableForHead(final ProtoNode node) {
+  spec: |
+    <spec fn="get_filtered_node_tree" fork="gloas" hash="5e59710d">
+    def get_filtered_node_tree(store: Store) -> Sequence[ForkChoiceNode]:
+        """
+        Retrieve a filtered node tree from ``store``, only returning branches
+        whose leaf state's justified/finalized info agrees with that in ``store``.
+        """
+        # [Modified in Gloas:EIP7732]
+        base = ForkChoiceNode(
+            root=store.justified_checkpoint.root,
+            payload_status=PAYLOAD_STATUS_PENDING,
+        )
+        return filter_node_tree(store, base)
     </spec>
 
 - name: get_finality_delay#phase0
@@ -4327,9 +4399,9 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/helpers/BeaconStateAccessors.java
       search: public UInt64 getFinalityDelay(
   spec: |
-    <spec fn="get_finality_delay" fork="phase0" hash="08cbd75c">
-    def get_finality_delay(state: BeaconState) -> Uint64:
-        return Uint64(get_previous_epoch(state) - state.finalized_checkpoint.epoch)
+    <spec fn="get_finality_delay" fork="phase0" hash="192bb2de">
+    def get_finality_delay(state: BeaconState) -> Epoch:
+        return get_previous_epoch(state) - state.finalized_checkpoint.epoch
     </spec>
 
 - name: get_flag_index_deltas#altair
@@ -4337,10 +4409,10 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/altair/statetransition/epoch/RewardsAndPenaltiesCalculatorAltair.java
       search: public void processFlagIndexDeltas(
   spec: |
-    <spec fn="get_flag_index_deltas" fork="altair" hash="15ec0f1e">
+    <spec fn="get_flag_index_deltas" fork="altair" hash="b223bf01">
     def get_flag_index_deltas(
         state: BeaconState, flag_index: int
-    ) -> Tuple[Sequence[Gwei], Sequence[Gwei]]:
+    ) -> tuple[Sequence[Gwei], Sequence[Gwei]]:
         """
         Return the deltas for a given ``flag_index`` by scanning through the participation flags.
         """
@@ -4372,16 +4444,17 @@
     - file: storage/src/main/java/tech/pegasys/teku/storage/store/StoreBuilder.java
       search: public static OnDiskStoreData forkChoiceStoreBuilder(
   spec: |
-    <spec fn="get_forkchoice_store" fork="phase0" hash="2a19880c">
+    <spec fn="get_forkchoice_store" fork="phase0" hash="101415ce">
     def get_forkchoice_store(anchor_state: BeaconState, anchor_block: BeaconBlock) -> Store:
         assert anchor_block.state_root == hash_tree_root(anchor_state)
         anchor_root = hash_tree_root(anchor_block)
         anchor_epoch = get_current_epoch(anchor_state)
         justified_checkpoint = Checkpoint(epoch=anchor_epoch, root=anchor_root)
         finalized_checkpoint = Checkpoint(epoch=anchor_epoch, root=anchor_root)
+        genesis_time_ms = seconds_to_milliseconds(anchor_state.genesis_time)
         return Store(
-            time=Uint64(anchor_state.genesis_time + SLOT_DURATION_MS * anchor_state.slot // 1000),
-            genesis_time=anchor_state.genesis_time,
+            time_ms=compute_time_at_slot_ms(genesis_time_ms, anchor_state.slot),
+            genesis_time_ms=genesis_time_ms,
             justified_checkpoint=justified_checkpoint,
             finalized_checkpoint=finalized_checkpoint,
             unrealized_justified_checkpoint=justified_checkpoint,
@@ -4402,16 +4475,17 @@
     - file: storage/src/main/java/tech/pegasys/teku/storage/store/StoreBuilder.java
       search: public static OnDiskStoreData forkChoiceStoreBuilder(
   spec: |
-    <spec fn="get_forkchoice_store" fork="gloas" hash="243267ba">
+    <spec fn="get_forkchoice_store" fork="gloas" hash="9d5e9448">
     def get_forkchoice_store(anchor_state: BeaconState, anchor_block: BeaconBlock) -> Store:
         assert anchor_block.state_root == hash_tree_root(anchor_state)
         anchor_root = hash_tree_root(anchor_block)
         anchor_epoch = get_current_epoch(anchor_state)
         justified_checkpoint = Checkpoint(epoch=anchor_epoch, root=anchor_root)
         finalized_checkpoint = Checkpoint(epoch=anchor_epoch, root=anchor_root)
+        genesis_time_ms = seconds_to_milliseconds(anchor_state.genesis_time)
         return Store(
-            time=Uint64(anchor_state.genesis_time + SLOT_DURATION_MS * anchor_state.slot // 1000),
-            genesis_time=anchor_state.genesis_time,
+            time_ms=compute_time_at_slot_ms(genesis_time_ms, anchor_state.slot),
+            genesis_time_ms=genesis_time_ms,
             justified_checkpoint=justified_checkpoint,
             finalized_checkpoint=finalized_checkpoint,
             unrealized_justified_checkpoint=justified_checkpoint,
@@ -4441,14 +4515,14 @@
     - file: storage/src/main/java/tech/pegasys/teku/storage/protoarray/ProtoArray.java
       search: public ProtoNode findOptimisticHead(
   spec: |
-    <spec fn="get_head" fork="phase0" hash="d6e08d79">
+    <spec fn="get_head" fork="phase0" hash="75dbe36c">
     def get_head(store: Store) -> ForkChoiceNode:
-        # Get filtered block tree that only includes viable branches
-        blocks = get_filtered_block_tree(store)
+        # Get filtered node tree that only includes viable branches
+        nodes = get_filtered_node_tree(store)
         # Execute the LMD-GHOST fork choice
         head = ForkChoiceNode(root=store.justified_checkpoint.root)
         while True:
-            children = get_node_children(store, blocks, head)
+            children = [child for child in get_node_children(store, head) if child in nodes]
             if len(children) == 0:
                 return head
             # Sort by latest attesting balance with ties broken lexicographically
@@ -4463,10 +4537,19 @@
     - file: storage/src/main/java/tech/pegasys/teku/storage/protoarray/ForkChoiceModelGloas.java
       search: public int compareViableChildren(
   spec: |
-    <spec fn="get_head" fork="gloas" hash="e64bd18b">
+    <spec fn="get_head" fork="gloas" hash="ed4a5ca3">
     def get_head(store: Store) -> ForkChoiceNode:
-        # Get filtered block tree that only includes viable branches
-        blocks = get_filtered_block_tree(store)
+        # Get filtered node tree that only includes viable branches
+        nodes = get_filtered_node_tree(store)
+
+        # [New in Gloas:EIP7732]
+        # Return empty node if there are no viable nodes
+        if not any(nodes):
+            return ForkChoiceNode(
+                root=store.justified_checkpoint.root,
+                payload_status=PAYLOAD_STATUS_EMPTY,
+            )
+
         # Execute the LMD-GHOST fork-choice
         head = ForkChoiceNode(
             root=store.justified_checkpoint.root,
@@ -4475,7 +4558,7 @@
         )
 
         while True:
-            children = get_node_children(store, blocks, head)
+            children = [child for child in get_node_children(store, head) if child in nodes]
             if len(children) == 0:
                 return head
             # Sort by latest attesting balance with ties broken lexicographically
@@ -4495,8 +4578,8 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/phase0/statetransition/epoch/RewardsAndPenaltiesCalculatorPhase0.java
       search: public void applyHeadDelta(
   spec: |
-    <spec fn="get_head_deltas" fork="phase0" hash="3e9b5111">
-    def get_head_deltas(state: BeaconState) -> Tuple[Sequence[Gwei], Sequence[Gwei]]:
+    <spec fn="get_head_deltas" fork="phase0" hash="d2d999aa">
+    def get_head_deltas(state: BeaconState) -> tuple[Sequence[Gwei], Sequence[Gwei]]:
         """
         Return attester micro-rewards/penalties for head-vote for each validator.
         """
@@ -4509,8 +4592,8 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/phase0/statetransition/epoch/RewardsAndPenaltiesCalculatorPhase0.java
       search: public void applyInactivityPenaltyDelta(
   spec: |
-    <spec fn="get_inactivity_penalty_deltas" fork="phase0" hash="8af3df7c">
-    def get_inactivity_penalty_deltas(state: BeaconState) -> Tuple[Sequence[Gwei], Sequence[Gwei]]:
+    <spec fn="get_inactivity_penalty_deltas" fork="phase0" hash="632c856f">
+    def get_inactivity_penalty_deltas(state: BeaconState) -> tuple[Sequence[Gwei], Sequence[Gwei]]:
         """
         Return inactivity reward/penalty deltas for each validator.
         """
@@ -4531,7 +4614,9 @@
                 if index not in matching_target_attesting_indices:
                     effective_balance = state.validators[index].effective_balance
                     penalties[index] += (
-                        effective_balance * get_finality_delay(state) // INACTIVITY_PENALTY_QUOTIENT
+                        effective_balance
+                        * Uint64(get_finality_delay(state))
+                        // INACTIVITY_PENALTY_QUOTIENT
                     )
 
         # No rewards associated with inactivity penalties
@@ -4544,8 +4629,8 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/altair/statetransition/epoch/RewardsAndPenaltiesCalculatorAltair.java
       search: public void processInactivityPenaltyDeltas(
   spec: |
-    <spec fn="get_inactivity_penalty_deltas" fork="altair" hash="5236420d">
-    def get_inactivity_penalty_deltas(state: BeaconState) -> Tuple[Sequence[Gwei], Sequence[Gwei]]:
+    <spec fn="get_inactivity_penalty_deltas" fork="altair" hash="435dffc8">
+    def get_inactivity_penalty_deltas(state: BeaconState) -> tuple[Sequence[Gwei], Sequence[Gwei]]:
         """
         Return the inactivity penalty deltas by considering timely target participation flags and inactivity scores.
         """
@@ -4572,8 +4657,8 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/bellatrix/statetransition/epoch/RewardsAndPenaltiesCalculatorBellatrix.java
       search: protected UInt64 getInactivityPenaltyQuotient(
   spec: |
-    <spec fn="get_inactivity_penalty_deltas" fork="bellatrix" hash="d6e29690">
-    def get_inactivity_penalty_deltas(state: BeaconState) -> Tuple[Sequence[Gwei], Sequence[Gwei]]:
+    <spec fn="get_inactivity_penalty_deltas" fork="bellatrix" hash="dfcf19f9">
+    def get_inactivity_penalty_deltas(state: BeaconState) -> tuple[Sequence[Gwei], Sequence[Gwei]]:
         """
         Return the inactivity penalty deltas by considering timely target participation flags and inactivity scores.
         """
@@ -4599,8 +4684,8 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/phase0/statetransition/epoch/RewardsAndPenaltiesCalculatorPhase0.java
       search: public void applyInclusionDelayDelta(
   spec: |
-    <spec fn="get_inclusion_delay_deltas" fork="phase0" hash="6575be17">
-    def get_inclusion_delay_deltas(state: BeaconState) -> Tuple[Sequence[Gwei], Sequence[Gwei]]:
+    <spec fn="get_inclusion_delay_deltas" fork="phase0" hash="0ac4bdc0">
+    def get_inclusion_delay_deltas(state: BeaconState) -> tuple[Sequence[Gwei], Sequence[Gwei]]:
         """
         Return proposer and inclusion delay micro-rewards/penalties for each validator.
         """
@@ -4611,9 +4696,9 @@
         for index in get_unslashed_attesting_indices(state, matching_source_attestations):
             attestation = min(
                 [
-                    a
-                    for a in matching_source_attestations
-                    if index in get_pending_attesting_indices(state, a)
+                    attestation
+                    for attestation in matching_source_attestations
+                    if index in get_pending_attesting_indices(state, attestation)
                 ],
                 key=lambda a: a.inclusion_delay,
             )
@@ -4673,7 +4758,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/helpers/BeaconStateAccessorsGloas.java
       search: public IndexedPayloadAttestationLight getIndexedPayloadAttestation(
   spec: |
-    <spec fn="get_indexed_payload_attestation" fork="gloas" hash="53d80b99">
+    <spec fn="get_indexed_payload_attestation" fork="gloas" hash="2b7862fa">
     def get_indexed_payload_attestation(
         state: BeaconState, payload_attestation: PayloadAttestation
     ) -> IndexedPayloadAttestation:
@@ -4683,7 +4768,9 @@
         slot = payload_attestation.data.slot
         ptc = get_ptc(state, slot)
         bits = payload_attestation.aggregation_bits
-        attesting_indices = [index for i, index in enumerate(ptc) if bits[i]]
+        attesting_indices = [
+            validator_index for index, validator_index in enumerate(ptc) if bits[index]
+        ]
 
         return IndexedPayloadAttestation(
             attesting_indices=PayloadTimelinessCommitteeIndices(data=sorted(attesting_indices)),
@@ -4834,14 +4921,15 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/phase0/statetransition/epoch/ValidatorStatusFactoryPhase0.java
       search: protected void processParticipation(
   spec: |
-    <spec fn="get_matching_head_attestations" fork="phase0" hash="9e3ca171">
+    <spec fn="get_matching_head_attestations" fork="phase0" hash="d0fd2cf6">
     def get_matching_head_attestations(
         state: BeaconState, epoch: Epoch
     ) -> Sequence[PendingAttestation]:
         return [
-            a
-            for a in get_matching_target_attestations(state, epoch)
-            if a.data.beacon_block_root == get_block_root_at_slot(state, a.data.slot)
+            attestation
+            for attestation in get_matching_target_attestations(state, epoch)
+            if attestation.data.beacon_block_root
+            == get_block_root_at_slot(state, attestation.data.slot)
         ]
     </spec>
 
@@ -4867,14 +4955,14 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/phase0/statetransition/epoch/ValidatorStatusFactoryPhase0.java
       search: protected void processParticipation(
   spec: |
-    <spec fn="get_matching_target_attestations" fork="phase0" hash="811f3459">
+    <spec fn="get_matching_target_attestations" fork="phase0" hash="ad4545dd">
     def get_matching_target_attestations(
         state: BeaconState, epoch: Epoch
     ) -> Sequence[PendingAttestation]:
         return [
-            a
-            for a in get_matching_source_attestations(state, epoch)
-            if a.data.target.root == get_block_root(state, epoch)
+            attestation
+            for attestation in get_matching_source_attestations(state, epoch)
+            if attestation.data.target.root == get_block_root(state, epoch)
         ]
     </spec>
 
@@ -5000,13 +5088,13 @@
     - file: storage/src/main/java/tech/pegasys/teku/storage/protoarray/BlockNodeVariants.java
       search: List<ForkChoiceNode> allNodes(
   spec: |
-    <spec fn="get_node_children" fork="phase0" hash="ec6c4033">
-    def get_node_children(
-        store: Store,  # noqa: ARG001
-        blocks: Dict[Root, BeaconBlock],
-        node: ForkChoiceNode,
-    ) -> Sequence[ForkChoiceNode]:
-        return [ForkChoiceNode(root=root) for root in blocks if blocks[root].parent_root == node.root]
+    <spec fn="get_node_children" fork="phase0" hash="16d41c09">
+    def get_node_children(store: Store, node: ForkChoiceNode) -> Sequence[ForkChoiceNode]:
+        return [
+            ForkChoiceNode(root=root)
+            for root in store.blocks
+            if store.blocks[root].parent_root == node.root
+        ]
     </spec>
 
 - name: get_node_children#gloas
@@ -5014,10 +5102,8 @@
     - file: storage/src/main/java/tech/pegasys/teku/storage/protoarray/BlockNodeVariants.java
       search: List<ForkChoiceNode> allNodes(
   spec: |
-    <spec fn="get_node_children" fork="gloas" hash="49c8594f">
-    def get_node_children(
-        store: Store, blocks: Dict[Root, BeaconBlock], node: ForkChoiceNode
-    ) -> Sequence[ForkChoiceNode]:
+    <spec fn="get_node_children" fork="gloas" hash="9a93f921">
+    def get_node_children(store: Store, node: ForkChoiceNode) -> Sequence[ForkChoiceNode]:
         if node.payload_status == PAYLOAD_STATUS_PENDING:
             children = [ForkChoiceNode(root=node.root, payload_status=PAYLOAD_STATUS_EMPTY)]
             if is_payload_verified(store, node.root):
@@ -5026,10 +5112,10 @@
         else:
             return [
                 ForkChoiceNode(root=root, payload_status=PAYLOAD_STATUS_PENDING)
-                for root in blocks
+                for root in store.blocks
                 if (
-                    blocks[root].parent_root == node.root
-                    and node.payload_status == get_parent_payload_status(store, blocks[root])
+                    store.blocks[root].parent_root == node.root
+                    and node.payload_status == get_parent_payload_status(store, store.blocks[root])
                 )
             ]
     </spec>
@@ -5053,6 +5139,55 @@
     def get_node_for_root(block_root: Root) -> ForkChoiceNode:
         # [Modified in Gloas:EIP7732]
         return ForkChoiceNode(root=block_root, payload_status=PAYLOAD_STATUS_PENDING)
+    </spec>
+
+- name: get_node_support_between_slots#phase0
+  sources:
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/fastconfirmation/FastConfirmationCalculator.java
+      search: UInt64 getNodeSupportBetweenSlots(
+  spec: |
+    <spec fn="get_node_support_between_slots" fork="phase0" hash="f6d00005">
+    def get_node_support_between_slots(
+        store: Store,
+        balance_source: BeaconState,
+        node: ForkChoiceNode,
+        start_slot: Slot,
+        end_slot: Slot,
+    ) -> Gwei:
+        """
+        Return support of the node by validators assigned to slots
+        between ``start_slot`` and ``end_slot`` (inclusive of both).
+        """
+        participants: set[ValidatorIndex] = set()
+        for slot in range(start_slot, end_slot + 1):
+            participants.update(get_slot_committee(store, Slot(slot)))
+
+        # Keep validators that were active at the balance_source epoch to be consistent
+        # with get_total_active_balance() computation, also filter out slashed validators
+        unslashed_and_active_indices = [
+            index
+            for index in participants
+            if (
+                not balance_source.validators[index].slashed
+                and is_active_validator(
+                    balance_source.validators[index], get_current_epoch(balance_source)
+                )
+            )
+        ]
+
+        return Gwei(
+            sum(
+                balance_source.validators[index].effective_balance
+                for index in unslashed_and_active_indices
+                # Check that validator has voted in the support of the node
+                # and has not been slashed
+                if (
+                    index in store.latest_messages
+                    and get_supported_node(store, store.latest_messages[index]) == node
+                    and index not in store.equivocating_indices
+                )
+            )
+        )
     </spec>
 
 - name: get_parent_payload_status#gloas
@@ -5130,15 +5265,19 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/util/AttestationUtil.java
       search: public IntStream streamAttestingIndices(
   spec: |
-    <spec fn="get_pending_attesting_indices" fork="phase0" hash="42ee8140">
+    <spec fn="get_pending_attesting_indices" fork="phase0" hash="3321e867">
     def get_pending_attesting_indices(
         state: BeaconState, attestation: PendingAttestation
-    ) -> Set[ValidatorIndex]:
+    ) -> set[ValidatorIndex]:
         """
         Return the set of attesting indices for a ``PendingAttestation``.
         """
         committee = get_beacon_committee(state, attestation.data.slot, attestation.data.index)
-        return {index for i, index in enumerate(committee) if attestation.aggregation_bits[i]}
+        return {
+            validator_index
+            for index, validator_index in enumerate(committee)
+            if attestation.aggregation_bits[index]
+        }
     </spec>
 
 - name: get_pending_balance_to_withdraw#electra
@@ -5179,12 +5318,12 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/electra/withdrawals/WithdrawalsHelpersElectra.java
       search: protected int processPendingPartialWithdrawals(
   spec: |
-    <spec fn="get_pending_partial_withdrawals" fork="electra" hash="d2bf130b">
+    <spec fn="get_pending_partial_withdrawals" fork="electra" hash="3b6f8e91">
     def get_pending_partial_withdrawals(
         state: BeaconState,
         withdrawal_index: WithdrawalIndex,
         prior_withdrawals: Sequence[Withdrawal],
-    ) -> Tuple[Sequence[Withdrawal], WithdrawalIndex, Uint64]:
+    ) -> tuple[Sequence[Withdrawal], WithdrawalIndex, Uint64]:
         epoch = get_current_epoch(state)
         withdrawals_limit = min(
             len(prior_withdrawals) + MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP,
@@ -5224,10 +5363,10 @@
 - name: get_pow_block_at_terminal_total_difficulty#bellatrix
   sources: []
   spec: |
-    <spec fn="get_pow_block_at_terminal_total_difficulty" fork="bellatrix" hash="7b6668d2">
+    <spec fn="get_pow_block_at_terminal_total_difficulty" fork="bellatrix" hash="d4548f9b">
     def get_pow_block_at_terminal_total_difficulty(
-        pow_chain: Dict[Hash32, PowBlock],
-    ) -> Optional[PowBlock]:
+        pow_chain: dict[Hash32, PowBlock],
+    ) -> PowBlock | None:
         # `pow_chain` abstractly represents all blocks in the PoW chain
         for block in pow_chain.values():
             block_reached_ttd = block.total_difficulty >= TERMINAL_TOTAL_DIFFICULTY
@@ -5511,10 +5650,10 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/util/ValidatorsUtilGloas.java
       search: public Optional<UInt64> getPtcAssignment(
   spec: |
-    <spec fn="get_ptc_assignment" fork="gloas" hash="b04433da">
+    <spec fn="get_ptc_assignment" fork="gloas" hash="8b8e9ba6">
     def get_ptc_assignment(
         state: BeaconState, epoch: Epoch, validator_index: ValidatorIndex
-    ) -> Optional[Slot]:
+    ) -> Slot | None:
         """
         Returns the slot during the requested epoch in which the validator with
         index ``validator_index`` is a member of the PTC. Returns None if no
@@ -5563,6 +5702,34 @@
         return state.randao_mixes[epoch % EPOCHS_PER_HISTORICAL_VECTOR]
     </spec>
 
+- name: get_restart_resilient_confirmed_root#phase0
+  sources: []
+  spec: |
+    <spec fn="get_restart_resilient_confirmed_root" fork="phase0" hash="1e5cb5a6">
+    def get_restart_resilient_confirmed_root(fcr_store: FastConfirmationStore) -> Root:
+        store = fcr_store.store
+        root_before_restart = get_root_confirmed_before_restart()
+        root_before_restart_slot = get_block_slot(store, root_before_restart)
+
+        # Recently confirmed block has advanced beyond the block that was confirmed
+        # before the node restart
+        if root_before_restart_slot <= get_block_slot(store, fcr_store.confirmed_root):
+            return fcr_store.confirmed_root
+
+        # If the block is old enough it either has been finalized already or
+        # finality has been delayed which makes block confirmed before restart
+        # unreliable
+        if block_should_be_finalized(store, root_before_restart):
+            return fcr_store.confirmed_root
+
+        # If a block confirmed before the restart is not canonical,
+        # return the recently confirmed block
+        if not is_ancestor(store, get_head(store), get_node_for_root(root_before_restart)):
+            return fcr_store.confirmed_root
+
+        return root_before_restart
+    </spec>
+
 - name: get_safe_execution_block_hash#bellatrix
   sources:
     - file: storage/src/main/java/tech/pegasys/teku/storage/protoarray/ForkChoiceStrategy.java
@@ -5605,8 +5772,8 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/helpers/MiscHelpersGloas.java
       search: public Optional<UInt64> getScheduledGasLimit(
   spec: |
-    <spec fn="get_scheduled_gas_limit" fork="gloas" hash="9f246e85">
-    def get_scheduled_gas_limit(epoch: Epoch) -> Optional[Uint64]:
+    <spec fn="get_scheduled_gas_limit" fork="gloas" hash="fd2ea037">
+    def get_scheduled_gas_limit(epoch: Epoch) -> Uint64 | None:
         """
         Return the scheduled gas limit at a given epoch, if any.
         """
@@ -5721,7 +5888,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/signatures/LocalSigner.java
       search: public SafeFuture<BLSSignature> signProposerPreferences(
   spec: |
-    <spec fn="get_signed_proposer_preferences" fork="gloas" hash="c1833478">
+    <spec fn="get_signed_proposer_preferences" fork="gloas" hash="37906197">
     def get_signed_proposer_preferences(
         store: Store,
         state: BeaconState,
@@ -5741,7 +5908,11 @@
             fee_recipient=fee_recipient,
             target_gas_limit=target_gas_limit,
         )
-        domain = get_domain(state, DOMAIN_PROPOSER_PREFERENCES, proposal_epoch)
+        domain = compute_domain(
+            DOMAIN_PROPOSER_PREFERENCES,
+            compute_fork_version(proposal_epoch),
+            state.genesis_validators_root,
+        )
         signing_root = compute_signing_root(preferences, domain)
         signature = bls.Sign(privkey, signing_root)
         return SignedProposerPreferences(message=preferences, signature=signature)
@@ -5752,15 +5923,15 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/fastconfirmation/FastConfirmationCalculator.java
       search: IntSet getSlotCommittee(final UInt64 slot) {
   spec: |
-    <spec fn="get_slot_committee" fork="phase0" hash="34f6f1c4">
-    def get_slot_committee(store: Store, slot: Slot) -> Set[ValidatorIndex]:
+    <spec fn="get_slot_committee" fork="phase0" hash="28132fb1">
+    def get_slot_committee(store: Store, slot: Slot) -> set[ValidatorIndex]:
         """
         Return participants of all committees in ``slot``.
         """
         head = get_head(store).root
         shuffling_source = store.block_states[head]
         committees_count = get_committee_count_per_slot(shuffling_source, compute_epoch_at_slot(slot))
-        participants: Set[ValidatorIndex] = set()
+        participants: set[ValidatorIndex] = set()
         for i in range(committees_count):
             participants.update(get_beacon_committee(shuffling_source, slot, CommitteeIndex(i)))
         return participants
@@ -5798,9 +5969,9 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/helpers/MiscHelpers.java
       search: public UInt64 computeSlotAtTime(final UInt64 genesisTime, final UInt64 currentTime) {
   spec: |
-    <spec fn="get_slots_since_genesis" fork="phase0" hash="80c67100">
-    def get_slots_since_genesis(store: Store) -> int:
-        return (store.time - store.genesis_time) * 1000 // SLOT_DURATION_MS
+    <spec fn="get_slots_since_genesis" fork="phase0" hash="750bf7a1">
+    def get_slots_since_genesis(store: Store) -> Slot:
+        return compute_slot_at_time_ms(store.genesis_time_ms, store.time_ms)
     </spec>
 
 - name: get_source_deltas#phase0
@@ -5808,8 +5979,8 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/phase0/statetransition/epoch/RewardsAndPenaltiesCalculatorPhase0.java
       search: public void applySourceDelta(
   spec: |
-    <spec fn="get_source_deltas" fork="phase0" hash="af1e0223">
-    def get_source_deltas(state: BeaconState) -> Tuple[Sequence[Gwei], Sequence[Gwei]]:
+    <spec fn="get_source_deltas" fork="phase0" hash="b62e4186">
+    def get_source_deltas(state: BeaconState) -> tuple[Sequence[Gwei], Sequence[Gwei]]:
         """
         Return attester micro-rewards/penalties for source-vote for each validator.
         """
@@ -5977,8 +6148,8 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/phase0/statetransition/epoch/RewardsAndPenaltiesCalculatorPhase0.java
       search: public void applyTargetDelta(
   spec: |
-    <spec fn="get_target_deltas" fork="phase0" hash="2e16c38d">
-    def get_target_deltas(state: BeaconState) -> Tuple[Sequence[Gwei], Sequence[Gwei]]:
+    <spec fn="get_target_deltas" fork="phase0" hash="1d0e7f92">
+    def get_target_deltas(state: BeaconState) -> tuple[Sequence[Gwei], Sequence[Gwei]]:
         """
         Return attester micro-rewards/penalties for target-vote for each validator.
         """
@@ -5993,8 +6164,8 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/TerminalPowBlockMonitor.java
       search: private void checkTerminalBlockByBlockHash(final Bytes32 blockHashTracking) {
   spec: |
-    <spec fn="get_terminal_pow_block" fork="bellatrix" hash="8ead2ad2">
-    def get_terminal_pow_block(pow_chain: Dict[Hash32, PowBlock]) -> Optional[PowBlock]:
+    <spec fn="get_terminal_pow_block" fork="bellatrix" hash="6b781249">
+    def get_terminal_pow_block(pow_chain: dict[Hash32, PowBlock]) -> PowBlock | None:
         if TERMINAL_BLOCK_HASH != EMPTY_BLOCK_HASH:
             # Terminal block hash override takes precedence over terminal total difficulty
             if TERMINAL_BLOCK_HASH in pow_chain:
@@ -6003,6 +6174,14 @@
                 return None
 
         return get_pow_block_at_terminal_total_difficulty(pow_chain)
+    </spec>
+
+- name: get_time_into_slot_ms#phase0
+  sources: []
+  spec: |
+    <spec fn="get_time_into_slot_ms" fork="phase0" hash="7f3a39b9">
+    def get_time_into_slot_ms(store: Store) -> Uint64:
+        return store.time_ms - compute_time_at_slot_ms(store.genesis_time_ms, get_current_slot(store))
     </spec>
 
 - name: get_total_active_balance#phase0
@@ -6026,8 +6205,8 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/helpers/BeaconStateAccessors.java
       search: public UInt64 getTotalBalance(
   spec: |
-    <spec fn="get_total_balance" fork="phase0" hash="8227088d">
-    def get_total_balance(state: BeaconState, indices: Set[ValidatorIndex]) -> Gwei:
+    <spec fn="get_total_balance" fork="phase0" hash="981e5580">
+    def get_total_balance(state: BeaconState, indices: set[ValidatorIndex]) -> Gwei:
         """
         Return the combined effective balance of the ``indices``.
         ``EFFECTIVE_BALANCE_INCREMENT`` Gwei minimum to avoid divisions by zero.
@@ -6048,11 +6227,11 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/phase0/statetransition/epoch/RewardsAndPenaltiesCalculatorPhase0.java
       search: public void applyAttestationComponentDelta(
   spec: |
-    <spec fn="get_unslashed_attesting_indices" fork="phase0" hash="c5679384">
+    <spec fn="get_unslashed_attesting_indices" fork="phase0" hash="f0f94072">
     def get_unslashed_attesting_indices(
         state: BeaconState, attestations: Sequence[PendingAttestation]
-    ) -> Set[ValidatorIndex]:
-        output: Set[ValidatorIndex] = set()
+    ) -> set[ValidatorIndex]:
+        output: set[ValidatorIndex] = set()
         for a in attestations:
             output = output.union(get_pending_attesting_indices(state, a))
         return set(filter(lambda index: not state.validators[index].slashed, output))
@@ -6063,10 +6242,10 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/altair/statetransition/epoch/RewardsAndPenaltiesCalculatorAltair.java
       search: private boolean isUnslashedPrevEpochParticipatingIndex(
   spec: |
-    <spec fn="get_unslashed_participating_indices" fork="altair" hash="8a8aae5f">
+    <spec fn="get_unslashed_participating_indices" fork="altair" hash="d33eb6c1">
     def get_unslashed_participating_indices(
         state: BeaconState, flag_index: int, epoch: Epoch
-    ) -> Set[ValidatorIndex]:
+    ) -> set[ValidatorIndex]:
         """
         Return the set of validator indices that are both active and unslashed for the given ``flag_index`` and ``epoch``.
         """
@@ -6077,7 +6256,9 @@
             epoch_participation = state.previous_epoch_participation
         active_validator_indices = get_active_validator_indices(state, epoch)
         participating_indices = [
-            i for i in active_validator_indices if has_flag(epoch_participation[i], flag_index)
+            index
+            for index in active_validator_indices
+            if has_flag(epoch_participation[index], flag_index)
         ]
         return set(filter(lambda index: not state.validators[index].slashed, participating_indices))
     </spec>
@@ -6208,12 +6389,12 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/capella/withdrawals/WithdrawalsHelpersCapella.java
       search: protected int processValidatorsSweepWithdrawals(
   spec: |
-    <spec fn="get_validators_sweep_withdrawals" fork="capella" hash="bcbd76e8">
+    <spec fn="get_validators_sweep_withdrawals" fork="capella" hash="0061b77f">
     def get_validators_sweep_withdrawals(
         state: BeaconState,
         withdrawal_index: WithdrawalIndex,
         prior_withdrawals: Sequence[Withdrawal],
-    ) -> Tuple[Sequence[Withdrawal], WithdrawalIndex, Uint64]:
+    ) -> tuple[Sequence[Withdrawal], WithdrawalIndex, Uint64]:
         epoch = get_current_epoch(state)
         validators_limit = min(len(state.validators), MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP)
         withdrawals_limit = MAX_WITHDRAWALS_PER_PAYLOAD
@@ -6267,12 +6448,12 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/electra/helpers/MiscHelpersElectra.java
       search: public UInt64 getMaxEffectiveBalance(
   spec: |
-    <spec fn="get_validators_sweep_withdrawals" fork="electra" hash="7cbd742b">
+    <spec fn="get_validators_sweep_withdrawals" fork="electra" hash="2399d8dd">
     def get_validators_sweep_withdrawals(
         state: BeaconState,
         withdrawal_index: WithdrawalIndex,
         prior_withdrawals: Sequence[Withdrawal],
-    ) -> Tuple[Sequence[Withdrawal], WithdrawalIndex, Uint64]:
+    ) -> tuple[Sequence[Withdrawal], WithdrawalIndex, Uint64]:
         epoch = get_current_epoch(state)
         validators_limit = min(len(state.validators), MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP)
         withdrawals_limit = MAX_WITHDRAWALS_PER_PAYLOAD
@@ -6577,7 +6758,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/helpers/BeaconStateAccessorsGloas.java
       search: public SszVector<SszUInt64Vector> initializePtcWindow(
   spec: |
-    <spec fn="initialize_ptc_window" fork="gloas" hash="88530cbd">
+    <spec fn="initialize_ptc_window" fork="gloas" hash="a02bea8d">
     def initialize_ptc_window(
         state: BeaconState,
     ) -> PayloadTimelinessCommitteeWindow:
@@ -6595,7 +6776,7 @@
         for e in range(1 + MIN_SEED_LOOKAHEAD):
             epoch = current_epoch + e
             start_slot = compute_start_slot_at_epoch(epoch)
-            ptcs += [compute_ptc(state, start_slot + i) for i in range(SLOTS_PER_EPOCH)]
+            ptcs += [compute_ptc(state, start_slot + index) for index in range(SLOTS_PER_EPOCH)]
 
         return PayloadTimelinessCommitteeWindow(data=empty_previous_epoch + ptcs)
     </spec>
@@ -6620,7 +6801,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/helpers/BeaconStateMutators.java
       search: public void initiateValidatorExit(
   spec: |
-    <spec fn="initiate_validator_exit" fork="phase0" hash="3fe78d6a">
+    <spec fn="initiate_validator_exit" fork="phase0" hash="025466a5">
     def initiate_validator_exit(state: BeaconState, index: ValidatorIndex) -> None:
         """
         Initiate the exit of the validator with index ``index``.
@@ -6631,9 +6812,15 @@
             return
 
         # Compute exit queue epoch
-        exit_epochs = [v.exit_epoch for v in state.validators if v.exit_epoch != FAR_FUTURE_EPOCH]
+        exit_epochs = [
+            validator.exit_epoch
+            for validator in state.validators
+            if validator.exit_epoch != FAR_FUTURE_EPOCH
+        ]
         exit_queue_epoch = max(exit_epochs + [compute_activation_exit_epoch(get_current_epoch(state))])
-        exit_queue_churn = len([v for v in state.validators if v.exit_epoch == exit_queue_epoch])
+        exit_queue_churn = len([
+            validator for validator in state.validators if validator.exit_epoch == exit_queue_epoch
+        ])
         if exit_queue_churn >= get_validator_churn_limit(state):
             exit_queue_epoch += 1
 
@@ -7280,7 +7467,7 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/GossipValidationHelper.java
       search: public boolean isEpochFromFuture(
   spec: |
-    <spec fn="is_future_epoch" fork="phase0" hash="3fcd17f8">
+    <spec fn="is_future_epoch" fork="phase0" hash="f1bbea8c">
     def is_future_epoch(
         store: Store,
         epoch: Epoch,
@@ -7290,9 +7477,8 @@
         Check if the given epoch is in the future
         (with MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance).
         """
-        time_since_genesis_ms = current_time_ms - store.genesis_time * 1000
-        time_since_genesis_ms += MAXIMUM_GOSSIP_CLOCK_DISPARITY
-        current_slot = Slot(time_since_genesis_ms // SLOT_DURATION_MS)
+        current_time_with_disparity_ms = current_time_ms + MAXIMUM_GOSSIP_CLOCK_DISPARITY
+        current_slot = compute_slot_at_time_ms(store.genesis_time_ms, current_time_with_disparity_ms)
         return compute_epoch_at_slot(current_slot) < epoch
     </spec>
 
@@ -7301,7 +7487,7 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/GossipValidationHelper.java
       search: public boolean isSlotFromFuture(
   spec: |
-    <spec fn="is_future_slot" fork="phase0" hash="24f51b32">
+    <spec fn="is_future_slot" fork="phase0" hash="30761290">
     def is_future_slot(
         store: Store,
         slot: Slot,
@@ -7311,7 +7497,7 @@
         Check if the given slot is in the future
         (with MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance).
         """
-        slot_time_ms = compute_time_at_slot_ms(store, slot)
+        slot_time_ms = compute_time_at_slot_ms(store.genesis_time_ms, slot)
         return current_time_ms + MAXIMUM_GOSSIP_CLOCK_DISPARITY < slot_time_ms
     </spec>
 
@@ -7364,7 +7550,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/util/ForkChoiceUtil.java
       search: public boolean isHeadWeak(
   spec: |
-    <spec fn="is_head_weak" fork="phase0" hash="08f7dac6">
+    <spec fn="is_head_weak" fork="phase0" hash="99cf8799">
     def is_head_weak(store: Store, head_root: Root) -> bool:
         # Calculate weight threshold for weak head
         justified_state = store.checkpoint_states[store.justified_checkpoint]
@@ -7380,9 +7566,9 @@
             committee = get_beacon_committee(head_state, head_block.slot, CommitteeIndex(index))
             head_weight += Gwei(
                 sum(
-                    justified_state.validators[i].effective_balance
-                    for i in committee
-                    if i in store.equivocating_indices
+                    justified_state.validators[index].effective_balance
+                    for index in committee
+                    if index in store.equivocating_indices
                 )
             )
 
@@ -7394,7 +7580,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/util/ForkChoiceUtilGloas.java
       search: public boolean isHeadWeak(
   spec: |
-    <spec fn="is_head_weak" fork="gloas" hash="5b81945a">
+    <spec fn="is_head_weak" fork="gloas" hash="a98e1174">
     def is_head_weak(store: Store, head_root: Root) -> bool:
         # Calculate weight threshold for weak head
         justified_state = store.checkpoint_states[store.justified_checkpoint]
@@ -7411,9 +7597,9 @@
             committee = get_beacon_committee(head_state, head_block.slot, CommitteeIndex(index))
             head_weight += Gwei(
                 sum(
-                    justified_state.validators[i].effective_balance
-                    for i in committee
-                    if i in store.equivocating_indices
+                    justified_state.validators[index].effective_balance
+                    for index in committee
+                    if index in store.equivocating_indices
                 )
             )
 
@@ -7468,10 +7654,10 @@
     - file: infrastructure/ssz/src/main/java/tech/pegasys/teku/infrastructure/ssz/collections/SszBitSet.java
       search: default boolean isSuperSetOf(final SszBitSet other) {
   spec: |
-    <spec fn="is_non_strict_superset" fork="phase0" hash="4ec0d323">
+    <spec fn="is_non_strict_superset" fork="phase0" hash="6076a50e">
     def is_non_strict_superset(
-        seen_bits_set: Set[Tuple[bool, ...]],
-        new_bits: Tuple[bool, ...],
+        seen_bits_set: set[tuple[bool, ...]],
+        new_bits: tuple[bool, ...],
     ) -> bool:
         """
         Return True if any prior bitset in ``seen_bits_set`` is a non-strict
@@ -7619,7 +7805,7 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/GossipValidationHelper.java
       search: public boolean hasSlotStarted(
   spec: |
-    <spec fn="is_past_slot" fork="gloas" hash="4bd9aba5">
+    <spec fn="is_past_slot" fork="gloas" hash="ad519271">
     def is_past_slot(
         store: Store,
         slot: Slot,
@@ -7629,7 +7815,7 @@
         Check if the given slot is in the past
         (with MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance).
         """
-        slot_time_ms = compute_time_at_slot_ms(store, slot)
+        slot_time_ms = compute_time_at_slot_ms(store.genesis_time_ms, slot)
         return current_time_ms > slot_time_ms + MAXIMUM_GOSSIP_CLOCK_DISPARITY
     </spec>
 
@@ -7718,12 +7904,9 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/util/ForkChoiceUtil.java
       search: public boolean isProposingOnTime(
   spec: |
-    <spec fn="is_proposing_on_time" fork="phase0" hash="cd918967">
+    <spec fn="is_proposing_on_time" fork="phase0" hash="ddd7b14e">
     def is_proposing_on_time(store: Store) -> bool:
-        seconds_since_genesis = store.time - store.genesis_time
-        time_into_slot_ms = seconds_to_milliseconds(seconds_since_genesis) % SLOT_DURATION_MS
-        proposer_reorg_cutoff_ms = get_proposer_reorg_cutoff_ms()
-        return time_into_slot_ms <= proposer_reorg_cutoff_ms
+        return get_time_into_slot_ms(store) <= get_proposer_reorg_cutoff_ms()
     </spec>
 
 - name: is_shuffling_stable#phase0
@@ -7887,7 +8070,7 @@
       search: public AttestationProcessingResult\s+isValidIndexedAttestation\s*\(\s*final\s+Fork\s+\w+\s*,\s*final\s+BeaconState\s+\w+\s*,\s*final\s+IndexedAttestation\s+\w+\s*\)
       regex: true
   spec: |
-    <spec fn="is_valid_indexed_attestation" fork="phase0" hash="756c2738">
+    <spec fn="is_valid_indexed_attestation" fork="phase0" hash="d8c6b9c1">
     def is_valid_indexed_attestation(
         state: BeaconState, indexed_attestation: IndexedAttestation
     ) -> bool:
@@ -7899,7 +8082,7 @@
         if len(indices) == 0 or list(indices) != sorted(set(indices)):
             return False
         # Verify aggregate signature
-        pubkeys = [state.validators[i].pubkey for i in indices]
+        pubkeys = [state.validators[index].pubkey for index in indices]
         domain = get_domain(state, DOMAIN_BEACON_ATTESTER, indexed_attestation.data.target.epoch)
         signing_root = compute_signing_root(indexed_attestation.data, domain)
         return bls.FastAggregateVerify(pubkeys, signing_root, indexed_attestation.signature)
@@ -7913,7 +8096,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/config/SpecConfigElectra.java
       search: default long getMaxValidatorsPerAttestation()
   spec: |
-    <spec fn="is_valid_indexed_attestation" fork="gloas" hash="4a8f400e">
+    <spec fn="is_valid_indexed_attestation" fork="gloas" hash="31f5cc96">
     def is_valid_indexed_attestation(
         state: BeaconState, indexed_attestation: IndexedAttestation
     ) -> bool:
@@ -7930,7 +8113,7 @@
         ):
             return False
         # Verify aggregate signature
-        pubkeys = [state.validators[i].pubkey for i in indices]
+        pubkeys = [state.validators[index].pubkey for index in indices]
         domain = get_domain(state, DOMAIN_BEACON_ATTESTER, indexed_attestation.data.target.epoch)
         signing_root = compute_signing_root(indexed_attestation.data, domain)
         return bls.FastAggregateVerify(pubkeys, signing_root, indexed_attestation.signature)
@@ -7941,7 +8124,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/util/AttestationUtilGloas.java
       search: public boolean isValidIndexedPayloadAttestation(
   spec: |
-    <spec fn="is_valid_indexed_payload_attestation" fork="gloas" hash="37b2500a">
+    <spec fn="is_valid_indexed_payload_attestation" fork="gloas" hash="dd1e5a76">
     def is_valid_indexed_payload_attestation(
         state: BeaconState, attestation: IndexedPayloadAttestation
     ) -> bool:
@@ -7955,7 +8138,7 @@
             return False
 
         # Verify aggregate signature
-        pubkeys = [state.validators[i].pubkey for i in indices]
+        pubkeys = [state.validators[index].pubkey for index in indices]
         domain = get_domain(state, DOMAIN_PTC_ATTESTER, compute_epoch_at_slot(attestation.data.slot))
         signing_root = compute_signing_root(attestation.data, domain)
         return bls.FastAggregateVerify(pubkeys, signing_root, attestation.signature)
@@ -8054,7 +8237,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/electra/helpers/BeaconStateMutatorsElectra.java
       search: public void switchToCompoundingValidator(
   spec: |
-    <spec fn="is_valid_switch_to_compounding_request" fork="electra" hash="91aa69bb">
+    <spec fn="is_valid_switch_to_compounding_request" fork="electra" hash="57283459">
     def is_valid_switch_to_compounding_request(
         state: BeaconState, consolidation_request: ConsolidationRequest
     ) -> bool:
@@ -8064,7 +8247,7 @@
 
         # Verify pubkey exists
         source_pubkey = consolidation_request.source_pubkey
-        validator_pubkeys = [v.pubkey for v in state.validators]
+        validator_pubkeys = [validator.pubkey for validator in state.validators]
         if source_pubkey not in validator_pubkeys:
             return False
 
@@ -8130,7 +8313,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/phase0/util/AttestationUtilPhase0.java
       search: public Optional<SlotInclusionGossipValidationResult> performSlotInclusionGossipValidation(
   spec: |
-    <spec fn="is_within_slot_range" fork="phase0" hash="672b30bc">
+    <spec fn="is_within_slot_range" fork="phase0" hash="8d4c066f">
     def is_within_slot_range(
         store: Store,
         slot: Slot,
@@ -8141,10 +8324,10 @@
         Check if the current time is within the inclusive slot range ``[slot, slot + slot_range]``
         (with MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance on both ends).
         """
-        start_time_ms = compute_time_at_slot_ms(store, slot)
+        start_time_ms = compute_time_at_slot_ms(store.genesis_time_ms, slot)
         if current_time_ms + MAXIMUM_GOSSIP_CLOCK_DISPARITY < start_time_ms:
             return False
-        end_time_ms = compute_time_at_slot_ms(store, slot + slot_range + 1)
+        end_time_ms = compute_time_at_slot_ms(store.genesis_time_ms, slot + slot_range + 1)
         if end_time_ms + MAXIMUM_GOSSIP_CLOCK_DISPARITY < current_time_ms:
             return False
         return True
@@ -8227,6 +8410,19 @@
     def max_message_size() -> Uint64:
         # Allow 1024 bytes for framing and encoding overhead but at least 1MiB in case MAX_PAYLOAD_SIZE is small.
         return max(max_compressed_len(MAX_PAYLOAD_SIZE) + 1024, Uint64(1024 * 1024))
+    </spec>
+
+- name: milliseconds_to_seconds#phase0
+  sources:
+    - file: infrastructure/time/src/main/java/tech/pegasys/teku/infrastructure/time/TimeUtilities.java
+      search: public static UInt64 millisToSeconds(final UInt64 timeInMillis) {
+  spec: |
+    <spec fn="milliseconds_to_seconds" fork="phase0" hash="25f94fde">
+    def milliseconds_to_seconds(milliseconds: Uint64) -> Uint64:
+        """
+        Convert milliseconds to seconds, discarding any remainder.
+        """
+        return milliseconds // 1000
     </spec>
 
 - name: next_sync_committee_gindex_at_slot#altair
@@ -8812,17 +9008,16 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/util/ForkChoiceUtil.java
       search: public void onTick(
   spec: |
-    <spec fn="on_tick" fork="phase0" hash="8ec6b435">
-    def on_tick(store: Store, time: Uint64) -> None:
-        # If the ``store.time`` falls behind, while loop catches up slot by slot
+    <spec fn="on_tick" fork="phase0" hash="f9e19730">
+    def on_tick(store: Store, time_ms: Uint64) -> None:
+        # If the ``store.time_ms`` falls behind, while loop catches up slot by slot
         # to ensure that every previous slot is processed with ``on_tick_per_slot``
-        tick_slot = (time - store.genesis_time) * 1000 // SLOT_DURATION_MS
+        tick_slot = compute_slot_at_time_ms(store.genesis_time_ms, time_ms)
         while get_current_slot(store) < tick_slot:
-            previous_time = (
-                store.genesis_time + (get_current_slot(store) + 1) * SLOT_DURATION_MS // 1000
-            )
-            on_tick_per_slot(store, previous_time)
-        on_tick_per_slot(store, time)
+            next_slot = get_current_slot(store) + 1
+            next_slot_time_ms = compute_time_at_slot_ms(store.genesis_time_ms, next_slot)
+            on_tick_per_slot(store, next_slot_time_ms)
+        on_tick_per_slot(store, time_ms)
     </spec>
 
 - name: on_tick_per_slot#phase0
@@ -8830,12 +9025,12 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/util/ForkChoiceUtil.java
       search: private void processOnTick(final MutableStore store, final UInt64 timeMillis) {
   spec: |
-    <spec fn="on_tick_per_slot" fork="phase0" hash="8bda5b76">
-    def on_tick_per_slot(store: Store, time: Uint64) -> None:
+    <spec fn="on_tick_per_slot" fork="phase0" hash="13c885a4">
+    def on_tick_per_slot(store: Store, time_ms: Uint64) -> None:
         previous_slot = get_current_slot(store)
 
         # Update store time
-        store.time = time
+        store.time_ms = time_ms
 
         current_slot = get_current_slot(store)
 
@@ -8855,13 +9050,13 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/forktransition/GloasStateUpgrade.java
       search: private void onboardBuildersFromPendingDeposits(
   spec: |
-    <spec fn="onboard_builders_from_pending_deposits" fork="gloas" hash="49853afd">
+    <spec fn="onboard_builders_from_pending_deposits" fork="gloas" hash="e09a82dc">
     def onboard_builders_from_pending_deposits(state: BeaconState) -> None:
         """
         Applies any pending deposit for builders, effectively
         onboarding builders at the fork.
         """
-        validator_pubkeys = [v.pubkey for v in state.validators]
+        validator_pubkeys = [validator.pubkey for validator in state.validators]
 
         pending_deposits = PendingDeposits()
         for deposit in state.pending_deposits:
@@ -8873,7 +9068,7 @@
             # Note that applying a deposit below can mutate the state and
             # may add a builder to the registry. For this reason, the list
             # of builder pubkeys must be recomputed each iteration.
-            builder_pubkeys = [b.pubkey for b in state.builders]
+            builder_pubkeys = [builder.pubkey for builder in state.builders]
 
             # Deposits for non-builders stay in the pending queue. If there is a
             # valid pending deposit for a new validator with this pubkey, keep this
@@ -8913,7 +9108,7 @@
     - file: storage/src/main/java/tech/pegasys/teku/storage/protoarray/ForkChoiceModelGloas.java
       search: private boolean payloadDataAvailability(
   spec: |
-    <spec fn="payload_data_availability" fork="gloas" hash="9be717cf">
+    <spec fn="payload_data_availability" fork="gloas" hash="3c04b6ec">
     def payload_data_availability(store: Store, root: Root, available: bool) -> bool:
         """
         Return whether the blob data for the beacon block with root ``root`` is
@@ -8928,7 +9123,7 @@
         if not is_payload_verified(store, root):
             return not available
 
-        votes = [bool(v) for v in store.payload_data_availability_vote[root] if v is not None]
+        votes = [bool(vote) for vote in store.payload_data_availability_vote[root] if vote is not None]
         return sum(vote == available for vote in votes) > DATA_AVAILABILITY_TIMELY_THRESHOLD
     </spec>
 
@@ -8937,7 +9132,7 @@
     - file: storage/src/main/java/tech/pegasys/teku/storage/protoarray/ForkChoiceModelGloas.java
       search: private boolean payloadTimeliness(
   spec: |
-    <spec fn="payload_timeliness" fork="gloas" hash="3633a58b">
+    <spec fn="payload_timeliness" fork="gloas" hash="841f53bf">
     def payload_timeliness(store: Store, root: Root, timely: bool) -> bool:
         """
         Return whether the execution payload for the beacon block with root ``root``
@@ -8952,7 +9147,7 @@
         if not is_payload_verified(store, root):
             return not timely
 
-        votes = [bool(v) for v in store.payload_timeliness_vote[root] if v is not None]
+        votes = [bool(vote) for vote in store.payload_timeliness_vote[root] if vote is not None]
         return sum(vote == timely for vote in votes) > PAYLOAD_TIMELY_THRESHOLD
     </spec>
 
@@ -8968,15 +9163,15 @@
       search: ^  SafeFuture<ForkChoiceUpdatedResult> engineForkChoiceUpdated\(
       regex: true
   spec: |
-    <spec fn="prepare_execution_payload" fork="bellatrix" hash="da7b5dbb">
+    <spec fn="prepare_execution_payload" fork="bellatrix" hash="096aaa2b">
     def prepare_execution_payload(
         state: BeaconState,
         safe_block_hash: Hash32,
         finalized_block_hash: Hash32,
         suggested_fee_recipient: ExecutionAddress,
         execution_engine: ExecutionEngine,
-        pow_chain: Optional[Dict[Hash32, PowBlock]] = None,
-    ) -> Optional[PayloadId]:
+        pow_chain: dict[Hash32, PowBlock] | None = None,
+    ) -> PayloadId | None:
         if not is_merge_transition_complete(state):
             assert pow_chain is not None
             is_terminal_block_hash_set = TERMINAL_BLOCK_HASH != EMPTY_BLOCK_HASH
@@ -8999,7 +9194,7 @@
 
         # Set the forkchoice head and initiate the payload build process
         payload_attributes = PayloadAttributes(
-            timestamp=compute_time_at_slot(state, state.slot),
+            timestamp=compute_time_at_slot(state.genesis_time, state.slot),
             prev_randao=get_randao_mix(state, get_current_epoch(state)),
             suggested_fee_recipient=suggested_fee_recipient,
         )
@@ -9020,15 +9215,15 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/ProposersDataManager.java
       search: return getPayloadAttributeWithdrawals(currentHeadBlock, state)
   spec: |
-    <spec fn="prepare_execution_payload" fork="capella" style="diff" hash="bdb15c3f">
+    <spec fn="prepare_execution_payload" fork="capella" style="diff" hash="ab77068a">
     --- bellatrix
     +++ capella
     @@ -4,28 +4,14 @@
          finalized_block_hash: Hash32,
          suggested_fee_recipient: ExecutionAddress,
          execution_engine: ExecutionEngine,
-    -    pow_chain: Optional[Dict[Hash32, PowBlock]] = None,
-     ) -> Optional[PayloadId]:
+    -    pow_chain: dict[Hash32, PowBlock] | None = None,
+     ) -> PayloadId | None:
     -    if not is_merge_transition_complete(state):
     -        assert pow_chain is not None
     -        is_terminal_block_hash_set = TERMINAL_BLOCK_HASH != EMPTY_BLOCK_HASH
@@ -9047,7 +9242,7 @@
     +    parent_hash = state.latest_execution_payload_header.block_hash
 
          payload_attributes = PayloadAttributes(
-             timestamp=compute_time_at_slot(state, state.slot),
+             timestamp=compute_time_at_slot(state.genesis_time, state.slot),
              prev_randao=get_randao_mix(state, get_current_epoch(state)),
              suggested_fee_recipient=suggested_fee_recipient,
     +        withdrawals=get_expected_withdrawals(state).withdrawals,
@@ -9065,7 +9260,7 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/ForkChoiceUpdateData.java
       search: executionLayer.engineForkChoiceUpdated(forkChoiceState, payloadBuildingAttributes)
   spec: |
-    <spec fn="prepare_execution_payload" fork="deneb" style="diff" hash="c617aa1b">
+    <spec fn="prepare_execution_payload" fork="deneb" style="diff" hash="e2cd1561">
     --- capella
     +++ deneb
     @@ -12,6 +12,7 @@
@@ -9085,7 +9280,7 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/ProposersDataManager.java
       search: private SafeFuture<Optional<PayloadBuildingAttributes>> calculatePayloadBuildingAttributes(
   spec: |
-    <spec fn="prepare_execution_payload" fork="gloas" hash="50f45435">
+    <spec fn="prepare_execution_payload" fork="gloas" hash="31955b36">
     def prepare_execution_payload(
         # [New in Gloas:EIP7732]
         store: Store,
@@ -9098,7 +9293,7 @@
         # [New in Gloas]
         target_gas_limit: Uint64,
         execution_engine: ExecutionEngine,
-    ) -> Optional[PayloadId]:
+    ) -> PayloadId | None:
         # [New in Gloas:EIP7732]
         parent_bid = state.latest_execution_payload_bid
         if should_build_on_full(store, head, get_current_slot(store)):
@@ -9115,7 +9310,7 @@
 
         # Set the forkchoice head and initiate the payload build process
         payload_attributes = PayloadAttributes(
-            timestamp=compute_time_at_slot(state, state.slot),
+            timestamp=compute_time_at_slot(state.genesis_time, state.slot),
             prev_randao=get_randao_mix(state, get_current_epoch(state)),
             suggested_fee_recipient=suggested_fee_recipient,
             # [Modified in Gloas:EIP7732]
@@ -9274,7 +9469,7 @@
       search: protected void processAttestation(
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/electra/operations/validation/AttestationDataValidatorElectra.java
   spec: |
-    <spec fn="process_attestation" fork="electra" hash="d0e174f7">
+    <spec fn="process_attestation" fork="electra" hash="d6fe656d">
     def process_attestation(state: BeaconState, attestation: Attestation) -> None:
         data = attestation.data
         assert data.target.epoch in (get_previous_epoch(state), get_current_epoch(state))
@@ -9290,8 +9485,8 @@
             committee = get_beacon_committee(state, data.slot, committee_index)
             committee_attesters = {
                 attester_index
-                for i, attester_index in enumerate(committee)
-                if attestation.aggregation_bits[committee_offset + i]
+                for index, attester_index in enumerate(committee)
+                if attestation.aggregation_bits[committee_offset + index]
             }
             assert len(committee_attesters) > 0
             committee_offset += len(committee)
@@ -9342,7 +9537,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/block/BlockProcessorGloas.java
       search: protected void consumeAttestationProcessingResult(
   spec: |
-    <spec fn="process_attestation" fork="gloas" hash="d78c7941">
+    <spec fn="process_attestation" fork="gloas" hash="485df2d4">
     def process_attestation(
         state: BeaconState,
         attestation: Attestation,
@@ -9363,8 +9558,8 @@
             committee = get_beacon_committee(state, data.slot, committee_index)
             committee_attesters = {
                 attester_index
-                for i, attester_index in enumerate(committee)
-                if attestation.aggregation_bits[committee_offset + i]
+                for index, attester_index in enumerate(committee)
+                if attestation.aggregation_bits[committee_offset + index]
             }
             assert len(committee_attesters) > 0
             committee_offset += len(committee)
@@ -9645,13 +9840,13 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/execution/ExecutionRequestsProcessorGloas.java
       search: public void processBuilderDepositRequests(
   spec: |
-    <spec fn="process_builder_deposit_request" fork="gloas" hash="1d458f9c">
+    <spec fn="process_builder_deposit_request" fork="gloas" hash="f0fb2ad8">
     def process_builder_deposit_request(state: BeaconState, request: BuilderDepositRequest) -> None:
         # Ignore deposits with unexpected withdrawal credential prefixes
         if not is_builder_withdrawal_credential(request.withdrawal_credentials):
             return
 
-        builder_pubkeys = [b.pubkey for b in state.builders]
+        builder_pubkeys = [builder.pubkey for builder in state.builders]
         if request.pubkey not in builder_pubkeys:
             if is_valid_builder_deposit_signature(request):
                 add_builder_to_registry(
@@ -9680,9 +9875,9 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/execution/ExecutionRequestsProcessorGloas.java
       search: public void processBuilderExitRequests(
   spec: |
-    <spec fn="process_builder_exit_request" fork="gloas" hash="144e9faf">
+    <spec fn="process_builder_exit_request" fork="gloas" hash="b9a9fe05">
     def process_builder_exit_request(state: BeaconState, request: BuilderExitRequest) -> None:
-        builder_pubkeys = [b.pubkey for b in state.builders]
+        builder_pubkeys = [builder.pubkey for builder in state.builders]
         if request.pubkey not in builder_pubkeys:
             return
 
@@ -9725,12 +9920,12 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/electra/execution/ExecutionRequestsProcessorElectra.java
       search: public void processConsolidationRequests(
   spec: |
-    <spec fn="process_consolidation_request" fork="electra" hash="be045fd3">
+    <spec fn="process_consolidation_request" fork="electra" hash="8524ae3e">
     def process_consolidation_request(
         state: BeaconState, consolidation_request: ConsolidationRequest
     ) -> None:
         if is_valid_switch_to_compounding_request(state, consolidation_request):
-            validator_pubkeys = [v.pubkey for v in state.validators]
+            validator_pubkeys = [validator.pubkey for validator in state.validators]
             request_source_pubkey = consolidation_request.source_pubkey
             source_index = ValidatorIndex(validator_pubkeys.index(request_source_pubkey))
             switch_to_compounding_validator(state, source_index)
@@ -9746,7 +9941,7 @@
         if get_consolidation_churn_limit(state) <= MIN_ACTIVATION_BALANCE:
             return
 
-        validator_pubkeys = [v.pubkey for v in state.validators]
+        validator_pubkeys = [validator.pubkey for validator in state.validators]
         # Verify pubkeys exists
         request_source_pubkey = consolidation_request.source_pubkey
         request_target_pubkey = consolidation_request.target_pubkey
@@ -10134,7 +10329,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/bellatrix/block/BlockProcessorBellatrix.java
       search: public void processExecutionPayload(
   spec: |
-    <spec fn="process_execution_payload" fork="bellatrix" hash="d1d1e466">
+    <spec fn="process_execution_payload" fork="bellatrix" hash="c4a09fc8">
     def process_execution_payload(
         state: BeaconState, body: BeaconBlockBody, execution_engine: ExecutionEngine
     ) -> None:
@@ -10146,7 +10341,7 @@
         # Verify prev_randao
         assert payload.prev_randao == get_randao_mix(state, get_current_epoch(state))
         # Verify timestamp
-        assert payload.timestamp == compute_time_at_slot(state, state.slot)
+        assert payload.timestamp == compute_time_at_slot(state.genesis_time, state.slot)
         # Verify the execution payload is valid
         assert execution_engine.verify_and_notify_new_payload(
             NewPayloadRequest(execution_payload=payload)
@@ -10177,7 +10372,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/bellatrix/block/BlockProcessorBellatrix.java
       search: public void validateExecutionPayloadHeader(
   spec: |
-    <spec fn="process_execution_payload" fork="capella" style="diff" hash="8da02dfc">
+    <spec fn="process_execution_payload" fork="capella" style="diff" hash="fc87a9e1">
     --- bellatrix
     +++ capella
     @@ -2,9 +2,7 @@
@@ -10189,7 +10384,7 @@
     -        assert payload.parent_hash == state.latest_execution_payload_header.block_hash
     +    assert payload.parent_hash == state.latest_execution_payload_header.block_hash
          assert payload.prev_randao == get_randao_mix(state, get_current_epoch(state))
-         assert payload.timestamp == compute_time_at_slot(state, state.slot)
+         assert payload.timestamp == compute_time_at_slot(state.genesis_time, state.slot)
          assert execution_engine.verify_and_notify_new_payload(
     @@ -25,4 +23,5 @@
              base_fee_per_gas=payload.base_fee_per_gas,
@@ -10204,7 +10399,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/deneb/block/BlockProcessorDeneb.java
       search: public void validateExecutionPayload(
   spec: |
-    <spec fn="process_execution_payload" fork="deneb" hash="2862375f">
+    <spec fn="process_execution_payload" fork="deneb" hash="70bf8101">
     def process_execution_payload(
         state: BeaconState, body: BeaconBlockBody, execution_engine: ExecutionEngine
     ) -> None:
@@ -10215,7 +10410,7 @@
         # Verify prev_randao
         assert payload.prev_randao == get_randao_mix(state, get_current_epoch(state))
         # Verify timestamp
-        assert payload.timestamp == compute_time_at_slot(state, state.slot)
+        assert payload.timestamp == compute_time_at_slot(state.genesis_time, state.slot)
         # [New in Deneb:EIP4844]
         # Verify commitments are under limit
         assert len(body.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
@@ -10268,13 +10463,13 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/electra/block/BlockProcessorElectra.java
       search: public NewPayloadRequest computeNewPayloadRequest(
   spec: |
-    <spec fn="process_execution_payload" fork="electra" style="diff" hash="ff488718">
+    <spec fn="process_execution_payload" fork="electra" style="diff" hash="f641b522">
     --- deneb
     +++ electra
     @@ -6,7 +6,7 @@
          assert payload.parent_hash == state.latest_execution_payload_header.block_hash
          assert payload.prev_randao == get_randao_mix(state, get_current_epoch(state))
-         assert payload.timestamp == compute_time_at_slot(state, state.slot)
+         assert payload.timestamp == compute_time_at_slot(state.genesis_time, state.slot)
     -    assert len(body.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
     +    assert len(body.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK_ELECTRA
 
@@ -10294,7 +10489,7 @@
   sources:
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/fulu/block/BlockProcessorFulu.java
   spec: |
-    <spec fn="process_execution_payload" fork="fulu" hash="e912e6fe">
+    <spec fn="process_execution_payload" fork="fulu" hash="18b098e2">
     def process_execution_payload(
         state: BeaconState, body: BeaconBlockBody, execution_engine: ExecutionEngine
     ) -> None:
@@ -10305,7 +10500,7 @@
         # Verify prev_randao
         assert payload.prev_randao == get_randao_mix(state, get_current_epoch(state))
         # Verify timestamp
-        assert payload.timestamp == compute_time_at_slot(state, state.slot)
+        assert payload.timestamp == compute_time_at_slot(state.genesis_time, state.slot)
         # [Modified in Fulu:EIP7892]
         # Verify commitments are under limit
         assert (
@@ -10896,7 +11091,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/electra/statetransition/epoch/EpochProcessorElectra.java
       search: public void processPendingDeposits(
   spec: |
-    <spec fn="process_pending_deposits" fork="electra" hash="0e4a7df9">
+    <spec fn="process_pending_deposits" fork="electra" hash="5494307e">
     def process_pending_deposits(state: BeaconState) -> None:
         next_epoch = get_current_epoch(state) + 1
         available_for_processing = state.deposit_balance_to_consume + get_activation_exit_churn_limit(
@@ -10930,7 +11125,7 @@
             # Read validator state
             is_validator_exited = False
             is_validator_withdrawn = False
-            validator_pubkeys = [v.pubkey for v in state.validators]
+            validator_pubkeys = [validator.pubkey for validator in state.validators]
             if deposit.pubkey in validator_pubkeys:
                 validator = state.validators[ValidatorIndex(validator_pubkeys.index(deposit.pubkey))]
                 is_validator_exited = validator.exit_epoch < FAR_FUTURE_EPOCH
@@ -10969,7 +11164,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/electra/statetransition/epoch/EpochProcessorElectra.java
       search: public void processPendingDeposits(
   spec: |
-    <spec fn="process_pending_deposits" fork="fulu" hash="78b65ccd">
+    <spec fn="process_pending_deposits" fork="fulu" hash="01421c54">
     def process_pending_deposits(state: BeaconState) -> None:
         next_epoch = get_current_epoch(state) + 1
         available_for_processing = state.deposit_balance_to_consume + get_activation_exit_churn_limit(
@@ -10993,7 +11188,7 @@
             # Read validator state
             is_validator_exited = False
             is_validator_withdrawn = False
-            validator_pubkeys = [v.pubkey for v in state.validators]
+            validator_pubkeys = [validator.pubkey for validator in state.validators]
             if deposit.pubkey in validator_pubkeys:
                 validator = state.validators[ValidatorIndex(validator_pubkeys.index(deposit.pubkey))]
                 is_validator_exited = validator.exit_epoch < FAR_FUTURE_EPOCH
@@ -11032,7 +11227,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/electra/statetransition/epoch/EpochProcessorElectra.java
       search: public void processPendingDeposits(
   spec: |
-    <spec fn="process_pending_deposits" fork="gloas" hash="4e47c45b">
+    <spec fn="process_pending_deposits" fork="gloas" hash="514b90de">
     def process_pending_deposits(state: BeaconState) -> None:
         next_epoch = get_current_epoch(state) + 1
         # [Modified in Gloas:EIP8061]
@@ -11056,7 +11251,7 @@
             # Read validator state
             is_validator_exited = False
             is_validator_withdrawn = False
-            validator_pubkeys = [v.pubkey for v in state.validators]
+            validator_pubkeys = [validator.pubkey for validator in state.validators]
             if deposit.pubkey in validator_pubkeys:
                 validator = state.validators[ValidatorIndex(validator_pubkeys.index(deposit.pubkey))]
                 is_validator_exited = validator.exit_epoch < FAR_FUTURE_EPOCH
@@ -11133,56 +11328,6 @@
             )
             signing_root = compute_signing_root(signed_header.message, domain)
             assert bls.Verify(proposer.pubkey, signing_root, signed_header.signature)
-
-        slash_validator(state, header_1.proposer_index)
-    </spec>
-
-- name: process_proposer_slashing#gloas
-  sources:
-    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/block/AbstractBlockProcessor.java
-      search: public void processProposerSlashings(
-    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/block/BlockProcessorGloas.java
-      search: protected void removeBuilderPendingPayment(
-  spec: |
-    <spec fn="process_proposer_slashing" fork="gloas" hash="be35ae0b">
-    def process_proposer_slashing(state: BeaconState, proposer_slashing: ProposerSlashing) -> None:
-        header_1 = proposer_slashing.signed_header_1.message
-        header_2 = proposer_slashing.signed_header_2.message
-
-        # Verify header slots match
-        assert header_1.slot == header_2.slot
-        # Verify header proposer indices match
-        assert header_1.proposer_index == header_2.proposer_index
-        # Verify the headers are different
-        assert header_1 != header_2
-        # Verify the proposer is slashable
-        proposer = state.validators[header_1.proposer_index]
-        assert is_slashable_validator(proposer, get_current_epoch(state))
-        # Verify signatures
-        for signed_header in (proposer_slashing.signed_header_1, proposer_slashing.signed_header_2):
-            domain = get_domain(
-                state, DOMAIN_BEACON_PROPOSER, compute_epoch_at_slot(signed_header.message.slot)
-            )
-            signing_root = compute_signing_root(signed_header.message, domain)
-            assert bls.Verify(proposer.pubkey, signing_root, signed_header.signature)
-
-        # [New in Gloas:EIP7732]
-        # Remove the BuilderPendingPayment corresponding to this proposal if it is
-        # still in the 2-epoch window. Only clear it when the slashed validator is
-        # the proposer associated with the payment; otherwise an unrelated same-slot
-        # equivocation could grief an honest proposer's payment.
-        slot = header_1.slot
-        proposal_epoch = compute_epoch_at_slot(slot)
-        if proposal_epoch == get_current_epoch(state):
-            payment_index = SLOTS_PER_EPOCH + slot % SLOTS_PER_EPOCH
-            payment = state.builder_pending_payments[payment_index]
-            if payment.proposer_index == header_1.proposer_index:
-                state.builder_pending_payments[payment_index] = BuilderPendingPayment.empty()
-        elif proposal_epoch == get_previous_epoch(state):
-            payment_index = slot % SLOTS_PER_EPOCH
-            payment = state.builder_pending_payments[payment_index]
-            if payment.proposer_index == header_1.proposer_index:
-                state.builder_pending_payments[payment_index] = BuilderPendingPayment.empty()
 
         slash_validator(state, header_1.proposer_index)
     </spec>
@@ -11529,7 +11674,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/altair/block/BlockProcessorAltair.java
       search: public void processSyncAggregate(
   spec: |
-    <spec fn="process_sync_aggregate" fork="altair" hash="cda6498b">
+    <spec fn="process_sync_aggregate" fork="altair" hash="d9888799">
     def process_sync_aggregate(state: BeaconState, sync_aggregate: SyncAggregate) -> None:
         # Verify sync committee aggregate signature signing over the previous slot block root
         committee_pubkeys = state.current_sync_committee.pubkeys
@@ -11579,7 +11724,7 @@
         proposer_reward = participant_reward * PROPOSER_WEIGHT // (WEIGHT_DENOMINATOR - PROPOSER_WEIGHT)
 
         # Apply participant and proposer rewards
-        all_pubkeys = [v.pubkey for v in state.validators]
+        all_pubkeys = [validator.pubkey for validator in state.validators]
         committee_indices = [
             ValidatorIndex(all_pubkeys.index(pubkey)) for pubkey in state.current_sync_committee.pubkeys
         ]
@@ -11598,9 +11743,9 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/util/SyncCommitteeUtil.java
       search: public SyncAggregate createSyncAggregate(
   spec: |
-    <spec fn="process_sync_committee_contributions" fork="altair" hash="97790134">
+    <spec fn="process_sync_committee_contributions" fork="altair" hash="24d187fa">
     def process_sync_committee_contributions(
-        block: BeaconBlock, contributions: Set[SyncCommitteeContribution]
+        block: BeaconBlock, contributions: set[SyncCommitteeContribution]
     ) -> None:
         sync_aggregate = SyncAggregate.empty()
         signatures = []
@@ -11707,7 +11852,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/electra/execution/ExecutionRequestsProcessorElectra.java
       search: public void processWithdrawalRequests(
   spec: |
-    <spec fn="process_withdrawal_request" fork="electra" hash="72409a67">
+    <spec fn="process_withdrawal_request" fork="electra" hash="8c3a4a20">
     def process_withdrawal_request(state: BeaconState, withdrawal_request: WithdrawalRequest) -> None:
         amount = withdrawal_request.amount
         is_full_exit_request = amount == FULL_EXIT_REQUEST_AMOUNT
@@ -11719,7 +11864,7 @@
         ):
             return
 
-        validator_pubkeys = [v.pubkey for v in state.validators]
+        validator_pubkeys = [validator.pubkey for validator in state.validators]
         # Verify pubkey exists
         request_pubkey = withdrawal_request.validator_pubkey
         if request_pubkey not in validator_pubkeys:
@@ -11883,11 +12028,10 @@
     - file: storage/src/main/java/tech/pegasys/teku/storage/client/BlockTimelinessTracker.java
       search: public void setBlockTimelinessFromArrivalTime(
   spec: |
-    <spec fn="record_block_timeliness" fork="phase0" hash="0a633d56">
+    <spec fn="record_block_timeliness" fork="phase0" hash="35697974">
     def record_block_timeliness(store: Store, root: Root) -> None:
         block = store.blocks[root]
-        seconds_since_genesis = store.time - store.genesis_time
-        time_into_slot_ms = seconds_to_milliseconds(seconds_since_genesis) % SLOT_DURATION_MS
+        time_into_slot_ms = get_time_into_slot_ms(store)
         attestation_threshold_ms = get_attestation_due_ms()
         is_before_attesting_interval = time_into_slot_ms < attestation_threshold_ms
         is_timely = get_current_slot(store) == block.slot and is_before_attesting_interval
@@ -11901,11 +12045,10 @@
     - file: storage/src/main/java/tech/pegasys/teku/storage/client/BlockTimelinessTracker.java
       search: public void setBlockTimelinessFromArrivalTime(
   spec: |
-    <spec fn="record_block_timeliness" fork="gloas" hash="84a253c3">
+    <spec fn="record_block_timeliness" fork="gloas" hash="ef030383">
     def record_block_timeliness(store: Store, root: Root) -> None:
         block = store.blocks[root]
-        seconds_since_genesis = store.time - store.genesis_time
-        time_into_slot_ms = seconds_to_milliseconds(seconds_since_genesis) % SLOT_DURATION_MS
+        time_into_slot_ms = get_time_into_slot_ms(store)
         attestation_threshold_ms = get_attestation_due_ms()
         # [New in Gloas:EIP7732]
         is_current_slot = get_current_slot(store) == block.slot
@@ -12110,11 +12253,11 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/helpers/BeaconStateMutators.java
       search: public void slashValidator(
   spec: |
-    <spec fn="slash_validator" fork="phase0" hash="243a7676">
+    <spec fn="slash_validator" fork="phase0" hash="3a8cf5ea">
     def slash_validator(
         state: BeaconState,
         slashed_index: ValidatorIndex,
-        whistleblower_index: Optional[ValidatorIndex] = None,
+        whistleblower_index: ValidatorIndex | None = None,
     ) -> None:
         """
         Slash the validator with index ``slashed_index``.
@@ -12146,11 +12289,11 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/altair/helpers/BeaconStateMutatorsAltair.java
       search: public void slashValidator(
   spec: |
-    <spec fn="slash_validator" fork="altair" hash="fb68c54f">
+    <spec fn="slash_validator" fork="altair" hash="c3475250">
     def slash_validator(
         state: BeaconState,
         slashed_index: ValidatorIndex,
-        whistleblower_index: Optional[ValidatorIndex] = None,
+        whistleblower_index: ValidatorIndex | None = None,
     ) -> None:
         """
         Slash the validator with index ``slashed_index``.
@@ -12184,11 +12327,11 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/bellatrix/helpers/BeaconStateMutatorsBellatrix.java
       search: protected int getMinSlashingPenaltyQuotient(
   spec: |
-    <spec fn="slash_validator" fork="bellatrix" hash="5c0ef20f">
+    <spec fn="slash_validator" fork="bellatrix" hash="223efd96">
     def slash_validator(
         state: BeaconState,
         slashed_index: ValidatorIndex,
-        whistleblower_index: Optional[ValidatorIndex] = None,
+        whistleblower_index: ValidatorIndex | None = None,
     ) -> None:
         """
         Slash the validator with index ``slashed_index``.
@@ -12224,11 +12367,11 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/electra/helpers/BeaconStateMutatorsElectra.java
       search: protected int getWhistleblowerRewardQuotient(
   spec: |
-    <spec fn="slash_validator" fork="electra" hash="f60f4b98">
+    <spec fn="slash_validator" fork="electra" hash="d44a24d5">
     def slash_validator(
         state: BeaconState,
         slashed_index: ValidatorIndex,
-        whistleblower_index: Optional[ValidatorIndex] = None,
+        whistleblower_index: ValidatorIndex | None = None,
     ) -> None:
         """
         Slash the validator with index ``slashed_index``.
@@ -12254,6 +12397,47 @@
         proposer_reward = whistleblower_reward * PROPOSER_WEIGHT // WEIGHT_DENOMINATOR
         increase_balance(state, proposer_index, proposer_reward)
         increase_balance(state, whistleblower_index, whistleblower_reward - proposer_reward)
+    </spec>
+
+- name: slash_validator#gloas
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/helpers/BeaconStateMutatorsGloas.java
+      search: public void slashValidator(
+  spec: |
+    <spec fn="slash_validator" fork="gloas" hash="b6ba992a">
+    def slash_validator(
+        state: BeaconState,
+        slashed_index: ValidatorIndex,
+        whistleblower_index: ValidatorIndex | None = None,
+    ) -> None:
+        """
+        Slash the validator with index ``slashed_index``.
+        """
+        epoch = get_current_epoch(state)
+        initiate_validator_exit(state, slashed_index)
+        validator = state.validators[slashed_index]
+        validator.slashed = Boolean(True)
+        validator.withdrawable_epoch = max(
+            validator.withdrawable_epoch, epoch + EPOCHS_PER_SLASHINGS_VECTOR
+        )
+        state.slashings[epoch % EPOCHS_PER_SLASHINGS_VECTOR] += validator.effective_balance
+        slashing_penalty = validator.effective_balance // MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA
+        decrease_balance(state, slashed_index, slashing_penalty)
+
+        # Apply proposer and whistleblower rewards
+        proposer_index = get_beacon_proposer_index(state)
+        if whistleblower_index is None:
+            whistleblower_index = proposer_index
+        whistleblower_reward = validator.effective_balance // WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA
+        proposer_reward = whistleblower_reward * PROPOSER_WEIGHT // WEIGHT_DENOMINATOR
+        increase_balance(state, proposer_index, proposer_reward)
+        increase_balance(state, whistleblower_index, whistleblower_reward - proposer_reward)
+
+        # [New in Gloas:EIP7732]
+        # Remove pending builder payments for blocks proposed by the slashed validator
+        for payment_index, payment in enumerate(state.builder_pending_payments):
+            if payment.proposer_index == slashed_index:
+                state.builder_pending_payments[payment_index] = BuilderPendingPayment.empty()
     </spec>
 
 - name: state_transition#phase0
@@ -12316,7 +12500,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/altair/forktransition/AltairStateUpgrade.java
       search: private void translateParticipation(
   spec: |
-    <spec fn="translate_participation" fork="altair" hash="da05eaba">
+    <spec fn="translate_participation" fork="altair" hash="43ddf49d">
     def translate_participation(
         state: BeaconState, pending_attestations: Sequence[phase0.PendingAttestation]
     ) -> None:
@@ -12332,7 +12516,9 @@
             epoch_participation = state.previous_epoch_participation
             committee = get_beacon_committee(state, data.slot, data.index)
             attesting_indices = {
-                index for i, index in enumerate(committee) if attestation.aggregation_bits[i]
+                validator_index
+                for index, validator_index in enumerate(committee)
+                if attestation.aggregation_bits[index]
             }
             for index in attesting_indices:
                 for flag_index in participation_flag_indices:
@@ -12423,14 +12609,14 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/util/ForkChoiceUtil.java
       search: public boolean shouldUpdateVote(
   spec: |
-    <spec fn="update_latest_messages" fork="phase0" hash="3da3b413">
+    <spec fn="update_latest_messages" fork="phase0" hash="87826836">
     def update_latest_messages(
         store: Store, attesting_indices: Sequence[ValidatorIndex], attestation: Attestation
     ) -> None:
         target = attestation.data.target
         beacon_block_root = attestation.data.beacon_block_root
         non_equivocating_attesting_indices = [
-            i for i in attesting_indices if i not in store.equivocating_indices
+            index for index in attesting_indices if index not in store.equivocating_indices
         ]
         for i in non_equivocating_attesting_indices:
             if i not in store.latest_messages or target.epoch > store.latest_messages[i].epoch:
@@ -12446,7 +12632,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/util/ForkChoiceUtilGloas.java
       search: public boolean getFullPayloadVoteHint(
   spec: |
-    <spec fn="update_latest_messages" fork="gloas" hash="c7de718c">
+    <spec fn="update_latest_messages" fork="gloas" hash="91f0190f">
     def update_latest_messages(
         store: Store, attesting_indices: Sequence[ValidatorIndex], attestation: Attestation
     ) -> None:
@@ -12454,7 +12640,7 @@
         beacon_block_root = attestation.data.beacon_block_root
         payload_present = attestation.data.index == 1
         non_equivocating_attesting_indices = [
-            i for i in attesting_indices if i not in store.equivocating_indices
+            index for index in attesting_indices if index not in store.equivocating_indices
         ]
         for i in non_equivocating_attesting_indices:
             if i not in store.latest_messages or slot > store.latest_messages[i].slot:
@@ -13860,14 +14046,14 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/AggregateAttestationValidator.java
       search: public SafeFuture<InternalValidationResult> validate(final ValidatableAttestation attestation) {
   spec: |
-    <spec fn="validate_beacon_aggregate_and_proof_gossip" fork="gloas" hash="2a309aa4">
+    <spec fn="validate_beacon_aggregate_and_proof_gossip" fork="gloas" hash="c29383ae">
     def validate_beacon_aggregate_and_proof_gossip(
         seen: Seen,
         store: Store,
         signed_aggregate_and_proof: SignedAggregateAndProof,
         current_time_ms: Uint64,
         # [New in Gloas:EIP7732]
-        block_payload_statuses: Dict[Root, PayloadValidationStatus],
+        block_payload_statuses: dict[Root, PayloadValidationStatus],
     ) -> None:
         """
         Validate a SignedAggregateAndProof for gossip propagation.
@@ -14291,7 +14477,7 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/AttestationValidator.java
       search: public SafeFuture<InternalValidationResult> validate(
   spec: |
-    <spec fn="validate_beacon_attestation_gossip" fork="gloas" hash="79e90b20">
+    <spec fn="validate_beacon_attestation_gossip" fork="gloas" hash="a81b862b">
     def validate_beacon_attestation_gossip(
         seen: Seen,
         store: Store,
@@ -14299,7 +14485,7 @@
         current_time_ms: Uint64,
         subnet_id: SubnetID,
         # [New in Gloas:EIP7732]
-        block_payload_statuses: Dict[Root, PayloadValidationStatus],
+        block_payload_statuses: dict[Root, PayloadValidationStatus],
     ) -> None:
         """
         Validate a SingleAttestation for gossip propagation on a subnet.
@@ -14473,14 +14659,14 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/BlockGossipValidator.java
       search: public SafeFuture<InternalValidationResult> validate(
   spec: |
-    <spec fn="validate_beacon_block_gossip" fork="bellatrix" hash="4d404a30">
+    <spec fn="validate_beacon_block_gossip" fork="bellatrix" hash="0ea79a10">
     def validate_beacon_block_gossip(
         seen: Seen,
         store: Store,
         signed_beacon_block: SignedBeaconBlock,
         current_time_ms: Uint64,
         # [New in Bellatrix]
-        block_payload_statuses: Dict[Root, PayloadValidationStatus],
+        block_payload_statuses: dict[Root, PayloadValidationStatus],
     ) -> None:
         """
         Validate a SignedBeaconBlock for gossip propagation.
@@ -14548,7 +14734,7 @@
         # [New in Bellatrix]
         if is_execution_enabled(state, block.body):
             # [REJECT] The block's execution payload timestamp is correct with respect to the slot
-            if execution_payload.timestamp != compute_time_at_slot(state, block.slot):
+            if execution_payload.timestamp != compute_time_at_slot(state.genesis_time, block.slot):
                 raise GossipReject("incorrect execution payload timestamp")
 
             # [IGNORE] The block's parent passed validation but its execution payload is invalid
@@ -14582,13 +14768,13 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/BlockGossipValidator.java
       search: public SafeFuture<InternalValidationResult> validate(
   spec: |
-    <spec fn="validate_beacon_block_gossip" fork="capella" hash="e891bc72">
+    <spec fn="validate_beacon_block_gossip" fork="capella" hash="a76c49d5">
     def validate_beacon_block_gossip(
         seen: Seen,
         store: Store,
         signed_beacon_block: SignedBeaconBlock,
         current_time_ms: Uint64,
-        block_payload_statuses: Dict[Root, PayloadValidationStatus],
+        block_payload_statuses: dict[Root, PayloadValidationStatus],
     ) -> None:
         """
         Validate a SignedBeaconBlock for gossip propagation.
@@ -14649,7 +14835,7 @@
             raise GossipReject("invalid proposer signature")
 
         # [REJECT] The block's execution payload timestamp is correct with respect to the slot
-        if execution_payload.timestamp != compute_time_at_slot(state, block.slot):
+        if execution_payload.timestamp != compute_time_at_slot(state.genesis_time, block.slot):
             raise GossipReject("incorrect execution payload timestamp")
 
         # [REJECT] The block is from a higher slot than its parent
@@ -14679,13 +14865,13 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/BlockGossipValidator.java
       search: public SafeFuture<InternalValidationResult> validate(
   spec: |
-    <spec fn="validate_beacon_block_gossip" fork="deneb" hash="691763df">
+    <spec fn="validate_beacon_block_gossip" fork="deneb" hash="bcd4b461">
     def validate_beacon_block_gossip(
         seen: Seen,
         store: Store,
         signed_beacon_block: SignedBeaconBlock,
         current_time_ms: Uint64,
-        block_payload_statuses: Dict[Root, PayloadValidationStatus],
+        block_payload_statuses: dict[Root, PayloadValidationStatus],
     ) -> None:
         """
         Validate a SignedBeaconBlock for gossip propagation.
@@ -14746,7 +14932,7 @@
             raise GossipReject("invalid proposer signature")
 
         # [REJECT] The block's execution payload timestamp is correct with respect to the slot
-        if execution_payload.timestamp != compute_time_at_slot(state, block.slot):
+        if execution_payload.timestamp != compute_time_at_slot(state.genesis_time, block.slot):
             raise GossipReject("incorrect execution payload timestamp")
 
         # [REJECT] The block is from a higher slot than its parent
@@ -14781,13 +14967,13 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/BlockGossipValidator.java
       search: public SafeFuture<InternalValidationResult> validate(
   spec: |
-    <spec fn="validate_beacon_block_gossip" fork="electra" hash="7bb0eae4">
+    <spec fn="validate_beacon_block_gossip" fork="electra" hash="109c011e">
     def validate_beacon_block_gossip(
         seen: Seen,
         store: Store,
         signed_beacon_block: SignedBeaconBlock,
         current_time_ms: Uint64,
-        block_payload_statuses: Dict[Root, PayloadValidationStatus],
+        block_payload_statuses: dict[Root, PayloadValidationStatus],
     ) -> None:
         """
         Validate a SignedBeaconBlock for gossip propagation.
@@ -14848,7 +15034,7 @@
             raise GossipReject("invalid proposer signature")
 
         # [REJECT] The block's execution payload timestamp is correct with respect to the slot
-        if execution_payload.timestamp != compute_time_at_slot(state, block.slot):
+        if execution_payload.timestamp != compute_time_at_slot(state.genesis_time, block.slot):
             raise GossipReject("incorrect execution payload timestamp")
 
         # [REJECT] The block is from a higher slot than its parent
@@ -14883,13 +15069,13 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/BlockGossipValidator.java
       search: public SafeFuture<InternalValidationResult> validate(
   spec: |
-    <spec fn="validate_beacon_block_gossip" fork="fulu" hash="08a861a1">
+    <spec fn="validate_beacon_block_gossip" fork="fulu" hash="abc3b970">
     def validate_beacon_block_gossip(
         seen: Seen,
         store: Store,
         signed_beacon_block: SignedBeaconBlock,
         current_time_ms: Uint64,
-        block_payload_statuses: Dict[Root, PayloadValidationStatus],
+        block_payload_statuses: dict[Root, PayloadValidationStatus],
     ) -> None:
         """
         Validate a SignedBeaconBlock for gossip propagation.
@@ -14950,7 +15136,7 @@
             raise GossipReject("invalid proposer signature")
 
         # [REJECT] The block's execution payload timestamp is correct with respect to the slot
-        if execution_payload.timestamp != compute_time_at_slot(state, block.slot):
+        if execution_payload.timestamp != compute_time_at_slot(state.genesis_time, block.slot):
             raise GossipReject("incorrect execution payload timestamp")
 
         # [REJECT] The block is from a higher slot than its parent
@@ -16428,7 +16614,7 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/ProposerPreferencesGossipValidator.java
       search: public SafeFuture<InternalValidationResult> validate(
   spec: |
-    <spec fn="validate_proposer_preferences_gossip" fork="gloas" hash="e6040014">
+    <spec fn="validate_proposer_preferences_gossip" fork="gloas" hash="e4c30848">
     def validate_proposer_preferences_gossip(
         seen: Seen,
         store: Store,
@@ -16489,7 +16675,11 @@
 
         # [REJECT] The signature is valid
         validator = state.validators[preferences.validator_index]
-        domain = get_domain(state, DOMAIN_PROPOSER_PREFERENCES, proposal_epoch)
+        domain = compute_domain(
+            DOMAIN_PROPOSER_PREFERENCES,
+            compute_fork_version(proposal_epoch),
+            state.genesis_validators_root,
+        )
         signing_root = compute_signing_root(preferences, domain)
         if not bls.Verify(validator.pubkey, signing_root, signed_proposer_preferences.signature):
             raise GossipReject("invalid proposer preferences signature")
@@ -16562,7 +16752,7 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/synccommittee/SignedContributionAndProofValidator.java
       search: public SafeFuture<InternalValidationResult> validate(final SignedContributionAndProof proof) {
   spec: |
-    <spec fn="validate_sync_committee_contribution_and_proof_gossip" fork="altair" hash="416b8ead">
+    <spec fn="validate_sync_committee_contribution_and_proof_gossip" fork="altair" hash="aeda6823">
     def validate_sync_committee_contribution_and_proof_gossip(
         seen: Seen,
         store: Store,
@@ -16654,7 +16844,9 @@
         # and aggregate pubkey derived from the participation info in aggregation_bits
         # for the subcommittee specified by the contribution.subcommittee_index
         participant_pubkeys = [
-            subcommittee_pubkeys[i] for i, bit in enumerate(contribution.aggregation_bits) if bit
+            subcommittee_pubkeys[index]
+            for index, bit in enumerate(contribution.aggregation_bits)
+            if bit
         ]
         domain = get_domain(state, DOMAIN_SYNC_COMMITTEE, compute_epoch_at_slot(contribution.slot))
         signing_root = compute_signing_root(contribution.beacon_block_root, domain)
@@ -16865,11 +17057,11 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/util/AttestationUtilGloas.java
       search: public AttestationValidationResult validatePayloadStatus(
   spec: |
-    <spec fn="verify_attestation_payload_status" fork="gloas" hash="7006ea07">
+    <spec fn="verify_attestation_payload_status" fork="gloas" hash="73cb966e">
     def verify_attestation_payload_status(
         store: Store,
         data: AttestationData,
-        block_payload_statuses: Dict[Root, PayloadValidationStatus],
+        block_payload_statuses: dict[Root, PayloadValidationStatus],
     ) -> None:
         """
         Verify that the attested payload status is consistent with the block's payload.
@@ -17134,7 +17326,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/execution/ExecutionPayloadVerifierGloas.java
       search: public void verifyExecutionPayloadEnvelope(
   spec: |
-    <spec fn="verify_execution_payload_envelope" fork="gloas" hash="c9d2f59a">
+    <spec fn="verify_execution_payload_envelope" fork="gloas" hash="ba960f77">
     def verify_execution_payload_envelope(
         state: BeaconState,
         signed_envelope: SignedExecutionPayloadEnvelope,
@@ -17163,7 +17355,7 @@
         # Verify the execution payload is valid
         assert payload.slot_number == state.slot
         assert payload.parent_hash == state.latest_block_hash
-        assert payload.timestamp == compute_time_at_slot(state, state.slot)
+        assert payload.timestamp == compute_time_at_slot(state.genesis_time, state.slot)
         assert hash_tree_root(payload.withdrawals) == hash_tree_root(state.payload_expected_withdrawals)
 
         # Compute versioned hashes
@@ -17242,12 +17434,12 @@
     - file: beacon/validator/src/main/java/tech/pegasys/teku/validator/coordinator/Eth1VotingPeriod.java
       search: private UInt64 getVotingPeriodStartTime(
   spec: |
-    <spec fn="voting_period_start_time" fork="phase0" hash="75ee1681">
+    <spec fn="voting_period_start_time" fork="phase0" hash="8d73bc34">
     def voting_period_start_time(state: BeaconState) -> Uint64:
         eth1_voting_period_start_slot = state.slot - state.slot % (
             Uint64(EPOCHS_PER_ETH1_VOTING_PERIOD) * SLOTS_PER_EPOCH
         )
-        return compute_time_at_slot(state, eth1_voting_period_start_slot)
+        return compute_time_at_slot(state.genesis_time, eth1_voting_period_start_slot)
     </spec>
 
 - name: weigh_justification_and_finalization#phase0

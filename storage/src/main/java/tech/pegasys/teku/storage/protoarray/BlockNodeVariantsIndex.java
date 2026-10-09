@@ -89,7 +89,8 @@ public class BlockNodeVariantsIndex {
 
   void putBaseNode(
       final Bytes32 blockRoot, final UInt64 slot, final ForkChoiceNode baseNodeIdentity) {
-    variantsByRoot.put(
+    // Duplicate block imports must preserve any already registered payload variants.
+    variantsByRoot.putIfAbsent(
         blockRoot,
         new BlockNodeVariants(slot, baseNodeIdentity, Optional.empty(), Optional.empty()));
   }

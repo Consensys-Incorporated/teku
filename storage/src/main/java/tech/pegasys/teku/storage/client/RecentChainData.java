@@ -111,6 +111,7 @@ public abstract class RecentChainData
   private final SafeFuture<Void> storeInitializedFuture = new SafeFuture<>();
   private final SafeFuture<Void> bestBlockInitialized = new SafeFuture<>();
   private final Counter reorgCounter;
+  private final Counter payloadReorgCounter;
 
   private volatile UpdatableStore store;
   private volatile Optional<GenesisData> genesisData = Optional.empty();
@@ -166,6 +167,11 @@ public abstract class RecentChainData
             TekuMetricCategory.BEACON,
             "reorgs_total",
             "Total occurrences of reorganizations of the chain");
+    payloadReorgCounter =
+        metricsSystem.createCounter(
+            TekuMetricCategory.BEACON,
+            "payload_reorgs_total",
+            "Total occurrences of the head payload becoming non-canonical (FULL to EMPTY)");
     this.validatorIsConnectedProvider = validatorIsConnectedProvider;
     this.spec = spec;
     final int epochsForTimeliness =
@@ -455,29 +461,72 @@ public abstract class RecentChainData
       final ReadOnlyForkChoiceStrategy forkChoiceStrategy,
       final Optional<ChainHead> originalChainHead,
       final ChainHead newChainHead) {
-    final Optional<ReorgContext> optionalReorgContext;
-    if (originalChainHead
-        .map(head -> hasReorgedFrom(head.getRoot(), head.getSlot()))
-        .orElse(false)) {
-      final ChainHead previousChainHead = originalChainHead.get();
+    if (originalChainHead.isEmpty()) {
+      return ReorgContext.empty();
+    }
+    final ChainHead previousChainHead = originalChainHead.get();
 
-      final SlotAndBlockRoot commonAncestorSlotAndBlockRoot =
+    if (hasReorgedFrom(previousChainHead.getRoot(), previousChainHead.getSlot())) {
+      final SlotAndBlockRoot commonAncestor =
           forkChoiceStrategy
               .findCommonAncestor(previousChainHead.getRoot(), newChainHead.getRoot())
               .orElseGet(() -> store.getFinalizedCheckpoint().toSlotAndBlockRoot(spec));
 
       reorgCounter.inc();
-      optionalReorgContext =
-          ReorgContext.of(
+      return Optional.of(
+          ReorgContext.blockReorg(
               previousChainHead.getRoot(),
               previousChainHead.getSlot(),
               previousChainHead.getStateRoot(),
-              commonAncestorSlotAndBlockRoot.getSlot(),
-              commonAncestorSlotAndBlockRoot.getBlockRoot());
-    } else {
-      optionalReorgContext = ReorgContext.empty();
+              previousChainHead.getPayloadStatus(),
+              previousChainHead.getExecutionBlockHash(),
+              newChainHead.getExecutionBlockHash(),
+              commonAncestor.getSlot(),
+              commonAncestor.getBlockRoot(),
+              getPayloadStatusOnBranch(forkChoiceStrategy, previousChainHead, commonAncestor),
+              getPayloadStatusOnBranch(forkChoiceStrategy, newChainHead, commonAncestor)));
     }
-    return optionalReorgContext;
+
+    if (isPayloadReorg(previousChainHead, newChainHead)) {
+      payloadReorgCounter.inc();
+      return Optional.of(
+          ReorgContext.payloadReorg(
+              newChainHead.getRoot(),
+              newChainHead.getSlot(),
+              newChainHead.getStateRoot(),
+              previousChainHead.getExecutionBlockHash(),
+              newChainHead.getExecutionBlockHash()));
+    }
+
+    return ReorgContext.empty();
+  }
+
+  /**
+   * The same head block whose fork-choice payload status moves from FULL to EMPTY: its payload is
+   * no longer canonical. The opposite transition (EMPTY to FULL) is the payload arriving after the
+   * block and is not a reorg, nor are transitions from PENDING.
+   */
+  private static boolean isPayloadReorg(
+      final ChainHead previousChainHead, final ChainHead newChainHead) {
+    return previousChainHead.getRoot().equals(newChainHead.getRoot())
+        && previousChainHead.getPayloadStatus() == ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL
+        && newChainHead.getPayloadStatus() == ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY;
+  }
+
+  /**
+   * Resolves the payload status that the common ancestor block has on the branch leading to the
+   * given head, following the payload-status-aware ancestry ({@code get_ancestor}). Pre-Gloas, or
+   * when the ancestor is not available in fork choice, this is PENDING.
+   */
+  private static ForkChoicePayloadStatus getPayloadStatusOnBranch(
+      final ReadOnlyForkChoiceStrategy forkChoiceStrategy,
+      final ChainHead head,
+      final SlotAndBlockRoot commonAncestor) {
+    return forkChoiceStrategy
+        .getAncestorNode(head.getForkChoiceNode(), commonAncestor.getSlot())
+        .filter(ancestorNode -> ancestorNode.blockRoot().equals(commonAncestor.getBlockRoot()))
+        .map(ForkChoiceNode::payloadStatus)
+        .orElse(ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING);
   }
 
   private ChainHead createNewChainHead(
