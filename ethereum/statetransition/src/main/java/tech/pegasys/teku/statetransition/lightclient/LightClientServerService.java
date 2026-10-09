@@ -13,16 +13,23 @@
 
 package tech.pegasys.teku.statetransition.lightclient;
 
+import static tech.pegasys.teku.infrastructure.time.TimeUtilities.secondsToMillis;
 import static tech.pegasys.teku.spec.config.SpecConfig.GENESIS_SLOT;
 
+import java.time.Duration;
 import java.util.Collection;
 import java.util.Optional;
 import java.util.function.BiPredicate;
+import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.subscribers.Subscribers;
+import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -54,6 +61,12 @@ public class LightClientServerService
   private final Function<Bytes32, SafeFuture<Optional<SignedBeaconBlock>>> retrieveBlockByRoot;
   private final Function<Bytes32, SafeFuture<Optional<BeaconState>>> retrieveStateByRoot;
   private final BiPredicate<UInt64, Bytes32> isCanonicalBlock;
+  private final AsyncRunner asyncRunner;
+  private final TimeProvider timeProvider;
+  private final Subscribers<Consumer<LightClientFinalityUpdate>> finalityUpdateSubscribers =
+      Subscribers.create(true);
+  private final Subscribers<Consumer<LightClientOptimisticUpdate>> optimisticUpdateSubscribers =
+      Subscribers.create(true);
 
   /** Period of the latest finalized checkpoint seen; nothing below it can be orphaned. */
   private volatile UInt64 finalizedPeriod = UInt64.ZERO;
@@ -61,13 +74,17 @@ public class LightClientServerService
   public LightClientServerService(
       final Spec spec,
       final LightClientUpdateStore lightClientStore,
-      final CombinedChainDataClient combinedChainDataClient) {
+      final CombinedChainDataClient combinedChainDataClient,
+      final AsyncRunner asyncRunner,
+      final TimeProvider timeProvider) {
     this(
         spec,
         lightClientStore,
         combinedChainDataClient::getBlockByBlockRoot,
         combinedChainDataClient::getStateByBlockRoot,
-        (slot, blockRoot) -> isCanonicalBlock(combinedChainDataClient, slot, blockRoot));
+        (slot, blockRoot) -> isCanonicalBlock(combinedChainDataClient, slot, blockRoot),
+        asyncRunner,
+        timeProvider);
   }
 
   private static boolean isCanonicalBlock(
@@ -91,12 +108,26 @@ public class LightClientServerService
       final LightClientUpdateStore lightClientStore,
       final Function<Bytes32, SafeFuture<Optional<SignedBeaconBlock>>> retrieveBlockByRoot,
       final Function<Bytes32, SafeFuture<Optional<BeaconState>>> retrieveStateByRoot,
-      final BiPredicate<UInt64, Bytes32> isCanonicalBlock) {
+      final BiPredicate<UInt64, Bytes32> isCanonicalBlock,
+      final AsyncRunner asyncRunner,
+      final TimeProvider timeProvider) {
     this.spec = spec;
     this.lightClientStore = lightClientStore;
     this.retrieveBlockByRoot = retrieveBlockByRoot;
     this.retrieveStateByRoot = retrieveStateByRoot;
     this.isCanonicalBlock = isCanonicalBlock;
+    this.asyncRunner = asyncRunner;
+    this.timeProvider = timeProvider;
+  }
+
+  public void subscribeToFinalityUpdatesToPublish(
+      final Consumer<LightClientFinalityUpdate> subscriber) {
+    finalityUpdateSubscribers.subscribe(subscriber);
+  }
+
+  public void subscribeToOptimisticUpdatesToPublish(
+      final Consumer<LightClientOptimisticUpdate> subscriber) {
+    optimisticUpdateSubscribers.subscribe(subscriber);
   }
 
   @Override
@@ -228,21 +259,65 @@ public class LightClientServerService
 
                 lightClientStore.addUpdate(update, signatureBlock.getRoot(), isCanonicalBlock);
 
+                final UInt64 genesisTimeMillis =
+                    secondsToMillis(signatureBlockPostState.getGenesisTime());
                 if (LightClientUpdateStore.isFinalityUpdate(update)) {
                   final LightClientFinalityUpdate finalityUpdate =
                       lightClientUtil.createLightClientFinalityUpdate(update);
-                  lightClientStore.addFinalityUpdate(
-                      finalityUpdate, signatureBlock.getRoot(), isCanonicalBlock);
+                  if (lightClientStore.addFinalityUpdate(
+                      finalityUpdate, signatureBlock.getRoot(), isCanonicalBlock)) {
+                    schedulePublish(
+                        finalityUpdate,
+                        finalityUpdate.getSignatureSlot().get(),
+                        genesisTimeMillis,
+                        lightClientStore::getLatestFinalityUpdate,
+                        finalityUpdateSubscribers);
+                  }
                 }
 
                 final LightClientOptimisticUpdate optimisticUpdate =
                     lightClientUtil.createLightClientOptimisticUpdate(update);
-                lightClientStore.addOptimisticUpdate(
-                    optimisticUpdate, signatureBlock.getRoot(), isCanonicalBlock);
+                if (lightClientStore.addOptimisticUpdate(
+                    optimisticUpdate, signatureBlock.getRoot(), isCanonicalBlock)) {
+                  schedulePublish(
+                      optimisticUpdate,
+                      optimisticUpdate.getSignatureSlot().get(),
+                      genesisTimeMillis,
+                      lightClientStore::getLatestOptimisticUpdate,
+                      optimisticUpdateSubscribers);
+                }
 
                 return Optional.of(update);
               });
         });
+  }
+
+  private <T> void schedulePublish(
+      final T update,
+      final UInt64 signatureSlot,
+      final UInt64 genesisTimeMillis,
+      final Supplier<Optional<T>> latestUpdate,
+      final Subscribers<Consumer<T>> subscribers) {
+    final UInt64 slotStartMillis = spec.computeTimeMillisAtSlot(signatureSlot, genesisTimeMillis);
+    final UInt64 currentTimeMillis = timeProvider.getTimeInMillis();
+
+    if (currentTimeMillis.isGreaterThanOrEqualTo(
+        slotStartMillis.plus(spec.getSlotDurationMillis(signatureSlot)))) {
+      return;
+    }
+
+    final UInt64 publishTimeMillis =
+        slotStartMillis.plus(spec.getSyncMessageDueMillis(signatureSlot));
+
+    asyncRunner
+        .runAfterDelay(
+            () -> {
+              if (latestUpdate.get().filter(update::equals).isPresent()) {
+                subscribers.forEach(subscriber -> subscriber.accept(update));
+              }
+            },
+            Duration.ofMillis(publishTimeMillis.minusMinZero(currentTimeMillis).longValue()))
+        .finishError(LOG);
   }
 
   private SafeFuture<Optional<SignedBeaconBlock>> retrieveFinalizedBlock(

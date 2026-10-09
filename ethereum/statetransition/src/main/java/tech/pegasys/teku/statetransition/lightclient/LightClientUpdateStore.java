@@ -22,12 +22,14 @@ import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiPredicate;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.altair.SyncAggregate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
@@ -132,60 +134,53 @@ public class LightClientUpdateStore {
     }
   }
 
-  public synchronized void addFinalityUpdate(
+  public synchronized boolean addFinalityUpdate(
       final LightClientFinalityUpdate finalityUpdate,
       final Bytes32 signatureBlockRoot,
       final BiPredicate<UInt64, Bytes32> isCanonical) {
     final UInt64 signatureSlot = finalityUpdate.getSignatureSlot().get();
     if (!isCanonical.test(signatureSlot, signatureBlockRoot)) {
-      return;
+      return false;
     }
 
-    final StoredUpdate<LightClientFinalityUpdate> incoming =
-        new StoredUpdate<>(finalityUpdate, signatureSlot, signatureBlockRoot);
-
-    latestFinalityUpdate.updateAndGet(
-        current -> {
-          if (current.isEmpty()) {
-            return Optional.of(incoming);
-          }
-
-          return isLaterUpdate(
-                  finalityUpdate.getAttestedHeader().getBeacon().getSlot(),
-                  incoming.signatureSlot(),
-                  current.get().update().getAttestedHeader().getBeacon().getSlot(),
-                  current.get().signatureSlot())
-              ? Optional.of(incoming)
-              : current;
-        });
+    return replaceIfLater(
+        latestFinalityUpdate,
+        new StoredUpdate<>(finalityUpdate, signatureSlot, signatureBlockRoot),
+        update -> update.getAttestedHeader().getBeacon().getSlot());
   }
 
-  public synchronized void addOptimisticUpdate(
+  public synchronized boolean addOptimisticUpdate(
       final LightClientOptimisticUpdate optimisticUpdate,
       final Bytes32 signatureBlockRoot,
       final BiPredicate<UInt64, Bytes32> isCanonical) {
     final UInt64 signatureSlot = optimisticUpdate.getSignatureSlot().get();
     if (!isCanonical.test(signatureSlot, signatureBlockRoot)) {
-      return;
+      return false;
     }
 
-    final StoredUpdate<LightClientOptimisticUpdate> incoming =
-        new StoredUpdate<>(optimisticUpdate, signatureSlot, signatureBlockRoot);
+    return replaceIfLater(
+        latestOptimisticUpdate,
+        new StoredUpdate<>(optimisticUpdate, signatureSlot, signatureBlockRoot),
+        update -> update.getAttestedHeader().getBeacon().getSlot());
+  }
 
-    latestOptimisticUpdate.updateAndGet(
-        current -> {
-          if (current.isEmpty()) {
-            return Optional.of(incoming);
-          }
+  private <T> boolean replaceIfLater(
+      final AtomicReference<Optional<StoredUpdate<T>>> latest,
+      final StoredUpdate<T> incoming,
+      final Function<T, UInt64> attestedSlot) {
+    final Optional<StoredUpdate<T>> current = latest.get();
 
-          return isLaterUpdate(
-                  optimisticUpdate.getAttestedHeader().getBeacon().getSlot(),
-                  incoming.signatureSlot(),
-                  current.get().update().getAttestedHeader().getBeacon().getSlot(),
-                  current.get().signatureSlot())
-              ? Optional.of(incoming)
-              : current;
-        });
+    if (current.isPresent()
+        && !isLaterUpdate(
+            attestedSlot.apply(incoming.update()),
+            incoming.signatureSlot(),
+            attestedSlot.apply(current.get().update()),
+            current.get().signatureSlot())) {
+      return false;
+    }
+
+    latest.set(Optional.of(incoming));
+    return true;
   }
 
   public List<LightClientUpdate> getBestUpdatesInRange(final UInt64 startPeriod, final int count) {
@@ -227,16 +222,13 @@ public class LightClientUpdateStore {
   /** {@code is_better_update}. */
   private boolean isBetterUpdate(
       final LightClientUpdate newUpdate, final LightClientUpdate oldUpdate) {
-    final int maxActiveParticipants = newUpdate.getSyncAggregate().getSyncCommitteeBits().size();
     final int newUpdateActiveParticipants =
         newUpdate.getSyncAggregate().getSyncCommitteeBits().getBitCount();
     final int oldUpdateActiveParticipants =
         oldUpdate.getSyncAggregate().getSyncCommitteeBits().getBitCount();
 
-    final boolean newUpdateHasSupermajority =
-        newUpdateActiveParticipants * 3 >= maxActiveParticipants * 2;
-    final boolean oldUpdateHasSupermajority =
-        oldUpdateActiveParticipants * 3 >= maxActiveParticipants * 2;
+    final boolean newUpdateHasSupermajority = hasSupermajority(newUpdate.getSyncAggregate());
+    final boolean oldUpdateHasSupermajority = hasSupermajority(oldUpdate.getSyncAggregate());
 
     if (newUpdateHasSupermajority != oldUpdateHasSupermajority) {
       return newUpdateHasSupermajority;
@@ -298,6 +290,11 @@ public class LightClientUpdateStore {
   /** {@code is_sync_committee_update}. */
   private boolean isSyncCommitteeUpdate(final LightClientUpdate update) {
     return !update.getNextSyncCommitteeBranch().isDefault();
+  }
+
+  public static boolean hasSupermajority(final SyncAggregate syncAggregate) {
+    return syncAggregate.getSyncCommitteeBits().getBitCount() * 3
+        >= syncAggregate.getSyncCommitteeBits().size() * 2;
   }
 
   /** {@code is_finality_update}. */

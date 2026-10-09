@@ -19,6 +19,7 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
@@ -94,6 +95,8 @@ public class GossipForkSubscriptionsGloasTest {
         noopOperationProcessor,
         noopOperationProcessor,
         noopOperationProcessor,
+        Optional.empty(),
+        Optional.empty(),
         noopOperationProcessor,
         noopOperationProcessor,
         noopOperationProcessor,

@@ -23,6 +23,8 @@ import java.util.function.BiPredicate;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
+import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -40,6 +42,8 @@ class LightClientUpdatePersistenceTest {
   private static final BiPredicate<UInt64, Bytes32> CANONICAL = (slot, root) -> true;
   private static final BiPredicate<UInt64, Bytes32> ORPHANED = (slot, root) -> false;
 
+  private final StubTimeProvider timeProvider = StubTimeProvider.withTimeInMillis(0);
+  private final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
   private final Spec spec = TestSpecFactory.createMinimalAltair();
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
   private final StorageSystem storageSystem = InMemoryStorageSystemBuilder.buildDefault(spec);
@@ -145,7 +149,9 @@ class LightClientUpdatePersistenceTest {
         store,
         root -> completedFuture(Optional.empty()),
         root -> completedFuture(Optional.empty()),
-        isCanonical);
+        isCanonical,
+        asyncRunner,
+        timeProvider);
   }
 
   private List<UInt64> storedPeriods() {
