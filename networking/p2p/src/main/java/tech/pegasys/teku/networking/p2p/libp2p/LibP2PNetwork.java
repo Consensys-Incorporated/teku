@@ -116,8 +116,9 @@ public class LibP2PNetwork implements P2PNetwork<Peer> {
   }
 
   @Override
-  public PeerAddress createPeerAddress(final DiscoveryPeer discoveryPeer) {
-    return MultiaddrPeerAddress.fromDiscoveryPeer(discoveryPeer, quicEnabled);
+  public Optional<PeerAddress> createPeerAddress(final DiscoveryPeer discoveryPeer) {
+    return MultiaddrPeerAddress.fromDiscoveryPeer(discoveryPeer, quicEnabled)
+        .map(PeerAddress.class::cast);
   }
 
   @Override

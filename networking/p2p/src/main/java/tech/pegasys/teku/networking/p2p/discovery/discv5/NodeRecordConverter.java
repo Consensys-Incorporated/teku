@@ -73,16 +73,18 @@ public class NodeRecordConverter {
       LOG.debug("Ignoring node record with unusable address: {}", nodeRecord, e);
       return Optional.empty();
     }
-    return tcpAddress.map(
-        address ->
-            socketAddressToDiscoveryPeer(
-                schemaDefinitions, nodeRecord, address, quicAddress, maxDasCustodyGroupCount));
+    if (tcpAddress.isEmpty() && quicAddress.isEmpty()) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        socketAddressToDiscoveryPeer(
+            schemaDefinitions, nodeRecord, tcpAddress, quicAddress, maxDasCustodyGroupCount));
   }
 
   private static DiscoveryPeer socketAddressToDiscoveryPeer(
       final SchemaDefinitions schemaDefinitions,
       final NodeRecord nodeRecord,
-      final InetSocketAddress address,
+      final Optional<InetSocketAddress> tcpAddress,
       final Optional<InetSocketAddress> quicAddress,
       final Optional<Integer> maxDasCustodyGroupCount) {
 
@@ -116,7 +118,7 @@ public class NodeRecordConverter {
     return new DiscoveryPeer(
         ((Bytes) nodeRecord.get(EnrField.PKEY_SECP256K1)),
         nodeRecord.getNodeId(),
-        address,
+        tcpAddress,
         quicAddress,
         enrForkId,
         persistentAttestationSubnets,

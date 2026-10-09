@@ -49,7 +49,7 @@ public class MockP2PNetwork<P extends Peer> implements P2PNetwork<P> {
   }
 
   @Override
-  public PeerAddress createPeerAddress(final DiscoveryPeer discoveryPeer) {
+  public Optional<PeerAddress> createPeerAddress(final DiscoveryPeer discoveryPeer) {
     throw new UnsupportedOperationException();
   }
 

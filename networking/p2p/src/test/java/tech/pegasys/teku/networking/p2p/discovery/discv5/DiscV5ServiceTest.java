@@ -16,8 +16,11 @@ package tech.pegasys.teku.networking.p2p.discovery.discv5;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
+import io.libp2p.core.PeerId;
 import io.libp2p.core.crypto.KeyKt;
 import io.libp2p.core.crypto.KeyType;
+import io.libp2p.core.crypto.PrivKey;
+import io.libp2p.core.multiformats.Multiaddr;
 import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.Optional;
@@ -99,15 +102,51 @@ class DiscV5ServiceTest {
         .doesNotThrowAnyException();
   }
 
+  @Test
+  void shouldReportUdpDiscoveryAddressForEachAdvertisedIp() {
+    final PrivKey privKey = KeyKt.generateKeyPair(KeyType.SECP256K1).component1();
+    final String peerId = PeerId.fromPubKey(privKey.publicKey()).toBase58();
+    final DiscoveryConfig discoveryConfig =
+        DiscoveryConfig.builder().listenUdpPort(9000).listenUdpPortIpv6(9001).build();
+    final NetworkConfig networkConfig =
+        NetworkConfig.builder()
+            .networkInterfaces(List.of("0.0.0.0", "::"))
+            .advertisedIps(Optional.of(List.of("127.0.0.1", "::1")))
+            .build();
+
+    final DiscV5Service service =
+        createService(
+            discoveryConfig,
+            networkConfig,
+            new CapturingDiscoverySystemBuilder(),
+            Bytes.wrap(privKey.raw()));
+
+    assertThat(service.getDiscoveryAddresses().orElseThrow())
+        .map(Multiaddr::fromString)
+        .containsExactly(
+            Multiaddr.fromString("/ip4/127.0.0.1/udp/9000/p2p/" + peerId),
+            Multiaddr.fromString("/ip6/::1/udp/9001/p2p/" + peerId));
+  }
+
   private static void createService(
       final DiscoveryConfig discoveryConfig,
       final NetworkConfig networkConfig,
       final DiscoverySystemBuilder discoverySystemBuilder) {
-    final Bytes privateKey =
-        Bytes.wrap(KeyKt.generateKeyPair(KeyType.SECP256K1).component1().raw());
+    createService(
+        discoveryConfig,
+        networkConfig,
+        discoverySystemBuilder,
+        Bytes.wrap(KeyKt.generateKeyPair(KeyType.SECP256K1).component1().raw()));
+  }
+
+  private static DiscV5Service createService(
+      final DiscoveryConfig discoveryConfig,
+      final NetworkConfig networkConfig,
+      final DiscoverySystemBuilder discoverySystemBuilder,
+      final Bytes privateKey) {
     final Spec spec = TestSpecFactory.createMinimalPhase0();
 
-    new DiscV5Service(
+    return new DiscV5Service(
         new NoOpMetricsSystem(),
         DelayedExecutorAsyncRunner.create(),
         discoveryConfig,

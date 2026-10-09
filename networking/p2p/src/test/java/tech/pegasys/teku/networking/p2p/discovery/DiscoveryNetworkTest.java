@@ -438,7 +438,7 @@ class DiscoveryNetworkTest {
     return new DiscoveryPeer(
         BLSPublicKey.empty().toSSZBytes(),
         Bytes32.ZERO,
-        InetSocketAddress.createUnresolved("yo", 9999),
+        Optional.of(InetSocketAddress.createUnresolved("yo", 9999)),
         Optional.empty(),
         maybeForkId,
         SszBitvectorSchema.create(spec.getNetworkingConfig().getAttestationSubnetCount())

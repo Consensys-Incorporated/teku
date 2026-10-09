@@ -21,30 +21,33 @@ import io.libp2p.core.multiformats.Multiaddr;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.networking.p2p.discovery.DiscoveryPeer;
 import tech.pegasys.teku.networking.p2p.peer.NodeId;
 
 public class MultiaddrUtil {
 
-  public static Multiaddr fromDiscoveryPeer(
+  public static Optional<Multiaddr> fromDiscoveryPeer(
       final DiscoveryPeer peer, final boolean localNodeQuicEnabled) {
-    final NodeId nodeId = getNodeId(peer);
     // Only dial a peer over QUIC if this node has the QUIC transport enabled, otherwise we have no
     // QuicTransport to perform the dial and would fail even though the peer also advertises TCP.
-    if (localNodeQuicEnabled) {
-      return peer.getQuicAddress()
-          .map(quicAddr -> fromInetSocketAddressAsQuic(quicAddr, nodeId))
-          .orElseGet(() -> fromDiscoveryPeerAsTcp(peer));
-    }
-    return fromDiscoveryPeerAsTcp(peer);
+    final Optional<Multiaddr> quicMultiaddr =
+        localNodeQuicEnabled
+            ? peer.getQuicAddress()
+                .map(quicAddr -> fromInetSocketAddressAsQuic(quicAddr, getNodeId(peer)))
+            : Optional.empty();
+    return quicMultiaddr.or(() -> fromDiscoveryPeerAsTcp(peer));
   }
 
-  public static Multiaddr fromDiscoveryPeerAsTcp(final DiscoveryPeer peer) {
-    return fromInetSocketAddress(peer.getNodeAddress(), getNodeId(peer));
+  public static Optional<Multiaddr> fromDiscoveryPeerAsTcp(final DiscoveryPeer peer) {
+    return peer.getTcpAddress()
+        .map(tcpAddress -> fromInetSocketAddress(tcpAddress, getNodeId(peer)));
   }
 
-  public static Multiaddr fromDiscoveryPeerAsUdp(final DiscoveryPeer peer) {
-    return addPeerId(fromInetSocketAddress(peer.getNodeAddress(), "udp"), getNodeId(peer));
+  public static Multiaddr fromUdpAddress(
+      final InetSocketAddress udpAddress, final Bytes publicKey) {
+    return addPeerId(fromInetSocketAddress(udpAddress, "udp"), getNodeId(publicKey));
   }
 
   static Multiaddr fromInetSocketAddress(final InetSocketAddress address) {
@@ -87,7 +90,11 @@ public class MultiaddrUtil {
   }
 
   private static NodeId getNodeId(final DiscoveryPeer peer) {
-    final PubKey pubKey = unmarshalSecp256k1PublicKey(peer.getPublicKey().toArrayUnsafe());
+    return getNodeId(peer.getPublicKey());
+  }
+
+  private static NodeId getNodeId(final Bytes publicKey) {
+    final PubKey pubKey = unmarshalSecp256k1PublicKey(publicKey.toArrayUnsafe());
     return new LibP2PNodeId(PeerId.fromPubKey(pubKey));
   }
 

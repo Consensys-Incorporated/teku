@@ -48,14 +48,13 @@ public class MultiaddrPeerAddress extends PeerAddress {
     return fromMultiaddr(multiaddr);
   }
 
-  public static MultiaddrPeerAddress fromDiscoveryPeer(
+  public static Optional<MultiaddrPeerAddress> fromDiscoveryPeer(
       final DiscoveryPeer discoveryPeer, final boolean localNodeQuicEnabled) {
-    final Multiaddr multiaddr =
-        MultiaddrUtil.fromDiscoveryPeer(discoveryPeer, localNodeQuicEnabled);
-    final Multiaddr tcpMultiaddr = MultiaddrUtil.fromDiscoveryPeerAsTcp(discoveryPeer);
-    final Optional<Multiaddr> fallbackMultiaddr =
-        multiaddr.equals(tcpMultiaddr) ? Optional.empty() : Optional.of(tcpMultiaddr);
-    return fromMultiaddr(multiaddr, fallbackMultiaddr);
+    final Optional<Multiaddr> tcpMultiaddr = MultiaddrUtil.fromDiscoveryPeerAsTcp(discoveryPeer);
+    return MultiaddrUtil.fromDiscoveryPeer(discoveryPeer, localNodeQuicEnabled)
+        .map(
+            multiaddr ->
+                fromMultiaddr(multiaddr, tcpMultiaddr.filter(tcp -> !tcp.equals(multiaddr))));
   }
 
   private static MultiaddrPeerAddress fromMultiaddr(final Multiaddr multiaddr) {

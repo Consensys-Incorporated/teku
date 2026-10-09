@@ -361,7 +361,8 @@ public class ConnectionManager extends Service {
   }
 
   private boolean isPeerValid(final DiscoveryPeer peer) {
-    return !peer.getNodeAddress().getAddress().isAnyLocalAddress()
+    return Stream.concat(peer.getTcpAddress().stream(), peer.getQuicAddress().stream())
+            .noneMatch(address -> address.getAddress().isAnyLocalAddress())
         && peerPredicates.stream().allMatch(predicate -> predicate.test(peer));
   }
 }

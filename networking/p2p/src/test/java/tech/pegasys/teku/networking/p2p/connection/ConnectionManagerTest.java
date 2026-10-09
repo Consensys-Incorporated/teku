@@ -271,6 +271,66 @@ class ConnectionManagerTest {
   }
 
   @Test
+  public void shouldConnectToKnownPeerWithOnlyQuicAddress() {
+    final ConnectionManager manager = createManager();
+    when(discoveryService.streamKnownPeers())
+        .thenReturn(
+            Stream.of(
+                createDiscoveryPeer(PEER1, Optional.empty(), Optional.of(loopbackAddress(9100)))));
+    when(network.connect(any(PeerAddress.class))).thenReturn(new SafeFuture<>());
+
+    manager.start().join();
+    asyncRunner.executeDueActionsRepeatedly();
+
+    verify(network).connect(PEER1);
+  }
+
+  @Test
+  public void shouldNotConnectToKnownPeerWithAnyLocalTcpAddress() {
+    final ConnectionManager manager = createManager();
+    when(discoveryService.streamKnownPeers())
+        .thenReturn(
+            Stream.of(
+                createDiscoveryPeer(PEER1, Optional.of(anyLocalAddress(9000)), Optional.empty())));
+
+    manager.start().join();
+    asyncRunner.executeDueActionsRepeatedly();
+
+    verify(network, never()).connect(any());
+  }
+
+  @Test
+  public void shouldNotConnectToKnownPeerWithAnyLocalQuicAddress() {
+    final ConnectionManager manager = createManager();
+    when(discoveryService.streamKnownPeers())
+        .thenReturn(
+            Stream.of(
+                createDiscoveryPeer(
+                    PEER1,
+                    Optional.of(loopbackAddress(9000)),
+                    Optional.of(anyLocalAddress(9100)))));
+
+    manager.start().join();
+    asyncRunner.executeDueActionsRepeatedly();
+
+    verify(network, never()).connect(any());
+  }
+
+  @Test
+  public void shouldNotConnectToKnownQuicOnlyPeerWithAnyLocalAddress() {
+    final ConnectionManager manager = createManager();
+    when(discoveryService.streamKnownPeers())
+        .thenReturn(
+            Stream.of(
+                createDiscoveryPeer(PEER1, Optional.empty(), Optional.of(anyLocalAddress(9100)))));
+
+    manager.start().join();
+    asyncRunner.executeDueActionsRepeatedly();
+
+    verify(network, never()).connect(any());
+  }
+
+  @Test
   public void shouldPeriodicallyTriggerNewDiscoverySearch() {
     final SafeFuture<Collection<DiscoveryPeer>> search1 = new SafeFuture<>();
     final SafeFuture<Collection<DiscoveryPeer>> search2 = new SafeFuture<>();
@@ -646,11 +706,37 @@ class ConnectionManagerTest {
     return createDiscoveryPeer(peer.getId().toBytes(), subnetIds);
   }
 
+  private static DiscoveryPeer createDiscoveryPeer(
+      final PeerAddress peer,
+      final Optional<InetSocketAddress> tcpAddress,
+      final Optional<InetSocketAddress> quicAddress) {
+    return new DiscoveryPeer(
+        peer.getId().toBytes(),
+        Bytes32.ZERO,
+        tcpAddress,
+        quicAddress,
+        ENR_FORK_ID,
+        SCHEMA_DEFINITIONS_SUPPLIER.getAttnetsENRFieldSchema().getDefault(),
+        SCHEMA_DEFINITIONS_SUPPLIER.getSyncnetsENRFieldSchema().getDefault(),
+        Optional.empty(),
+        Optional.empty());
+  }
+
+  private static InetSocketAddress loopbackAddress(final int port) {
+    return new InetSocketAddress(InetAddress.getLoopbackAddress(), port);
+  }
+
+  private static InetSocketAddress anyLocalAddress(final int port) {
+    return new InetSocketAddress(port);
+  }
+
   private static DiscoveryPeer createDiscoveryPeer(final Bytes peerId, final int... subnetIds) {
     return new DiscoveryPeer(
         peerId,
         Bytes32.ZERO,
-        new InetSocketAddress(InetAddress.getLoopbackAddress(), peerId.trimLeadingZeros().toInt()),
+        Optional.of(
+            new InetSocketAddress(
+                InetAddress.getLoopbackAddress(), peerId.trimLeadingZeros().toInt())),
         Optional.empty(),
         ENR_FORK_ID,
         SCHEMA_DEFINITIONS_SUPPLIER.getAttnetsENRFieldSchema().ofBits(subnetIds),

@@ -327,20 +327,10 @@ public class DiscV5Service extends Service implements DiscoveryService {
     final List<String> discoveryAddresses =
         updAddresses.stream()
             .map(
-                updAddress -> {
-                  final DiscoveryPeer discoveryPeer =
-                      new DiscoveryPeer(
-                          (Bytes) nodeRecord.get(EnrField.PKEY_SECP256K1),
-                          nodeRecord.getNodeId(),
-                          updAddress,
-                          Optional.empty(),
-                          Optional.empty(),
-                          currentSchemaDefinitionsSupplier.getAttnetsENRFieldSchema().getDefault(),
-                          currentSchemaDefinitionsSupplier.getSyncnetsENRFieldSchema().getDefault(),
-                          Optional.empty(),
-                          Optional.empty());
-                  return MultiaddrUtil.fromDiscoveryPeerAsUdp(discoveryPeer).toString();
-                })
+                updAddress ->
+                    MultiaddrUtil.fromUdpAddress(
+                            updAddress, (Bytes) nodeRecord.get(EnrField.PKEY_SECP256K1))
+                        .toString())
             .toList();
     return Optional.of(discoveryAddresses);
   }
