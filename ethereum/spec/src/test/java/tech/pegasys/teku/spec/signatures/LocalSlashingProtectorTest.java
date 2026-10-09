@@ -174,6 +174,69 @@ class LocalSlashingProtectorTest {
         .isCompletedWithValue(false);
   }
 
+  @Test
+  void shouldNotKeepRecordReadBeforeConcurrentImport() throws Exception {
+    final ValidatorSigningRecord preImportRecord =
+        new ValidatorSigningRecord(
+            Optional.of(GENESIS_VALIDATORS_ROOT), UInt64.ONE, UInt64.ZERO, UInt64.ONE);
+    final AtomicReference<Optional<Bytes>> file =
+        new AtomicReference<>(Optional.of(preImportRecord.toBytes()));
+    final CountDownLatch readerReadFile = new CountDownLatch(1);
+    final CountDownLatch importDone = new CountDownLatch(1);
+    final Thread importer = Thread.currentThread();
+    final Thread reader =
+        new Thread(
+            () -> {
+              try {
+                getSlashingProtector().getSigningRecord(validator);
+              } catch (final IOException e) {
+                throw new RuntimeException(e);
+              }
+            });
+    when(dataWriter.read(signingRecordPath))
+        .thenAnswer(
+            __ -> {
+              final Optional<Bytes> contents = file.get();
+              if (Thread.currentThread().equals(reader)) {
+                // the reader has the pre-import file, hold it there until the import has run
+                readerReadFile.countDown();
+                waitFor(
+                    () ->
+                        importDone.getCount() == 0 || importer.getState() == Thread.State.BLOCKED);
+              }
+              return contents;
+            });
+    doAnswer(
+            invocation -> {
+              file.set(Optional.of(invocation.getArgument(1)));
+              return null;
+            })
+        .when(dataWriter)
+        .syncedWrite(eq(signingRecordPath), any());
+    warmUpSigningPath();
+
+    reader.start();
+    assertThat(readerReadFile.await(5, TimeUnit.SECONDS)).isTrue();
+    final Optional<String> importError =
+        getSlashingProtector()
+            .importSigningRecord(
+                validator,
+                () -> {
+                  file.set(Optional.of(IMPORTED_RECORD.toBytes()));
+                  return Optional.empty();
+                });
+    importDone.countDown();
+    reader.join(5000);
+
+    assertThat(importError).isEmpty();
+    assertThat(
+            getSlashingProtector()
+                .maySignAttestation(
+                    validator, GENESIS_VALIDATORS_ROOT, UInt64.valueOf(2), UInt64.valueOf(3)))
+        .isCompletedWithValue(false);
+    assertThat(file.get()).contains(IMPORTED_RECORD.toBytes());
+  }
+
   // loads the classes the racing threads need, so a thread is only ever blocked by the protector
   private void warmUpSigningPath() throws IOException {
     final BLSPublicKey otherValidator = dataStructureUtil.randomPublicKey();
