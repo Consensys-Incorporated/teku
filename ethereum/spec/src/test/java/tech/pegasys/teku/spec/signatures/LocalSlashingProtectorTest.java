@@ -15,6 +15,8 @@ package tech.pegasys.teku.spec.signatures;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -24,6 +26,10 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
@@ -49,6 +55,12 @@ class LocalSlashingProtectorTest {
   private static final UInt64 ATTESTATION_TEST_BLOCK_SLOT = UInt64.valueOf(3);
   private static final UInt64 BLOCK_TEST_SOURCE_EPOCH = UInt64.valueOf(12);
   private static final UInt64 BLOCK_TEST_TARGET_EPOCH = UInt64.valueOf(15);
+  private static final ValidatorSigningRecord IMPORTED_RECORD =
+      new ValidatorSigningRecord(
+          Optional.of(GENESIS_VALIDATORS_ROOT),
+          UInt64.valueOf(5000),
+          UInt64.valueOf(905),
+          UInt64.valueOf(906));
   private final Path signingRecordPath =
       baseDir.resolve(validator.toBytesCompressed().toUnprefixedHexString() + ".yml");
 
@@ -99,6 +111,87 @@ class LocalSlashingProtectorTest {
                 .maySignAttestation(
                     validator, GENESIS_VALIDATORS_ROOT, UInt64.valueOf(2), UInt64.valueOf(3)))
         .isCompletedWithValue(false);
+  }
+
+  @Test
+  void shouldBlockSigningWhileImportingForValidatorWithNoCachedRecord() throws Exception {
+    final AtomicReference<Optional<Bytes>> file = new AtomicReference<>(Optional.empty());
+    final CountDownLatch signerReadFile = new CountDownLatch(1);
+    final CountDownLatch importWritten = new CountDownLatch(1);
+    final AtomicReference<Object> signerResult = new AtomicReference<>();
+    final Thread signer =
+        new Thread(
+            () ->
+                signerResult.set(
+                    getSlashingProtector()
+                        .maySignAttestation(
+                            validator, GENESIS_VALIDATORS_ROOT, UInt64.ONE, UInt64.valueOf(2))
+                        .join()));
+    when(dataWriter.read(signingRecordPath))
+        .thenAnswer(
+            __ -> {
+              final Optional<Bytes> contents = file.get();
+              if (Thread.currentThread().equals(signer)) {
+                // the signer has the pre-import file, hold it there until the import has written
+                signerReadFile.countDown();
+                assertThat(importWritten.await(5, TimeUnit.SECONDS)).isTrue();
+              }
+              return contents;
+            });
+    doAnswer(
+            invocation -> {
+              file.set(Optional.of(invocation.getArgument(1)));
+              return null;
+            })
+        .when(dataWriter)
+        .syncedWrite(eq(signingRecordPath), any());
+    warmUpSigningPath();
+
+    final Optional<String> importError =
+        getSlashingProtector()
+            .importSigningRecord(
+                validator,
+                () -> {
+                  signer.start();
+                  // the signer has either read the pre-import file, or is blocked by the import
+                  waitFor(
+                      () ->
+                          signerReadFile.getCount() == 0
+                              || signer.getState() == Thread.State.BLOCKED);
+                  file.set(Optional.of(IMPORTED_RECORD.toBytes()));
+                  importWritten.countDown();
+                  return Optional.empty();
+                });
+    signer.join(5000);
+
+    assertThat(importError).isEmpty();
+    assertThat(signerResult.get()).isEqualTo(false);
+    assertThat(file.get()).contains(IMPORTED_RECORD.toBytes());
+    assertThat(
+            getSlashingProtector()
+                .maySignAttestation(
+                    validator, GENESIS_VALIDATORS_ROOT, UInt64.valueOf(2), UInt64.valueOf(3)))
+        .isCompletedWithValue(false);
+  }
+
+  // loads the classes the racing threads need, so a thread is only ever blocked by the protector
+  private void warmUpSigningPath() throws IOException {
+    final BLSPublicKey otherValidator = dataStructureUtil.randomPublicKey();
+    assertThat(
+            getSlashingProtector()
+                .maySignAttestation(
+                    otherValidator, GENESIS_VALIDATORS_ROOT, UInt64.ONE, UInt64.valueOf(2)))
+        .isCompletedWithValue(true);
+    getSlashingProtector().getSigningRecord(otherValidator);
+    getSlashingProtector().importSigningRecord(otherValidator, Optional::empty);
+  }
+
+  private static void waitFor(final BooleanSupplier condition) {
+    final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (!condition.getAsBoolean()) {
+      assertThat(System.nanoTime()).isLessThan(deadline);
+      Thread.onSpinWait();
+    }
   }
 
   static List<Arguments> blockCases() {
