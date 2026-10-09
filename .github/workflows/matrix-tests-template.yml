@@ -181,9 +181,9 @@ jobs:
         run: |
           zstd -dc "${{ runner.temp }}/teku-docker-image.tar.zst" | docker load && rm "${{ runner.temp }}/teku-docker-image.tar.zst" && docker images consensys/teku
 
-      # 4.0.0
+      # v4.6.0
       - name: Login to dockerhub
-        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
         if: ${{ inputs.stage_key == 'acceptance' }}
         with:
           # Don't panic, throw away account to avoid Docker rate limits when downloading.
