@@ -77,8 +77,8 @@ public class LocalSlashingProtector implements SlashingProtector {
   }
 
   @Override
-  public Optional<ValidatorSigningRecord> getSigningRecord(final BLSPublicKey validator)
-      throws IOException {
+  public synchronized Optional<ValidatorSigningRecord> getSigningRecord(
+      final BLSPublicKey validator) throws IOException {
     final ValidatorSigningRecord record = signingRecords.get(validator);
     if (record != null) {
       return Optional.of(record);
