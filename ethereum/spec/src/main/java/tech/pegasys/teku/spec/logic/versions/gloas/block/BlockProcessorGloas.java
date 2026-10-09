@@ -172,7 +172,8 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
     final UInt64 parentSlot = state.getLatestBlockHeader().getSlot();
     final UInt64 parentEpoch = miscHelpers.computeEpochAtSlot(parentSlot);
 
-    // Settle the builder payment
+    // Settle the builder payment before the requests so that a builder exit request is rejected
+    // while the payment is pending
     if (parentEpoch.equals(beaconStateAccessorsGloas.getCurrentEpoch(state))) {
       final UInt64 paymentIndex =
           parentSlot.mod(specConfig.getSlotsPerEpoch()).plus(specConfig.getSlotsPerEpoch());

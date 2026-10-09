@@ -20,7 +20,6 @@ import static tech.pegasys.teku.reference.TestDataUtils.loadYaml;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
-import java.util.Optional;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.reference.TestExecutor;
@@ -43,8 +42,7 @@ public class GossipVoluntaryExitTestExecutor implements TestExecutor {
     final List<SignedBeaconBlock> blocks =
         GossipTestContext.loadBlocks(testDefinition, spec, metaData.getBlocks());
     final GossipTestContext ctx = GossipTestContext.create(spec, state, blocks);
-    ctx.forkChoice.onTick(UInt64.valueOf(metaData.getCurrentTimeMs()), Optional.empty());
-    final UInt64[] validationTimeMs = {UInt64.valueOf(metaData.getCurrentTimeMs())};
+    final UInt64[] validationTimeMs = {UInt64.ZERO};
     final GossipValidationHelper gossipValidationHelper =
         new GossipValidationHelper(spec, ctx.recentChainData, ctx.metricsSystem) {
           @Override
@@ -57,8 +55,7 @@ public class GossipVoluntaryExitTestExecutor implements TestExecutor {
             spec, ctx.recentChainData, () -> validationTimeMs[0], gossipValidationHelper);
 
     for (final GossipVoluntaryExitMetaData.Message message : metaData.getMessages()) {
-      validationTimeMs[0] =
-          UInt64.valueOf(Math.addExact(metaData.getCurrentTimeMs(), message.getOffsetMs()));
+      validationTimeMs[0] = UInt64.valueOf(message.getCurrentTimeMs());
 
       final SignedVoluntaryExit exit =
           loadSsz(
@@ -82,9 +79,6 @@ public class GossipVoluntaryExitTestExecutor implements TestExecutor {
     @JsonProperty(value = "blocks", required = true)
     private List<GossipTestContext.BlockEntry> blocks;
 
-    @JsonProperty(value = "current_time_ms", required = true)
-    private long currentTimeMs;
-
     @JsonProperty(value = "bls_setting", required = false, defaultValue = "0")
     private int blsSetting;
 
@@ -96,18 +90,14 @@ public class GossipVoluntaryExitTestExecutor implements TestExecutor {
       return blocks;
     }
 
-    public long getCurrentTimeMs() {
-      return currentTimeMs;
-    }
-
     public String getTopic() {
       return topic;
     }
 
     private static class Message {
 
-      @JsonProperty(value = "offset_ms", required = true)
-      private long offsetMs;
+      @JsonProperty(value = "current_time_ms")
+      private long currentTimeMs;
 
       @JsonProperty(value = "message", required = true)
       private String message;
@@ -122,8 +112,8 @@ public class GossipVoluntaryExitTestExecutor implements TestExecutor {
         return message;
       }
 
-      public long getOffsetMs() {
-        return offsetMs;
+      public long getCurrentTimeMs() {
+        return currentTimeMs;
       }
 
       public String getExpected() {

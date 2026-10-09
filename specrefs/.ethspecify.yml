@@ -1,4 +1,4 @@
-version: v1.7.0-beta.2
+version: v1.7.0-beta.3
 style: full
 
 specrefs:
@@ -211,6 +211,17 @@ specrefs:
       # Unnecessary
       - xor#phase0
 
+      # Not implemented: the restart-resilient confirmed root (consensus-specs #5673) needs a
+      # confirmed root persisted across restarts, which Teku's FastConfirmationStore does not
+      # hold. block_should_be_finalized exists only to serve this function.
+      - get_restart_resilient_confirmed_root#phase0
+      - block_should_be_finalized#phase0
+
+      # Implemented differently: Teku derives the time into a slot from a message's arrival
+      # timestamp where it is needed (BlockTimelinessTracker), rather than reading it off the
+      # store, so there is no store-based accessor to anchor to
+      - get_time_into_slot_ms#phase0
+
       # Will not implement: Deprecated
       - get_pow_block_at_terminal_total_difficulty#bellatrix
 
@@ -267,6 +278,10 @@ specrefs:
       # Not implemented: gloas
       - validate_partial_data_column_sidecar_gossip#gloas
       - compute_max_partial_data_column_sidecar_size#gloas
+      # Not implemented: Teku computes MIN_EPOCHS_FOR_BLOCK_REQUESTS with the pre-Gloas formula
+      # (SpecConfigBuilder#computeMinEpochsForBlockRequests); the EIP-8061 churn-based formula
+      # has not been adopted
+      - compute_min_epochs_for_block_requests#gloas
 
       # Not implemented yet: EIP-7688 progressive SSZ transition
       - upgrade_attestation_to_gloas#gloas

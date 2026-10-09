@@ -174,7 +174,7 @@ public class MiscHelpers {
     return computeStartSlotAtEpoch(epoch.plus(1)).minusMinZero(1);
   }
 
-  // this doesn't appear to be in spec, but named consistently with compute_timestamp_at_slot
+  // compute_slot_at_time
   public UInt64 computeSlotAtTime(final UInt64 genesisTime, final UInt64 currentTime) {
     if (currentTime.isLessThan(genesisTime)) {
       return UInt64.ZERO;

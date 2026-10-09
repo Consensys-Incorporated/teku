@@ -108,6 +108,18 @@ task convertRefTests {
 	group = "Execution"
 	description = "Convert all reference test tarballs into zip archives"
 	dependsOn convertRefTestTasks
+	// The tests mount every <config>.zip they find in this directory, so an archive left behind by
+	// an earlier build (or restored from a CI cache) would still be picked up after its config was
+	// removed from refTestTarballs. Drop anything no longer configured.
+	doLast {
+		def expected = rootProject.ext.refTestTarballs.keySet().collect { "${it}.zip".toString() }
+		refTestArchivesDir.listFiles()?.each { file ->
+			if (file.name.endsWith('.zip') && !expected.contains(file.name)) {
+				logger.lifecycle("Removing unconfigured reference test archive ${file.name}")
+				file.delete()
+			}
+		}
+	}
 }
 
 // Lets the tests read either the zip archives (default) or a plain directory of <config>/ trees,

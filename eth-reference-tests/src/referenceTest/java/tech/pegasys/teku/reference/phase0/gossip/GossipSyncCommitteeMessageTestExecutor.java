@@ -76,8 +76,7 @@ public class GossipSyncCommitteeMessageTestExecutor implements TestExecutor {
             new GossipValidationHelper(spec, recentChainData, metricsSystem));
 
     for (final GossipSyncCommitteeMessageMetaData.Message message : metaData.getMessages()) {
-      final UInt64 messageTimeMs =
-          UInt64.valueOf(metaData.getCurrentTimeMs()).plus(UInt64.valueOf(message.getOffsetMs()));
+      final UInt64 messageTimeMs = UInt64.valueOf(message.getCurrentTimeMs());
       setStoreTimeMillis(recentChainData, messageTimeMs);
 
       final SyncCommitteeMessage syncCommitteeMessage =
@@ -115,18 +114,11 @@ public class GossipSyncCommitteeMessageTestExecutor implements TestExecutor {
     @JsonProperty(value = "messages", required = true)
     private List<Message> messages;
 
-    @JsonProperty(value = "current_time_ms", required = true)
-    private long currentTimeMs;
-
     @JsonProperty(value = "bls_setting", required = false, defaultValue = "0")
     private int blsSetting;
 
     public List<Message> getMessages() {
       return messages;
-    }
-
-    public long getCurrentTimeMs() {
-      return currentTimeMs;
     }
 
     public BlsSetting getBlsSetting() {
@@ -135,8 +127,8 @@ public class GossipSyncCommitteeMessageTestExecutor implements TestExecutor {
 
     private static class Message {
 
-      @JsonProperty(value = "offset_ms", required = true)
-      private long offsetMs;
+      @JsonProperty(value = "current_time_ms")
+      private long currentTimeMs;
 
       @JsonProperty(value = "subnet_id", required = true)
       private int subnetId;
@@ -150,8 +142,8 @@ public class GossipSyncCommitteeMessageTestExecutor implements TestExecutor {
       @JsonProperty(value = "reason", required = false)
       private String reason;
 
-      public long getOffsetMs() {
-        return offsetMs;
+      public long getCurrentTimeMs() {
+        return currentTimeMs;
       }
 
       public int getSubnetId() {

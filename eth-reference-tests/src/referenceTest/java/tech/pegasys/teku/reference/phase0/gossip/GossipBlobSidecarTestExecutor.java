@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Supplier;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
@@ -86,8 +87,6 @@ public class GossipBlobSidecarTestExecutor implements TestExecutor {
                 .map(BlockEntryAndBlock::block)
                 .toList());
 
-    ctx.forkChoice.onTick(UInt64.valueOf(metaData.getCurrentTimeMs()), Optional.empty());
-
     final Map<Bytes32, BlockImportResult> invalidBlockRoots = new HashMap<>();
 
     for (final BlockEntryAndBlock blockEntryAndBlock : blocks) {
@@ -96,6 +95,9 @@ public class GossipBlobSidecarTestExecutor implements TestExecutor {
       if (block.getRoot().equals(ctx.anchorPoint.getRoot())) {
         continue;
       }
+      ctx.forkChoice.onTick(
+          spec.computeTimeMillisAtSlot(block.getSlot(), ctx.recentChainData.getGenesisTimeMillis()),
+          Optional.empty());
       final BlockImportResult importResult =
           safeJoin(
               ctx.forkChoice.onBlock(
@@ -131,9 +133,18 @@ public class GossipBlobSidecarTestExecutor implements TestExecutor {
       }
     }
 
+    // Use a mutable time reference so the gossip validator sees each message's current_time_ms even
+    // when that time is earlier than the store's time (which only moves forward). Blocks are
+    // imported after their slot starts, while a message may be validated just before that slot
+    // starts, and the spec does not require message times to be monotonic.
+    final UInt64[] validationTimeMs = {UInt64.ZERO};
     final GossipValidationHelper gossipValidationHelper =
         createGossipValidationHelper(
-            spec, ctx.recentChainData, ctx.metricsSystem, customFinalizedCheckpoint);
+            spec,
+            ctx.recentChainData,
+            ctx.metricsSystem,
+            customFinalizedCheckpoint,
+            () -> validationTimeMs[0]);
     final MiscHelpersDeneb miscHelpersDeneb =
         MiscHelpersDeneb.required(spec.forMilestone(SpecMilestone.DENEB).miscHelpers());
     // The test spec ships with a NoOpKZG that accepts every proof. Only the invalid-kzg-proof case
@@ -156,8 +167,8 @@ public class GossipBlobSidecarTestExecutor implements TestExecutor {
         (blobSidecar, arrivalTimestamp) -> blobSidecarValidator.validate(blobSidecar);
 
     for (final GossipBlobSidecarMetaData.Message message : metaData.getMessages()) {
-      final UInt64 messageTimeMs =
-          UInt64.valueOf(metaData.getCurrentTimeMs()).plus(UInt64.valueOf(message.getOffsetMs()));
+      final UInt64 messageTimeMs = UInt64.valueOf(message.getCurrentTimeMs());
+      validationTimeMs[0] = messageTimeMs;
       ctx.forkChoice.onTick(messageTimeMs, Optional.empty());
 
       final BlobSidecar blobSidecar =
@@ -180,32 +191,37 @@ public class GossipBlobSidecarTestExecutor implements TestExecutor {
       final Spec spec,
       final RecentChainData recentChainData,
       final StubMetricsSystem metricsSystem,
-      final Optional<Checkpoint> finalizedCheckpointOverride) {
-    return finalizedCheckpointOverride
-        .<GossipValidationHelper>map(
-            finalizedCheckpoint ->
-                new GossipValidationHelper(spec, recentChainData, metricsSystem) {
-                  @Override
-                  public boolean currentFinalizedCheckpointIsAncestorOfBlock(
-                      final UInt64 blockSlot, final Bytes32 blockParentRoot) {
-                    // The production helper reads the finalized checkpoint from Store, but ref-test
-                    // gives a fake checkpoint that cannot be committed there given that it doesn't
-                    // have a block root.
-                    // We preserve the production ancestry rule while substituting the fixture's
-                    // checkpoint root.
-                    if (blockSlot.isLessThanOrEqualTo(
-                        finalizedCheckpoint.getEpochStartSlot(spec))) {
-                      return false;
-                    }
-                    return spec.getAncestor(
-                            getForkChoiceStrategy(),
-                            blockParentRoot,
-                            finalizedCheckpoint.getEpochStartSlot(spec))
-                        .map(ancestorRoot -> ancestorRoot.equals(finalizedCheckpoint.getRoot()))
-                        .orElse(false);
-                  }
-                })
-        .orElseGet(() -> new GossipValidationHelper(spec, recentChainData, metricsSystem));
+      final Optional<Checkpoint> finalizedCheckpointOverride,
+      final Supplier<UInt64> validationTimeMs) {
+    return new GossipValidationHelper(spec, recentChainData, metricsSystem) {
+      @Override
+      public UInt64 getCurrentTimeMillis() {
+        return validationTimeMs.get();
+      }
+
+      @Override
+      public boolean currentFinalizedCheckpointIsAncestorOfBlock(
+          final UInt64 blockSlot, final Bytes32 blockParentRoot) {
+        if (finalizedCheckpointOverride.isEmpty()) {
+          return super.currentFinalizedCheckpointIsAncestorOfBlock(blockSlot, blockParentRoot);
+        }
+        // The production helper reads the finalized checkpoint from Store, but ref-test
+        // gives a fake checkpoint that cannot be committed there given that it doesn't
+        // have a block root.
+        // We preserve the production ancestry rule while substituting the fixture's
+        // checkpoint root.
+        final Checkpoint finalizedCheckpoint = finalizedCheckpointOverride.get();
+        if (blockSlot.isLessThanOrEqualTo(finalizedCheckpoint.getEpochStartSlot(spec))) {
+          return false;
+        }
+        return spec.getAncestor(
+                getForkChoiceStrategy(),
+                blockParentRoot,
+                finalizedCheckpoint.getEpochStartSlot(spec))
+            .map(ancestorRoot -> ancestorRoot.equals(finalizedCheckpoint.getRoot()))
+            .orElse(false);
+      }
+    };
   }
 
   @SuppressWarnings("unused")
@@ -221,9 +237,6 @@ public class GossipBlobSidecarTestExecutor implements TestExecutor {
     @JsonProperty(value = "messages", required = true)
     private List<Message> messages;
 
-    @JsonProperty(value = "current_time_ms", required = true)
-    private long currentTimeMs;
-
     @JsonProperty(value = "bls_setting", required = false, defaultValue = "0")
     private int blsSetting;
 
@@ -236,10 +249,6 @@ public class GossipBlobSidecarTestExecutor implements TestExecutor {
 
     public List<Message> getMessages() {
       return messages;
-    }
-
-    public long getCurrentTimeMs() {
-      return currentTimeMs;
     }
 
     public BlsSetting getBlsSetting() {
@@ -274,8 +283,8 @@ public class GossipBlobSidecarTestExecutor implements TestExecutor {
       @JsonProperty(value = "subnet_id", required = false)
       private Integer subnetId;
 
-      @JsonProperty(value = "offset_ms", required = true)
-      private long offsetMs;
+      @JsonProperty(value = "current_time_ms")
+      private long currentTimeMs;
 
       @JsonProperty(value = "message", required = true)
       private String message;
@@ -290,8 +299,8 @@ public class GossipBlobSidecarTestExecutor implements TestExecutor {
         return subnetId;
       }
 
-      public long getOffsetMs() {
-        return offsetMs;
+      public long getCurrentTimeMs() {
+        return currentTimeMs;
       }
 
       public String getMessage() {

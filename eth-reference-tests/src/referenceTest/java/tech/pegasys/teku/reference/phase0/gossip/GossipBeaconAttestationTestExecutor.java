@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 import org.apache.tuweni.bytes.Bytes32;
 import org.opentest4j.TestAbortedException;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
@@ -100,9 +101,6 @@ public class GossipBeaconAttestationTestExecutor implements TestExecutor {
                 .map(BlockEntryAndBlock::block)
                 .toList());
 
-    // Tick clock to current_time_ms before importing blocks
-    ctx.forkChoice.onTick(UInt64.valueOf(metaData.getCurrentTimeMs()), Optional.empty());
-
     // Blocks marked failed: true in meta.yaml are recorded as invalid (by root) and not imported,
     // mirroring the invalidBlockRoots map maintained in production by BlockManager. The attestation
     // validator rejects attestations voting for one of these roots.
@@ -125,6 +123,10 @@ public class GossipBeaconAttestationTestExecutor implements TestExecutor {
         continue;
       }
       if (!block.getRoot().equals(ctx.anchorPoint.getRoot())) {
+        ctx.forkChoice.onTick(
+            spec.computeTimeMillisAtSlot(
+                block.getSlot(), ctx.recentChainData.getGenesisTimeMillis()),
+            Optional.empty());
         final BlockImportResult importResult =
             safeJoin(
                 ctx.forkChoice.onBlock(
@@ -193,19 +195,28 @@ public class GossipBeaconAttestationTestExecutor implements TestExecutor {
       }
     }
 
+    // Use a mutable time reference so the gossip validator sees each message's current_time_ms even
+    // when that time is earlier than the store's time (which only moves forward). Blocks are
+    // imported after their slot starts, while a message may be validated just before that slot
+    // starts, and the spec does not require message times to be monotonic.
+    final UInt64[] validationTimeMs = {UInt64.ZERO};
     final AttestationValidator attestationValidator =
         new AttestationValidator(
             spec,
             AsyncBLSSignatureVerifier.wrap(blsVerifier),
             createGossipValidationHelper(
-                spec, ctx.recentChainData, ctx.metricsSystem, customFinalizedCheckpoint),
+                spec,
+                ctx.recentChainData,
+                ctx.metricsSystem,
+                customFinalizedCheckpoint,
+                () -> validationTimeMs[0]),
             invalidBlockRoots,
             blockRootsWithInvalidExecutionPayload);
 
     for (final GossipBeaconAttestationMetaData.Message message : metaData.getMessages()) {
       // Advance clock to message arrival time
-      final UInt64 messageTimeMs =
-          UInt64.valueOf(metaData.getCurrentTimeMs()).plus(UInt64.valueOf(message.getOffsetMs()));
+      final UInt64 messageTimeMs = UInt64.valueOf(message.getCurrentTimeMs());
+      validationTimeMs[0] = messageTimeMs;
       ctx.forkChoice.onTick(messageTimeMs, Optional.empty());
 
       final Attestation attestation =
@@ -237,23 +248,27 @@ public class GossipBeaconAttestationTestExecutor implements TestExecutor {
       final Spec spec,
       final RecentChainData recentChainData,
       final StubMetricsSystem metricsSystem,
-      final Optional<Checkpoint> finalizedCheckpointOverride) {
-    return finalizedCheckpointOverride
-        .<GossipValidationHelper>map(
-            finalizedCheckpoint ->
-                new GossipValidationHelper(spec, recentChainData, metricsSystem) {
-                  @Override
-                  public boolean currentFinalizedCheckpointIsAncestorOfAttestationBlock(
-                      final Bytes32 blockRoot) {
-                    return spec.getAncestor(
-                            getForkChoiceStrategy(),
-                            blockRoot,
-                            finalizedCheckpoint.getEpochStartSlot(spec))
-                        .map(ancestorRoot -> ancestorRoot.equals(finalizedCheckpoint.getRoot()))
-                        .orElse(false);
-                  }
-                })
-        .orElseGet(() -> new GossipValidationHelper(spec, recentChainData, metricsSystem));
+      final Optional<Checkpoint> finalizedCheckpointOverride,
+      final Supplier<UInt64> validationTimeMs) {
+    return new GossipValidationHelper(spec, recentChainData, metricsSystem) {
+      @Override
+      public UInt64 getCurrentTimeMillis() {
+        return validationTimeMs.get();
+      }
+
+      @Override
+      public boolean currentFinalizedCheckpointIsAncestorOfAttestationBlock(
+          final Bytes32 blockRoot) {
+        if (finalizedCheckpointOverride.isEmpty()) {
+          return super.currentFinalizedCheckpointIsAncestorOfAttestationBlock(blockRoot);
+        }
+        final Checkpoint finalizedCheckpoint = finalizedCheckpointOverride.get();
+        return spec.getAncestor(
+                getForkChoiceStrategy(), blockRoot, finalizedCheckpoint.getEpochStartSlot(spec))
+            .map(ancestorRoot -> ancestorRoot.equals(finalizedCheckpoint.getRoot()))
+            .orElse(false);
+      }
+    };
   }
 
   @SuppressWarnings("unused")
@@ -269,9 +284,6 @@ public class GossipBeaconAttestationTestExecutor implements TestExecutor {
     @JsonProperty(value = "messages", required = true)
     private List<Message> messages;
 
-    @JsonProperty(value = "current_time_ms", required = true)
-    private long currentTimeMs;
-
     @JsonProperty(value = "bls_setting", required = false, defaultValue = "0")
     private int blsSetting;
 
@@ -284,10 +296,6 @@ public class GossipBeaconAttestationTestExecutor implements TestExecutor {
 
     public List<Message> getMessages() {
       return messages;
-    }
-
-    public long getCurrentTimeMs() {
-      return currentTimeMs;
     }
 
     public BlsSetting getBlsSetting() {
@@ -338,8 +346,8 @@ public class GossipBeaconAttestationTestExecutor implements TestExecutor {
       @JsonProperty(value = "subnet_id", required = true)
       private int subnetId;
 
-      @JsonProperty(value = "offset_ms", required = true)
-      private long offsetMs;
+      @JsonProperty(value = "current_time_ms")
+      private long currentTimeMs;
 
       @JsonProperty(value = "message", required = true)
       private String message;
@@ -354,8 +362,8 @@ public class GossipBeaconAttestationTestExecutor implements TestExecutor {
         return subnetId;
       }
 
-      public long getOffsetMs() {
-        return offsetMs;
+      public long getCurrentTimeMs() {
+        return currentTimeMs;
       }
 
       public String getMessage() {

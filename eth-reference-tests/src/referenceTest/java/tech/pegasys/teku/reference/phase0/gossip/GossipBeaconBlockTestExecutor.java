@@ -90,9 +90,6 @@ public class GossipBeaconBlockTestExecutor implements TestExecutor {
                 .map(BlockEntryAndBlock::block)
                 .toList());
 
-    // Tick clock to current_time_ms before importing blocks
-    ctx.forkChoice.onTick(UInt64.valueOf(metaData.getCurrentTimeMs()), Optional.empty());
-
     // Track block roots that explicitly failed validation (marked failed: true in meta.yaml).
     // We load these blocks to obtain their hash tree root but do not import them, mirroring the
     // spec distinction between "block not seen" (IGNORE) and "block failed validation" (REJECT).
@@ -124,6 +121,10 @@ public class GossipBeaconBlockTestExecutor implements TestExecutor {
         }
       } else {
         if (!block.getRoot().equals(ctx.anchorPoint.getRoot())) {
+          ctx.forkChoice.onTick(
+              spec.computeTimeMillisAtSlot(
+                  block.getSlot(), ctx.recentChainData.getGenesisTimeMillis()),
+              Optional.empty());
           final BlockImportResult importResult =
               safeJoin(
                   ctx.forkChoice.onBlock(
@@ -193,10 +194,20 @@ public class GossipBeaconBlockTestExecutor implements TestExecutor {
       }
     }
 
+    // Use a mutable time reference so the gossip validator sees each message's current_time_ms even
+    // when that time is earlier than the store's time (which only moves forward). Blocks are
+    // imported after their slot starts, while a message may be validated just before that slot
+    // starts, and the spec does not require message times to be monotonic.
+    final UInt64[] validationTimeMs = {UInt64.ZERO};
     final BlockGossipValidator blockGossipValidator =
         new BlockGossipValidator(
             spec,
-            new GossipValidationHelper(spec, ctx.recentChainData, ctx.metricsSystem),
+            new GossipValidationHelper(spec, ctx.recentChainData, ctx.metricsSystem) {
+              @Override
+              public UInt64 getCurrentTimeMillis() {
+                return validationTimeMs[0];
+              }
+            },
             new ReceivedBlockEventsChannel() {
               @Override
               public void onBlockValidated(final SignedBeaconBlock block) {}
@@ -208,8 +219,8 @@ public class GossipBeaconBlockTestExecutor implements TestExecutor {
 
     for (final GossipBeaconBlockMetaData.Message message : metaData.getMessages()) {
       // Advance clock to message arrival time
-      final UInt64 messageTimeMs =
-          UInt64.valueOf(metaData.getCurrentTimeMs()).plus(UInt64.valueOf(message.getOffsetMs()));
+      final UInt64 messageTimeMs = UInt64.valueOf(message.getCurrentTimeMs());
+      validationTimeMs[0] = messageTimeMs;
       ctx.forkChoice.onTick(messageTimeMs, Optional.empty());
 
       final SignedBeaconBlock block =
@@ -284,9 +295,6 @@ public class GossipBeaconBlockTestExecutor implements TestExecutor {
     @JsonProperty(value = "messages", required = true)
     private List<Message> messages;
 
-    @JsonProperty(value = "current_time_ms", required = true)
-    private long currentTimeMs;
-
     @JsonProperty(value = "bls_setting", defaultValue = "0")
     private int blsSetting;
 
@@ -299,10 +307,6 @@ public class GossipBeaconBlockTestExecutor implements TestExecutor {
 
     public List<Message> getMessages() {
       return messages;
-    }
-
-    public long getCurrentTimeMs() {
-      return currentTimeMs;
     }
 
     public BlsSetting getBlsSetting() {
@@ -358,8 +362,8 @@ public class GossipBeaconBlockTestExecutor implements TestExecutor {
     @JsonIgnoreProperties(ignoreUnknown = true)
     private static class Message {
 
-      @JsonProperty(value = "offset_ms", required = true)
-      private long offsetMs;
+      @JsonProperty(value = "current_time_ms")
+      private long currentTimeMs;
 
       @JsonProperty(value = "message", required = true)
       private String message;
@@ -370,8 +374,8 @@ public class GossipBeaconBlockTestExecutor implements TestExecutor {
       @JsonProperty(value = "reason")
       private String reason;
 
-      public long getOffsetMs() {
-        return offsetMs;
+      public long getCurrentTimeMs() {
+        return currentTimeMs;
       }
 
       public String getMessage() {
