@@ -277,14 +277,14 @@ jobs:
           docker save consensys/teku:develop | zstd -T0 -3 -o teku-docker-image.tar.zst
           ls -la teku-docker-image.tar.zst
       - name: Upload Teku docker image
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: teku-docker-image
           path: teku-docker-image.tar.zst
           retention-days: 1
       - name: Upload distribution tar
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: distribution-tar
           path: |
@@ -292,7 +292,7 @@ jobs:
           retention-days: 14
       - name: Upload distribution zip
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: distribution-zip
           path: |
@@ -319,7 +319,7 @@ jobs:
             .
           ls -la "$RUNNER_TEMP/assemble-output.tar.zst"
       - name: Upload workspace build
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: assemble-output
           path: ${{ runner.temp }}/assemble-output.tar.zst
@@ -343,14 +343,14 @@ jobs:
         run: |
           ./gradlew clean distTar distZip
       - name: Upload distribution tar
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: distribution-tar
           path: |
             build/distributions/*.tar.gz
           retention-days: 14
       - name: Upload distribution zip
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: distribution-zip
           path: |
@@ -369,7 +369,7 @@ jobs:
       - name: Prepare
         uses: ./.github/actions/prepare
       - name: Download assemble-output
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
@@ -402,7 +402,7 @@ jobs:
           kill $TEKU_PID
           exit $EXIT_CODE
       - name: Upload openapi spec
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: openapi-spec
           path: |
@@ -424,7 +424,7 @@ jobs:
       - name: Prepare
         uses: ./.github/actions/prepare
       - name: Download openapi spec
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: openapi-spec
           path: ${{ github.workspace }}/.openapidoc/spec
@@ -432,7 +432,7 @@ jobs:
         run: |
           ls -R .openapidoc/spec/
       - name: Use Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           cache-dependency-path: .openapidoc/package-lock.json
@@ -680,7 +680,7 @@ jobs:
       - name: Prepare
         uses: ./.github/actions/prepare
       - name: Download assemble-output
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
@@ -736,7 +736,7 @@ jobs:
           output: build/test-results/merged/TEST-reference-${{ matrix.shard }}.xml
       - name: Upload JUnit XML + HTML for ReferenceTests
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: reference-reports-${{ matrix.shard }}
           # XML only: the HTML report is 16k files / 130MB per shard for the generated classes and
