@@ -141,7 +141,7 @@ class InclusionListStoreTest {
   }
 
   @Test
-  void shouldStoreAndRetrieveSignedEntriesByKeyAndSlot() {
+  void shouldStoreAndRetrieveSignedEntriesAndTimelyListsByKey() {
     final InclusionListStore inclusionListStore = new InclusionListStore(4);
     final SignedInclusionList inclusionList1 =
         createSignedInclusionList(SLOT, VALIDATOR_INDEX, DEPENDENT_ROOT_1);
@@ -153,12 +153,13 @@ class InclusionListStoreTest {
 
     assertThat(inclusionListStore.getInclusionLists(keyFor(inclusionList1)))
         .hasValue(Map.of(VALIDATOR_INDEX, new InclusionListEntry(inclusionList1, true)));
-    assertThat(inclusionListStore.getInclusionLists(SLOT))
-        .hasValueSatisfying(
-            entries ->
-                assertThat(entries).containsExactly(new InclusionListEntry(inclusionList1, true)));
-    assertThat(inclusionListStore.getInclusionLists(OTHER_SLOT))
-        .hasValueSatisfying(entries -> assertThat(entries).isEmpty());
+    assertThat(inclusionListStore.getTimelyInclusionLists(keyFor(inclusionList1)))
+        .containsExactly(inclusionList1.getMessage());
+    assertThat(inclusionListStore.getTimelyInclusionLists(keyFor(inclusionList2))).isEmpty();
+    assertThat(
+            inclusionListStore.getTimelyInclusionLists(
+                new SlotAndBlockRoot(OTHER_SLOT, DEPENDENT_ROOT_1)))
+        .isEmpty();
   }
 
   @Test
@@ -203,7 +204,7 @@ class InclusionListStoreTest {
   }
 
   @Test
-  void shouldUpgradeTimelinessWhenDuplicateArrivesTimely() {
+  void shouldNotUpgradeTimelinessWhenDuplicateArrivesTimely() {
     final InclusionListStore inclusionListStore = new InclusionListStore(4);
     final SignedInclusionList inclusionList =
         createSignedInclusionList(SLOT, VALIDATOR_INDEX, DEPENDENT_ROOT_1);
@@ -212,7 +213,8 @@ class InclusionListStoreTest {
     inclusionListStore.processInclusionList(inclusionList, true);
 
     assertThat(inclusionListStore.getInclusionLists(keyFor(inclusionList)))
-        .hasValue(Map.of(VALIDATOR_INDEX, new InclusionListEntry(inclusionList, true)));
+        .hasValue(Map.of(VALIDATOR_INDEX, new InclusionListEntry(inclusionList, false)));
+    assertThat(inclusionListStore.getTimelyInclusionLists(keyFor(inclusionList))).isEmpty();
     assertThat(
             inclusionListStore.isInclusionListEquivocator(keyFor(inclusionList), VALIDATOR_INDEX))
         .isFalse();
@@ -236,8 +238,7 @@ class InclusionListStoreTest {
     assertThat(
             inclusionListStore.isInclusionListEquivocator(keyFor(inclusionList), VALIDATOR_INDEX))
         .isTrue();
-    assertThat(inclusionListStore.getInclusionLists(SLOT))
-        .hasValueSatisfying(entries -> assertThat(entries).isEmpty());
+    assertThat(inclusionListStore.getTimelyInclusionLists(keyFor(inclusionList))).isEmpty();
   }
 
   @Test
@@ -264,11 +265,10 @@ class InclusionListStoreTest {
             inclusionListStore.isInclusionListEquivocator(
                 keyFor(otherRootInclusionList), VALIDATOR_INDEX))
         .isFalse();
-    assertThat(inclusionListStore.getInclusionLists(SLOT))
-        .hasValueSatisfying(
-            entries ->
-                assertThat(entries)
-                    .containsExactly(new InclusionListEntry(otherRootInclusionList, true)));
+    // Lists for the same slot under another dependent root are not mixed in
+    assertThat(inclusionListStore.getTimelyInclusionLists(keyFor(inclusionList))).isEmpty();
+    assertThat(inclusionListStore.getTimelyInclusionLists(keyFor(otherRootInclusionList)))
+        .containsExactly(otherRootInclusionList.getMessage());
   }
 
   @Test

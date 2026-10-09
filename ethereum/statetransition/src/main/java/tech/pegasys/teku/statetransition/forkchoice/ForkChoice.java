@@ -58,6 +58,7 @@ import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
+import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
@@ -654,7 +655,8 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
 
     availabilityChecker.initiateDataAvailabilityCheck();
     final Optional<List<InclusionList>> inclusionLists =
-        forkChoiceUtil.getInclusionListsForPayloadValidation(inclusionListStore, block.getSlot());
+        forkChoiceUtil.getInclusionListsForPayloadValidation(
+            inclusionListStore, getPayloadInclusionListKey(blockSlotState.get(), block.getSlot()));
     final BeaconState postState;
     try {
       postState =
@@ -747,7 +749,7 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
     availabilityChecker.initiateDataAvailabilityCheck();
     final Optional<List<InclusionList>> inclusionLists =
         forkChoiceUtil.getInclusionListsForPayloadValidation(
-            inclusionListStore, signedEnvelope.getSlot());
+            inclusionListStore, getPayloadInclusionListKey(state, signedEnvelope.getSlot()));
     final ForkChoicePayloadExecutorGloas payloadExecutor =
         createPayloadExecutor(signedEnvelope, executionLayer, inclusionLists);
 
@@ -1088,6 +1090,19 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
         getShufflingDependentRoot(preImportHead, currentEpoch, forkChoiceStrategy);
     return maybeBlockDependentRoot.isPresent()
         && maybeBlockDependentRoot.equals(maybeHeadDependentRoot);
+  }
+
+  /**
+   * The inclusion list store key for a payload in {@code slot}: the previous slot and the shuffling
+   * dependent root of the payload's beacon block for that slot's epoch, as in {@code
+   * record_payload_inclusion_list_satisfaction}. {@code state} must be the beacon block's state at
+   * {@code slot}, so its block roots cover the dependent slot.
+   */
+  private SlotAndBlockRoot getPayloadInclusionListKey(final BeaconState state, final UInt64 slot) {
+    final UInt64 inclusionListSlot = slot.minusMinZero(UInt64.ONE);
+    return new SlotAndBlockRoot(
+        inclusionListSlot,
+        ShufflingDependentRootUtil.getShufflingDependentRoot(spec, state, inclusionListSlot));
   }
 
   private Optional<Bytes32> getShufflingDependentRoot(

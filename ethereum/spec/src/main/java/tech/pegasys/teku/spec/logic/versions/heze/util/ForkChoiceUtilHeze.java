@@ -13,11 +13,10 @@
 
 package tech.pegasys.teku.spec.logic.versions.heze.util;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfigHeze;
+import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionList;
 import tech.pegasys.teku.spec.datastructures.forkchoice.InclusionListStore;
 import tech.pegasys.teku.spec.logic.versions.gloas.block.BlockProcessorGloas;
@@ -59,13 +58,7 @@ public class ForkChoiceUtilHeze extends ForkChoiceUtilGloas {
 
   @Override
   public Optional<List<InclusionList>> getInclusionListsForPayloadValidation(
-      final InclusionListStore inclusionListStore, final UInt64 slot) {
-    return Optional.of(
-        inclusionListStore
-            .getInclusionLists(slot.minusMinZero(UInt64.ONE))
-            .orElse(Collections.emptyList())
-            .stream()
-            .map(entry -> entry.signedInclusionList().getMessage())
-            .toList());
+      final InclusionListStore inclusionListStore, final SlotAndBlockRoot inclusionListKey) {
+    return Optional.of(inclusionListStore.getTimelyInclusionLists(inclusionListKey));
   }
 }

@@ -16,7 +16,6 @@ package tech.pegasys.teku.spec.datastructures.forkchoice;
 import static com.google.common.base.Preconditions.checkArgument;
 
 import it.unimi.dsi.fastutil.ints.IntList;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -64,14 +63,10 @@ public class InclusionListStore {
         return;
       }
 
+      // Mark the validator as an equivocator if it published a different inclusion list. Either
+      // way the first message and its timeliness are retained.
       final InclusionListEntry storedEntry = inclusionLists.get(validatorIndex);
-      // Retain the first message, but let an identical timely duplicate upgrade its timeliness.
-      if (storedEntry.signedInclusionList().getMessage().equals(inclusionList)) {
-        if (timely && !storedEntry.timely()) {
-          inclusionLists.put(
-              validatorIndex, new InclusionListEntry(storedEntry.signedInclusionList(), true));
-        }
-      } else {
+      if (!storedEntry.signedInclusionList().getMessage().equals(inclusionList)) {
         equivocatedValidatorIndicesByKey
             .computeIfAbsent(key, __ -> new HashSet<>())
             .add(validatorIndex);
@@ -91,25 +86,17 @@ public class InclusionListStore {
     }
   }
 
-  /** Returns timely entries from non-equivocating validators for the given slot. */
-  public Optional<List<InclusionListEntry>> getInclusionLists(final UInt64 slot) {
+  /** Returns the timely inclusion lists from non-equivocating validators for the given key. */
+  public List<InclusionList> getTimelyInclusionLists(final SlotAndBlockRoot key) {
     readLock.lock();
     try {
-      final List<InclusionListEntry> inclusionLists = new ArrayList<>();
-      synchronized (inclusionListsByKey) {
-        for (final var entry : inclusionListsByKey.entrySet()) {
-          if (entry.getKey().getSlot().equals(slot)) {
-            final Set<UInt64> equivocators =
-                equivocatedValidatorIndicesByKey.getOrDefault(entry.getKey(), Set.of());
-            entry.getValue().entrySet().stream()
-                .filter(validatorEntry -> !equivocators.contains(validatorEntry.getKey()))
-                .map(Map.Entry::getValue)
-                .filter(InclusionListEntry::timely)
-                .forEach(inclusionLists::add);
-          }
-        }
-      }
-      return Optional.of(List.copyOf(inclusionLists));
+      final Set<UInt64> equivocators = equivocatedValidatorIndicesByKey.getOrDefault(key, Set.of());
+      return inclusionListsByKey.getOrDefault(key, Map.of()).entrySet().stream()
+          .filter(entry -> !equivocators.contains(entry.getKey()))
+          .map(Map.Entry::getValue)
+          .filter(InclusionListEntry::timely)
+          .map(entry -> entry.signedInclusionList().getMessage())
+          .toList();
     } finally {
       readLock.unlock();
     }

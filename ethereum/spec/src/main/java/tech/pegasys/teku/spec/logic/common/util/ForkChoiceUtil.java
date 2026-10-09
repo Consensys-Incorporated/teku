@@ -839,8 +839,15 @@ public class ForkChoiceUtil {
     return Optional.empty();
   }
 
+  /**
+   * The inclusion lists a payload must satisfy, as used by {@code
+   * record_payload_inclusion_list_satisfaction}.
+   *
+   * @param inclusionListKey the previous slot and the shuffling dependent root of the payload's
+   *     beacon block for that slot's epoch
+   */
   public Optional<List<InclusionList>> getInclusionListsForPayloadValidation(
-      final InclusionListStore inclusionListStore, final UInt64 slot) {
+      final InclusionListStore inclusionListStore, final SlotAndBlockRoot inclusionListKey) {
     return Optional.empty();
   }
 

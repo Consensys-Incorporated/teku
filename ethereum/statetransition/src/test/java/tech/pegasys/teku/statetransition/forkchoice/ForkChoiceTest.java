@@ -86,6 +86,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestat
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
+import tech.pegasys.teku.spec.datastructures.execution.NewPayloadRequest;
 import tech.pegasys.teku.spec.datastructures.execution.PowBlock;
 import tech.pegasys.teku.spec.datastructures.execution.Transaction;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionList;
@@ -1892,6 +1893,67 @@ class ForkChoiceTest {
   }
 
   @Test
+  void onExecutionPayloadEnvelope_shouldOnlyUseTimelyInclusionListsForBlockDependentRoot() {
+    setupWithSpec(
+        TestSpecFactory.createMinimalHeze(
+            builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
+    assertThat(forkChoice.applyGenesisExecutionPayloadForGloas()).isCompleted();
+
+    final SignedBlockAndState targetBlock = chainBuilder.generateBlockAtSlot(ONE);
+    importBlock(targetBlock);
+
+    // Inclusion lists for the previous slot: the block's shuffling dependent root for epoch 0 is
+    // the genesis block
+    final UInt64 inclusionListSlot = ZERO;
+    final Bytes32 dependentRoot = chainBuilder.getBlockAtSlot(ZERO).getRoot();
+    final Transaction expectedTransaction = inclusionListTransaction(Bytes.of(1));
+    final Transaction otherRootTransaction = inclusionListTransaction(Bytes.of(2));
+    final Transaction untimelyTransaction = inclusionListTransaction(Bytes.of(3));
+    inclusionListStore.processInclusionList(
+        signedInclusionList(inclusionListSlot, ZERO, dependentRoot, expectedTransaction), true);
+    inclusionListStore.processInclusionList(
+        signedInclusionList(
+            inclusionListSlot, ONE, dataStructureUtil.randomBytes32(), otherRootTransaction),
+        true);
+    inclusionListStore.processInclusionList(
+        signedInclusionList(
+            inclusionListSlot, UInt64.valueOf(2), dependentRoot, untimelyTransaction),
+        false);
+
+    executionLayer = spy(executionLayer);
+    importPayload(targetBlock);
+
+    final ArgumentCaptor<NewPayloadRequest> newPayloadRequest =
+        ArgumentCaptor.forClass(NewPayloadRequest.class);
+    verify(executionLayer).engineNewPayload(newPayloadRequest.capture(), any());
+    assertThat(newPayloadRequest.getValue().getInclusionList())
+        .hasValue(List.of(expectedTransaction));
+  }
+
+  private Transaction inclusionListTransaction(final Bytes transactionBytes) {
+    return SchemaDefinitionsHeze.required(spec.getGenesisSchemaDefinitions())
+        .getExecutionPayloadSchema()
+        .getTransactionSchema()
+        .fromBytes(transactionBytes);
+  }
+
+  private SignedInclusionList signedInclusionList(
+      final UInt64 slot,
+      final UInt64 validatorIndex,
+      final Bytes32 dependentRoot,
+      final Transaction transaction) {
+    final SchemaDefinitionsHeze schemaDefinitions =
+        SchemaDefinitionsHeze.required(spec.getGenesisSchemaDefinitions());
+    return schemaDefinitions
+        .getSignedInclusionListSchema()
+        .create(
+            schemaDefinitions
+                .getInclusionListSchema()
+                .create(slot, validatorIndex, dependentRoot, List.of(transaction)),
+            dataStructureUtil.randomSignature());
+  }
+
+  @Test
   void onForkChoiceUpdatedResult_shouldRecordDelayedUnsatisfiedInclusionListResult() {
     setupWithSpec(
         TestSpecFactory.createMinimalHeze(
@@ -1953,7 +2015,10 @@ class ForkChoiceTest {
     assertThat(result.isSuccessful()).isFalse();
     assertThat(result.getFailureReason())
         .contains(InclusionListImportResult.FailureReason.EMPTY_TRANSACTION);
-    assertThat(inclusionListStore.getInclusionLists(ZERO).orElseThrow()).isEmpty();
+    assertThat(
+            inclusionListStore.getInclusionLists(
+                new SlotAndBlockRoot(ZERO, inclusionList.getDependentRoot())))
+        .isEmpty();
   }
 
   @Test
@@ -1987,7 +2052,10 @@ class ForkChoiceTest {
     assertThat(result.isSuccessful()).isFalse();
     assertThat(result.getFailureReason())
         .contains(InclusionListImportResult.FailureReason.TRANSACTIONS_SIZE_EXCEEDS_LIMIT);
-    assertThat(inclusionListStore.getInclusionLists(ZERO).orElseThrow()).isEmpty();
+    assertThat(
+            inclusionListStore.getInclusionLists(
+                new SlotAndBlockRoot(ZERO, inclusionList.getDependentRoot())))
+        .isEmpty();
   }
 
   @Test
