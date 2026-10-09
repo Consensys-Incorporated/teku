@@ -107,10 +107,9 @@ jobs:
           echo "Creating buildVersion: ${{ steps.jdkDetails.outputs.buildVersion }}"
           echo "Creating dockertags: ${{ steps.jdkDetails.outputs.dockertags }}"
           # tree build/docker-teku/
-      # v4.6.0
       # Docker Hub OIDC: short-lived push token issued to the publish environment, no stored password.
       - name: Login to Docker Hub
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         env:
           DOCKERHUB_OIDC_CONNECTIONID: ${{ vars.DOCKERHUB_OIDC_CONNECTIONID }}
           # Login to push takes ~3m10s; default token lifetime is 5 min.
@@ -145,9 +144,8 @@ jobs:
       id-token: write
     environment: publish
     steps:
-      # v4.6.0
       - name: Login to Docker Hub
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         env:
           DOCKERHUB_OIDC_CONNECTIONID: ${{ vars.DOCKERHUB_OIDC_CONNECTIONID }}
         with:
