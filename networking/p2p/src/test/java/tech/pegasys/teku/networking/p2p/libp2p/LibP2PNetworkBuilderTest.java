@@ -26,6 +26,8 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.util.List;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -33,13 +35,16 @@ import tech.pegasys.teku.infrastructure.async.DelayedExecutorAsyncRunner;
 import tech.pegasys.teku.infrastructure.async.Waiter;
 import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.networking.p2p.connection.PeerPools;
+import tech.pegasys.teku.networking.p2p.discovery.DiscoveryPeer;
 import tech.pegasys.teku.networking.p2p.network.P2PNetwork;
+import tech.pegasys.teku.networking.p2p.network.PeerAddress;
 import tech.pegasys.teku.networking.p2p.network.config.NetworkConfig;
 import tech.pegasys.teku.networking.p2p.peer.NodeId;
 import tech.pegasys.teku.networking.p2p.peer.Peer;
 import tech.pegasys.teku.networking.p2p.reputation.DefaultReputationManager;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.config.Constants;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
 
 class LibP2PNetworkBuilderTest {
 
@@ -230,6 +235,41 @@ class LibP2PNetworkBuilderTest {
     } finally {
       Waiter.waitFor(network.stop());
     }
+  }
+
+  @Test
+  void createPeerAddress_quicOnlyNetworkHasNoAddressForTcpOnlyPeer() throws Exception {
+    final NetworkConfig config = singleStackConfig().quicEnabled(true).tcpEnabled(false).build();
+    final P2PNetwork<Peer> network = createNetwork(config);
+
+    assertThat(network.createPeerAddress(tcpOnlyDiscoveryPeer())).isEmpty();
+  }
+
+  @Test
+  void createPeerAddress_tcpAndQuicNetworkDialsTcpOnlyPeerOverTcp() throws Exception {
+    final NetworkConfig config = singleStackConfig().quicEnabled(true).build();
+    final P2PNetwork<Peer> network = createNetwork(config);
+
+    assertThat(network.createPeerAddress(tcpOnlyDiscoveryPeer()))
+        .map(PeerAddress::toExternalForm)
+        .contains(
+            "/ip4/127.0.0.1/tcp/9000/p2p/16Uiu2HAmR4wQRGWgCNy5uzx7HfuV59Q6X1MVzBRmvreuHgEQcCnF");
+  }
+
+  private static DiscoveryPeer tcpOnlyDiscoveryPeer() throws Exception {
+    final SchemaDefinitions schemaDefinitions =
+        TestSpecFactory.createMinimalPhase0().getGenesisSchemaDefinitions();
+    return new DiscoveryPeer(
+        Bytes.fromHexString("0x03B86ED9F747A7FA99963F39E3B176B45E9E863108A2D145EA3A4E76D8D0935194"),
+        Bytes32.ZERO,
+        Optional.of(
+            new InetSocketAddress(InetAddress.getByAddress(new byte[] {127, 0, 0, 1}), 9000)),
+        Optional.empty(),
+        Optional.empty(),
+        schemaDefinitions.getAttnetsENRFieldSchema().getDefault(),
+        schemaDefinitions.getSyncnetsENRFieldSchema().getDefault(),
+        Optional.empty(),
+        Optional.empty());
   }
 
   private static List<String> asStrings(final List<Multiaddr> addresses) {

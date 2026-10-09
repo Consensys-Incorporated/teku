@@ -129,6 +129,7 @@ public class LibP2PNetworkBuilder {
         advertisedAddresses,
         gossipNetwork,
         listenPorts,
+        config.isTcpEnabled(),
         config.isQuicEnabled());
   }
 

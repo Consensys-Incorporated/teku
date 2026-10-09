@@ -88,7 +88,7 @@ class MultiaddrUtilTest {
             SYNC_COMMITTEE_SUBNETS,
             Optional.empty(),
             Optional.empty());
-    final Multiaddr result = MultiaddrUtil.fromDiscoveryPeer(peer, true).orElseThrow();
+    final Multiaddr result = MultiaddrUtil.fromDiscoveryPeer(peer, true, true).orElseThrow();
     assertThat(result).isEqualTo(Multiaddr.fromString("/ip4/123.34.58.22/tcp/5883/p2p/" + PEER_ID));
     assertThatComponent(result, Protocol.IP4).isEqualTo(ipAddress);
     assertThatComponent(result, Protocol.TCP).isEqualTo(Protocol.TCP.addressToBytes("5883"));
@@ -110,7 +110,7 @@ class MultiaddrUtilTest {
             SYNC_COMMITTEE_SUBNETS,
             Optional.empty(),
             Optional.empty());
-    final Multiaddr result = MultiaddrUtil.fromDiscoveryPeer(peer, true).orElseThrow();
+    final Multiaddr result = MultiaddrUtil.fromDiscoveryPeer(peer, true, true).orElseThrow();
     assertThat(result)
         .isEqualTo(Multiaddr.fromString("/ip6/3300:4:5000:780:0:12:0:1/tcp/5883/p2p/" + PEER_ID));
     assertThatComponent(result, Protocol.IP6).isEqualTo(ipAddress);
@@ -136,7 +136,7 @@ class MultiaddrUtilTest {
     final Multiaddr expectedMultiAddr =
         Multiaddr.fromString(
             "/ip4/127.0.0.1/tcp/9000/p2p/16Uiu2HAmR4wQRGWgCNy5uzx7HfuV59Q6X1MVzBRmvreuHgEQcCnF");
-    assertThat(MultiaddrUtil.fromDiscoveryPeer(peer, true).orElseThrow())
+    assertThat(MultiaddrUtil.fromDiscoveryPeer(peer, true, true).orElseThrow())
         .isEqualTo(expectedMultiAddr);
   }
 
@@ -157,7 +157,7 @@ class MultiaddrUtilTest {
             SYNC_COMMITTEE_SUBNETS,
             Optional.empty(),
             Optional.empty());
-    final Multiaddr result = MultiaddrUtil.fromDiscoveryPeer(peer, true).orElseThrow();
+    final Multiaddr result = MultiaddrUtil.fromDiscoveryPeer(peer, true, true).orElseThrow();
     assertThat(result)
         .isEqualTo(
             Multiaddr.fromString(
@@ -182,7 +182,7 @@ class MultiaddrUtilTest {
             Optional.empty(),
             Optional.empty());
     // The peer advertises QUIC, but this node has QUIC disabled so it must dial over TCP.
-    final Multiaddr result = MultiaddrUtil.fromDiscoveryPeer(peer, false).orElseThrow();
+    final Multiaddr result = MultiaddrUtil.fromDiscoveryPeer(peer, true, false).orElseThrow();
     assertThat(result)
         .isEqualTo(
             Multiaddr.fromString(
@@ -205,7 +205,7 @@ class MultiaddrUtilTest {
             SYNC_COMMITTEE_SUBNETS,
             Optional.empty(),
             Optional.empty());
-    final Multiaddr result = MultiaddrUtil.fromDiscoveryPeer(peer, true).orElseThrow();
+    final Multiaddr result = MultiaddrUtil.fromDiscoveryPeer(peer, true, true).orElseThrow();
     assertThat(result)
         .isEqualTo(
             Multiaddr.fromString(
@@ -229,7 +229,27 @@ class MultiaddrUtilTest {
             Optional.empty(),
             Optional.empty());
     // The peer can only be reached over QUIC, which this node has disabled.
-    assertThat(MultiaddrUtil.fromDiscoveryPeer(peer, false)).isEmpty();
+    assertThat(MultiaddrUtil.fromDiscoveryPeer(peer, true, false)).isEmpty();
+  }
+
+  @Test
+  public void fromDiscoveryPeer_shouldReturnEmptyForTcpOnlyPeerWhenLocalNodeTcpDisabled()
+      throws Exception {
+    final DiscoveryPeer peer =
+        new DiscoveryPeer(
+            Bytes.fromHexString(
+                "0x03B86ED9F747A7FA99963F39E3B176B45E9E863108A2D145EA3A4E76D8D0935194"),
+            Bytes32.ZERO,
+            Optional.of(
+                new InetSocketAddress(InetAddress.getByAddress(new byte[] {127, 0, 0, 1}), 9000)),
+            Optional.empty(),
+            ENR_FORK_ID,
+            PERSISTENT_ATTESTATION_SUBNETS,
+            SYNC_COMMITTEE_SUBNETS,
+            Optional.empty(),
+            Optional.empty());
+    // The peer can only be reached over TCP, which this node has disabled.
+    assertThat(MultiaddrUtil.fromDiscoveryPeer(peer, false, true)).isEmpty();
   }
 
   @Test

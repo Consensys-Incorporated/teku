@@ -36,12 +36,13 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
-import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
+import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
+import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.network.p2p.peer.StubPeer;
 import tech.pegasys.teku.networking.p2p.discovery.DiscoveryPeer;
@@ -72,6 +73,7 @@ class ConnectionManagerTest {
   private final P2PNetwork<Peer> network = mock(P2PNetwork.class);
 
   private final PeerPools peerPools = new PeerPools();
+  private final StubMetricsSystem metricsSystem = new StubMetricsSystem();
 
   private final DiscoveryService discoveryService = mock(DiscoveryService.class);
   private final PeerSelectionStrategy peerSelectionStrategy = mock(PeerSelectionStrategy.class);
@@ -81,6 +83,12 @@ class ConnectionManagerTest {
   @BeforeEach
   public void setUp() {
     when(discoveryService.searchForPeers()).thenReturn(SafeFuture.completedFuture(emptyList()));
+    when(network.createPeerAddress(any(DiscoveryPeer.class)))
+        .thenAnswer(
+            invocation -> {
+              final DiscoveryPeer peer = invocation.getArgument(0);
+              return Optional.of(new PeerAddress(new MockNodeId(peer.getPublicKey())));
+            });
     when(peerSelectionStrategy.selectPeersToConnect(eq(network), any(), any()))
         .thenAnswer(
             invocation -> {
@@ -328,6 +336,24 @@ class ConnectionManagerTest {
     asyncRunner.executeDueActionsRepeatedly();
 
     verify(network, never()).connect(any());
+  }
+
+  @Test
+  public void shouldNotOfferCandidateWithNoDialableAddressToSelection() {
+    final ConnectionManager manager = createManager();
+    when(discoveryService.streamKnownPeers())
+        .thenReturn(Stream.of(DISCOVERY_PEER1, DISCOVERY_PEER2));
+    when(network.createPeerAddress(DISCOVERY_PEER1)).thenReturn(Optional.empty());
+    when(network.connect(any(PeerAddress.class))).thenReturn(new SafeFuture<>());
+
+    manager.start().join();
+    asyncRunner.executeDueActionsRepeatedly();
+
+    verify(network).connect(PEER2);
+    verify(network, never()).connect(PEER1);
+    assertThat(candidateCount("considered")).isEqualTo(2);
+    assertThat(candidateCount("no_dialable_address")).isEqualTo(1);
+    assertThat(candidateCount("eligible")).isEqualTo(1);
   }
 
   @Test
@@ -690,9 +716,14 @@ class ConnectionManagerTest {
     return captor.getValue();
   }
 
+  private long candidateCount(final String result) {
+    return metricsSystem.getLabelledCounterValue(
+        TekuMetricCategory.NETWORK, "peer_candidate_count_total", result);
+  }
+
   private ConnectionManager createManager(final PeerAddress... peers) {
     return new ConnectionManager(
-        new NoOpMetricsSystem(),
+        metricsSystem,
         discoveryService,
         asyncRunner,
         timeProvider,

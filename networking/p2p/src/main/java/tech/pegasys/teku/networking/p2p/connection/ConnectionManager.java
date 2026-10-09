@@ -64,6 +64,9 @@ public class ConnectionManager extends Service {
   private final Counter attemptedConnectionCounter;
   private final Counter successfulConnectionCounter;
   private final Counter failedConnectionCounter;
+  private final Counter consideredCandidateCounter;
+  private final Counter noDialableAddressCandidateCounter;
+  private final Counter eligibleCandidateCounter;
   private final PeerPools peerPools;
   private final Collection<Predicate<DiscoveryPeer>> peerPredicates = new CopyOnWriteArrayList<>();
 
@@ -100,6 +103,15 @@ public class ConnectionManager extends Service {
     attemptedConnectionCounter = connectionAttemptCounter.labels("attempted");
     successfulConnectionCounter = connectionAttemptCounter.labels("successful");
     failedConnectionCounter = connectionAttemptCounter.labels("failed");
+    final LabelledMetric<Counter> candidateCounter =
+        metricsSystem.createLabelledCounter(
+            TekuMetricCategory.NETWORK,
+            "peer_candidate_count_total",
+            "Total number of discovered peers considered by each peer search, by result",
+            "result");
+    consideredCandidateCounter = candidateCounter.labels("considered");
+    noDialableAddressCandidateCounter = candidateCounter.labels("no_dialable_address");
+    eligibleCandidateCounter = candidateCounter.labels("eligible");
     this.peerPools = peerPools;
   }
 
@@ -176,14 +188,35 @@ public class ConnectionManager extends Service {
   private void connectToBestPeers(final Collection<DiscoveryPeer> additionalPeersToConsider) {
     peerSelectionStrategy
         .selectPeersToConnect(
-            network,
-            peerPools,
-            () ->
-                Stream.concat(
-                        additionalPeersToConsider.stream(), discoveryService.streamKnownPeers())
-                    .filter(this::isPeerValid)
-                    .collect(Collectors.toSet()))
+            network, peerPools, () -> dialableCandidates(additionalPeersToConsider))
         .forEach(this::attemptConnection);
+  }
+
+  /**
+   * Narrows the discovered peers to the ones this node could actually dial. A candidate that
+   * advertises no address for a transport enabled locally would waste a selection slot and fail
+   * immediately, so it is dropped here, before selection, and counted as such.
+   */
+  private Set<DiscoveryPeer> dialableCandidates(
+      final Collection<DiscoveryPeer> additionalPeersToConsider) {
+    final Set<DiscoveryPeer> candidates =
+        Stream.concat(additionalPeersToConsider.stream(), discoveryService.streamKnownPeers())
+            .filter(this::isPeerValid)
+            .collect(Collectors.toSet());
+    final Set<DiscoveryPeer> dialable =
+        candidates.stream()
+            .filter(candidate -> network.createPeerAddress(candidate).isPresent())
+            .collect(Collectors.toSet());
+    final int excluded = candidates.size() - dialable.size();
+    consideredCandidateCounter.inc(candidates.size());
+    noDialableAddressCandidateCounter.inc(excluded);
+    eligibleCandidateCounter.inc(dialable.size());
+    LOG.debug(
+        "Peer search considered {} candidates, excluded {} with no address this node can dial, {} eligible",
+        candidates.size(),
+        excluded,
+        dialable.size());
+    return dialable;
   }
 
   private SafeFuture<Void> searchForPeers() {
