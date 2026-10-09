@@ -19,6 +19,7 @@ import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
@@ -101,11 +102,25 @@ public class LocalSlashingProtectorConcurrentAccess implements SlashingProtector
   @Override
   public Optional<String> importSigningRecord(
       final BLSPublicKey validator, final Supplier<Optional<String>> recordUpdate) {
-    final LocalSlashingProtectionRecord record = records.get(validator);
-    if (record == null) {
-      // nothing is cached, so the updated record is read from file when the validator next signs
-      return recordUpdate.get();
-    }
+    final AtomicReference<Optional<String>> result = new AtomicReference<>(Optional.empty());
+    // compute holds the map's lock for this validator, so a signer with no cached record cannot
+    // load the pre-import file while the update runs. The lock order is always map, then record.
+    records.compute(
+        validator,
+        (__, record) -> {
+          result.set(
+              record == null
+                  ? recordUpdate.get()
+                  : updateCachedRecord(validator, record, recordUpdate));
+          return record;
+        });
+    return result.get();
+  }
+
+  private Optional<String> updateCachedRecord(
+      final BLSPublicKey validator,
+      final LocalSlashingProtectionRecord record,
+      final Supplier<Optional<String>> recordUpdate) {
     record.lock();
     try {
       final Optional<String> error = recordUpdate.get();
