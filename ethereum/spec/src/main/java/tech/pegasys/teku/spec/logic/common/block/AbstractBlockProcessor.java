@@ -504,19 +504,12 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
                 "process_proposer_slashings: %s",
                 invalidReason.map(OperationInvalidReason::describe).orElse(""));
 
-            removeBuilderPendingPayment(proposerSlashing, state);
-
             beaconStateMutators.slashValidator(
                 state,
                 proposerSlashing.getHeader1().getMessage().getProposerIndex().intValue(),
                 validatorExitContextSupplier);
           }
         });
-  }
-
-  protected void removeBuilderPendingPayment(
-      final ProposerSlashing proposerSlashing, final MutableBeaconState state) {
-    // NO-OP until Gloas
   }
 
   protected BlockValidationResult verifyProposerSlashings(

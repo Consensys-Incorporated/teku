@@ -211,6 +211,70 @@ public class BeaconStateAccessorsTest {
     assertThat(fraction).isEqualTo(totalActiveBalancePerSlot.dividedBy(100));
   }
 
+  @Test
+  void calculateCommitteeFraction_shouldExcludeSlashedValidators() {
+    final BeaconState state = stateWithOneSlashedOfFourValidators();
+    final UInt64 unslashedBalancePerSlot =
+        UInt64.THIRTY_TWO_ETH.times(3).dividedBy(specConfig.getSlotsPerEpoch());
+
+    assertThat(beaconStateAccessors.getTotalActiveUnslashedBalance(state))
+        .isEqualTo(UInt64.THIRTY_TWO_ETH.times(3));
+    assertThat(beaconStateAccessors.calculateCommitteeFraction(state, 100))
+        .isEqualTo(unslashedBalancePerSlot);
+  }
+
+  @Test
+  void getProposerBoostAmount_shouldExcludeSlashedValidators() {
+    final BeaconState state = stateWithOneSlashedOfFourValidators();
+    final UInt64 unslashedBalancePerSlot =
+        UInt64.THIRTY_TWO_ETH.times(3).dividedBy(specConfig.getSlotsPerEpoch());
+
+    assertThat(beaconStateAccessors.getProposerBoostAmount(state))
+        .isEqualTo(
+            unslashedBalancePerSlot.times(specConfig.getProposerScoreBoost()).dividedBy(100));
+  }
+
+  @Test
+  void getTotalActiveUnslashedBalance_shouldExcludeValidatorSlashedAfterCacheWasPopulated() {
+    final BeaconState state =
+        new BeaconStateTestBuilder(dataStructureUtil)
+            .activeValidator(UInt64.THIRTY_TWO_ETH)
+            .activeValidator(UInt64.THIRTY_TWO_ETH)
+            .build();
+    assertThat(beaconStateAccessors.getTotalActiveUnslashedBalance(state))
+        .isEqualTo(UInt64.THIRTY_TWO_ETH.times(2));
+
+    final BeaconStateMutators beaconStateMutators = genesisSpec.beaconStateMutators();
+    final BeaconState slashedState =
+        state.updated(
+            mutableState ->
+                beaconStateMutators.slashValidator(
+                    mutableState,
+                    1,
+                    beaconStateMutators.createValidatorExitContextSupplier(mutableState)));
+
+    assertThat(beaconStateAccessors.getTotalActiveUnslashedBalance(slashedState))
+        .isEqualTo(UInt64.THIRTY_TWO_ETH);
+    assertThat(beaconStateAccessors.getTotalActiveUnslashedBalance(state))
+        .isEqualTo(UInt64.THIRTY_TWO_ETH.times(2));
+  }
+
+  private BeaconState stateWithOneSlashedOfFourValidators() {
+    return new BeaconStateTestBuilder(dataStructureUtil)
+        .activeValidator(UInt64.THIRTY_TWO_ETH)
+        .activeValidator(UInt64.THIRTY_TWO_ETH)
+        .activeValidator(UInt64.THIRTY_TWO_ETH)
+        .validator(
+            dataStructureUtil
+                .validatorBuilder()
+                .slashed(true)
+                .effectiveBalance(UInt64.THIRTY_TWO_ETH)
+                .activationEpoch(UInt64.ZERO)
+                .exitEpoch(SpecConfig.FAR_FUTURE_EPOCH)
+                .build())
+        .build();
+  }
+
   private BeaconState createBeaconState() {
     return new BeaconStateTestBuilder(dataStructureUtil)
         .forkVersion(specConfig.getGenesisForkVersion())

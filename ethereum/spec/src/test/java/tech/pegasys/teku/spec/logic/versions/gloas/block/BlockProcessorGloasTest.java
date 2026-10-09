@@ -36,15 +36,12 @@ import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderExi
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.IndexedAttestationLight;
-import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateSchemaGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
-import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPayment;
-import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPaymentSchema;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingWithdrawal;
 import tech.pegasys.teku.spec.logic.common.block.AbstractBlockProcessor;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateMutators.ValidatorExitContext;
@@ -65,42 +62,6 @@ class BlockProcessorGloasTest {
 
   private BlockProcessorGloas blockProcessor() {
     return (BlockProcessorGloas) spec.getGenesisSpec().getBlockProcessor();
-  }
-
-  @Test
-  void removeBuilderPendingPayment_clearsPaymentWhenSlashedValidatorIsThePaymentProposer() {
-    // header slot in the current epoch (epoch 2)
-    final UInt64 headerSlot = UInt64.valueOf(2L * slotsPerEpoch + 1);
-    final UInt64 proposerIndex = UInt64.valueOf(3);
-    final int paymentIndex = slotsPerEpoch + headerSlot.mod(slotsPerEpoch).intValue();
-
-    final BeaconState state =
-        stateWithPaymentAt(headerSlot, paymentIndex, paymentWithProposer(proposerIndex));
-    final ProposerSlashing slashing =
-        dataStructureUtil.randomProposerSlashing(headerSlot, proposerIndex);
-
-    final BeaconState result =
-        state.updated(mutable -> blockProcessor().removeBuilderPendingPayment(slashing, mutable));
-
-    assertThat(builderPaymentAt(result, paymentIndex)).isEqualTo(paymentSchema().getDefault());
-  }
-
-  @Test
-  void removeBuilderPendingPayment_keepsPaymentWhenSlashedValidatorIsNotThePaymentProposer() {
-    final UInt64 headerSlot = UInt64.valueOf(2L * slotsPerEpoch + 1);
-    final UInt64 paymentProposer = UInt64.valueOf(3);
-    final UInt64 slashedProposer = UInt64.valueOf(7);
-    final int paymentIndex = slotsPerEpoch + headerSlot.mod(slotsPerEpoch).intValue();
-
-    final BuilderPendingPayment payment = paymentWithProposer(paymentProposer);
-    final BeaconState state = stateWithPaymentAt(headerSlot, paymentIndex, payment);
-    final ProposerSlashing slashing =
-        dataStructureUtil.randomProposerSlashing(headerSlot, slashedProposer);
-
-    final BeaconState result =
-        state.updated(mutable -> blockProcessor().removeBuilderPendingPayment(slashing, mutable));
-
-    assertThat(builderPaymentAt(result, paymentIndex)).isEqualTo(payment);
   }
 
   @Test
@@ -304,34 +265,4 @@ class BlockProcessorGloasTest {
       Attestation attestation,
       AbstractBlockProcessor.IndexedAttestationProvider indexedAttestationProvider,
       UInt64 parentSlot) {}
-
-  private BeaconState stateWithPaymentAt(
-      final UInt64 slot, final int paymentIndex, final BuilderPendingPayment payment) {
-    return dataStructureUtil
-        .randomBeaconState(slot)
-        .updated(
-            mutable ->
-                MutableBeaconStateGloas.required(mutable)
-                    .getBuilderPendingPayments()
-                    .set(paymentIndex, payment));
-  }
-
-  private BuilderPendingPayment paymentWithProposer(final UInt64 proposerIndex) {
-    return paymentSchema()
-        .create(
-            UInt64.valueOf(1000),
-            dataStructureUtil.randomBuilderPendingWithdrawal(),
-            proposerIndex);
-  }
-
-  private BuilderPendingPayment builderPaymentAt(final BeaconState state, final int index) {
-    return BeaconStateGloas.required(state).getBuilderPendingPayments().get(index);
-  }
-
-  private BuilderPendingPaymentSchema paymentSchema() {
-    return spec.getGenesisSchemaDefinitions()
-        .toVersionGloas()
-        .orElseThrow()
-        .getBuilderPendingPaymentSchema();
-  }
 }
