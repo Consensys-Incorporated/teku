@@ -267,6 +267,34 @@
             increase_balance(state, validator_index, deposit.amount)
     </spec>
 
+- name: apply_pending_deposit#heze
+  sources:
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/heze/statetransition/epoch/EpochProcessorHeze.java
+      search: public void applyPendingDeposits(
+  spec: |
+    <spec fn="apply_pending_deposit" fork="heze" hash="bdef283e">
+    def apply_pending_deposit(state: BeaconState, deposit: PendingDeposit) -> None:
+        """
+        Applies ``deposit`` to the ``state`` without creating validators with BLS withdrawal credentials.
+        """
+        validator_pubkeys = [validator.pubkey for validator in state.validators]
+        if deposit.pubkey not in validator_pubkeys:
+            # [New in Heze:EIP8365]
+            # Do not create validators with BLS withdrawal credentials
+            if deposit.withdrawal_credentials[:1] == BLS_WITHDRAWAL_PREFIX:
+                return
+            # Verify the deposit signature (proof of possession) which is not checked by the deposit contract
+            if is_valid_deposit_signature(
+                deposit.pubkey, deposit.withdrawal_credentials, deposit.amount, deposit.signature
+            ):
+                add_validator_to_registry(
+                    state, deposit.pubkey, deposit.withdrawal_credentials, deposit.amount
+                )
+        else:
+            validator_index = ValidatorIndex(validator_pubkeys.index(deposit.pubkey))
+            increase_balance(state, validator_index, deposit.amount)
+    </spec>
+
 - name: apply_withdrawals#capella
   sources:
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/capella/withdrawals/WithdrawalsHelpersCapella.java

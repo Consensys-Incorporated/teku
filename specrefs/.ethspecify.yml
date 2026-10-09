@@ -295,7 +295,6 @@ specrefs:
       - get_custody_column_bits#gloas
 
       # Not implemented: heze
-      - apply_pending_deposit#heze
       - get_forkchoice_store#heze
       - get_inclusion_list_bits#heze
       - get_inclusion_list_committee#heze
