@@ -33,7 +33,9 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
@@ -65,6 +67,22 @@ class BlobKzgCommitmentsProviderTest {
 
     assertThat(provider.getBlobKzgCommitments(block.getRoot()).join()).contains(commitments);
     verify(combinedChainDataClient, never()).getBlockByBlockRoot(block.getRoot());
+  }
+
+  @Test
+  void returnsStateOnlyCheckpointCommitmentsWithoutRequiringBlock() {
+    final BeaconStateGloas state =
+        BeaconStateGloas.required(dataStructureUtil.randomBeaconState(UInt64.valueOf(8)));
+    final AnchorPoint anchor = mock(AnchorPoint.class);
+    when(anchor.getRoot()).thenReturn(dataStructureUtil.randomBytes32());
+    when(anchor.getState()).thenReturn(state);
+    when(combinedChainDataClient.getLatestFinalized()).thenReturn(Optional.of(anchor));
+
+    assertThat(provider.getBlobKzgCommitments(anchor.getRoot()))
+        .isCompletedWithValue(
+            Optional.of(state.getLatestExecutionPayloadBid().getBlobKzgCommitments()));
+    assertThat(provider.getBlobKzgCommitments(dataStructureUtil.randomBytes32()))
+        .isCompletedWithValue(Optional.empty());
   }
 
   @Test

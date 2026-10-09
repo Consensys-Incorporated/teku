@@ -57,6 +57,7 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
     this.executionRequestsDataCodec = executionRequestsDataCodec;
   }
 
+  /** Accepts the block's post-state or a checkpoint state advanced through empty slots. */
   @Override
   public void verifyExecutionPayloadEnvelope(
       final SignedExecutionPayloadEnvelope signedEnvelope,
@@ -82,9 +83,10 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
       throw new ExecutionPayloadVerificationException(
           "Envelope parent beacon block root is not consistent with the latest beacon block parent root from the state");
     }
-    if (!envelope.getSlot().equals(state.getSlot())) {
+    // A trusted checkpoint can be advanced through empty slots after its latest block.
+    if (!envelope.getSlot().equals(state.getLatestBlockHeader().getSlot())) {
       throw new ExecutionPayloadVerificationException(
-          "Envelope slot is not consistent with the state slot");
+          "Envelope slot is not consistent with the latest beacon block slot");
     }
     final BeaconStateGloas stateGloas = BeaconStateGloas.required(state);
 
@@ -121,7 +123,7 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
     }
     if (!payload
         .getTimestamp()
-        .equals(miscHelpers.computeTimeAtSlot(state.getGenesisTime(), state.getSlot()))) {
+        .equals(miscHelpers.computeTimeAtSlot(state.getGenesisTime(), envelope.getSlot()))) {
       throw new ExecutionPayloadVerificationException(
           "Timestamp of the payload is not as expected");
     }
@@ -161,7 +163,7 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
         beaconStateAccessors.getDomain(
             state.getForkInfo(),
             Domain.BEACON_BUILDER,
-            miscHelpers.computeEpochAtSlot(state.getSlot()));
+            miscHelpers.computeEpochAtSlot(signedEnvelope.getSlot()));
     final Bytes signingRoot = miscHelpers.computeSigningRoot(signedEnvelope.getMessage(), domain);
     return signatureVerifier.verify(pubkey, signingRoot, signedEnvelope.getSignature());
   }

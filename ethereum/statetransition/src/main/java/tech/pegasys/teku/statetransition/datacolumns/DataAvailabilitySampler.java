@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
@@ -54,7 +55,8 @@ public interface DataAvailabilitySampler
         public void flush() {}
 
         @Override
-        public SamplingEligibilityStatus checkSamplingEligibility(final BeaconBlock block) {
+        public SamplingEligibilityStatus checkSamplingEligibility(
+            final UInt64 slot, final boolean hasBlobs) {
           return SamplingEligibilityStatus.NOT_REQUIRED_OLD_EPOCH;
         }
 
@@ -91,7 +93,13 @@ public interface DataAvailabilitySampler
    */
   void flush();
 
-  SamplingEligibilityStatus checkSamplingEligibility(BeaconBlock block);
+  default SamplingEligibilityStatus checkSamplingEligibility(final BeaconBlock block) {
+    return checkSamplingEligibility(
+        block.getSlot(),
+        !block.getBody().getOptionalBlobKzgCommitments().map(SszList::isEmpty).orElse(true));
+  }
+
+  SamplingEligibilityStatus checkSamplingEligibility(UInt64 slot, boolean hasBlobs);
 
   void onNewValidatedDataColumnSidecar(DataColumnSlotAndIdentifier columnId, RemoteOrigin origin);
 

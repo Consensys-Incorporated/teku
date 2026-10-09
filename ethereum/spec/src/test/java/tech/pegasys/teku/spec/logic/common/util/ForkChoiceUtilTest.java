@@ -379,9 +379,9 @@ class ForkChoiceUtilTest {
     final AvailabilityCheckerFactory<UInt64> dataColumnSidecarAvailabilityCheckerFactory =
         mock(AvailabilityCheckerFactory.class);
 
-    final SignedBeaconBlock block = mock(SignedBeaconBlock.class);
     final SignedExecutionPayloadEnvelope signedEnvelope =
         mock(SignedExecutionPayloadEnvelope.class);
+    final BeaconState state = mock(BeaconState.class);
 
     spec.reinitializeForTesting(
         blobSidecarAvailabilityCheckerFactory,
@@ -389,14 +389,14 @@ class ForkChoiceUtilTest {
         KZG.DISABLED);
 
     final AvailabilityChecker<?> availabilityChecker =
-        util.createAvailabilityCheckerOnExecutionPayloadEnvelope(block, signedEnvelope);
+        util.createAvailabilityCheckerOnExecutionPayloadEnvelope(state, signedEnvelope);
 
     switch (milestone) {
       case PHASE0, ALTAIR, BELLATRIX, CAPELLA, DENEB, ELECTRA, FULU ->
           assertThat(availabilityChecker).isSameAs(AvailabilityChecker.NOOP);
       case GLOAS, HEZE ->
           verify(dataColumnSidecarAvailabilityCheckerFactory)
-              .createAvailabilityChecker(block, signedEnvelope);
+              .createAvailabilityChecker(state, signedEnvelope);
       default -> throw new IllegalStateException("Unexpected milestone " + milestone);
     }
   }

@@ -19,7 +19,6 @@ import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.ethereum.events.SlotEventsChannel;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
-import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
@@ -46,7 +45,8 @@ public interface DasSamplerBasic extends DataAvailabilitySampler, SlotEventsChan
         }
 
         @Override
-        public SamplingEligibilityStatus checkSamplingEligibility(final BeaconBlock block) {
+        public SamplingEligibilityStatus checkSamplingEligibility(
+            final UInt64 slot, final boolean hasBlobs) {
           return SamplingEligibilityStatus.NOT_REQUIRED_NO_BLOBS;
         }
 

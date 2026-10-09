@@ -16,6 +16,8 @@ package tech.pegasys.teku.statetransition.forkchoice;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
@@ -29,9 +31,14 @@ import tech.pegasys.teku.infrastructure.async.DelayedExecutorAsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
 import tech.pegasys.teku.spec.logic.common.statetransition.availability.DataAndValidationResult;
+import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.datacolumns.DataAvailabilitySampler;
 import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.storage.store.UpdatableStore;
@@ -49,9 +56,9 @@ class DataColumnSidecarAvailabilityCheckerTest {
 
   @BeforeEach
   void setup() {
-    checker = new DataColumnSidecarAvailabilityChecker(das, spec, recentChainData, block);
     when(block.getMessage()).thenReturn(beaconBlock);
     when(block.getSlot()).thenReturn(UInt64.ONE);
+    checker = new DataColumnSidecarAvailabilityChecker(das, spec, recentChainData, block);
     when(spec.getSlotDurationMillis(any())).thenReturn(10_000);
     when(recentChainData.getCurrentSlot()).thenReturn(Optional.empty());
   }
@@ -64,6 +71,85 @@ class DataColumnSidecarAvailabilityCheckerTest {
     assertThat(checker.initiateDataAvailabilityCheck()).isTrue();
     assertThat(checker.getAvailabilityCheckResult().get())
         .isEqualTo(DataAndValidationResult.notRequired());
+  }
+
+  @Test
+  void shouldRespectNoopSamplerEligibilityForEnvelope() {
+    final DataStructureUtil data = new DataStructureUtil(TestSpecFactory.createMinimalGloas());
+    final BeaconState state = data.randomBeaconState(UInt64.valueOf(8));
+    final SignedExecutionPayloadEnvelope envelope = data.randomSignedExecutionPayloadEnvelope(8);
+    when(spec.isAvailabilityOfDataColumnSidecarsRequiredAtSlot(any(), any())).thenReturn(true);
+    final DataColumnSidecarAvailabilityChecker envelopeChecker =
+        new DataColumnSidecarAvailabilityChecker(
+            DataAvailabilitySampler.NOOP, spec, recentChainData, state, envelope);
+
+    envelopeChecker.initiateDataAvailabilityCheck();
+
+    assertThat(envelopeChecker.getAvailabilityCheckResult())
+        .isCompletedWithValue(DataAndValidationResult.notRequired());
+  }
+
+  @Test
+  void shouldWaitForEnvelopeColumnsWhenCommittedByState() {
+    final DataStructureUtil data = new DataStructureUtil(TestSpecFactory.createMinimalGloas());
+    final BeaconState state = data.randomBeaconState(UInt64.valueOf(8));
+    final SignedExecutionPayloadEnvelope envelope = data.randomSignedExecutionPayloadEnvelope(8);
+    final SafeFuture<List<UInt64>> columns = new SafeFuture<>();
+    when(das.checkSamplingEligibility(envelope.getSlot(), true))
+        .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.REQUIRED);
+    when(das.checkDataAvailability(envelope.getSlot(), envelope.getBeaconBlockRoot()))
+        .thenReturn(columns);
+    final DataColumnSidecarAvailabilityChecker envelopeChecker =
+        new DataColumnSidecarAvailabilityChecker(das, spec, recentChainData, state, envelope);
+
+    envelopeChecker.initiateDataAvailabilityCheck();
+    verify(das).checkSamplingEligibility(envelope.getSlot(), true);
+    assertThat(envelopeChecker.getAvailabilityCheckResult()).isNotDone();
+    columns.complete(List.of(UInt64.ONE));
+    assertThat(envelopeChecker.getAvailabilityCheckResult())
+        .isCompletedWithValue(DataAndValidationResult.validResult(List.of(UInt64.ONE)));
+  }
+
+  @Test
+  void shouldReturnNotRequiredForEnvelopeWithoutBlobCommitmentsInState() {
+    final DataStructureUtil data = new DataStructureUtil(TestSpecFactory.createMinimalGloas());
+    final BeaconState state =
+        data.randomBeaconState(UInt64.valueOf(8))
+            .updated(
+                mutableState ->
+                    MutableBeaconStateGloas.required(mutableState)
+                        .setLatestExecutionPayloadBid(
+                            data.randomSignedExecutionPayloadBidWithCommitments(
+                                    data.emptyBlobKzgCommitments())
+                                .getMessage()));
+    final SignedExecutionPayloadEnvelope envelope = data.randomSignedExecutionPayloadEnvelope(8);
+    when(das.checkSamplingEligibility(envelope.getSlot(), false))
+        .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.NOT_REQUIRED_NO_BLOBS);
+    final DataColumnSidecarAvailabilityChecker envelopeChecker =
+        new DataColumnSidecarAvailabilityChecker(das, spec, recentChainData, state, envelope);
+
+    assertThat(envelopeChecker.initiateDataAvailabilityCheck()).isTrue();
+    assertThat(envelopeChecker.getAvailabilityCheckResult())
+        .isCompletedWithValue(DataAndValidationResult.notRequired());
+    verify(das).checkSamplingEligibility(envelope.getSlot(), false);
+    verifyNoMoreInteractions(das);
+  }
+
+  @Test
+  void shouldReturnNotRequiredForEnvelopeOutsideDataAvailabilityWindow() {
+    final DataStructureUtil data = new DataStructureUtil(TestSpecFactory.createMinimalGloas());
+    final BeaconState state = data.randomBeaconState(UInt64.valueOf(8));
+    final SignedExecutionPayloadEnvelope envelope = data.randomSignedExecutionPayloadEnvelope(8);
+    when(das.checkSamplingEligibility(envelope.getSlot(), true))
+        .thenReturn(DataAvailabilitySampler.SamplingEligibilityStatus.NOT_REQUIRED_OLD_EPOCH);
+    final DataColumnSidecarAvailabilityChecker envelopeChecker =
+        new DataColumnSidecarAvailabilityChecker(das, spec, recentChainData, state, envelope);
+
+    assertThat(envelopeChecker.initiateDataAvailabilityCheck()).isTrue();
+    assertThat(envelopeChecker.getAvailabilityCheckResult())
+        .isCompletedWithValue(DataAndValidationResult.notRequired());
+    verify(das).checkSamplingEligibility(envelope.getSlot(), true);
+    verifyNoMoreInteractions(das);
   }
 
   @Test

@@ -357,21 +357,22 @@ public class DasSamplerBasicImpl implements DasSamplerBasic, SlotEventsChannel {
     return tracker != null && tracker.completionFuture().isCompletedNormally();
   }
 
-  private boolean isInCustodyPeriod(final BeaconBlock block) {
+  private boolean isInCustodyPeriod(final UInt64 slot) {
     final MiscHelpersFulu miscHelpersFulu =
-        MiscHelpersFulu.required(spec.atSlot(block.getSlot()).miscHelpers());
+        MiscHelpersFulu.required(spec.atSlot(slot).miscHelpers());
     final UInt64 currentEpoch = spec.computeEpochAtSlot(currentSlotProvider.getCurrentSlot());
     return miscHelpersFulu.isAvailabilityOfDataColumnSidecarsRequiredAtEpoch(
-        currentEpoch, spec.computeEpochAtSlot(block.getSlot()));
+        currentEpoch, spec.computeEpochAtSlot(slot));
   }
 
   @Override
-  public SamplingEligibilityStatus checkSamplingEligibility(final BeaconBlock block) {
-    if (!spec.atSlot(block.getSlot()).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.FULU)) {
+  public SamplingEligibilityStatus checkSamplingEligibility(
+      final UInt64 slot, final boolean hasBlobs) {
+    if (!spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.FULU)) {
       return SamplingEligibilityStatus.NOT_REQUIRED_BEFORE_FULU;
-    } else if (!isInCustodyPeriod(block)) {
+    } else if (!isInCustodyPeriod(slot)) {
       return SamplingEligibilityStatus.NOT_REQUIRED_OLD_EPOCH;
-    } else if (!hasBlobs(block)) {
+    } else if (!hasBlobs) {
       return SamplingEligibilityStatus.NOT_REQUIRED_NO_BLOBS;
     } else {
       return SamplingEligibilityStatus.REQUIRED;

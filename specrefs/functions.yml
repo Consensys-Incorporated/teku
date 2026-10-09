@@ -5192,8 +5192,8 @@
 
 - name: get_parent_payload_status#gloas
   sources:
-    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/util/ForkChoiceUtilGloas.java
-      search: SafeFuture<ForkChoicePayloadStatus> getParentPayloadStatus(
+    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/helpers/MiscHelpersGloas.java
+      search: public boolean isBidBuildingOnFullParent(
   spec: |
     <spec fn="get_parent_payload_status" fork="gloas" hash="4ab82d16">
     def get_parent_payload_status(store: Store, block: BeaconBlock) -> PayloadStatus:
@@ -7720,7 +7720,7 @@
 - name: is_parent_node_full#gloas
   sources:
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/util/ForkChoiceUtilGloas.java
-      search: SafeFuture<Boolean> isParentNodeFull(final ReadOnlyStore store, final BeaconBlock block) {
+      search: private boolean isParentFullPayloadRequired(
   spec: |
     <spec fn="is_parent_node_full" fork="gloas" hash="4fc2d12c">
     def is_parent_node_full(store: Store, block: BeaconBlock) -> bool:

@@ -242,7 +242,7 @@ public class ForkChoiceTestExecutor implements TestExecutor {
             64,
             (block, level, origin) -> new SafeFuture<>());
     final StubDataColumnSidecarManager dataColumnSidecarManager =
-        new StubDataColumnSidecarManager(spec, recentChainData, dasSampler);
+        new StubDataColumnSidecarManager(spec, storageSystem.combinedChainDataClient(), dasSampler);
     spec.reinitializeForTesting(blobSidecarManager, dataColumnSidecarManager, kzg);
     final AsyncBLSSignatureVerifier signatureVerifier =
         AsyncBLSSignatureVerifier.wrap(

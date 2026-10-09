@@ -914,7 +914,7 @@ public class ForkChoiceUtil {
   }
 
   public AvailabilityChecker<?> createAvailabilityCheckerOnExecutionPayloadEnvelope(
-      final SignedBeaconBlock block, final SignedExecutionPayloadEnvelope signedEnvelope) {
+      final BeaconState state, final SignedExecutionPayloadEnvelope signedEnvelope) {
     return AvailabilityChecker.NOOP;
   }
 

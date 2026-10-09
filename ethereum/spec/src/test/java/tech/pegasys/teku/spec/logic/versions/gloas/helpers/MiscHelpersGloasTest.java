@@ -19,6 +19,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.List;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -129,8 +131,10 @@ public class MiscHelpersGloasTest {
         .isEqualTo(builderIndex);
   }
 
-  @Test
-  public void isBidBuildingOnFullParent_shouldBeTrueWhenBidReferencesLatestCommittedBid() {
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  public void isBidBuildingOnFullParent_shouldCompareAgainstLatestCommittedBid(
+      final boolean matches) {
     final Bytes32 fullParentBlockHash = data.randomBytes32();
     final ExecutionPayloadBid latestExecutionPayloadBid =
         data.randomExecutionPayloadBid(
@@ -150,12 +154,12 @@ public class MiscHelpersGloasTest {
                     }));
     final ExecutionPayloadBid childBid =
         data.randomExecutionPayloadBid(
-            fullParentBlockHash,
+            matches ? fullParentBlockHash : data.randomBytes32(),
             data.randomSlot(),
             data.randomBuilderIndex(),
             UInt64.ZERO,
             UInt64.ZERO);
 
-    assertThat(miscHelpers.isBidBuildingOnFullParent(state, childBid)).isTrue();
+    assertThat(miscHelpers.isBidBuildingOnFullParent(state, childBid)).isEqualTo(matches);
   }
 }

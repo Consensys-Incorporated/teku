@@ -57,7 +57,6 @@ import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
-import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
@@ -276,15 +275,19 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
       final ExecutionLayerChannel executionLayer,
       final Optional<ReceivedExecutionPayloadEventsChannel>
           receivedExecutionPayloadEventsChannelPublisher) {
-    return recentChainData
-        .retrieveBlockAndState(signedEnvelope.getBeaconBlockRoot())
-        .thenCompose(
-            maybeBlockAndState ->
-                onExecutionPayloadEnvelope(
-                    signedEnvelope,
-                    maybeBlockAndState,
-                    executionLayer,
-                    receivedExecutionPayloadEventsChannelPublisher));
+    final Bytes32 blockRoot = signedEnvelope.getBeaconBlockRoot();
+    final SafeFuture<Optional<BeaconState>> state =
+        recentChainData
+            .getStore()
+            .retrieveStateAndBlockSummary(blockRoot)
+            .thenApply(result -> result.map(StateAndBlockSummary::getState));
+    return state.thenCompose(
+        maybeState ->
+            onExecutionPayloadEnvelope(
+                signedEnvelope,
+                maybeState,
+                executionLayer,
+                receivedExecutionPayloadEventsChannelPublisher));
   }
 
   public SafeFuture<AttestationProcessingResult> onAttestation(
@@ -659,29 +662,26 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
   }
 
   /**
-   * Import an execution payload envelope to the store. The supplied {@code blockAndState} must
-   * contain the block and post-state after processing the block whose root is the beacon block root
-   * of the execution payload
+   * Import an execution payload envelope using its block's post-state, or the checkpoint state when
+   * recovering the finalized anchor's payload.
    */
   private SafeFuture<ExecutionPayloadImportResult> onExecutionPayloadEnvelope(
       final SignedExecutionPayloadEnvelope signedEnvelope,
-      final Optional<SignedBlockAndState> blockAndState,
+      final Optional<BeaconState> maybeState,
       final ExecutionLayerChannel executionLayer,
       final Optional<ReceivedExecutionPayloadEventsChannel>
           receivedExecutionPayloadEventsChannelPublisher) {
-    if (blockAndState.isEmpty()) {
+    if (maybeState.isEmpty()) {
       return SafeFuture.completedFuture(
           ExecutionPayloadImportResult.FAILED_UNKNOWN_BEACON_BLOCK_ROOT);
     }
 
-    final SignedBeaconBlock block = blockAndState.get().getBlock();
-    final BeaconState state = blockAndState.get().getState();
+    final BeaconState state = maybeState.get();
 
     final ForkChoiceUtil forkChoiceUtil = spec.atSlot(signedEnvelope.getSlot()).getForkChoiceUtil();
 
     final AvailabilityChecker<?> availabilityChecker =
-        forkChoiceUtil.createAvailabilityCheckerOnExecutionPayloadEnvelope(block, signedEnvelope);
-    availabilityChecker.initiateDataAvailabilityCheck();
+        forkChoiceUtil.createAvailabilityCheckerOnExecutionPayloadEnvelope(state, signedEnvelope);
     final ForkChoicePayloadExecutorGloas payloadExecutor =
         ForkChoicePayloadExecutorGloas.create(signedEnvelope, executionLayer);
 
@@ -701,6 +701,9 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
       return SafeFuture.completedFuture(result);
     }
 
+    // Reject invalid envelopes before starting sampling. Verification starts the asynchronous EL
+    // request without awaiting it, so DA sampling and EL validation still run concurrently.
+    availabilityChecker.initiateDataAvailabilityCheck();
     final SafeFuture<? extends DataAndValidationResult<?>> dataAndValidationResultFuture =
         availabilityChecker
             .getAndLogAvailabilityCheckResult(LOG)

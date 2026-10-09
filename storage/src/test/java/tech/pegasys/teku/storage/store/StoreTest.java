@@ -34,6 +34,7 @@ import java.util.stream.Collectors;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.dataproviders.lookup.BlindedExecutionPayloadProvider;
+import tech.pegasys.teku.dataproviders.lookup.BlockProvider;
 import tech.pegasys.teku.dataproviders.lookup.EarliestBlobSidecarSlotProvider;
 import tech.pegasys.teku.dataproviders.lookup.ExecutionPayloadProvider;
 import tech.pegasys.teku.dataproviders.lookup.StateAndBlockSummaryProvider;
@@ -466,6 +467,38 @@ class StoreTest extends AbstractStoreTest {
               .describedAs("State at %s", blockAndState.getSlot())
               .isCompletedWithValue(Optional.of(blockAndState.getState()));
         });
+  }
+
+  @Test
+  public void retrieveBlockState_shouldUseStateOnlyAnchorOnlyForSlotTargetedRetrieval()
+      throws Exception {
+    chainBuilder.generateGenesis();
+    final UInt64 checkpointSlot = spec.computeStartSlotAtEpoch(UInt64.ONE);
+    final SignedBlockAndState anchorBlock =
+        chainBuilder.generateBlockAtSlot(checkpointSlot.minus(1));
+    final BeaconState anchorState = spec.processSlots(anchorBlock.getState(), checkpointSlot);
+    final AnchorPoint anchor = AnchorPoint.fromInitialState(spec, anchorState);
+    final UpdatableStore store =
+        StoreBuilder.create()
+            .onDiskStoreData(StoreBuilder.forkChoiceStoreBuilder(spec, anchor, UInt64.ZERO))
+            .asyncRunner(SYNC_RUNNER)
+            .metricsSystem(new StubMetricsSystem())
+            .specProvider(spec)
+            .blockProvider(BlockProvider.NOOP)
+            .stateProvider(StateAndBlockSummaryProvider.NOOP)
+            .earliestBlobSidecarSlotProvider(EarliestBlobSidecarSlotProvider.NOOP)
+            .build();
+
+    assertThat(store.retrieveBlockState(anchor.getRoot())).isCompletedWithValue(Optional.empty());
+    assertThat(store.retrieveBlockState(new SlotAndBlockRoot(checkpointSlot, anchor.getRoot())))
+        .isCompletedWithValue(Optional.of(anchorState));
+    final UInt64 childSlot = checkpointSlot.plus(1);
+    assertThat(store.retrieveBlockState(new SlotAndBlockRoot(childSlot, anchor.getRoot())))
+        .isCompletedWithValue(Optional.of(spec.processSlots(anchorState, childSlot)));
+    assertThatSafeFuture(
+            store.retrieveBlockState(new SlotAndBlockRoot(anchorBlock.getSlot(), anchor.getRoot())))
+        .isCompletedExceptionallyWith(InvalidCheckpointException.class);
+    assertThat(store.retrieveBlockState(anchor.getRoot())).isCompletedWithValue(Optional.empty());
   }
 
   @Test
