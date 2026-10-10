@@ -45,7 +45,6 @@ import tech.pegasys.teku.statetransition.forkchoice.ForkChoice;
 import tech.pegasys.teku.statetransition.util.ShufflingDependentRootUtil;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 import tech.pegasys.teku.statetransition.validation.SignedInclusionListValidator;
-import tech.pegasys.teku.statetransition.validation.ValidationResultCode;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
 public class InclusionListManager implements SlotEventsChannel {
@@ -113,9 +112,7 @@ public class InclusionListManager implements SlotEventsChannel {
       final SignedInclusionList signedInclusionList) {
     validationResult.thenAccept(
         internalValidationResult -> {
-          // TODO EIP7805 how should we handle the future ILs
-          if (internalValidationResult.code().equals(ValidationResultCode.ACCEPT)
-              || internalValidationResult.code().equals(ValidationResultCode.SAVE_FOR_FUTURE)) {
+          if (internalValidationResult.isAccept()) {
             onInclusionList(signedInclusionList)
                 .finish(
                     inclusionListImportResult -> {
@@ -126,8 +123,6 @@ public class InclusionListManager implements SlotEventsChannel {
                       }
                     },
                     err -> LOG.error("Failed to process received inclusion list.", err));
-          }
-          if (internalValidationResult.isAccept()) {
             notifyInclusionListsSubscribers(signedInclusionList);
           }
         });

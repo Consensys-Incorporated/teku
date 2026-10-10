@@ -26,6 +26,7 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.config.SpecConfigHeze;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionList;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.SignedInclusionList;
+import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
@@ -132,58 +133,117 @@ public class SignedInclusionListValidator {
     final InclusionListUtil inclusionListUtil =
         spec.atSlot(slot).getInclusionListUtil().orElseThrow();
 
-    return recentChainData
-        .retrieveStateInEffectAtSlot(slot)
+    final Bytes32 dependentRoot = inclusionList.getDependentRoot();
+
+    /*
+     * [IGNORE] The dependent block has been seen (via gossip or non-gossip sources)
+     */
+    if (!gossipValidationHelper.isBlockAvailable(dependentRoot)) {
+      return SafeFuture.completedFuture(
+          InternalValidationResult.ignore("Inclusion List dependent block has not been seen"));
+    }
+
+    final UInt64 epoch = spec.computeEpochAtSlot(slot);
+    final UInt64 lookaheadEpoch =
+        epoch.minusMinZero(spec.atSlot(slot).getConfig().getMinSeedLookahead());
+    final UInt64 lookaheadStartSlot = spec.computeStartSlotAtEpoch(lookaheadEpoch);
+    final UInt64 shufflingDependentSlot = lookaheadStartSlot.minusMinZero(UInt64.ONE);
+
+    return gossipValidationHelper
+        .getStateAtBlockRoot(dependentRoot)
         .thenCompose(
-            maybeState -> {
-              if (maybeState.isEmpty()) {
-                // We know the block is imported but now don't have a state to validate against
-                // Must have got pruned between checks
-                return SafeFuture.completedFuture(InternalValidationResult.IGNORE);
-              }
-              final BeaconState state = maybeState.get();
+            maybeDependentState -> {
               /*
-               * [IGNORE] The dependent root for the inclusion-list epoch on the current branch
-               * corresponds to message.dependent_root.
+               * [IGNORE] The dependent block passes validation
                */
-              if (!spec.getInclusionListDependentRoot(state, slot)
-                  .equals(inclusionList.getDependentRoot())) {
+              if (maybeDependentState.isEmpty()) {
                 return SafeFuture.completedFuture(
-                    InternalValidationResult.ignore("Inclusion List dependent root mismatch."));
-              }
-              /*
-               * [REJECT] The validator index message.validator_index is within the inclusion list
-               * committee corresponding to message.dependent_root.
-               */
-              if (!inclusionListUtil.validatorIndexWithinCommittee(
-                  state, slot, inclusionList.getValidatorIndex())) {
-                return SafeFuture.completedFuture(
-                    InternalValidationResult.reject(
-                        "Validator index is not within the inclusion list committee."));
+                    InternalValidationResult.ignore(
+                        "Inclusion List dependent block has not passed validation"));
               }
 
               /*
-               * [REJECT] The signature is valid with respect to the validator's public key.
+               * [REJECT] The dependent block's slot is not after the shuffling dependent slot
                */
-              return inclusionListUtil
-                  .isValidInclusionListSignature(
-                      fork, state, signedInclusionList, signatureVerifier)
-                  .thenApply(
-                      isValidInclusionListSignature -> {
-                        if (!isValidInclusionListSignature) {
-                          return InternalValidationResult.reject(
-                              "Invalid inclusion list signature.");
-                        }
-                        // Another valid list from this validator may have been counted while
-                        // this one was being validated
-                        return markSeen(slot, seenKey)
-                            ? InternalValidationResult.ACCEPT
-                            : InternalValidationResult.ignore(
-                                "Already received %d valid Inclusion Lists from validator with"
-                                    + " index %d",
-                                MAX_VALID_INCLUSION_LISTS_PER_VALIDATOR,
-                                inclusionList.getValidatorIndex().intValue());
-                      });
+              final UInt64 dependentBlockSlot = maybeDependentState.get().getSlot();
+              if (dependentBlockSlot.isGreaterThan(shufflingDependentSlot)) {
+                return SafeFuture.completedFuture(
+                    InternalValidationResult.reject(
+                        "Inclusion List dependent block is at slot %s, after the shuffling"
+                            + " dependent slot %s",
+                        dependentBlockSlot, shufflingDependentSlot));
+              }
+
+              /*
+               * [IGNORE] The dependent block is a possible dependent block for the committee
+               * lookahead
+               */
+              if (!gossipValidationHelper.isPossibleDependentRoot(
+                  dependentRoot, lookaheadStartSlot)) {
+                return SafeFuture.completedFuture(
+                    InternalValidationResult.ignore(
+                        "Inclusion List dependent block is not a possible dependent block"));
+              }
+
+              // The dependent block's state processed up to the start of the lookahead epoch
+              return recentChainData
+                  .retrieveCheckpointState(new Checkpoint(lookaheadEpoch, dependentRoot))
+                  .thenCompose(
+                      maybeState ->
+                          maybeState
+                              .map(
+                                  state ->
+                                      validateCommitteeAndSignature(
+                                          signedInclusionList,
+                                          state,
+                                          fork,
+                                          inclusionListUtil,
+                                          seenKey))
+                              .orElseGet(
+                                  () ->
+                                      SafeFuture.completedFuture(
+                                          InternalValidationResult.ignore(
+                                              "Inclusion List dependent state is unavailable"))));
+            });
+  }
+
+  private SafeFuture<InternalValidationResult> validateCommitteeAndSignature(
+      final SignedInclusionList signedInclusionList,
+      final BeaconState state,
+      final Fork fork,
+      final InclusionListUtil inclusionListUtil,
+      final SeenInclusionListKey seenKey) {
+    final InclusionList inclusionList = signedInclusionList.getMessage();
+    final UInt64 slot = inclusionList.getSlot();
+    /*
+     * [REJECT] The validator index message.validator_index is within the inclusion list
+     * committee corresponding to message.dependent_root.
+     */
+    if (!inclusionListUtil.validatorIndexWithinCommittee(
+        state, slot, inclusionList.getValidatorIndex())) {
+      return SafeFuture.completedFuture(
+          InternalValidationResult.reject(
+              "Validator index is not within the inclusion list committee."));
+    }
+
+    /*
+     * [REJECT] The signature is valid with respect to the validator's public key.
+     */
+    return inclusionListUtil
+        .isValidInclusionListSignature(fork, state, signedInclusionList, signatureVerifier)
+        .thenApply(
+            isValidInclusionListSignature -> {
+              if (!isValidInclusionListSignature) {
+                return InternalValidationResult.reject("Invalid inclusion list signature.");
+              }
+              // Another valid list from this validator may have been counted while
+              // this one was being validated
+              return markSeen(slot, seenKey)
+                  ? InternalValidationResult.ACCEPT
+                  : InternalValidationResult.ignore(
+                      "Already received %d valid Inclusion Lists from validator with" + " index %d",
+                      MAX_VALID_INCLUSION_LISTS_PER_VALIDATOR,
+                      inclusionList.getValidatorIndex().intValue());
             });
   }
 

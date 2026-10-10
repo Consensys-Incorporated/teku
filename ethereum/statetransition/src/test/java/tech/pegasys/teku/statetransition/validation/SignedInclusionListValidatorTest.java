@@ -15,15 +15,18 @@ package tech.pegasys.teku.statetransition.validation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 
+import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.IntStream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,9 +43,11 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.config.SpecConfigHeze;
+import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.execution.Transaction;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionList;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.SignedInclusionList;
+import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
@@ -69,27 +74,132 @@ class SignedInclusionListValidatorTest {
           gossipValidationHelper,
           AsyncBLSSignatureVerifier.wrap(BLSSignatureVerifier.SIMPLE));
 
+  // The first Heze slot: its committee lookahead starts at the previous epoch
   private final UInt64 slot = spec.computeStartSlotAtEpoch(HEZE_FORK_EPOCH);
-  private BeaconState state;
+  private final UInt64 lookaheadEpoch = HEZE_FORK_EPOCH.decrement();
+  private final UInt64 lookaheadStartSlot = spec.computeStartSlotAtEpoch(lookaheadEpoch);
+  private BeaconState genesisState;
+  private BeaconState lookaheadState;
+  private Bytes32 dependentRoot;
   private int committeeMember;
 
   @BeforeEach
   void setUp() throws Exception {
-    final BeaconState genesisState =
-        ChainBuilder.create(spec, VALIDATOR_KEYS).generateGenesis().getState();
-    // The block in effect at the first Heze slot is still pre-fork
-    state = spec.processSlots(genesisState, slot.decrement());
-    committeeMember = inclusionListUtil().getInclusionListCommittee(state, slot).getInt(0);
-    when(recentChainData.retrieveStateInEffectAtSlot(slot))
-        .thenReturn(SafeFuture.completedFuture(Optional.of(state)));
+    genesisState = ChainBuilder.create(spec, VALIDATOR_KEYS).generateGenesis().getState();
+    // No blocks after genesis, so genesis is the dependent block
+    dependentRoot = BeaconBlockHeader.fromState(genesisState).getRoot();
+    lookaheadState = spec.processSlots(genesisState, lookaheadStartSlot);
+    committeeMember = inclusionListUtil().getInclusionListCommittee(lookaheadState, slot).getInt(0);
     when(gossipValidationHelper.isSlotCurrent(slot)).thenReturn(true);
+    mockDependentRoot(dependentRoot, genesisState);
   }
 
   @Test
-  void shouldAcceptValidInclusionListForFirstHezeSlotWhenBlockInEffectIsPreFork() {
-    assertThat(state.getFork()).isNotEqualTo(spec.fork(HEZE_FORK_EPOCH));
+  void shouldAcceptValidInclusionListForFirstHezeSlotWhenLookaheadStateIsPreFork() {
+    assertThat(lookaheadState.getFork()).isNotEqualTo(spec.fork(HEZE_FORK_EPOCH));
 
     assertThat(validate(signedInclusionList(transaction(1)))).isEqualTo(accept());
+  }
+
+  @Test
+  void shouldAcceptDependentRootOnAnotherBranch() {
+    // Any possible dependent block is accepted, not just the one on the local head's branch
+    final Bytes32 otherBranchRoot = Bytes32.fromHexStringLenient("0x01");
+    mockDependentRoot(otherBranchRoot, genesisState);
+
+    assertThat(validate(signedInclusionList(otherBranchRoot, transaction(1)))).isEqualTo(accept());
+    verify(recentChainData)
+        .retrieveCheckpointState(new Checkpoint(lookaheadEpoch, otherBranchRoot));
+  }
+
+  @Test
+  void shouldIgnoreWhenDependentBlockHasNotBeenSeen() {
+    when(gossipValidationHelper.isBlockAvailable(dependentRoot)).thenReturn(false);
+
+    assertIgnoredWith(validate(signedInclusionList(transaction(1))), "has not been seen");
+  }
+
+  @Test
+  void shouldIgnoreWhenDependentBlockHasNotPassedValidation() {
+    when(gossipValidationHelper.getStateAtBlockRoot(dependentRoot))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+
+    assertIgnoredWith(validate(signedInclusionList(transaction(1))), "has not passed validation");
+  }
+
+  @Test
+  void shouldRejectWhenDependentBlockIsAtLookaheadEpochStart() {
+    // The shuffling dependent slot is the slot before the lookahead epoch starts
+    mockDependentRoot(dependentRoot, lookaheadState);
+
+    assertRejectedWith(
+        validate(signedInclusionList(transaction(1))), "after the shuffling dependent slot");
+    verify(gossipValidationHelper, never()).isPossibleDependentRoot(any(), any());
+  }
+
+  @Test
+  void shouldIgnoreWhenDependentBlockIsNotPossible() {
+    when(gossipValidationHelper.isPossibleDependentRoot(dependentRoot, lookaheadStartSlot))
+        .thenReturn(false);
+
+    assertIgnoredWith(
+        validate(signedInclusionList(transaction(1))), "not a possible dependent block");
+  }
+
+  @Test
+  void shouldIgnoreWhenLookaheadStateIsUnavailable() {
+    when(recentChainData.retrieveCheckpointState(new Checkpoint(lookaheadEpoch, dependentRoot)))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+
+    assertIgnoredWith(validate(signedInclusionList(transaction(1))), "state is unavailable");
+  }
+
+  @Test
+  void shouldRejectIncluderNotInCommittee() {
+    final IntList committee = inclusionListUtil().getInclusionListCommittee(lookaheadState, slot);
+    final int nonMember =
+        IntStream.range(0, VALIDATOR_KEYS.size())
+            .filter(index -> !committee.contains(index))
+            .findFirst()
+            .orElseThrow();
+    committeeMember = nonMember;
+
+    assertRejectedWith(
+        validate(signedInclusionList(transaction(1))), "not within the inclusion list committee");
+  }
+
+  @Test
+  void shouldRejectNonGenesisDependentRootInGenesisEpoch() throws Exception {
+    // In the genesis epoch, the lookahead starts at slot 0 so only genesis can be the dependent
+    final Spec hezeAtGenesisSpec = TestSpecFactory.createMinimalHeze();
+    final SignedInclusionListValidator genesisEpochValidator =
+        new SignedInclusionListValidator(
+            hezeAtGenesisSpec,
+            recentChainData,
+            gossipValidationHelper,
+            AsyncBLSSignatureVerifier.wrap(BLSSignatureVerifier.SIMPLE));
+    final UInt64 genesisEpochSlot = UInt64.valueOf(2);
+    final Bytes32 slotOneRoot = Bytes32.fromHexStringLenient("0x02");
+    final BeaconState slotOneState =
+        hezeAtGenesisSpec.processSlots(
+            ChainBuilder.create(hezeAtGenesisSpec, VALIDATOR_KEYS).generateGenesis().getState(),
+            UInt64.ONE);
+    when(gossipValidationHelper.isSlotCurrent(genesisEpochSlot)).thenReturn(true);
+    mockDependentRoot(slotOneRoot, slotOneState);
+    final SchemaDefinitionsHeze genesisSchemaDefinitions =
+        SchemaDefinitionsHeze.required(hezeAtGenesisSpec.getGenesisSchemaDefinitions());
+    final SignedInclusionList inclusionList =
+        genesisSchemaDefinitions
+            .getSignedInclusionListSchema()
+            .create(
+                genesisSchemaDefinitions
+                    .getInclusionListSchema()
+                    .create(genesisEpochSlot, UInt64.ZERO, slotOneRoot, List.of(transaction(1))),
+                BLSSignature.empty());
+
+    assertRejectedWith(
+        safeJoin(genesisEpochValidator.validate(inclusionList)),
+        "at slot 1, after the shuffling dependent slot 0");
   }
 
   @Test
@@ -104,14 +214,13 @@ class SignedInclusionListValidatorTest {
   void shouldCountValidMessagesPerDependentRoot() {
     assertThat(validate(signedInclusionList(transaction(1)))).isEqualTo(accept());
     assertThat(validate(signedInclusionList(transaction(2)))).isEqualTo(accept());
+    final Bytes32 otherRoot = Bytes32.fromHexStringLenient("0x01");
+    mockDependentRoot(otherRoot, genesisState);
     final SignedInclusionList otherRootInclusionList =
-        signedInclusionList(Bytes32.fromHexStringLenient("0x01"), transaction(3));
+        signedInclusionList(otherRoot, transaction(3));
 
-    // Two lists already counted for the head's dependent root don't block another root. That list
-    // is then ignored by the head-branch dependent root check, not the seen count.
-    assertThat(validate(otherRootInclusionList).getDescription())
-        .hasValueSatisfying(
-            description -> assertThat(description).contains("dependent root mismatch"));
+    // Two lists already counted for one dependent root don't block another root
+    assertThat(validate(otherRootInclusionList)).isEqualTo(accept());
   }
 
   @Test
@@ -162,7 +271,7 @@ class SignedInclusionListValidatorTest {
     when(gossipValidationHelper.isSlotCurrent(slot)).thenReturn(false);
 
     assertThat(validate(signedInclusionList(transaction(1))).isIgnore()).isTrue();
-    verify(recentChainData, never()).retrieveStateInEffectAtSlot(any());
+    verify(gossipValidationHelper, never()).getStateAtBlockRoot(any());
   }
 
   @Test
@@ -240,7 +349,31 @@ class SignedInclusionListValidatorTest {
   }
 
   private SignedInclusionList signedInclusionList(final Transaction... transactions) {
-    return signedInclusionList(spec.getInclusionListDependentRoot(state, slot), transactions);
+    return signedInclusionList(dependentRoot, transactions);
+  }
+
+  /** Makes {@code root} a known, validated and possible dependent block. */
+  private void mockDependentRoot(final Bytes32 root, final BeaconState dependentBlockState) {
+    when(gossipValidationHelper.isBlockAvailable(root)).thenReturn(true);
+    when(gossipValidationHelper.getStateAtBlockRoot(root))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(dependentBlockState)));
+    when(gossipValidationHelper.isPossibleDependentRoot(eq(root), any())).thenReturn(true);
+    when(recentChainData.retrieveCheckpointState(new Checkpoint(lookaheadEpoch, root)))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(lookaheadState)));
+  }
+
+  private static void assertRejectedWith(
+      final InternalValidationResult result, final String expectedDescription) {
+    assertThat(result.isReject()).isTrue();
+    assertThat(result.getDescription())
+        .hasValueSatisfying(description -> assertThat(description).contains(expectedDescription));
+  }
+
+  private static void assertIgnoredWith(
+      final InternalValidationResult result, final String expectedDescription) {
+    assertThat(result.isIgnore()).isTrue();
+    assertThat(result.getDescription())
+        .hasValueSatisfying(description -> assertThat(description).contains(expectedDescription));
   }
 
   private SignedInclusionList signedInclusionList(
@@ -250,7 +383,8 @@ class SignedInclusionListValidatorTest {
             .getInclusionListSchema()
             .create(slot, UInt64.valueOf(committeeMember), dependentRoot, List.of(transactions));
     final ForkInfo forkInfo =
-        new ForkInfo(spec.fork(spec.computeEpochAtSlot(slot)), state.getGenesisValidatorsRoot());
+        new ForkInfo(
+            spec.fork(spec.computeEpochAtSlot(slot)), genesisState.getGenesisValidatorsRoot());
     final BLSSignature signature =
         safeJoin(
             new LocalSigner(spec, VALIDATOR_KEYS.get(committeeMember), SyncAsyncRunner.SYNC_RUNNER)

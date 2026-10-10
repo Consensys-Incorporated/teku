@@ -16108,7 +16108,9 @@
     </spec>
 
 - name: validate_inclusion_list_gossip#heze
-  sources: []
+  sources:
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/SignedInclusionListValidator.java
+      search: public SafeFuture<InternalValidationResult> validate(
   spec: |
     <spec fn="validate_inclusion_list_gossip" fork="heze" hash="fd58a724">
     def validate_inclusion_list_gossip(
