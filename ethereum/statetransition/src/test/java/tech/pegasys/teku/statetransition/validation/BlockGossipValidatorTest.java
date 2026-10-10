@@ -14,15 +14,19 @@
 package tech.pegasys.teku.statetransition.validation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
 import static tech.pegasys.teku.networks.Eth2NetworkConfiguration.DEFAULT_FORK_CHOICE_LATE_BLOCK_REORG_ENABLED;
 
+import java.util.Optional;
 import java.util.function.Function;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
+import tech.pegasys.teku.bls.BLS;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.bls.BLSTestUtil;
@@ -48,6 +52,8 @@ import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.generator.ChainBuilder.BlockOptions;
 import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.signatures.SigningRootUtil;
+import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoice;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoiceStateProvider;
@@ -191,6 +197,145 @@ public class BlockGossipValidatorTest {
         SignedBeaconBlock.create(spec, block, blockSignature);
 
     assertThat(blockGossipValidator.validate(blockWithNoParent, true))
+        .isCompletedWithValueMatching(InternalValidationResult::isSaveForFuture);
+  }
+
+  @TestTemplate
+  void shouldRejectBlockFromFutureWithInvalidSignature() {
+    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
+    final SignedBeaconBlock block =
+        SignedBeaconBlock.create(
+            spec,
+            storageSystem.chainBuilder().generateBlockAtSlot(nextSlot).getBlock().getMessage(),
+            BLSTestUtil.randomSignature(0));
+
+    assertThat(blockGossipValidator.validate(block, true))
+        .isCompletedWithValue(InternalValidationResult.reject("Block signature is invalid"));
+  }
+
+  @TestTemplate
+  void shouldRejectBlockWithParentUnavailableAndInvalidSignature() {
+    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
+    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
+    final BeaconBlock blockWithUnknownParent =
+        createBlockWithUnknownParent(
+            storageSystem.chainBuilder().generateBlockAtSlot(nextSlot).getBlock(),
+            Optional.empty());
+
+    final SignedBeaconBlock block =
+        SignedBeaconBlock.create(spec, blockWithUnknownParent, BLSTestUtil.randomSignature(0));
+
+    assertThat(blockGossipValidator.validate(block, true))
+        .isCompletedWithValue(InternalValidationResult.reject("Block signature is invalid"));
+  }
+
+  @TestTemplate
+  void shouldIgnoreBlockWithParentUnavailableAndProposerIndexBeyondHeadState() {
+    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
+    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
+    final UInt64 unknownProposerIndex = UInt64.valueOf(1_000_000);
+    final BeaconBlock blockWithUnknownParent =
+        createBlockWithUnknownParent(
+            storageSystem.chainBuilder().generateBlockAtSlot(nextSlot).getBlock(),
+            Optional.of(unknownProposerIndex));
+
+    final SignedBeaconBlock block =
+        SignedBeaconBlock.create(spec, blockWithUnknownParent, BLSTestUtil.randomSignature(0));
+
+    assertThat(blockGossipValidator.validate(block, true))
+        .isCompletedWithValue(
+            InternalValidationResult.ignore(
+                "Block proposer index %s is not a known validator", unknownProposerIndex));
+  }
+
+  @TestTemplate
+  void shouldRejectInvalidSignatureWhenProposerIndexIsOnlyInHeadState() {
+    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
+    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
+    final SignedBeaconBlock block =
+        SignedBeaconBlock.create(
+            spec,
+            createBlockWithUnknownParent(
+                storageSystem.chainBuilder().generateBlockAtSlot(nextSlot).getBlock(),
+                Optional.empty()),
+            BLSTestUtil.randomSignature(0));
+
+    assertThat(validatorWithoutFinalizedValidators().validate(block, true))
+        .isCompletedWithValue(InternalValidationResult.reject("Block signature is invalid"));
+  }
+
+  @TestTemplate
+  void shouldSaveForFutureWithValidSignatureWhenProposerIndexIsOnlyInHeadState() {
+    final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
+    storageSystem.chainUpdater().setCurrentSlot(nextSlot);
+    final BeaconBlock blockWithUnknownParent =
+        createBlockWithUnknownParent(
+            storageSystem.chainBuilder().generateBlockAtSlot(nextSlot).getBlock(),
+            Optional.empty());
+    final BLSSignature signature =
+        storageSystem
+            .chainBuilder()
+            .getSigner(blockWithUnknownParent.getProposerIndex().intValue())
+            .signBlock(
+                blockWithUnknownParent,
+                storageSystem.chainBuilder().getLatestBlockAndState().getState().getForkInfo())
+            .join();
+    final SignedBeaconBlock block =
+        SignedBeaconBlock.create(spec, blockWithUnknownParent, signature);
+
+    assertThat(validatorWithoutFinalizedValidators().validate(block, true))
+        .isCompletedWithValueMatching(InternalValidationResult::isSaveForFuture);
+  }
+
+  /**
+   * A validator whose latest finalized state has no validators, so every proposer is only in the
+   * head state.
+   */
+  private BlockGossipValidator validatorWithoutFinalizedValidators() {
+    final GossipValidationHelper gossipValidationHelper =
+        spy(new GossipValidationHelper(spec, recentChainData, storageSystem.getMetricsSystem()));
+    doReturn(new DataStructureUtil(spec).randomBeaconState(0))
+        .when(gossipValidationHelper)
+        .getLatestFinalizedState();
+    return new BlockGossipValidator(
+        spec, gossipValidationHelper, mock(ReceivedBlockEventsChannel.class));
+  }
+
+  @TestTemplate
+  void shouldVerifyFutureBlockSignatureWithForkOfBlockEpoch(final SpecContext specContext) {
+    specContext.assumeGloasActive();
+
+    final Spec forkTransitionSpec = TestSpecFactory.createMinimalWithGloasForkEpoch(ONE);
+    final StorageSystem forkTransitionStorageSystem =
+        InMemoryStorageSystemBuilder.buildDefault(forkTransitionSpec);
+    forkTransitionStorageSystem.chainUpdater().initializeGenesis();
+    final BlockGossipValidator forkTransitionBlockGossipValidator =
+        new BlockGossipValidator(
+            forkTransitionSpec,
+            new GossipValidationHelper(
+                forkTransitionSpec,
+                forkTransitionStorageSystem.recentChainData(),
+                forkTransitionStorageSystem.getMetricsSystem()),
+            mock(ReceivedBlockEventsChannel.class));
+
+    final UInt64 firstGloasSlot = forkTransitionSpec.computeStartSlotAtEpoch(ONE);
+    final SignedBlockAndState preGloasHead =
+        forkTransitionStorageSystem.chainUpdater().advanceChain(firstGloasSlot.minus(ONE));
+    final SignedBeaconBlock firstGloasBlock =
+        forkTransitionStorageSystem.chainBuilder().generateBlockAtSlot(firstGloasSlot).getBlock();
+
+    // the head state's fork predates Gloas, so its signing domain would not verify the signature
+    assertThat(
+            BLS.verify(
+                forkTransitionSpec
+                    .getValidatorPubKey(preGloasHead.getState(), firstGloasBlock.getProposerIndex())
+                    .orElseThrow(),
+                new SigningRootUtil(forkTransitionSpec)
+                    .signingRootForSignBlock(
+                        firstGloasBlock.getMessage(), preGloasHead.getState().getForkInfo()),
+                firstGloasBlock.getSignature()))
+        .isFalse();
+    assertThat(forkTransitionBlockGossipValidator.validate(firstGloasBlock, true))
         .isCompletedWithValueMatching(InternalValidationResult::isSaveForFuture);
   }
 
@@ -540,6 +685,28 @@ public class BlockGossipValidatorTest {
   }
 
   @TestTemplate
+  void shouldRejectInvalidSignatureWhenParentFullPayloadIsNotAvailable(
+      final SpecContext specContext) {
+    specContext.assumeGloasActive();
+
+    final UInt64 parentSlot = recentChainData.getHeadSlot().plus(ONE);
+    final SignedBlockAndState parentBlockAndState =
+        storageSystem.chainBuilder().generateBlockAtSlot(parentSlot);
+    storageSystem.chainUpdater().saveBlock(parentBlockAndState);
+
+    final UInt64 childSlot = parentSlot.plus(ONE);
+    final SignedBeaconBlock childBlock =
+        SignedBeaconBlock.create(
+            spec,
+            storageSystem.chainBuilder().generateBlockAtSlot(childSlot).getBlock().getMessage(),
+            BLSTestUtil.randomSignature(0));
+    storageSystem.chainUpdater().setCurrentSlot(childSlot);
+
+    assertThat(blockGossipValidator.validate(childBlock, true))
+        .isCompletedWithValue(InternalValidationResult.reject("Block signature is invalid"));
+  }
+
+  @TestTemplate
   void shouldSaveForFutureWhenParentFullPayloadHashAlsoMatchesLatestBlockHash(
       final SpecContext specContext) {
     specContext.assumeGloasActive();
@@ -814,6 +981,17 @@ public class BlockGossipValidatorTest {
             .join();
 
     return SignedBeaconBlock.create(spec, modifiedUnsignedBlock, newSignature);
+  }
+
+  private BeaconBlock createBlockWithUnknownParent(
+      final SignedBeaconBlock signedBlock, final Optional<UInt64> maybeProposerIndex) {
+    return new BeaconBlock(
+        spec.getGenesisSchemaDefinitions().getBeaconBlockSchema(),
+        signedBlock.getSlot(),
+        maybeProposerIndex.orElse(signedBlock.getMessage().getProposerIndex()),
+        Bytes32.ZERO,
+        signedBlock.getMessage().getStateRoot(),
+        signedBlock.getMessage().getBody());
   }
 
   private void assertResultIsAccept(

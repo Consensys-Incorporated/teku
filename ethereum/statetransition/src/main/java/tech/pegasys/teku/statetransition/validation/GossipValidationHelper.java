@@ -37,6 +37,7 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
+import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateAccessors;
 import tech.pegasys.teku.spec.logic.common.util.AttestationUtil;
@@ -288,6 +289,22 @@ public class GossipValidationHelper {
 
   public boolean isBlockAvailable(final Bytes32 blockRoot) {
     return recentChainData.containsBlock(blockRoot);
+  }
+
+  public BeaconState getLatestFinalizedState() {
+    return recentChainData.getStore().getLatestFinalized().getState();
+  }
+
+  public SafeFuture<Optional<BeaconState>> getHeadState() {
+    return recentChainData
+        .getBestState()
+        .map(headState -> headState.thenApply(Optional::of))
+        .orElseGet(() -> SafeFuture.completedFuture(Optional.empty()));
+  }
+
+  /** Returns the fork info for an epoch from the fork schedule, independent of any state. */
+  public Optional<ForkInfo> getForkInfo(final UInt64 epoch) {
+    return recentChainData.getForkInfo(epoch);
   }
 
   int getMaxOffsetTimeInMillis() {

@@ -483,6 +483,25 @@ public class BlockManagerTest {
   }
 
   @Test
+  public void onGossipedBlock_rejectedFutureBlockShouldNotBeQueued() {
+    final UInt64 nextSlot = GENESIS_SLOT.plus(UInt64.ONE);
+    final SignedBeaconBlock nextBlock =
+        localChain.chainBuilder().generateBlockAtSlot(nextSlot).getBlock();
+    when(blockValidator.validateGossip(eq(nextBlock)))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                InternalValidationResult.reject("Block signature is invalid")));
+
+    assertThat(blockManager.validateAndImportBlock(nextBlock, Optional.empty()))
+        .isCompletedWithValueMatching(InternalValidationResult::isReject);
+
+    assertThat(futureBlocks.size()).isZero();
+    assertThat(pendingBlocks.size()).isZero();
+    verify(blockEventsListenerRouter).removeAllForBlock(nextBlock.getSlotAndBlockRoot());
+    verify(blockEventsListenerRouter, never()).onNewBlock(eq(nextBlock), any());
+  }
+
+  @Test
   public void onGossipedBlock_unattachedFutureBlock() {
     final UInt64 nextSlot = GENESIS_SLOT.plus(UInt64.ONE);
     final UInt64 nextNextSlot = nextSlot.plus(UInt64.ONE);
