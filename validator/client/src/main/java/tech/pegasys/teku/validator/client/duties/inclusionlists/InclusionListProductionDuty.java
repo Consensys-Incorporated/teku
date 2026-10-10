@@ -118,6 +118,15 @@ public class InclusionListProductionDuty implements Duty {
                     .map(
                         inclusionList -> {
                           validationInclusionList(inclusionList);
+                          if (hasNoTransactions(inclusionList)) {
+                            // Gossip ignores inclusion lists without transactions, so there is
+                            // nothing worth signing or publishing
+                            LOG.debug(
+                                "Skipping inclusion list for slot {} with no transactions", slot);
+                            return SafeFuture.completedFuture(
+                                ProductionResult.<SignedInclusionList>noop(
+                                    validatorWithIndex.validator.getPublicKey()));
+                          }
                           return validatorDutyMetrics.record(
                               () ->
                                   signInclusionListForValidator(
@@ -165,6 +174,11 @@ public class InclusionListProductionDuty implements Duty {
             .getSignedInclusionListSchema();
 
     return signedInclusionListSchema.create(inclusionList, signature);
+  }
+
+  private static boolean hasNoTransactions(final InclusionList inclusionList) {
+    return inclusionList.getTransactions().stream()
+        .allMatch(transaction -> transaction.getBytes().isEmpty());
   }
 
   private void validationInclusionList(final InclusionList inclusionList) {
