@@ -76,6 +76,7 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
+import tech.pegasys.teku.spec.config.SpecConfigHeze;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.Eth1Data;
@@ -2003,7 +2004,11 @@ class ForkChoiceTest {
     final InclusionList inclusionList =
         schemaDefinitions
             .getInclusionListSchema()
-            .create(ZERO, ZERO, dataStructureUtil.randomBytes32(), List.of(emptyTransaction));
+            .create(
+                ZERO,
+                ZERO,
+                dataStructureUtil.randomBytes32(),
+                List.of(inclusionListTransaction(Bytes.of(1)), emptyTransaction));
     final SignedInclusionList signedInclusionList =
         schemaDefinitions
             .getSignedInclusionListSchema()
@@ -2018,6 +2023,80 @@ class ForkChoiceTest {
     assertThat(
             inclusionListStore.getInclusionLists(
                 new SlotAndBlockRoot(ZERO, inclusionList.getDependentRoot())))
+        .isEmpty();
+  }
+
+  @Test
+  void onInclusionList_shouldRejectListWithNoTransactions() {
+    setupWithSpec(TestSpecFactory.createMinimalHeze());
+    final SignedInclusionList signedInclusionList =
+        signedInclusionList(ZERO, dataStructureUtil.randomBytes32(), List.of());
+
+    final InclusionListImportResult result =
+        safeJoin(forkChoice.onInclusionList(signedInclusionList));
+
+    assertThat(result.getFailureReason())
+        .contains(InclusionListImportResult.FailureReason.NO_TRANSACTIONS);
+    assertNotStored(signedInclusionList);
+  }
+
+  @Test
+  void onInclusionList_shouldRejectListForFutureSlot() {
+    setupWithSpec(TestSpecFactory.createMinimalHeze());
+    final SignedInclusionList signedInclusionList =
+        signedInclusionList(
+            ONE, dataStructureUtil.randomBytes32(), List.of(inclusionListTransaction(Bytes.of(1))));
+
+    final InclusionListImportResult result =
+        safeJoin(forkChoice.onInclusionList(signedInclusionList));
+
+    assertThat(result.getFailureReason())
+        .contains(InclusionListImportResult.FailureReason.SLOT_OUTSIDE_RETENTION_WINDOW);
+    assertNotStored(signedInclusionList);
+  }
+
+  @Test
+  void onInclusionList_shouldOnlyStoreListsWithinRetentionWindow() {
+    setupWithSpec(TestSpecFactory.createMinimalHeze());
+    final int minSlotsForInclusionListsRequests =
+        SpecConfigHeze.required(spec.getGenesisSpecConfig()).getMinSlotsForInclusionListsRequests();
+    final UInt64 currentSlot = UInt64.valueOf(minSlotsForInclusionListsRequests + 1);
+    storageSystem.chainUpdater().setCurrentSlot(currentSlot);
+    final SignedInclusionList oldestRetained =
+        signedInclusionList(
+            currentSlot.minus(minSlotsForInclusionListsRequests),
+            dataStructureUtil.randomBytes32(),
+            List.of(inclusionListTransaction(Bytes.of(1))));
+    final SignedInclusionList tooOld =
+        signedInclusionList(
+            currentSlot.minus(minSlotsForInclusionListsRequests + 1),
+            dataStructureUtil.randomBytes32(),
+            List.of(inclusionListTransaction(Bytes.of(2))));
+
+    assertThat(safeJoin(forkChoice.onInclusionList(oldestRetained)).isSuccessful()).isTrue();
+    assertThat(safeJoin(forkChoice.onInclusionList(tooOld)).getFailureReason())
+        .contains(InclusionListImportResult.FailureReason.SLOT_OUTSIDE_RETENTION_WINDOW);
+    assertNotStored(tooOld);
+  }
+
+  private SignedInclusionList signedInclusionList(
+      final UInt64 slot, final Bytes32 dependentRoot, final List<Transaction> transactions) {
+    final SchemaDefinitionsHeze schemaDefinitions =
+        SchemaDefinitionsHeze.required(spec.getGenesisSchemaDefinitions());
+    return schemaDefinitions
+        .getSignedInclusionListSchema()
+        .create(
+            schemaDefinitions
+                .getInclusionListSchema()
+                .create(slot, ZERO, dependentRoot, transactions),
+            dataStructureUtil.randomSignature());
+  }
+
+  private void assertNotStored(final SignedInclusionList signedInclusionList) {
+    final InclusionList inclusionList = signedInclusionList.getMessage();
+    assertThat(
+            inclusionListStore.getInclusionLists(
+                new SlotAndBlockRoot(inclusionList.getSlot(), inclusionList.getDependentRoot())))
         .isEmpty();
   }
 

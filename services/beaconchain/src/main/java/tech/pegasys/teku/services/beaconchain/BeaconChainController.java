@@ -2378,7 +2378,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
   protected void initInclusionListManager() {
     LOG.debug("BeaconChainController.initInclusionListPool()");
     final SignedInclusionListValidator signedInclusionListValidator =
-        new SignedInclusionListValidator(spec, recentChainData, signatureVerificationService);
+        new SignedInclusionListValidator(
+            spec, recentChainData, gossipValidationHelper, signatureVerificationService);
     inclusionListManager =
         new InclusionListManager(
             signedInclusionListValidator, forkChoice, spec, recentChainData, inclusionListStore);

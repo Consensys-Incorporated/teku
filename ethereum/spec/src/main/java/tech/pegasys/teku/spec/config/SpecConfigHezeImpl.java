@@ -21,6 +21,7 @@ public class SpecConfigHezeImpl extends DelegatingSpecConfigGloas implements Spe
 
   private final int inclusionListDueBps;
   private final int maxRequestInclusionList;
+  private final int minSlotsForInclusionListsRequests;
   private final int maxTransactionsBytesPerInclusionList;
   private final int maxSignedInclusionListSize;
   private final int inclusionListCommitteeSize;
@@ -29,12 +30,14 @@ public class SpecConfigHezeImpl extends DelegatingSpecConfigGloas implements Spe
       final SpecConfigGloas specConfig,
       final int inclusionListDueBps,
       final int maxRequestInclusionList,
+      final int minSlotsForInclusionListsRequests,
       final int maxTransactionsBytesPerInclusionList,
       final int maxSignedInclusionListSize,
       final int inclusionListCommitteeSize) {
     super(specConfig);
     this.inclusionListDueBps = inclusionListDueBps;
     this.maxRequestInclusionList = maxRequestInclusionList;
+    this.minSlotsForInclusionListsRequests = minSlotsForInclusionListsRequests;
     this.maxTransactionsBytesPerInclusionList = maxTransactionsBytesPerInclusionList;
     this.maxSignedInclusionListSize = maxSignedInclusionListSize;
     this.inclusionListCommitteeSize = inclusionListCommitteeSize;
@@ -53,6 +56,11 @@ public class SpecConfigHezeImpl extends DelegatingSpecConfigGloas implements Spe
   @Override
   public int getMaxRequestInclusionList() {
     return maxRequestInclusionList;
+  }
+
+  @Override
+  public int getMinSlotsForInclusionListsRequests() {
+    return minSlotsForInclusionListsRequests;
   }
 
   @Override
@@ -86,6 +94,7 @@ public class SpecConfigHezeImpl extends DelegatingSpecConfigGloas implements Spe
     SpecConfigHezeImpl that = (SpecConfigHezeImpl) o;
     return inclusionListDueBps == that.inclusionListDueBps
         && maxRequestInclusionList == that.maxRequestInclusionList
+        && minSlotsForInclusionListsRequests == that.minSlotsForInclusionListsRequests
         && maxTransactionsBytesPerInclusionList == that.maxTransactionsBytesPerInclusionList
         && maxSignedInclusionListSize == that.maxSignedInclusionListSize
         && inclusionListCommitteeSize == that.inclusionListCommitteeSize;
@@ -97,6 +106,7 @@ public class SpecConfigHezeImpl extends DelegatingSpecConfigGloas implements Spe
         super.hashCode(),
         inclusionListDueBps,
         maxRequestInclusionList,
+        minSlotsForInclusionListsRequests,
         maxTransactionsBytesPerInclusionList,
         maxSignedInclusionListSize,
         inclusionListCommitteeSize);

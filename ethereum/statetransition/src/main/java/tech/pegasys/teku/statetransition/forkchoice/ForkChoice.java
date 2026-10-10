@@ -53,6 +53,7 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.cache.CapturingIndexedAttestationCache;
 import tech.pegasys.teku.spec.cache.IndexedAttestationCache;
+import tech.pegasys.teku.spec.config.SpecConfigHeze;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
@@ -387,18 +388,27 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
     final InclusionList inclusionList = signedInclusionList.getMessage();
     final UInt64 inclusionListSlot = inclusionList.getSlot();
     final UpdatableStore store = recentChainData.getStore();
+    final SpecConfigHeze specConfigHeze =
+        SpecConfigHeze.required(spec.atSlot(inclusionListSlot).getConfig());
+    final UInt64 currentSlot = spec.getCurrentSlot(store);
+
+    // The slot must be within the retention window
+    if (inclusionListSlot.isGreaterThan(currentSlot)
+        || inclusionListSlot
+            .plus(specConfigHeze.getMinSlotsForInclusionListsRequests())
+            .isLessThan(currentSlot)) {
+      return SafeFuture.completedFuture(
+          InclusionListImportResult.failedSlotOutsideRetentionWindow());
+    }
 
     final long transactionsSize =
         inclusionList.getTransactions().stream()
             .mapToLong(transaction -> transaction.getBytes().size())
             .sum();
-    final int maxTransactionsSize =
-        spec.atSlot(inclusionListSlot)
-            .getConfig()
-            .toVersionHeze()
-            .orElseThrow()
-            .getMaxTransactionsBytesPerInclusionList();
-    if (transactionsSize > maxTransactionsSize) {
+    if (transactionsSize == 0) {
+      return SafeFuture.completedFuture(InclusionListImportResult.failedNoTransactions());
+    }
+    if (transactionsSize > specConfigHeze.getMaxTransactionsBytesPerInclusionList()) {
       return SafeFuture.completedFuture(
           InclusionListImportResult.failedTransactionsSizeExceedsLimit());
     }
@@ -407,8 +417,6 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
         .anyMatch(transaction -> transaction.getBytes().isEmpty())) {
       return SafeFuture.completedFuture(InclusionListImportResult.failedEmptyTransaction());
     }
-
-    final UInt64 currentSlot = spec.getCurrentSlot(store);
 
     final int slotDurationMillis =
         spec.atSlot(inclusionListSlot).getConfig().getSlotDurationMillis();

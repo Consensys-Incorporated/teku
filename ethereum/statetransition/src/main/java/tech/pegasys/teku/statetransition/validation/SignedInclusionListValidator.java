@@ -13,12 +13,13 @@
 
 package tech.pegasys.teku.statetransition.validation;
 
-import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
-import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.stream.Collectors;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -33,26 +34,64 @@ import tech.pegasys.teku.storage.client.RecentChainData;
 
 public class SignedInclusionListValidator {
 
+  /** Spec: a validator may have at most two valid inclusion lists per slot and dependent root. */
+  private static final int MAX_VALID_INCLUSION_LISTS_PER_VALIDATOR = 2;
+
   private final Spec spec;
   private final RecentChainData recentChainData;
+  private final GossipValidationHelper gossipValidationHelper;
   private final AsyncBLSSignatureVerifier signatureVerifier;
+
+  /**
+   * {@code seen.inclusion_list_counts}: valid inclusion lists per slot, then per dependent root and
+   * validator index. Keyed by slot first so that past slots can be pruned.
+   */
+  private final NavigableMap<UInt64, ConcurrentMap<SeenInclusionListKey, Integer>>
+      seenInclusionListCounts = new ConcurrentSkipListMap<>();
 
   public SignedInclusionListValidator(
       final Spec spec,
       final RecentChainData recentChainData,
+      final GossipValidationHelper gossipValidationHelper,
       final AsyncBLSSignatureVerifier signatureVerifier) {
     this.spec = spec;
     this.recentChainData = recentChainData;
+    this.gossipValidationHelper = gossipValidationHelper;
     this.signatureVerifier = signatureVerifier;
   }
 
   public SafeFuture<InternalValidationResult> validate(
-      final SignedInclusionList signedInclusionList,
-      final NavigableMap<UInt64, ConcurrentMap<UInt64, List<SignedInclusionList>>>
-          slotToInclusionListsByValidatorIndex) {
+      final SignedInclusionList signedInclusionList) {
 
     final InclusionList inclusionList = signedInclusionList.getMessage();
     final UInt64 slot = inclusionList.getSlot();
+    final SeenInclusionListKey seenKey =
+        new SeenInclusionListKey(
+            inclusionList.getDependentRoot(), inclusionList.getValidatorIndex());
+
+    /*
+     * [IGNORE] This is the first or second valid message from this validator for the slot and
+     * dependent root.
+     */
+    if (getSeenCount(slot, seenKey) >= MAX_VALID_INCLUSION_LISTS_PER_VALIDATOR) {
+      return SafeFuture.completedFuture(
+          InternalValidationResult.ignore(
+              "Already received %d valid Inclusion Lists from validator with index %d",
+              MAX_VALID_INCLUSION_LISTS_PER_VALIDATOR,
+              inclusionList.getValidatorIndex().intValue()));
+    }
+
+    /*
+     * [IGNORE] The inclusion list's slot is for the current slot (with
+     * MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance).
+     */
+    if (!gossipValidationHelper.isSlotCurrent(slot)) {
+      return SafeFuture.completedFuture(
+          InternalValidationResult.ignore("Inclusion List is not for the current slot"));
+    }
+    // Only current slot inclusion lists can be valid, so earlier slots' counts are no longer needed
+    seenInclusionListCounts.headMap(slot.minusMinZero(UInt64.ONE)).clear();
+
     final Fork fork = spec.fork(spec.computeEpochAtSlot(slot));
     final SpecConfigHeze specConfigHeze =
         spec.atSlot(slot).getConfig().toVersionHeze().orElseThrow();
@@ -62,6 +101,14 @@ public class SignedInclusionListValidator {
         inclusionList.getTransactions().stream()
             .map(transaction -> transaction.getBytes().size())
             .reduce(0, Integer::sum);
+
+    /*
+     * [IGNORE] The size of inclusion list transactions must be non-empty
+     */
+    if (transactionsBytesSize == 0) {
+      return SafeFuture.completedFuture(
+          InternalValidationResult.ignore("Inclusion List contains no transactions"));
+    }
 
     /*
      * [REJECT] The size of message is within upperbound MAX_TRANSACTIONS_BYTES_PER_INCLUSION_LIST
@@ -84,17 +131,6 @@ public class SignedInclusionListValidator {
 
     final InclusionListUtil inclusionListUtil =
         spec.atSlot(slot).getInclusionListUtil().orElseThrow();
-
-    /*
-     * [IGNORE] The message is either the first or second valid message received from the validator with index message.validator_index.
-     */
-    if (countInclusionLists(slotToInclusionListsByValidatorIndex, inclusionList.getValidatorIndex())
-        > 2) {
-      return SafeFuture.completedFuture(
-          InternalValidationResult.ignore(
-              "Already received 2 Inclusion Lists from validator with index %d",
-              inclusionList.getValidatorIndex().intValue()));
-    }
 
     return recentChainData
         .retrieveStateInEffectAtSlot(slot)
@@ -134,24 +170,45 @@ public class SignedInclusionListValidator {
                       fork, state, signedInclusionList, signatureVerifier)
                   .thenApply(
                       isValidInclusionListSignature -> {
-                        if (isValidInclusionListSignature) {
-                          return InternalValidationResult.ACCEPT;
-                        } else {
+                        if (!isValidInclusionListSignature) {
                           return InternalValidationResult.reject(
                               "Invalid inclusion list signature.");
                         }
+                        // Another valid list from this validator may have been counted while
+                        // this one was being validated
+                        return markSeen(slot, seenKey)
+                            ? InternalValidationResult.ACCEPT
+                            : InternalValidationResult.ignore(
+                                "Already received %d valid Inclusion Lists from validator with"
+                                    + " index %d",
+                                MAX_VALID_INCLUSION_LISTS_PER_VALIDATOR,
+                                inclusionList.getValidatorIndex().intValue());
                       });
             });
   }
 
-  private int countInclusionLists(
-      final NavigableMap<UInt64, ConcurrentMap<UInt64, List<SignedInclusionList>>>
-          slotToInclusionListsByValidatorIndex,
-      final UInt64 validatorIndex) {
-    final Set<Map<UInt64, List<SignedInclusionList>>> validatorInclusionLists =
-        slotToInclusionListsByValidatorIndex.values().stream()
-            .filter(e -> e.containsKey(validatorIndex))
-            .collect(Collectors.toSet());
-    return validatorInclusionLists.stream().mapToInt(e -> e.get(validatorIndex).size()).sum();
+  private int getSeenCount(final UInt64 slot, final SeenInclusionListKey seenKey) {
+    final Map<SeenInclusionListKey, Integer> countsForSlot = seenInclusionListCounts.get(slot);
+    return countsForSlot == null ? 0 : countsForSlot.getOrDefault(seenKey, 0);
   }
+
+  /** Counts a valid inclusion list, returning false if the validator already had the maximum. */
+  private boolean markSeen(final UInt64 slot, final SeenInclusionListKey seenKey) {
+    final AtomicBoolean counted = new AtomicBoolean(false);
+    seenInclusionListCounts
+        .computeIfAbsent(slot, __ -> new ConcurrentHashMap<>())
+        .compute(
+            seenKey,
+            (__, count) -> {
+              final int currentCount = count == null ? 0 : count;
+              if (currentCount >= MAX_VALID_INCLUSION_LISTS_PER_VALIDATOR) {
+                return currentCount;
+              }
+              counted.set(true);
+              return currentCount + 1;
+            });
+    return counted.get();
+  }
+
+  private record SeenInclusionListKey(Bytes32 dependentRoot, UInt64 validatorIndex) {}
 }

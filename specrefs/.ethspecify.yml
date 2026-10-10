@@ -14,9 +14,7 @@ specrefs:
     - presets.yml
 
   exceptions:
-    configs:
-      # Not implemented: heze
-      - MIN_SLOTS_FOR_INCLUSION_LISTS_REQUESTS#heze
+    configs: []
 
     constants:
       # Not defined as a constant, unnecessary

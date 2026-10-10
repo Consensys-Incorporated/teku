@@ -15,7 +15,6 @@ package tech.pegasys.teku.statetransition.inclusionlist;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -82,7 +81,7 @@ class InclusionListManagerTest {
         createSignedInclusionList(UInt64.ONE, UInt64.ONE, dataStructureUtil.randomBytes32());
     final List<SignedInclusionList> receivedInclusionLists = new ArrayList<>();
     inclusionListManager.subscribeToInclusionLists(receivedInclusionLists::add);
-    when(signedInclusionListValidator.validate(eq(signedInclusionList), any()))
+    when(signedInclusionListValidator.validate(signedInclusionList))
         .thenReturn(
             SafeFuture.completedFuture(
                 InternalValidationResult.create(validationResultCode, "Test validation result")));

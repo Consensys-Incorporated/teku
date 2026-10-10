@@ -102,8 +102,7 @@ public class InclusionListManager implements SlotEventsChannel {
   public SafeFuture<InternalValidationResult> addSignedInclusionList(
       final SignedInclusionList signedInclusionList, final Optional<UInt64> arrivalTimestamp) {
     final SafeFuture<InternalValidationResult> validationResult =
-        signedInclusionListValidator.validate(
-            signedInclusionList, slotToInclusionListsByValidatorIndex);
+        signedInclusionListValidator.validate(signedInclusionList);
     processInternallyInclusionList(validationResult, signedInclusionList);
     return validationResult;
   }

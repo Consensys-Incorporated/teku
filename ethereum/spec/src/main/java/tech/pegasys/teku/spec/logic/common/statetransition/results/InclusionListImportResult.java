@@ -18,6 +18,15 @@ import tech.pegasys.teku.spec.datastructures.execution.versions.heze.SignedInclu
 
 public interface InclusionListImportResult {
 
+  static InclusionListImportResult failedSlotOutsideRetentionWindow() {
+    return new FailedInclusionListImportResult(
+        FailureReason.SLOT_OUTSIDE_RETENTION_WINDOW, Optional.empty());
+  }
+
+  static InclusionListImportResult failedNoTransactions() {
+    return new FailedInclusionListImportResult(FailureReason.NO_TRANSACTIONS, Optional.empty());
+  }
+
   static InclusionListImportResult failedEmptyTransaction() {
     return new FailedInclusionListImportResult(FailureReason.EMPTY_TRANSACTION, Optional.empty());
   }
@@ -32,6 +41,8 @@ public interface InclusionListImportResult {
   }
 
   enum FailureReason {
+    SLOT_OUTSIDE_RETENTION_WINDOW,
+    NO_TRANSACTIONS,
     EMPTY_TRANSACTION,
     TRANSACTIONS_SIZE_EXCEEDS_LIMIT,
     INTERNAL_ERROR // A catch-all category for unexpected errors (bugs)
