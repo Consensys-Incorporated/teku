@@ -26,6 +26,7 @@ import io.libp2p.core.pubsub.PubsubApiKt;
 import io.libp2p.core.pubsub.PubsubPublisherApi;
 import io.libp2p.core.pubsub.ValidationResult;
 import io.libp2p.pubsub.FastIdSeenCache;
+import io.libp2p.pubsub.LRUSeenCache;
 import io.libp2p.pubsub.MaxCountTopicSubscriptionFilter;
 import io.libp2p.pubsub.PubsubProtocol;
 import io.libp2p.pubsub.SeenCache;
@@ -118,11 +119,12 @@ public class LibP2PGossipNetworkBuilder {
             gossipTopicFilter::isRelevantTopic);
 
     final GossipRouterBuilder builder = new GossipRouterBuilder();
-    final SeenCache<Optional<ValidationResult>> seenCache =
+    final SeenCache<Optional<ValidationResult>> fastIdSeenCache =
+        new FastIdSeenCache<>(msg -> Bytes.wrap(msg.messageSha256()));
+    final SeenCache<Optional<ValidationResult>> ttlSeenCache =
         new TTLSeenCache<>(
-            new FastIdSeenCache<>(msg -> Bytes.wrap(msg.messageSha256())),
-            gossipParams.getSeenTTL(),
-            builder.getCurrentTimeSupplier());
+            fastIdSeenCache, gossipParams.getSeenTTL(), builder.getCurrentTimeSupplier());
+    final SeenCache<Optional<ValidationResult>> seenCache = new LRUSeenCache<>(ttlSeenCache, 10000);
 
     builder.setParams(gossipParams);
     builder.setScoreParams(scoreParams);
