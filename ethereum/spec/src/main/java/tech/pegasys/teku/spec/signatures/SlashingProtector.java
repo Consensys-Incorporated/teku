@@ -15,6 +15,7 @@ package tech.pegasys.teku.spec.signatures;
 
 import java.io.IOException;
 import java.util.Optional;
+import java.util.function.Supplier;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.signingrecord.ValidatorSigningRecord;
@@ -33,4 +34,17 @@ public interface SlashingProtector {
 
   Optional<ValidatorSigningRecord> getSigningRecord(final BLSPublicKey validator)
       throws IOException;
+
+  /**
+   * Applies an externally sourced update to a validator's signing record, for example an EIP-3076
+   * import through the keymanager API, and refreshes any record this protector has cached. The
+   * update is applied while signing for that validator is blocked, so a signature in flight cannot
+   * write the pre-import record back over the imported one.
+   *
+   * @param validator the validator whose signing record is being updated
+   * @param recordUpdate updates the stored record, returning a description of any failure
+   * @return the error reported by recordUpdate, or empty if the update was applied
+   */
+  Optional<String> importSigningRecord(
+      final BLSPublicKey validator, final Supplier<Optional<String>> recordUpdate);
 }
