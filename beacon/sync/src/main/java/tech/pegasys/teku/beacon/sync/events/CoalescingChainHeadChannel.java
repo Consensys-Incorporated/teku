@@ -202,18 +202,33 @@ public class CoalescingChainHeadChannel implements ChainHeadChannel, SyncSubscri
       this.previousDutyDependentRoot = previousDutyDependentRoot;
       this.currentDutyDependentRoot = currentDutyDependentRoot;
       this.payloadStatus = payloadStatus;
-      if (reorgContext.isPresent() && hasEarlierCommonAncestor(reorgContext)) {
-        this.reorgContext = reorgContext;
-      }
+      reorgContext.ifPresent(this::mergeReorgContext);
       return this;
     }
 
-    private boolean hasEarlierCommonAncestor(final Optional<ReorgContext> reorgContext) {
-      return this.reorgContext.isEmpty()
-          || reorgContext
-              .orElseThrow()
-              .commonAncestorSlot()
-              .isLessThan(this.reorgContext.orElseThrow().commonAncestorSlot());
+    /**
+     * While syncing only the last head update is delivered (without logging), so the pending reorg
+     * context must keep whatever the consumers need to act on. A block reorg is what pools, light
+     * client pruning and the chain_reorg event act on, so it is never displaced by a payload reorg;
+     * between block reorgs the earliest common ancestor covers the most ground. No consumer acts on
+     * a payload reorg, so one is only kept while no block reorg is pending (the latest, so that the
+     * delivered event is not stripped of a context that was reported) and the delivered payload
+     * status reflects the final head regardless of which context is kept.
+     */
+    private void mergeReorgContext(final ReorgContext incoming) {
+      if (this.reorgContext.isEmpty()) {
+        this.reorgContext = Optional.of(incoming);
+        return;
+      }
+      final ReorgContext pending = this.reorgContext.get();
+      if (pending.isPayloadReorg()) {
+        // a block reorg replaces it, a newer payload reorg refreshes it
+        this.reorgContext = Optional.of(incoming);
+      } else if (incoming.isBlockReorg()
+          && incoming.commonAncestorSlot().isLessThan(pending.commonAncestorSlot())) {
+        this.reorgContext = Optional.of(incoming);
+      }
+      // otherwise the pending block reorg is kept
     }
   }
 }

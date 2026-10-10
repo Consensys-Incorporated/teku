@@ -606,6 +606,125 @@ class CoalescingChainHeadChannelTest {
             eq(Optional.of("EMPTY")));
   }
 
+  @Test
+  void shouldKeepBlockReorgOverEarlierPayloadReorgWhileSyncing() {
+    // The payload reorg's common ancestor is its own head (slot 100). The block reorg that follows
+    // forks above it (slot 105): "earliest common ancestor" alone would keep the payload reorg
+    // and silence the block reorg for pools, light client pruning and chain_reorg.
+    final Optional<ReorgContext> payloadReorg = payloadReorgAtSlot(UInt64.valueOf(100));
+    final Optional<ReorgContext> blockReorg = blockReorgWithCommonAncestorSlot(UInt64.valueOf(105));
+    final UInt64 finalSlot = UInt64.valueOf(110);
+    final Bytes32 finalBlockRoot = dataStructureUtil.randomBytes32();
+
+    channel.onSyncingChange(true);
+    sendHeadUpdate(
+        UInt64.valueOf(100), dataStructureUtil.randomBytes32(), PAYLOAD_STATUS_EMPTY, payloadReorg);
+    sendHeadUpdate(finalSlot, finalBlockRoot, PAYLOAD_STATUS_FULL, blockReorg);
+    verifyNoInteractions(delegate);
+
+    channel.onSyncingChange(false);
+    verifyDelegateReceived(finalSlot, finalBlockRoot, PAYLOAD_STATUS_FULL, blockReorg);
+  }
+
+  @Test
+  void shouldKeepBlockReorgOverLaterPayloadReorgWhileSyncing() {
+    final Optional<ReorgContext> blockReorg = blockReorgWithCommonAncestorSlot(UInt64.valueOf(100));
+    final Optional<ReorgContext> payloadReorg = payloadReorgAtSlot(UInt64.valueOf(90));
+    final UInt64 finalSlot = UInt64.valueOf(90);
+    final Bytes32 finalBlockRoot = dataStructureUtil.randomBytes32();
+
+    channel.onSyncingChange(true);
+    sendHeadUpdate(
+        UInt64.valueOf(110), dataStructureUtil.randomBytes32(), PAYLOAD_STATUS_FULL, blockReorg);
+    sendHeadUpdate(finalSlot, finalBlockRoot, PAYLOAD_STATUS_EMPTY, payloadReorg);
+    verifyNoInteractions(delegate);
+
+    channel.onSyncingChange(false);
+    // the block reorg context is kept but the delivered head is the latest one
+    verifyDelegateReceived(finalSlot, finalBlockRoot, PAYLOAD_STATUS_EMPTY, blockReorg);
+  }
+
+  @Test
+  void shouldKeepLatestPayloadReorgWhileSyncing() {
+    final Optional<ReorgContext> firstPayloadReorg = payloadReorgAtSlot(UInt64.valueOf(100));
+    final Optional<ReorgContext> secondPayloadReorg = payloadReorgAtSlot(UInt64.valueOf(105));
+    final UInt64 finalSlot = UInt64.valueOf(105);
+    final Bytes32 finalBlockRoot = dataStructureUtil.randomBytes32();
+
+    channel.onSyncingChange(true);
+    sendHeadUpdate(
+        UInt64.valueOf(100),
+        dataStructureUtil.randomBytes32(),
+        PAYLOAD_STATUS_EMPTY,
+        firstPayloadReorg);
+    sendHeadUpdate(finalSlot, finalBlockRoot, PAYLOAD_STATUS_EMPTY, secondPayloadReorg);
+    verifyNoInteractions(delegate);
+
+    channel.onSyncingChange(false);
+    verifyDelegateReceived(finalSlot, finalBlockRoot, PAYLOAD_STATUS_EMPTY, secondPayloadReorg);
+  }
+
+  @Test
+  void shouldReplacePendingBlockReorgWithBlockReorgWithEarlierCommonAncestorWhileSyncing() {
+    final Optional<ReorgContext> laterBlockReorg =
+        blockReorgWithCommonAncestorSlot(UInt64.valueOf(100));
+    final Optional<ReorgContext> earlierBlockReorg =
+        blockReorgWithCommonAncestorSlot(UInt64.valueOf(80));
+    final UInt64 finalSlot = UInt64.valueOf(95);
+    final Bytes32 finalBlockRoot = dataStructureUtil.randomBytes32();
+
+    channel.onSyncingChange(true);
+    sendHeadUpdate(
+        UInt64.valueOf(110),
+        dataStructureUtil.randomBytes32(),
+        PAYLOAD_STATUS_FULL,
+        laterBlockReorg);
+    sendHeadUpdate(finalSlot, finalBlockRoot, PAYLOAD_STATUS_EMPTY, earlierBlockReorg);
+    verifyNoInteractions(delegate);
+
+    channel.onSyncingChange(false);
+    verifyDelegateReceived(finalSlot, finalBlockRoot, PAYLOAD_STATUS_EMPTY, earlierBlockReorg);
+  }
+
+  private Optional<ReorgContext> payloadReorgAtSlot(final UInt64 headSlot) {
+    return Optional.of(
+        ReorgContext.payloadReorg(
+            dataStructureUtil.randomBytes32(),
+            headSlot,
+            dataStructureUtil.randomBytes32(),
+            dataStructureUtil.randomBytes32(),
+            dataStructureUtil.randomBytes32()));
+  }
+
+  private Optional<ReorgContext> blockReorgWithCommonAncestorSlot(final UInt64 commonAncestorSlot) {
+    return Optional.of(
+        new ReorgContext(
+            dataStructureUtil.randomBytes32(),
+            dataStructureUtil.randomUInt64(),
+            dataStructureUtil.randomBytes32(),
+            commonAncestorSlot,
+            dataStructureUtil.randomBytes32()));
+  }
+
+  private void verifyDelegateReceived(
+      final UInt64 slot,
+      final Bytes32 bestBlockRoot,
+      final ForkChoicePayloadStatus payloadStatus,
+      final Optional<ReorgContext> reorgContext) {
+    verify(delegate)
+        .chainHeadUpdated(
+            eq(slot),
+            any(),
+            eq(bestBlockRoot),
+            anyBoolean(),
+            anyBoolean(),
+            any(),
+            any(),
+            eq(Optional.of(payloadStatus)),
+            eq(reorgContext));
+    verifyNoMoreInteractions(delegate);
+  }
+
   private void sendHeadUpdate(
       final UInt64 slot,
       final Bytes32 bestBlockRoot,
