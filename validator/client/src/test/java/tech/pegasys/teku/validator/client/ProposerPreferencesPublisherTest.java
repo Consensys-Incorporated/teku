@@ -90,6 +90,7 @@ public class ProposerPreferencesPublisherTest {
             proposerConfigPropertiesProvider,
             forkProvider);
 
+    when(proposerConfigPropertiesProvider.refresh()).thenReturn(SafeFuture.COMPLETE);
     when(proposerConfigPropertiesProvider.getFeeRecipient(publicKey))
         .thenReturn(Optional.of(feeRecipient));
     when(proposerConfigPropertiesProvider.getGasLimit(eq(publicKey), any())).thenReturn(gasLimit);
@@ -114,6 +115,7 @@ public class ProposerPreferencesPublisherTest {
             List.of(new ProposerDuty(publicKey, 42, slot)),
             false));
 
+    verify(proposerConfigPropertiesProvider).refresh();
     verify(validatorApiChannel).sendSignedProposerPreferences(anyList());
     // duties may be for a future epoch, so the gas limit must be resolved for that epoch
     verify(proposerConfigPropertiesProvider).getGasLimit(publicKey, epoch);

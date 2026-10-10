@@ -46,14 +46,15 @@ public class BuilderPreferencesPublisher extends AbstractPreferencesPublisher {
       final OwnedValidators ownedValidators,
       final Spec spec,
       final ValidatorApiChannel validatorApiChannel,
+      final ProposerConfigPropertiesProvider proposerConfigPropertiesProvider,
       final BuilderConfigProvider builderConfigProvider) {
-    super(ownedValidators, spec);
+    super(ownedValidators, spec, proposerConfigPropertiesProvider);
     this.validatorApiChannel = validatorApiChannel;
     this.builderConfigProvider = builderConfigProvider;
   }
 
   @Override
-  void publishPreferences(
+  SafeFuture<Void> publishPreferences(
       final UInt64 epoch,
       final List<ProposerDuty> ownedProposerDuties,
       final Bytes32 dependentRoot) {
@@ -87,7 +88,7 @@ public class BuilderPreferencesPublisher extends AbstractPreferencesPublisher {
                             return List.of();
                           });
                 });
-    SafeFuture.collectAll(builderPreferencesFutures)
+    return SafeFuture.collectAll(builderPreferencesFutures)
         .thenCompose(
             unflattenedBuilderPreferences -> {
               final SszList<BuilderPreferencesEntry> builderPreferences =
@@ -95,8 +96,12 @@ public class BuilderPreferencesPublisher extends AbstractPreferencesPublisher {
                       .flatMap(List::stream)
                       .collect(ApiSchemas.BUILDER_PREFERENCES_ENTRIES_SCHEMA.collector());
               return sendBuilderPreferences(builderPreferences);
-            })
-        .finish(error -> VALIDATOR_LOGGER.builderPreferencesPublicationFailed(epoch, error));
+            });
+  }
+
+  @Override
+  void handlePublicationError(final UInt64 epoch, final Throwable error) {
+    VALIDATOR_LOGGER.builderPreferencesPublicationFailed(epoch, error);
   }
 
   private SafeFuture<Void> sendBuilderPreferences(

@@ -19,6 +19,7 @@ import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuty;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
@@ -31,10 +32,15 @@ abstract class AbstractPreferencesPublisher implements ValidatorTimingChannel {
 
   protected final OwnedValidators ownedValidators;
   protected final Spec spec;
+  protected final ProposerConfigPropertiesProvider proposerConfigPropertiesProvider;
 
-  public AbstractPreferencesPublisher(final OwnedValidators ownedValidators, final Spec spec) {
+  public AbstractPreferencesPublisher(
+      final OwnedValidators ownedValidators,
+      final Spec spec,
+      final ProposerConfigPropertiesProvider proposerConfigPropertiesProvider) {
     this.ownedValidators = ownedValidators;
     this.spec = spec;
+    this.proposerConfigPropertiesProvider = proposerConfigPropertiesProvider;
   }
 
   @Override
@@ -61,9 +67,14 @@ abstract class AbstractPreferencesPublisher implements ValidatorTimingChannel {
     // getBlockProposalDependentRoot returns the same value, so we reuse it here.
     final Bytes32 dependentRoot = proposerDuties.getDependentRoot();
 
-    publishPreferences(epoch, ownedProposerDuties, dependentRoot);
+    proposerConfigPropertiesProvider
+        .refresh()
+        .thenCompose(__ -> publishPreferences(epoch, ownedProposerDuties, dependentRoot))
+        .finish(error -> handlePublicationError(epoch, error));
   }
 
-  abstract void publishPreferences(
+  abstract SafeFuture<Void> publishPreferences(
       UInt64 epoch, List<ProposerDuty> ownedProposerDuties, Bytes32 dependentRoot);
+
+  abstract void handlePublicationError(final UInt64 epoch, final Throwable error);
 }

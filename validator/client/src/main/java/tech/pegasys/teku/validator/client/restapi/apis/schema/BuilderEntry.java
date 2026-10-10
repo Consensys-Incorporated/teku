@@ -13,12 +13,6 @@
 
 package tech.pegasys.teku.validator.client.restapi.apis.schema;
 
-import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkNotNull;
-import static tech.pegasys.teku.spec.config.SpecConfigGloas.MAX_BUILDER_AUTH_DATA_SIZE;
-import static tech.pegasys.teku.spec.schemas.ApiSchemas.MAX_BUILDER_PUBKEYS;
-import static tech.pegasys.teku.spec.schemas.ApiSchemas.MAX_BUILDER_URL_SIZE;
-
 import java.util.List;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
@@ -36,27 +30,6 @@ public record BuilderEntry(
     Optional<UInt64> maxExecutionPayment,
     Optional<UInt64> minBid,
     Optional<UInt64> builderBoostFactor) {
-
-  @SuppressWarnings("MethodInputParametersMustBeFinal")
-  public BuilderEntry {
-    checkNotNull(url, "url is required");
-    checkArgument(
-        !url.isEmpty() && url.length() <= MAX_BUILDER_URL_SIZE,
-        "url must be between 1 and %s characters",
-        MAX_BUILDER_URL_SIZE);
-    authData.ifPresent(
-        data ->
-            checkArgument(
-                !data.isEmpty() && data.size() <= MAX_BUILDER_AUTH_DATA_SIZE,
-                "auth_data must be between 1 and %s bytes",
-                MAX_BUILDER_AUTH_DATA_SIZE));
-    builderPubkeys.ifPresent(
-        pubkeys ->
-            checkArgument(
-                pubkeys.size() <= MAX_BUILDER_PUBKEYS,
-                "builder_pubkeys must contain at most %s entries",
-                MAX_BUILDER_PUBKEYS));
-  }
 
   public static class Builder {
     private String url;

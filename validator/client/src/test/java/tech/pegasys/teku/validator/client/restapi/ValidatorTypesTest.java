@@ -242,17 +242,6 @@ class ValidatorTypesTest {
   }
 
   @Test
-  void builderConfigType_duplicateUrls() {
-    assertThatThrownBy(
-            () ->
-                parse(
-                    "{\"builders\": [{\"url\": \"https://builder-a.example.com\"}, {\"url\": \"https://builder-a.example.com\", \"min_bid\": \"1\"}]}",
-                    ValidatorTypes.BUILDER_CONFIG_TYPE))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("builders contain duplicate url https://builder-a.example.com");
-  }
-
-  @Test
   void externalValidatorType_roundTrip() throws Exception {
     final ExternalValidator externalValidator =
         new ExternalValidator(dataStructureUtil.randomPublicKey(), Optional.empty(), true);

@@ -13,14 +13,26 @@
 
 package tech.pegasys.teku.validator.client;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.base.Strings.isNullOrEmpty;
 import static java.util.Objects.requireNonNullElse;
+import static tech.pegasys.teku.spec.config.SpecConfigGloas.MAX_BUILDER_AUTH_DATA_SIZE;
+import static tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfigSchema.MAX_BUILDER_ENTRIES;
+import static tech.pegasys.teku.spec.schemas.ApiSchemas.MAX_BUILDER_PUBKEYS;
+import static tech.pegasys.teku.spec.schemas.ApiSchemas.MAX_BUILDER_URL_SIZE;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URL;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -161,6 +173,9 @@ public class ProposerConfig {
     @JsonProperty(value = "urls")
     private final Map<String, BuilderOverrides> urls;
 
+    // the urls parsed once on creation, in the order they were configured
+    private final List<BuilderUrl> builders;
+
     @JsonCreator
     public BuilderConfig(
         @JsonProperty(value = "enabled") final Boolean enabled,
@@ -175,7 +190,45 @@ public class ProposerConfig {
       this.registrationOverrides = registrationOverrides;
       this.minBid = minBid;
       this.builderBoostFactor = builderBoostFactor;
-      this.urls = requireNonNullElse(urls, ImmutableMap.of());
+      this.urls = urls == null ? ImmutableMap.of() : replaceNullOverrides(urls);
+      this.builders = parseUrls(this.urls);
+    }
+
+    private static Map<String, BuilderOverrides> replaceNullOverrides(
+        final Map<String, BuilderOverrides> urls) {
+      final Map<String, BuilderOverrides> result = new LinkedHashMap<>();
+      urls.forEach(
+          (url, overrides) ->
+              result.put(url, requireNonNullElse(overrides, BuilderOverrides.EMPTY)));
+      return Collections.unmodifiableMap(result);
+    }
+
+    private static List<BuilderUrl> parseUrls(final Map<String, BuilderOverrides> urls) {
+      checkArgument(
+          urls.size() <= MAX_BUILDER_ENTRIES,
+          "\"urls\" must contain at most %s entries",
+          MAX_BUILDER_ENTRIES);
+      return urls.entrySet().stream()
+          .map(entry -> new BuilderUrl(parseUrl(entry.getKey()), entry.getValue()))
+          .toList();
+    }
+
+    private static URL parseUrl(final String url) {
+      checkArgument(
+          url != null && !url.isEmpty() && url.length() <= MAX_BUILDER_URL_SIZE,
+          "builder url must be between 1 and %s characters",
+          MAX_BUILDER_URL_SIZE);
+      try {
+        final URL parsedUrl = URI.create(url).toURL();
+        checkArgument(
+            !isNullOrEmpty(parsedUrl.getHost()),
+            "Invalid proposer config. Builder URL (%s) must contain a valid host",
+            parsedUrl);
+        return parsedUrl;
+      } catch (MalformedURLException ex) {
+        throw new IllegalArgumentException(
+            "Invalid proposer config. Builder URL (" + url + ") has invalid syntax", ex);
+      }
     }
 
     public Optional<Boolean> isEnabled() {
@@ -200,6 +253,11 @@ public class ProposerConfig {
 
     public Map<String, BuilderOverrides> getUrls() {
       return urls;
+    }
+
+    @JsonIgnore
+    public List<BuilderUrl> getBuilders() {
+      return builders;
     }
 
     @Override
@@ -284,6 +342,8 @@ public class ProposerConfig {
     @JsonProperty(value = "max_execution_payment")
     private final UInt64 maxExecutionPayment;
 
+    public static final BuilderOverrides EMPTY = new BuilderOverrides(null, null, null, null, null);
+
     @JsonCreator
     public BuilderOverrides(
         @JsonProperty(value = "auth_data") final Bytes authData,
@@ -291,6 +351,15 @@ public class ProposerConfig {
         @JsonProperty(value = "min_bid") final UInt64 minBid,
         @JsonProperty(value = "builder_boost_factor") final UInt64 builderBoostFactor,
         @JsonProperty(value = "max_execution_payment") final UInt64 maxExecutionPayment) {
+      checkArgument(
+          authData == null
+              || (!authData.isEmpty() && authData.size() <= MAX_BUILDER_AUTH_DATA_SIZE),
+          "\"auth_data\" must be between 1 and %s bytes",
+          MAX_BUILDER_AUTH_DATA_SIZE);
+      checkArgument(
+          builderPubkeys == null || builderPubkeys.size() <= MAX_BUILDER_PUBKEYS,
+          "\"builder_pubkeys\" must contain at most %s entries",
+          MAX_BUILDER_PUBKEYS);
       this.authData = authData;
       this.builderPubkeys = builderPubkeys;
       this.minBid = minBid;
@@ -340,4 +409,7 @@ public class ProposerConfig {
           authData, builderPubkeys, minBid, builderBoostFactor, maxExecutionPayment);
     }
   }
+
+  /** A configured builder url, parsed, with its overrides. */
+  public record BuilderUrl(URL url, BuilderOverrides overrides) {}
 }

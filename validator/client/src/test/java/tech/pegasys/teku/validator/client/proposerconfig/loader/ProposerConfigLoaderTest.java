@@ -15,6 +15,11 @@ package tech.pegasys.teku.validator.client.proposerconfig.loader;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
+import static tech.pegasys.teku.spec.config.SpecConfigGloas.MAX_BUILDER_AUTH_DATA_SIZE;
+import static tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfigSchema.MAX_BUILDER_ENTRIES;
+import static tech.pegasys.teku.spec.schemas.ApiSchemas.MAX_BUILDER_PUBKEYS;
+import static tech.pegasys.teku.spec.schemas.ApiSchemas.MAX_BUILDER_URL_SIZE;
 
 import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -168,6 +173,21 @@ public class ProposerConfigLoaderTest {
   }
 
   @Test
+  void shouldLoadNullUrlOverridesAsEmpty() {
+    final URL resource = Resources.getResource("proposerConfigWithUrlsValid4.json");
+
+    final Map<String, BuilderOverrides> urls =
+        loader
+            .getProposerConfig(resource)
+            .getConfigForPubKey(
+                "0xa057816155ad77931185101128655c0191bd0214c201ca48ed887f6c4c6adf334070efcd75140eada5ac83a92506dd7a")
+            .flatMap(Config::getBuilder)
+            .map(BuilderConfig::getUrls)
+            .orElseThrow();
+    assertThat(urls).containsExactly(entry("https://builder.example.com", BuilderOverrides.EMPTY));
+  }
+
+  @Test
   void shouldNotLoadBuilderOverridesWithPubKeyInDefaultConfig() {
     final URL resource = Resources.getResource("proposerConfigInvalid8.json");
 
@@ -175,6 +195,45 @@ public class ProposerConfigLoaderTest {
         .hasRootCauseInstanceOf(IllegalStateException.class)
         .hasRootCauseMessage(
             "\"publicKey\" is not allowed in \"default_config.builder.registrationOverrides\"");
+  }
+
+  @Test
+  void shouldNotLoadTooManyUrls() {
+    final URL resource = Resources.getResource("proposerConfigInvalid9.json");
+
+    assertThatThrownBy(() -> loader.getProposerConfig(resource))
+        .hasRootCauseInstanceOf(IllegalArgumentException.class)
+        .hasRootCauseMessage("\"urls\" must contain at most " + MAX_BUILDER_ENTRIES + " entries");
+  }
+
+  @Test
+  void shouldNotLoadTooLongUrl() {
+    final URL resource = Resources.getResource("proposerConfigInvalid10.json");
+
+    assertThatThrownBy(() -> loader.getProposerConfig(resource))
+        .hasRootCauseInstanceOf(IllegalArgumentException.class)
+        .hasRootCauseMessage(
+            "builder url must be between 1 and " + MAX_BUILDER_URL_SIZE + " characters");
+  }
+
+  @Test
+  void shouldNotLoadTooLongAuthData() {
+    final URL resource = Resources.getResource("proposerConfigInvalid11.json");
+
+    assertThatThrownBy(() -> loader.getProposerConfig(resource))
+        .hasRootCauseInstanceOf(IllegalArgumentException.class)
+        .hasRootCauseMessage(
+            "\"auth_data\" must be between 1 and " + MAX_BUILDER_AUTH_DATA_SIZE + " bytes");
+  }
+
+  @Test
+  void shouldNotLoadTooManyBuilderPubkeys() {
+    final URL resource = Resources.getResource("proposerConfigInvalid12.json");
+
+    assertThatThrownBy(() -> loader.getProposerConfig(resource))
+        .hasRootCauseInstanceOf(IllegalArgumentException.class)
+        .hasRootCauseMessage(
+            "\"builder_pubkeys\" must contain at most " + MAX_BUILDER_PUBKEYS + " entries");
   }
 
   @Test

@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -203,7 +204,12 @@ public class RuntimeProposerConfig {
                                             builderEntry.builderPubkeys().orElse(null),
                                             builderEntry.minBid().orElse(null),
                                             builderEntry.builderBoostFactor().orElse(null),
-                                            builderEntry.maxExecutionPayment().orElse(null)))));
+                                            builderEntry.maxExecutionPayment().orElse(null)),
+                                    (__, ___) -> {
+                                      throw new IllegalArgumentException(
+                                          "builders contain duplicate url");
+                                    },
+                                    LinkedHashMap::new)));
         return new ProposerConfig.BuilderConfig(
             null,
             gasLimit.orElse(null),
