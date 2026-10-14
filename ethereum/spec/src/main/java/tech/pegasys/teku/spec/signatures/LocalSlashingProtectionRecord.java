@@ -57,6 +57,10 @@ class LocalSlashingProtectionRecord {
     return signingRecord;
   }
 
+  void setSigningRecord(final ValidatorSigningRecord signingRecord) {
+    this.signingRecord = signingRecord;
+  }
+
   boolean writeSigningRecord(
       final SyncDataAccessor dataAccessor, final Optional<ValidatorSigningRecord> maybeRecord)
       throws IOException {

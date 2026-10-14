@@ -14,6 +14,7 @@
 package tech.pegasys.teku.spec.signatures;
 
 import java.util.Optional;
+import java.util.function.Supplier;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.signingrecord.ValidatorSigningRecord;
@@ -39,5 +40,12 @@ public class RejectingSlashingProtector implements SlashingProtector {
   @Override
   public Optional<ValidatorSigningRecord> getSigningRecord(final BLSPublicKey validator) {
     return Optional.empty();
+  }
+
+  @Override
+  public Optional<String> importSigningRecord(
+      final BLSPublicKey validator, final Supplier<Optional<String>> recordUpdate) {
+    // no record is held in memory, so there is nothing to refresh
+    return recordUpdate.get();
   }
 }

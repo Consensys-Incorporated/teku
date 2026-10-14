@@ -59,6 +59,7 @@ public class ValidatorLoader {
   private final Function<BLSPublicKey, Optional<Bytes32>> updatableGraffitiProvider;
   private final Optional<DataDirLayout> maybeDataDirLayout;
   private final SlashingProtectionLogger slashingProtectionLogger;
+  private final SlashingProtector slashingProtector;
 
   private ValidatorLoader(
       final List<ValidatorSource> validatorSources,
@@ -67,7 +68,8 @@ public class ValidatorLoader {
       final GraffitiProvider defaultGraffitiProvider,
       final Function<BLSPublicKey, Optional<Bytes32>> updatableGraffitiProvider,
       final Optional<DataDirLayout> maybeDataDirLayout,
-      final SlashingProtectionLogger slashingProtectionLogger) {
+      final SlashingProtectionLogger slashingProtectionLogger,
+      final SlashingProtector slashingProtector) {
     this.validatorSources = validatorSources;
     this.mutableLocalValidatorSource = mutableLocalValidatorSource;
     this.mutableExternalValidatorSource = mutableExternalValidatorSource;
@@ -75,6 +77,7 @@ public class ValidatorLoader {
     this.updatableGraffitiProvider = updatableGraffitiProvider;
     this.maybeDataDirLayout = maybeDataDirLayout;
     this.slashingProtectionLogger = slashingProtectionLogger;
+    this.slashingProtector = slashingProtector;
   }
 
   // synchronized to ensure that only one load is active at a time
@@ -116,7 +119,9 @@ public class ValidatorLoader {
 
     if (slashingProtectionImporter.isPresent()) {
       final Optional<String> errorString =
-          slashingProtectionImporter.get().updateSigningRecord(publicKey, LOG::debug);
+          slashingProtector.importSigningRecord(
+              publicKey,
+              () -> slashingProtectionImporter.get().updateSigningRecord(publicKey, LOG::debug));
       if (errorString.isPresent()) {
         return new LocalValidatorImportResult.Builder(
                 PostKeyResult.error(errorString.get()), password)
@@ -274,7 +279,8 @@ public class ValidatorLoader {
         config.getGraffitiProvider(),
         updatableGraffitiProvider,
         maybeMutableDir,
-        slashingProtectionLogger);
+        slashingProtectionLogger,
+        slashingProtector);
   }
 
   @VisibleForTesting
@@ -284,7 +290,8 @@ public class ValidatorLoader {
       final Optional<ValidatorSource> mutableExternalValidatorSource,
       final GraffitiProvider graffitiProvider,
       final Optional<DataDirLayout> maybeDataDirLayout,
-      final SlashingProtectionLogger slashingProtectionLogger) {
+      final SlashingProtectionLogger slashingProtectionLogger,
+      final SlashingProtector slashingProtector) {
     return new ValidatorLoader(
         validatorSources,
         mutableLocalValidatorSource,
@@ -292,7 +299,8 @@ public class ValidatorLoader {
         graffitiProvider,
         (publicKey) -> Optional.empty(),
         maybeDataDirLayout,
-        slashingProtectionLogger);
+        slashingProtectionLogger,
+        slashingProtector);
   }
 
   private void addValidatorsFromSource(

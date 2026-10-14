@@ -18,6 +18,7 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Supplier;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.signingrecord.ValidatorSigningRecord;
@@ -76,8 +77,8 @@ public class LocalSlashingProtector implements SlashingProtector {
   }
 
   @Override
-  public Optional<ValidatorSigningRecord> getSigningRecord(final BLSPublicKey validator)
-      throws IOException {
+  public synchronized Optional<ValidatorSigningRecord> getSigningRecord(
+      final BLSPublicKey validator) throws IOException {
     final ValidatorSigningRecord record = signingRecords.get(validator);
     if (record != null) {
       return Optional.of(record);
@@ -86,6 +87,17 @@ public class LocalSlashingProtector implements SlashingProtector {
         dataAccessor.read(validatorRecordPath(validator)).map(ValidatorSigningRecord::fromBytes);
     loaded.ifPresent(signingRecord -> signingRecords.put(validator, signingRecord));
     return loaded;
+  }
+
+  @Override
+  public synchronized Optional<String> importSigningRecord(
+      final BLSPublicKey validator, final Supplier<Optional<String>> recordUpdate) {
+    final Optional<String> error = recordUpdate.get();
+    if (error.isEmpty()) {
+      // the record on disk is now ahead of the cached one, so drop the cached copy
+      signingRecords.remove(validator);
+    }
+    return error;
   }
 
   private ValidatorSigningRecord loadOrCreateSigningRecord(
