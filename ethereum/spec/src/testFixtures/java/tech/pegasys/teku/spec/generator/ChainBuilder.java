@@ -75,6 +75,7 @@ import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.altair.BeaconStateAltair;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
 import tech.pegasys.teku.spec.datastructures.util.BeaconBlockBodyLists;
 import tech.pegasys.teku.spec.datastructures.util.BlobsUtil;
@@ -89,6 +90,7 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsDeneb;
 import tech.pegasys.teku.spec.signatures.LocalSigner;
 import tech.pegasys.teku.spec.signatures.Signer;
+import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 /**
  * A utility for building small, valid chains of blocks with states (and execution payloads with
@@ -121,6 +123,7 @@ public class ChainBuilder {
   private final BlockProposalTestUtil blockProposalTestUtil;
   private final ExecutionPayloadProposalTestUtil executionPayloadProposalTestUtil;
   private final BlobsUtil blobsUtil;
+  private final DataStructureUtil dataStructureUtil;
 
   private ChainBuilder(
       final Spec spec,
@@ -134,6 +137,7 @@ public class ChainBuilder {
     this.spec = spec;
     this.validatorKeys = validatorKeys;
     this.blobsUtil = new BlobsUtil(spec);
+    this.dataStructureUtil = new DataStructureUtil(spec);
     this.attestationGenerator = new AttestationGenerator(spec, validatorKeys);
     this.attesterSlashingGenerator = new AttesterSlashingGenerator(spec, validatorKeys);
     this.proposerSlashingGenerator = new ProposerSlashingGenerator(spec, validatorKeys);
@@ -479,6 +483,35 @@ public class ChainBuilder {
   public SignedBlockAndState generateNextBlock() {
     assertBlockCanBeGenerated();
     return generateNextBlock(0);
+  }
+
+  /**
+   * Creates block options for a Gloas block at {@code slot} whose bid builds on the EMPTY variant
+   * of the latest block, i.e. on the latest block hash of the state rather than on the latest bid's
+   * block hash. The latest block's execution payload envelope, if any, remains available in this
+   * chain builder: it is a payload the chain did not build on.
+   */
+  public BlockOptions createBlockOptionsBuildingOnEmptyParent(final UInt64 slot) {
+    final BeaconStateGloas blockSlotState;
+    try {
+      blockSlotState =
+          BeaconStateGloas.required(spec.processSlots(getLatestBlockAndState().getState(), slot));
+    } catch (final SlotProcessingException | EpochProcessingException e) {
+      throw new RuntimeException(e);
+    }
+    final Bytes32 prevRandao =
+        spec.atSlot(slot)
+            .beaconStateAccessors()
+            .getRandaoMix(blockSlotState, spec.computeEpochAtSlot(slot));
+    final ExecutionPayload executionPayload =
+        dataStructureUtil.randomExecutionPayload(
+            slot,
+            builder ->
+                builder.parentHash(blockSlotState.getLatestBlockHash()).prevRandao(prevRandao));
+    return BlockOptions.create()
+        .setExecutionPayload(executionPayload)
+        // No execution requests are expected for an EMPTY parent
+        .setParentExecutionRequests(dataStructureUtil.emptyExecutionRequests(slot));
   }
 
   public SignedBlockAndState generateNextBlock(final BlockOptions options) {

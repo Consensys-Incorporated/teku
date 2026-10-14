@@ -42,6 +42,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
@@ -567,6 +568,15 @@ public class CombinedChainDataClient {
   public NavigableMap<UInt64, Bytes32> getAncestorRoots(
       final UInt64 startSlot, final UInt64 step, final UInt64 count) {
     return recentChainData.getAncestorRootsOnHeadChain(startSlot, step, count);
+  }
+
+  /**
+   * Returns the fork choice node on the head chain for every slot in the range with a block, so
+   * that the payload status of each block on that chain is known.
+   */
+  public NavigableMap<UInt64, ForkChoiceNode> getAncestorNodes(
+      final UInt64 startSlot, final UInt64 count) {
+    return recentChainData.getAncestorNodesOnHeadChain(startSlot, count);
   }
 
   /**

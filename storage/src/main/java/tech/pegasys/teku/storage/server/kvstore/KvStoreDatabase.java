@@ -18,6 +18,7 @@ import static java.util.stream.Collectors.groupingBy;
 import static tech.pegasys.teku.infrastructure.logging.DbLogger.DB_LOGGER;
 import static tech.pegasys.teku.infrastructure.logging.StatusLogger.STATUS_LOG;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
+import static tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas.isParentBlockFull;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.errorprone.annotations.MustBeClosed;
@@ -1591,11 +1592,18 @@ public class KvStoreDatabase implements Database {
             update.getOptimisticTransitionBlockRoot());
 
     if (update.isExecutionPayloadEnvelopesEnabled()) {
-      final Set<Bytes32> nonCanonicalPrunedRoots =
-          update.getDeletedHotBlocks().keySet().stream()
-              .filter(root -> !update.getFinalizedChildToParentMap().containsKey(root))
+      // Envelopes are dropped for pruned non-canonical blocks and for finalized blocks whose
+      // payload the finalized chain did not build on
+      final Set<Bytes32> prunedExecutionPayloadRoots =
+          Stream.concat(
+                  update.getDeletedHotBlocks().keySet().stream()
+                      .filter(root -> !update.getFinalizedChildToParentMap().containsKey(root)),
+                  findOrphanedExecutionPayloadRoots(
+                      update.getFinalizedChildToParentMap(), update.getFinalizedBlocks())
+                      .stream())
               .collect(Collectors.toSet());
-      updateBlindedExecutionPayloads(update.getBlindedExecutionPayloads(), nonCanonicalPrunedRoots);
+      updateBlindedExecutionPayloads(
+          update.getBlindedExecutionPayloads(), prunedExecutionPayloadRoots);
     }
 
     if (update.isBlobSidecarsEnabled()) {
@@ -1931,6 +1939,43 @@ public class KvStoreDatabase implements Database {
     }
 
     return Optional.empty();
+  }
+
+  /**
+   * Finds the finalized blocks whose execution payload is not part of the finalized chain: their
+   * finalized child built on their EMPTY variant, so their blinded envelope must not be retained.
+   * Block bodies are read from the database, as the store's block cache does not hold blocks that
+   * are finalized long after import. The newly finalized block has no finalized child yet, so it is
+   * resolved by the finalization that finalizes its child, when it is the parent already in the
+   * finalized database.
+   */
+  private Set<Bytes32> findOrphanedExecutionPayloadRoots(
+      final Map<Bytes32, Bytes32> finalizedChildToParentMap,
+      final Map<Bytes32, SignedBeaconBlock> finalizedBlocks) {
+    final Map<Bytes32, Optional<SignedBeaconBlock>> blocksByRoot = new HashMap<>();
+    final Function<Bytes32, Optional<SignedBeaconBlock>> getBlock =
+        root ->
+            blocksByRoot.computeIfAbsent(
+                root,
+                __ ->
+                    Optional.ofNullable(finalizedBlocks.get(root))
+                        .or(() -> dao.getHotBlock(root))
+                        // Not getFinalizedBlock(root), which reads the hot column: the parent of
+                        // the oldest finalized child is only in finalized storage
+                        .or(() -> dao.getFinalizedBlock(root)));
+    final Set<Bytes32> orphanedExecutionPayloadRoots = new HashSet<>();
+    finalizedChildToParentMap.forEach(
+        (childRoot, parentRoot) ->
+            getBlock
+                .apply(parentRoot)
+                .filter(parent -> spec.isExecutionPayloadEnvelopeAvailableAtSlot(parent.getSlot()))
+                .ifPresent(
+                    parent ->
+                        getBlock
+                            .apply(childRoot)
+                            .filter(child -> !isParentBlockFull(parent, child))
+                            .ifPresent(__ -> orphanedExecutionPayloadRoots.add(parentRoot))));
+    return orphanedExecutionPayloadRoots;
   }
 
   private void updateBlindedExecutionPayloads(

@@ -89,7 +89,10 @@ public class RandomChainBuilderForkChoiceStrategy implements ReadOnlyForkChoiceS
 
   @Override
   public Optional<ForkChoiceNode> getParentBeaconBlockNode(final ForkChoiceNode node) {
-    return Optional.empty();
+    // Single-variant tree: the parent beacon block node is the base (PENDING) node of the parent
+    return getBlock(node.blockRoot())
+        .flatMap(block -> getBlock(block.getParentRoot()))
+        .map(parent -> ForkChoiceNode.createBase(parent.getRoot()));
   }
 
   @Override

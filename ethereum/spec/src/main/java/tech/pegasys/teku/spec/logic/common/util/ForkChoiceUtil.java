@@ -150,6 +150,49 @@ public class ForkChoiceUtil {
   }
 
   /**
+   * The payload-status-aware counterpart of {@link #getAncestors(ReadOnlyForkChoiceStrategy,
+   * Bytes32, UInt64, UInt64, UInt64)}: walks the chain of fork choice nodes leading to {@code node}
+   * (mirroring {@code get_ancestor(store, node, slot)}) so that every entry carries the payload
+   * status the block has on that chain, rather than discarding it as a block-root walk does.
+   *
+   * @param forkChoiceStrategy the object that stores information on forks and block roots
+   * @param node the fork choice node that dictates the chain we walk backwards from
+   * @param startSlot the first slot (inclusive) of the range
+   * @param count the number of slots in the range
+   * @return the fork choice node on the chain for every slot in the range that has a block, indexed
+   *     by slot; empty when {@code node} is unknown
+   */
+  public NavigableMap<UInt64, ForkChoiceNode> getAncestorNodes(
+      final ReadOnlyForkChoiceStrategy forkChoiceStrategy,
+      final ForkChoiceNode node,
+      final UInt64 startSlot,
+      final UInt64 count) {
+    final NavigableMap<UInt64, ForkChoiceNode> nodes = new TreeMap<>();
+    if (count.isZero()) {
+      return nodes;
+    }
+    // minus(ONE) because the start block is included
+    final UInt64 endSlot = startSlot.plus(count).minusMinZero(1);
+    Optional<ForkChoiceNode> currentNode = Optional.of(node);
+    Optional<UInt64> currentSlot = forkChoiceStrategy.blockSlot(node.blockRoot());
+    while (currentNode.isPresent() && currentSlot.isPresent()) {
+      final UInt64 slot = currentSlot.get();
+      if (slot.isLessThan(startSlot)) {
+        break;
+      }
+      if (slot.isLessThanOrEqualTo(endSlot)) {
+        nodes.put(slot, currentNode.get());
+      }
+      if (slot.equals(startSlot)) {
+        break;
+      }
+      currentNode = forkChoiceStrategy.getParentBeaconBlockNode(currentNode.get());
+      currentSlot = currentNode.flatMap(parent -> forkChoiceStrategy.blockSlot(parent.blockRoot()));
+    }
+    return nodes;
+  }
+
+  /**
    * @param forkChoiceStrategy the object that stores information on forks and block roots
    * @param root the root that dictates the block/fork that we walk backwards from
    * @param startSlot the slot (exclusive) until which we walk the chain backwards

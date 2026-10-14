@@ -197,6 +197,63 @@ class ForkChoiceUtilTest {
   }
 
   @Test
+  void getAncestorNodes_shouldGetSequenceOfNodesOnChain() {
+    chainBuilder.generateBlocksUpToSlot(10);
+
+    final NavigableMap<UInt64, ForkChoiceNode> nodesBySlot =
+        forkChoiceUtil.getAncestorNodes(
+            forkChoiceStrategy,
+            ForkChoiceNode.createBase(chainBuilder.getChainHead().orElseThrow().getRoot()),
+            UInt64.ONE,
+            UInt64.valueOf(8));
+
+    assertThat(nodesBySlot).containsExactlyEntriesOf(getBaseNodesForBlocks(1, 2, 3, 4, 5, 6, 7, 8));
+  }
+
+  @Test
+  void getAncestorNodes_shouldNotIncludeEntryForEmptySlots() {
+    chainBuilder.generateBlockAtSlot(3);
+    chainBuilder.generateBlockAtSlot(5);
+
+    final NavigableMap<UInt64, ForkChoiceNode> nodesBySlot =
+        forkChoiceUtil.getAncestorNodes(
+            forkChoiceStrategy,
+            ForkChoiceNode.createBase(chainBuilder.getChainHead().orElseThrow().getRoot()),
+            UInt64.ZERO,
+            UInt64.valueOf(10));
+
+    assertThat(nodesBySlot).containsExactlyEntriesOf(getBaseNodesForBlocks(0, 3, 5));
+  }
+
+  @Test
+  void getAncestorNodes_shouldReturnEmptyWhenCountIsZero() {
+    chainBuilder.generateBlocksUpToSlot(5);
+
+    final NavigableMap<UInt64, ForkChoiceNode> nodesBySlot =
+        forkChoiceUtil.getAncestorNodes(
+            forkChoiceStrategy,
+            ForkChoiceNode.createBase(chainBuilder.getChainHead().orElseThrow().getRoot()),
+            UInt64.ZERO,
+            UInt64.ZERO);
+
+    assertThat(nodesBySlot).isEmpty();
+  }
+
+  @Test
+  void getAncestorNodes_shouldReturnEmptyWhenStartNodeIsUnknown() {
+    chainBuilder.generateBlocksUpToSlot(5);
+
+    final NavigableMap<UInt64, ForkChoiceNode> nodesBySlot =
+        forkChoiceUtil.getAncestorNodes(
+            forkChoiceStrategy,
+            ForkChoiceNode.createBase(dataStructureUtil.randomBytes32()),
+            UInt64.ONE,
+            UInt64.valueOf(5));
+
+    assertThat(nodesBySlot).isEmpty();
+  }
+
+  @Test
   void getAncestorsOnFork_shouldIncludeHeadBlockAndExcludeStartSlot() {
     chainBuilder.generateBlocksUpToSlot(10);
 
@@ -755,5 +812,14 @@ class ForkChoiceUtilTest {
         .mapToObj(chainBuilder::getBlock)
         .flatMap(Optional::stream)
         .collect(Collectors.toMap(SignedBeaconBlock::getSlot, SignedBeaconBlock::getRoot));
+  }
+
+  private Map<UInt64, ForkChoiceNode> getBaseNodesForBlocks(final int... blockNumbers) {
+    return IntStream.of(blockNumbers)
+        .mapToObj(chainBuilder::getBlock)
+        .flatMap(Optional::stream)
+        .collect(
+            Collectors.toMap(
+                SignedBeaconBlock::getSlot, block -> ForkChoiceNode.createBase(block.getRoot())));
   }
 }

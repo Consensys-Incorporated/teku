@@ -14,6 +14,7 @@
 package tech.pegasys.teku.storage.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 import static tech.pegasys.teku.infrastructure.time.TimeUtilities.secondsToMillis;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
@@ -604,6 +605,36 @@ class RecentChainDataTest {
         .isEqualTo(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
     assertThat(reorgContext.commonAncestorPayloadStatusOnNewBranch())
         .isEqualTo(ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY);
+  }
+
+  @Test
+  public void getAncestorNodesOnHeadChain_shouldResolvePayloadStatusOfBlocksOnTheHeadChain() {
+    final GloasChain chain = setUpGloasChainWithBlockAndPayload();
+    final RecentChainData gloasRecentChainData = chain.storageSystem().recentChainData();
+    final Bytes32 parentRoot = chain.block().getRoot();
+
+    // Child block built on the EMPTY variant of its parent, so the parent payload is not part of
+    // the chain even though its envelope has been imported
+    final SignedBlockAndState child =
+        chain
+            .chainBuilder()
+            .generateBlockAtSlot(
+                2, chain.chainBuilder().createBlockOptionsBuildingOnEmptyParent(UInt64.valueOf(2)));
+    final StoreTransaction tx = gloasRecentChainData.startStoreTransaction();
+    tx.putBlockAndState(child, chain.spec().calculateBlockCheckpoints(child.getState()));
+    tx.commit().join();
+    gloasRecentChainData.updateHead(ForkChoiceNode.createBase(child.getRoot()), child.getSlot());
+
+    assertThat(gloasRecentChainData.getAncestorNodesOnHeadChain(UInt64.ONE, UInt64.valueOf(2)))
+        .containsExactly(
+            entry(UInt64.ONE, ForkChoiceNode.createEmpty(parentRoot)),
+            entry(UInt64.valueOf(2), ForkChoiceNode.createBase(child.getRoot())));
+
+    // Switching the head to the FULL variant of the parent makes its payload part of the chain
+    gloasRecentChainData.updateHead(ForkChoiceNode.createFull(parentRoot), child.getSlot());
+
+    assertThat(gloasRecentChainData.getAncestorNodesOnHeadChain(UInt64.ONE, UInt64.valueOf(2)))
+        .containsExactly(entry(UInt64.ONE, ForkChoiceNode.createFull(parentRoot)));
   }
 
   @Test

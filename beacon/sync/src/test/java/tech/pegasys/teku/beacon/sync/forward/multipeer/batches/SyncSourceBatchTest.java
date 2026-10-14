@@ -508,10 +508,81 @@ public class SyncSourceBatchTest {
     verify(conflictResolutionStrategy).reportInvalidBatch(batch, getSyncSource(batch));
   }
 
+  @Test
+  void shouldDropExecutionPayloadOfBlockWhosePayloadTheNextBlockDidNotBuildOn() {
+    final int batchCount = 5;
+    final Batch batch = createBatch(gloasSlot, batchCount);
+    batch.requestMoreBlocks(() -> {});
+
+    // the block at slot gloasSlot + 3 builds on the EMPTY variant of its parent, so the payload of
+    // slot gloasSlot + 2 is not part of the chain even though its envelope is served
+    final UInt64 emptyPayloadSlot = UInt64.valueOf(gloasSlot + 2);
+    generateRealisticChain(
+        gloasSlot, batch.getLastSlot().longValue(), Optional.of(emptyPayloadSlot.increment()));
+
+    receiveBlocksFromChainBuilder(batch, gloasSlot, batch.getLastSlot().longValue());
+    receiveExecutionPayloadsFromChainBuilder(
+        batch, gloasSlot, batch.getLastSlot().longValue(), __ -> true);
+
+    verifyNoInteractions(conflictResolutionStrategy);
+    final Bytes32 emptyPayloadBlockRoot = chainBuilder.getBlockAtSlot(emptyPayloadSlot).getRoot();
+    assertThat(batch.getExecutionPayloadsByBlockRoot())
+        .doesNotContainKey(emptyPayloadBlockRoot)
+        .hasSize(batchCount - 1);
+  }
+
+  @Test
+  void shouldDropExecutionPayloadOfLastBlockOfPreviousRequestWhenNextBlockDidNotBuildOnIt() {
+    final int batchCount = 5;
+    final Batch batch = createBatch(gloasSlot, batchCount);
+
+    // the last block of the batch builds on the EMPTY variant of its parent, the last block of the
+    // first request
+    final long lastSlotOfFirstRequest = batch.getLastSlot().longValue() - 1;
+    generateRealisticChain(
+        gloasSlot, batch.getLastSlot().longValue(), Optional.of(batch.getLastSlot()));
+
+    // first request receives blocks and execution payloads up to and including the parent
+    batch.requestMoreBlocks(() -> {});
+    receiveBlocksFromChainBuilder(batch, gloasSlot, lastSlotOfFirstRequest);
+    receiveExecutionPayloadsFromChainBuilder(batch, gloasSlot, lastSlotOfFirstRequest, __ -> true);
+    final Bytes32 lastBlockOfFirstRequestRoot =
+        chainBuilder.getBlockAtSlot(lastSlotOfFirstRequest).getRoot();
+    assertThat(batch.getExecutionPayloadsByBlockRoot()).containsKey(lastBlockOfFirstRequestRoot);
+
+    // second request returns the block that does not build on the previous payload
+    batch.requestMoreBlocks(() -> {});
+    receiveBlocks(batch, chainBuilder.getBlockAtSlot(batch.getLastSlot().longValue()));
+    receiveExecutionPayloads(
+        batch, chainBuilder.getExecutionPayloadAtSlot(batch.getLastSlot()).orElseThrow());
+
+    verifyNoInteractions(conflictResolutionStrategy);
+    assertThat(batch.getExecutionPayloadsByBlockRoot())
+        .doesNotContainKey(lastBlockOfFirstRequestRoot)
+        .hasSize(batchCount - 1);
+  }
+
   protected void generateRealisticChain(final long fromSlot, final long toSlot) {
+    generateRealisticChain(fromSlot, toSlot, Optional.empty());
+  }
+
+  /**
+   * Generates a chain where the block at {@code maybeSlotBuildingOnEmptyParent}, if any, builds on
+   * the EMPTY variant of its parent rather than on the parent's execution payload.
+   */
+  protected void generateRealisticChain(
+      final long fromSlot,
+      final long toSlot,
+      final Optional<UInt64> maybeSlotBuildingOnEmptyParent) {
     chainBuilder.generateGenesis();
     for (long i = fromSlot; i <= toSlot; i++) {
-      chainBuilder.generateBlockAtSlot(i);
+      final UInt64 slot = UInt64.valueOf(i);
+      if (maybeSlotBuildingOnEmptyParent.map(slot::equals).orElse(false)) {
+        chainBuilder.generateBlockAtSlot(
+            slot, chainBuilder.createBlockOptionsBuildingOnEmptyParent(slot));
+      } else {
+        chainBuilder.generateBlockAtSlot(slot);
+      }
     }
   }
 

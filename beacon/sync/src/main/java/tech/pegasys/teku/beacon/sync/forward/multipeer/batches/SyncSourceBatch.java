@@ -15,6 +15,7 @@ package tech.pegasys.teku.beacon.sync.forward.multipeer.batches;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
+import static tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas.isParentBlockFull;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Throwables;
@@ -47,7 +48,6 @@ import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.MinimalBeaconBlockSummary;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.deneb.BeaconBlockBodyDeneb;
-import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodyGloas;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.statetransition.blobs.BlobSidecarManager;
 
@@ -385,6 +385,7 @@ public class SyncSourceBatch implements Batch {
         markAsInvalid();
         return;
       }
+      dropExecutionPayloadsNotBuiltOn(newBlocks, newExecutionPayloadsByBlockRoot, lastBlock);
       executionPayloadsByBlockRoot.putAll(newExecutionPayloadsByBlockRoot);
     }
 
@@ -515,20 +516,42 @@ public class SyncSourceBatch implements Batch {
     return true;
   }
 
-  public static boolean isParentBlockFull(
-      final SignedBeaconBlock parentBlock, final SignedBeaconBlock block) {
-    final Optional<BeaconBlockBodyGloas> maybeParentBlockBody =
-        parentBlock.getMessage().getBody().toVersionGloas();
-    if (maybeParentBlockBody.isEmpty()) {
-      // we don't expect execution payloads for blocks prior to Gloas
-      return false;
+  /**
+   * Drops the execution payloads of blocks whose next block built on their EMPTY variant. Such
+   * payloads are not part of the chain, so importing them would only add fork choice nodes the
+   * chain does not build on, and they must not be served to other peers. Peers are expected not to
+   * send them, but older peers may still do so, so they are dropped rather than invalidating the
+   * batch. The payload of the last block received can only be resolved by the next block.
+   */
+  private void dropExecutionPayloadsNotBuiltOn(
+      final List<SignedBeaconBlock> newBlocks,
+      final Map<Bytes32, SignedExecutionPayloadEnvelope> newExecutionPayloadsByBlockRoot,
+      final Optional<SignedBeaconBlock> lastBlock) {
+    for (int i = 0; i < newBlocks.size(); i++) {
+      final SignedBeaconBlock newBlock = newBlocks.get(i);
+      if (i == 0 && lastBlock.isPresent()) {
+        dropExecutionPayloadIfNotBuiltOn(executionPayloadsByBlockRoot, lastBlock.get(), newBlock);
+      }
+      if (i != newBlocks.size() - 1) {
+        dropExecutionPayloadIfNotBuiltOn(
+            newExecutionPayloadsByBlockRoot, newBlock, newBlocks.get(i + 1));
+      }
     }
-    return BeaconBlockBodyGloas.required(block.getMessage().getBody())
-        .getSignedExecutionPayloadBid()
-        .getMessage()
-        .getParentBlockHash()
-        .equals(
-            maybeParentBlockBody.get().getSignedExecutionPayloadBid().getMessage().getBlockHash());
+  }
+
+  private void dropExecutionPayloadIfNotBuiltOn(
+      final Map<Bytes32, SignedExecutionPayloadEnvelope> executionPayloadsByBlockRoot,
+      final SignedBeaconBlock block,
+      final SignedBeaconBlock nextBlock) {
+    if (!executionPayloadsByBlockRoot.containsKey(block.getRoot())
+        || isParentBlockFull(block, nextBlock)) {
+      return;
+    }
+    LOG.debug(
+        "Dropping execution payload envelope for slot {} and root {} because the next block did not build on it",
+        block.getSlot(),
+        block.getRoot());
+    executionPayloadsByBlockRoot.remove(block.getRoot());
   }
 
   private void logBatchInvalidBecauseOfExecutionPayloadMissing(final SignedBeaconBlock block) {

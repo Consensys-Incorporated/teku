@@ -347,6 +347,21 @@ public abstract class RecentChainData
         .orElseGet(TreeMap::new);
   }
 
+  /**
+   * The payload-status-aware counterpart of {@link #getAncestorRootsOnHeadChain(UInt64, UInt64,
+   * UInt64)}: walks the chain of fork choice nodes leading to the head, so each entry carries the
+   * payload status the block has on the head chain.
+   */
+  public NavigableMap<UInt64, ForkChoiceNode> getAncestorNodesOnHeadChain(
+      final UInt64 startSlot, final UInt64 count) {
+    return chainHead
+        .map(
+            head ->
+                spec.getAncestorNodes(
+                    store.getForkChoiceStrategy(), head.getForkChoiceNode(), startSlot, count))
+        .orElseGet(TreeMap::new);
+  }
+
   public NavigableMap<UInt64, Bytes32> getAncestorsOnFork(
       final UInt64 startSlot, final Bytes32 root) {
     return spec.getAncestorsOnFork(store.getForkChoiceStrategy(), root, startSlot);

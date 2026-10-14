@@ -44,8 +44,10 @@ import tech.pegasys.teku.spec.config.SpecConfigElectra;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.fulu.MatrixEntry;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodyGloas;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
@@ -265,6 +267,27 @@ public class MiscHelpersGloas extends MiscHelpersFulu {
   public boolean isBidBuildingOnFullParent(
       final BeaconStateGloas state, final ExecutionPayloadBid bid) {
     return bid.getParentBlockHash().equals(state.getLatestExecutionPayloadBid().getBlockHash());
+  }
+
+  /**
+   * Whether {@code block} builds on the execution payload of {@code parentBlock}, i.e. the parent
+   * block is FULL on the chain through {@code block}: the parent hash of the block's bid is the
+   * block hash committed to by the parent's bid. Pre-Gloas parents have no execution payload
+   * envelope to build on.
+   */
+  public static boolean isParentBlockFull(
+      final SignedBeaconBlock parentBlock, final SignedBeaconBlock block) {
+    final Optional<BeaconBlockBodyGloas> maybeParentBlockBody =
+        parentBlock.getMessage().getBody().toVersionGloas();
+    if (maybeParentBlockBody.isEmpty()) {
+      return false;
+    }
+    return BeaconBlockBodyGloas.required(block.getMessage().getBody())
+        .getSignedExecutionPayloadBid()
+        .getMessage()
+        .getParentBlockHash()
+        .equals(
+            maybeParentBlockBody.get().getSignedExecutionPayloadBid().getMessage().getBlockHash());
   }
 
   public boolean isExecutionRequestsRootMatchingLatestBid(
