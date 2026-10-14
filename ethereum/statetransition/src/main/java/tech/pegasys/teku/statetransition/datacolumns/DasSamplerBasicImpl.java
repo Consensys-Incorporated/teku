@@ -31,13 +31,11 @@ import tech.pegasys.teku.ethereum.events.SlotEventsChannel;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.exceptions.ExceptionUtil;
-import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.config.SpecConfigFulu;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
-import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
@@ -325,10 +323,6 @@ public class DasSamplerBasicImpl implements DasSamplerBasic, SlotEventsChannel {
     retriever.flush();
   }
 
-  private boolean hasBlobs(final BeaconBlock block) {
-    return !block.getBody().getOptionalBlobKzgCommitments().map(SszList::isEmpty).orElse(true);
-  }
-
   private boolean isDataAvailabilityAlreadySatisfied(final UInt64 slot, final Bytes32 blockRoot) {
     if (!recentChainData.containsBlock(blockRoot)) {
       return false;
@@ -347,7 +341,7 @@ public class DasSamplerBasicImpl implements DasSamplerBasic, SlotEventsChannel {
   @Override
   public boolean isDataAvailable(final SignedBeaconBlock block) {
     // if there are no blobs for this block, consider the data as available
-    if (!hasBlobs(block.getMessage())) {
+    if (!DataAvailabilitySampler.hasBlobs(block.getMessage())) {
       return true;
     }
     if (isDataAvailabilityAlreadySatisfied(block.getSlot(), block.getRoot())) {
@@ -357,21 +351,22 @@ public class DasSamplerBasicImpl implements DasSamplerBasic, SlotEventsChannel {
     return tracker != null && tracker.completionFuture().isCompletedNormally();
   }
 
-  private boolean isInCustodyPeriod(final BeaconBlock block) {
+  private boolean isInCustodyPeriod(final UInt64 slot) {
     final MiscHelpersFulu miscHelpersFulu =
-        MiscHelpersFulu.required(spec.atSlot(block.getSlot()).miscHelpers());
+        MiscHelpersFulu.required(spec.atSlot(slot).miscHelpers());
     final UInt64 currentEpoch = spec.computeEpochAtSlot(currentSlotProvider.getCurrentSlot());
     return miscHelpersFulu.isAvailabilityOfDataColumnSidecarsRequiredAtEpoch(
-        currentEpoch, spec.computeEpochAtSlot(block.getSlot()));
+        currentEpoch, spec.computeEpochAtSlot(slot));
   }
 
   @Override
-  public SamplingEligibilityStatus checkSamplingEligibility(final BeaconBlock block) {
-    if (!spec.atSlot(block.getSlot()).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.FULU)) {
+  public SamplingEligibilityStatus checkSamplingEligibility(
+      final UInt64 slot, final boolean hasBlobs) {
+    if (!spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.FULU)) {
       return SamplingEligibilityStatus.NOT_REQUIRED_BEFORE_FULU;
-    } else if (!isInCustodyPeriod(block)) {
+    } else if (!isInCustodyPeriod(slot)) {
       return SamplingEligibilityStatus.NOT_REQUIRED_OLD_EPOCH;
-    } else if (!hasBlobs(block)) {
+    } else if (!hasBlobs) {
       return SamplingEligibilityStatus.NOT_REQUIRED_NO_BLOBS;
     } else {
       return SamplingEligibilityStatus.REQUIRED;
@@ -421,7 +416,7 @@ public class DasSamplerBasicImpl implements DasSamplerBasic, SlotEventsChannel {
   @Override
   public void onNewBlock(final SignedBeaconBlock block, final Optional<RemoteOrigin> remoteOrigin) {
     LOG.debug("Sampler received block {} - origin: {}", block.getSlotAndBlockRoot(), remoteOrigin);
-    if (hasBlobs(block.getMessage())) {
+    if (DataAvailabilitySampler.hasBlobs(block.getMessage())) {
       getOrCreateTracker(block.getSlot(), block.getRoot()).setBlock(block);
     }
   }

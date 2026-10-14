@@ -16,6 +16,7 @@ package tech.pegasys.teku.spec.logic.common.execution;
 import java.util.Optional;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.versions.bellatrix.block.OptimisticExecutionPayloadExecutor;
 
@@ -25,6 +26,14 @@ public interface ExecutionPayloadVerifier {
   void verifyExecutionPayloadEnvelope(
       SignedExecutionPayloadEnvelope signedEnvelope,
       BeaconState state,
+      BLSSignatureVerifier signatureVerifier,
+      Optional<? extends OptimisticExecutionPayloadExecutor> payloadExecutor)
+      throws ExecutionPayloadVerificationException;
+
+  /** The caller must supply its trusted, state-only finalized anchor. */
+  void verifyCheckpointAnchorExecutionPayloadEnvelope(
+      SignedExecutionPayloadEnvelope signedEnvelope,
+      AnchorPoint anchor,
       BLSSignatureVerifier signatureVerifier,
       Optional<? extends OptimisticExecutionPayloadExecutor> payloadExecutor)
       throws ExecutionPayloadVerificationException;

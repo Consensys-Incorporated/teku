@@ -18,7 +18,6 @@ import static com.google.common.base.Preconditions.checkArgument;
 import com.google.common.annotations.VisibleForTesting;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Function;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.collections.LimitedMap;
@@ -28,6 +27,7 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
 import tech.pegasys.teku.storage.api.FinalizedCheckpointChannel;
@@ -49,23 +49,16 @@ public class BlobKzgCommitmentsProvider
     implements ReceivedBlockEventsChannel, FinalizedCheckpointChannel {
 
   private final Spec spec;
-  private final Function<Bytes32, SafeFuture<Optional<SignedBeaconBlock>>> retrieveBlockByRoot;
+  private final CombinedChainDataClient combinedChainDataClient;
   private final Map<Bytes32, BlobKzgCommitmentsEntry> commitmentsByRoot;
 
   public BlobKzgCommitmentsProvider(
       final Spec spec,
       final CombinedChainDataClient combinedChainDataClient,
       final int maxCacheSize) {
-    this(spec, combinedChainDataClient::getBlockByBlockRoot, maxCacheSize);
-  }
-
-  public BlobKzgCommitmentsProvider(
-      final Spec spec,
-      final Function<Bytes32, SafeFuture<Optional<SignedBeaconBlock>>> retrieveBlockByRoot,
-      final int maxCacheSize) {
     checkArgument(maxCacheSize > 0, "maxCacheSize must be positive");
     this.spec = spec;
-    this.retrieveBlockByRoot = retrieveBlockByRoot;
+    this.combinedChainDataClient = combinedChainDataClient;
     this.commitmentsByRoot = LimitedMap.createSynchronizedLRU(maxCacheSize);
   }
 
@@ -96,8 +89,19 @@ public class BlobKzgCommitmentsProvider
       return SafeFuture.completedFuture(Optional.of(cachedEntry.commitments()));
     }
 
-    return retrieveBlockByRoot
-        .apply(blockRoot)
+    final Optional<SszList<SszKZGCommitment>> anchorCommitments =
+        combinedChainDataClient
+            .getLatestFinalized()
+            .filter(anchor -> anchor.getRoot().equals(blockRoot))
+            .flatMap(anchor -> anchor.getState().toVersionGloas())
+            .map(BeaconStateGloas::getLatestExecutionPayloadBid)
+            .map(bid -> bid.getBlobKzgCommitments());
+    if (anchorCommitments.isPresent()) {
+      return SafeFuture.completedFuture(anchorCommitments);
+    }
+
+    return combinedChainDataClient
+        .getBlockByBlockRoot(blockRoot)
         .thenApply(
             maybeBlock -> {
               maybeBlock.ifPresent(this::onNewBlock);

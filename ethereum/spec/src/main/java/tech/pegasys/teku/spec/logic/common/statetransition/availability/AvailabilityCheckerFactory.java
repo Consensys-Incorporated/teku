@@ -17,18 +17,32 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 
 @FunctionalInterface
 public interface AvailabilityCheckerFactory<T> {
   AvailabilityCheckerFactory<BlobSidecar> NOOP_BLOB_SIDECAR =
       block -> AvailabilityChecker.NOOP_BLOB_SIDECAR;
   AvailabilityCheckerFactory<UInt64> NOOP_DATACOLUMN_SIDECAR =
-      block -> AvailabilityChecker.NOOP_DATACOLUMN_SIDECAR;
+      new AvailabilityCheckerFactory<>() {
+        @Override
+        public AvailabilityChecker<UInt64> createAvailabilityChecker(
+            final SignedBeaconBlock block) {
+          return AvailabilityChecker.NOOP_DATACOLUMN_SIDECAR;
+        }
+
+        @Override
+        public AvailabilityChecker<UInt64> createAvailabilityChecker(
+            final BeaconState state, final SignedExecutionPayloadEnvelope signedEnvelope) {
+          return AvailabilityChecker.NOOP_DATACOLUMN_SIDECAR;
+        }
+      };
 
   AvailabilityChecker<T> createAvailabilityChecker(SignedBeaconBlock block);
 
   default AvailabilityChecker<T> createAvailabilityChecker(
-      final SignedBeaconBlock block, final SignedExecutionPayloadEnvelope signedEnvelope) {
-    return createAvailabilityChecker(block);
+      final BeaconState state, final SignedExecutionPayloadEnvelope signedEnvelope) {
+    throw new UnsupportedOperationException(
+        "Execution payload envelope availability is not supported");
   }
 }

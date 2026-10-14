@@ -294,6 +294,12 @@ specrefs:
       # (MiscHelpersFulu#computeCustodyColumnIndices), not the bitvector form (alpha.14)
       - get_custody_column_bits#gloas
 
+      # Implemented differently: the parent payload status is derived from the parent
+      # state's latest_execution_payload_bid (MiscHelpersGloas#isBidBuildingOnFullParent /
+      # ForkChoiceUtilGloas#isParentFullPayloadRequired) instead of store.blocks[parent]
+      - get_parent_payload_status#gloas
+      - is_parent_node_full#gloas
+
       # Not implemented: heze
       - get_forkchoice_store#heze
       - get_inclusion_list_bits#heze

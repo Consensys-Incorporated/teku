@@ -47,6 +47,7 @@ import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.config.SpecConfigFulu;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlockHeader;
@@ -110,8 +111,13 @@ public class DasSamplerBasicTest {
 
   private DasSamplerBasicImpl createSampler(
       final int maxRecentlySampledBlocks, final StubMetricsSystem metricsSystem) {
+    return createSampler(SPEC, maxRecentlySampledBlocks, metricsSystem);
+  }
+
+  private DasSamplerBasicImpl createSampler(
+      final Spec spec, final int maxRecentlySampledBlocks, final StubMetricsSystem metricsSystem) {
     return new DasSamplerBasicImpl(
-        SPEC,
+        spec,
         asyncRunner,
         currentSlotProvider,
         rpcFetchDelayProvider,
@@ -341,6 +347,41 @@ public class DasSamplerBasicTest {
   void flush_shouldForwardToRetriever() {
     sampler.flush();
     verify(retriever).flush();
+  }
+
+  @Test
+  void checkSamplingEligibility_shouldReturnBeforeFulu() {
+    final DasSamplerBasicImpl preFuluSampler =
+        createSampler(
+            TestSpecFactory.createMinimalDeneb(),
+            MAX_RECENTLY_SAMPLED_BLOCKS,
+            new StubMetricsSystem());
+
+    assertThat(preFuluSampler.checkSamplingEligibility(UInt64.ZERO, true))
+        .isEqualTo(SamplingEligibilityStatus.NOT_REQUIRED_BEFORE_FULU);
+  }
+
+  @Test
+  void checkSamplingEligibility_shouldIncludeCustodyBoundary() {
+    final UInt64 retentionEpochs =
+        UInt64.valueOf(
+            SpecConfigFulu.required(SPEC.getGenesisSpecConfig())
+                .getMinEpochsForDataColumnSidecarsRequests());
+    when(currentSlotProvider.getCurrentSlot())
+        .thenReturn(SPEC.computeStartSlotAtEpoch(retentionEpochs));
+
+    assertThat(sampler.checkSamplingEligibility(UInt64.ZERO, true))
+        .isEqualTo(SamplingEligibilityStatus.REQUIRED);
+    assertThat(sampler.checkSamplingEligibility(UInt64.ZERO, false))
+        .isEqualTo(SamplingEligibilityStatus.NOT_REQUIRED_NO_BLOBS);
+
+    when(currentSlotProvider.getCurrentSlot())
+        .thenReturn(SPEC.computeStartSlotAtEpoch(retentionEpochs.plus(1)));
+
+    assertThat(sampler.checkSamplingEligibility(UInt64.ZERO, true))
+        .isEqualTo(SamplingEligibilityStatus.NOT_REQUIRED_OLD_EPOCH);
+    assertThat(sampler.checkSamplingEligibility(UInt64.ZERO, false))
+        .isEqualTo(SamplingEligibilityStatus.NOT_REQUIRED_OLD_EPOCH);
   }
 
   @Test

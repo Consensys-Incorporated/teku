@@ -5218,19 +5218,6 @@
         )
     </spec>
 
-- name: get_parent_payload_status#gloas
-  sources:
-    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/util/ForkChoiceUtilGloas.java
-      search: SafeFuture<ForkChoicePayloadStatus> getParentPayloadStatus(
-  spec: |
-    <spec fn="get_parent_payload_status" fork="gloas" hash="4ab82d16">
-    def get_parent_payload_status(store: Store, block: BeaconBlock) -> PayloadStatus:
-        parent = store.blocks[block.parent_root]
-        parent_block_hash = block.body.signed_execution_payload_bid.message.parent_block_hash
-        message_block_hash = parent.body.signed_execution_payload_bid.message.block_hash
-        return PAYLOAD_STATUS_FULL if parent_block_hash == message_block_hash else PAYLOAD_STATUS_EMPTY
-    </spec>
-
 - name: get_payload_attestation_due_ms#gloas
   sources:
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/Spec.java
@@ -7743,16 +7730,6 @@
             return True
 
         return False
-    </spec>
-
-- name: is_parent_node_full#gloas
-  sources:
-    - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/util/ForkChoiceUtilGloas.java
-      search: SafeFuture<Boolean> isParentNodeFull(final ReadOnlyStore store, final BeaconBlock block) {
-  spec: |
-    <spec fn="is_parent_node_full" fork="gloas" hash="4fc2d12c">
-    def is_parent_node_full(store: Store, block: BeaconBlock) -> bool:
-        return get_parent_payload_status(store, block) == PAYLOAD_STATUS_FULL
     </spec>
 
 - name: is_parent_strong#phase0

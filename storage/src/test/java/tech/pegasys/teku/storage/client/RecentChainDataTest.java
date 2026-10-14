@@ -108,6 +108,21 @@ class RecentChainDataTest {
   }
 
   @Test
+  public void getLatestFinalized_beforeStoreInitialization() {
+    initPreGenesis();
+
+    assertThat(recentChainData.getLatestFinalized()).isEmpty();
+  }
+
+  @Test
+  public void getLatestFinalized_afterStoreInitialization() {
+    initPostGenesis();
+
+    assertThat(recentChainData.getLatestFinalized())
+        .contains(recentChainData.getStore().getLatestFinalized());
+  }
+
+  @Test
   public void initialize_setupInitialState() {
     initPreGenesis();
     generateGenesisWithoutIniting();

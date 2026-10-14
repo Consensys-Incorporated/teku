@@ -32,6 +32,7 @@ import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequestsDataCodec;
 import tech.pegasys.teku.spec.datastructures.execution.NewPayloadRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.capella.ExecutionPayloadCapella;
+import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
@@ -64,11 +65,44 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
       final BLSSignatureVerifier signatureVerifier,
       final Optional<? extends OptimisticExecutionPayloadExecutor> payloadExecutor)
       throws ExecutionPayloadVerificationException {
+    verifyEnvelope(signedEnvelope, state, state.getSlot(), signatureVerifier, payloadExecutor);
+  }
+
+  @Override
+  public void verifyCheckpointAnchorExecutionPayloadEnvelope(
+      final SignedExecutionPayloadEnvelope signedEnvelope,
+      final AnchorPoint anchor,
+      final BLSSignatureVerifier signatureVerifier,
+      final Optional<? extends OptimisticExecutionPayloadExecutor> payloadExecutor)
+      throws ExecutionPayloadVerificationException {
+    if (anchor.getSignedBeaconBlock().isPresent()
+        || anchor.getState().toVersionGloas().isEmpty()
+        || !signedEnvelope.getBeaconBlockRoot().equals(anchor.getRoot())) {
+      throw new ExecutionPayloadVerificationException(
+          "Envelope does not match a state-only Gloas checkpoint anchor");
+    }
+    // Empty slots advance the checkpoint state, but the envelope belongs to its latest block.
+    verifyEnvelope(
+        signedEnvelope,
+        anchor.getState(),
+        anchor.getBlockSlot(),
+        signatureVerifier,
+        payloadExecutor);
+  }
+
+  private void verifyEnvelope(
+      final SignedExecutionPayloadEnvelope signedEnvelope,
+      final BeaconState state,
+      final UInt64 verificationSlot,
+      final BLSSignatureVerifier signatureVerifier,
+      final Optional<? extends OptimisticExecutionPayloadExecutor> payloadExecutor)
+      throws ExecutionPayloadVerificationException {
     final ExecutionPayloadEnvelope envelope = signedEnvelope.getMessage();
     final ExecutionPayload payload = envelope.getPayload();
 
     // Verify signature
-    if (!verifyExecutionPayloadEnvelopeSignature(state, signedEnvelope, signatureVerifier)) {
+    if (!verifyExecutionPayloadEnvelopeSignature(
+        state, signedEnvelope, signatureVerifier, verificationSlot)) {
       throw new ExecutionPayloadVerificationException(
           "Signature verification of the execution payload envelope failed");
     }
@@ -82,9 +116,9 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
       throw new ExecutionPayloadVerificationException(
           "Envelope parent beacon block root is not consistent with the latest beacon block parent root from the state");
     }
-    if (!envelope.getSlot().equals(state.getSlot())) {
+    if (!envelope.getSlot().equals(verificationSlot)) {
       throw new ExecutionPayloadVerificationException(
-          "Envelope slot is not consistent with the state slot");
+          "Envelope slot is not consistent with the verification state slot");
     }
     final BeaconStateGloas stateGloas = BeaconStateGloas.required(state);
 
@@ -121,7 +155,7 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
     }
     if (!payload
         .getTimestamp()
-        .equals(miscHelpers.computeTimeAtSlot(state.getGenesisTime(), state.getSlot()))) {
+        .equals(miscHelpers.computeTimeAtSlot(state.getGenesisTime(), verificationSlot))) {
       throw new ExecutionPayloadVerificationException(
           "Timestamp of the payload is not as expected");
     }
@@ -149,6 +183,15 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
       final BeaconState state,
       final SignedExecutionPayloadEnvelope signedEnvelope,
       final BLSSignatureVerifier signatureVerifier) {
+    return verifyExecutionPayloadEnvelopeSignature(
+        state, signedEnvelope, signatureVerifier, state.getSlot());
+  }
+
+  private boolean verifyExecutionPayloadEnvelopeSignature(
+      final BeaconState state,
+      final SignedExecutionPayloadEnvelope signedEnvelope,
+      final BLSSignatureVerifier signatureVerifier,
+      final UInt64 signatureSlot) {
     final UInt64 builderIndex = signedEnvelope.getMessage().getBuilderIndex();
     final BLSPublicKey pubkey;
     if (builderIndex.equals(BUILDER_INDEX_SELF_BUILD)) {
@@ -161,7 +204,7 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
         beaconStateAccessors.getDomain(
             state.getForkInfo(),
             Domain.BEACON_BUILDER,
-            miscHelpers.computeEpochAtSlot(state.getSlot()));
+            miscHelpers.computeEpochAtSlot(signatureSlot));
     final Bytes signingRoot = miscHelpers.computeSigningRoot(signedEnvelope.getMessage(), domain);
     return signatureVerifier.verify(pubkey, signingRoot, signedEnvelope.getSignature());
   }
