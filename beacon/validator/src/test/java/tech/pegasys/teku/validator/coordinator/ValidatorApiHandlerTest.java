@@ -137,6 +137,7 @@ import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 import tech.pegasys.teku.statetransition.validation.ValidationResultCode;
 import tech.pegasys.teku.storage.client.ChainHead;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
+import tech.pegasys.teku.storage.protoarray.ForkChoiceStrategy;
 import tech.pegasys.teku.storage.store.UpdatableStore;
 import tech.pegasys.teku.validator.api.CommitteeSubscriptionRequest;
 import tech.pegasys.teku.validator.api.NodeSyncingException;
@@ -155,6 +156,7 @@ class ValidatorApiHandlerTest {
   private final CombinedChainDataClient chainDataClient = mock(CombinedChainDataClient.class);
   private final ChainHead chainHead = mock(ChainHead.class);
   private final UpdatableStore store = mock(UpdatableStore.class);
+  private final ForkChoiceStrategy forkChoiceStrategy = mock(ForkChoiceStrategy.class);
   private final SyncStateProvider syncStateProvider = mock(SyncStateProvider.class);
   private final BlockFactory blockFactory = mock(BlockFactory.class);
   private final AggregatingAttestationPool attestationPool = mock(AggregatingAttestationPool.class);
@@ -258,6 +260,9 @@ class ValidatorApiHandlerTest {
         .when(blockProductionPerformanceFactory)
         .createForProduction(any());
     when(chainDataClient.getStore()).thenReturn(store);
+    // Gloas attestation data asks fork choice whether the block's payload is verified; the plain
+    // mock tracks no FULL node, so the attestation committee index stays 0.
+    when(store.getForkChoiceStrategy()).thenReturn(forkChoiceStrategy);
     when(syncStateProvider.getCurrentSyncState()).thenReturn(SyncState.IN_SYNC);
     when(forkChoiceTrigger.prepareForBlockProduction(any(), any()))
         .thenReturn(SafeFuture.completedFuture(chainHead));

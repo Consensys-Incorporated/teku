@@ -34,6 +34,30 @@ public interface ReadOnlyForkChoiceStrategy {
     return Optional.empty();
   }
 
+  /**
+   * Returns whether block {@code blockRoot} is tracked but no execution payload for it has ever
+   * been imported into fork choice.
+   *
+   * <p>This is a Gloas notion: the payload is the block's FULL variant and fork choice remembers
+   * having imported it for as long as the block is tracked, also after the execution layer has
+   * invalidated it. The answer is not durable across pruning or a restart, and it says nothing
+   * about the payload's current validity, see {@link #getBlockData(Bytes32,
+   * ForkChoicePayloadStatus)} for that. Implementations that do not model the Gloas tree may return
+   * false.
+   *
+   * <table>
+   * <caption>Result per state of the block in fork choice</caption>
+   * <tr><th>Block state</th><th>Result</th></tr>
+   * <tr><td>Tracked, FULL never imported</td><td>{@code true}</td></tr>
+   * <tr><td>Tracked, FULL currently present</td><td>{@code false}</td></tr>
+   * <tr><td>Tracked, FULL invalidated</td><td>{@code false}</td></tr>
+   * <tr><td>No longer tracked</td><td>{@code false}</td></tr>
+   * </table>
+   */
+  default boolean isAwaitingExecutionPayload(final Bytes32 blockRoot) {
+    return false;
+  }
+
   Optional<Bytes32> getAncestor(Bytes32 blockRoot, UInt64 slot);
 
   /**

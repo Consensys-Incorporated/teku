@@ -14,6 +14,7 @@
 package tech.pegasys.teku.storage.protoarray;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkState;
 
 import com.google.common.annotations.VisibleForTesting;
 import it.unimi.dsi.fastutil.ints.IntSet;
@@ -220,17 +221,28 @@ class ForkChoiceModelGloas implements ForkChoiceModel {
     // node at the root of the protoarray. A completely missing parent is only valid while
     // rebuilding the very first anchor node into an empty protoarray.
     final Optional<ForkChoiceNode> fullNode = blockNodeIndex.getFullNode(parentRoot);
-    if (fullNode.isPresent()) {
-      final Optional<ProtoNode> maybeFullNode = protoArray.getNode(fullNode.get());
-      if (maybeFullNode.isPresent()
-          && maybeFullNode.get().getExecutionBlockHash().equals(childParentBlockHash)) {
-        return maybeFullNode;
-      }
+    final Optional<ProtoNode> trackedFullNode = fullNode.flatMap(protoArray::getNode);
+    if (trackedFullNode.isPresent()
+        && trackedFullNode.get().getExecutionBlockHash().equals(childParentBlockHash)) {
+      return trackedFullNode;
     }
+    // A FULL variant the index knows but the protoarray no longer tracks has been invalidated by
+    // the execution layer (pruning removes the whole index entry).
+    final boolean fullNodeInvalidated = fullNode.isPresent() && trackedFullNode.isEmpty();
 
     final Optional<ProtoNode> emptyNode =
         blockNodeIndex.getEmptyNode(parentRoot).flatMap(protoArray::getNode);
     if (emptyNode.isPresent()) {
+      // A child that passed the state transition names either the parent's payload or the
+      // execution head EMPTY inherited, so a child not naming the latter builds on the invalidated
+      // payload. on_block rejects such blocks (ForkChoiceUtilGloas), there is no fallback to EMPTY.
+      checkState(
+          !fullNodeInvalidated
+              || emptyNode.get().getExecutionBlockHash().equals(childParentBlockHash),
+          "Block builds on execution payload %s of parent %s which has been invalidated by the"
+              + " execution layer",
+          childParentBlockHash,
+          parentRoot);
       return emptyNode;
     }
 
@@ -775,6 +787,24 @@ class ForkChoiceModelGloas implements ForkChoiceModel {
     return getExecutionNodeForBlockRootAndHash(protoArray, blockNodeIndex, blockRoot, blockHash)
         .map(ProtoNode::getExecutionGasLimit)
         .filter(gasLimit -> !gasLimit.equals(ProtoNode.NO_EXECUTION_GAS_LIMIT));
+  }
+
+  @Override
+  public boolean isAwaitingExecutionPayload(
+      final BlockNodeVariantsIndex blockNodeIndex, final Bytes32 blockRoot) {
+    // The index has an entry for a block exactly while its BASE node is tracked: the entry is
+    // created with the block and removed when the block leaves the protoarray (pruning, or the
+    // BASE node itself invalidated through an ancestor). The FULL identity is attached when the
+    // payload is imported and stays in the entry afterwards. When the execution layer invalidates
+    // the payload only the FULL node leaves the protoarray indices, the entry keeps the identity.
+    // Hence:
+    //  - no entry: block not tracked, nothing to wait for -> false
+    //  - entry with FULL identity: payload imported, still tracked or since invalidated -> false
+    //  - entry without FULL identity: payload never imported -> true
+    return blockNodeIndex
+        .getVariants(blockRoot)
+        .map(variants -> variants.fullNode().isEmpty())
+        .orElse(false);
   }
 
   private Optional<ProtoNode> getExecutionNodeForBlockRootAndHash(

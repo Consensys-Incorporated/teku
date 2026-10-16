@@ -112,6 +112,7 @@ public class BlockProposalTestUtil {
       final Optional<SszList<SszKZGCommitment>> kzgCommitments,
       final Optional<SszList<PayloadAttestation>> payloadAttestations,
       final Optional<ExecutionRequests> parentExecutionRequests,
+      final boolean buildOnEmptyParent,
       final boolean skipStateTransition)
       throws EpochProcessingException, SlotProcessingException {
     final UInt64 newEpoch = spec.computeEpochAtSlot(newSlot);
@@ -134,7 +135,8 @@ public class BlockProposalTestUtil {
           blsToExecutionChanges,
           kzgCommitments,
           payloadAttestations,
-          parentExecutionRequests);
+          parentExecutionRequests,
+          buildOnEmptyParent);
     }
     return createNewBlock(
         signer,
@@ -154,7 +156,8 @@ public class BlockProposalTestUtil {
         blsToExecutionChanges,
         kzgCommitments,
         payloadAttestations,
-        parentExecutionRequests);
+        parentExecutionRequests,
+        buildOnEmptyParent);
   }
 
   public SafeFuture<SignedBlockAndState> createBlockWithBlobs(
@@ -177,6 +180,7 @@ public class BlockProposalTestUtil {
       final List<Blob> blobs,
       final Optional<SszList<PayloadAttestation>> payloadAttestations,
       final Optional<ExecutionRequests> parentExecutionRequests,
+      final boolean buildOnEmptyParent,
       final boolean skipStateTransition)
       throws EpochProcessingException, SlotProcessingException {
     final UInt64 newEpoch = spec.computeEpochAtSlot(newSlot);
@@ -210,7 +214,8 @@ public class BlockProposalTestUtil {
           blsToExecutionChanges,
           Optional.of(kzgCommitments),
           payloadAttestations,
-          parentExecutionRequests);
+          parentExecutionRequests,
+          buildOnEmptyParent);
     } else {
       return createNewBlock(
           signer,
@@ -230,7 +235,8 @@ public class BlockProposalTestUtil {
           blsToExecutionChanges,
           Optional.of(kzgCommitments),
           payloadAttestations,
-          parentExecutionRequests);
+          parentExecutionRequests,
+          buildOnEmptyParent);
     }
   }
 
@@ -273,7 +279,8 @@ public class BlockProposalTestUtil {
       final Optional<SszList<SignedBlsToExecutionChange>> blsToExecutionChanges,
       final Optional<SszList<SszKZGCommitment>> kzgCommitments,
       final Optional<SszList<PayloadAttestation>> payloadAttestations,
-      final Optional<ExecutionRequests> parentExecutionRequests)
+      final Optional<ExecutionRequests> parentExecutionRequests,
+      final boolean buildOnEmptyParent)
       throws EpochProcessingException, SlotProcessingException {
     final UInt64 parentSlot = state.getSlot();
     final UInt64 newEpoch = spec.computeEpochAtSlot(newSlot);
@@ -332,7 +339,8 @@ public class BlockProposalTestUtil {
                                 transactions,
                                 terminalBlock,
                                 Optional.of(executionRequests),
-                                parentBlockSigningRoot));
+                                parentBlockSigningRoot,
+                                buildOnEmptyParent));
                 final ExecutionPayloadProposalData executionPayloadProposalData =
                     new ExecutionPayloadProposalData(
                         payload,
@@ -350,7 +358,10 @@ public class BlockProposalTestUtil {
               if (builder.supportsParentExecutionRequests()) {
                 builder.parentExecutionRequests(
                     parentExecutionRequests.orElseGet(
-                        () -> getParentExecutionRequests(newSlot, parentSlot)));
+                        () ->
+                            buildOnEmptyParent
+                                ? dataStructureUtil.emptyExecutionRequests(newSlot)
+                                : getParentExecutionRequests(newSlot, parentSlot)));
               }
               return SafeFuture.COMPLETE;
             },
@@ -385,7 +396,8 @@ public class BlockProposalTestUtil {
       final Optional<SszList<SignedBlsToExecutionChange>> blsToExecutionChanges,
       final Optional<SszList<SszKZGCommitment>> kzgCommitments,
       final Optional<SszList<PayloadAttestation>> payloadAttestations,
-      final Optional<ExecutionRequests> parentExecutionRequests)
+      final Optional<ExecutionRequests> parentExecutionRequests,
+      final boolean buildOnEmptyParent)
       throws EpochProcessingException, SlotProcessingException {
     final UInt64 parentSlot = state.getSlot();
     final UInt64 newEpoch = spec.computeEpochAtSlot(newSlot);
@@ -443,7 +455,8 @@ public class BlockProposalTestUtil {
                                 transactions,
                                 terminalBlock,
                                 Optional.of(executionRequests),
-                                parentBlockSigningRoot));
+                                parentBlockSigningRoot,
+                                buildOnEmptyParent));
                 final ExecutionPayloadProposalData executionPayloadProposalData =
                     new ExecutionPayloadProposalData(
                         payload,
@@ -461,7 +474,10 @@ public class BlockProposalTestUtil {
               if (builder.supportsParentExecutionRequests()) {
                 builder.parentExecutionRequests(
                     parentExecutionRequests.orElseGet(
-                        () -> getParentExecutionRequests(newSlot, parentSlot)));
+                        () ->
+                            buildOnEmptyParent
+                                ? dataStructureUtil.emptyExecutionRequests(newSlot)
+                                : getParentExecutionRequests(newSlot, parentSlot)));
               }
               return SafeFuture.COMPLETE;
             })
@@ -513,6 +529,28 @@ public class BlockProposalTestUtil {
       final Optional<Bytes32> terminalBlock,
       final Optional<ExecutionRequests> maybeExecutionRequests,
       final Bytes32 parentBeaconBlockRoot) {
+    return createExecutionPayload(
+        newSlot,
+        state,
+        transactions,
+        terminalBlock,
+        maybeExecutionRequests,
+        parentBeaconBlockRoot,
+        false);
+  }
+
+  /**
+   * @param buildOnEmptyParent Gloas only: build on the parent's EMPTY variant, i.e. on the state's
+   *     execution head, instead of on the parent's bid
+   */
+  private ExecutionPayload createExecutionPayload(
+      final UInt64 newSlot,
+      final BeaconState state,
+      final Optional<List<Bytes>> transactions,
+      final Optional<Bytes32> terminalBlock,
+      final Optional<ExecutionRequests> maybeExecutionRequests,
+      final Bytes32 parentBeaconBlockRoot,
+      final boolean buildOnEmptyParent) {
     final SpecVersion specVersion = spec.atSlot(newSlot);
     final ExecutionPayloadSchema<?> schema =
         SchemaDefinitionsBellatrix.required(specVersion.getSchemaDefinitions())
@@ -526,8 +564,12 @@ public class BlockProposalTestUtil {
             .getLatestExecutionPayloadHeader()
             .map(ExecutionPayloadHeader::getBlockHash)
             .orElseGet(
-                () ->
-                    BeaconStateGloas.required(state).getLatestExecutionPayloadBid().getBlockHash());
+                () -> {
+                  final BeaconStateGloas stateGloas = BeaconStateGloas.required(state);
+                  return buildOnEmptyParent
+                      ? stateGloas.getLatestBlockHash()
+                      : stateGloas.getLatestExecutionPayloadBid().getBlockHash();
+                });
 
     if (!currentExecutionPayloadBlockHash.isZero() && terminalBlock.isPresent()) {
       throw new IllegalArgumentException("Merge already happened, cannot set terminal block hash");

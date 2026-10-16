@@ -443,6 +443,18 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
   }
 
   @Override
+  public boolean isAwaitingExecutionPayload(final Bytes32 blockRoot) {
+    protoArrayLock.readLock().lock();
+    try {
+      return getForkChoiceModelForRoot(blockRoot)
+          .map(model -> model.isAwaitingExecutionPayload(blockNodeIndex, blockRoot))
+          .orElse(false);
+    } finally {
+      protoArrayLock.readLock().unlock();
+    }
+  }
+
+  @Override
   public Optional<Bytes32> blockParentRoot(final Bytes32 blockRoot) {
     protoArrayLock.readLock().lock();
     try {
