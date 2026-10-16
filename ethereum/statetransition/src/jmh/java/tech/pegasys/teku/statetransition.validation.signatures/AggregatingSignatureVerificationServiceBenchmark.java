@@ -14,6 +14,7 @@
 package tech.pegasys.teku.statetransition.validation.signatures;
 
 import com.google.common.collect.Streams;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -67,7 +68,9 @@ public class AggregatingSignatureVerificationServiceBenchmark {
           2,
           15_000,
           250,
-          false);
+          false,
+          SignatureVerificationMode.GATHER_AND_GROUP,
+          Duration.ofMillis(10));
 
   private final int signaturesToVerify = 10_000;
 

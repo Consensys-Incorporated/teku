@@ -30,6 +30,7 @@ import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.config.NetworkingSpecConfig;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.config.SpecConfigFulu;
+import tech.pegasys.teku.statetransition.validation.signatures.SignatureVerificationMode;
 
 public class P2PConfig {
 
@@ -51,6 +52,11 @@ public class P2PConfig {
   public static final int DEFAULT_BATCH_VERIFY_QUEUE_CAPACITY = 30_000;
   public static final int DEFAULT_BATCH_VERIFY_MAX_BATCH_SIZE = 250;
   public static final boolean DEFAULT_BATCH_VERIFY_STRICT_THREAD_LIMIT_ENABLED = false;
+  public static final SignatureVerificationMode DEFAULT_BATCH_VERIFY_MODE =
+      SignatureVerificationMode.GATHER_AND_GROUP;
+  // In GATHER_AND_GROUP mode, after the first task of a batch arrives, keep gathering tasks for up
+  // to this long (or until the batch is full) so that batches amortise the per-batch pairing cost
+  public static final int DEFAULT_BATCH_VERIFY_GATHER_TIMEOUT_MILLIS = 10;
   // it's not allowed to set less than requirement which is > 0, so it's safe value
   public static final int DEFAULT_CUSTODY_GROUP_COUNT_OVERRIDE = 0;
   public static final int DEFAULT_DAS_PUBLISH_WITHHOLD_COLUMNS_EVERY_SLOTS = -1;
@@ -93,6 +99,8 @@ public class P2PConfig {
   private final int batchVerifyQueueCapacity;
   private final int batchVerifyMaxBatchSize;
   private final boolean batchVerifyStrictThreadLimitEnabled;
+  private final SignatureVerificationMode batchVerifyMode;
+  private final int batchVerifyGatherTimeoutMillis;
   private final boolean isGossipBlobsAfterBlockEnabled;
   private final boolean allTopicsFilterEnabled;
   private final int sidecarRecoveryTimeout;
@@ -125,6 +133,8 @@ public class P2PConfig {
       final int batchVerifyQueueCapacity,
       final int batchVerifyMaxBatchSize,
       final boolean batchVerifyStrictThreadLimitEnabled,
+      final SignatureVerificationMode batchVerifyMode,
+      final int batchVerifyGatherTimeoutMillis,
       final boolean allTopicsFilterEnabled,
       final boolean isGossipBlobsAfterBlockEnabled,
       final int sidecarRecoveryTimeout,
@@ -155,6 +165,8 @@ public class P2PConfig {
     this.batchVerifyQueueCapacity = batchVerifyQueueCapacity;
     this.batchVerifyMaxBatchSize = batchVerifyMaxBatchSize;
     this.batchVerifyStrictThreadLimitEnabled = batchVerifyStrictThreadLimitEnabled;
+    this.batchVerifyMode = batchVerifyMode;
+    this.batchVerifyGatherTimeoutMillis = batchVerifyGatherTimeoutMillis;
     this.networkingSpecConfig = spec.getNetworkingConfig();
     this.allTopicsFilterEnabled = allTopicsFilterEnabled;
     this.isGossipBlobsAfterBlockEnabled = isGossipBlobsAfterBlockEnabled;
@@ -253,6 +265,14 @@ public class P2PConfig {
     return batchVerifyStrictThreadLimitEnabled;
   }
 
+  public SignatureVerificationMode getBatchVerifyMode() {
+    return batchVerifyMode;
+  }
+
+  public Duration getBatchVerifyGatherTimeout() {
+    return Duration.ofMillis(batchVerifyGatherTimeoutMillis);
+  }
+
   public NetworkingSpecConfig getNetworkingSpecConfig() {
     return networkingSpecConfig;
   }
@@ -324,6 +344,8 @@ public class P2PConfig {
     private int batchVerifyMaxBatchSize = DEFAULT_BATCH_VERIFY_MAX_BATCH_SIZE;
     private boolean batchVerifyStrictThreadLimitEnabled =
         DEFAULT_BATCH_VERIFY_STRICT_THREAD_LIMIT_ENABLED;
+    private SignatureVerificationMode batchVerifyMode = DEFAULT_BATCH_VERIFY_MODE;
+    private int batchVerifyGatherTimeoutMillis = DEFAULT_BATCH_VERIFY_GATHER_TIMEOUT_MILLIS;
     private boolean allTopicsFilterEnabled = DEFAULT_PEER_ALL_TOPIC_FILTER_ENABLED;
     private int floodPublishMaxMessageSizeThreshold =
         DEFAULT_FLOOD_PUBLISH_MAX_MESSAGE_SIZE_THRESHOLD;
@@ -401,6 +423,8 @@ public class P2PConfig {
           batchVerifyQueueCapacity.orElse(DEFAULT_BATCH_VERIFY_QUEUE_CAPACITY),
           batchVerifyMaxBatchSize,
           batchVerifyStrictThreadLimitEnabled,
+          batchVerifyMode,
+          batchVerifyGatherTimeoutMillis,
           allTopicsFilterEnabled,
           gossipBlobsAfterBlockEnabled,
           sidecarRecoveryTimeout,
@@ -568,6 +592,22 @@ public class P2PConfig {
     public Builder batchVerifyStrictThreadLimitEnabled(
         final boolean batchVerifyStrictThreadLimitEnabled) {
       this.batchVerifyStrictThreadLimitEnabled = batchVerifyStrictThreadLimitEnabled;
+      return this;
+    }
+
+    public Builder batchVerifyMode(final SignatureVerificationMode batchVerifyMode) {
+      checkNotNull(batchVerifyMode);
+      this.batchVerifyMode = batchVerifyMode;
+      return this;
+    }
+
+    public Builder batchVerifyGatherTimeoutMillis(final int batchVerifyGatherTimeoutMillis) {
+      if (batchVerifyGatherTimeoutMillis < 0) {
+        throw new InvalidConfigurationException(
+            String.format(
+                "Invalid batchVerifyGatherTimeoutMillis: %d", batchVerifyGatherTimeoutMillis));
+      }
+      this.batchVerifyGatherTimeoutMillis = batchVerifyGatherTimeoutMillis;
       return this;
     }
 
