@@ -54,6 +54,8 @@ public class BuilderPreferencesPublisherTest {
   private static final int VALIDATOR_INDEX = 42;
 
   private final ValidatorApiChannel validatorApiChannel = mock(ValidatorApiChannel.class);
+  private final ProposerConfigPropertiesProvider proposerConfigPropertiesProvider =
+      mock(ProposerConfigPropertiesProvider.class);
   private final BuilderConfigProvider builderConfigProvider = mock(BuilderConfigProvider.class);
 
   private Spec spec;
@@ -71,7 +73,12 @@ public class BuilderPreferencesPublisherTest {
     final OwnedValidators ownedValidators = new OwnedValidators(Map.of(publicKey, validator));
     publisher =
         new BuilderPreferencesPublisher(
-            ownedValidators, spec, validatorApiChannel, builderConfigProvider);
+            ownedValidators,
+            spec,
+            validatorApiChannel,
+            proposerConfigPropertiesProvider,
+            builderConfigProvider);
+    when(proposerConfigPropertiesProvider.refresh()).thenReturn(SafeFuture.COMPLETE);
     when(validatorApiChannel.sendBuilderPreferences(any()))
         .thenReturn(SafeFuture.completedFuture(List.of()));
   }
@@ -104,6 +111,7 @@ public class BuilderPreferencesPublisherTest {
     @SuppressWarnings("unchecked")
     final ArgumentCaptor<SszList<BuilderPreferencesEntry>> captor =
         ArgumentCaptor.forClass(SszList.class);
+    verify(proposerConfigPropertiesProvider).refresh();
     verify(validatorApiChannel).sendBuilderPreferences(captor.capture());
     final SszList<BuilderPreferencesEntry> published = captor.getValue();
     assertThat(published).hasSize(1);

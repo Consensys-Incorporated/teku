@@ -13,10 +13,8 @@
 
 package tech.pegasys.teku.cli.options;
 
-import static com.google.common.base.Strings.isNullOrEmpty;
+import static tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfigSchema.MAX_BUILDER_ENTRIES;
 
-import java.net.MalformedURLException;
-import java.net.URI;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
@@ -26,6 +24,7 @@ import tech.pegasys.teku.config.TekuConfiguration;
 import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.validator.api.ValidatorConfig;
+import tech.pegasys.teku.validator.client.BuilderUrlParser;
 
 /**
  * Configuration options for ePBS
@@ -93,20 +92,12 @@ public class BuilderOptions {
   }
 
   private List<URL> parseBuilderUrls() {
-    return builderUrls.stream().map(this::parseBuilderUrl).toList();
-  }
-
-  private URL parseBuilderUrl(final String builderUrl) {
-    try {
-      final URL parsedBuilderUrl = URI.create(builderUrl).toURL();
-      if (isNullOrEmpty(parsedBuilderUrl.getHost())) {
-        throw new InvalidConfigurationException(
-            "Invalid configuration. Builder URL (" + builderUrl + ") must contain a valid host");
-      }
-      return parsedBuilderUrl;
-    } catch (IllegalArgumentException | MalformedURLException e) {
+    if (builderUrls.size() > MAX_BUILDER_ENTRIES) {
       throw new InvalidConfigurationException(
-          "Invalid configuration. Builder URL (" + builderUrl + ") has invalid syntax", e);
+          String.format(
+              "Invalid configuration. Builders must be at most %s but are %s",
+              MAX_BUILDER_ENTRIES, builderUrls.size()));
     }
+    return builderUrls.stream().map(BuilderUrlParser::parseBuilderUrl).toList();
   }
 }

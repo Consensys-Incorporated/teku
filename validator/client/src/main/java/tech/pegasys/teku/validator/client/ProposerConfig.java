@@ -13,18 +13,28 @@
 
 package tech.pegasys.teku.validator.client;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 import static java.util.Objects.requireNonNullElse;
+import static tech.pegasys.teku.spec.config.SpecConfigGloas.MAX_BUILDER_AUTH_DATA_SIZE;
+import static tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfigSchema.MAX_BUILDER_ENTRIES;
+import static tech.pegasys.teku.spec.schemas.ApiSchemas.MAX_BUILDER_PUBKEYS;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
+import java.net.URL;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes48;
 import tech.pegasys.teku.bls.BLSPublicKey;
@@ -161,6 +171,8 @@ public class ProposerConfig {
     @JsonProperty(value = "urls")
     private final Map<String, BuilderOverrides> urls;
 
+    private final Map<String, URL> parsedUrls;
+
     @JsonCreator
     public BuilderConfig(
         @JsonProperty(value = "enabled") final Boolean enabled,
@@ -175,7 +187,27 @@ public class ProposerConfig {
       this.registrationOverrides = registrationOverrides;
       this.minBid = minBid;
       this.builderBoostFactor = builderBoostFactor;
-      this.urls = requireNonNullElse(urls, ImmutableMap.of());
+      this.urls = urls == null ? null : replaceNullOverrides(urls);
+      // keeping a cache of the parsed URL objects to avoid creating them on the fly
+      this.parsedUrls =
+          urls == null
+              ? ImmutableMap.of()
+              : urls.keySet().stream()
+                  .collect(
+                      Collectors.toMap(Function.identity(), BuilderUrlParser::parseBuilderUrl));
+    }
+
+    private Map<String, BuilderOverrides> replaceNullOverrides(
+        final Map<String, BuilderOverrides> urls) {
+      checkArgument(
+          urls.size() <= MAX_BUILDER_ENTRIES,
+          "\"urls\" must contain at most %s entries",
+          MAX_BUILDER_ENTRIES);
+      final Map<String, BuilderOverrides> result = new LinkedHashMap<>();
+      urls.forEach(
+          (url, overrides) ->
+              result.put(url, requireNonNullElse(overrides, BuilderOverrides.EMPTY)));
+      return Collections.unmodifiableMap(result);
     }
 
     public Optional<Boolean> isEnabled() {
@@ -198,8 +230,13 @@ public class ProposerConfig {
       return Optional.ofNullable(builderBoostFactor);
     }
 
-    public Map<String, BuilderOverrides> getUrls() {
-      return urls;
+    public Optional<Map<String, BuilderOverrides>> getUrls() {
+      return Optional.ofNullable(urls);
+    }
+
+    @JsonIgnore
+    public URL getParsedUrl(final String url) {
+      return parsedUrls.get(url);
     }
 
     @Override
@@ -284,6 +321,8 @@ public class ProposerConfig {
     @JsonProperty(value = "max_execution_payment")
     private final UInt64 maxExecutionPayment;
 
+    public static final BuilderOverrides EMPTY = new BuilderOverrides(null, null, null, null, null);
+
     @JsonCreator
     public BuilderOverrides(
         @JsonProperty(value = "auth_data") final Bytes authData,
@@ -291,6 +330,15 @@ public class ProposerConfig {
         @JsonProperty(value = "min_bid") final UInt64 minBid,
         @JsonProperty(value = "builder_boost_factor") final UInt64 builderBoostFactor,
         @JsonProperty(value = "max_execution_payment") final UInt64 maxExecutionPayment) {
+      checkArgument(
+          authData == null
+              || (!authData.isEmpty() && authData.size() <= MAX_BUILDER_AUTH_DATA_SIZE),
+          "\"auth_data\" must be between 1 and %s bytes",
+          MAX_BUILDER_AUTH_DATA_SIZE);
+      checkArgument(
+          builderPubkeys == null || builderPubkeys.size() <= MAX_BUILDER_PUBKEYS,
+          "\"builder_pubkeys\" must contain at most %s entries",
+          MAX_BUILDER_PUBKEYS);
       this.authData = authData;
       this.builderPubkeys = builderPubkeys;
       this.minBid = minBid;

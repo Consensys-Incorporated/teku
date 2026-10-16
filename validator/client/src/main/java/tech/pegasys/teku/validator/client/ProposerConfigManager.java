@@ -15,6 +15,7 @@ package tech.pegasys.teku.validator.client;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,8 +31,10 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.validator.api.ValidatorConfig;
 import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
 import tech.pegasys.teku.validator.client.ProposerConfig.BuilderConfig;
+import tech.pegasys.teku.validator.client.ProposerConfig.BuilderOverrides;
 import tech.pegasys.teku.validator.client.ProposerConfig.Config;
 import tech.pegasys.teku.validator.client.ProposerConfig.RegistrationOverrides;
+import tech.pegasys.teku.validator.client.ResolvedBuilderConfig.ResolvedBuilderEntry;
 import tech.pegasys.teku.validator.client.loader.OwnedValidators;
 import tech.pegasys.teku.validator.client.proposerconfig.ProposerConfigProvider;
 
@@ -252,6 +255,73 @@ public class ProposerConfigManager
   }
 
   @Override
+  public ResolvedBuilderConfig resolveBuilderConfig(final BLSPublicKey publicKey) {
+    final UInt64 minBid =
+        getAttributeWithFallback(
+                config -> config.getBuilder().flatMap(BuilderConfig::getMinBid), publicKey)
+            .orElse(config.getBuilderMinBid());
+    final UInt64 builderBoostFactor =
+        getAttributeWithFallback(
+                config -> config.getBuilder().flatMap(BuilderConfig::getBuilderBoostFactor),
+                publicKey)
+            .orElse(config.getBuilderBoostFactor());
+
+    // the builder flow is on unless the proposer config disables it
+    final boolean builderEnabled =
+        getAttributeWithFallback(
+                config -> config.getBuilder().flatMap(BuilderConfig::isEnabled), publicKey)
+            .orElse(true);
+
+    if (!builderEnabled) {
+      return new ResolvedBuilderConfig(minBid, builderBoostFactor, List.of());
+    }
+
+    final Optional<BuilderConfig> maybeProposerConfigBuilderWithUrls =
+        getAttributeWithFallback(
+            config ->
+                config.getBuilder().filter(builderConfig -> builderConfig.getUrls().isPresent()),
+            publicKey);
+
+    final List<ResolvedBuilderEntry> resolvedBuilders =
+        maybeProposerConfigBuilderWithUrls
+            .map(
+                builderConfig -> {
+                  final Map<String, BuilderOverrides> builderUrls =
+                      builderConfig.getUrls().orElseThrow();
+                  return builderUrls.entrySet().stream()
+                      .map(
+                          builder -> {
+                            final String url = builder.getKey();
+                            final BuilderOverrides overrides = builder.getValue();
+                            return new ResolvedBuilderEntry(
+                                builderConfig.getParsedUrl(url),
+                                overrides.getAuthData(),
+                                overrides.getBuilderPubkeys().orElse(List.of()),
+                                overrides
+                                    .getMaxExecutionPayment()
+                                    .orElse(config.getBuilderMaxExecutionPayment()),
+                                overrides.getMinBid().orElse(minBid),
+                                overrides.getBuilderBoostFactor().orElse(builderBoostFactor));
+                          })
+                      .toList();
+                })
+            .orElseGet(
+                () ->
+                    config.getBuilderUrls().stream()
+                        .map(
+                            url ->
+                                new ResolvedBuilderEntry(
+                                    url,
+                                    Optional.empty(),
+                                    List.of(),
+                                    config.getBuilderMaxExecutionPayment(),
+                                    minBid,
+                                    builderBoostFactor))
+                        .toList());
+    return new ResolvedBuilderConfig(minBid, builderBoostFactor, resolvedBuilders);
+  }
+
+  @Override
   public Optional<UInt64> getBuilderRegistrationTimestampOverride(final BLSPublicKey publicKey) {
     return getAttributeWithFallback(
             config ->
@@ -278,17 +348,16 @@ public class ProposerConfigManager
 
   private <T> Optional<T> getAttributeWithFallback(
       final Function<Config, Optional<T>> selector, final BLSPublicKey publicKey) {
-    final Optional<ProposerConfig> localMaybeProposerConfig = maybeProposerConfig.get();
-
-    if (localMaybeProposerConfig.isEmpty()) {
-      return runtimeProposerConfig.getProposerConfig(publicKey).flatMap(selector);
-    }
-    return localMaybeProposerConfig
+    return maybeProposerConfig
         .get()
-        .getConfigForPubKey(publicKey)
-        .flatMap(selector)
-        .or(() -> runtimeProposerConfig.getProposerConfig(publicKey).flatMap(selector))
-        .or(() -> selector.apply(localMaybeProposerConfig.get().getDefaultConfig()));
+        .map(
+            proposerConfig ->
+                proposerConfig
+                    .getConfigForPubKey(publicKey)
+                    .flatMap(selector)
+                    .or(() -> runtimeProposerConfig.getProposerConfig(publicKey).flatMap(selector))
+                    .or(() -> selector.apply(proposerConfig.getDefaultConfig())))
+        .orElseGet(() -> runtimeProposerConfig.getProposerConfig(publicKey).flatMap(selector));
   }
 
   private Optional<Eth1Address> getFeeRecipientFromProposerConfig(final BLSPublicKey publicKey) {

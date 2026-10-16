@@ -470,9 +470,15 @@ public class ValidatorClientService extends Service {
     final OwnedValidators validators = validatorLoader.getOwnedValidators();
     final BlockContainerSigner blockContainerSigner = new MilestoneBasedBlockContainerSigner(spec);
     final ValidatorDutyMetrics validatorDutyMetrics = ValidatorDutyMetrics.create(metricsSystem);
-    final BuilderConfigProvider builderConfigProvider =
-        new BuilderConfigProvider(spec, config.getValidatorConfig());
-    validatorTimingChannels.add(builderConfigProvider);
+    final BuilderConfigProvider builderConfigProvider;
+    if (spec.isMilestoneSupported(SpecMilestone.GLOAS)) {
+      final DefaultBuilderConfigProvider builderConfigProviderImpl =
+          new DefaultBuilderConfigProvider(spec, proposerConfigManager.orElseThrow());
+      validatorTimingChannels.add(builderConfigProviderImpl);
+      builderConfigProvider = builderConfigProviderImpl;
+    } else {
+      builderConfigProvider = BuilderConfigProvider.NOOP;
+    }
     final BlockDutyFactory blockDutyFactory =
         new BlockDutyFactory(
             forkProvider,
@@ -618,7 +624,11 @@ public class ValidatorClientService extends Service {
       validatorTimingChannels.add(proposerPreferencesPublisher);
       final BuilderPreferencesPublisher builderPreferencesPublisher =
           new BuilderPreferencesPublisher(
-              validators, spec, validatorApiChannel, builderConfigProvider);
+              validators,
+              spec,
+              validatorApiChannel,
+              proposerConfigManager.orElseThrow(),
+              builderConfigProvider);
       validatorTimingChannels.add(builderPreferencesPublisher);
     }
 

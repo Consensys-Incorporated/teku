@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -29,6 +30,8 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.validator.client.restapi.apis.schema.BuilderConfig;
+import tech.pegasys.teku.validator.client.restapi.apis.schema.BuilderEntry;
 
 class RuntimeProposerConfigTest {
   private final Spec spec = TestSpecFactory.createMinimalBellatrix();
@@ -113,6 +116,29 @@ class RuntimeProposerConfigTest {
     proposerConfig.deleteGasLimit(pubkey);
     final String data = Files.readString(testData);
     assertThat(data).isEqualTo("{}");
+  }
+
+  @Test
+  void shouldRejectBuilderConfigWithDuplicateUrls() {
+    final BuilderEntry builder =
+        new BuilderEntry(
+            "https://builder.example.com",
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty());
+    final BuilderConfig builderConfig =
+        new BuilderConfig(
+            Optional.empty(), Optional.empty(), Optional.of(List.of(builder, builder)));
+
+    assertThatThrownBy(
+            () ->
+                new RuntimeProposerConfig.RuntimeConfigBuilder()
+                    .builderConfig(Optional.of(builderConfig))
+                    .build())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("builders contain duplicate url");
   }
 
   @Test

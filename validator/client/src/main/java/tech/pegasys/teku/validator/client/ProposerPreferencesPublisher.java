@@ -40,7 +40,6 @@ public class ProposerPreferencesPublisher extends AbstractPreferencesPublisher {
   private static final Logger LOG = LogManager.getLogger();
 
   private final ValidatorApiChannel validatorApiChannel;
-  private final ProposerConfigPropertiesProvider proposerConfigPropertiesProvider;
   private final ForkProvider forkProvider;
 
   public ProposerPreferencesPublisher(
@@ -49,14 +48,13 @@ public class ProposerPreferencesPublisher extends AbstractPreferencesPublisher {
       final ValidatorApiChannel validatorApiChannel,
       final ProposerConfigPropertiesProvider proposerConfigPropertiesProvider,
       final ForkProvider forkProvider) {
-    super(ownedValidators, spec);
+    super(ownedValidators, spec, proposerConfigPropertiesProvider);
     this.validatorApiChannel = validatorApiChannel;
-    this.proposerConfigPropertiesProvider = proposerConfigPropertiesProvider;
     this.forkProvider = forkProvider;
   }
 
   @Override
-  void publishPreferences(
+  SafeFuture<Void> publishPreferences(
       final UInt64 epoch,
       final List<ProposerDuty> ownedProposerDuties,
       final Bytes32 dependentRoot) {
@@ -69,7 +67,7 @@ public class ProposerPreferencesPublisher extends AbstractPreferencesPublisher {
 
     final ProposerPreferencesUtil preferencesUtil = spec.getProposerPreferencesUtil(epoch);
 
-    forkProvider
+    return forkProvider
         .getForkInfo(ownedProposerDuties.getFirst().getSlot())
         .thenCompose(
             forkInfo ->
@@ -101,8 +99,12 @@ public class ProposerPreferencesPublisher extends AbstractPreferencesPublisher {
                                         "{} proposer preferences published successfully",
                                         preferencesList.size());
                                   });
-                        }))
-        .finish(error -> VALIDATOR_LOGGER.proposerPreferencesPublicationFailed(epoch, error));
+                        }));
+  }
+
+  @Override
+  void handlePublicationError(final UInt64 epoch, final Throwable error) {
+    VALIDATOR_LOGGER.proposerPreferencesPublicationFailed(epoch, error);
   }
 
   private SafeFuture<Optional<SignedProposerPreferences>> createSignedProposerPreferences(
