@@ -36,6 +36,7 @@ import tech.pegasys.teku.spec.networks.Eth2Network;
 import tech.pegasys.teku.storage.api.CombinedStorageChannel;
 import tech.pegasys.teku.storage.api.Eth1DepositStorageChannel;
 import tech.pegasys.teku.storage.api.LightClientUpdateChannel;
+import tech.pegasys.teku.storage.api.SidecarArchivePrunableChannel;
 import tech.pegasys.teku.storage.api.SidecarUpdateChannel;
 import tech.pegasys.teku.storage.api.VoteUpdateChannel;
 import tech.pegasys.teku.storage.archive.BlobSidecarsArchiver;
@@ -88,6 +89,8 @@ public class StorageService extends Service implements StorageServiceFacade {
   protected SafeFuture<?> doStart() {
     return SafeFuture.fromRunnable(
             () -> {
+              // Must stay single-threaded: this guarantees data column sidecar pruning and
+              // archiving never run concurrently.
               final AsyncRunner storagePrunerAsyncRunner =
                   serviceConfig.createAsyncRunner(
                       "storagePrunerAsyncRunner",
@@ -204,6 +207,9 @@ public class StorageService extends Service implements StorageServiceFacade {
                             config.isStoreNonCanonicalBlocksEnabled(),
                             config.getPruningWarnTimeout()));
               }
+
+              final EventChannels eventChannels = serviceConfig.getEventChannels();
+
               if (config.getSpec().isMilestoneSupported(SpecMilestone.FULU)) {
                 dataColumnSidecarPruner =
                     Optional.of(
@@ -221,6 +227,8 @@ public class StorageService extends Service implements StorageServiceFacade {
                             pruningTimingsLabelledGauge,
                             pruningActiveLabelledGauge,
                             config.getPruningWarnTimeout()));
+                eventChannels.subscribe(
+                    SidecarArchivePrunableChannel.class, dataColumnSidecarPruner.get());
               }
               chainStorage =
                   ChainStorage.create(
@@ -229,8 +237,6 @@ public class StorageService extends Service implements StorageServiceFacade {
                       config.getDataStorageMode(),
                       config.getStateRebuildTimeoutSeconds(),
                       blobSidecarsArchiver);
-
-              final EventChannels eventChannels = serviceConfig.getEventChannels();
 
               final DepositStorage depositStorage = DepositStorage.create(database);
 
