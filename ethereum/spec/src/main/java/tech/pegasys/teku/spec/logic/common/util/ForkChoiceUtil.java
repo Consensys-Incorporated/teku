@@ -927,7 +927,7 @@ public class ForkChoiceUtil {
       final UInt64 slot,
       final BeaconBlock block,
       final int committeeIndex,
-      final ReadOnlyStore store) {
+      final Optional<ForkChoiceNode> selectedNode) {
     return committeeIndex;
   }
 

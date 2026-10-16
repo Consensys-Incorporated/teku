@@ -94,6 +94,8 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
@@ -584,59 +586,125 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
     final SafeFuture<Optional<AttestationData>> result =
         forkChoiceTrigger
             .prepareForAttestationProduction(slot)
+            .thenApply(__ -> getAttestationHeadNode(slot))
             .thenCompose(
-                __ ->
-                    combinedChainDataClient
-                        .getSignedBlockAndStateInEffectAtSlot(slot)
+                selectedHead ->
+                    getAttestationHeadBlockAndState(
+                            slot, selectedHead.map(AttestationHeadSelection::forkChoiceNode))
                         .thenCompose(
                             maybeBlockAndState -> {
                               if (maybeBlockAndState.isEmpty()) {
                                 return SafeFuture.completedFuture(Optional.empty());
                               }
                               final SignedBlockAndState blockAndState = maybeBlockAndState.get();
-                              final BeaconBlock block = blockAndState.getBlock().getMessage();
-
                               // The head block must not be optimistically synced.
-                              if (combinedChainDataClient.isOptimisticBlock(block.getRoot())) {
+                              if (selectedHead
+                                  .map(AttestationHeadSelection::optimistic)
+                                  .orElseGet(
+                                      () ->
+                                          combinedChainDataClient.isOptimisticBlock(
+                                              blockAndState.getRoot()))) {
                                 return NodeSyncingException.failedFuture();
                               }
-                              if (blockAndState.getSlot().compareTo(minQuerySlot) < 0) {
-                                // The current effective block is too far in the past - so roll the
-                                // state forward to the current epoch. Ensures we have the latest
-                                // justified checkpoint
-                                return combinedChainDataClient
-                                    .getCheckpointState(epoch, blockAndState)
-                                    .thenApply(
-                                        checkpointState ->
-                                            Optional.of(
-                                                createAttestationData(
-                                                    block,
-                                                    checkpointState.getState(),
-                                                    slot,
-                                                    computeCommitteeIndexForAttestation(
-                                                        slot, block, committeeIndex))));
-                              } else {
-                                final AttestationData attestationData =
-                                    createAttestationData(
-                                        block,
-                                        blockAndState.getState(),
-                                        slot,
-                                        computeCommitteeIndexForAttestation(
-                                            slot, block, committeeIndex));
-                                return SafeFuture.completedFuture(Optional.of(attestationData));
-                              }
+                              return createAttestationData(
+                                  epoch,
+                                  minQuerySlot,
+                                  slot,
+                                  committeeIndex,
+                                  blockAndState,
+                                  selectedHead.map(AttestationHeadSelection::forkChoiceNode));
                             }));
     result.always(context::stopTimer);
     return result;
   }
 
-  private int computeCommitteeIndexForAttestation(
-      final UInt64 slot, final BeaconBlock block, final int committeeIndex) {
-    return spec.atSlot(slot)
-        .getForkChoiceUtil()
-        .computeCommitteeIndexForAttestation(
-            slot, block, committeeIndex, combinedChainDataClient.getStore());
+  private SafeFuture<Optional<SignedBlockAndState>> getAttestationHeadBlockAndState(
+      final UInt64 slot, final Optional<ForkChoiceNode> selectedHead) {
+    if (!spec.isExecutionPayloadEnvelopeAvailableAtSlot(slot)) {
+      return combinedChainDataClient.getSignedBlockAndStateInEffectAtSlot(slot);
+    }
+
+    return selectedHead
+        .map(
+            node ->
+                combinedChainDataClient
+                    .getBlockByBlockRoot(node.blockRoot())
+                    .thenCompose(
+                        maybeBlock ->
+                            maybeBlock
+                                .map(
+                                    block ->
+                                        combinedChainDataClient
+                                            .getStateByBlockRoot(node.blockRoot())
+                                            .thenApply(
+                                                maybeState ->
+                                                    maybeState.map(
+                                                        state ->
+                                                            new SignedBlockAndState(block, state))))
+                                .orElseGet(() -> SafeFuture.completedFuture(Optional.empty()))))
+        .orElseGet(() -> SafeFuture.completedFuture(Optional.empty()));
   }
+
+  private SafeFuture<Optional<AttestationData>> createAttestationData(
+      final UInt64 epoch,
+      final UInt64 minQuerySlot,
+      final UInt64 slot,
+      final int committeeIndex,
+      final SignedBlockAndState blockAndState,
+      final Optional<ForkChoiceNode> selectedHead) {
+    final BeaconBlock block = blockAndState.getBlock().getMessage();
+    final int computedCommitteeIndex =
+        spec.atSlot(slot)
+            .getForkChoiceUtil()
+            .computeCommitteeIndexForAttestation(slot, block, committeeIndex, selectedHead);
+
+    if (blockAndState.getSlot().compareTo(minQuerySlot) < 0) {
+      // The current effective block is too far in the past - so roll the state forward to the
+      // current epoch. Ensures we have the latest justified checkpoint.
+      return combinedChainDataClient
+          .getCheckpointState(epoch, blockAndState)
+          .thenApply(
+              checkpointState ->
+                  Optional.of(
+                      createAttestationData(
+                          block, checkpointState.getState(), slot, computedCommitteeIndex)));
+    }
+
+    final AttestationData attestationData =
+        createAttestationData(block, blockAndState.getState(), slot, computedCommitteeIndex);
+    return SafeFuture.completedFuture(Optional.of(attestationData));
+  }
+
+  private Optional<AttestationHeadSelection> getAttestationHeadNode(final UInt64 slot) {
+    if (!spec.isExecutionPayloadEnvelopeAvailableAtSlot(slot)) {
+      return Optional.empty();
+    }
+    return combinedChainDataClient
+        .getChainHead()
+        .flatMap(
+            head -> {
+              if (head.getSlot().isLessThanOrEqualTo(slot)) {
+                return Optional.of(
+                    new AttestationHeadSelection(head.getForkChoiceNode(), head.isOptimistic()));
+              }
+              // Preserve the payload variant selected by the canonical descendant
+              final ProtoNodeData ancestorData =
+                  combinedChainDataClient
+                      .getStore()
+                      .getForkChoiceStrategy()
+                      .getAncestorNodeData(head.getForkChoiceNode(), slot)
+                      .orElseThrow(
+                          () ->
+                              new IllegalStateException(
+                                  "Canonical head data is unavailable for slot " + slot));
+              final ForkChoiceNode ancestor =
+                  new ForkChoiceNode(ancestorData.getRoot(), ancestorData.getPayloadStatus());
+              return Optional.of(
+                  new AttestationHeadSelection(ancestor, ancestorData.isOptimistic()));
+            });
+  }
+
+  private record AttestationHeadSelection(ForkChoiceNode forkChoiceNode, boolean optimistic) {}
 
   private AttestationData createAttestationData(
       final BeaconBlock block,

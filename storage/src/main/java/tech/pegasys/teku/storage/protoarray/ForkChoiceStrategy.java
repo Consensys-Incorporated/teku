@@ -600,6 +600,16 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
   }
 
   @Override
+  public Optional<ProtoNodeData> getAncestorNodeData(final ForkChoiceNode node, final UInt64 slot) {
+    protoArrayLock.readLock().lock();
+    try {
+      return getAncestorProtoNode(node, slot).map(ProtoNode::getBlockData);
+    } finally {
+      protoArrayLock.readLock().unlock();
+    }
+  }
+
+  @Override
   public Optional<ForkChoiceNode> getSupportedNode(
       final UInt64 currentSlot,
       final Bytes32 voteRoot,
