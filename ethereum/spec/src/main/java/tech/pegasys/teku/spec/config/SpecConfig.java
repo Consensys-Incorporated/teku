@@ -88,6 +88,9 @@ public interface SpecConfig extends NetworkingSpecConfig {
 
   int getSlotDurationMillis();
 
+  /** EIP-8198: the slot duration from {@link #getHezeForkEpoch()}. */
+  int getSlotDurationMsHeze();
+
   int getSecondsPerEth1Block();
 
   int getMinValidatorWithdrawabilityDelay();

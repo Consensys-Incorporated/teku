@@ -18,7 +18,12 @@ import static tech.pegasys.teku.infrastructure.ssz.SszDataAssert.assertThatSszDa
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Map;
 import java.util.Optional;
 import org.assertj.core.api.Assertions;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
@@ -32,6 +37,7 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.config.SpecConfigAndParent;
 import tech.pegasys.teku.spec.config.SpecConfigLoader;
+import tech.pegasys.teku.spec.config.YamlConfigReader;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.StateTransitionException;
@@ -45,6 +51,23 @@ public class TransitionTestExecutor implements TestExecutor {
   public void runTest(final TestDefinition testDefinition) throws Throwable {
     final MetaData metadata = TestDataUtils.loadYaml(testDefinition, "meta.yaml", MetaData.class);
     processUpgrade(testDefinition, metadata);
+  }
+
+  /**
+   * Transition vectors may ship a {@code config.yaml}, e.g. EIP-8198 transition tests set the Heze
+   * slot duration, so apply it on top of the builtin config. The fork epochs are still set from
+   * {@code meta.yaml} below.
+   */
+  private static Map<String, Object> readConfigOverrides(final TestDefinition testDefinition) {
+    final Path configYaml = testDefinition.getTestDirectory().resolve("config.yaml");
+    if (!Files.exists(configYaml)) {
+      return Map.of();
+    }
+    try (final InputStream in = Files.newInputStream(configYaml)) {
+      return new YamlConfigReader().readValues(in);
+    } catch (final IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 
   private void processUpgrade(final TestDefinition testDefinition, final MetaData metadata) {
@@ -110,7 +133,8 @@ public class TransitionTestExecutor implements TestExecutor {
                             + ": "
                             + milestone);
               }
-            });
+            },
+            readConfigOverrides(testDefinition));
     final Spec spec = SpecFactory.create(config);
     final BeaconState preState =
         TestDataUtils.loadSsz(testDefinition, "pre.ssz_snappy", spec::deserializeBeaconState);

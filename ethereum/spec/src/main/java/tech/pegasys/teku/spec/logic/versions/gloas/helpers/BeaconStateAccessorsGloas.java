@@ -99,10 +99,17 @@ public class BeaconStateAccessorsGloas extends BeaconStateAccessorsFulu {
    * EFFECTIVE_BALANCE_INCREMENT.
    */
   private UInt64 computeBalanceChurnLimit(final BeaconStateElectra state, final UInt64 quotient) {
-    final UInt64 churn =
-        configElectra
-            .getMinPerEpochChurnLimitElectra()
-            .max(getTotalActiveBalance(state).dividedBy(quotient));
+    return roundDownToEffectiveBalanceIncrement(computeUnroundedBalanceChurnLimit(state, quotient));
+  }
+
+  protected UInt64 computeUnroundedBalanceChurnLimit(
+      final BeaconStateElectra state, final UInt64 quotient) {
+    return configElectra
+        .getMinPerEpochChurnLimitElectra()
+        .max(getTotalActiveBalance(state).dividedBy(quotient));
+  }
+
+  protected UInt64 roundDownToEffectiveBalanceIncrement(final UInt64 churn) {
     return churn.minusMinZero(churn.mod(configElectra.getEffectiveBalanceIncrement()));
   }
 

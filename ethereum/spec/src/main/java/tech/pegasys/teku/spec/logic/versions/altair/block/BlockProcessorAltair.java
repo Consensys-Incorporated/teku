@@ -190,7 +190,8 @@ public class BlockProcessorAltair extends AbstractBlockProcessor {
       final int index = attestingIndex.intValue();
       final byte previousParticipationFlags = epochParticipation.get(index).get();
       byte newParticipationFlags = 0;
-      final UInt64 baseReward = beaconStateAccessorsAltair.getBaseReward(state, index);
+      final UInt64 baseReward =
+          beaconStateAccessorsAltair.getBaseReward(state, index, data.getTarget().getEpoch());
       for (int flagIndex = 0; flagIndex < PARTICIPATION_FLAG_WEIGHTS.size(); flagIndex++) {
         final UInt64 weight = PARTICIPATION_FLAG_WEIGHTS.get(flagIndex);
 

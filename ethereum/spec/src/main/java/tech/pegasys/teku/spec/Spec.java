@@ -746,7 +746,8 @@ public class Spec {
   }
 
   public int getSlotDurationMillis(final UInt64 slot) {
-    return atSlot(slot).getConfig().getSlotDurationMillis();
+    final MiscHelpers miscHelpers = atSlot(slot).miscHelpers();
+    return miscHelpers.getSlotDurationMillis(miscHelpers.computeEpochAtSlot(slot));
   }
 
   public int getSyncMessageDueMillis(final UInt64 slot) {
@@ -1488,9 +1489,20 @@ public class Spec {
     if (epoch.isLessThan(specConfigFulu.getFuluForkEpoch())) {
       return false;
     }
-    return getCurrentEpoch(store)
-        .minusMinZero(epoch)
-        .isLessThanOrEqualTo(specConfigFulu.getMinEpochsForDataColumnSidecarsRequests());
+    final UInt64 currentEpoch = getCurrentEpoch(store);
+    return atEpoch(currentEpoch)
+        .miscHelpers()
+        .toVersionFulu()
+        .map(
+            miscHelpersFulu ->
+                miscHelpersFulu.isAvailabilityOfDataColumnSidecarsRequiredAtEpoch(
+                    currentEpoch, epoch))
+        .orElseGet(
+            () ->
+                currentEpoch
+                    .minusMinZero(epoch)
+                    .isLessThanOrEqualTo(
+                        specConfigFulu.getMinEpochsForDataColumnSidecarsRequests()));
   }
 
   public Optional<UInt64> computeFirstSlotWithBlobSupport() {

@@ -13,16 +13,12 @@
 
 package tech.pegasys.teku.spec.config.builder;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
-import static tech.pegasys.teku.spec.config.SpecConfig.FAR_FUTURE_EPOCH;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiConsumer;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfigAndParent;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
@@ -31,8 +27,6 @@ import tech.pegasys.teku.spec.config.SpecConfigHezeImpl;
 
 public class HezeBuilder extends BaseForkBuilder
     implements ForkConfigBuilder<SpecConfigGloas, SpecConfigHeze> {
-
-  private static final Logger LOG = LogManager.getLogger();
 
   private Integer inclusionListDueBps;
   private Integer maxRequestInclusionList;
@@ -43,9 +37,7 @@ public class HezeBuilder extends BaseForkBuilder
   private Integer inclusionListCommitteeSize;
   private Integer maxSignedInclusionListSize;
 
-  // EIP-8198 (quick slots) is not implemented yet. These are optional and default to the current
-  // timing, and a slot duration change at the Heze fork is rejected rather than silently ignored.
-  private Optional<Integer> slotDurationMsHeze = Optional.empty();
+  // EIP-8198: optional, defaults to the MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS window
   private Optional<UInt64> minBlobDataRetentionMs = Optional.empty();
 
   HezeBuilder() {}
@@ -54,33 +46,6 @@ public class HezeBuilder extends BaseForkBuilder
   public SpecConfigAndParent<SpecConfigHeze> build(
       final SpecConfigAndParent<SpecConfigGloas> specConfigAndParent) {
     final SpecConfigGloas gloasConfig = specConfigAndParent.specConfig();
-    final int slotDurationMs = gloasConfig.getSlotDurationMillis();
-    final UInt64 dataColumnSidecarsRetentionMs =
-        UInt64.valueOf(gloasConfig.getMinEpochsForDataColumnSidecarsRequests())
-            .times(gloasConfig.getSlotsPerEpoch())
-            .times(slotDurationMs);
-    final int resolvedSlotDurationMsHeze = slotDurationMsHeze.orElse(slotDurationMs);
-    final UInt64 resolvedMinBlobDataRetentionMs =
-        minBlobDataRetentionMs.orElse(dataColumnSidecarsRetentionMs);
-
-    if (!getForkEpoch().equals(FAR_FUTURE_EPOCH)) {
-      checkArgument(
-          resolvedSlotDurationMsHeze == slotDurationMs,
-          "SLOT_DURATION_MS_HEZE (%s) must equal SLOT_DURATION_MS (%s): changing the slot duration"
-              + " at the Heze fork (EIP-8198) is not supported yet",
-          resolvedSlotDurationMsHeze,
-          slotDurationMs);
-      if (!resolvedMinBlobDataRetentionMs.equals(dataColumnSidecarsRetentionMs)) {
-        LOG.warn(
-            "MIN_BLOB_DATA_RETENTION_MS ({}) differs from the retention period implied by"
-                + " MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS ({} ms). Data column sidecars are"
-                + " retained and served using MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS until"
-                + " EIP-8198 is supported",
-            resolvedMinBlobDataRetentionMs,
-            dataColumnSidecarsRetentionMs);
-      }
-    }
-
     return SpecConfigAndParent.of(
         new SpecConfigHezeImpl(
             gloasConfig,
@@ -90,8 +55,11 @@ public class HezeBuilder extends BaseForkBuilder
             maxTransactionsBytesPerInclusionList,
             maxSignedInclusionListSize,
             inclusionListCommitteeSize,
-            resolvedSlotDurationMsHeze,
-            resolvedMinBlobDataRetentionMs),
+            minBlobDataRetentionMs.orElseGet(
+                () ->
+                    UInt64.valueOf(gloasConfig.getMinEpochsForDataColumnSidecarsRequests())
+                        .times(gloasConfig.getSlotsPerEpoch())
+                        .times(gloasConfig.getSlotDurationMillis()))),
         specConfigAndParent);
   }
 
@@ -130,12 +98,6 @@ public class HezeBuilder extends BaseForkBuilder
   public HezeBuilder maxSignedInclusionListSize(final Integer maxSignedInclusionListSize) {
     checkNotNull(maxSignedInclusionListSize);
     this.maxSignedInclusionListSize = maxSignedInclusionListSize;
-    return this;
-  }
-
-  public HezeBuilder slotDurationMsHeze(final Integer slotDurationMsHeze) {
-    checkNotNull(slotDurationMsHeze);
-    this.slotDurationMsHeze = Optional.of(slotDurationMsHeze);
     return this;
   }
 

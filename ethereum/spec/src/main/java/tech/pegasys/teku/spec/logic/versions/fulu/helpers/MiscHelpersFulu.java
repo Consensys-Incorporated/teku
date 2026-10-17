@@ -603,9 +603,15 @@ public class MiscHelpersFulu extends MiscHelpersElectra {
 
   public boolean isAvailabilityOfDataColumnSidecarsRequiredAtEpoch(
       final UInt64 currentEpoch, final UInt64 epoch) {
-    return currentEpoch
-        .minusMinZero(epoch)
-        .isLessThanOrEqualTo(specConfigFulu.getMinEpochsForDataColumnSidecarsRequests());
+    return epoch.isGreaterThanOrEqualTo(computeDataColumnSidecarRetentionStartEpoch(currentEpoch));
+  }
+
+  /**
+   * The first epoch of the data column sidecar retention window at {@code currentEpoch}, without
+   * the {@code FULU_FORK_EPOCH} floor.
+   */
+  public UInt64 computeDataColumnSidecarRetentionStartEpoch(final UInt64 currentEpoch) {
+    return currentEpoch.minusMinZero(specConfigFulu.getMinEpochsForDataColumnSidecarsRequests());
   }
 
   // compute_proposer_indices

@@ -55,6 +55,16 @@ public class BeaconStateAccessorsAltair extends BeaconStateAccessors {
   }
 
   public UInt64 getBaseRewardPerIncrement(final BeaconState state) {
+    return getBaseRewardPerIncrement(state, getCurrentEpoch(state));
+  }
+
+  /**
+   * get_base_reward_per_increment
+   *
+   * <p>The epoch only affects the result from Heze (EIP-8198), where rewards are scaled to the slot
+   * duration in effect at that epoch.
+   */
+  public UInt64 getBaseRewardPerIncrement(final BeaconState state, final UInt64 epoch) {
     return BeaconStateCache.getTransitionCaches(state)
         .getBaseRewardPerIncrement()
         .get(
@@ -78,13 +88,24 @@ public class BeaconStateAccessorsAltair extends BeaconStateAccessors {
    * @return the calculated base reward
    */
   public UInt64 getBaseReward(final BeaconState state, final int validatorIndex) {
+    return getBaseReward(state, validatorIndex, getCurrentEpoch(state));
+  }
+
+  /**
+   * get_base_reward
+   *
+   * <p>The epoch only affects the result from Heze (EIP-8198), see {@link
+   * #getBaseRewardPerIncrement(BeaconState, UInt64)}.
+   */
+  public UInt64 getBaseReward(
+      final BeaconState state, final int validatorIndex, final UInt64 epoch) {
     final UInt64 increments =
         state
             .getValidators()
             .get(validatorIndex)
             .getEffectiveBalance()
             .dividedBy(config.getEffectiveBalanceIncrement());
-    return increments.times(getBaseRewardPerIncrement(state));
+    return increments.times(getBaseRewardPerIncrement(state, epoch));
   }
 
   /**

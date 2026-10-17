@@ -46,7 +46,7 @@ public abstract class TimeBasedEventAdapter {
     this.validatorTimingChannel = validatorTimingChannel;
     this.specVersion = spec.atSlot(firstSlot);
     this.onLastSlot = onLastSlot;
-    this.millisPerSlot = UInt64.valueOf(specVersion.getConfig().getSlotDurationMillis());
+    this.millisPerSlot = UInt64.valueOf(spec.getSlotDurationMillis(firstSlot));
   }
 
   abstract void scheduleDuties(

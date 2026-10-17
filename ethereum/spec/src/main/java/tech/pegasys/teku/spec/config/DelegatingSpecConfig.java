@@ -261,6 +261,11 @@ public class DelegatingSpecConfig implements SpecConfig {
   }
 
   @Override
+  public int getSlotDurationMsHeze() {
+    return specConfig.getSlotDurationMsHeze();
+  }
+
+  @Override
   public int getMinAttestationInclusionDelay() {
     return specConfig.getMinAttestationInclusionDelay();
   }

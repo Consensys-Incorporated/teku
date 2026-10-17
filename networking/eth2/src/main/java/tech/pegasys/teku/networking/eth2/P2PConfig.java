@@ -367,9 +367,13 @@ public class P2PConfig {
       networkConfig.gossipConfig(
           builder -> {
             gossipConfigurator.configure(builder, eth2Context);
+            // EIP-8198: use the longest slot duration so the TTL covers two epochs on either
+            // side of a slot duration change
+            final long maxSlotDurationMillis =
+                Math.max(
+                    (long) specConfig.getSlotDurationMillis(), specConfig.getSlotDurationMsHeze());
             builder.seenTTL(
-                Duration.ofSeconds(
-                    (long) specConfig.getSecondsPerSlot() * specConfig.getSlotsPerEpoch() * 2));
+                Duration.ofMillis(maxSlotDurationMillis * specConfig.getSlotsPerEpoch() * 2));
             builder.floodPublishMaxMessageSizeThreshold(floodPublishMaxMessageSizeThreshold);
           });
 

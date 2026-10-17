@@ -1931,8 +1931,13 @@ class ForkChoiceTest {
         .hasValue(List.of(expectedTransaction));
   }
 
+  private SchemaDefinitionsHeze hezeSchemaDefinitions() {
+    return SchemaDefinitionsHeze.required(
+        spec.forMilestone(SpecMilestone.HEZE).getSchemaDefinitions());
+  }
+
   private Transaction inclusionListTransaction(final Bytes transactionBytes) {
-    return SchemaDefinitionsHeze.required(spec.getGenesisSchemaDefinitions())
+    return hezeSchemaDefinitions()
         .getExecutionPayloadSchema()
         .getTransactionSchema()
         .fromBytes(transactionBytes);
@@ -1943,8 +1948,7 @@ class ForkChoiceTest {
       final UInt64 validatorIndex,
       final Bytes32 dependentRoot,
       final Transaction transaction) {
-    final SchemaDefinitionsHeze schemaDefinitions =
-        SchemaDefinitionsHeze.required(spec.getGenesisSchemaDefinitions());
+    final SchemaDefinitionsHeze schemaDefinitions = hezeSchemaDefinitions();
     return schemaDefinitions
         .getSignedInclusionListSchema()
         .create(
@@ -2189,10 +2193,56 @@ class ForkChoiceTest {
     assertNotStored(tooOld);
   }
 
+  @Test
+  void onInclusionList_shouldMeasureTimelinessFromSlotStartAfterSlotDurationChange() {
+    // EIP-8198: 6000 ms slots, then 5000 ms slots from Heze at epoch 1 (slot 8, 48 s)
+    setupWithSpec(
+        TestSpecFactory.createMinimalHeze(
+            builder -> builder.hezeForkEpoch(ONE).slotDurationMsHeze(5000)));
+    final UInt64 inclusionListSlot = UInt64.valueOf(9);
+    final int inclusionListDueMillis =
+        spec.getInclusionListDueMillis(inclusionListSlot).orElseThrow();
+    final UInt64 slotStartMillis =
+        spec.computeTimeMillisAtSlot(
+            inclusionListSlot, recentChainData.getStore().getGenesisTimeMillis());
+    assertThat(slotStartMillis.minus(recentChainData.getStore().getGenesisTimeMillis()))
+        .isEqualTo(UInt64.valueOf(53_000));
+
+    final SignedInclusionList timely =
+        signedInclusionList(
+            inclusionListSlot,
+            dataStructureUtil.randomBytes32(),
+            List.of(inclusionListTransaction(Bytes.of(1))));
+    storageSystem.chainUpdater().setTimeMillis(slotStartMillis.plus(inclusionListDueMillis - 1));
+    assertThat(safeJoin(forkChoice.onInclusionList(timely)).isSuccessful()).isTrue();
+
+    // Measuring time into the slot modulo the slot duration would treat this as 2500 ms
+    final SignedInclusionList late =
+        signedInclusionList(
+            inclusionListSlot,
+            dataStructureUtil.randomBytes32(),
+            List.of(inclusionListTransaction(Bytes.of(2))));
+    storageSystem.chainUpdater().setTimeMillis(slotStartMillis.plus(3_500));
+    assertThat(inclusionListDueMillis).isLessThan(3_500);
+    assertThat(safeJoin(forkChoice.onInclusionList(late)).isSuccessful()).isTrue();
+
+    assertThat(
+            inclusionListStore.getTimelyInclusionLists(
+                new SlotAndBlockRoot(inclusionListSlot, timely.getMessage().getDependentRoot())))
+        .containsExactly(timely.getMessage());
+    assertThat(
+            inclusionListStore.getTimelyInclusionLists(
+                new SlotAndBlockRoot(inclusionListSlot, late.getMessage().getDependentRoot())))
+        .isEmpty();
+    assertThat(
+            inclusionListStore.getInclusionLists(
+                new SlotAndBlockRoot(inclusionListSlot, late.getMessage().getDependentRoot())))
+        .isPresent();
+  }
+
   private SignedInclusionList signedInclusionList(
       final UInt64 slot, final Bytes32 dependentRoot, final List<Transaction> transactions) {
-    final SchemaDefinitionsHeze schemaDefinitions =
-        SchemaDefinitionsHeze.required(spec.getGenesisSchemaDefinitions());
+    final SchemaDefinitionsHeze schemaDefinitions = hezeSchemaDefinitions();
     return schemaDefinitions
         .getSignedInclusionListSchema()
         .create(

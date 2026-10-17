@@ -99,4 +99,21 @@ class MinCustodyPeriodSlotCalculatorTest {
 
     assertThat(resultSlot).isEmpty();
   }
+
+  @Test
+  void shouldKeepTheWallClockRetentionWindowAfterHezeSlotDurationChange() {
+    // EIP-8198: 6000 ms slots, then 5000 ms slots from Heze at epoch 1. The 4096 epoch
+    // (196,608,000 ms) window reaching back from epoch 6000 starts in epoch 1084, see
+    // MiscHelpersHezeTest
+    final Spec hezeSpec =
+        TestSpecFactory.createMinimalHeze(
+            builder -> builder.hezeForkEpoch(UInt64.ONE).slotDurationMsHeze(5000));
+    final UInt64 currentSlot = UInt64.valueOf(6000).times(slotsPerEpoch);
+
+    final Optional<UInt64> resultSlot =
+        MinCustodyPeriodSlotCalculator.createFromSpec(hezeSpec)
+            .getMinCustodyPeriodSlot(currentSlot);
+
+    assertThat(resultSlot).contains(UInt64.valueOf(1084).times(slotsPerEpoch));
+  }
 }

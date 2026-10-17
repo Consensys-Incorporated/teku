@@ -58,6 +58,8 @@ class ScoringConfig {
     this.genesisSpec = spec.getGenesisSpec();
     this.d = d;
 
+    // Scoring parameters are fixed when the gossip router starts, so they keep using the genesis
+    // slot duration after an EIP-8198 slot duration change at Heze.
     this.slotDuration = Duration.ofSeconds(this.genesisConfig.getSecondsPerSlot());
     this.epochDuration = slotDuration.multipliedBy(this.genesisConfig.getSlotsPerEpoch());
     this.decayInterval = slotDuration;

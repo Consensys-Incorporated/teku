@@ -209,13 +209,25 @@ public class RewardBasedAttestationSorter {
     }
   }
 
-  private final Int2ObjectOpenHashMap<UInt64> validatorBaseRewardCache =
+  // Base rewards are priced at the attestation's target epoch (EIP-8198), which is either the
+  // current or the previous epoch
+  private final Int2ObjectOpenHashMap<UInt64> currentEpochBaseRewardCache =
+      new Int2ObjectOpenHashMap<>();
+  private final Int2ObjectOpenHashMap<UInt64> previousEpochBaseRewardCache =
       new Int2ObjectOpenHashMap<>();
 
-  private UInt64 getValidatorBaseRewards(final int index) {
-    return validatorBaseRewardCache.computeIfAbsent(
+  private UInt64 getValidatorBaseRewards(final int index, final boolean isCurrentEpoch) {
+    final Int2ObjectOpenHashMap<UInt64> cache =
+        isCurrentEpoch ? currentEpochBaseRewardCache : previousEpochBaseRewardCache;
+    return cache.computeIfAbsent(
         index,
-        k -> BeaconStateAccessorsAltair.required(beaconStateAccessors).getBaseReward(state, k));
+        k ->
+            beaconStateAccessors.getBaseReward(
+                state,
+                k,
+                isCurrentEpoch
+                    ? beaconStateAccessors.getCurrentEpoch(state)
+                    : beaconStateAccessors.getPreviousEpoch(state)));
   }
 
   private PooledAttestationWithRewardInfo initializeRewardInfo(
@@ -250,7 +262,8 @@ public class RewardBasedAttestationSorter {
           epochParticipation.getParticipation(attestingIndexInt);
       byte newParticipationFlags = 0;
 
-      final UInt64 baseReward = getValidatorBaseRewards(attestingIndexInt);
+      final UInt64 baseReward =
+          getValidatorBaseRewards(attestingIndexInt, attestation.isCurrentEpoch);
 
       if (attestation.timelySource
           && !miscHelpers.hasFlag(previousParticipationFlags, TIMELY_SOURCE_FLAG_INDEX)) {

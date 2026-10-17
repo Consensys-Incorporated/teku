@@ -2995,7 +2995,7 @@
 - name: get_base_reward#altair
   sources:
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/altair/helpers/BeaconStateAccessorsAltair.java
-      search: public UInt64 getBaseReward(
+      search: public UInt64 getBaseReward(final BeaconState state, final int validatorIndex) {
   spec: |
     <spec fn="get_base_reward" fork="altair" hash="96548bdd">
     def get_base_reward(state: BeaconState, index: ValidatorIndex) -> Gwei:
@@ -3009,7 +3009,7 @@
 - name: get_base_reward_per_increment#altair
   sources:
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/altair/helpers/BeaconStateAccessorsAltair.java
-      search: public UInt64 getBaseRewardPerIncrement(
+      search: public UInt64 getBaseRewardPerIncrement(final BeaconState state) {
   spec: |
     <spec fn="get_base_reward_per_increment" fork="altair" hash="8b1aba66">
     def get_base_reward_per_increment(state: BeaconState) -> Gwei:

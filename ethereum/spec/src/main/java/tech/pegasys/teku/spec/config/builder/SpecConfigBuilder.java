@@ -73,6 +73,7 @@ public class SpecConfigBuilder {
   private Integer secondsPerSlot;
 
   private Integer slotDurationMs;
+  private Integer slotDurationMsHeze;
   private Integer proposerReorgCutoffBps;
   private Integer attestationDueBps;
   private Integer aggregateDueBps;
@@ -221,6 +222,11 @@ public class SpecConfigBuilder {
               "The specified network configuration had both SLOT_DURATION_MS (%d) and SECONDS_PER_SLOT(%d) defined, and they were inconsistent.",
               slotDurationMs, secondsPerSlot));
     }
+    // EIP-8198: the Heze slot duration defaults to the current slot duration
+    if (slotDurationMsHeze == null && slotDurationMs != null) {
+      slotDurationMsHeze = slotDurationMs;
+    }
+
     // defaulting for compatibility
     if (attestationDueBps == null) {
       attestationDueBps = 3333;
@@ -328,6 +334,7 @@ public class SpecConfigBuilder {
                 reorgParentWeightThreshold,
                 maxPerEpochActivationExitChurnLimit,
                 slotDurationMs,
+                slotDurationMsHeze,
                 attestationDueBps,
                 aggregateDueBps,
                 proposerReorgCutoffBps,
@@ -377,6 +384,7 @@ public class SpecConfigBuilder {
     constants.put("genesisDelay", genesisDelay);
     constants.put("secondsPerSlot", secondsPerSlot);
     constants.put("slotDurationMs", slotDurationMs);
+    constants.put("slotDurationMsHeze", slotDurationMsHeze);
     constants.put("proposerReorgCutoffBps", proposerReorgCutoffBps);
     constants.put("attestationDueBps", attestationDueBps);
     constants.put("aggregateDueBps", aggregateDueBps);
@@ -515,6 +523,12 @@ public class SpecConfigBuilder {
           String.format(
               "The specified network configuration had missing or invalid values for constants %s",
               String.join(", ", fieldsFailingValidation)));
+    }
+    if (!hezeForkEpoch.equals(FAR_FUTURE_EPOCH)) {
+      checkArgument(
+          slotDurationMsHeze > 0 && slotDurationMsHeze % 1000 == 0,
+          "SLOT_DURATION_MS_HEZE (%s) must be a positive multiple of 1000",
+          slotDurationMsHeze);
     }
     builderChain.validate();
   }
@@ -740,6 +754,12 @@ public class SpecConfigBuilder {
   public SpecConfigBuilder secondsPerSlot(final Integer secondsPerSlot) {
     checkNotNull(secondsPerSlot);
     this.secondsPerSlot = secondsPerSlot;
+    return this;
+  }
+
+  public SpecConfigBuilder slotDurationMsHeze(final Integer slotDurationMsHeze) {
+    checkNotNull(slotDurationMsHeze);
+    this.slotDurationMsHeze = slotDurationMsHeze;
     return this;
   }
 

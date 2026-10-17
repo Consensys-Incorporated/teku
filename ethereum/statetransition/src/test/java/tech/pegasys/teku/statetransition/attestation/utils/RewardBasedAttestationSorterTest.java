@@ -96,7 +96,10 @@ public class RewardBasedAttestationSorterTest {
     when(state.getPreviousEpochParticipation()).thenReturn(initialParticipationSszList);
 
     // Default base reward for any validator
-    when(beaconStateAccessors.getBaseReward(eq(state), anyInt())).thenReturn(BASE_REWARD_VALUE);
+    when(beaconStateAccessors.getCurrentEpoch(state)).thenReturn(CURRENT_EPOCH);
+    when(beaconStateAccessors.getPreviousEpoch(state)).thenReturn(PREVIOUS_EPOCH);
+    when(beaconStateAccessors.getBaseReward(eq(state), anyInt(), any()))
+        .thenReturn(BASE_REWARD_VALUE);
 
     sorter = RewardBasedAttestationSorter.create(spec, state);
   }
@@ -291,10 +294,10 @@ public class RewardBasedAttestationSorterTest {
     assertThat(sortedAttestations.get(3).getRewardNumerator())
         .isEqualTo(UInt64.ZERO); // Att2 (after re-evaluation)
 
-    // Verify base rewards were fetched (cached, so once per validator)
-    verify(beaconStateAccessors, times(1)).getBaseReward(state, 0); // For Att1, Att2
-    verify(beaconStateAccessors, times(1)).getBaseReward(state, 1); // For Att3
-    verify(beaconStateAccessors, times(1)).getBaseReward(state, 2); // For Att4
+    // Verify base rewards were fetched at the target epoch (cached, so once per validator)
+    verify(beaconStateAccessors, times(1)).getBaseReward(state, 0, CURRENT_EPOCH); // For Att1, Att2
+    verify(beaconStateAccessors, times(1)).getBaseReward(state, 1, CURRENT_EPOCH); // For Att3
+    verify(beaconStateAccessors, times(1)).getBaseReward(state, 2, PREVIOUS_EPOCH); // For Att4
   }
 
   private PooledAttestationWithData mockPooledAttestationWithData(

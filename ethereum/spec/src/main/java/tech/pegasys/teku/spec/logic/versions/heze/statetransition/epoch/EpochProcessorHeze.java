@@ -13,21 +13,30 @@
 
 package tech.pegasys.teku.spec.logic.versions.heze.statetransition.epoch;
 
+import java.util.function.Function;
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.constants.WithdrawalPrefixes;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.bellatrix.BeaconStateBellatrix;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDeposit;
+import tech.pegasys.teku.spec.logic.common.statetransition.epoch.RewardAndPenaltyDeltas;
+import tech.pegasys.teku.spec.logic.common.statetransition.epoch.RewardsAndPenaltiesCalculator;
 import tech.pegasys.teku.spec.logic.common.statetransition.epoch.status.ValidatorStatusFactory;
+import tech.pegasys.teku.spec.logic.common.statetransition.epoch.status.ValidatorStatuses;
 import tech.pegasys.teku.spec.logic.common.util.BeaconStateUtil;
 import tech.pegasys.teku.spec.logic.common.util.ValidatorsUtil;
 import tech.pegasys.teku.spec.logic.versions.electra.helpers.BeaconStateMutatorsElectra;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.BeaconStateAccessorsGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.statetransition.epoch.EpochProcessorGloas;
+import tech.pegasys.teku.spec.logic.versions.heze.helpers.BeaconStateAccessorsHeze;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 
 public class EpochProcessorHeze extends EpochProcessorGloas {
+
+  private final SpecConfigGloas specConfigGloas;
 
   public EpochProcessorHeze(
       final SpecConfigGloas specConfig,
@@ -49,6 +58,29 @@ public class EpochProcessorHeze extends EpochProcessorGloas {
         validatorStatusFactory,
         schemaDefinitions,
         timeProvider);
+    this.specConfigGloas = specConfig;
+  }
+
+  @Override
+  public RewardAndPenaltyDeltas getRewardAndPenaltyDeltas(
+      final BeaconState state, final ValidatorStatuses validatorStatuses) {
+    return getRewardAndPenaltyDeltas(
+        state, validatorStatuses, RewardsAndPenaltiesCalculator::getDeltas);
+  }
+
+  /** EIP-8198: rewards and penalties are scaled to the previous epoch's slot duration. */
+  @Override
+  public RewardAndPenaltyDeltas getRewardAndPenaltyDeltas(
+      final BeaconState state,
+      final ValidatorStatuses validatorStatuses,
+      final Function<RewardsAndPenaltiesCalculator, RewardAndPenaltyDeltas> calculatorFunction) {
+    return calculatorFunction.apply(
+        new RewardsAndPenaltiesCalculatorHeze(
+            specConfigGloas,
+            BeaconStateBellatrix.required(state),
+            validatorStatuses,
+            miscHelpersAltair,
+            BeaconStateAccessorsHeze.required(beaconStateAccessorsAltair)));
   }
 
   /** {@code process_eth1_data_reset} was removed in Heze (EIP-8015). */

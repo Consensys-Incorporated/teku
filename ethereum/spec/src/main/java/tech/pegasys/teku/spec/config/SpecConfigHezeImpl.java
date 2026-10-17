@@ -26,7 +26,6 @@ public class SpecConfigHezeImpl extends DelegatingSpecConfigGloas implements Spe
   private final int maxTransactionsBytesPerInclusionList;
   private final int maxSignedInclusionListSize;
   private final int inclusionListCommitteeSize;
-  private final int slotDurationMsHeze;
   private final UInt64 minBlobDataRetentionMs;
 
   public SpecConfigHezeImpl(
@@ -37,7 +36,6 @@ public class SpecConfigHezeImpl extends DelegatingSpecConfigGloas implements Spe
       final int maxTransactionsBytesPerInclusionList,
       final int maxSignedInclusionListSize,
       final int inclusionListCommitteeSize,
-      final int slotDurationMsHeze,
       final UInt64 minBlobDataRetentionMs) {
     super(specConfig);
     this.inclusionListDueBps = inclusionListDueBps;
@@ -46,7 +44,6 @@ public class SpecConfigHezeImpl extends DelegatingSpecConfigGloas implements Spe
     this.maxTransactionsBytesPerInclusionList = maxTransactionsBytesPerInclusionList;
     this.maxSignedInclusionListSize = maxSignedInclusionListSize;
     this.inclusionListCommitteeSize = inclusionListCommitteeSize;
-    this.slotDurationMsHeze = slotDurationMsHeze;
     this.minBlobDataRetentionMs = minBlobDataRetentionMs;
   }
 
@@ -86,11 +83,6 @@ public class SpecConfigHezeImpl extends DelegatingSpecConfigGloas implements Spe
   }
 
   @Override
-  public int getSlotDurationMsHeze() {
-    return slotDurationMsHeze;
-  }
-
-  @Override
   public UInt64 getMinBlobDataRetentionMs() {
     return minBlobDataRetentionMs;
   }
@@ -115,7 +107,6 @@ public class SpecConfigHezeImpl extends DelegatingSpecConfigGloas implements Spe
         && maxTransactionsBytesPerInclusionList == that.maxTransactionsBytesPerInclusionList
         && maxSignedInclusionListSize == that.maxSignedInclusionListSize
         && inclusionListCommitteeSize == that.inclusionListCommitteeSize
-        && slotDurationMsHeze == that.slotDurationMsHeze
         && Objects.equals(minBlobDataRetentionMs, that.minBlobDataRetentionMs);
   }
 
@@ -129,7 +120,6 @@ public class SpecConfigHezeImpl extends DelegatingSpecConfigGloas implements Spe
         maxTransactionsBytesPerInclusionList,
         maxSignedInclusionListSize,
         inclusionListCommitteeSize,
-        slotDurationMsHeze,
         minBlobDataRetentionMs);
   }
 }

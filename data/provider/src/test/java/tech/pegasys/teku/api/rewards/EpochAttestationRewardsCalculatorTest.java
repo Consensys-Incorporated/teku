@@ -82,7 +82,7 @@ class EpochAttestationRewardsCalculatorTest {
     expectedMaximumReward.addSource(7);
     expectedMaximumReward.addHead(7);
 
-    when(beaconStateAccessorsAltair.getBaseRewardPerIncrement(any())).thenReturn(UInt64.ONE);
+    when(beaconStateAccessorsAltair.getBaseRewardPerIncrement(any(), any())).thenReturn(UInt64.ONE);
     when(specConfig.getEffectiveBalanceIncrement()).thenReturn(UInt64.ONE);
 
     final BeaconState beaconState = dataStructureUtil.randomBeaconState();

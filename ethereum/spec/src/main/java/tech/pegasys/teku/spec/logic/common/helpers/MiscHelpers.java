@@ -15,6 +15,7 @@ package tech.pegasys.teku.spec.logic.common.helpers;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static tech.pegasys.teku.infrastructure.crypto.Hash.getSha256Instance;
+import static tech.pegasys.teku.infrastructure.time.TimeUtilities.millisToSeconds;
 import static tech.pegasys.teku.infrastructure.time.TimeUtilities.secondsToMillis;
 import static tech.pegasys.teku.spec.config.SpecConfig.FAR_FUTURE_EPOCH;
 import static tech.pegasys.teku.spec.logic.common.helpers.MathHelpers.bytesToUInt64;
@@ -175,32 +176,76 @@ public class MiscHelpers {
     return computeStartSlotAtEpoch(epoch.plus(1)).minusMinZero(1);
   }
 
+  // get_slot_duration_ms
+  public int getSlotDurationMillis(final UInt64 epoch) {
+    final UInt64 hezeForkEpoch = specConfig.getHezeForkEpoch();
+    if (!hezeForkEpoch.equals(FAR_FUTURE_EPOCH) && epoch.isGreaterThanOrEqualTo(hezeForkEpoch)) {
+      return specConfig.getSlotDurationMsHeze();
+    }
+    return specConfig.getSlotDurationMillis();
+  }
+
+  /**
+   * EIP-8198: whether the slot duration changes at the Heze fork. When it does not, every slot has
+   * the same duration and the time conversions below are linear from genesis.
+   */
+  private boolean hasSlotDurationChange() {
+    return !specConfig.getHezeForkEpoch().equals(FAR_FUTURE_EPOCH)
+        && specConfig.getSlotDurationMsHeze() != specConfig.getSlotDurationMillis();
+  }
+
   // compute_slot_at_time
   public UInt64 computeSlotAtTime(final UInt64 genesisTime, final UInt64 currentTime) {
     if (currentTime.isLessThan(genesisTime)) {
       return UInt64.ZERO;
     }
+    if (hasSlotDurationChange()) {
+      return computeSlotAtTimeMillis(secondsToMillis(genesisTime), secondsToMillis(currentTime));
+    }
     return currentTime.minusMinZero(genesisTime).dividedBy(specConfig.getSecondsPerSlot());
   }
 
+  // compute_slot_at_time_ms
   public UInt64 computeSlotAtTimeMillis(
       final UInt64 genesisTimeMillis, final UInt64 currentTimeMillis) {
     if (currentTimeMillis.isLessThan(genesisTimeMillis)) {
       return UInt64.ZERO;
     }
-    return currentTimeMillis.minus(genesisTimeMillis).dividedBy(specConfig.getSlotDurationMillis());
+    final UInt64 elapsedMillis = currentTimeMillis.minus(genesisTimeMillis);
+    if (!hasSlotDurationChange()) {
+      return elapsedMillis.dividedBy(specConfig.getSlotDurationMillis());
+    }
+    final UInt64 forkSlot = computeStartSlotAtEpoch(specConfig.getHezeForkEpoch());
+    final UInt64 forkOffsetMillis = forkSlot.times(specConfig.getSlotDurationMillis());
+    if (elapsedMillis.isLessThan(forkOffsetMillis)) {
+      return elapsedMillis.dividedBy(specConfig.getSlotDurationMillis());
+    }
+    return forkSlot.plus(
+        elapsedMillis.minus(forkOffsetMillis).dividedBy(specConfig.getSlotDurationMsHeze()));
   }
 
   // compute_time_at_slot, spec function takes state, but otherwise the same.
   public UInt64 computeTimeAtSlot(final UInt64 genesisTime, final UInt64 slot) {
+    if (hasSlotDurationChange()) {
+      return millisToSeconds(computeTimeMillisAtSlot(secondsToMillis(genesisTime), slot));
+    }
     final UInt64 slotsSinceGenesis = slot.minus(SpecConfig.GENESIS_SLOT);
     return genesisTime.plus(slotsSinceGenesis.times(specConfig.getSecondsPerSlot()));
   }
 
-  // compute_time_at_slot - milliseconds version
+  // compute_time_at_slot_ms
   public UInt64 computeTimeMillisAtSlot(final UInt64 genesisTimeMillis, final UInt64 slot) {
     final UInt64 slotsSinceGenesis = slot.minus(SpecConfig.GENESIS_SLOT);
-    return genesisTimeMillis.plus(slotsSinceGenesis.times(specConfig.getSlotDurationMillis()));
+    if (!hasSlotDurationChange()) {
+      return genesisTimeMillis.plus(slotsSinceGenesis.times(specConfig.getSlotDurationMillis()));
+    }
+    final UInt64 forkSlot = computeStartSlotAtEpoch(specConfig.getHezeForkEpoch());
+    if (slotsSinceGenesis.isLessThanOrEqualTo(forkSlot)) {
+      return genesisTimeMillis.plus(slotsSinceGenesis.times(specConfig.getSlotDurationMillis()));
+    }
+    return genesisTimeMillis
+        .plus(forkSlot.times(specConfig.getSlotDurationMillis()))
+        .plus(slotsSinceGenesis.minus(forkSlot).times(specConfig.getSlotDurationMsHeze()));
   }
 
   /**

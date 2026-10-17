@@ -14,12 +14,14 @@
 package tech.pegasys.teku.spec.logic.versions.heze.helpers;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static tech.pegasys.teku.spec.logic.common.helpers.MathHelpers.integerSquareRoot;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfigHeze;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.BeaconStateElectra;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateAccessors;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.BeaconStateAccessorsGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas;
@@ -41,7 +43,7 @@ public class BeaconStateAccessorsHeze extends BeaconStateAccessorsGloas {
 
   public static BeaconStateAccessorsHeze required(final BeaconStateAccessors beaconStateAccessors) {
     checkArgument(
-        beaconStateAccessors instanceof BeaconStateAccessorsGloas,
+        beaconStateAccessors instanceof BeaconStateAccessorsHeze,
         "Expected %s but it was %s",
         BeaconStateAccessorsHeze.class,
         beaconStateAccessors.getClass());
@@ -77,5 +79,84 @@ public class BeaconStateAccessorsHeze extends BeaconStateAccessorsGloas {
       inclusionListCommittee.add(indices.getInt(i % size));
     }
     return inclusionListCommittee;
+  }
+
+  /**
+   * get_base_reward_per_increment
+   *
+   * <p>EIP-8198: scaled to the slot duration in effect at {@code epoch}.
+   */
+  @Override
+  public UInt64 getBaseRewardPerIncrement(final BeaconState state, final UInt64 epoch) {
+    if (!hasScaledSlotDuration(epoch)) {
+      return super.getBaseRewardPerIncrement(state, epoch);
+    }
+    return scaleBySlotDuration(
+            configHeze.getEffectiveBalanceIncrement().times(configHeze.getBaseRewardFactor()),
+            epoch)
+        .dividedBy(integerSquareRoot(getTotalActiveBalance(state)));
+  }
+
+  /**
+   * get_activation_churn_limit
+   *
+   * <p>EIP-8198: the capped churn is scaled to the current slot duration, then rounded.
+   */
+  @Override
+  public UInt64 getActivationChurnLimit(final BeaconStateElectra state) {
+    final UInt64 churn =
+        computeUnroundedBalanceChurnLimit(
+                state, UInt64.valueOf(configHeze.getChurnLimitQuotientGloas()))
+            .min(configHeze.getMaxPerEpochActivationChurnLimitGloas());
+    return roundDownToEffectiveBalanceIncrement(scaleBySlotDuration(churn, getCurrentEpoch(state)));
+  }
+
+  /**
+   * get_exit_churn_limit
+   *
+   * <p>EIP-8198: scaled to the current slot duration, then rounded.
+   */
+  @Override
+  public UInt64 getExitChurnLimit(final BeaconStateElectra state) {
+    final UInt64 churn =
+        computeUnroundedBalanceChurnLimit(
+            state, UInt64.valueOf(configHeze.getChurnLimitQuotientGloas()));
+    return roundDownToEffectiveBalanceIncrement(scaleBySlotDuration(churn, getCurrentEpoch(state)));
+  }
+
+  /**
+   * get_consolidation_churn_limit
+   *
+   * <p>EIP-8198: scaled to the current slot duration, then rounded.
+   */
+  @Override
+  public UInt64 getConsolidationChurnLimit(final BeaconStateElectra state) {
+    final UInt64 churn =
+        getTotalActiveBalance(state).dividedBy(configHeze.getConsolidationChurnLimitQuotient());
+    return roundDownToEffectiveBalanceIncrement(scaleBySlotDuration(churn, getCurrentEpoch(state)));
+  }
+
+  /**
+   * EIP-8198: whether the slot duration at {@code epoch} differs from the one that per-epoch
+   * rewards and churn are defined against.
+   */
+  public boolean hasScaledSlotDuration(final UInt64 epoch) {
+    return miscHelpers.getSlotDurationMillis(epoch) != getBaseSlotDurationMillis();
+  }
+
+  /** EIP-8198: {@code value * get_slot_duration_ms(epoch) // SLOT_DURATION_MS}. */
+  public UInt64 scaleBySlotDuration(final UInt64 value, final UInt64 epoch) {
+    return value
+        .times(miscHelpers.getSlotDurationMillis(epoch))
+        .dividedBy(getBaseSlotDurationMillis());
+  }
+
+  /**
+   * EIP-8198: the slot duration that per-epoch rewards and churn are defined against. This is
+   * {@code SLOT_DURATION_MS} rather than the slot duration at genesis, so networks that activate
+   * Heze at genesis are still scaled.
+   */
+  public int getBaseSlotDurationMillis() {
+    return configHeze.getSlotDurationMillis();
   }
 }

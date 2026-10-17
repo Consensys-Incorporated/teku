@@ -113,22 +113,32 @@ public class SpecConfigHezeTest {
   }
 
   @Test
-  public void eip8198Values_slotDurationChangeRejectedWhenHezeScheduled() {
-    assertThatThrownBy(
-            () ->
-                loadHezeConfig(
-                    "mainnet", Map.of("HEZE_FORK_EPOCH", "10", "SLOT_DURATION_MS_HEZE", "10000")))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("SLOT_DURATION_MS_HEZE (10000) must equal SLOT_DURATION_MS (12000)");
+  public void eip8198Values_slotDurationChangeAcceptedWhenHezeScheduled() {
+    final SpecConfigHeze config =
+        loadHezeConfig(
+            "mainnet", Map.of("HEZE_FORK_EPOCH", "10", "SLOT_DURATION_MS_HEZE", "10000"));
+
+    assertThat(config.getSlotDurationMsHeze()).isEqualTo(10000);
+    assertThat(config.getSlotDurationMillis()).isEqualTo(12000);
   }
 
   @Test
-  public void eip8198Values_slotDurationChangeIgnoredWhenHezeNotScheduled() {
+  public void eip8198Values_slotDurationMustBeWholeSecondsWhenHezeScheduled() {
+    assertThatThrownBy(
+            () ->
+                loadHezeConfig(
+                    "mainnet", Map.of("HEZE_FORK_EPOCH", "10", "SLOT_DURATION_MS_HEZE", "10500")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("SLOT_DURATION_MS_HEZE (10500) must be a positive multiple of 1000");
+  }
+
+  @Test
+  public void eip8198Values_slotDurationIgnoredWhenHezeNotScheduled() {
     final SpecConfigHeze config =
-        loadHezeConfig("mainnet", Map.of("SLOT_DURATION_MS_HEZE", "10000"));
+        loadHezeConfig("mainnet", Map.of("SLOT_DURATION_MS_HEZE", "10500"));
 
     assertThat(config.getHezeForkEpoch()).isEqualTo(SpecConfig.FAR_FUTURE_EPOCH);
-    assertThat(config.getSlotDurationMsHeze()).isEqualTo(10000);
+    assertThat(config.getSlotDurationMsHeze()).isEqualTo(10500);
     assertThat(config.getSlotDurationMillis()).isEqualTo(12000);
   }
 
@@ -153,7 +163,6 @@ public class SpecConfigHezeTest {
     final DataStructureUtil dataStructureUtil = new DataStructureUtil(seed, spec);
     return new SpecConfigHezeImpl(
         gloasConfig,
-        dataStructureUtil.randomPositiveInt(),
         dataStructureUtil.randomPositiveInt(),
         dataStructureUtil.randomPositiveInt(),
         dataStructureUtil.randomPositiveInt(),

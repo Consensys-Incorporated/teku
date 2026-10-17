@@ -73,6 +73,7 @@ public class SpecConfigPhase0 implements SpecConfig {
   private final int minValidatorWithdrawabilityDelay;
   private final UInt64 shardCommitteePeriod;
   private final int slotDurationMillis;
+  private final int slotDurationMsHeze;
   private final int attestationDueBps;
   private final int aggregateDueBps;
   private final int proposerReorgCutoffBps;
@@ -232,6 +233,7 @@ public class SpecConfigPhase0 implements SpecConfig {
       final int reorgParentWeightThreshold,
       final UInt64 maxPerEpochActivationExitChurnLimit,
       final int slotDurationMillis,
+      final int slotDurationMsHeze,
       final int attestationDueBps,
       final int aggregateDueBps,
       final int proposerReorgCutoffBps,
@@ -321,6 +323,7 @@ public class SpecConfigPhase0 implements SpecConfig {
     this.reorgParentWeightThreshold = reorgParentWeightThreshold;
     this.maxPerEpochActivationExitChurnLimit = maxPerEpochActivationExitChurnLimit;
     this.slotDurationMillis = slotDurationMillis;
+    this.slotDurationMsHeze = slotDurationMsHeze;
     this.attestationDueBps = attestationDueBps;
     this.aggregateDueBps = aggregateDueBps;
     this.proposerReorgCutoffBps = proposerReorgCutoffBps;
@@ -581,6 +584,11 @@ public class SpecConfigPhase0 implements SpecConfig {
   }
 
   @Override
+  public int getSlotDurationMsHeze() {
+    return slotDurationMsHeze;
+  }
+
+  @Override
   public int getMinAttestationInclusionDelay() {
     return minAttestationInclusionDelay;
   }
@@ -833,6 +841,7 @@ public class SpecConfigPhase0 implements SpecConfig {
         && minGenesisActiveValidatorCount == that.minGenesisActiveValidatorCount
         && proportionalSlashingMultiplier == that.proportionalSlashingMultiplier
         && secondsPerSlot == that.secondsPerSlot
+        && slotDurationMsHeze == that.slotDurationMsHeze
         && minAttestationInclusionDelay == that.minAttestationInclusionDelay
         && slotsPerEpoch == that.slotsPerEpoch
         && squareRootSlotsPerEpoch == that.squareRootSlotsPerEpoch
@@ -926,6 +935,7 @@ public class SpecConfigPhase0 implements SpecConfig {
         genesisForkVersion,
         genesisDelay,
         secondsPerSlot,
+        slotDurationMsHeze,
         minAttestationInclusionDelay,
         slotsPerEpoch,
         squareRootSlotsPerEpoch,

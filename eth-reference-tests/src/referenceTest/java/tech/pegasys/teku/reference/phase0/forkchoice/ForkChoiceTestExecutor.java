@@ -145,6 +145,7 @@ public class ForkChoiceTestExecutor implements TestExecutor {
           .put("fork_choice/on_payload_attestation_message", new ForkChoiceTestExecutor())
           .put("fork_choice/payload_data_availability", new ForkChoiceTestExecutor())
           .put("fork_choice/payload_timeliness", new ForkChoiceTestExecutor())
+          .put("fork_choice/slot_duration", new ForkChoiceTestExecutor())
           .put(
               "fork_choice/should_apply_proposer_boost",
               new ForkChoiceTestExecutor(

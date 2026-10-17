@@ -89,10 +89,13 @@ public class AttestationUtilPhase0 extends AttestationUtil {
     final UInt64 earliestSlotForForkChoice =
         attestation.getData().getEarliestSlotForForkChoice(miscHelpers);
     final UInt64 attestationForkChoiceEligibleTimeMillis =
-        secondsToMillis(genesisTime)
-            .plus(earliestSlotForForkChoice.times(specConfig.getSlotDurationMillis()));
+        miscHelpers.computeTimeMillisAtSlot(
+            secondsToMillis(genesisTime), earliestSlotForForkChoice);
+    final int slotDurationMillis =
+        miscHelpers.getSlotDurationMillis(
+            miscHelpers.computeEpochAtSlot(earliestSlotForForkChoice));
     final UInt64 discardAttestationsAfterMillis =
-        currentTimeMillis.plus(MAX_FUTURE_SLOT_ALLOWANCE.times(specConfig.getSlotDurationMillis()));
+        currentTimeMillis.plus(MAX_FUTURE_SLOT_ALLOWANCE.times(slotDurationMillis));
     return attestationForkChoiceEligibleTimeMillis.isGreaterThan(discardAttestationsAfterMillis);
   }
 
@@ -103,8 +106,8 @@ public class AttestationUtilPhase0 extends AttestationUtil {
         attestationSlot.plus(specConfig.getAttestationPropagationSlotRange());
     // The last allowed time is the end of the lastAllowedSlot (hence the plus 1).
     final UInt64 lastAllowedTimeMillis =
-        secondsToMillis(genesisTime)
-            .plus(lastAllowedSlot.plus(ONE).times(specConfig.getSlotDurationMillis()));
+        miscHelpers.computeTimeMillisAtSlot(
+            secondsToMillis(genesisTime), lastAllowedSlot.plus(ONE));
     // Add allowed clock disparity
     final UInt64 maximumBroadcastTimeMillis =
         lastAllowedTimeMillis.plus(specConfig.getMaximumGossipClockDisparity());

@@ -419,10 +419,10 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
       return SafeFuture.completedFuture(InclusionListImportResult.failedEmptyTransaction());
     }
 
-    final int slotDurationMillis =
-        spec.atSlot(inclusionListSlot).getConfig().getSlotDurationMillis();
     final UInt64 timeIntoSlotMillis =
-        store.getTimeInMillis().minusMinZero(store.getGenesisTimeMillis()).mod(slotDurationMillis);
+        store
+            .getTimeInMillis()
+            .minusMinZero(spec.computeTimeMillisAtSlot(currentSlot, store.getGenesisTimeMillis()));
 
     final boolean timely =
         isInclusionListTimely(spec, currentSlot, signedInclusionList, timeIntoSlotMillis);

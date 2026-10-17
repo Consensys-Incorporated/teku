@@ -15,6 +15,7 @@ package tech.pegasys.teku.validator.beaconnode;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -122,6 +123,52 @@ class ForkAwareTimeBasedEventAdapterTest {
     verify(validatorTimingChannel).onBlockProductionDue(postForkSlot);
     SlotEventVerifierTestUtil.verifySlotEvents(
         spec, timeProvider, asyncRunner, validatorTimingChannel, postForkSlot);
+  }
+
+  @Test
+  void shouldUseHezeSlotDurationAfterEip8198SlotDurationChange() {
+    // 6000 ms slots, then 5000 ms slots from Heze at epoch 1 (slot 8)
+    final Spec spec =
+        TestSpecFactory.createMinimalHeze(
+            builder -> builder.hezeForkEpoch(UInt64.ONE).slotDurationMsHeze(5000));
+
+    final StubTimeProvider timeProvider = StubTimeProvider.withTimeInSeconds(100);
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
+    final RepeatingTaskScheduler scheduler = new RepeatingTaskScheduler(asyncRunner, timeProvider);
+    final ForkAwareTimeBasedEventAdapter eventAdapter =
+        new ForkAwareTimeBasedEventAdapter(
+            genesisDataProvider, scheduler, timeProvider, validatorTimingChannel, spec);
+    when(genesisDataProvider.getGenesisTime())
+        .thenReturn(SafeFuture.completedFuture(timeProvider.getTimeInSeconds()));
+
+    timeProvider.advanceTimeBySeconds(6L * 6);
+    assertThat(eventAdapter.start()).isCompleted();
+    asyncRunner.executeDueActionsRepeatedly();
+    verifyNoInteractions(validatorTimingChannel);
+
+    // slot 7 starts after a 6000 ms slot
+    timeProvider.advanceTimeByMillis(6000);
+    asyncRunner.executeDueActionsRepeatedly();
+    verify(validatorTimingChannel).onSlot(UInt64.valueOf(7));
+
+    // slot 8, the first Heze slot, starts 6000 ms later
+    timeProvider.advanceTimeByMillis(5999);
+    asyncRunner.executeDueActionsRepeatedly();
+    verify(validatorTimingChannel, never()).onSlot(UInt64.valueOf(8));
+    timeProvider.advanceTimeByMillis(1);
+    asyncRunner.executeDueActionsRepeatedly();
+    verify(validatorTimingChannel).onSlot(UInt64.valueOf(8));
+    final long advancedMillis =
+        SlotEventVerifierTestUtil.verifySlotEvents(
+            spec, timeProvider, asyncRunner, validatorTimingChannel, UInt64.valueOf(8));
+
+    // slot 9 starts only 5000 ms after slot 8
+    timeProvider.advanceTimeByMillis(5000 - advancedMillis - 1);
+    asyncRunner.executeDueActionsRepeatedly();
+    verify(validatorTimingChannel, never()).onSlot(UInt64.valueOf(9));
+    timeProvider.advanceTimeByMillis(1);
+    asyncRunner.executeDueActionsRepeatedly();
+    verify(validatorTimingChannel).onSlot(UInt64.valueOf(9));
   }
 
   static Stream<Arguments> singleMilestoneStartups() {
