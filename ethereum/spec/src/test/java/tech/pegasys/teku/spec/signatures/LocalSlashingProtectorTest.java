@@ -52,7 +52,7 @@ class LocalSlashingProtectorTest {
       baseDir.resolve(validator.toBytesCompressed().toUnprefixedHexString() + ".yml");
 
   private final LocalSlashingProtector slashingProtectionStorage =
-      new LocalSlashingProtector(dataWriter, baseDir);
+      new LocalSlashingProtector(dataWriter, baseDir, false);
 
   @ParameterizedTest(name = "maySignBlock({0})")
   @MethodSource("blockCases")
@@ -214,5 +214,56 @@ class LocalSlashingProtectorTest {
         .isCompletedWithValue(false);
 
     verify(dataWriter, never()).syncedWrite(any(), any());
+  }
+
+  @ParameterizedTest(name = "maySignBlockWithStrictMode({0})")
+  @MethodSource("blockCases")
+  void maySignBlockWithStrictMode(
+      @SuppressWarnings("unused") final String name,
+      final Optional<UInt64> lastSignedRecord,
+      final UInt64 slot,
+      final boolean allowed)
+      throws Exception {
+    final LocalSlashingProtector strictSlashingProtector =
+        new LocalSlashingProtector(dataWriter, baseDir, true);
+    when(dataWriter.read(signingRecordPath))
+        .thenReturn(lastSignedRecord.map(this::blockTestSigningRecord));
+
+    if (lastSignedRecord.isEmpty()) {
+      assertThat(strictSlashingProtector.maySignBlock(validator, GENESIS_VALIDATORS_ROOT, slot))
+          .isCompletedWithValue(false);
+      verify(dataWriter, never()).syncedWrite(any(), any());
+    } else {
+      assertThat(strictSlashingProtector.maySignBlock(validator, GENESIS_VALIDATORS_ROOT, slot))
+          .isCompletedWithValue(allowed);
+    }
+  }
+
+  @ParameterizedTest(name = "maySignAttestationWithStrictMode({0})")
+  @MethodSource("attestationCases")
+  void maySignAttestationWithStrictMode(
+      @SuppressWarnings("unused") final String name,
+      final Optional<ValidatorSigningRecord> lastSignedRecord,
+      final UInt64 sourceEpoch,
+      final UInt64 targetEpoch,
+      final boolean allowed)
+      throws Exception {
+    final LocalSlashingProtector strictSlashingProtector =
+        new LocalSlashingProtector(dataWriter, baseDir, true);
+    when(dataWriter.read(signingRecordPath))
+        .thenReturn(lastSignedRecord.map(ValidatorSigningRecord::toBytes));
+
+    if (lastSignedRecord.isEmpty()) {
+      assertThat(
+              strictSlashingProtector.maySignAttestation(
+                  validator, GENESIS_VALIDATORS_ROOT, sourceEpoch, targetEpoch))
+          .isCompletedWithValue(false);
+      verify(dataWriter, never()).syncedWrite(any(), any());
+    } else {
+      assertThat(
+              strictSlashingProtector.maySignAttestation(
+                  validator, GENESIS_VALIDATORS_ROOT, sourceEpoch, targetEpoch))
+          .isCompletedWithValue(allowed);
+    }
   }
 }

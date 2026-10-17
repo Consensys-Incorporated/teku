@@ -31,11 +31,15 @@ public class LocalSlashingProtector implements SlashingProtector {
   private final Map<BLSPublicKey, Path> slashingProtectionPath = new HashMap<>();
   private final SyncDataAccessor dataAccessor;
   private final Path slashingProtectionBaseDir;
+  private final boolean slashingProtectionStrictModeEnabled;
 
   public LocalSlashingProtector(
-      final SyncDataAccessor dataAccessor, final Path slashingProtectionBaseDir) {
+      final SyncDataAccessor dataAccessor,
+      final Path slashingProtectionBaseDir,
+      final boolean slashingProtectionStrictModeEnabled) {
     this.dataAccessor = dataAccessor;
     this.slashingProtectionBaseDir = slashingProtectionBaseDir;
+    this.slashingProtectionStrictModeEnabled = slashingProtectionStrictModeEnabled;
   }
 
   @Override
@@ -43,9 +47,13 @@ public class LocalSlashingProtector implements SlashingProtector {
       final BLSPublicKey validator, final Bytes32 genesisValidatorsRoot, final UInt64 slot) {
     return SafeFuture.of(
         () -> {
-          final ValidatorSigningRecord signingRecord =
-              loadOrCreateSigningRecord(validator, genesisValidatorsRoot);
-          return handleResult(validator, signingRecord.maySignBlock(genesisValidatorsRoot, slot));
+          final Optional<ValidatorSigningRecord> signingRecord =
+              loadSigningRecord(validator, genesisValidatorsRoot);
+          if (signingRecord.isEmpty()) {
+            return false;
+          }
+          return handleResult(
+              validator, signingRecord.get().maySignBlock(genesisValidatorsRoot, slot));
         });
   }
 
@@ -57,11 +65,14 @@ public class LocalSlashingProtector implements SlashingProtector {
       final UInt64 targetEpoch) {
     return SafeFuture.of(
         () -> {
-          final ValidatorSigningRecord signingRecord =
-              loadOrCreateSigningRecord(validator, genesisValidatorsRoot);
+          final Optional<ValidatorSigningRecord> signingRecord =
+              loadSigningRecord(validator, genesisValidatorsRoot);
+          if (signingRecord.isEmpty()) {
+            return false;
+          }
           return handleResult(
               validator,
-              signingRecord.maySignAttestation(genesisValidatorsRoot, sourceEpoch, targetEpoch));
+              signingRecord.get().maySignAttestation(genesisValidatorsRoot, sourceEpoch, targetEpoch));
         });
   }
 
@@ -88,16 +99,19 @@ public class LocalSlashingProtector implements SlashingProtector {
     return loaded;
   }
 
-  private ValidatorSigningRecord loadOrCreateSigningRecord(
+  private Optional<ValidatorSigningRecord> loadSigningRecord(
       final BLSPublicKey validator, final Bytes32 genesisValidatorsRoot) throws IOException {
     final Optional<ValidatorSigningRecord> record = getSigningRecord(validator);
-    return record.orElseGet(
-        () -> {
-          final ValidatorSigningRecord newRecord =
-              ValidatorSigningRecord.emptySigningRecord(genesisValidatorsRoot);
-          signingRecords.put(validator, newRecord);
-          return newRecord;
-        });
+    if (record.isPresent()) {
+      return record;
+    }
+    if (slashingProtectionStrictModeEnabled) {
+      return Optional.empty();
+    }
+    final ValidatorSigningRecord newRecord =
+        ValidatorSigningRecord.emptySigningRecord(genesisValidatorsRoot);
+    signingRecords.put(validator, newRecord);
+    return Optional.of(newRecord);
   }
 
   private void writeSigningRecord(final BLSPublicKey validator, final ValidatorSigningRecord record)
