@@ -150,8 +150,14 @@ public class EventSourceBeaconChainEventAdapter
   BackgroundEventSource createEventSource(final RemoteValidatorApiChannel beaconNodeApi) {
 
     final List<EventType> eventTypes = new ArrayList<>();
-    eventTypes.add(
-        spec.isMilestoneSupported(SpecMilestone.GLOAS) ? EventType.head_v2 : EventType.head);
+    if (spec.isMilestoneSupported(SpecMilestone.GLOAS)) {
+      eventTypes.add(EventType.head_v2);
+      // lets payload timeliness attestations be sent as soon as the payload is available rather
+      // than at the deadline
+      eventTypes.add(EventType.execution_payload_available);
+    } else {
+      eventTypes.add(EventType.head);
+    }
     if (shutdownWhenValidatorSlashedEnabled) {
       eventTypes.add(EventType.attester_slashing);
       eventTypes.add(EventType.proposer_slashing);

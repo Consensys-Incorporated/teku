@@ -177,7 +177,12 @@ public class EventSourceBeaconChainEventAdapterTest {
       final boolean gloasScheduled,
       final boolean shutdownWhenValidatorSlashedEnabled) {
     List<EventType> eventTypeList = new ArrayList<>();
-    eventTypeList.add(gloasScheduled ? EventType.head_v2 : EventType.head);
+    if (gloasScheduled) {
+      eventTypeList.add(EventType.head_v2);
+      eventTypeList.add(EventType.execution_payload_available);
+    } else {
+      eventTypeList.add(EventType.head);
+    }
     if (shutdownWhenValidatorSlashedEnabled) {
       eventTypeList.add(EventType.attester_slashing);
       eventTypeList.add(EventType.proposer_slashing);
