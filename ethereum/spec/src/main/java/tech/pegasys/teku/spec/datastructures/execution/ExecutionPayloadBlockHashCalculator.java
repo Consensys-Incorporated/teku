@@ -14,7 +14,6 @@
 package tech.pegasys.teku.spec.datastructures.execution;
 
 import static tech.pegasys.teku.infrastructure.crypto.Hash.keccak256;
-import static tech.pegasys.teku.infrastructure.crypto.Hash.sha256;
 
 import java.util.List;
 import org.apache.tuweni.bytes.Bytes;
@@ -28,6 +27,7 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderBuilder;
 import org.hyperledger.besu.ethereum.core.Difficulty;
+import org.hyperledger.besu.ethereum.core.Request;
 import org.hyperledger.besu.ethereum.core.Util;
 import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
 import org.hyperledger.besu.ethereum.mainnet.MainnetBlockHeaderFunctions;
@@ -112,9 +112,8 @@ public class ExecutionPayloadBlockHashCalculator {
   }
 
   private static Hash computeRequestsHash(final List<Bytes> executionRequestsData) {
-    final List<Bytes> requestHashes =
-        executionRequestsData.stream().map(bytes -> (Bytes) sha256(bytes)).toList();
-    return Hash.wrap(sha256(Bytes.wrap(requestHashes)));
+    return BodyValidation.requestsHash(
+        executionRequestsData.stream().map(Request::fromBytes).toList());
   }
 
   private static long toLong(final UInt64 value) {
