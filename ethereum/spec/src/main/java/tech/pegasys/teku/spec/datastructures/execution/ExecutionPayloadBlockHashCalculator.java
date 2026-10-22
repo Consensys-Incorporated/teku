@@ -42,8 +42,20 @@ public class ExecutionPayloadBlockHashCalculator {
   public static Bytes32 computeGloasBlockHash(
       final ExecutionPayloadEnvelope executionPayloadEnvelope,
       final ExecutionRequestsDataCodec executionRequestsDataCodec) {
-    final ExecutionPayloadGloas payload =
-        ExecutionPayloadGloas.required(executionPayloadEnvelope.getPayload());
+    return computeGloasBlockHash(
+        executionPayloadEnvelope.getPayload(),
+        executionPayloadEnvelope.getExecutionRequests(),
+        executionPayloadEnvelope.getParentBeaconBlockRoot(),
+        executionRequestsDataCodec);
+  }
+
+  /** The envelope's builder index and beacon block root are not part of the block hash */
+  public static Bytes32 computeGloasBlockHash(
+      final ExecutionPayload executionPayload,
+      final ExecutionRequests executionRequests,
+      final Bytes32 parentBeaconBlockRoot,
+      final ExecutionRequestsDataCodec executionRequestsDataCodec) {
+    final ExecutionPayloadGloas payload = ExecutionPayloadGloas.required(executionPayload);
     final BlockHeader blockHeader =
         BlockHeaderBuilder.create()
             .parentHash(Hash.wrap(payload.getParentHash()))
@@ -65,11 +77,8 @@ public class ExecutionPayloadBlockHashCalculator {
             .withdrawalsRoot(computeWithdrawalsRoot(payload))
             .blobGasUsed(toLong(payload.getBlobGasUsed()))
             .excessBlobGas(BlobGas.of(payload.getExcessBlobGas().bigIntegerValue()))
-            .parentBeaconBlockRoot(executionPayloadEnvelope.getParentBeaconBlockRoot())
-            .requestsHash(
-                computeRequestsHash(
-                    executionRequestsDataCodec.encode(
-                        executionPayloadEnvelope.getExecutionRequests())))
+            .parentBeaconBlockRoot(parentBeaconBlockRoot)
+            .requestsHash(computeRequestsHash(executionRequestsDataCodec.encode(executionRequests)))
             .balHash(BodyValidation.balHash(payload.getBlockAccessList().getBytes()))
             .slotNumber(toLong(payload.getSlotNumber()))
             .blockHeaderFunctions(new MainnetBlockHeaderFunctions())

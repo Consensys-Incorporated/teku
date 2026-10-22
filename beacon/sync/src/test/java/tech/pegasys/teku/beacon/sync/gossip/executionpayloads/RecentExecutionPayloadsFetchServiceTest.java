@@ -103,6 +103,7 @@ class RecentExecutionPayloadsFetchServiceTest {
     final Bytes32 beaconBlockRoot = dataStructureUtil.randomBytes32();
     recentExecutionPayloadsFetchService.requestRecentExecutionPayload(beaconBlockRoot);
 
+    verify(executionPayloadManager).isExecutionPayloadImportedOrImporting(beaconBlockRoot);
     assertTaskCounts(1, 1, 0);
     assertThat(importedExecutionPayloads).isEmpty();
 
@@ -134,9 +135,10 @@ class RecentExecutionPayloadsFetchServiceTest {
   }
 
   @Test
-  public void ignoreKnownExecutionPayload() {
+  public void ignoreImportedExecutionPayload() {
     final Bytes32 beaconBlockRoot = dataStructureUtil.randomBytes32();
-    when(executionPayloadManager.isExecutionPayloadRecentlySeen(beaconBlockRoot)).thenReturn(true);
+    when(executionPayloadManager.isExecutionPayloadImportedOrImporting(beaconBlockRoot))
+        .thenReturn(true);
     recentExecutionPayloadsFetchService.requestRecentExecutionPayload(beaconBlockRoot);
 
     assertTaskCounts(0, 0, 0);

@@ -32,6 +32,7 @@ import tech.pegasys.teku.reference.BlsSetting;
 import tech.pegasys.teku.reference.TestExecutor;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeSchema;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
@@ -116,6 +117,13 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
             return declaredFinalizedCheckpoint
                 .map(checkpoint -> slot.isLessThan(checkpoint.getEpochStartSlot(spec)))
                 .orElseGet(() -> super.isBeforeFinalizedSlot(slot));
+          }
+
+          @Override
+          public Bytes32 computeExecutionPayloadBlockHash(final ExecutionPayloadEnvelope envelope) {
+            // The fixtures carry a zero payload block hash, so Teku's content check (not a spec
+            // rule) must treat the declared hash as matching
+            return envelope.getPayload().getBlockHash();
           }
         };
     final BlockGossipValidator blockGossipValidator =
