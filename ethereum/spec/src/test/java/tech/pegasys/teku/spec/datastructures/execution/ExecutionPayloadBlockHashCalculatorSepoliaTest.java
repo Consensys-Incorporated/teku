@@ -55,9 +55,9 @@ import tech.pegasys.teku.spec.util.DataStructureUtil;
  * block access list and empty execution requests.
  *
  * <p>Sepolia has produced no Gloas envelope with non-empty execution requests so far, so that case
- * is covered by adding synthetic requests of every type to the real envelope and taking Besu as the
- * independent reference: the expected hash is the real header with its requests hash replaced by
- * Besu's EIP-7685 hash of the same requests.
+ * is covered by adding synthetic requests of every type to the real envelope: the codec output must
+ * parse as Besu requests of all five types and land in the header's requests hash, so the result
+ * must equal the execution client's header with only that field replaced.
  */
 class ExecutionPayloadBlockHashCalculatorSepoliaTest {
 
