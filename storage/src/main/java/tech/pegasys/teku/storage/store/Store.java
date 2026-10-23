@@ -775,8 +775,17 @@ class Store extends CacheableStore {
   public SafeFuture<Optional<BeaconState>> retrieveBlockState(final Bytes32 blockRoot) {
     return getAndCacheBlockAndState(blockRoot)
         .thenApply(
-            maybeStateAndBlockSummary ->
-                maybeStateAndBlockSummary.map(StateAndBlockSummary::getState));
+            maybeBlockAndState ->
+                maybeBlockAndState
+                    .map(SignedBlockAndState::getState)
+                    .or(() -> getStateOnlyAnchorBlockState(blockRoot)));
+  }
+
+  private Optional<BeaconState> getStateOnlyAnchorBlockState(final Bytes32 blockRoot) {
+    return Optional.of(finalizedAnchor)
+        .filter(anchor -> anchor.getRoot().equals(blockRoot))
+        .filter(anchor -> anchor.getState().getSlot().equals(anchor.getBlockSlot()))
+        .map(AnchorPoint::getState);
   }
 
   @Override

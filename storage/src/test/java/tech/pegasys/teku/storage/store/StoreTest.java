@@ -103,6 +103,45 @@ class StoreTest extends AbstractStoreTest {
   }
 
   @Test
+  public void retrieveBlockState_shouldReturnAnchorStateWhenAnchorBlockIsNotAvailable() {
+    chainBuilder.generateGenesis();
+    final SignedBlockAndState anchorBlockAndState = chainBuilder.generateBlockAtSlot(8);
+    final AnchorPoint anchor = AnchorPoint.fromInitialState(spec, anchorBlockAndState.getState());
+    final UpdatableStore store =
+        StoreBuilder.create()
+            .asyncRunner(SYNC_RUNNER)
+            .metricsSystem(new StubMetricsSystem())
+            .specProvider(spec)
+            .blockProvider(BlockProvider.NOOP)
+            .earliestBlobSidecarSlotProvider(EarliestBlobSidecarSlotProvider.NOOP)
+            .stateProvider(StateAndBlockSummaryProvider.NOOP)
+            .anchor(Optional.of(anchor.getCheckpoint()))
+            .genesisTime(anchorBlockAndState.getState().getGenesisTime())
+            .time(anchorBlockAndState.getState().getGenesisTime())
+            .latestFinalized(anchor)
+            .justifiedCheckpoint(anchor.getCheckpoint())
+            .bestJustifiedCheckpoint(anchor.getCheckpoint())
+            .blockInformation(
+                Map.of(
+                    anchor.getRoot(),
+                    new StoredBlockMetadata(
+                        anchor.getBlockSlot(),
+                        anchor.getRoot(),
+                        anchor.getParentRoot(),
+                        anchor.getStateRoot(),
+                        anchorBlockAndState.getExecutionBlockNumber(),
+                        anchorBlockAndState.getExecutionBlockHash(),
+                        Optional.of(spec.calculateBlockCheckpoints(anchor.getState())))))
+            .storeConfig(defaultStoreConfig)
+            .votes(Collections.emptyMap())
+            .latestCanonicalBlockRoot(Optional.empty())
+            .build();
+
+    assertThat(store.retrieveBlockState(anchor.getRoot()))
+        .isCompletedWithValue(Optional.of(anchor.getState()));
+  }
+
+  @Test
   public void retrieveSignedBlock_withLimitedCache() {
     processChainWithLimitedCache(
         (store, blockAndState) -> {
