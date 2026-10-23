@@ -38,6 +38,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
@@ -536,5 +537,15 @@ public class ChainStorage
   @Override
   public SafeFuture<Void> onPruneBestLightClientUpdatesBefore(final UInt64 period) {
     return SafeFuture.fromRunnable(() -> database.pruneBestLightClientUpdatesBefore(period));
+  }
+
+  @Override
+  public SafeFuture<Void> onNewLightClientBootstrap(final LightClientBootstrap bootstrap) {
+    return SafeFuture.fromRunnable(() -> database.storeLightClientBootstrap(bootstrap));
+  }
+
+  @Override
+  public SafeFuture<Optional<LightClientBootstrap>> getLightClientBootstrap(final UInt64 slot) {
+    return SafeFuture.of(() -> database.getLightClientBootstrap(slot));
   }
 }
