@@ -17,6 +17,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.time.TimeUtilities.secondsToMillis;
 
@@ -52,6 +54,7 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.generator.ChainBuilder.BlockOptions;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.storage.api.LightClientUpdateChannel;
 import tech.pegasys.teku.storage.api.ReorgContext;
 import tech.pegasys.teku.storage.client.ChainHead;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
@@ -284,6 +287,66 @@ public class LightClientServerServiceTest {
     pendingAttestedState.complete(Optional.of(chain.attested().getState()));
 
     assertThat(store.getLatestOptimisticUpdate()).isPresent();
+  }
+
+  @TestTemplate
+  public void onNewFinalizedCheckpoint_shouldStoreBootstrapForFinalizedBlock() {
+    final Chain chain = generateChain();
+    final LightClientUpdateChannel channel =
+        mock(LightClientUpdateChannel.class, invocation -> SafeFuture.COMPLETE);
+    final LightClientServerService bootstrapService =
+        new LightClientServerService(
+            spec,
+            new LightClientUpdateStore(spec, channel),
+            this::lookUpBlock,
+            this::lookUpState,
+            CANONICAL,
+            asyncRunner,
+            timeProvider);
+    final SignedBlockAndState finalized = chain.attested();
+
+    bootstrapService.onNewFinalizedCheckpoint(
+        new Checkpoint(spec.computeEpochAtSlot(finalized.getSlot()), finalized.getRoot()), false);
+
+    verify(channel)
+        .onNewLightClientBootstrap(
+            spec.getLightClientUtilRequired(finalized.getSlot())
+                .createLightClientBootstrap(finalized.getState(), finalized.getBlock()));
+  }
+
+  @TestTemplate
+  public void onNewFinalizedCheckpoint_shouldStoreBootstrapOnceMissingBlockArrives() {
+    final Chain chain = generateChain();
+    final LightClientUpdateChannel channel =
+        mock(LightClientUpdateChannel.class, invocation -> SafeFuture.COMPLETE);
+    final LightClientServerService bootstrapService =
+        new LightClientServerService(
+            spec,
+            new LightClientUpdateStore(spec, channel),
+            this::lookUpBlock,
+            this::lookUpState,
+            CANONICAL,
+            asyncRunner,
+            timeProvider);
+    final SignedBlockAndState anchor = chain.attested();
+    blocksByRoot.remove(anchor.getRoot());
+
+    bootstrapService.onNewFinalizedCheckpoint(checkpointAt(anchor), false);
+    verify(channel, never()).onNewLightClientBootstrap(any());
+
+    blocksByRoot.put(anchor.getRoot(), anchor.getBlock());
+    statesByRoot.remove(anchor.getRoot());
+    bootstrapService.onNewFinalizedCheckpoint(checkpointAt(chain.signature()), false);
+
+    verify(channel)
+        .onNewLightClientBootstrap(
+            spec.getLightClientUtilRequired(anchor.getSlot())
+                .createLightClientBootstrap(anchor.getState(), anchor.getBlock()));
+  }
+
+  private Checkpoint checkpointAt(final SignedBlockAndState blockAndState) {
+    return new Checkpoint(
+        spec.computeEpochAtSlot(blockAndState.getSlot()), blockAndState.getRoot());
   }
 
   @TestTemplate

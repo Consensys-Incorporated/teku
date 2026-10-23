@@ -31,6 +31,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.altair.SyncAggregate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
@@ -203,6 +204,10 @@ public class LightClientUpdateStore {
   public synchronized void pruneUpdatesBefore(final UInt64 period) {
     bestUpdatesByPeriod.headMap(period).clear();
     channel.onPruneBestLightClientUpdatesBefore(period).finishError(LOG);
+  }
+
+  public void addBootstrap(final LightClientBootstrap bootstrap) {
+    channel.onNewLightClientBootstrap(bootstrap).finishError(LOG);
   }
 
   public Optional<LightClientFinalityUpdate> getLatestFinalityUpdate() {

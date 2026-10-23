@@ -19,6 +19,7 @@ import static tech.pegasys.teku.spec.config.SpecConfig.GENESIS_SLOT;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -34,9 +35,11 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.config.SpecConfigAltair;
+import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.altair.SyncAggregate;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
@@ -67,6 +70,8 @@ public class LightClientServerService
       Subscribers.create(true);
   private final Subscribers<Consumer<LightClientOptimisticUpdate>> optimisticUpdateSubscribers =
       Subscribers.create(true);
+  private final AtomicReference<Optional<BeaconState>> pendingBootstrapState =
+      new AtomicReference<>(Optional.empty());
 
   /** Period of the latest finalized checkpoint seen; nothing below it can be orphaned. */
   private volatile UInt64 finalizedPeriod = UInt64.ZERO;
@@ -191,6 +196,38 @@ public class LightClientServerService
             .minusMinZero(spec.getNetworkingConfig().getMinEpochsForBlockRequests());
     lightClientStore.pruneUpdatesBefore(
         syncCommitteeUtil.computeSyncCommitteePeriod(oldestRetainedEpoch));
+
+    pendingBootstrapState
+        .getAndSet(Optional.empty())
+        .ifPresent(
+            state ->
+                storeBootstrap(
+                    BeaconBlockHeader.fromState(state).hashTreeRoot(),
+                    SafeFuture.completedFuture(Optional.of(state))));
+    storeBootstrap(checkpoint.getRoot(), retrieveStateByRoot.apply(checkpoint.getRoot()));
+  }
+
+  private void storeBootstrap(
+      final Bytes32 blockRoot, final SafeFuture<Optional<BeaconState>> stateFuture) {
+    retrieveBlockByRoot
+        .apply(blockRoot)
+        .thenCombine(
+            stateFuture,
+            (maybeBlock, maybeState) -> {
+              if (maybeBlock.isEmpty()) {
+                maybeState.ifPresent(state -> pendingBootstrapState.set(Optional.of(state)));
+                return Optional.<LightClientBootstrap>empty();
+              }
+              final SignedBeaconBlock block = maybeBlock.get();
+              return maybeState.flatMap(
+                  state ->
+                      spec.getLightClientUtil(block.getSlot())
+                          .map(util -> util.createLightClientBootstrap(state, block)));
+            })
+        .finish(
+            maybeBootstrap -> maybeBootstrap.ifPresent(lightClientStore::addBootstrap),
+            error ->
+                LOG.warn("Failed to create light client bootstrap for block {}", blockRoot, error));
   }
 
   public void loadUpdates(final Collection<StoredLightClientUpdate> updates) {
