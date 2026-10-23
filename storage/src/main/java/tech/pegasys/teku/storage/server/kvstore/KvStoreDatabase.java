@@ -70,6 +70,8 @@ import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadSummary;
 import tech.pegasys.teku.spec.datastructures.execution.SlotAndExecutionPayloadSummary;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
 import tech.pegasys.teku.spec.datastructures.hashtree.HashTree;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrapSchema;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
@@ -77,6 +79,7 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGProof;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
 import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
 import tech.pegasys.teku.storage.api.GloasForkChoiceRebuildData;
 import tech.pegasys.teku.storage.api.OnDiskStoreData;
 import tech.pegasys.teku.storage.api.StorageUpdate;
@@ -1385,6 +1388,69 @@ public class KvStoreDatabase implements Database {
       periodsToDelete = periods.filter(storedPeriod -> storedPeriod.isLessThan(period)).toList();
     }
     removeBestLightClientUpdates(periodsToDelete);
+    pruneLightClientBootstrapsBefore(period);
+  }
+
+  private void pruneLightClientBootstrapsBefore(final UInt64 period) {
+    final List<UInt64> slotsToDelete;
+    try (final Stream<UInt64> slots = dao.streamLightClientBootstrapSlots()) {
+      slotsToDelete =
+          slots.takeWhile(slot -> syncCommitteePeriodAtSlot(slot).isLessThan(period)).toList();
+    }
+    final List<UInt64> committeePeriodsToDelete;
+    try (final Stream<UInt64> periods = dao.streamLightClientSyncCommitteePeriods()) {
+      committeePeriodsToDelete =
+          periods.takeWhile(storedPeriod -> storedPeriod.isLessThan(period)).toList();
+    }
+    if (slotsToDelete.isEmpty() && committeePeriodsToDelete.isEmpty()) {
+      return;
+    }
+    try (final HotUpdater updater = hotUpdater()) {
+      slotsToDelete.forEach(updater::removeLightClientBootstrap);
+      committeePeriodsToDelete.forEach(updater::removeLightClientSyncCommittee);
+      updater.commit();
+    }
+  }
+
+  @Override
+  public void storeLightClientBootstrap(final LightClientBootstrap bootstrap) {
+    final UInt64 slot = bootstrap.getLightClientHeader().getBeacon().getSlot();
+    try (final HotUpdater updater = hotUpdater()) {
+      updater.addLightClientBootstrap(
+          slot,
+          Bytes.concatenate(
+              bootstrap.getSyncCommitteeBranch().sszSerialize(),
+              bootstrap.getLightClientHeader().sszSerialize()),
+          syncCommitteePeriodAtSlot(slot),
+          bootstrap.getCurrentSyncCommittee().sszSerialize());
+      updater.commit();
+    }
+  }
+
+  @Override
+  public Optional<LightClientBootstrap> getLightClientBootstrap(final UInt64 slot) {
+    return dao.getLightClientBootstrap(slot)
+        .flatMap(
+            stored ->
+                dao.getLightClientSyncCommittee(syncCommitteePeriodAtSlot(slot))
+                    .map(syncCommittee -> deserializeBootstrap(slot, stored, syncCommittee)));
+  }
+
+  private LightClientBootstrap deserializeBootstrap(
+      final UInt64 slot, final Bytes stored, final Bytes syncCommittee) {
+    final LightClientBootstrapSchema schema =
+        SchemaDefinitionsAltair.required(spec.atSlot(slot).getSchemaDefinitions())
+            .getLightClientBootstrapSchema();
+    final int branchSize = schema.getSyncCommitteeBranchSchema().getLength() * Bytes32.SIZE;
+    return schema.create(
+        schema.getFieldSchema0().sszDeserialize(stored.slice(branchSize)),
+        schema.getFieldSchema1().sszDeserialize(syncCommittee),
+        schema.getSyncCommitteeBranchSchema().sszDeserialize(stored.slice(0, branchSize)));
+  }
+
+  private UInt64 syncCommitteePeriodAtSlot(final UInt64 slot) {
+    return spec.getSyncCommitteeUtilRequired(slot)
+        .computeSyncCommitteePeriod(spec.computeEpochAtSlot(slot));
   }
 
   @Override
