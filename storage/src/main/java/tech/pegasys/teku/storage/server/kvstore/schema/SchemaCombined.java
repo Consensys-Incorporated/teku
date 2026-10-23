@@ -81,6 +81,10 @@ public interface SchemaCombined extends Schema {
 
   KvStoreColumn<UInt64, Bytes32> getBestLightClientUpdateSignatureBlockRootsByPeriod();
 
+  KvStoreColumn<UInt64, Bytes> getLightClientBootstrapsBySlot();
+
+  KvStoreColumn<UInt64, Bytes> getLightClientSyncCommitteesByPeriod();
+
   // Variables
   KvStoreVariable<UInt64> getVariableGenesisTime();
 
