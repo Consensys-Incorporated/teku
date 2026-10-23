@@ -52,6 +52,8 @@ import tech.pegasys.teku.spec.config.BlobScheduleEntry;
 import tech.pegasys.teku.spec.datastructures.attestation.ProcessedAttestationListener;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.logic.versions.fulu.helpers.BlobParameters;
@@ -384,6 +386,28 @@ public class ActiveEth2P2PNetworkTest {
 
     network.onSyncStateChanged(false, false);
     verify(gossipForkManager).stopGossip();
+  }
+
+  @Test
+  void publishLightClientUpdates_shouldOnlyPublishWhileGossipIsStarted() {
+    storageSystem.chainUpdater().setCurrentSlot(UInt64.valueOf(1000));
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
+    final LightClientOptimisticUpdate optimisticUpdate =
+        dataStructureUtil.randomLightClientOptimisticUpdate(UInt64.valueOf(64));
+    final LightClientFinalityUpdate finalityUpdate =
+        dataStructureUtil.randomLightClientFinalityUpdate(UInt64.valueOf(64));
+    assertThat(network.start()).isCompleted();
+
+    network.publishLightClientOptimisticUpdate(optimisticUpdate);
+    network.publishLightClientFinalityUpdate(finalityUpdate);
+    verify(gossipForkManager, never()).publishLightClientOptimisticUpdate(any());
+    verify(gossipForkManager, never()).publishLightClientFinalityUpdate(any());
+
+    network.onSyncStateChanged(true, false);
+    network.publishLightClientOptimisticUpdate(optimisticUpdate);
+    network.publishLightClientFinalityUpdate(finalityUpdate);
+    verify(gossipForkManager).publishLightClientOptimisticUpdate(optimisticUpdate);
+    verify(gossipForkManager).publishLightClientFinalityUpdate(finalityUpdate);
   }
 
   @Test
