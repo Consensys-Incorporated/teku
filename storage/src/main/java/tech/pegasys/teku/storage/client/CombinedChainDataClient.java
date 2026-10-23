@@ -47,6 +47,7 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockAndMetaData;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
@@ -685,6 +686,49 @@ public class CombinedChainDataClient {
 
   public SafeFuture<List<StoredLightClientUpdate>> getBestLightClientUpdates() {
     return historicalChainData.getBestLightClientUpdates();
+  }
+
+  public SafeFuture<Optional<LightClientBootstrap>> getLightClientBootstrap(
+      final Bytes32 blockRoot) {
+    final UpdatableStore store = getStore();
+    if (store == null) {
+      return SafeFuture.completedFuture(Optional.empty());
+    }
+    final Optional<BeaconState> maybeState =
+        store
+            .getBlockStateIfAvailable(blockRoot)
+            .or(
+                () ->
+                    Optional.of(store.getLatestFinalized())
+                        .filter(anchor -> anchor.getRoot().equals(blockRoot))
+                        .filter(anchor -> anchor.getState().getSlot().equals(anchor.getBlockSlot()))
+                        .map(AnchorPoint::getState));
+    if (maybeState.isPresent()) {
+      return getBlockByBlockRoot(blockRoot)
+          .thenApply(
+              maybeBlock ->
+                  maybeBlock.flatMap(
+                      block ->
+                          spec.getLightClientUtil(block.getSlot())
+                              .map(
+                                  util ->
+                                      util.createLightClientBootstrap(maybeState.get(), block))));
+    }
+    return getSlotByBlockRoot(blockRoot)
+        .thenCompose(
+            maybeSlot ->
+                maybeSlot
+                    .map(historicalChainData::getLightClientBootstrap)
+                    .orElse(SafeFuture.completedFuture(Optional.empty())))
+        .thenApply(
+            maybeBootstrap ->
+                maybeBootstrap.filter(
+                    bootstrap ->
+                        bootstrap
+                            .getLightClientHeader()
+                            .getBeacon()
+                            .hashTreeRoot()
+                            .equals(blockRoot)));
   }
 
   /**
