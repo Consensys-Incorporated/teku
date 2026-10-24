@@ -18,7 +18,9 @@ import static tech.pegasys.teku.spec.config.SpecConfig.GENESIS_SLOT;
 
 import java.time.Duration;
 import java.util.Collection;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
@@ -72,6 +74,7 @@ public class LightClientServerService
       Subscribers.create(true);
   private final AtomicReference<Optional<BeaconState>> pendingBootstrapState =
       new AtomicReference<>(Optional.empty());
+  private final Map<UInt64, PendingUpdate> pendingUpdatesByPeriod = new ConcurrentHashMap<>();
 
   /** Period of the latest finalized checkpoint seen; nothing below it can be orphaned. */
   private volatile UInt64 finalizedPeriod = UInt64.ZERO;
@@ -205,6 +208,36 @@ public class LightClientServerService
                     BeaconBlockHeader.fromState(state).hashTreeRoot(),
                     SafeFuture.completedFuture(Optional.of(state))));
     storeBootstrap(checkpoint.getRoot(), retrieveStateByRoot.apply(checkpoint.getRoot()));
+    pendingUpdatesByPeriod.forEach(this::retryPendingUpdate);
+  }
+
+  private void retryPendingUpdate(final UInt64 period, final PendingUpdate pending) {
+    retrieveBlockByRoot
+        .apply(pending.attestedState().getFinalizedCheckpoint().getRoot())
+        .thenAccept(
+            maybeFinalizedBlock ->
+                maybeFinalizedBlock.ifPresent(
+                    finalizedBlock -> {
+                      if (!pendingUpdatesByPeriod.remove(period, pending)) {
+                        return;
+                      }
+                      lightClientStore.addUpdate(
+                          spec.getLightClientUtilRequired(pending.attestedBlock().getSlot())
+                              .createLightClientUpdate(
+                                  pending.signatureBlockPostState(),
+                                  pending.signatureBlock(),
+                                  pending.attestedState(),
+                                  pending.attestedBlock(),
+                                  Optional.of(finalizedBlock)),
+                          pending.signatureBlock().getRoot(),
+                          isCanonicalBlock);
+                    }))
+        .finish(
+            error ->
+                LOG.warn(
+                    "Failed to retry light client update for block {}",
+                    pending.signatureBlock().getRoot(),
+                    error));
   }
 
   private void storeBootstrap(
@@ -295,6 +328,19 @@ public class LightClientServerService
                         maybeFinalizedBlock);
 
                 lightClientStore.addUpdate(update, signatureBlock.getRoot(), isCanonicalBlock);
+                if (maybeFinalizedBlock.isEmpty()
+                    && !attestedState.getFinalizedCheckpoint().getRoot().isZero()) {
+                  pendingUpdatesByPeriod.merge(
+                      spec.getSyncCommitteeUtilRequired(attestedBlock.getSlot())
+                          .computeSyncCommitteePeriod(
+                              spec.computeEpochAtSlot(attestedBlock.getSlot())),
+                      new PendingUpdate(
+                          signatureBlock, signatureBlockPostState, attestedBlock, attestedState),
+                      (existing, incoming) ->
+                          incoming.participation() > existing.participation()
+                              ? incoming
+                              : existing);
+                }
 
                 final UInt64 genesisTimeMillis =
                     secondsToMillis(signatureBlockPostState.getGenesisTime());
@@ -373,5 +419,21 @@ public class LightClientServerService
       return SafeFuture.completedFuture(Optional.empty());
     }
     return retrieveBlockByRoot.apply(spec.getBlockRootAtSlot(attestedState, GENESIS_SLOT));
+  }
+
+  private record PendingUpdate(
+      SignedBeaconBlock signatureBlock,
+      BeaconState signatureBlockPostState,
+      SignedBeaconBlock attestedBlock,
+      BeaconState attestedState) {
+
+    int participation() {
+      return signatureBlock
+          .getMessage()
+          .getBody()
+          .getOptionalSyncAggregate()
+          .map(syncAggregate -> syncAggregate.getSyncCommitteeBits().getBitCount())
+          .orElse(0);
+    }
   }
 }

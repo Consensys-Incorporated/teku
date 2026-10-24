@@ -344,6 +344,24 @@ public class LightClientServerServiceTest {
                 .createLightClientBootstrap(anchor.getState(), anchor.getBlock()));
   }
 
+  @TestTemplate
+  public void onNewFinalizedCheckpoint_shouldAddFinalityOnceMissingFinalizedBlockArrives() {
+    final Chain chain = generateChain();
+    final SignedBeaconBlock finalizedBlock = dataStructureUtil.randomSignedBeaconBlock(1);
+    finalizeAttestedStateAt(chain, finalizedBlock.getRoot());
+
+    service.onBlockImported(chain.signature().getBlock(), false);
+    assertThat(onlyUpdateAtPeriod(0).getFinalityBranch().isDefault()).isTrue();
+
+    blocksByRoot.put(finalizedBlock.getRoot(), finalizedBlock);
+    service.onNewFinalizedCheckpoint(checkpointAt(chain.signature()), false);
+
+    final LightClientUpdate update = onlyUpdateAtPeriod(0);
+    assertThat(update.getFinalityBranch().isDefault()).isFalse();
+    assertThat(update.getFinalizedHeader().getBeacon().hashTreeRoot())
+        .isEqualTo(finalizedBlock.getRoot());
+  }
+
   private Checkpoint checkpointAt(final SignedBlockAndState blockAndState) {
     return new Checkpoint(
         spec.computeEpochAtSlot(blockAndState.getSlot()), blockAndState.getRoot());
