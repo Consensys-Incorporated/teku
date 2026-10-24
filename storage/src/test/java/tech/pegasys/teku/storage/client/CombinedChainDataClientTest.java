@@ -562,10 +562,28 @@ class CombinedChainDataClientTest {
     verify(store, never()).retrieveBlockState(any(Bytes32.class));
   }
 
+  @Test
+  public void getLightClientBootstrap_shouldIgnoreInMemoryStateAdvancedPastBlock() {
+    final LightClientBootstrap bootstrap =
+        dataStructureUtil.randomLightClientBoostrapWithHeaderSlot(UInt64.valueOf(8));
+    final Bytes32 blockRoot = bootstrap.getLightClientHeader().getBeacon().getRoot();
+    givenStoredBootstrap(blockRoot, bootstrap);
+    final BeaconState advancedState =
+        dataStructureUtil
+            .randomBeaconState(UInt64.valueOf(9))
+            .updated(
+                mutableState ->
+                    mutableState.setLatestBlockHeader(
+                        bootstrap.getLightClientHeader().getBeacon()));
+    when(store.getBlockStateIfAvailable(blockRoot)).thenReturn(Optional.of(advancedState));
+
+    assertThat(client.getLightClientBootstrap(blockRoot))
+        .isCompletedWithValue(Optional.of(bootstrap));
+  }
+
   private void givenStoredBootstrap(final Bytes32 blockRoot, final LightClientBootstrap bootstrap) {
     final UInt64 slot = bootstrap.getLightClientHeader().getBeacon().getSlot();
     final AnchorPoint finalized = mock(AnchorPoint.class);
-    when(finalized.getRoot()).thenReturn(dataStructureUtil.randomBytes32());
     when(recentChainData.getStore()).thenReturn(store);
     when(store.getBlockStateIfAvailable(blockRoot)).thenReturn(Optional.empty());
     when(store.getLatestFinalized()).thenReturn(finalized);

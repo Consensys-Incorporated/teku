@@ -197,8 +197,10 @@ public class LightClientServerService
         checkpoint
             .getEpoch()
             .minusMinZero(spec.getNetworkingConfig().getMinEpochsForBlockRequests());
-    lightClientStore.pruneUpdatesBefore(
-        syncCommitteeUtil.computeSyncCommitteePeriod(oldestRetainedEpoch));
+    final UInt64 oldestRetainedPeriod =
+        syncCommitteeUtil.computeSyncCommitteePeriod(oldestRetainedEpoch);
+    lightClientStore.pruneUpdatesBefore(oldestRetainedPeriod);
+    pendingUpdatesByPeriod.keySet().removeIf(period -> period.isLessThan(oldestRetainedPeriod));
 
     pendingBootstrapState
         .getAndSet(Optional.empty())
@@ -245,7 +247,10 @@ public class LightClientServerService
     retrieveBlockByRoot
         .apply(blockRoot)
         .thenCombine(
-            stateFuture,
+            stateFuture.thenApply(
+                maybeState ->
+                    maybeState.filter(
+                        state -> state.getSlot().equals(state.getLatestBlockHeader().getSlot()))),
             (maybeBlock, maybeState) -> {
               if (maybeBlock.isEmpty()) {
                 maybeState.ifPresent(state -> pendingBootstrapState.set(Optional.of(state)));

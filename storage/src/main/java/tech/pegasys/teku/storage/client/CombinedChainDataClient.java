@@ -697,12 +697,8 @@ public class CombinedChainDataClient {
     final Optional<BeaconState> maybeState =
         store
             .getBlockStateIfAvailable(blockRoot)
-            .or(
-                () ->
-                    Optional.of(store.getLatestFinalized())
-                        .filter(anchor -> anchor.getRoot().equals(blockRoot))
-                        .filter(anchor -> anchor.getState().getSlot().equals(anchor.getBlockSlot()))
-                        .map(AnchorPoint::getState));
+            .or(() -> store.getLatestFinalized().getBlockPostState(blockRoot))
+            .filter(state -> state.getSlot().equals(state.getLatestBlockHeader().getSlot()));
     if (maybeState.isPresent()) {
       return getBlockByBlockRoot(blockRoot)
           .thenApply(

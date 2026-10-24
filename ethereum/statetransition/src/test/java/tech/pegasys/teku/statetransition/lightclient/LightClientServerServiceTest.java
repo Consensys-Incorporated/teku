@@ -33,6 +33,7 @@ import java.util.stream.IntStream;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
@@ -345,6 +346,33 @@ public class LightClientServerServiceTest {
   }
 
   @TestTemplate
+  public void onNewFinalizedCheckpoint_shouldSkipBootstrapWhenStateIsNotBlockPostState() {
+    final Chain chain = generateChain();
+    final LightClientUpdateChannel channel =
+        mock(LightClientUpdateChannel.class, invocation -> SafeFuture.COMPLETE);
+    final LightClientServerService bootstrapService =
+        new LightClientServerService(
+            spec,
+            new LightClientUpdateStore(spec, channel),
+            this::lookUpBlock,
+            this::lookUpState,
+            CANONICAL,
+            asyncRunner,
+            timeProvider);
+    final SignedBlockAndState anchor = chain.attested();
+    statesByRoot.put(
+        anchor.getRoot(),
+        anchor.getState().updated(state -> state.setSlot(state.getSlot().plus(1))));
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(LightClientServerService.class)) {
+      bootstrapService.onNewFinalizedCheckpoint(checkpointAt(anchor), false);
+
+      assertThat(logCaptor.getWarnLogs()).isEmpty();
+    }
+    verify(channel, never()).onNewLightClientBootstrap(any());
+  }
+
+  @TestTemplate
   public void onNewFinalizedCheckpoint_shouldAddFinalityOnceMissingFinalizedBlockArrives() {
     final Chain chain = generateChain();
     final SignedBeaconBlock finalizedBlock = dataStructureUtil.randomSignedBeaconBlock(1);
@@ -360,6 +388,20 @@ public class LightClientServerServiceTest {
     assertThat(update.getFinalityBranch().isDefault()).isFalse();
     assertThat(update.getFinalizedHeader().getBeacon().hashTreeRoot())
         .isEqualTo(finalizedBlock.getRoot());
+  }
+
+  @TestTemplate
+  public void onNewFinalizedCheckpoint_shouldDropPendingUpdatesBeyondRetentionWindow() {
+    final Chain chain = generateChain();
+    final SignedBeaconBlock finalizedBlock = dataStructureUtil.randomSignedBeaconBlock(1);
+    finalizeAttestedStateAt(chain, finalizedBlock.getRoot());
+    service.onBlockImported(chain.signature().getBlock(), false);
+
+    service.onNewFinalizedCheckpoint(checkpointAtPeriod(200), false);
+    blocksByRoot.put(finalizedBlock.getRoot(), finalizedBlock);
+    service.onNewFinalizedCheckpoint(checkpointAtPeriod(200), false);
+
+    assertThat(store.getBestUpdatesInRange(UInt64.ZERO, 1)).isEmpty();
   }
 
   private Checkpoint checkpointAt(final SignedBlockAndState blockAndState) {

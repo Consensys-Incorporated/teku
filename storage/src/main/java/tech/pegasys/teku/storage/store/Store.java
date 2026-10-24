@@ -778,14 +778,7 @@ class Store extends CacheableStore {
             maybeBlockAndState ->
                 maybeBlockAndState
                     .map(SignedBlockAndState::getState)
-                    .or(() -> getStateOnlyAnchorBlockState(blockRoot)));
-  }
-
-  private Optional<BeaconState> getStateOnlyAnchorBlockState(final Bytes32 blockRoot) {
-    return Optional.of(finalizedAnchor)
-        .filter(anchor -> anchor.getRoot().equals(blockRoot))
-        .filter(anchor -> anchor.getState().getSlot().equals(anchor.getBlockSlot()))
-        .map(AnchorPoint::getState);
+                    .or(() -> finalizedAnchor.getBlockPostState(blockRoot)));
   }
 
   @Override
