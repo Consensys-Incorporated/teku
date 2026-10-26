@@ -16,7 +16,10 @@ package tech.pegasys.teku.networking.p2p.libp2p.rpc;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -34,12 +37,15 @@ import io.libp2p.etc.util.netty.mux.RemoteWriteClosed;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.util.concurrent.EventExecutor;
+import io.netty.util.concurrent.ScheduledFuture;
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import kotlin.Unit;
@@ -272,6 +278,37 @@ public class RpcHandlerTest {
 
     streamController.handlerRemoved(context);
     assertThat(inboundRpcStreamLimiter.getActiveStreams()).isZero();
+  }
+
+  @Test
+  void shouldShortenDeadlineOnEventLoopRatherThanOnThreadCompletingHalfClose() {
+    final Controller<RpcRequestHandler> streamController =
+        activateStream(rpcHandler, createP2PStream(false));
+
+    assertThat(streamController.getRpcStream().closeWriteStream()).isCompleted();
+    // the deadline is only touched on the event loop, so the change waits for it to run
+    assertThat(nanosUntilNextScheduledTask())
+        .isEqualTo(RpcHandler.INBOUND_STREAM_LIFETIME.toNanos());
+
+    eventLoopChannel.runPendingTasks();
+    assertThat(nanosUntilNextScheduledTask())
+        .isEqualTo(RpcHandler.INBOUND_STREAM_FIN_GRACE.toNanos());
+  }
+
+  @Test
+  void shouldCompleteHalfCloseWhenEventLoopHasShutDown() {
+    final EventExecutor shutDownEventLoop = mock(EventExecutor.class);
+    doReturn(mock(ScheduledFuture.class))
+        .when(shutDownEventLoop)
+        .schedule(any(Runnable.class), anyLong(), any(TimeUnit.class));
+    doThrow(new RejectedExecutionException("event executor terminated"))
+        .when(shutDownEventLoop)
+        .execute(any());
+    when(context.executor()).thenReturn(shutDownEventLoop);
+    final Controller<RpcRequestHandler> streamController =
+        activateStream(rpcHandler, createP2PStream(false));
+
+    assertThat(streamController.getRpcStream().closeWriteStream()).isCompleted();
   }
 
   @Test
@@ -710,6 +747,11 @@ public class RpcHandlerTest {
     verify(p2pStream, never()).close();
     advanceTimeBy(Duration.ofMillis(1));
     verify(p2pStream).close();
+  }
+
+  private long nanosUntilNextScheduledTask() {
+    // runs only scheduled tasks that are due, leaving the ones handed to the event loop queued
+    return eventLoopChannel.runScheduledPendingTasks();
   }
 
   private boolean hasScheduledDeadline() {

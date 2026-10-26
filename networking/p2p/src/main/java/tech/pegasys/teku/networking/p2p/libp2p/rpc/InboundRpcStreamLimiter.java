@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.networking.p2p.libp2p.rpc;
 
+import com.google.common.annotations.VisibleForTesting;
 import java.util.HashMap;
 import java.util.Map;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
@@ -116,6 +117,7 @@ public class InboundRpcStreamLimiter {
     return activeStreams;
   }
 
+  @VisibleForTesting
   synchronized int getActiveStreams(final NodeId peer) {
     return activeStreamsPerPeer.getOrDefault(peer, 0);
   }

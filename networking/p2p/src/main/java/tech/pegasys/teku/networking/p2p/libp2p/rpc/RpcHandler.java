@@ -32,6 +32,7 @@ import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.ScheduledFuture;
 import java.time.Duration;
 import java.util.Optional;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import org.apache.logging.log4j.LogManager;
@@ -74,7 +75,8 @@ public class RpcHandler<
 
   /**
    * Backstop on how long an inbound stream can hold its permit, whatever way the peer abandons it.
-   * Longer than any response served today, so it only cuts off streams that are stuck.
+   * Meant to leave room for any response to a peer that reads at a reasonable pace; a response
+   * still being sent when it expires is cut off.
    */
   static final Duration INBOUND_STREAM_LIFETIME = Duration.ofMinutes(2);
 
@@ -302,8 +304,14 @@ public class RpcHandler<
 
     /** Runs on whichever thread completed our half-close. */
     private void onLocalWriteClosed() {
-      if (inbound) {
+      if (!inbound) {
+        return;
+      }
+      try {
         eventLoop.execute(this::shortenInboundDeadlineToFinGrace);
+      } catch (final RejectedExecutionException e) {
+        // The event loop has shut down, closing its streams, so there is no deadline to shorten
+        LOG.trace("Not shortening the deadline of inbound RPC stream {}", p2pStream, e);
       }
     }
 
