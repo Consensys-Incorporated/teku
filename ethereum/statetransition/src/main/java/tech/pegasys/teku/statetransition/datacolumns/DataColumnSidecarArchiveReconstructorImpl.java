@@ -294,6 +294,10 @@ public class DataColumnSidecarArchiveReconstructorImpl
               final boolean reconstructed =
                   error == null
                       && result.sidecars().values().stream().anyMatch(Optional::isPresent);
+              // completion counts as a request, as the waiting callers read the result now: a
+              // result
+              // that waited in the queue must not look least recently requested once it is ready
+              entry.lastRequestedAtMillis = timeProvider.getTimeInMillis().longValue();
               // a single write publishes the outcome, so a successful entry is never observed
               // as completed-but-failed
               entry.state = reconstructed ? State.SUCCEEDED : State.FAILED;

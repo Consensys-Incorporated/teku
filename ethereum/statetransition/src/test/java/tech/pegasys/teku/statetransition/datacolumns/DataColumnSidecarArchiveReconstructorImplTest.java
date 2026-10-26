@@ -585,6 +585,42 @@ public class DataColumnSidecarArchiveReconstructorImplTest {
   }
 
   @TestTemplate
+  public void shouldNotEvictResultThatWaitedInQueueWhenItCompletes() {
+    final StubAsyncRunner stubAsyncRunner = new StubAsyncRunner(timeProvider);
+    // keeps a single successful result
+    final DataColumnSidecarArchiveReconstructorImpl limitedReconstructor =
+        newReconstructor(stubAsyncRunner, 10, 10, 1);
+    final SignedBeaconBlock slowBlock = createBlockWithBlobs(UInt64.ONE);
+    final SignedBeaconBlock otherBlock = createBlockWithBlobs(UInt64.valueOf(2));
+    final SafeFuture<List<DataColumnSidecar>> slowBlockSidecars = new SafeFuture<>();
+    stubArchivedBlock(slowBlock, slowBlockSidecars);
+    stubArchivedBlock(otherBlock, SafeFuture.completedFuture(createFirstHalfSidecars(otherBlock)));
+    final UInt64 index = UInt64.valueOf(halfColumns);
+    final int requestId = limitedReconstructor.onRequest();
+
+    // slowBlock is requested first but completes after otherBlock, which was requested later
+    final SafeFuture<Optional<DataColumnSidecar>> first =
+        limitedReconstructor.reconstructDataColumnSidecar(slowBlock, index, requestId);
+    stubAsyncRunner.executeDueActionsRepeatedly();
+    timeProvider.advanceTimeBySeconds(1);
+    final SafeFuture<Optional<DataColumnSidecar>> other =
+        limitedReconstructor.reconstructDataColumnSidecar(
+            otherBlock, index, limitedReconstructor.onRequest());
+    stubAsyncRunner.executeDueActionsRepeatedly();
+    assertThat(other).isCompletedWithValueMatching(Optional::isPresent);
+    timeProvider.advanceTimeBySeconds(1);
+    slowBlockSidecars.complete(createFirstHalfSidecars(slowBlock));
+    stubAsyncRunner.executeDueActionsRepeatedly();
+    assertThat(first).isCompletedWithValueMatching(Optional::isPresent);
+
+    // completing counts as a request, so the request's next column reuses it instead of a rebuild
+    assertThat(
+            limitedReconstructor.reconstructDataColumnSidecar(slowBlock, index.plus(1), requestId))
+        .isCompletedWithValueMatching(Optional::isPresent);
+    verify(chainDataClient).getDataColumnSidecars(eq(slowBlock.getSlot()), anyList());
+  }
+
+  @TestTemplate
   public void shouldRecordDurationOfHungReconstructionOnceItFinishes() {
     final List<Double> observedSeconds = new ArrayList<>();
     final StubMetricsSystem recordingMetricsSystem =
