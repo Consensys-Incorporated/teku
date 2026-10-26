@@ -28,8 +28,11 @@ import io.libp2p.etc.util.netty.mux.RemoteWriteClosed;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.util.concurrent.EventExecutor;
+import io.netty.util.concurrent.ScheduledFuture;
 import java.time.Duration;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -44,6 +47,7 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture.Interruptor;
 import tech.pegasys.teku.infrastructure.exceptions.ExceptionUtil;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.networking.p2p.libp2p.LibP2PNodeId;
+import tech.pegasys.teku.networking.p2p.libp2p.rpc.InboundRpcStreamLimiter.AcquireResult;
 import tech.pegasys.teku.networking.p2p.libp2p.rpc.RpcHandler.Controller;
 import tech.pegasys.teku.networking.p2p.peer.NodeId;
 import tech.pegasys.teku.networking.p2p.peer.PeerDisconnectedException;
@@ -67,6 +71,18 @@ public class RpcHandler<
   private static final Logger LOG = LogManager.getLogger();
 
   private static final Duration STREAM_INITIALIZE_TIMEOUT = Duration.ofSeconds(5);
+
+  /**
+   * Backstop on how long an inbound stream can hold its permit, whatever way the peer abandons it.
+   * Longer than any response served today, so it only cuts off streams that are stuck.
+   */
+  static final Duration INBOUND_STREAM_LIFETIME = Duration.ofMinutes(2);
+
+  /**
+   * How long an inbound stream can stay open once we have half-closed it. The lifetime deadline is
+   * shortened to this, as the stream should already be closed by then.
+   */
+  static final Duration INBOUND_STREAM_FIN_GRACE = Duration.ofSeconds(5);
 
   private final AsyncRunner asyncRunner;
   private final RpcMethod<TOutgoingHandler, TRequest, TRespHandler> rpcMethod;
@@ -210,23 +226,23 @@ public class RpcHandler<
     final NodeId nodeId = new LibP2PNodeId(connection.secureSession().getRemoteId());
 
     final boolean isIncomingStream = !channel.isInitiator();
-    if (isIncomingStream && !inboundRpcStreamLimiter.tryAcquire()) {
-      LOG.debug(
-          "Rejecting inbound RPC stream for protocol {} from {} because the global active stream limit of {} has been reached",
-          selectedProtocol,
-          nodeId,
-          inboundRpcStreamLimiter.getMaximumActiveStreams());
-      ignoreFuture(streamChannel.close());
-      return SafeFuture.failedFuture(
-          new IllegalStateException("Maximum active inbound RPC streams reached"));
+    if (isIncomingStream) {
+      final AcquireResult acquireResult = inboundRpcStreamLimiter.tryAcquire(nodeId);
+      if (acquireResult != AcquireResult.ACQUIRED) {
+        LOG.debug(
+            "Rejecting inbound RPC stream for protocol {} from {}: {}",
+            selectedProtocol,
+            nodeId,
+            acquireResult);
+        ignoreFuture(streamChannel.close());
+        return SafeFuture.failedFuture(
+            new IllegalStateException("Inbound RPC stream rejected: " + acquireResult));
+      }
     }
 
     try {
       final Controller<TOutgoingHandler> controller =
-          new Controller<>(
-              nodeId,
-              streamChannel,
-              isIncomingStream ? inboundRpcStreamLimiter::release : () -> {});
+          new Controller<>(nodeId, streamChannel, inboundRpcStreamLimiter);
       if (isIncomingStream) {
         controller.setIncomingRequestHandler(
             rpcMethod.createIncomingRequestHandler(selectedProtocol));
@@ -235,7 +251,7 @@ public class RpcHandler<
       return controller.activeFuture;
     } catch (final Throwable t) {
       if (isIncomingStream) {
-        inboundRpcStreamLimiter.release();
+        inboundRpcStreamLimiter.release(nodeId);
       }
       ignoreFuture(streamChannel.close());
       return SafeFuture.failedFuture(t);
@@ -248,25 +264,83 @@ public class RpcHandler<
 
     private final NodeId nodeId;
     private final Stream p2pStream;
-    private final Runnable releaseStreamPermit;
+    private final InboundRpcStreamLimiter inboundRpcStreamLimiter;
+    private final boolean inbound;
     private Optional<TOutgoingHandler> outgoingRequestHandler = Optional.empty();
     private Optional<RpcRequestHandler> rpcRequestHandler = Optional.empty();
     private RpcStream rpcStream;
     private boolean readCompleted = false;
+    private EventExecutor eventLoop;
+    // Only used on the stream's event loop, where cancelling a task also removes it from the
+    // scheduler, so a closed stream is not kept reachable until its deadline would have fired
+    private Optional<ScheduledFuture<?>> inboundDeadline = Optional.empty();
 
     protected final SafeFuture<Controller<TOutgoingHandler>> activeFuture = new SafeFuture<>();
 
     private Controller(
-        final NodeId nodeId, final Stream p2pStream, final Runnable releaseStreamPermit) {
+        final NodeId nodeId,
+        final Stream p2pStream,
+        final InboundRpcStreamLimiter inboundRpcStreamLimiter) {
       this.nodeId = nodeId;
       this.p2pStream = p2pStream;
-      this.releaseStreamPermit = releaseStreamPermit;
+      this.inboundRpcStreamLimiter = inboundRpcStreamLimiter;
+      this.inbound = !p2pStream.isInitiator();
     }
 
     @Override
     public void channelActive(final ChannelHandlerContext ctx) {
-      rpcStream = new LibP2PRpcStream(nodeId, p2pStream, ctx);
+      eventLoop = ctx.executor();
+      rpcStream = new LibP2PRpcStream(nodeId, p2pStream, ctx, this::onLocalWriteClosed);
+      if (inbound) {
+        inboundDeadline =
+            Optional.of(
+                scheduleClose(
+                    INBOUND_STREAM_LIFETIME, inboundRpcStreamLimiter::recordLifetimeExpired));
+      }
       activeFuture.complete(this);
+    }
+
+    /** Runs on whichever thread completed our half-close. */
+    private void onLocalWriteClosed() {
+      if (inbound) {
+        eventLoop.execute(this::shortenInboundDeadlineToFinGrace);
+      }
+    }
+
+    /**
+     * Once we have half-closed, a peer that closed its side after its request lets the transport
+     * close the stream right away. A stream still open is held by a peer that did not, or by a
+     * transport that missed it, so it only gets INBOUND_STREAM_FIN_GRACE more.
+     */
+    private void shortenInboundDeadlineToFinGrace() {
+      inboundDeadline
+          .filter(
+              deadline ->
+                  deadline.getDelay(TimeUnit.NANOSECONDS) > INBOUND_STREAM_FIN_GRACE.toNanos())
+          .ifPresent(
+              deadline -> {
+                deadline.cancel(false);
+                inboundDeadline =
+                    Optional.of(
+                        scheduleClose(
+                            INBOUND_STREAM_FIN_GRACE,
+                            inboundRpcStreamLimiter::recordFinGraceExpired));
+              });
+    }
+
+    private ScheduledFuture<?> scheduleClose(final Duration delay, final Runnable recordExpiry) {
+      return eventLoop.schedule(
+          () -> {
+            LOG.debug(
+                "Inbound RPC stream {} from {} outlived its {} deadline, closing it",
+                p2pStream,
+                nodeId,
+                delay);
+            recordExpiry.run();
+            closeAbruptly();
+          },
+          delay.toNanos(),
+          TimeUnit.NANOSECONDS);
     }
 
     @Override
@@ -353,8 +427,13 @@ public class RpcHandler<
         onRemoteWriteClosed();
         runHandler(h -> h.closed(nodeId, rpcStream));
       } finally {
+        inboundDeadline.ifPresent(deadline -> deadline.cancel(false));
+        // so that a half-close completing after the close does not schedule a new deadline
+        inboundDeadline = Optional.empty();
         rpcRequestHandler = Optional.empty();
-        releaseStreamPermit.run();
+        if (inbound) {
+          inboundRpcStreamLimiter.release(nodeId);
+        }
       }
     }
 
