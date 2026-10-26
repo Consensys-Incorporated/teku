@@ -60,69 +60,71 @@ class RpcResponseCallback<TResponse extends SszData> implements ResponseCallback
   @Override
   public void respondAndCompleteSuccessfully(final TResponse data) {
     respond(data)
-        .thenRun(this::completeSuccessfully)
+        .thenRun(this::closeWriteStream)
         .finish(
-            RootCauseExceptionHandler.builder()
-                .addCatch(
-                    StreamClosedException.class,
-                    err -> LOG.trace("Failed to write because stream was closed", err))
-                .addCatch(
-                    StreamTimeoutException.class,
-                    err -> LOG.trace("Failed to write because response write timed out", err))
-                .addCatch(
-                    ClosedChannelException.class,
-                    err -> LOG.trace("Failed to write because channel was closed", err))
-                .addCatch(
-                    ChannelOutputShutdownException.class,
-                    err ->
-                        LOG.trace(
-                            "Failed to write because peer stopped reading the stream (STOP_SENDING)",
-                            err))
-                .defaultCatch(err -> LOG.error("Failed to write req/resp response", err)));
+            error -> {
+              logWriteFailure("response", error);
+              closeStreamAbruptly();
+            });
   }
 
   @Override
   public void completeSuccessfully() {
-    rpcStream.closeWriteStream().finishStackTrace();
+    closeWriteStream();
   }
 
   @Override
   public void completeWithErrorResponse(final RpcException error) {
     LOG.debug("Responding to RPC request with error: {}", error.getErrorMessageString());
-    try {
-      writeWithTimeout(responseEncoder.encodeErrorResponse(error))
-          .finish(
-              RootCauseExceptionHandler.builder()
-                  .addCatch(
-                      StreamClosedException.class,
-                      err ->
-                          LOG.trace(
-                              "Failed to write error response because stream was closed", err))
-                  .addCatch(
-                      StreamTimeoutException.class,
-                      err ->
-                          LOG.trace(
-                              "Failed to write error response because response write timed out",
-                              err))
-                  .addCatch(
-                      ClosedChannelException.class,
-                      err ->
-                          LOG.trace(
-                              "Failed to write error response because channel was closed", err))
-                  .addCatch(
-                      ChannelOutputShutdownException.class,
-                      err ->
-                          LOG.trace(
-                              "Failed to write error response because peer stopped reading the stream (STOP_SENDING)",
-                              err))
-                  .defaultCatch(err -> LOG.error("Failed to write req/resp error response", err)));
-    } catch (StreamClosedException e) {
-      LOG.debug(
-          "Unable to send error message ({}) to peer, rpc stream already closed: {}",
-          error,
-          rpcStream);
-    }
-    rpcStream.closeWriteStream().finishDebug(LOG);
+    writeWithTimeout(responseEncoder.encodeErrorResponse(error))
+        .finish(
+            this::closeWriteStream,
+            writeError -> {
+              logWriteFailure("error response", writeError);
+              closeStreamAbruptly();
+            });
+  }
+
+  /** Half-closes the stream after a complete response, closing it fully if that is not possible. */
+  private void closeWriteStream() {
+    rpcStream
+        .closeWriteStream()
+        .finish(
+            error -> {
+              LOG.trace("Failed to half-close stream after response, closing it", error);
+              closeStreamAbruptly();
+            });
+  }
+
+  /**
+   * A stream whose response could not be written is never half-closed: over QUIC a peer that sent
+   * STOP_SENDING refuses our FIN, so the stream would stay open (and keep its inbound RPC stream
+   * permit) until the connection dies. Only an explicit close releases it.
+   */
+  private void closeStreamAbruptly() {
+    rpcStream.closeAbruptly().finishTrace(LOG);
+  }
+
+  private void logWriteFailure(final String what, final Throwable error) {
+    RootCauseExceptionHandler.builder()
+        .addCatch(
+            StreamClosedException.class,
+            err -> LOG.trace("Failed to write {} because stream was closed", what, err))
+        .addCatch(
+            StreamTimeoutException.class,
+            err -> LOG.trace("Failed to write {} because response write timed out", what, err))
+        .addCatch(
+            ClosedChannelException.class,
+            err -> LOG.trace("Failed to write {} because channel was closed", what, err))
+        .addCatch(
+            ChannelOutputShutdownException.class,
+            err ->
+                LOG.trace(
+                    "Failed to write {} because peer stopped reading the stream (STOP_SENDING)",
+                    what,
+                    err))
+        .defaultCatch(err -> LOG.error("Failed to write req/resp {}", what, err))
+        .accept(error);
   }
 
   private SafeFuture<Void> writeWithTimeout(final Bytes responseBytes) {

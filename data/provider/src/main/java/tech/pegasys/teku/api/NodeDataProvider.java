@@ -27,6 +27,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.api.exceptions.BadRequestException;
 import tech.pegasys.teku.api.exceptions.ServiceUnavailableException;
 import tech.pegasys.teku.api.migrated.ValidatorLivenessAtEpoch;
@@ -207,6 +208,19 @@ public class NodeDataProvider {
             maybeSlot);
     return new ObjectAndMetaData<>(
         filteredPayloadAttestations, spec.atSlot(slot).getMilestone(), false, false, false);
+  }
+
+  public ObjectAndMetaData<List<SignedProposerPreferences>> getProposerPreferencesAndMetaData(
+      final Optional<UInt64> maybeSlot, final Optional<Bytes32> maybeDependentRoot) {
+    final List<SignedProposerPreferences> proposerPreferences =
+        proposerPreferencesManager.getSignedProposerPreferences(maybeSlot, maybeDependentRoot);
+    final UInt64 slot =
+        getSlot(
+            proposerPreferences,
+            preferences -> preferences.getMessage().getProposalSlot(),
+            maybeSlot);
+    return new ObjectAndMetaData<>(
+        proposerPreferences, spec.atSlot(slot).getMilestone(), false, false, false);
   }
 
   public SafeFuture<InternalValidationResult> postVoluntaryExit(final SignedVoluntaryExit exit) {

@@ -13,7 +13,6 @@
 
 package tech.pegasys.teku.statetransition.execution;
 
-import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
@@ -47,7 +46,8 @@ public interface ProposerPreferencesManager {
         }
 
         @Override
-        public Collection<ProposerPreferences> getProposerPreferencesForSlot(final UInt64 slot) {
+        public List<SignedProposerPreferences> getSignedProposerPreferences(
+            final Optional<UInt64> maybeSlot, final Optional<Bytes32> maybeDependentRoot) {
           return List.of();
         }
 
@@ -64,7 +64,12 @@ public interface ProposerPreferencesManager {
 
   Optional<ProposerPreferences> getProposerPreferences(UInt64 slot, Bytes32 dependentRoot);
 
-  Collection<ProposerPreferences> getProposerPreferencesForSlot(UInt64 slot);
+  /**
+   * Returns the accepted signed proposer preferences, ordered by proposal slot, optionally filtered
+   * by proposal slot and/or dependent root.
+   */
+  List<SignedProposerPreferences> getSignedProposerPreferences(
+      Optional<UInt64> maybeSlot, Optional<Bytes32> maybeDependentRoot);
 
   void subscribeOperationAdded(OperationAddedSubscriber<SignedProposerPreferences> subscriber);
 }
