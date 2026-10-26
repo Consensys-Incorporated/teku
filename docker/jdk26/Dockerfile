@@ -16,12 +16,14 @@ RUN $JAVA_HOME/bin/jlink \
          --no-header-files \
          --output /javaruntime
 
-# Stop trusting emSign ECC Root CA - G3, which the eMudhra intermediate CAs compromised in
-# October 2026 chain to, and AAA Certificate Services, which cross-signs them
-# (https://openjdk.org/emudhra). Roots are matched by SHA-256 fingerprint, so this works whatever
-# their alias, and the build fails if either is still trusted. Remove once the base image drops them.
+# Stop trusting the roots OpenJDK removed after the eMudhra intermediate CA compromise of
+# October 2026 (https://openjdk.org/emudhra): emSign ECC Root CA - G3, emSign Root CA - G1 and
+# G2, and AAA Certificate Services. Roots are matched by SHA-256 fingerprint, so this works
+# whatever their alias, and the build fails if any is still trusted. Temurin's trust store follows
+# Mozilla, which still trusts emSign Root CA - G1, so this keeps removing G1 until we choose to
+# trust it again; the others become no-ops once the base image drops them.
 RUN set -eu; \
-    DISTRUSTED_ROOTS="86:A1:EC:BA:08:9C:4A:8D:3B:BE:27:34:C6:12:BA:34:1D:81:3E:04:3C:F9:E8:A8:62:CD:5C:57:A3:6B:BE:6B|D7:A7:A0:FB:5D:7E:27:31:D7:71:E9:48:4E:BC:DE:F7:1D:5F:0C:3E:0A:29:48:78:2B:C8:3E:E0:EA:69:9E:F4"; \
+    DISTRUSTED_ROOTS="86:A1:EC:BA:08:9C:4A:8D:3B:BE:27:34:C6:12:BA:34:1D:81:3E:04:3C:F9:E8:A8:62:CD:5C:57:A3:6B:BE:6B|40:F6:AF:03:46:A9:9A:A1:CD:1D:55:5A:4E:9C:CE:62:C7:F9:63:46:03:EE:40:66:15:83:3D:C8:C8:D0:03:67|1A:A0:C2:70:9E:83:1B:D6:E3:B5:12:9A:00:BA:41:F7:EE:EF:02:08:72:F1:E6:50:4B:F0:F6:C3:F2:4F:3A:F3|D7:A7:A0:FB:5D:7E:27:31:D7:71:E9:48:4E:BC:DE:F7:1D:5F:0C:3E:0A:29:48:78:2B:C8:3E:E0:EA:69:9E:F4"; \
     KEYTOOL="$JAVA_HOME/bin/keytool"; \
     STORE="-keystore /javaruntime/lib/security/cacerts -storepass changeit"; \
     $KEYTOOL -list $STORE > /dev/null; \
