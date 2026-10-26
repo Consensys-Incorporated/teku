@@ -13,39 +13,19 @@
 
 package tech.pegasys.teku.beaconrestapi.handlers.v1.beacon;
 
-import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.PARAMETER_STATE_ID;
-import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.ETH_CONSENSUS_HEADER_TYPE;
-import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.MILESTONE_TYPE;
-import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.sszResponseType;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
-import static tech.pegasys.teku.infrastructure.http.RestApiConstants.EXECUTION_OPTIMISTIC;
-import static tech.pegasys.teku.infrastructure.http.RestApiConstants.FINALIZED;
-import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
-import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_BEACON;
-import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.BOOLEAN_TYPE;
-
-import com.fasterxml.jackson.core.JsonProcessingException;
-import java.util.Optional;
 import tech.pegasys.teku.api.ChainDataProvider;
 import tech.pegasys.teku.api.DataProvider;
-import tech.pegasys.teku.infrastructure.async.SafeFuture;
-import tech.pegasys.teku.infrastructure.json.types.SerializableTypeDefinition;
-import tech.pegasys.teku.infrastructure.restapi.endpoints.AsyncApiResponse;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.EndpointMetadata;
-import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
-import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
-import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
 import tech.pegasys.teku.spec.SpecMilestone;
-import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingWithdrawal;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 
-public class GetStateBuilderPendingWithdrawals extends RestApiEndpoint {
+public class GetStateBuilderPendingWithdrawals
+    extends AbstractGetStateField<SszList<BuilderPendingWithdrawal>> {
   public static final String ROUTE = "/eth/v1/beacon/states/{state_id}/builder_pending_withdrawals";
-
-  private final ChainDataProvider chainDataProvider;
 
   public GetStateBuilderPendingWithdrawals(
       final DataProvider dataProvider, final SchemaDefinitionCache schemaDefinitionCache) {
@@ -55,61 +35,18 @@ public class GetStateBuilderPendingWithdrawals extends RestApiEndpoint {
   GetStateBuilderPendingWithdrawals(
       final ChainDataProvider provider, final SchemaDefinitionCache schemaDefinitionCache) {
     super(
+        provider,
         EndpointMetadata.get(ROUTE)
             .operationId("getBuilderPendingWithdrawals")
             .summary("Get State Builder Pending Withdrawals")
             .description(
-                "Returns pending builder withdrawals for state with given 'stateId'. Should return 400 if the state retrieved is prior to Gloas.")
-            .pathParam(PARAMETER_STATE_ID)
-            .tags(TAG_BEACON)
-            .response(
-                SC_OK,
-                "Request successful",
-                getResponseType(schemaDefinitionCache),
-                sszResponseType(),
-                ETH_CONSENSUS_HEADER_TYPE)
-            .withNotFoundResponse()
-            .withNotAcceptableResponse()
-            .withChainDataResponses()
-            .build());
-    this.chainDataProvider = provider;
-  }
-
-  @Override
-  public void handleRequest(final RestApiRequest request) throws JsonProcessingException {
-    final SafeFuture<Optional<ObjectAndMetaData<SszList<BuilderPendingWithdrawal>>>> future =
-        chainDataProvider.getStateBuilderPendingWithdrawals(
-            request.getPathParameter(PARAMETER_STATE_ID));
-
-    request.respondAsync(
-        future.thenApply(
-            maybeData ->
-                maybeData
-                    .map(
-                        objectAndMetadata -> {
-                          request.header(
-                              HEADER_CONSENSUS_VERSION,
-                              objectAndMetadata.getMilestone().lowerCaseName());
-                          return AsyncApiResponse.respondOk(objectAndMetadata);
-                        })
-                    .orElseGet(AsyncApiResponse::respondNotFound)));
-  }
-
-  @SuppressWarnings("unchecked")
-  private static SerializableTypeDefinition<ObjectAndMetaData<SszList<BuilderPendingWithdrawal>>>
-      getResponseType(final SchemaDefinitionCache schemaDefinitionCache) {
-    final SchemaDefinitionsGloas definitions =
+                "Returns pending builder withdrawals for state with given 'stateId'. Should return 400 if the state retrieved is prior to Gloas."),
+        "GetBuilderPendingWithdrawalsResponse",
+        SpecMilestone.GLOAS,
+        "builder pending withdrawals",
         SchemaDefinitionsGloas.required(
-            schemaDefinitionCache.getSchemaDefinition(SpecMilestone.GLOAS));
-    final SszListSchema<BuilderPendingWithdrawal, SszList<BuilderPendingWithdrawal>> schema =
-        (SszListSchema<BuilderPendingWithdrawal, SszList<BuilderPendingWithdrawal>>)
-            definitions.getBuilderPendingWithdrawalsSchema();
-    return SerializableTypeDefinition.<ObjectAndMetaData<SszList<BuilderPendingWithdrawal>>>object()
-        .name("GetBuilderPendingWithdrawalsResponse")
-        .withField("version", MILESTONE_TYPE, ObjectAndMetaData::getMilestone)
-        .withField(EXECUTION_OPTIMISTIC, BOOLEAN_TYPE, ObjectAndMetaData::isExecutionOptimistic)
-        .withField(FINALIZED, BOOLEAN_TYPE, ObjectAndMetaData::isFinalized)
-        .withField("data", schema.getJsonTypeDefinition(), ObjectAndMetaData::getData)
-        .build();
+                schemaDefinitionCache.getSchemaDefinition(SpecMilestone.GLOAS))
+            .getBuilderPendingWithdrawalsSchema(),
+        state -> BeaconStateGloas.required(state).getBuilderPendingWithdrawals());
   }
 }

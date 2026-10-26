@@ -287,15 +287,22 @@ public class ProposerConfigManager
 
   @Override
   public ResolvedBuilderConfig resolveBuilderConfig(final BLSPublicKey publicKey) {
-    final UInt64 minBid =
+    final Optional<UInt64> maybeProposerConfigMinBid =
         getAttributeWithFallback(
-                config -> config.getBuilder().flatMap(BuilderConfig::getMinBid), publicKey)
-            .orElse(config.getBuilderMinBid());
+            config -> config.getBuilder().flatMap(BuilderConfig::getMinBid), publicKey);
+    final Optional<UInt64> maybeProposerConfigBuilderBoostFactor =
+        getAttributeWithFallback(
+            config -> config.getBuilder().flatMap(BuilderConfig::getBuilderBoostFactor), publicKey);
+
+    // the defaults for the bids received over P2P
+    final UInt64 p2pMinBid = maybeProposerConfigMinBid.orElse(config.getP2pBuilderMinBid());
+    final UInt64 p2pBuilderBoostFactor =
+        maybeProposerConfigBuilderBoostFactor.orElse(config.getP2pBuilderBoostFactor());
+
+    // the defaults for the configured builders
+    final UInt64 builderMinBid = maybeProposerConfigMinBid.orElse(config.getBuilderMinBid());
     final UInt64 builderBoostFactor =
-        getAttributeWithFallback(
-                config -> config.getBuilder().flatMap(BuilderConfig::getBuilderBoostFactor),
-                publicKey)
-            .orElse(config.getBuilderBoostFactor());
+        maybeProposerConfigBuilderBoostFactor.orElse(config.getBuilderBoostFactor());
 
     // the builder flow is on unless the proposer config disables it
     final boolean builderEnabled =
@@ -304,7 +311,7 @@ public class ProposerConfigManager
             .orElse(true);
 
     if (!builderEnabled) {
-      return new ResolvedBuilderConfig(minBid, builderBoostFactor, List.of());
+      return new ResolvedBuilderConfig(p2pMinBid, p2pBuilderBoostFactor, List.of());
     }
 
     final Optional<List<BuilderEntry>> maybeProposerConfigBuilders =
@@ -327,7 +334,7 @@ public class ProposerConfigManager
                                     builder
                                         .getMaxExecutionPayment()
                                         .orElse(config.getBuilderMaxExecutionPayment()),
-                                    builder.getMinBid().orElse(minBid),
+                                    builder.getMinBid().orElse(builderMinBid),
                                     builder.getBuilderBoostFactor().orElse(builderBoostFactor)))
                         .toList())
             .orElseGet(
@@ -340,10 +347,10 @@ public class ProposerConfigManager
                                     getDefaultAuthData(url),
                                     List.of(),
                                     config.getBuilderMaxExecutionPayment(),
-                                    minBid,
+                                    builderMinBid,
                                     builderBoostFactor))
                         .toList());
-    return new ResolvedBuilderConfig(minBid, builderBoostFactor, resolvedBuilders);
+    return new ResolvedBuilderConfig(p2pMinBid, p2pBuilderBoostFactor, resolvedBuilders);
   }
 
   private Bytes getDefaultAuthData(final URL builderUrl) {

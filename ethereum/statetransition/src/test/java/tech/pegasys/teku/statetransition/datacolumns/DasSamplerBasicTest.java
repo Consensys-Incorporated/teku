@@ -28,6 +28,7 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -53,6 +54,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
@@ -86,6 +88,8 @@ public class DasSamplerBasicTest {
   private CustodyGroupCountManager custodyGroupCountManager;
   private StubMetricsSystem metricsSystem;
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(0, SPEC);
+  private final DataStructureUtil gloasDataStructureUtil =
+      new DataStructureUtil(0, TestSpecFactory.createMinimalGloas());
 
   private DasSamplerBasicImpl sampler;
 
@@ -645,6 +649,174 @@ public class DasSamplerBasicTest {
     assertThat(gloasSampler.getRecentlySampledColumnsByRoot())
         .doesNotContainKey(blockWithBlobs.getRoot());
     assertThat(completionFuture).isCancelled();
+  }
+
+  @Test
+  void onSlot_shouldRetainLatestFinalizedAnchorTrackerUntilExecutionPayloadImported() {
+    final DasSamplerBasicImpl gloasSampler = createGloasSampler();
+    final UInt64 finalizedEpoch = UInt64.ONE;
+    // state-only checkpoint anchor: its block slot is at or below the finalized epoch start
+    final UInt64 anchorBlockSlot = SPEC.computeStartSlotAtEpoch(finalizedEpoch).decrement();
+    final Bytes32 anchorRoot = dataStructureUtil.randomBytes32();
+    mockLatestFinalizedAnchor(anchorRoot, Optional.empty());
+    when(recentChainData.getFinalizedEpoch()).thenReturn(finalizedEpoch);
+    when(recentChainData.containsBlock(any())).thenReturn(false);
+
+    final SafeFuture<List<UInt64>> anchorTrackerFuture = new SafeFuture<>();
+    final DataColumnSamplingTracker anchorTracker =
+        incompleteMockTracker(anchorRoot, anchorBlockSlot, anchorTrackerFuture);
+    // another incomplete tracker at the same finalized slot is still pruned
+    final SafeFuture<List<UInt64>> otherTrackerFuture = new SafeFuture<>();
+    final DataColumnSamplingTracker otherTracker =
+        incompleteMockTracker(
+            dataStructureUtil.randomBytes32(), anchorBlockSlot, otherTrackerFuture);
+    gloasSampler.getRecentlySampledColumnsByRoot().put(anchorRoot, anchorTracker);
+    gloasSampler.getRecentlySampledColumnsByRoot().put(otherTracker.blockRoot(), otherTracker);
+
+    gloasSampler.onSlot(SPEC.computeStartSlotAtEpoch(finalizedEpoch.plus(2)));
+
+    assertThat(gloasSampler.getRecentlySampledColumnsByRoot())
+        .containsExactly(entry(anchorRoot, anchorTracker));
+    assertThat(anchorTrackerFuture).isNotDone();
+    assertThat(otherTrackerFuture).isCompletedExceptionally();
+
+    // the anchor envelope import removes the tracker, as for any other imported payload
+    gloasSampler.onExecutionPayloadImported(new SlotAndBlockRoot(anchorBlockSlot, anchorRoot));
+
+    assertThat(gloasSampler.getRecentlySampledColumnsByRoot()).isEmpty();
+    assertThat(anchorTrackerFuture).isCancelled();
+  }
+
+  @Test
+  void onSlot_shouldPruneLatestFinalizedAnchorTrackerOnceExecutionPayloadIsInStore() {
+    final DasSamplerBasicImpl gloasSampler = createGloasSampler();
+    final UInt64 finalizedEpoch = UInt64.ONE;
+    final UInt64 anchorBlockSlot = SPEC.computeStartSlotAtEpoch(finalizedEpoch).decrement();
+    final Bytes32 anchorRoot = dataStructureUtil.randomBytes32();
+    mockLatestFinalizedAnchor(anchorRoot, Optional.of(mock(SignedExecutionPayloadEnvelope.class)));
+    when(recentChainData.getFinalizedEpoch()).thenReturn(finalizedEpoch);
+    when(recentChainData.containsBlock(any())).thenReturn(false);
+
+    final SafeFuture<List<UInt64>> anchorTrackerFuture = new SafeFuture<>();
+    final DataColumnSamplingTracker anchorTracker =
+        incompleteMockTracker(anchorRoot, anchorBlockSlot, anchorTrackerFuture);
+    gloasSampler.getRecentlySampledColumnsByRoot().put(anchorRoot, anchorTracker);
+
+    gloasSampler.onSlot(SPEC.computeStartSlotAtEpoch(finalizedEpoch.plus(2)));
+
+    assertThat(gloasSampler.getRecentlySampledColumnsByRoot()).isEmpty();
+    assertThat(anchorTrackerFuture).isCompletedExceptionally();
+  }
+
+  @Test
+  void onSlot_shouldPruneLatestFinalizedAnchorTrackerWhenAnchorHasBlock() {
+    final DasSamplerBasicImpl gloasSampler = createGloasSampler();
+    final UInt64 finalizedEpoch = UInt64.ONE;
+    final UInt64 anchorBlockSlot = SPEC.computeStartSlotAtEpoch(finalizedEpoch).decrement();
+    final Bytes32 anchorRoot = dataStructureUtil.randomBytes32();
+    // a regularly finalized anchor (block present) whose payload never arrived is not recovered
+    mockLatestFinalizedAnchor(
+        anchorRoot, Optional.of(mock(SignedBeaconBlock.class)), Optional.empty());
+    when(recentChainData.getFinalizedEpoch()).thenReturn(finalizedEpoch);
+    when(recentChainData.containsBlock(any())).thenReturn(false);
+
+    final SafeFuture<List<UInt64>> anchorTrackerFuture = new SafeFuture<>();
+    final DataColumnSamplingTracker anchorTracker =
+        incompleteMockTracker(anchorRoot, anchorBlockSlot, anchorTrackerFuture);
+    gloasSampler.getRecentlySampledColumnsByRoot().put(anchorRoot, anchorTracker);
+
+    gloasSampler.onSlot(SPEC.computeStartSlotAtEpoch(finalizedEpoch.plus(2)));
+
+    assertThat(gloasSampler.getRecentlySampledColumnsByRoot()).isEmpty();
+    assertThat(anchorTrackerFuture).isCompletedExceptionally();
+    verify(recentChainData, never()).getStore();
+  }
+
+  @Test
+  void onSlot_shouldPruneLatestFinalizedAnchorTrackerWhenDataAvailabilityNotDeferred() {
+    final UInt64 finalizedEpoch = UInt64.ONE;
+    final UInt64 anchorBlockSlot = SPEC.computeStartSlotAtEpoch(finalizedEpoch);
+    final Bytes32 anchorRoot = dataStructureUtil.randomBytes32();
+    mockLatestFinalizedAnchor(anchorRoot, Optional.empty());
+    when(recentChainData.getFinalizedEpoch()).thenReturn(finalizedEpoch);
+    when(recentChainData.containsBlock(any())).thenReturn(false);
+
+    final SafeFuture<List<UInt64>> anchorTrackerFuture = new SafeFuture<>();
+    final DataColumnSamplingTracker anchorTracker =
+        incompleteMockTracker(anchorRoot, anchorBlockSlot, anchorTrackerFuture);
+    sampler.getRecentlySampledColumnsByRoot().put(anchorRoot, anchorTracker);
+
+    // pre-Gloas the block import already required data availability, nothing to wait for
+    sampler.onSlot(SPEC.computeStartSlotAtEpoch(finalizedEpoch.plus(2)));
+
+    assertThat(sampler.getRecentlySampledColumnsByRoot()).isEmpty();
+    assertThat(anchorTrackerFuture).isCompletedExceptionally();
+    verify(recentChainData, never()).getStore();
+  }
+
+  @Test
+  void checkDataAvailability_shouldSurviveSlotTickForLatestFinalizedAnchorEnvelope() {
+    final DasSamplerBasicImpl gloasSampler = createGloasSampler();
+    final UInt64 finalizedEpoch = UInt64.ONE;
+    final UInt64 anchorBlockSlot = SPEC.computeStartSlotAtEpoch(finalizedEpoch).decrement();
+    final Bytes32 anchorRoot = dataStructureUtil.randomBytes32();
+    mockLatestFinalizedAnchor(anchorRoot, Optional.empty());
+    when(recentChainData.getFinalizedEpoch()).thenReturn(finalizedEpoch);
+    when(recentChainData.containsBlock(any())).thenReturn(false);
+    when(rpcFetchDelayProvider.calculate(anchorBlockSlot)).thenReturn(Duration.ZERO);
+    final Map<DataColumnSlotAndIdentifier, SafeFuture<DataColumnSidecar>> pendingRetrievals =
+        new HashMap<>();
+    when(retriever.retrieve(any()))
+        .thenAnswer(
+            invocation ->
+                pendingRetrievals.computeIfAbsent(
+                    invocation.getArgument(0), __ -> new SafeFuture<>()));
+
+    // the anchor envelope DA check starts the column fetch at the anchor block slot
+    final SafeFuture<List<UInt64>> completionFuture =
+        gloasSampler.checkDataAvailability(anchorBlockSlot, anchorRoot);
+    assertThat(pendingRetrievals).hasSize(SAMPLING_INDICES.size());
+    assertThat(completionFuture).isNotDone();
+
+    // a slot tick while the columns are still being fetched must not expire the check
+    gloasSampler.onSlot(SPEC.computeStartSlotAtEpoch(finalizedEpoch.plus(2)));
+
+    assertThat(gloasSampler.getRecentlySampledColumnsByRoot()).containsKey(anchorRoot);
+    assertThat(completionFuture).isNotDone();
+
+    pendingRetrievals.forEach((id, future) -> future.complete(mock(DataColumnSidecar.class)));
+
+    assertThat(completionFuture)
+        .isCompletedWithValueMatching(sampled -> Set.copyOf(sampled).equals(SAMPLING_INDICES));
+  }
+
+  private void mockLatestFinalizedAnchor(
+      final Bytes32 anchorRoot, final Optional<SignedExecutionPayloadEnvelope> executionPayload) {
+    mockLatestFinalizedAnchor(anchorRoot, Optional.empty(), executionPayload);
+  }
+
+  private void mockLatestFinalizedAnchor(
+      final Bytes32 anchorRoot,
+      final Optional<SignedBeaconBlock> anchorBlock,
+      final Optional<SignedExecutionPayloadEnvelope> executionPayload) {
+    final AnchorPoint anchor = mock(AnchorPoint.class);
+    when(anchor.getRoot()).thenReturn(anchorRoot);
+    when(anchor.getSignedBeaconBlock()).thenReturn(anchorBlock);
+    when(anchor.getState()).thenReturn(gloasDataStructureUtil.randomBeaconState());
+    when(recentChainData.getLatestFinalized()).thenReturn(Optional.of(anchor));
+    final UpdatableStore store = mock(UpdatableStore.class);
+    when(store.getExecutionPayloadIfAvailable(anchorRoot)).thenReturn(executionPayload);
+    when(recentChainData.getStore()).thenReturn(store);
+  }
+
+  private DataColumnSamplingTracker incompleteMockTracker(
+      final Bytes32 blockRoot, final UInt64 slot, final SafeFuture<List<UInt64>> completionFuture) {
+    final DataColumnSamplingTracker tracker = mock(DataColumnSamplingTracker.class);
+    when(tracker.blockRoot()).thenReturn(blockRoot);
+    when(tracker.slot()).thenReturn(slot);
+    when(tracker.completionFuture()).thenReturn(completionFuture);
+    when(tracker.fullySampled()).thenReturn(new AtomicBoolean(false));
+    return tracker;
   }
 
   @Test

@@ -483,20 +483,26 @@ public class BeaconNodeCommandTest extends AbstractBeaconNodeCommandTest {
   @Test
   public void shouldParseBuilderOptions() {
     final String[] args = {
-      "--Xbuilder-min-bid",
+      "--builder-min-bid",
       "42",
-      "--Xbuilder-boost-factor",
+      "--p2p-builder-min-bid",
+      "43",
+      "--builder-boost-factor",
       "80",
-      "--Xbuilder-max-execution-payment",
+      "--p2p-builder-boost-factor",
+      "70",
+      "--builder-max-execution-payment",
       "67",
-      "--Xbuilder-urls",
+      "--builder-urls",
       "https://foobar.com,https://plataberget.com"
     };
     beaconNodeCommand.parse(args);
     final ValidatorConfig validatorConfig =
         beaconNodeCommand.tekuConfiguration().validatorClient().getValidatorConfig();
     assertThat(validatorConfig.getBuilderMinBid()).isEqualTo(UInt64.valueOf(42));
+    assertThat(validatorConfig.getP2pBuilderMinBid()).isEqualTo(UInt64.valueOf(43));
     assertThat(validatorConfig.getBuilderBoostFactor()).isEqualTo(UInt64.valueOf(80));
+    assertThat(validatorConfig.getP2pBuilderBoostFactor()).isEqualTo(UInt64.valueOf(70));
     assertThat(validatorConfig.getBuilderMaxExecutionPayment()).isEqualTo(UInt64.valueOf(67));
     assertThat(validatorConfig.getBuilderUrls()).hasSize(2);
   }
