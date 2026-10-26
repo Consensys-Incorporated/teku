@@ -60,7 +60,7 @@ class RpcResponseCallback<TResponse extends SszData> implements ResponseCallback
   @Override
   public void respondAndCompleteSuccessfully(final TResponse data) {
     respond(data)
-        .thenRun(this::completeSuccessfully)
+        .thenRun(this::closeWriteStream)
         .finish(
             error -> {
               logWriteFailure("response", error);
@@ -70,13 +70,7 @@ class RpcResponseCallback<TResponse extends SszData> implements ResponseCallback
 
   @Override
   public void completeSuccessfully() {
-    rpcStream
-        .closeWriteStream()
-        .finish(
-            error -> {
-              LOG.trace("Failed to half-close stream after response, closing it", error);
-              closeStreamAbruptly();
-            });
+    closeWriteStream();
   }
 
   @Override
@@ -84,9 +78,20 @@ class RpcResponseCallback<TResponse extends SszData> implements ResponseCallback
     LOG.debug("Responding to RPC request with error: {}", error.getErrorMessageString());
     writeWithTimeout(responseEncoder.encodeErrorResponse(error))
         .finish(
-            this::completeSuccessfully,
+            this::closeWriteStream,
             writeError -> {
               logWriteFailure("error response", writeError);
+              closeStreamAbruptly();
+            });
+  }
+
+  /** Half-closes the stream after a complete response, closing it fully if that is not possible. */
+  private void closeWriteStream() {
+    rpcStream
+        .closeWriteStream()
+        .finish(
+            error -> {
+              LOG.trace("Failed to half-close stream after response, closing it", error);
               closeStreamAbruptly();
             });
   }
