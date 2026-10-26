@@ -1,6 +1,7 @@
 # Changelog
 
 ## Upcoming Breaking Changes
+ - Teku will stop publishing the `-jdk26` Docker images in a future release, because Java 26 is end of life and no longer receives security fixes. Use the `-jdk25` tags instead.
 
 ## Current Releases
 
@@ -19,6 +20,7 @@
  - Added the `GET /eth/v1/beacon/proposer_preferences` Gloas Beacon API endpoint, which returns the signed proposer preferences known by the node, optionally filtered by `slot` and `dependent_root`. [#11548](https://github.com/Consensys-Incorporated/teku/pull/11548)
 
 ### Bug Fixes
+ - Docker images no longer trust the emSign ECC Root CA - G3, emSign Root CA - G1, emSign Root CA - G2 or AAA Certificate Services roots, which OpenJDK removed after the eMudhra intermediate certificate authorities were compromised in October 2026. The Eclipse Temurin base images do not include this fix yet.
  - Close an inbound RPC stream when its response cannot be written, instead of half-closing it. Over QUIC a peer that cancelled its request (STOP_SENDING) refuses our FIN, so such streams stayed open until the peer disconnected and could exhaust the node-wide limit of 128 inbound RPC streams, after which every other peer's requests were rejected.
  - The fee recipient of a Gloas block now comes from signed proposer preferences, so preferences that fail validation no longer change where the block pays, and `prepare_beacon_proposer` is ignored once Gloas is active. [#11518](https://github.com/Consensys-Incorporated/teku/issues/11518)
  - Reduced the memory held by gossip blocks waiting for validation, limited their total size, and blocks too far in the future are now ignored before they are decoded. [#11503](https://github.com/Consensys-Incorporated/teku/pull/11503)
