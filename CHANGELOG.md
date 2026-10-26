@@ -1,6 +1,7 @@
 # Changelog
 
 ## Upcoming Breaking Changes
+ - Teku will stop publishing the `-jdk26` Docker images in a future release, because Java 26 is end of life and no longer receives security fixes. Use the `-jdk25` tags instead.
 
 ## Current Releases
 
