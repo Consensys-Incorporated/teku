@@ -247,12 +247,6 @@ public class AttestationValidator {
               data.getBeaconBlockRoot()));
     }
 
-    // The block being voted for must pass validation to be in the store.
-    // If it's not in the store, it may not have been processed yet so save for future.
-    if (!gossipValidationHelper.isBlockAvailable(data.getBeaconBlockRoot())) {
-      return completedFuture(InternalValidationResultWithState.saveForFuture());
-    }
-
     return gossipValidationHelper
         .getStateForAttestationValidation(attestation.getData())
         .thenCompose(
@@ -319,6 +313,12 @@ public class AttestationValidator {
                 return completedFuture(
                     InternalValidationResultWithState.ignore(
                         "Already seen an attestation for this target epoch and validator"));
+              }
+
+              // The block being voted for must pass validation to be in the store.
+              // If it's not in the store, it may not have been processed yet so save for future.
+              if (!gossipValidationHelper.isBlockAvailable(data.getBeaconBlockRoot())) {
+                return completedFuture(InternalValidationResultWithState.saveForFuture());
               }
 
               return spec.isValidIndexedAttestation(
