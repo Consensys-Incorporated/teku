@@ -36,6 +36,7 @@ import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
+import org.hyperledger.besu.plugin.services.metrics.LabelledMetric;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.ThrottlingTaskQueue;
@@ -132,7 +133,9 @@ public class DataColumnSidecarArchiveReconstructorImpl
 
   private final MetricsHistogram reconstructionTimeSeconds;
   private final Counter reconstructionSuccessCounter;
-  private final Counter reconstructionFailureCounter;
+  // Labelled by reason, keeping load shedding (rejected, storage_rejected, skipped, timeout) apart
+  // from genuine problems (unavailable, error); see failureReason
+  private final LabelledMetric<Counter> reconstructionFailureCounter;
 
   public DataColumnSidecarArchiveReconstructorImpl(
       final CombinedChainDataClient chainDataClient,
@@ -187,9 +190,9 @@ public class DataColumnSidecarArchiveReconstructorImpl
                 .getNumberOfColumns()
             / 2;
     this.sidecarArchivePrunableChannel = sidecarArchivePrunableChannel;
-    // Queue rejections (full queue) are surfaced via reconstructionFailureCounter, so the
-    // queue's own metrics are omitted here to keep a single reconstructor per node metric-free of
-    // duplicates.
+    // Queue rejections (full queue) are surfaced via the rejected reason of
+    // reconstructionFailureCounter, so the queue's own metrics are omitted here to keep a single
+    // reconstructor per node metric-free of duplicates.
     this.reconstructionQueue =
         ThrottlingTaskQueue.create(maxConcurrentReconstructions, maxQueuedReconstructions);
     this.reconstructionTimeSeconds =
@@ -206,15 +209,16 @@ public class DataColumnSidecarArchiveReconstructorImpl
             "data_column_sidecar_archive_reconstruction_successes_total",
             "Total number of successful data column sidecar archive reconstructions");
     this.reconstructionFailureCounter =
-        metricsSystem.createCounter(
+        metricsSystem.createLabelledCounter(
             TekuMetricCategory.BEACON,
             "data_column_sidecar_archive_reconstruction_failures_total",
-            "Total number of failed data column sidecar archive reconstructions");
+            "Total number of failed data column sidecar archive reconstructions",
+            "reason");
   }
 
   @Override
   public SafeFuture<Optional<DataColumnSidecar>> reconstructDataColumnSidecar(
-      final SignedBeaconBlock block, final UInt64 index, final int requestId) {
+      final SlotAndBlockRoot slotAndBlockRoot, final UInt64 index, final int requestId) {
     checkArgument(
         index.isGreaterThanOrEqualTo(halfColumns),
         "Only second-half column indices (>= %s) can be reconstructed, got %s",
@@ -222,17 +226,17 @@ public class DataColumnSidecarArchiveReconstructorImpl
         index);
     LOG.trace(
         "Reconstruction requested for slot {} index {} blockRoot {} (requestId {})",
-        block.getSlot(),
+        slotAndBlockRoot.getSlot(),
         index,
-        block.getRoot(),
+        slotAndBlockRoot.getBlockRoot(),
         requestId);
     final long now = timeProvider.getTimeInMillis().longValue();
     if (requestsPastDeadline.contains(requestId)) {
-      return getCompletedReconstruction(block.getSlotAndBlockRoot(), index, now);
+      return getCompletedReconstruction(slotAndBlockRoot, index, now);
     }
     final ReconstructionCacheEntry entry =
         reconstructions.compute(
-            block.getSlotAndBlockRoot(),
+            slotAndBlockRoot,
             (__, existing) -> {
               final ReconstructionCacheEntry maybeReused =
                   existing != null && !existing.hasFailed()
@@ -244,7 +248,7 @@ public class DataColumnSidecarArchiveReconstructorImpl
     // started only once compute has returned: completing a reconstruction can evict other entries,
     // which must not happen inside compute
     if (entry.claimStart()) {
-      startReconstruction(block, entry);
+      startReconstruction(slotAndBlockRoot, entry);
     }
     // the deadline applies to this caller's own future only, never to the shared reconstruction
     return entry
@@ -256,7 +260,7 @@ public class DataColumnSidecarArchiveReconstructorImpl
               requestsPastDeadline.add(requestId);
               LOG.debug(
                   "Reconstruction request for {} index {} timed out (requestId {}): {}",
-                  block.getSlotAndBlockRoot(),
+                  slotAndBlockRoot,
                   index,
                   requestId,
                   error.toString());
@@ -286,17 +290,16 @@ public class DataColumnSidecarArchiveReconstructorImpl
   }
 
   private void startReconstruction(
-      final SignedBeaconBlock block, final ReconstructionCacheEntry entry) {
+      final SlotAndBlockRoot slotAndBlockRoot, final ReconstructionCacheEntry entry) {
     reconstructionQueue
-        .queueTask(() -> runReconstruction(block, entry))
+        .queueTask(() -> runReconstruction(slotAndBlockRoot, entry))
         .whenComplete(
             (result, error) -> {
               final boolean reconstructed =
                   error == null
                       && result.sidecars().values().stream().anyMatch(Optional::isPresent);
               // completion counts as a request, as the waiting callers read the result now: a
-              // result
-              // that waited in the queue must not look least recently requested once it is ready
+              // result that waited in the queue must not look least recently requested once ready
               entry.lastRequestedAtMillis = timeProvider.getTimeInMillis().longValue();
               // a single write publishes the outcome, so a successful entry is never observed
               // as completed-but-failed
@@ -305,9 +308,9 @@ public class DataColumnSidecarArchiveReconstructorImpl
                 reconstructionSuccessCounter.inc();
                 evictExcessResults();
               } else {
-                reconstructionFailureCounter.inc();
+                reconstructionFailureCounter.labels(failureReason(entry, error)).inc();
                 if (error != null) {
-                  logReconstructionFailure(block, error);
+                  logReconstructionFailure(slotAndBlockRoot, error);
                 }
               }
             })
@@ -339,28 +342,47 @@ public class DataColumnSidecarArchiveReconstructorImpl
   }
 
   private SafeFuture<ReconstructionResult> runReconstruction(
-      final SignedBeaconBlock block, final ReconstructionCacheEntry entry) {
+      final SlotAndBlockRoot slotAndBlockRoot, final ReconstructionCacheEntry entry) {
+    entry.dequeued = true;
     if (entry.isUnrequestedForRetention(timeProvider.getTimeInMillis().longValue())) {
       // nobody asked for it while it was queued, so its result would be pruned on the next slot:
-      // skip the work (counted as a failure, like a full-queue rejection) and let the next request
-      // retry
+      // skip the work and let the next request retry
+      entry.skipped = true;
       LOG.debug(
           "Skipping reconstruction for {}: unrequested for over {} while queued",
-          block.getSlotAndBlockRoot(),
+          slotAndBlockRoot,
           RESULT_RETENTION);
       return SafeFuture.completedFuture(emptyResult());
     }
     // the backstop fails a copy of the task rather than the task itself, so the task still
     // completes, and records its duration, once the work eventually finishes
     final SafeFuture<ReconstructionResult> taskCopy = new SafeFuture<>();
-    createTask(block).propagateTo(taskCopy);
+    createTask(slotAndBlockRoot).propagateTo(taskCopy);
     return taskCopy.orTimeout(timeoutAsyncRunner, RECONSTRUCTION_HUNG_TIMEOUT);
   }
 
-  private void logReconstructionFailure(final SignedBeaconBlock block, final Throwable error) {
+  private static String failureReason(final ReconstructionCacheEntry entry, final Throwable error) {
+    if (error == null) {
+      // completed without sidecars: skipped while queued, or the block, first-half sidecars or
+      // extension proofs are missing or mismatched
+      return entry.skipped ? "skipped" : "unavailable";
+    }
+    if (ExceptionUtil.hasCause(error, TimeoutException.class)) {
+      return "timeout";
+    }
+    if (ExceptionUtil.hasCause(error, QueueIsFullException.class)) {
+      // a full reconstruction queue rejects the task before it runs; once running, the archived
+      // data is read through the storage query queue it shares with the other RPC handlers
+      return entry.dequeued ? "storage_rejected" : "rejected";
+    }
+    return "error";
+  }
+
+  private void logReconstructionFailure(
+      final SlotAndBlockRoot slotAndBlockRoot, final Throwable error) {
     // timeouts and full-queue rejections are expected under load
     if (ExceptionUtil.hasCause(error, TimeoutException.class, QueueIsFullException.class)) {
-      LOG.debug("Reconstruction failed for {}: {}", block.getSlotAndBlockRoot(), error.toString());
+      LOG.debug("Reconstruction failed for {}: {}", slotAndBlockRoot, error.toString());
       return;
     }
     final long now = timeProvider.getTimeInMillis().longValue();
@@ -368,28 +390,46 @@ public class DataColumnSidecarArchiveReconstructorImpl
     if (now >= nextWarnAtMillis
         && nextFailureWarnAtMillis.compareAndSet(
             nextWarnAtMillis, now + FAILURE_WARN_INTERVAL.toMillis())) {
-      LOG.warn("Reconstruction failed for {}", block.getSlotAndBlockRoot(), error);
+      LOG.warn("Reconstruction failed for {}", slotAndBlockRoot, error);
     } else {
-      LOG.debug("Reconstruction failed for {}", block.getSlotAndBlockRoot(), error);
+      LOG.debug("Reconstruction failed for {}", slotAndBlockRoot, error);
     }
   }
 
-  private SafeFuture<ReconstructionResult> createTask(final SignedBeaconBlock block) {
+  private SafeFuture<ReconstructionResult> createTask(final SlotAndBlockRoot slotAndBlockRoot) {
     final List<UInt64> firstHalfOfIndices =
         Stream.iterate(UInt64.ZERO, UInt64::increment).limit(halfColumns).toList();
 
     final MetricsHistogram.Timer timer = reconstructionTimeSeconds.startTimer();
 
+    // the block is only needed once a reconstruction actually runs, so it is loaded here rather
+    // than by every request, most of which are served from completed reconstructions
     return reconstructionAsyncRunner
         .runAsync(
             () ->
                 chainDataClient
-                    .getDataColumnSidecars(block.getSlot(), firstHalfOfIndices)
-                    .thenComposeCombined(
-                        chainDataClient.getDataColumnSidecarProofs(block.getSlot()),
-                        (sidecars, proofs) ->
-                            reconstructionAsyncRunner.runAsync(
-                                () -> reconstructDataColumnSidecar(block, sidecars, proofs))))
+                    .getBlockByBlockRoot(slotAndBlockRoot.getBlockRoot())
+                    .thenCompose(
+                        maybeBlock -> {
+                          if (maybeBlock.isEmpty()) {
+                            LOG.debug(
+                                "Cannot reconstruct extension data column sidecars for slot {} "
+                                    + "blockRoot {}: block not available",
+                                slotAndBlockRoot.getSlot(),
+                                slotAndBlockRoot.getBlockRoot());
+                            return SafeFuture.completedFuture(emptyResult());
+                          }
+                          final SignedBeaconBlock block = maybeBlock.get();
+                          return chainDataClient
+                              .getDataColumnSidecars(block.getSlot(), firstHalfOfIndices)
+                              .thenComposeCombined(
+                                  chainDataClient.getDataColumnSidecarProofs(block.getSlot()),
+                                  (sidecars, proofs) ->
+                                      reconstructionAsyncRunner.runAsync(
+                                          () ->
+                                              reconstructDataColumnSidecar(
+                                                  block, sidecars, proofs)));
+                        }))
         .whenComplete((result, error) -> timer.closeUnchecked().run());
   }
 
@@ -570,6 +610,10 @@ public class DataColumnSidecarArchiveReconstructorImpl
     private final AtomicBoolean started = new AtomicBoolean(false);
     private volatile State state = State.RUNNING;
     private volatile long lastRequestedAtMillis;
+    // set by runReconstruction: the queue handed the task over, and whether it was then skipped;
+    // both only tell apart the reasons a reconstruction failed
+    private volatile boolean dequeued;
+    private volatile boolean skipped;
 
     private ReconstructionCacheEntry(final Duration retention, final long requestedAtMillis) {
       this.retentionMillis = retention.toMillis();

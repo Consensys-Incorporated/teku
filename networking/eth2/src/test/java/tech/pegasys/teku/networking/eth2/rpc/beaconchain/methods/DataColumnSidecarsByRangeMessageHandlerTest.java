@@ -511,9 +511,6 @@ public class DataColumnSidecarsByRangeMessageHandlerTest {
     // Let's simulate that we call it "pruned"
     when(dataColumnSidecarArchiveReconstructor.isSidecarPruned(any(), any())).thenReturn(true);
 
-    when(combinedChainDataClient.getBlockAtSlotExact(any()))
-        .thenReturn(
-            SafeFuture.completedFuture(Optional.of(dataStructureUtil.randomSignedBeaconBlock())));
     when(dataColumnSidecarArchiveReconstructor.reconstructDataColumnSidecar(any(), any(), anyInt()))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
 
@@ -581,15 +578,14 @@ public class DataColumnSidecarsByRangeMessageHandlerTest {
             ImmutableSortedMap.of(
                 canonicalSlotAndBlockRoot.getSlot(), canonicalSlotAndBlockRoot.getBlockRoot()));
     when(dataColumnSidecarArchiveReconstructor.isSidecarPruned(any(), any())).thenReturn(true);
-    when(combinedChainDataClient.getBlockAtSlotExact(any()))
-        .thenReturn(
-            SafeFuture.completedFuture(Optional.of(dataStructureUtil.randomSignedBeaconBlock())));
     // reconstruction succeeds, returning a sidecar for the requested (pruned) column index
     when(dataColumnSidecarArchiveReconstructor.reconstructDataColumnSidecar(any(), any(), anyInt()))
         .thenAnswer(
             invocation -> {
-              final SignedBeaconBlock block = invocation.getArgument(0);
+              final SlotAndBlockRoot slotAndBlockRoot = invocation.getArgument(0);
               final UInt64 index = invocation.getArgument(1);
+              final SignedBeaconBlock block =
+                  dataStructureUtil.randomSignedBeaconBlock(slotAndBlockRoot.getSlot());
               return SafeFuture.completedFuture(
                   Optional.of(dataStructureUtil.randomDataColumnSidecar(block, index)));
             });
@@ -620,7 +616,7 @@ public class DataColumnSidecarsByRangeMessageHandlerTest {
   }
 
   @TestTemplate
-  public void shouldNotReconstructByRangeWhenBlockIsMissing() {
+  public void shouldLeaveLoadingTheBlockToTheReconstructor() {
     // request only a pruned extension column
     final UInt64 prunedColumn = UInt64.valueOf(72);
     final DataColumnSidecarsByRangeRequestMessage request =
@@ -630,22 +626,28 @@ public class DataColumnSidecarsByRangeMessageHandlerTest {
     when(combinedChainDataClient.getSidecar(any()))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
     // stored identifiers only provide the canonical slots/roots to expand against
-    setUpDataColumnSidecarsData(
-        startSlot, request.getMaxSlot(), new ArrayList<>(List.of(UInt64.valueOf(1))));
+    final List<DataColumnSidecar> storedSidecars =
+        setUpDataColumnSidecarsData(
+            startSlot, request.getMaxSlot(), new ArrayList<>(List.of(UInt64.valueOf(1))));
     when(combinedChainDataClient.getAncestorRoots(any(), any(), any()))
         .thenReturn(ImmutableSortedMap.of());
     when(dataColumnSidecarArchiveReconstructor.isSidecarPruned(any(), any())).thenReturn(true);
-    // the block backing the pruned column cannot be loaded, so reconstruction is skipped
-    when(combinedChainDataClient.getBlockAtSlotExact(any()))
+    when(dataColumnSidecarArchiveReconstructor.reconstructDataColumnSidecar(any(), any(), anyInt()))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
 
     handler.onIncomingMessage(protocolId, peer, request, listener);
 
     verify(listener, never()).respond(any());
     verify(listener).completeSuccessfully();
-    verify(combinedChainDataClient, times(count.intValue())).getBlockAtSlotExact(any());
-    verify(dataColumnSidecarArchiveReconstructor, never())
-        .reconstructDataColumnSidecar(any(), any(), anyInt());
+    // each archived block is passed by slot and root; the handler loads no block itself
+    verify(combinedChainDataClient, never()).getBlockAtSlotExact(any());
+    verify(dataColumnSidecarArchiveReconstructor, times(count.intValue()))
+        .reconstructDataColumnSidecar(any(), eq(prunedColumn), anyInt());
+    storedSidecars.forEach(
+        sidecar ->
+            verify(dataColumnSidecarArchiveReconstructor)
+                .reconstructDataColumnSidecar(
+                    eq(sidecar.getSlotAndBlockRoot()), eq(prunedColumn), anyInt()));
   }
 
   private List<DataColumnSidecar> setUpDataColumnSidecarsData(

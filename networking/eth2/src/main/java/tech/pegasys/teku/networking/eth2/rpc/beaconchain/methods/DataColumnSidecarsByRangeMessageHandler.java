@@ -398,33 +398,21 @@ public class DataColumnSidecarsByRangeMessageHandler
         return SafeFuture.completedFuture(Optional.empty());
       }
 
-      return combinedChainDataClient
-          .getBlockAtSlotExact(columnSlotAndIdentifier.slot())
-          .thenCompose(
-              maybeBlock -> {
-                if (maybeBlock.isEmpty()) {
-                  LOG.debug(
-                      "Cannot reconstruct pruned data column sidecar slot {} index {}: "
-                          + "block not available",
-                      columnSlotAndIdentifier.slot(),
-                      columnSlotAndIdentifier.columnIndex());
-                  return SafeFuture.completedFuture(Optional.empty());
-                }
-
-                return dataColumnSidecarArchiveReconstructor
-                    .reconstructDataColumnSidecar(
-                        maybeBlock.get(), columnSlotAndIdentifier.columnIndex(), messageId)
-                    .thenPeek(
-                        maybeSidecar ->
-                            maybeSidecar.ifPresent(
-                                sidecar ->
-                                    LOG.debug(
-                                        "Serving reconstructed data column sidecar slot {} index {} "
-                                            + "blockRoot {} for by-range request",
-                                        sidecar.getSlot(),
-                                        sidecar.getIndex(),
-                                        columnSlotAndIdentifier.blockRoot())));
-              });
+      return dataColumnSidecarArchiveReconstructor
+          .reconstructDataColumnSidecar(
+              columnSlotAndIdentifier.getSlotAndBlockRoot(),
+              columnSlotAndIdentifier.columnIndex(),
+              messageId)
+          .thenPeek(
+              maybeSidecar ->
+                  maybeSidecar.ifPresent(
+                      sidecar ->
+                          LOG.debug(
+                              "Serving reconstructed data column sidecar slot {} index {} "
+                                  + "blockRoot {} for by-range request",
+                              sidecar.getSlot(),
+                              sidecar.getIndex(),
+                              columnSlotAndIdentifier.blockRoot())));
     }
 
     private boolean isCanonicalHotDataColumnSidecar(

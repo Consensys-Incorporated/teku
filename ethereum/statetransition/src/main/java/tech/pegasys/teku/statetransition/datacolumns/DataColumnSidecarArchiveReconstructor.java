@@ -18,7 +18,7 @@ import tech.pegasys.teku.ethereum.events.SlotEventsChannel;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
-import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.storage.api.FinalizedCheckpointChannel;
 
@@ -34,7 +34,7 @@ public interface DataColumnSidecarArchiveReconstructor
 
         @Override
         public SafeFuture<Optional<DataColumnSidecar>> reconstructDataColumnSidecar(
-            final SignedBeaconBlock block, final UInt64 index, final int requestId) {
+            final SlotAndBlockRoot slotAndBlockRoot, final UInt64 index, final int requestId) {
           return SafeFuture.completedFuture(Optional.empty());
         }
 
@@ -61,8 +61,12 @@ public interface DataColumnSidecarArchiveReconstructor
    */
   int onRequest();
 
+  /**
+   * Reconstructs an archived extension column of the given block. The block is loaded only when a
+   * reconstruction has to run, so callers need no block lookup of their own.
+   */
   SafeFuture<Optional<DataColumnSidecar>> reconstructDataColumnSidecar(
-      SignedBeaconBlock block, UInt64 index, int requestId);
+      SlotAndBlockRoot slotAndBlockRoot, UInt64 index, int requestId);
 
   boolean isSidecarPruned(UInt64 slot, UInt64 index);
 

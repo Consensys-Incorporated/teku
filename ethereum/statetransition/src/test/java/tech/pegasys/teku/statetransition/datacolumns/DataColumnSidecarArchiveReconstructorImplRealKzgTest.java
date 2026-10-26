@@ -110,6 +110,8 @@ public class DataColumnSidecarArchiveReconstructorImplRealKzgTest {
             .map(sidecar -> sidecar.getKzgProofs().stream().map(SszKZGProof::getKZGProof).toList())
             .toList();
 
+    when(chainDataClient.getBlockByBlockRoot(block.getRoot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(block)));
     when(chainDataClient.getDataColumnSidecars(any(UInt64.class), anyList()))
         .thenReturn(SafeFuture.completedFuture(firstHalfSidecars));
     when(chainDataClient.getDataColumnSidecarProofs(any()))
@@ -121,7 +123,8 @@ public class DataColumnSidecarArchiveReconstructorImplRealKzgTest {
       for (int index = halfColumns; index < numberOfColumns; index++) {
         final Optional<DataColumnSidecar> reconstructed =
             reconstructor
-                .reconstructDataColumnSidecar(block, UInt64.valueOf(index), requestId)
+                .reconstructDataColumnSidecar(
+                    block.getSlotAndBlockRoot(), UInt64.valueOf(index), requestId)
                 .join();
         assertThat(reconstructed).contains(originalSidecars.get(index));
       }
@@ -143,9 +146,14 @@ public class DataColumnSidecarArchiveReconstructorImplRealKzgTest {
                 "data_column_sidecar_archive_reconstruction_successes_total"))
         .isEqualTo(1);
     assertThat(
-            metricsSystem.getCounterValue(
-                TekuMetricCategory.BEACON,
-                "data_column_sidecar_archive_reconstruction_failures_total"))
-        .isZero();
+            List.of("unavailable", "error", "timeout", "rejected", "storage_rejected", "skipped"))
+        .allSatisfy(
+            reason ->
+                assertThat(
+                        metricsSystem.getLabelledCounterValue(
+                            TekuMetricCategory.BEACON,
+                            "data_column_sidecar_archive_reconstruction_failures_total",
+                            reason))
+                    .isZero());
   }
 }
