@@ -25,4 +25,9 @@ public interface RpcRequestHandler {
   void readComplete(final NodeId nodeId, final RpcStream rpcStream);
 
   void closed(final NodeId nodeId, final RpcStream rpcStream);
+
+  /** Whether a request has been received on an inbound stream, for diagnostics only. */
+  default boolean hasRequestBeenReceived() {
+    return false;
+  }
 }

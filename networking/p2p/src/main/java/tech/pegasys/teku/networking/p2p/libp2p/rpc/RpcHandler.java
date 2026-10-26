@@ -244,7 +244,7 @@ public class RpcHandler<
 
     try {
       final Controller<TOutgoingHandler> controller =
-          new Controller<>(nodeId, streamChannel, inboundRpcStreamLimiter);
+          new Controller<>(nodeId, streamChannel, selectedProtocol, inboundRpcStreamLimiter);
       if (isIncomingStream) {
         controller.setIncomingRequestHandler(
             rpcMethod.createIncomingRequestHandler(selectedProtocol));
@@ -266,13 +266,15 @@ public class RpcHandler<
 
     private final NodeId nodeId;
     private final Stream p2pStream;
+    private final String protocolId;
     private final InboundRpcStreamLimiter inboundRpcStreamLimiter;
     private final boolean inbound;
     private Optional<TOutgoingHandler> outgoingRequestHandler = Optional.empty();
     private Optional<RpcRequestHandler> rpcRequestHandler = Optional.empty();
-    private RpcStream rpcStream;
+    private LibP2PRpcStream rpcStream;
     private boolean readCompleted = false;
     private EventExecutor eventLoop;
+    private long activatedAtNanos;
     // Only used on the stream's event loop, where cancelling a task also removes it from the
     // scheduler, so a closed stream is not kept reachable until its deadline would have fired
     private Optional<ScheduledFuture<?>> inboundDeadline = Optional.empty();
@@ -282,9 +284,11 @@ public class RpcHandler<
     private Controller(
         final NodeId nodeId,
         final Stream p2pStream,
+        final String protocolId,
         final InboundRpcStreamLimiter inboundRpcStreamLimiter) {
       this.nodeId = nodeId;
       this.p2pStream = p2pStream;
+      this.protocolId = protocolId;
       this.inboundRpcStreamLimiter = inboundRpcStreamLimiter;
       this.inbound = !p2pStream.isInitiator();
     }
@@ -292,12 +296,15 @@ public class RpcHandler<
     @Override
     public void channelActive(final ChannelHandlerContext ctx) {
       eventLoop = ctx.executor();
+      activatedAtNanos = eventLoop.ticker().nanoTime();
       rpcStream = new LibP2PRpcStream(nodeId, p2pStream, ctx, this::onLocalWriteClosed);
       if (inbound) {
         inboundDeadline =
             Optional.of(
                 scheduleClose(
-                    INBOUND_STREAM_LIFETIME, inboundRpcStreamLimiter::recordLifetimeExpired));
+                    INBOUND_STREAM_LIFETIME,
+                    "lifetime",
+                    inboundRpcStreamLimiter::recordLifetimeExpired));
       }
       activeFuture.complete(this);
     }
@@ -332,18 +339,31 @@ public class RpcHandler<
                     Optional.of(
                         scheduleClose(
                             INBOUND_STREAM_FIN_GRACE,
+                            "fin_grace",
                             inboundRpcStreamLimiter::recordFinGraceExpired));
               });
     }
 
-    private ScheduledFuture<?> scheduleClose(final Duration delay, final Runnable recordExpiry) {
+    private ScheduledFuture<?> scheduleClose(
+        final Duration delay, final String deadlineName, final Runnable recordExpiry) {
       return eventLoop.schedule(
           () -> {
+            // the state tells a response or FIN stuck in the transport from a request never
+            // answered
             LOG.debug(
-                "Inbound RPC stream {} from {} outlived its {} deadline, closing it",
+                "Inbound RPC stream {} from {} outlived its {} deadline, closing it: deadline={}"
+                    + " protocol={} age={} requestReceived={} halfCloseRequested={}"
+                    + " halfCloseCompleted={} peerFinReceived={}",
                 p2pStream,
                 nodeId,
-                delay);
+                delay,
+                deadlineName,
+                protocolId,
+                Duration.ofNanos(eventLoop.ticker().nanoTime() - activatedAtNanos),
+                rpcRequestHandler.map(RpcRequestHandler::hasRequestBeenReceived).orElse(false),
+                rpcStream.isHalfCloseRequested(),
+                rpcStream.isHalfCloseCompleted(),
+                readCompleted);
             recordExpiry.run();
             closeAbruptly();
           },

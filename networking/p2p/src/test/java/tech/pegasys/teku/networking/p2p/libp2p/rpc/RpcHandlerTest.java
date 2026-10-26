@@ -39,6 +39,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.ScheduledFuture;
+import io.netty.util.concurrent.Ticker;
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -49,11 +50,13 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import kotlin.Unit;
+import org.apache.logging.log4j.Level;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
@@ -238,6 +241,58 @@ public class RpcHandlerTest {
   }
 
   @Test
+  void shouldLogStreamStateWhenLifetimeDeadlineExpires() {
+    final RpcRequestHandler requestHandler = mock(RpcRequestHandler.class);
+    when(requestHandler.hasRequestBeenReceived()).thenReturn(true);
+    final Stream p2pStream = createP2PStream(false);
+    // our FIN is stuck in the transport
+    when(p2pStream.closeWrite()).thenReturn(new CompletableFuture<>());
+    final Controller<RpcRequestHandler> streamController =
+        activateStream(rpcHandler, p2pStream, requestHandler);
+    assertThat(streamController.getRpcStream().closeWriteStream()).isNotDone();
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(RpcHandler.class, Level.DEBUG)) {
+      advanceTimeBy(RpcHandler.INBOUND_STREAM_LIFETIME);
+
+      assertThat(logCaptor.getDebugLogs())
+          .singleElement()
+          .asString()
+          .contains(
+              "deadline=lifetime",
+              "protocol=" + protocolId,
+              "age=" + RpcHandler.INBOUND_STREAM_LIFETIME,
+              "requestReceived=true",
+              "halfCloseRequested=true",
+              "halfCloseCompleted=false",
+              "peerFinReceived=false");
+    }
+  }
+
+  @Test
+  void shouldLogStreamStateWhenFinGraceDeadlineExpires() {
+    final Stream p2pStream = createP2PStream(false);
+    final Controller<RpcRequestHandler> streamController = activateStream(rpcHandler, p2pStream);
+    streamController.userEventTriggered(context, RemoteWriteClosed.INSTANCE);
+    assertThat(streamController.getRpcStream().closeWriteStream()).isCompleted();
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(RpcHandler.class, Level.DEBUG)) {
+      advanceTimeBy(RpcHandler.INBOUND_STREAM_FIN_GRACE);
+
+      assertThat(logCaptor.getDebugLogs())
+          .singleElement()
+          .asString()
+          .contains(
+              "deadline=fin_grace",
+              "protocol=" + protocolId,
+              "age=" + RpcHandler.INBOUND_STREAM_FIN_GRACE,
+              "requestReceived=false",
+              "halfCloseRequested=true",
+              "halfCloseCompleted=true",
+              "peerFinReceived=true");
+    }
+  }
+
+  @Test
   void shouldRemoveDeadlineWhenInboundStreamClosesNormally() {
     final Stream p2pStream = createP2PStream(false);
     final Controller<RpcRequestHandler> streamController = activateStream(rpcHandler, p2pStream);
@@ -298,6 +353,7 @@ public class RpcHandlerTest {
   @Test
   void shouldCompleteHalfCloseWhenEventLoopHasShutDown() {
     final EventExecutor shutDownEventLoop = mock(EventExecutor.class);
+    when(shutDownEventLoop.ticker()).thenReturn(Ticker.systemTicker());
     doReturn(mock(ScheduledFuture.class))
         .when(shutDownEventLoop)
         .schedule(any(Runnable.class), anyLong(), any(TimeUnit.class));
@@ -723,8 +779,14 @@ public class RpcHandlerTest {
   private Controller<RpcRequestHandler> activateStream(
       final RpcHandler<RpcRequestHandler, RpcRequest, RpcResponseHandler<?>> handler,
       final Stream p2pStream) {
-    when(rpcMethod.createIncomingRequestHandler(protocolId))
-        .thenReturn(mock(RpcRequestHandler.class));
+    return activateStream(handler, p2pStream, mock(RpcRequestHandler.class));
+  }
+
+  private Controller<RpcRequestHandler> activateStream(
+      final RpcHandler<RpcRequestHandler, RpcRequest, RpcResponseHandler<?>> handler,
+      final Stream p2pStream,
+      final RpcRequestHandler requestHandler) {
+    when(rpcMethod.createIncomingRequestHandler(protocolId)).thenReturn(requestHandler);
     final AtomicReference<Controller<RpcRequestHandler>> capturedController =
         captureController(p2pStream);
     final SafeFuture<Controller<RpcRequestHandler>> init =
