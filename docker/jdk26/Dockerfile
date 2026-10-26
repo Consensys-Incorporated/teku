@@ -16,6 +16,20 @@ RUN $JAVA_HOME/bin/jlink \
          --no-header-files \
          --output /javaruntime
 
+# Stop trusting emSign ECC Root CA - G3, which the eMudhra intermediate CAs compromised in
+# October 2026 chain to, and AAA Certificate Services, which cross-signs them
+# (https://openjdk.org/emudhra). Roots are matched by SHA-256 fingerprint, so this works whatever
+# their alias, and the build fails if either is still trusted. Remove once the base image drops them.
+RUN set -eu; \
+    DISTRUSTED_ROOTS="86:A1:EC:BA:08:9C:4A:8D:3B:BE:27:34:C6:12:BA:34:1D:81:3E:04:3C:F9:E8:A8:62:CD:5C:57:A3:6B:BE:6B|D7:A7:A0:FB:5D:7E:27:31:D7:71:E9:48:4E:BC:DE:F7:1D:5F:0C:3E:0A:29:48:78:2B:C8:3E:E0:EA:69:9E:F4"; \
+    KEYTOOL="$JAVA_HOME/bin/keytool"; \
+    STORE="-keystore /javaruntime/lib/security/cacerts -storepass changeit"; \
+    $KEYTOOL -list $STORE > /dev/null; \
+    $KEYTOOL -J-Duser.language=en -list -v $STORE \
+      | awk -v roots="$DISTRUSTED_ROOTS" '/^Alias name: /{alias=substr($0,13)} $1 == "SHA256:" && $2 ~ "^(" roots ")$" {print alias}' \
+      | while IFS= read -r alias; do echo "Removing $alias"; $KEYTOOL -delete $STORE -alias "$alias"; done; \
+    if $KEYTOOL -list $STORE | grep -qE "$DISTRUSTED_ROOTS"; then echo "A distrusted root is still in cacerts" >&2; exit 1; fi
+
 FROM ${BASE_IMAGE_PREFIX}ubuntu:24.04
 ENV JAVA_HOME=/opt/java/openjdk
 ENV PATH="${JAVA_HOME}/bin:${PATH}"

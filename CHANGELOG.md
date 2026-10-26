@@ -19,6 +19,7 @@
  - Added the `GET /eth/v1/beacon/proposer_preferences` Gloas Beacon API endpoint, which returns the signed proposer preferences known by the node, optionally filtered by `slot` and `dependent_root`. [#11548](https://github.com/Consensys-Incorporated/teku/pull/11548)
 
 ### Bug Fixes
+ - Docker images no longer trust the emSign ECC Root CA - G3 or AAA Certificate Services roots, which the eMudhra intermediate certificate authorities compromised in October 2026 chain to. The Eclipse Temurin base images do not include this fix yet.
  - The fee recipient of a Gloas block now comes from signed proposer preferences, so preferences that fail validation no longer change where the block pays, and `prepare_beacon_proposer` is ignored once Gloas is active. [#11518](https://github.com/Consensys-Incorporated/teku/issues/11518)
  - Reduced the memory held by gossip blocks waiting for validation, limited their total size, and blocks too far in the future are now ignored before they are decoded. [#11503](https://github.com/Consensys-Incorporated/teku/pull/11503)
  - The node's ENR no longer advertises a TCP port when the TCP transport is disabled (`--Xp2p-tcp-enabled=false`), so peers stop dialing a port nothing listens on. [#11454](https://github.com/Consensys-Incorporated/teku/issues/11454)
