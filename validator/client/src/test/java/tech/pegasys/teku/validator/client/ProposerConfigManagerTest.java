@@ -88,6 +88,8 @@ public class ProposerConfigManagerTest {
 
   private UInt64 cliBuilderMinBid;
   private UInt64 cliBuilderBoostFactor;
+  private UInt64 cliP2pBuilderMinBid;
+  private UInt64 cliP2pBuilderBoostFactor;
   private UInt64 cliBuilderMaxExecutionPayment;
   private URL cliBuilderUrl;
   ;
@@ -121,11 +123,15 @@ public class ProposerConfigManagerTest {
 
     cliBuilderMinBid = dataStructureUtil.randomUInt64();
     cliBuilderBoostFactor = dataStructureUtil.randomUInt64();
+    cliP2pBuilderMinBid = dataStructureUtil.randomUInt64();
+    cliP2pBuilderBoostFactor = dataStructureUtil.randomUInt64();
     cliBuilderMaxExecutionPayment = dataStructureUtil.randomUInt64();
     cliBuilderUrl = URI.create("https://cli-builder.example.com").toURL();
 
     when(validatorConfig.getBuilderMinBid()).thenReturn(cliBuilderMinBid);
     when(validatorConfig.getBuilderBoostFactor()).thenReturn(cliBuilderBoostFactor);
+    when(validatorConfig.getP2pBuilderMinBid()).thenReturn(cliP2pBuilderMinBid);
+    when(validatorConfig.getP2pBuilderBoostFactor()).thenReturn(cliP2pBuilderBoostFactor);
     when(validatorConfig.getBuilderMaxExecutionPayment()).thenReturn(cliBuilderMaxExecutionPayment);
     when(validatorConfig.getBuilderUrls()).thenReturn(List.of(cliBuilderUrl));
 
@@ -321,8 +327,8 @@ public class ProposerConfigManagerTest {
     assertThat(proposerConfigManager.resolveBuilderConfig(validatorNotInConfig.getPublicKey()))
         .isEqualTo(
             new ResolvedBuilderConfig(
-                cliBuilderMinBid,
-                cliBuilderBoostFactor,
+                cliP2pBuilderMinBid,
+                cliP2pBuilderBoostFactor,
                 List.of(
                     new ResolvedBuilderEntry(
                         cliBuilderUrl,
@@ -389,7 +395,7 @@ public class ProposerConfigManagerTest {
         .isEqualTo(
             new ResolvedBuilderConfig(
                 runtimeMinBid,
-                cliBuilderBoostFactor,
+                cliP2pBuilderBoostFactor,
                 List.of(
                     new ResolvedBuilderEntry(
                         URI.create(BUILDER_URL).toURL(),
@@ -828,7 +834,7 @@ public class ProposerConfigManagerTest {
     // falls back to the validator client's own config
     assertThat(proposerConfigManager.resolveBuilderConfig(validatorNotInConfig.getPublicKey()))
         .extracting(ResolvedBuilderConfig::minBid)
-        .isEqualTo(cliBuilderMinBid);
+        .isEqualTo(cliP2pBuilderMinBid);
   }
 
   @Test

@@ -14,128 +14,84 @@
 package tech.pegasys.teku.beaconrestapi.handlers.v1.beacon;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_ACCEPTABLE;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_SERVICE_UNAVAILABLE;
-import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.getResponseSszFromMetadata;
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.getResponseStringFromMetadata;
-import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMetadataErrorResponse;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
-import java.io.IOException;
 import java.util.stream.Stream;
-import org.apache.tuweni.bytes.Bytes;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerWithChainDataProviderTest;
+import tech.pegasys.teku.api.ChainDataProvider;
 import tech.pegasys.teku.infrastructure.json.JsonTestUtil;
-import tech.pegasys.teku.infrastructure.json.JsonUtil;
 import tech.pegasys.teku.infrastructure.ssz.SszVector;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszVectorSchema;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPayment;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 
 public class GetStateBuilderPendingPaymentsTest
-    extends AbstractMigratedBeaconHandlerWithChainDataProviderTest {
+    extends AbstractGetStateFieldTest<SszVector<BuilderPendingPayment>> {
 
-  private SszVectorSchema<BuilderPendingPayment, ?> paymentsSchema;
+  @Override
+  protected SpecMilestone getMinimumMilestone() {
+    return SpecMilestone.GLOAS;
+  }
 
-  @BeforeEach
-  public void setup() {
-    initialise(SpecMilestone.GLOAS);
-    genesis();
-    setHandler(new GetStateBuilderPendingPayments(chainDataProvider, schemaDefinitionCache));
-    request.setPathParameter("state_id", "head");
-    paymentsSchema =
+  @Override
+  protected String getFieldLabel() {
+    return "builder pending payments";
+  }
+
+  @Override
+  protected AbstractGetStateField<SszVector<BuilderPendingPayment>> createHandler(
+      final ChainDataProvider provider, final SchemaDefinitionCache schemaDefinitionCache) {
+    return new GetStateBuilderPendingPayments(provider, schemaDefinitionCache);
+  }
+
+  @Override
+  protected SszVector<BuilderPendingPayment> getField(final BeaconState state) {
+    return BeaconStateGloas.required(state).getBuilderPendingPayments();
+  }
+
+  @Override
+  protected BeaconState withField(
+      final BeaconState state, final SszVector<BuilderPendingPayment> field) {
+    return BeaconStateGloas.required(state)
+        .updatedGloas(mutable -> mutable.setBuilderPendingPayments(field));
+  }
+
+  @Override
+  protected SszVector<BuilderPendingPayment> createField() {
+    final SszVectorSchema<BuilderPendingPayment, ?> schema =
         SchemaDefinitionsGloas.required(spec.getGenesisSchemaDefinitions())
             .getBuilderPendingPaymentsSchema();
+    return schema.createFromElements(
+        Stream.generate(dataStructureUtil::randomBuilderPendingPayment)
+            .limit(schema.getLength())
+            .toList());
   }
 
   @Test
-  void shouldReturnBuilderPendingPaymentsFromHeadState() throws JsonProcessingException {
-    handler.handleRequest(request);
-
-    assertThat(request.getResponseCode()).isEqualTo(SC_OK);
-    assertThat(request.getResponseHeaders("Eth-Consensus-Version"))
-        .isEqualTo(SpecMilestone.GLOAS.lowerCaseName());
-    @SuppressWarnings("unchecked")
-    final ObjectAndMetaData<SszVector<BuilderPendingPayment>> response =
-        (ObjectAndMetaData<SszVector<BuilderPendingPayment>>) request.getResponseBody();
-    assertThat(response.getMilestone()).isEqualTo(SpecMilestone.GLOAS);
-    assertThat(response.getData().size())
-        .isEqualTo(2 * spec.getGenesisSpecConfig().getSlotsPerEpoch());
-  }
-
-  @Test
-  void metadata_shouldHandle400() throws JsonProcessingException {
-    verifyMetadataErrorResponse(handler, SC_BAD_REQUEST);
-  }
-
-  @Test
-  void metadata_shouldHandle404() throws JsonProcessingException {
-    verifyMetadataErrorResponse(handler, SC_NOT_FOUND);
-  }
-
-  @Test
-  void metadata_shouldHandle406() throws JsonProcessingException {
-    verifyMetadataErrorResponse(handler, SC_NOT_ACCEPTABLE);
-  }
-
-  @Test
-  void metadata_shouldHandle500() throws JsonProcessingException {
-    verifyMetadataErrorResponse(handler, SC_INTERNAL_SERVER_ERROR);
-  }
-
-  @Test
-  void metadata_shouldHandle503() throws JsonProcessingException {
-    verifyMetadataErrorResponse(handler, SC_SERVICE_UNAVAILABLE);
-  }
-
-  @Test
-  void metadata_shouldHandle200() throws Exception {
-    final SszVector<BuilderPendingPayment> payments = randomPayments();
-    final ObjectAndMetaData<SszVector<BuilderPendingPayment>> responseData =
-        new ObjectAndMetaData<>(payments, SpecMilestone.GLOAS, false, true, false);
-
-    final String data = getResponseStringFromMetadata(handler, SC_OK, responseData);
-
-    final JsonNode node = JsonTestUtil.parseAsJsonNode(data);
-    assertThat(node.get("version").asText()).isEqualTo("gloas");
-    assertThat(node.get("execution_optimistic").asBoolean()).isFalse();
-    assertThat(node.get("finalized").asBoolean()).isFalse();
-    assertThat(node.get("data").size()).isEqualTo(payments.size());
+  void metadata_shouldHandle200WithSpecFieldNames() throws Exception {
+    final SszVector<BuilderPendingPayment> payments = createField();
     final BuilderPendingPayment payment = payments.get(0);
-    final JsonNode item = node.get("data").get(0);
+
+    final String data =
+        getResponseStringFromMetadata(
+            handler,
+            SC_OK,
+            new ObjectAndMetaData<>(payments, SpecMilestone.GLOAS, false, true, false));
+
+    final JsonNode dataNode = JsonTestUtil.parseAsJsonNode(data).get("data");
+    assertThat(dataNode.size()).isEqualTo(2 * spec.getGenesisSpecConfig().getSlotsPerEpoch());
+    final JsonNode item = dataNode.get(0);
     assertThat(item.get("weight").asText()).isEqualTo(payment.getWeight().toString());
-    assertThat(item.get("proposer_index").asText())
-        .isEqualTo(payment.getProposerIndex().toString());
     assertThat(item.get("withdrawal").get("amount").asText())
         .isEqualTo(payment.getWithdrawal().getAmount().toString());
-    assertThat(JsonUtil.parse(node.get("data").toString(), paymentsSchema.getJsonTypeDefinition()))
-        .isEqualTo(payments);
-  }
-
-  @Test
-  void metadata_shouldHandle200OctetStream() throws IOException {
-    final SszVector<BuilderPendingPayment> payments = randomPayments();
-    final ObjectAndMetaData<SszVector<BuilderPendingPayment>> responseData =
-        new ObjectAndMetaData<>(payments, SpecMilestone.GLOAS, false, true, false);
-
-    final byte[] data = getResponseSszFromMetadata(handler, SC_OK, responseData);
-
-    assertThat(Bytes.of(data)).isEqualTo(payments.sszSerialize());
-  }
-
-  private SszVector<BuilderPendingPayment> randomPayments() {
-    return paymentsSchema.createFromElements(
-        Stream.generate(dataStructureUtil::randomBuilderPendingPayment)
-            .limit(paymentsSchema.getLength())
-            .toList());
+    assertThat(item.get("proposer_index").asText())
+        .isEqualTo(payment.getProposerIndex().toString());
   }
 }

@@ -13,70 +13,72 @@
 
 package tech.pegasys.teku.beaconrestapi.handlers.v1.beacon;
 
-import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
+import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_UNSUPPORTED_MEDIA_TYPE;
-import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.getResponseSszFromMetadata;
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.getResponseStringFromMetadata;
-import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMetadataErrorResponse;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import java.io.IOException;
-import java.util.List;
-import org.apache.tuweni.bytes.Bytes;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerWithChainDataProviderTest;
+import tech.pegasys.teku.api.ChainDataProvider;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.BeaconStateElectra;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDeposit;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsElectra;
 
 public class GetStatePendingDepositsTest
-    extends AbstractMigratedBeaconHandlerWithChainDataProviderTest {
+    extends AbstractGetStateFieldTest<SszList<PendingDeposit>> {
 
-  @BeforeEach
-  public void setup() {
+  @Override
+  protected SpecMilestone getMinimumMilestone() {
+    return SpecMilestone.ELECTRA;
+  }
 
-    final GetStatePendingDeposits pendingDepositsHandler =
-        new GetStatePendingDeposits(chainDataProvider, schemaDefinitionCache);
-    initialise(SpecMilestone.ELECTRA);
-    genesis();
-    setHandler(pendingDepositsHandler);
-    request.setPathParameter("state_id", "head");
+  @Override
+  protected String getFieldLabel() {
+    return "pending deposits";
+  }
+
+  @Override
+  protected AbstractGetStateField<SszList<PendingDeposit>> createHandler(
+      final ChainDataProvider provider, final SchemaDefinitionCache schemaDefinitionCache) {
+    return new GetStatePendingDeposits(provider, schemaDefinitionCache);
+  }
+
+  @Override
+  protected SszList<PendingDeposit> getField(final BeaconState state) {
+    return BeaconStateElectra.required(state).getPendingDeposits();
+  }
+
+  @Override
+  protected BeaconState withField(final BeaconState state, final SszList<PendingDeposit> field) {
+    return BeaconStateElectra.required(state)
+        .updatedElectra(mutable -> mutable.setPendingDeposits(field));
+  }
+
+  @Override
+  protected SszList<PendingDeposit> createField() {
+    return SchemaDefinitionsElectra.required(spec.getGenesisSchemaDefinitions())
+        .getPendingDepositsSchema()
+        .of(dataStructureUtil.randomPendingDeposit(), dataStructureUtil.randomPendingDeposit());
   }
 
   @Test
-  void metadata_shouldHandle400() throws JsonProcessingException {
-    verifyMetadataErrorResponse(handler, SC_BAD_REQUEST);
-  }
-
-  @Test
-  void metadata_shouldHandle404() throws JsonProcessingException {
-    verifyMetadataErrorResponse(handler, SC_NOT_FOUND);
-  }
-
-  @Test
-  void metadata_shouldHandle415() throws JsonProcessingException {
-    verifyMetadataErrorResponse(handler, SC_UNSUPPORTED_MEDIA_TYPE);
-  }
-
-  @Test
-  void metadata_shouldHandle500() throws JsonProcessingException {
-    verifyMetadataErrorResponse(handler, SC_INTERNAL_SERVER_ERROR);
-  }
-
-  @Test
-  void metadata_shouldHandle200() throws IOException {
+  void metadata_shouldHandle200WithSpecFieldNames() throws JsonProcessingException {
     final PendingDeposit deposit = dataStructureUtil.randomPendingDeposit();
-    final ObjectAndMetaData<List<PendingDeposit>> responseData =
-        new ObjectAndMetaData<>(List.of(deposit), SpecMilestone.ELECTRA, false, true, false);
-    final String data = getResponseStringFromMetadata(handler, SC_OK, responseData);
-    String expected =
+    final SszList<PendingDeposit> deposits =
+        SchemaDefinitionsElectra.required(spec.getGenesisSchemaDefinitions())
+            .getPendingDepositsSchema()
+            .of(deposit);
+    final String data =
+        getResponseStringFromMetadata(
+            handler,
+            SC_OK,
+            new ObjectAndMetaData<>(deposits, SpecMilestone.ELECTRA, false, true, false));
+    final String expected =
         String.format(
             "{\"version\":\"electra\",\"execution_optimistic\":false,\"finalized\":false,"
                 + "\"data\":[{\"pubkey\":\"%s\",\"withdrawal_credentials\":\"%s\",\"amount\":\"%s\",\"signature\":\"%s\",\"slot\":\"%s\"}]}",
@@ -86,17 +88,5 @@ public class GetStatePendingDepositsTest
             deposit.getSignature(),
             deposit.getSlot());
     assertThat(data).isEqualTo(expected);
-  }
-
-  @Test
-  void metadata_shouldHandle200OctetStream() throws IOException {
-    final BeaconStateElectra state =
-        dataStructureUtil.randomBeaconState().toVersionElectra().orElseThrow();
-    final PendingDeposit deposit = dataStructureUtil.randomPendingDeposit();
-    final SszList<PendingDeposit> deposits = state.getPendingDeposits().getSchema().of(deposit);
-    final ObjectAndMetaData<SszList<PendingDeposit>> responseData =
-        new ObjectAndMetaData<>(deposits, SpecMilestone.ELECTRA, false, true, false);
-    final byte[] data = getResponseSszFromMetadata(handler, SC_OK, responseData);
-    assertThat(Bytes.of(data)).isEqualTo(deposits.sszSerialize());
   }
 }

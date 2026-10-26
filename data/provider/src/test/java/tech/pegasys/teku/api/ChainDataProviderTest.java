@@ -66,7 +66,6 @@ import tech.pegasys.teku.infrastructure.async.SafeFutureAssert;
 import tech.pegasys.teku.infrastructure.bytes.Bytes20;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
-import tech.pegasys.teku.infrastructure.ssz.SszVector;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -94,15 +93,9 @@ import tech.pegasys.teku.spec.datastructures.state.Validator;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.altair.BeaconStateAltair;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.BeaconStateElectra;
-import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.fulu.BeaconStateFulu;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateSchemaGloas;
-import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingConsolidation;
-import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDeposit;
-import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingPartialWithdrawal;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
-import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPayment;
-import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingWithdrawal;
 import tech.pegasys.teku.spec.generator.AttestationGenerator;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.logic.common.statetransition.epoch.EpochProcessor;
@@ -1298,178 +1291,6 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
   }
 
   @Test
-  void getPendingConsolidations_shouldReturnStatePendingConsolidations() {
-    final Spec electra = TestSpecFactory.createMinimalElectra();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(electra);
-    final ChainDataProvider chainDataProvider = setupBySpec(electra, dataStructureUtil, 16);
-
-    final StateAndMetaData stateAndMetaData =
-        getTestDataWithPartialConsolidations(dataStructureUtil, 1);
-
-    final Optional<ObjectAndMetaData<SszList<PendingConsolidation>>> data =
-        chainDataProvider.getPendingConsolidations(Optional.of(stateAndMetaData));
-
-    assertThat(data).isPresent();
-    assertThat(data.get().getData())
-        .isEqualTo(
-            stateAndMetaData.getData().toVersionElectra().orElseThrow().getPendingConsolidations());
-  }
-
-  @Test
-  void getPendingPartialConsolidations_canBeEmpty() {
-    final Spec electra = TestSpecFactory.createMinimalElectra();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(electra);
-    final ChainDataProvider chainDataProvider = setupBySpec(electra, dataStructureUtil, 16);
-
-    final StateAndMetaData stateAndMetaData = getTestDataWithDeposits(dataStructureUtil, 0);
-
-    final Optional<ObjectAndMetaData<SszList<PendingConsolidation>>> data =
-        chainDataProvider.getPendingConsolidations(Optional.of(stateAndMetaData));
-
-    assertThat(data).isPresent();
-    assertThat(data.get().getData())
-        .isEqualTo(
-            stateAndMetaData.getData().toVersionElectra().orElseThrow().getPendingConsolidations());
-  }
-
-  @Test
-  void getStatePendingPartialWithdrawals_shouldReturnPartialWithdrawals() {
-    final Spec electra = TestSpecFactory.createMinimalElectra();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(electra);
-    final ChainDataProvider chainDataProvider = setupBySpec(electra, dataStructureUtil, 16);
-
-    final StateAndMetaData stateAndMetaData =
-        getTestDataWithPartialWithdrawals(dataStructureUtil, 1);
-
-    final Optional<ObjectAndMetaData<SszList<PendingPartialWithdrawal>>> data =
-        chainDataProvider.getPendingPartialWithdrawals(Optional.of(stateAndMetaData));
-
-    assertThat(data).isPresent();
-    assertThat(data.get().getData())
-        .isEqualTo(
-            stateAndMetaData
-                .getData()
-                .toVersionElectra()
-                .orElseThrow()
-                .getPendingPartialWithdrawals());
-  }
-
-  @Test
-  void getStatePendingPartialWithdrawals_canBeEmpty() {
-    final Spec electra = TestSpecFactory.createMinimalElectra();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(electra);
-    final ChainDataProvider chainDataProvider = setupBySpec(electra, dataStructureUtil, 16);
-
-    final StateAndMetaData stateAndMetaData =
-        getTestDataWithPartialWithdrawals(dataStructureUtil, 0);
-
-    final Optional<ObjectAndMetaData<SszList<PendingPartialWithdrawal>>> data =
-        chainDataProvider.getPendingPartialWithdrawals(Optional.of(stateAndMetaData));
-
-    assertThat(data).isPresent();
-    assertThat(data.get().getData())
-        .isEqualTo(
-            stateAndMetaData
-                .getData()
-                .toVersionElectra()
-                .orElseThrow()
-                .getPendingPartialWithdrawals());
-  }
-
-  @Test
-  void getPendingDeposits_shouldReturnPendingDeposits() {
-    final Spec electra = TestSpecFactory.createMinimalElectra();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(electra);
-    final ChainDataProvider chainDataProvider = setupBySpec(electra, dataStructureUtil, 16);
-
-    final StateAndMetaData stateAndMetaData = getTestDataWithDeposits(dataStructureUtil, 1);
-
-    final Optional<ObjectAndMetaData<SszList<PendingDeposit>>> data =
-        chainDataProvider.getPendingDeposits(Optional.of(stateAndMetaData));
-
-    assertThat(data).isPresent();
-    assertThat(data.get().getData())
-        .isEqualTo(
-            stateAndMetaData.getData().toVersionElectra().orElseThrow().getPendingDeposits());
-  }
-
-  @Test
-  void getPendingPartialDeposits_canBeEmpty() {
-    final Spec electra = TestSpecFactory.createMinimalElectra();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(electra);
-    final ChainDataProvider chainDataProvider = setupBySpec(electra, dataStructureUtil, 16);
-
-    final StateAndMetaData stateAndMetaData = getTestDataWithDeposits(dataStructureUtil, 0);
-
-    final Optional<ObjectAndMetaData<SszList<PendingDeposit>>> data =
-        chainDataProvider.getPendingDeposits(Optional.of(stateAndMetaData));
-
-    assertThat(data).isPresent();
-    assertThat(data.get().getData())
-        .isEqualTo(
-            stateAndMetaData.getData().toVersionElectra().orElseThrow().getPendingDeposits());
-  }
-
-  private StateAndMetaData getTestDataWithDeposits(
-      final DataStructureUtil dataStructureUtil, final int depositsCount) {
-    final BeaconStateElectra state =
-        dataStructureUtil.randomBeaconState().toVersionElectra().orElseThrow();
-    final SszList<PendingDeposit> pendingDeposits =
-        switch (depositsCount) {
-          case 1 ->
-              state.getPendingDeposits().getSchema().of(dataStructureUtil.randomPendingDeposit());
-          case 0 -> state.getPendingDeposits().getSchema().of();
-          default -> throw new IllegalArgumentException("Not implemented");
-        };
-    final BeaconStateElectra electraState =
-        state.updatedElectra(data -> data.setPendingDeposits(pendingDeposits));
-
-    return new StateAndMetaData(electraState, SpecMilestone.ELECTRA, false, true, true);
-  }
-
-  private StateAndMetaData getTestDataWithPartialWithdrawals(
-      final DataStructureUtil dataStructureUtil, final int withdrawalCount) {
-    final BeaconStateElectra state =
-        dataStructureUtil.randomBeaconState().toVersionElectra().orElseThrow();
-    final SszList<PendingPartialWithdrawal> withdrawalSszList =
-        switch (withdrawalCount) {
-          case 1 ->
-              state
-                  .getPendingPartialWithdrawals()
-                  .getSchema()
-                  .of(dataStructureUtil.randomPendingPartialWithdrawal());
-          case 0 -> state.getPendingPartialWithdrawals().getSchema().of();
-          default -> throw new IllegalArgumentException("Not implemented");
-        };
-
-    final BeaconStateElectra electraState =
-        state.updatedElectra(data -> data.setPendingPartialWithdrawals(withdrawalSszList));
-
-    return new StateAndMetaData(electraState, SpecMilestone.ELECTRA, false, true, true);
-  }
-
-  private StateAndMetaData getTestDataWithPartialConsolidations(
-      final DataStructureUtil dataStructureUtil, final int consolidationCount) {
-    final BeaconStateElectra state =
-        dataStructureUtil.randomBeaconState().toVersionElectra().orElseThrow();
-    final SszList<PendingConsolidation> pendingConsolidations =
-        switch (consolidationCount) {
-          case 1 ->
-              state
-                  .getPendingConsolidations()
-                  .getSchema()
-                  .of(dataStructureUtil.randomPendingConsolidation());
-          case 0 -> state.getPendingConsolidations().getSchema().of();
-          default -> throw new IllegalArgumentException("Not implemented");
-        };
-
-    final BeaconStateElectra electraState =
-        state.updatedElectra(data -> data.setPendingConsolidations(pendingConsolidations));
-
-    return new StateAndMetaData(electraState, SpecMilestone.ELECTRA, false, true, true);
-  }
-
-  @Test
   void getExpectedWithdrawalsFailsTooFarInFutureRequest() {
     final Spec capella = TestSpecFactory.createMinimalCapella();
     final DataStructureUtil dataStructureUtil = new DataStructureUtil(capella);
@@ -1484,130 +1305,75 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
   }
 
   @Test
-  void getProposerLookahead_withEmptyInput() {
-    final Spec capella = TestSpecFactory.createMinimalCapella();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(capella);
-    final ChainDataProvider chainDataProvider = setupBySpec(capella, dataStructureUtil, 16);
-    assertThat(chainDataProvider.getProposerLookahead(Optional.empty())).isEmpty();
-  }
-
-  @Test
-  void getProposerLookahead_respondsSuccessfully() {
-    final Spec capella = TestSpecFactory.createMinimalFulu();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(capella);
-    final BeaconStateFulu fuluState =
-        BeaconStateFulu.required(dataStructureUtil.randomBeaconState());
-    final ChainDataProvider chainDataProvider = setupBySpec(capella, dataStructureUtil, 16);
-    final StateAndMetaData stateAndMetaData =
-        new StateAndMetaData(fuluState, SpecMilestone.FULU, true, true, true);
-    final var expectedResult =
-        new ObjectAndMetaData<>(
-            fuluState.getProposerLookahead(), SpecMilestone.FULU, true, true, true);
-    assertThat(chainDataProvider.getProposerLookahead(Optional.of(stateAndMetaData)))
-        .isEqualTo(Optional.of(expectedResult));
-  }
-
-  @Test
-  void getProposerLookahead_failsBeforeFulu() {
-    final Spec capella = TestSpecFactory.createMinimalCapella();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(capella);
-    final ChainDataProvider chainDataProvider = setupBySpec(capella, dataStructureUtil, 16);
-    final StateAndMetaData stateAndMetaData =
-        new StateAndMetaData(
-            dataStructureUtil.randomBeaconState(), SpecMilestone.CAPELLA, true, true, true);
-    assertThatThrownBy(() -> chainDataProvider.getProposerLookahead(Optional.of(stateAndMetaData)))
-        .isInstanceOf(BadRequestException.class)
-        .hasMessageContaining("does not contain proposer lookahead");
-  }
-
-  @Test
-  void getBuilderPendingWithdrawals_withEmptyInput() {
+  void getStateField_shouldBeEmptyWhenStateIsNotFound() {
     final Spec gloas = TestSpecFactory.createMinimalGloas();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(gloas);
-    final ChainDataProvider chainDataProvider = setupBySpec(gloas, dataStructureUtil, 16);
-    assertThat(chainDataProvider.getBuilderPendingWithdrawals(Optional.empty())).isEmpty();
+    final ChainDataProvider chainDataProvider =
+        setupBySpec(gloas, new DataStructureUtil(gloas), 16);
+    assertThat(
+            chainDataProvider.getStateField(
+                Optional.empty(), SpecMilestone.GLOAS, "slot", BeaconState::getSlot))
+        .isEmpty();
   }
 
   @Test
-  void getBuilderPendingWithdrawals_respondsSuccessfully() {
+  void getStateField_shouldExtractFieldAndKeepMetadata() {
     final Spec gloas = TestSpecFactory.createMinimalGloas();
     final DataStructureUtil dataStructureUtil = new DataStructureUtil(gloas);
     final ChainDataProvider chainDataProvider = setupBySpec(gloas, dataStructureUtil, 16);
     final BeaconStateGloas state = BeaconStateGloas.required(dataStructureUtil.randomBeaconState());
-    final SszList<BuilderPendingWithdrawal> withdrawals =
-        state
-            .getBuilderPendingWithdrawals()
-            .getSchema()
-            .of(
-                dataStructureUtil.randomBuilderPendingWithdrawal(),
-                dataStructureUtil.randomBuilderPendingWithdrawal());
-    final BeaconStateGloas gloasState =
-        state.updatedGloas(mutable -> mutable.setBuilderPendingWithdrawals(withdrawals));
     final StateAndMetaData stateAndMetaData =
-        new StateAndMetaData(gloasState, SpecMilestone.GLOAS, true, true, false);
+        new StateAndMetaData(state, SpecMilestone.GLOAS, true, false, true);
 
-    assertThat(chainDataProvider.getBuilderPendingWithdrawals(Optional.of(stateAndMetaData)))
-        .contains(new ObjectAndMetaData<>(withdrawals, SpecMilestone.GLOAS, true, true, false));
-  }
-
-  @Test
-  void getBuilderPendingWithdrawals_failsBeforeGloas() {
-    final Spec fulu = TestSpecFactory.createMinimalFulu();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(fulu);
-    final ChainDataProvider chainDataProvider = setupBySpec(fulu, dataStructureUtil, 16);
-    final StateAndMetaData stateAndMetaData =
-        new StateAndMetaData(
-            dataStructureUtil.randomBeaconState(), SpecMilestone.FULU, true, true, true);
-    assertThatThrownBy(
-            () -> chainDataProvider.getBuilderPendingWithdrawals(Optional.of(stateAndMetaData)))
-        .isInstanceOf(BadRequestException.class)
-        .hasMessageContaining("prior to GLOAS and does not contain builder pending withdrawals");
-  }
-
-  @Test
-  void getBuilderPendingPayments_withEmptyInput() {
-    final Spec gloas = TestSpecFactory.createMinimalGloas();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(gloas);
-    final ChainDataProvider chainDataProvider = setupBySpec(gloas, dataStructureUtil, 16);
-    assertThat(chainDataProvider.getBuilderPendingPayments(Optional.empty())).isEmpty();
-  }
-
-  @Test
-  void getBuilderPendingPayments_respondsSuccessfully() {
-    final Spec gloas = TestSpecFactory.createMinimalGloas();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(gloas);
-    final ChainDataProvider chainDataProvider = setupBySpec(gloas, dataStructureUtil, 16);
-    final BeaconStateGloas state = BeaconStateGloas.required(dataStructureUtil.randomBeaconState());
-    final BuilderPendingPayment payment = dataStructureUtil.randomBuilderPendingPayment();
-    final BeaconStateGloas gloasState =
-        state.updatedGloas(mutable -> mutable.getBuilderPendingPayments().set(1, payment));
-    final StateAndMetaData stateAndMetaData =
-        new StateAndMetaData(gloasState, SpecMilestone.GLOAS, true, true, false);
-
-    final Optional<ObjectAndMetaData<SszVector<BuilderPendingPayment>>> result =
-        chainDataProvider.getBuilderPendingPayments(Optional.of(stateAndMetaData));
-
-    assertThat(result)
+    assertThat(
+            chainDataProvider.getStateField(
+                Optional.of(stateAndMetaData),
+                SpecMilestone.GLOAS,
+                "builder pending payments",
+                s -> BeaconStateGloas.required(s).getBuilderPendingPayments()))
         .contains(
             new ObjectAndMetaData<>(
-                gloasState.getBuilderPendingPayments(), SpecMilestone.GLOAS, true, true, false));
-    assertThat(result.orElseThrow().getData().size())
-        .isEqualTo(2 * gloas.getGenesisSpecConfig().getSlotsPerEpoch());
-    assertThat(result.orElseThrow().getData().get(1)).isEqualTo(payment);
+                state.getBuilderPendingPayments(), SpecMilestone.GLOAS, true, false, true));
   }
 
   @Test
-  void getBuilderPendingPayments_failsBeforeGloas() {
+  void getStateField_shouldAcceptStateAfterMinimumMilestone() {
+    final Spec gloas = TestSpecFactory.createMinimalGloas();
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(gloas);
+    final ChainDataProvider chainDataProvider = setupBySpec(gloas, dataStructureUtil, 16);
+    final BeaconStateGloas state = BeaconStateGloas.required(dataStructureUtil.randomBeaconState());
+    final StateAndMetaData stateAndMetaData =
+        new StateAndMetaData(state, SpecMilestone.GLOAS, false, true, false);
+
+    assertThat(
+            chainDataProvider.getStateField(
+                Optional.of(stateAndMetaData),
+                SpecMilestone.ELECTRA,
+                "pending deposits",
+                s -> BeaconStateElectra.required(s).getPendingDeposits()))
+        .contains(
+            new ObjectAndMetaData<>(
+                state.getPendingDeposits(), SpecMilestone.GLOAS, false, true, false));
+  }
+
+  @Test
+  void getStateField_shouldRejectStateBeforeMinimumMilestone() {
     final Spec fulu = TestSpecFactory.createMinimalFulu();
     final DataStructureUtil dataStructureUtil = new DataStructureUtil(fulu);
     final ChainDataProvider chainDataProvider = setupBySpec(fulu, dataStructureUtil, 16);
     final StateAndMetaData stateAndMetaData =
         new StateAndMetaData(
-            dataStructureUtil.randomBeaconState(), SpecMilestone.FULU, true, true, true);
+            dataStructureUtil.randomBeaconState(), SpecMilestone.FULU, false, true, false);
+
     assertThatThrownBy(
-            () -> chainDataProvider.getBuilderPendingPayments(Optional.of(stateAndMetaData)))
+            () ->
+                chainDataProvider.getStateField(
+                    Optional.of(stateAndMetaData),
+                    SpecMilestone.GLOAS,
+                    "builder pending payments",
+                    s -> BeaconStateGloas.required(s).getBuilderPendingPayments()))
         .isInstanceOf(BadRequestException.class)
-        .hasMessageContaining("prior to GLOAS and does not contain builder pending payments");
+        .hasMessage(
+            "The state was successfully retrieved, but was prior to GLOAS and does not contain builder pending payments.");
   }
 
   @Test

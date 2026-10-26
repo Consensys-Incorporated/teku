@@ -38,6 +38,7 @@ import tech.pegasys.teku.spec.config.SpecConfigFulu;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
+import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
 import tech.pegasys.teku.spec.logic.versions.fulu.helpers.MiscHelpersFulu;
 import tech.pegasys.teku.statetransition.blobs.RemoteOrigin;
@@ -377,19 +378,36 @@ public class DasSamplerBasicImpl implements DasSamplerBasic, SlotEventsChannel {
   public void onSlot(final UInt64 slot) {
     final UInt64 firstNonFinalizedSlot =
         spec.computeStartSlotAtEpoch(recentChainData.getFinalizedEpoch()).increment();
+    // A state-only Gloas checkpoint anchor has its execution payload envelope recovered after
+    // startup (see ForkChoice.onExecutionPayloadEnvelope). Its DA check runs at the anchor block
+    // slot, which is always at or below the finalized epoch start, so that tracker must survive
+    // the finalized-range pruning until the payload is imported.
+    final Optional<Bytes32> stateOnlyAnchorRoot = getStateOnlyFinalizedAnchorRoot();
     recentlySampledColumnsByRoot
         .values()
         .removeIf(
             tracker -> {
               final boolean isCleanupDue;
+              final boolean isDataAvailabilityDeferred =
+                  spec.atSlot(tracker.slot())
+                      .getForkChoiceUtil()
+                      .isDataAvailabilityCheckDeferredToExecutionPayloadEnvelope();
               if (tracker.slot().isLessThan(firstNonFinalizedSlot)) {
+                if (isDataAvailabilityDeferred
+                    && stateOnlyAnchorRoot.map(tracker.blockRoot()::equals).orElse(false)
+                    && recentChainData
+                        .getStore()
+                        .getExecutionPayloadIfAvailable(tracker.blockRoot())
+                        .isEmpty()) {
+                  LOG.debug(
+                      "Retaining DAS tracker for finalized anchor slot {} root {} until its execution payload is imported",
+                      tracker.slot(),
+                      tracker.blockRoot());
+                  return false;
+                }
                 isCleanupDue = true;
               } else {
                 final boolean blockImported = recentChainData.containsBlock(tracker.blockRoot());
-                final boolean isDataAvailabilityDeferred =
-                    spec.atSlot(tracker.slot())
-                        .getForkChoiceUtil()
-                        .isDataAvailabilityCheckDeferredToExecutionPayloadEnvelope();
                 isCleanupDue = blockImported && !isDataAvailabilityDeferred;
               }
 
@@ -411,6 +429,14 @@ public class DasSamplerBasicImpl implements DasSamplerBasic, SlotEventsChannel {
               }
               return false;
             });
+  }
+
+  private Optional<Bytes32> getStateOnlyFinalizedAnchorRoot() {
+    return recentChainData
+        .getLatestFinalized()
+        .filter(anchor -> anchor.getSignedBeaconBlock().isEmpty())
+        .filter(anchor -> anchor.getState().toVersionGloas().isPresent())
+        .map(AnchorPoint::getRoot);
   }
 
   @Override

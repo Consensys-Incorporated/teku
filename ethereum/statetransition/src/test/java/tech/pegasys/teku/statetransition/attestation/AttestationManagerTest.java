@@ -32,15 +32,19 @@ import static tech.pegasys.teku.spec.datastructures.util.AttestationProcessingRe
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
 
 import java.util.List;
+import java.util.Optional;
+import org.apache.logging.log4j.Level;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.metrics.SettableLabelledGauge;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.service.serviceutils.ServiceCapacityExceededException;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.attestation.ProcessedAttestationListener;
@@ -396,6 +400,69 @@ class AttestationManagerTest {
     assertThat(pendingAttestations.size()).isZero();
     assertThat(futureAttestations.size()).isZero();
     verifyNoInteractions(attestationPool);
+  }
+
+  @Test
+  public void shouldOnlyTraceReceivedAttestationFailingBecauseSignatureVerificationQueueIsFull() {
+    final ValidatableAttestation attestation =
+        ValidatableAttestation.from(spec, dataStructureUtil.randomAttestation());
+    when(attestationValidator.validate(attestation)).thenReturn(completedFuture(ACCEPT));
+    when(forkChoice.onAttestation(any()))
+        .thenReturn(SafeFuture.failedFuture(new ServiceCapacityExceededException("queue is full")));
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(AttestationManager.class, Level.TRACE)) {
+      assertThat(attestationManager.addAttestation(attestation, Optional.empty()))
+          .isCompletedWithValue(ACCEPT);
+
+      assertThat(logCaptor.getErrorLogs()).isEmpty();
+      assertThat(logCaptor.getTraceLogs())
+          .anyMatch(log -> log.startsWith("Failed to process received attestation."));
+    }
+  }
+
+  @Test
+  public void shouldLogErrorWhenReceivedAttestationFailsUnexpectedly() {
+    final ValidatableAttestation attestation =
+        ValidatableAttestation.from(spec, dataStructureUtil.randomAttestation());
+    when(attestationValidator.validate(attestation)).thenReturn(completedFuture(ACCEPT));
+    when(forkChoice.onAttestation(any()))
+        .thenReturn(SafeFuture.failedFuture(new IllegalStateException("unexpected")));
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(AttestationManager.class)) {
+      assertThat(attestationManager.addAttestation(attestation, Optional.empty()))
+          .isCompletedWithValue(ACCEPT);
+
+      assertThat(logCaptor.getErrorLogs())
+          .containsExactly("Failed to process received attestation.");
+    }
+  }
+
+  @Test
+  public void shouldOnlyTracePendingAttestationFailingBecauseSignatureVerificationQueueIsFull() {
+    final int slot = 1024;
+    onSlot(UInt64.valueOf(slot));
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(slot);
+    final Bytes32 requiredBlockRoot = block.getMessage().hashTreeRoot();
+    final ValidatableAttestation attestation =
+        ValidatableAttestation.from(spec, attestationFromSlot(slot, requiredBlockRoot));
+    when(forkChoice.onAttestation(any()))
+        .thenReturn(completedFuture(UNKNOWN_BLOCK))
+        .thenReturn(SafeFuture.failedFuture(new ServiceCapacityExceededException("queue is full")));
+    assertThat(attestationManager.onAttestation(attestation)).isCompleted();
+    assertThat(pendingAttestations.contains(attestation)).isTrue();
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(AttestationManager.class, Level.TRACE)) {
+      // Importing the block replays the pending attestation, which now fails on the full queue
+      attestationManager.onBlockImported(block, false);
+
+      verify(forkChoice, times(2)).onAttestation(attestation);
+      assertThat(logCaptor.getErrorLogs()).isEmpty();
+      assertThat(logCaptor.getTraceLogs())
+          .anyMatch(
+              log ->
+                  log.startsWith(
+                      "Failed to process pending attestation dependent on " + requiredBlockRoot));
+    }
   }
 
   private Attestation attestationFromSlot(final long slot) {

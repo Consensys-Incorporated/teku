@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -33,6 +34,8 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.SignedBlsToExecutionChange;
@@ -208,6 +211,53 @@ public class NodeDataProviderTest {
     when(recentChainData.getCurrentSlot()).thenReturn(Optional.empty());
     provider.getAttesterSlashingsAndMetaData();
     verify(specMock).atSlot(eq(UInt64.ZERO));
+  }
+
+  @Test
+  void proposerPreferencesMetaDataLookUp_UseFirstProposalSlot_WhenSlotParamNotProvided() {
+    final Spec specMock = setUpMockedSpec();
+    final DataStructureUtil gloasDataStructureUtil =
+        new DataStructureUtil(TestSpecFactory.createMinimalGloas());
+    final List<SignedProposerPreferences> preferences =
+        List.of(
+            gloasDataStructureUtil.randomSignedProposerPreferences(),
+            gloasDataStructureUtil.randomSignedProposerPreferences());
+    final Bytes32 dependentRoot = gloasDataStructureUtil.randomBytes32();
+    when(proposerPreferencesManager.getSignedProposerPreferences(
+            Optional.empty(), Optional.of(dependentRoot)))
+        .thenReturn(preferences);
+
+    final ObjectAndMetaData<List<SignedProposerPreferences>> result =
+        provider.getProposerPreferencesAndMetaData(Optional.empty(), Optional.of(dependentRoot));
+
+    assertThat(result.getData()).isEqualTo(preferences);
+    verify(specMock).atSlot(eq(preferences.getFirst().getMessage().getProposalSlot()));
+  }
+
+  @Test
+  void proposerPreferencesMetaDataLookUp_UseSlot_WhenSlotParamProvided() {
+    final Spec specMock = setUpMockedSpec();
+    final UInt64 slot = UInt64.valueOf(8);
+    when(proposerPreferencesManager.getSignedProposerPreferences(
+            Optional.of(slot), Optional.empty()))
+        .thenReturn(List.of());
+
+    provider.getProposerPreferencesAndMetaData(Optional.of(slot), Optional.empty());
+
+    verify(specMock).atSlot(eq(slot));
+  }
+
+  @Test
+  void proposerPreferencesMetaDataLookUp_UseCurrentSlot_WhenSlotParamNotProvided_EmptyList() {
+    final Spec specMock = setUpMockedSpec();
+    when(proposerPreferencesManager.getSignedProposerPreferences(any(), any()))
+        .thenReturn(List.of());
+    final UInt64 currentSlot = UInt64.valueOf(8);
+    when(recentChainData.getCurrentSlot()).thenReturn(Optional.of(currentSlot));
+
+    provider.getProposerPreferencesAndMetaData(Optional.empty(), Optional.empty());
+
+    verify(specMock).atSlot(eq(currentSlot));
   }
 
   private Spec setUpMockedSpec() {

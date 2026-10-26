@@ -14,74 +14,66 @@
 package tech.pegasys.teku.beaconrestapi.handlers.v1.beacon;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
+import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_SERVICE_UNAVAILABLE;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_UNSUPPORTED_MEDIA_TYPE;
-import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.getResponseSszFromMetadata;
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.getResponseStringFromMetadata;
-import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMetadataErrorResponse;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.google.common.io.Resources;
 import java.io.IOException;
-import org.apache.tuweni.bytes.Bytes;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerWithChainDataProviderTest;
+import tech.pegasys.teku.api.ChainDataProvider;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszUInt64Vector;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.fulu.BeaconStateFulu;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
+import tech.pegasys.teku.spec.util.DataStructureUtil;
 
-public class GetStateProposerLookaheadTest
-    extends AbstractMigratedBeaconHandlerWithChainDataProviderTest {
+public class GetStateProposerLookaheadTest extends AbstractGetStateFieldTest<SszUInt64Vector> {
 
-  @BeforeEach
-  public void setup() {
+  @Override
+  protected SpecMilestone getMinimumMilestone() {
+    return SpecMilestone.FULU;
+  }
 
-    final GetStateProposerLookahead proposerLookahead =
-        new GetStateProposerLookahead(chainDataProvider, schemaDefinitionCache);
-    initialise(SpecMilestone.FULU);
-    genesis();
-    setHandler(proposerLookahead);
-    request.setPathParameter("state_id", "head");
+  @Override
+  protected String getFieldLabel() {
+    return "proposer lookahead";
+  }
+
+  @Override
+  protected AbstractGetStateField<SszUInt64Vector> createHandler(
+      final ChainDataProvider provider, final SchemaDefinitionCache schemaDefinitionCache) {
+    return new GetStateProposerLookahead(provider, schemaDefinitionCache);
+  }
+
+  @Override
+  protected SszUInt64Vector getField(final BeaconState state) {
+    return BeaconStateFulu.required(state).getProposerLookahead();
+  }
+
+  @Override
+  protected BeaconState withField(final BeaconState state, final SszUInt64Vector field) {
+    return BeaconStateFulu.required(state)
+        .updatedFulu(mutable -> mutable.setProposerLookahead(field));
+  }
+
+  @Override
+  protected SszUInt64Vector createField() {
+    return getField(dataStructureUtil.randomBeaconState(32));
   }
 
   @Test
-  void metadata_shouldHandle400() throws JsonProcessingException {
-    verifyMetadataErrorResponse(handler, SC_BAD_REQUEST);
-  }
-
-  @Test
-  void metadata_shouldHandle404() throws JsonProcessingException {
-    verifyMetadataErrorResponse(handler, SC_NOT_FOUND);
-  }
-
-  @Test
-  void metadata_shouldHandle415() throws JsonProcessingException {
-    verifyMetadataErrorResponse(handler, SC_UNSUPPORTED_MEDIA_TYPE);
-  }
-
-  @Test
-  void metadata_shouldHandle500() throws JsonProcessingException {
-    verifyMetadataErrorResponse(handler, SC_INTERNAL_SERVER_ERROR);
-  }
-
-  @Test
-  void metadata_shouldHandle503() throws JsonProcessingException {
-    verifyMetadataErrorResponse(handler, SC_SERVICE_UNAVAILABLE);
-  }
-
-  @Test
-  void metadata_shouldHandle200() throws IOException {
-    final BeaconStateFulu state = BeaconStateFulu.required(dataStructureUtil.randomBeaconState(32));
+  void metadata_shouldHandle200MatchingFixture() throws IOException {
+    // The fixture holds the lookahead of the first random state a fresh DataStructureUtil makes
     final ObjectAndMetaData<SszUInt64Vector> responseData =
         new ObjectAndMetaData<>(
-            state.getProposerLookahead(), SpecMilestone.FULU, false, true, false);
+            getField(new DataStructureUtil(spec).randomBeaconState(32)),
+            SpecMilestone.FULU,
+            false,
+            true,
+            false);
     final String resource =
         Resources.toString(
             Resources.getResource(
@@ -89,15 +81,5 @@ public class GetStateProposerLookaheadTest
             UTF_8);
     final String data = getResponseStringFromMetadata(handler, SC_OK, responseData);
     assertThat(data).isEqualTo(resource);
-  }
-
-  @Test
-  void metadata_shouldHandle200OctetStream() throws IOException {
-    final BeaconStateFulu state = BeaconStateFulu.required(dataStructureUtil.randomBeaconState(32));
-    final ObjectAndMetaData<SszUInt64Vector> responseData =
-        new ObjectAndMetaData<>(
-            state.getProposerLookahead(), SpecMilestone.FULU, false, true, false);
-    final byte[] data = getResponseSszFromMetadata(handler, SC_OK, responseData);
-    assertThat(Bytes.of(data)).isEqualTo(state.getProposerLookahead().sszSerialize());
   }
 }
