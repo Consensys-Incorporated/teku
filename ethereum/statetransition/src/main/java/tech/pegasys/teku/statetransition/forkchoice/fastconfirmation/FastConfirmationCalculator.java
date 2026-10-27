@@ -389,9 +389,9 @@ class FastConfirmationCalculator {
   }
 
   /**
-   * Implements {@code get_block_support_between_slots}: the total effective balance (per {@code
+   * Implements {@code get_node_support_between_slots}: the total effective balance (per {@code
    * balanceSource}) of unslashed, active, non-equivocating validators assigned to the inclusive
-   * slot range whose latest vote is exactly {@code blockRoot}.
+   * slot range whose latest vote supports exactly {@code node} (per {@code get_supported_node}).
    */
   UInt64 getNodeSupportBetweenSlots(
       final BeaconState balanceSource,

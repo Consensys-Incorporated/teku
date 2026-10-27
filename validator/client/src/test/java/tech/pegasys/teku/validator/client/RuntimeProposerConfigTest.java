@@ -22,6 +22,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tech.pegasys.teku.bls.BLSPublicKey;
@@ -138,7 +139,38 @@ class RuntimeProposerConfigTest {
                     .builderConfig(Optional.of(builderConfig))
                     .build())
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("builders contain duplicate url");
+        .hasMessage(
+            "\"builders\" contain duplicate url https://builder.example.com with the same auth_data");
+  }
+
+  @Test
+  void shouldAcceptBuildersSharingUrlWithDifferentAuthData() {
+    final BuilderConfig builderConfig =
+        new BuilderConfig(
+            Optional.empty(),
+            Optional.empty(),
+            Optional.of(
+                List.of(
+                    builderWithAuthData(Bytes.fromHexString("0x01")),
+                    builderWithAuthData(Bytes.fromHexString("0x02")))));
+
+    final RuntimeProposerConfig.RuntimeConfig runtimeConfig =
+        new RuntimeProposerConfig.RuntimeConfigBuilder()
+            .builderConfig(Optional.of(builderConfig))
+            .build();
+
+    assertThat(runtimeConfig.getBuilder().flatMap(ProposerConfig.BuilderConfig::getBuilders))
+        .hasValueSatisfying(builders -> assertThat(builders).hasSize(2));
+  }
+
+  private static BuilderEntry builderWithAuthData(final Bytes authData) {
+    return new BuilderEntry(
+        "https://builder.example.com",
+        Optional.of(authData),
+        Optional.empty(),
+        Optional.empty(),
+        Optional.empty(),
+        Optional.empty());
   }
 
   @Test

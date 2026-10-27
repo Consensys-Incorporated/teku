@@ -21,7 +21,6 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
-import static tech.pegasys.teku.networks.Eth2NetworkConfiguration.DEFAULT_FORK_CHOICE_LATE_BLOCK_REORG_ENABLED;
 
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
@@ -35,10 +34,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import tech.pegasys.teku.bls.BLS;
 import tech.pegasys.teku.bls.BLSSignature;
-import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.bls.BLSTestUtil;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
-import tech.pegasys.teku.infrastructure.async.eventthread.InlineEventThread;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -57,21 +54,12 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.Be
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.generator.ChainBuilder.BlockOptions;
-import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.block.FutureBlockPool;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
-import tech.pegasys.teku.statetransition.forkchoice.ForkChoice;
-import tech.pegasys.teku.statetransition.forkchoice.ForkChoiceStateProvider;
-import tech.pegasys.teku.statetransition.forkchoice.MergeTransitionBlockValidator;
-import tech.pegasys.teku.statetransition.forkchoice.NoopForkChoiceNotifier;
-import tech.pegasys.teku.statetransition.forkchoice.TickProcessor;
-import tech.pegasys.teku.statetransition.forkchoice.fastconfirmation.FastConfirmationTracker;
-import tech.pegasys.teku.statetransition.util.DebugDataDumper;
 import tech.pegasys.teku.statetransition.validation.BlockGossipValidator.EquivocationCheckResult;
-import tech.pegasys.teku.storage.api.LateBlockReorgPreparationHandler;
 import tech.pegasys.teku.storage.client.ChainUpdater;
 import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystemBuilder;
@@ -102,35 +90,11 @@ public class BlockGossipValidatorTest {
     storageSystem = InMemoryStorageSystemBuilder.buildDefault(spec);
     storageSystem.chainUpdater().initializeGenesis(false);
     recentChainData = storageSystem.recentChainData();
-    seedGenesisExecutionPayloadForGloas();
     blockGossipValidator =
         new BlockGossipValidator(
             spec,
             new GossipValidationHelper(spec, recentChainData, storageSystem.getMetricsSystem()),
             receivedBlockEventsChannelPublisher);
-  }
-
-  private void seedGenesisExecutionPayloadForGloas() {
-    if (spec.getGenesisSpecConfig().getMilestone().isLessThan(SpecMilestone.GLOAS)) {
-      return;
-    }
-    final InlineEventThread eventThread = new InlineEventThread();
-    final ForkChoice forkChoice =
-        new ForkChoice(
-            spec,
-            eventThread,
-            recentChainData,
-            new NoopForkChoiceNotifier(),
-            new ForkChoiceStateProvider(eventThread, recentChainData),
-            new TickProcessor(spec, recentChainData),
-            mock(MergeTransitionBlockValidator.class),
-            FastConfirmationTracker.NOOP,
-            DEFAULT_FORK_CHOICE_LATE_BLOCK_REORG_ENABLED,
-            LateBlockReorgPreparationHandler.NOOP,
-            mock(DebugDataDumper.class),
-            storageSystem.getMetricsSystem(),
-            AsyncBLSSignatureVerifier.wrap(BLSSignatureVerifier.SIMPLE));
-    forkChoice.applyGenesisExecutionPayloadForGloas().join();
   }
 
   @TestTemplate
@@ -539,7 +503,6 @@ public class BlockGossipValidatorTest {
         .initializeGenesisWithPayload(
             false, specContext.getDataStructureUtil().randomExecutionPayloadHeader());
     recentChainData = storageSystem.recentChainData();
-    seedGenesisExecutionPayloadForGloas();
     blockGossipValidator =
         new BlockGossipValidator(
             spec,

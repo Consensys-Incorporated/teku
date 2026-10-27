@@ -20,6 +20,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.blocks.BlockCheckpoints;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.spec.executionlayer.ExecutionPayloadStatus;
 import tech.pegasys.teku.storage.api.StoredBlockMetadata;
@@ -172,6 +173,12 @@ interface ForkChoiceModel {
       final Bytes32 blockRoot,
       final Bytes32 blockHash) {
     return Optional.empty();
+  }
+
+  /** See {@link ReadOnlyForkChoiceStrategy#isAwaitingExecutionPayload(Bytes32)}. */
+  default boolean isAwaitingExecutionPayload(
+      final BlockNodeVariantsIndex blockNodeIndex, final Bytes32 blockRoot) {
+    return false;
   }
 
   void pullUpBlockCheckpoints(

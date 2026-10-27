@@ -24,8 +24,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
+import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.IGNORE;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.SAVE_FOR_FUTURE;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
@@ -87,6 +91,8 @@ public class DefaultProposerPreferencesManagerTest {
     assertThat(result).isEqualTo(ACCEPT);
     assertThat(manager.getProposerPreferences(slot, dependentRoot))
         .hasValue(signedProposerPreferences.getMessage());
+    assertThat(manager.getSignedProposerPreferences(Optional.of(slot), Optional.of(dependentRoot)))
+        .containsExactly(signedProposerPreferences);
   }
 
   @TestTemplate
@@ -123,6 +129,60 @@ public class DefaultProposerPreferencesManagerTest {
         .isInstanceOf(UnsupportedOperationException.class);
     assertThat(manager.getProposerPreferencesForSlot(proposalSlot))
         .containsExactly(preferences.getMessage());
+  }
+
+  @TestTemplate
+  void shouldReturnSignedPreferencesFilteredBySlotAndDependentRoot() {
+    final UInt64 firstSlot = UInt64.valueOf(10);
+    final UInt64 secondSlot = UInt64.valueOf(11);
+    final Bytes32 firstDependentRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 secondDependentRoot = dataStructureUtil.randomBytes32();
+    final SignedProposerPreferences firstSlotFirstRoot =
+        createSignedProposerPreferences(firstSlot, firstDependentRoot);
+    final SignedProposerPreferences firstSlotSecondRoot =
+        createSignedProposerPreferences(firstSlot, secondDependentRoot);
+    final SignedProposerPreferences secondSlotFirstRoot =
+        createSignedProposerPreferences(secondSlot, firstDependentRoot);
+    when(gossipValidator.validate(any())).thenReturn(SafeFuture.completedFuture(ACCEPT));
+    safeJoin(manager.addRemote(firstSlotFirstRoot));
+    safeJoin(manager.addRemote(firstSlotSecondRoot));
+    safeJoin(manager.addRemote(secondSlotFirstRoot));
+
+    assertThat(manager.getSignedProposerPreferences(Optional.empty(), Optional.empty()))
+        .containsExactlyInAnyOrder(firstSlotFirstRoot, firstSlotSecondRoot, secondSlotFirstRoot);
+    assertThat(manager.getSignedProposerPreferences(Optional.of(firstSlot), Optional.empty()))
+        .containsExactlyInAnyOrder(firstSlotFirstRoot, firstSlotSecondRoot);
+    assertThat(
+            manager.getSignedProposerPreferences(Optional.empty(), Optional.of(firstDependentRoot)))
+        .containsExactly(firstSlotFirstRoot, secondSlotFirstRoot);
+    assertThat(
+            manager.getSignedProposerPreferences(
+                Optional.of(firstSlot), Optional.of(secondDependentRoot)))
+        .containsExactly(firstSlotSecondRoot);
+    assertThat(
+            manager.getSignedProposerPreferences(
+                Optional.of(secondSlot), Optional.of(secondDependentRoot)))
+        .isEmpty();
+    assertThat(
+            manager.getSignedProposerPreferences(Optional.of(UInt64.valueOf(12)), Optional.empty()))
+        .isEmpty();
+  }
+
+  @TestTemplate
+  void shouldReturnSignedPreferencesOrderedByProposalSlot() {
+    when(gossipValidator.validate(any())).thenReturn(SafeFuture.completedFuture(ACCEPT));
+    final List<SignedProposerPreferences> preferences = new ArrayList<>();
+    for (int slot = 12; slot >= 9; slot--) {
+      final SignedProposerPreferences signedProposerPreferences =
+          createSignedProposerPreferences(UInt64.valueOf(slot), dataStructureUtil.randomBytes32());
+      safeJoin(manager.addRemote(signedProposerPreferences));
+      preferences.addFirst(signedProposerPreferences);
+    }
+
+    manager.onSlot(UInt64.valueOf(10));
+
+    assertThat(manager.getSignedProposerPreferences(Optional.empty(), Optional.empty()))
+        .containsExactlyElementsOf(preferences.subList(1, preferences.size()));
   }
 
   @TestTemplate
@@ -362,6 +422,90 @@ public class DefaultProposerPreferencesManagerTest {
   }
 
   @TestTemplate
+  void shouldTreatRemoteAcceptanceOfLocallySubmittedPreferencesAsLocal() {
+    final SignedBeaconBlock dependentBlock = dataStructureUtil.randomSignedBeaconBlock(9);
+    final UInt64 proposalSlot = UInt64.valueOf(10);
+    final SignedProposerPreferences preferences =
+        createSignedProposerPreferences(proposalSlot, dependentBlock.getRoot());
+    manager.onSlot(proposalSlot.minus(1));
+    when(gossipValidator.validate(preferences))
+        .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE))
+        .thenReturn(SafeFuture.completedFuture(ACCEPT));
+
+    safeJoin(manager.addLocal(preferences));
+    // an identical copy received over gossip wins validation once the dependent block arrives
+    safeJoin(manager.addRemote(preferences));
+
+    verify(subscriber).onOperationAdded(preferences, ACCEPT, false);
+  }
+
+  @TestTemplate
+  void shouldReportLocalAcceptanceWhenRemoteCopyWasQueuedFirst() {
+    final SignedBeaconBlock dependentBlock = dataStructureUtil.randomSignedBeaconBlock(9);
+    final UInt64 proposalSlot = UInt64.valueOf(10);
+    final SignedProposerPreferences preferences =
+        createSignedProposerPreferences(proposalSlot, dependentBlock.getRoot());
+    manager.onSlot(proposalSlot.minus(1));
+    when(gossipValidator.validate(preferences))
+        .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE))
+        .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE))
+        .thenReturn(SafeFuture.completedFuture(ACCEPT));
+
+    safeJoin(manager.addRemote(preferences));
+    safeJoin(manager.addLocal(preferences));
+    manager.onBlockImported(dependentBlock, false);
+
+    verify(subscriber).onOperationAdded(preferences, ACCEPT, false);
+    verify(subscriber, never()).onOperationAdded(preferences, ACCEPT, true);
+  }
+
+  @TestTemplate
+  void shouldReportLocalAcceptanceWhenRemoteCopyIsAcceptedDuringRetry() {
+    final SignedBeaconBlock dependentBlock = dataStructureUtil.randomSignedBeaconBlock(9);
+    final UInt64 proposalSlot = UInt64.valueOf(10);
+    final SignedProposerPreferences preferences =
+        createSignedProposerPreferences(proposalSlot, dependentBlock.getRoot());
+    final SafeFuture<InternalValidationResult> retryValidation = new SafeFuture<>();
+    manager.onSlot(proposalSlot.minus(1));
+    when(gossipValidator.validate(preferences))
+        .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE))
+        .thenReturn(retryValidation)
+        .thenReturn(SafeFuture.completedFuture(ACCEPT));
+
+    safeJoin(manager.addLocal(preferences));
+    manager.onBlockImported(dependentBlock, false);
+    // an identical copy received over gossip is accepted while our retry is still being validated
+    safeJoin(manager.addRemote(preferences));
+    retryValidation.complete(IGNORE);
+
+    verify(subscriber).onOperationAdded(preferences, ACCEPT, false);
+    verify(subscriber, never()).onOperationAdded(preferences, ACCEPT, true);
+  }
+
+  @TestTemplate
+  void shouldReportLocalAcceptanceWhenLocalCopyIsIgnoredBeforeRemoteAcceptanceIsProcessed() {
+    final SignedBeaconBlock dependentBlock = dataStructureUtil.randomSignedBeaconBlock(9);
+    final UInt64 proposalSlot = UInt64.valueOf(10);
+    final SignedProposerPreferences preferences =
+        createSignedProposerPreferences(proposalSlot, dependentBlock.getRoot());
+    final SafeFuture<InternalValidationResult> remoteValidation = new SafeFuture<>();
+    manager.onSlot(proposalSlot.minus(1));
+    when(gossipValidator.validate(preferences))
+        .thenReturn(remoteValidation)
+        .thenReturn(SafeFuture.completedFuture(IGNORE));
+
+    final SafeFuture<InternalValidationResult> remoteResult = manager.addRemote(preferences);
+    // the gossip copy has already been marked as seen by the validator, so our local copy is
+    // ignored before the gossip acceptance has been processed
+    safeJoin(manager.addLocal(preferences));
+    remoteValidation.complete(ACCEPT);
+    safeJoin(remoteResult);
+
+    verify(subscriber).onOperationAdded(preferences, ACCEPT, false);
+    verify(subscriber, never()).onOperationAdded(preferences, ACCEPT, true);
+  }
+
+  @TestTemplate
   void shouldBoundPendingPreferences() {
     final UInt64 proposalSlot = UInt64.valueOf(10);
     final PendingPool<PendingProposerPreferences> boundedPendingPool =
@@ -382,7 +526,7 @@ public class DefaultProposerPreferencesManagerTest {
   }
 
   @TestTemplate
-  void shouldNotRetainLocalOriginAfterPendingPreferenceIsEvicted() {
+  void shouldRetainLocalOriginAfterPendingPreferenceIsEvicted() {
     final UInt64 proposalSlot = UInt64.valueOf(10);
     final PendingPool<PendingProposerPreferences> boundedPendingPool =
         new PoolFactory(new StubMetricsSystem()).createPendingPoolForProposerPreferences(spec, 1);
@@ -406,7 +550,7 @@ public class DefaultProposerPreferencesManagerTest {
     safeJoin(boundedManager.addRemote(firstPreferences));
     boundedManager.onSlot(proposalSlot);
 
-    verify(subscriber).onOperationAdded(firstPreferences, ACCEPT, true);
+    verify(subscriber).onOperationAdded(firstPreferences, ACCEPT, false);
   }
 
   private SignedProposerPreferences createSignedProposerPreferences(

@@ -120,7 +120,7 @@ public class LibP2PGossipNetworkBuilder {
     final GossipRouterBuilder builder = new GossipRouterBuilder();
     final SeenCache<Optional<ValidationResult>> seenCache =
         new TTLSeenCache<>(
-            new FastIdSeenCache<>(msg -> Bytes.wrap(msg.messageSha256())),
+            new FastIdSeenCache<>(FastMessageId::of),
             gossipParams.getSeenTTL(),
             builder.getCurrentTimeSupplier());
 

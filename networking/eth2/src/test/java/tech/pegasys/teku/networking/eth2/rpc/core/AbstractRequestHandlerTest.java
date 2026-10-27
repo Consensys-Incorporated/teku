@@ -78,7 +78,8 @@ abstract class AbstractRequestHandlerTest<T extends RpcRequestHandler> {
             new MetadataMessagesFactory(),
             getRpcEncoding(),
             DataColumnSidecarArchiveReconstructor.NOOP,
-            DasReqRespLogger.NOOP);
+            DasReqRespLogger.NOOP,
+            Optional.empty());
 
     reqHandler = createRequestHandler(beaconChainMethods);
 

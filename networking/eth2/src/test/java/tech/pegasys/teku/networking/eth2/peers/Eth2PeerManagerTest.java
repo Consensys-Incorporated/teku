@@ -86,7 +86,8 @@ public class Eth2PeerManagerTest {
           Eth2P2PNetworkBuilder.DEFAULT_ETH2_RPC_OUTSTANDING_PING_THRESHOLD,
           Eth2P2PNetworkBuilder.DEFAULT_ETH2_STATUS_UPDATE_INTERVAL,
           DataColumnSidecarArchiveReconstructor.NOOP,
-          DasReqRespLogger.NOOP);
+          DasReqRespLogger.NOOP,
+          Optional.empty());
 
   @BeforeEach
   public void setUp() {

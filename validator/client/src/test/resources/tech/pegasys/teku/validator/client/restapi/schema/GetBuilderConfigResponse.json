@@ -1,0 +1,10 @@
+{
+  "title" : "GetBuilderConfigResponse",
+  "type" : "object",
+  "required" : [ "data" ],
+  "properties" : {
+    "data" : {
+      "$ref" : "#/components/schemas/BuilderConfig"
+    }
+  }
+}

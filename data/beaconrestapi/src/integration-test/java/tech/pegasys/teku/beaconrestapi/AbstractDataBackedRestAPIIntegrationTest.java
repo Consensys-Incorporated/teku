@@ -31,6 +31,7 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -68,10 +69,12 @@ import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBodySchema;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.capella.BeaconBlockBodySchemaCapella;
+import tech.pegasys.teku.spec.datastructures.interop.GenesisStateBuilder;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.SignedBlsToExecutionChange;
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.statetransition.MappedOperationPool;
 import tech.pegasys.teku.statetransition.OperationPool;
@@ -233,7 +236,19 @@ public abstract class AbstractDataBackedRestAPIIntegrationTest {
       final boolean useMockForkChoice,
       final SpecMilestone specMilestone,
       final boolean storeNonCanonicalBlocks) {
-    this.spec = TestSpecFactory.createMinimal(specMilestone);
+    setupStorage(
+        storageMode,
+        useMockForkChoice,
+        TestSpecFactory.createMinimal(specMilestone),
+        storeNonCanonicalBlocks);
+  }
+
+  private void setupStorage(
+      final StateStorageMode storageMode,
+      final boolean useMockForkChoice,
+      final Spec spec,
+      final boolean storeNonCanonicalBlocks) {
+    this.spec = spec;
     this.specConfig = spec.getGenesisSpecConfig();
     this.storageSystem =
         InMemoryStorageSystemBuilder.create()
@@ -365,6 +380,26 @@ public abstract class AbstractDataBackedRestAPIIntegrationTest {
 
   protected void startRestAPIAtGenesis(final SpecMilestone specMilestone) {
     startRestAPIAtGenesis(StateStorageMode.ARCHIVE, specMilestone, CONFIG);
+  }
+
+  protected void startRestAPIAtGenesis(final Spec spec) {
+    setupStorage(StateStorageMode.ARCHIVE, false, spec, false);
+    chainUpdater.initializeGenesis();
+    setupAndStartRestAPI();
+  }
+
+  protected void startRestAPIAtGenesis(
+      final SpecMilestone specMilestone, final UnaryOperator<BeaconState> genesisStateModifier) {
+    setupStorage(StateStorageMode.ARCHIVE, false, specMilestone);
+    final BeaconState genesisState =
+        new GenesisStateBuilder()
+            .spec(spec)
+            .signDeposits(true)
+            .addValidators(VALIDATOR_KEYS)
+            .genesisTime(UInt64.ZERO)
+            .build();
+    chainUpdater.initializeGenesis(genesisStateModifier.apply(genesisState));
+    setupAndStartRestAPI();
   }
 
   protected void startRestAPIAtGenesis(

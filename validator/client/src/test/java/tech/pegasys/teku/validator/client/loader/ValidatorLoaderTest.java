@@ -16,6 +16,7 @@ package tech.pegasys.teku.validator.client.loader;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -43,12 +44,15 @@ import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentMatchers;
 import tech.pegasys.techu.service.serviceutils.layout.SimpleDataDirLayout;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.bls.keystore.KeyStoreLoader;
 import tech.pegasys.teku.bls.keystore.model.KeyStoreData;
+import tech.pegasys.teku.data.SlashingProtectionImporter;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
@@ -748,6 +752,53 @@ class ValidatorLoaderTest {
     assertThat(validator).isPresent();
     assertThat(validator.orElseThrow().getSigner()).isInstanceOf(DeletableSigner.class);
     assertThat(validator.get().getGraffitiProvider()).isInstanceOf(UpdatableGraffitiProvider.class);
+  }
+
+  @ParameterizedTest(name = "addToOwnedValidators={0}")
+  @ValueSource(booleans = {false, true})
+  void shouldNotImportSlashingProtectionForAlreadyLoadedValidator(
+      final boolean addToOwnedValidators, @TempDir final Path tempDir) throws Exception {
+    final ValidatorConfig config = ValidatorConfig.builder().build();
+    final ValidatorLoader validatorLoader =
+        ValidatorLoader.create(
+            spec,
+            config,
+            disabledInteropConfig,
+            httpClientFactory,
+            slashingProtector,
+            slashingProtectionLogger,
+            publicKeyLoader,
+            asyncRunner,
+            metricsSystem,
+            Optional.of(new SimpleDataDirLayout(tempDir)),
+            (publicKey) -> Optional.empty());
+    validatorLoader.loadValidators();
+
+    final String keystoreString =
+        Resources.toString(Resources.getResource("pbkdf2TestVector.json"), StandardCharsets.UTF_8);
+    final SlashingProtectionImporter slashingProtectionImporter =
+        mock(SlashingProtectionImporter.class);
+    when(slashingProtectionImporter.updateSigningRecord(eq(PUBLIC_KEY1), any()))
+        .thenReturn(Optional.empty());
+
+    final ValidatorImportResult firstResult =
+        validatorLoader.loadLocalMutableValidator(
+            KeyStoreLoader.loadFromString(keystoreString),
+            "testpassword",
+            Optional.of(slashingProtectionImporter),
+            true);
+    assertThat(firstResult.getPostKeyResult().getImportStatus()).isEqualTo(ImportStatus.IMPORTED);
+    verify(slashingProtectionImporter).updateSigningRecord(eq(PUBLIC_KEY1), any());
+
+    final ValidatorImportResult secondResult =
+        validatorLoader.loadLocalMutableValidator(
+            KeyStoreLoader.loadFromString(keystoreString),
+            "testpassword",
+            Optional.of(slashingProtectionImporter),
+            addToOwnedValidators);
+    assertThat(secondResult.getPostKeyResult().getImportStatus()).isEqualTo(ImportStatus.DUPLICATE);
+    // the running slashing protector owns the loaded key's record, so it must not be updated
+    verify(slashingProtectionImporter, times(1)).updateSigningRecord(eq(PUBLIC_KEY1), any());
   }
 
   @Test

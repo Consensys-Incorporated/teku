@@ -854,12 +854,38 @@ public abstract class RecentChainData
         .flatMap(strategy -> spec.getAncestor(strategy, headBlockRoot, slot));
   }
 
+  /**
+   * Returns the fork choice node on the head chain that is in effect at {@code slot}: the head if
+   * it is at or before {@code slot}, otherwise the head chain's ancestor at that slot. Like {@link
+   * #getBlockRootInEffectBySlot(UInt64)} this only considers fork choice; it does not consult
+   * finalized storage.
+   *
+   * <p>From Gloas the node carries the payload variant (FULL or EMPTY) that the head chain builds
+   * on, which a block root alone cannot express. The node data, including its optimistic status, is
+   * captured from a single fork choice snapshot.
+   *
+   * @return the node in effect at {@code slot}, or empty if there is no chain head yet, {@code
+   *     slot} is before the fork choice anchor, or the head node is no longer tracked by fork
+   *     choice (e.g. its payload was just found INVALID and the head has not been re-selected yet)
+   */
+  public Optional<ProtoNodeData> getForkChoiceNodeInEffectBySlot(final UInt64 slot) {
+    return chainHead.flatMap(
+        head ->
+            getForkChoiceStrategy()
+                // Resolves to the head node itself when the head is at or before the slot
+                .flatMap(strategy -> strategy.getAncestorNodeData(head.getForkChoiceNode(), slot)));
+  }
+
   public UInt64 getFinalizedEpoch() {
     return getFinalizedCheckpoint().map(Checkpoint::getEpoch).orElse(UInt64.ZERO);
   }
 
   public Optional<Checkpoint> getFinalizedCheckpoint() {
     return store == null ? Optional.empty() : Optional.of(store.getFinalizedCheckpoint());
+  }
+
+  public Optional<AnchorPoint> getLatestFinalized() {
+    return store == null ? Optional.empty() : Optional.of(store.getLatestFinalized());
   }
 
   public Optional<Checkpoint> getJustifiedCheckpoint() {

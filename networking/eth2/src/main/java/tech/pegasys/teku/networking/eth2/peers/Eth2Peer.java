@@ -36,6 +36,7 @@ import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.BlobIdentifier;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.DataColumnsByRootIdentifier;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.RpcRequest;
@@ -59,6 +60,7 @@ public interface Eth2Peer extends Peer, SyncSource {
       final RateTracker blobSidecarsRequestTracker,
       final RateTracker dataColumnSidecarsRequestTracker,
       final RateTracker executionPayloadEnvelopesRequestTracker,
+      final RateTracker lightClientUpdatesRequestTracker,
       final RateTracker requestTracker,
       final MetricsSystem metricsSystem,
       final TimeProvider timeProvider,
@@ -76,6 +78,7 @@ public interface Eth2Peer extends Peer, SyncSource {
         blobSidecarsRequestTracker,
         dataColumnSidecarsRequestTracker,
         executionPayloadEnvelopesRequestTracker,
+        lightClientUpdatesRequestTracker,
         requestTracker,
         metricsSystem,
         timeProvider,
@@ -188,6 +191,18 @@ public interface Eth2Peer extends Peer, SyncSource {
         RequestObject.EXECUTION_PAYLOAD_ENVELOPE,
         requestKey,
         returnedExecutionPayloadEnvelopesCount);
+  }
+
+  default Optional<RequestKey> approveLightClientUpdatesRequest(
+      final ResponseCallback<LightClientUpdate> callback, final long lightClientUpdatesCount) {
+    return approveObjectsRequest(
+        RequestObject.LIGHT_CLIENT_UPDATE, callback, lightClientUpdatesCount);
+  }
+
+  default void adjustLightClientUpdatesRequest(
+      final RequestKey requestKey, final long returnedLightClientUpdatesCount) {
+    adjustObjectsRequest(
+        RequestObject.LIGHT_CLIENT_UPDATE, requestKey, returnedLightClientUpdatesCount);
   }
 
   long getAvailableDataColumnSidecarsRequestCount();

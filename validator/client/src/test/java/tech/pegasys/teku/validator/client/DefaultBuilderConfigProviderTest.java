@@ -25,16 +25,11 @@ import static tech.pegasys.teku.infrastructure.async.SafeFuture.completedFuture;
 
 import java.net.MalformedURLException;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -101,6 +96,7 @@ class DefaultBuilderConfigProviderTest {
     final UInt64 builderMinBid = UInt64.valueOf(120);
     final UInt64 builderBoostFactor = UInt64.valueOf(90);
     final UInt64 maxExecutionPayment = UInt64.valueOf(67);
+    final Bytes authData = dataStructureUtil.randomBytes(12);
     final List<BLSPublicKey> builderPubkeys = List.of(dataStructureUtil.randomPublicKey());
     final BLSSignature signature = dataStructureUtil.randomSignature();
 
@@ -112,16 +108,14 @@ class DefaultBuilderConfigProviderTest {
                 List.of(
                     new ResolvedBuilderEntry(
                         URI.create(BUILDER_URL).toURL(),
-                        Optional.empty(),
+                        authData,
                         builderPubkeys,
                         maxExecutionPayment,
                         builderMinBid,
                         builderBoostFactor))));
 
-    // no auth data configured, so it is derived from the builder url
     final BuilderRequestAuth expectedAuth =
-        ApiSchemas.BUILDER_REQUEST_AUTH_SCHEMA.create(
-            Bytes.of("builder.example.com".getBytes(StandardCharsets.US_ASCII)), SLOT);
+        ApiSchemas.BUILDER_REQUEST_AUTH_SCHEMA.create(authData, SLOT);
     when(signer.signBuilderRequestAuth(expectedAuth)).thenReturn(completedFuture(signature));
 
     final Optional<BuilderConfig> result = provider.getBuilderConfig(validator, SLOT).join();
@@ -159,7 +153,7 @@ class DefaultBuilderConfigProviderTest {
                 List.of(
                     new ResolvedBuilderEntry(
                         URI.create(BUILDER_URL).toURL(),
-                        Optional.of(authData),
+                        authData,
                         List.of(),
                         UInt64.ZERO,
                         UInt64.ZERO,
@@ -187,14 +181,14 @@ class DefaultBuilderConfigProviderTest {
                 List.of(
                     new ResolvedBuilderEntry(
                         URI.create("https://failing-builder.example.com").toURL(),
-                        Optional.of(failingAuthData),
+                        failingAuthData,
                         List.of(),
                         UInt64.ZERO,
                         UInt64.ZERO,
                         UInt64.valueOf(100)),
                     new ResolvedBuilderEntry(
                         URI.create(BUILDER_URL).toURL(),
-                        Optional.of(authData),
+                        authData,
                         List.of(),
                         UInt64.ZERO,
                         UInt64.ZERO,
@@ -238,7 +232,7 @@ class DefaultBuilderConfigProviderTest {
                 List.of(
                     new ResolvedBuilderEntry(
                         URI.create(BUILDER_URL).toURL(),
-                        Optional.empty(),
+                        Bytes.EMPTY,
                         List.of(),
                         UInt64.ZERO,
                         UInt64.ZERO,
@@ -257,26 +251,5 @@ class DefaultBuilderConfigProviderTest {
     verify(proposerConfigPropertiesProvider, times(2)).isReadyToProvideProperties();
     verify(proposerConfigPropertiesProvider).resolveBuilderConfig(validator.getPublicKey());
     verifyNoMoreInteractions(proposerConfigPropertiesProvider);
-  }
-
-  @ParameterizedTest
-  @MethodSource("authDataTestCases")
-  void shouldGetDefaultAuthData(final String builderUrl, final String expectedAuthData)
-      throws MalformedURLException {
-    assertThat(provider.getDefaultAuthData(URI.create(builderUrl).toURL()))
-        .isEqualTo(expectedAuthData);
-  }
-
-  static Stream<Arguments> authDataTestCases() {
-    return Stream.of(
-        Arguments.of("https://builder.example.com/", "builder.example.com"),
-        Arguments.of("HTTPS://Builder.Example.com:443/bids?x=1", "builder.example.com"),
-        Arguments.of("https://builder.example.com:8080", "builder.example.com"),
-        Arguments.of("https://user:pw@builder.example.com/", "builder.example.com"),
-        Arguments.of("https://10.0.0.5:18550/eth/v1/builder", "10.0.0.5"),
-        Arguments.of("https://[0:0:0:0:0:0:0:1]:8443/", "[::1]"),
-        Arguments.of("https://[2001:db8::192.0.2.1]/", "[2001:db8::c000:201]"),
-        Arguments.of("https://bücher.example.org/bids", "xn--bcher-kva.example.org"),
-        Arguments.of("https://platåberget.dev", "xn--platberget-45a.dev"));
   }
 }

@@ -20,6 +20,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
@@ -33,7 +34,9 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
@@ -68,6 +71,22 @@ class BlobKzgCommitmentsProviderTest {
   }
 
   @Test
+  void returnsStateOnlyCheckpointCommitmentsWithoutRequiringBlock() {
+    final BeaconStateGloas state =
+        BeaconStateGloas.required(dataStructureUtil.randomBeaconState(UInt64.valueOf(8)));
+    final AnchorPoint anchor = mock(AnchorPoint.class);
+    when(anchor.getRoot()).thenReturn(dataStructureUtil.randomBytes32());
+    when(anchor.getState()).thenReturn(state);
+    when(combinedChainDataClient.getLatestFinalized()).thenReturn(Optional.of(anchor));
+
+    assertThat(provider.getBlobKzgCommitments(anchor.getRoot()))
+        .isCompletedWithValue(
+            Optional.of(state.getLatestExecutionPayloadBid().getBlobKzgCommitments()));
+    assertThat(provider.getBlobKzgCommitments(dataStructureUtil.randomBytes32()))
+        .isCompletedWithValue(Optional.empty());
+  }
+
+  @Test
   void storesEmptyCommitmentsListAsKnownContext() {
     final SignedBeaconBlock block =
         dataStructureUtil.randomSignedBeaconBlockWithCommitments(UInt64.ONE, 0);
@@ -82,8 +101,10 @@ class BlobKzgCommitmentsProviderTest {
   }
 
   @Test
-  void returnsSidecarCommitmentsWithoutStoringThem() {
+  void returnsFuluSidecarCommitmentsWithoutStoringThem() {
     final Spec fuluSpec = TestSpecFactory.createMinimalFulu();
+    final BlobKzgCommitmentsProvider fuluProvider =
+        new BlobKzgCommitmentsProvider(fuluSpec, combinedChainDataClient, 2);
     final DataStructureUtil fuluDataStructureUtil = new DataStructureUtil(fuluSpec);
     final SignedBeaconBlock block =
         fuluDataStructureUtil.randomSignedBeaconBlockWithCommitments(UInt64.ONE, 2);
@@ -92,10 +113,44 @@ class BlobKzgCommitmentsProviderTest {
     final SszList<SszKZGCommitment> commitments =
         dataColumnSidecar.getMaybeKzgCommitments().orElseThrow();
 
-    assertThat(provider.getBlobKzgCommitments(dataColumnSidecar).join()).contains(commitments);
-    assertThat(provider.getBlobKzgCommitments(dataColumnSidecar.getBeaconBlockRoot()).join())
-        .isEmpty();
+    assertThatSafeFuture(fuluProvider.getBlobKzgCommitments(dataColumnSidecar))
+        .isCompletedWithOptionalContaining(commitments);
+    assertThatSafeFuture(fuluProvider.getBlobKzgCommitments(dataColumnSidecar.getBeaconBlockRoot()))
+        .isCompletedWithEmptyOptional();
     verify(combinedChainDataClient).getBlockByBlockRoot(dataColumnSidecar.getBeaconBlockRoot());
+  }
+
+  @Test
+  void ignoresCommitmentsCarriedBySidecarAtGloasSlot() {
+    final DataStructureUtil fuluDataStructureUtil =
+        new DataStructureUtil(TestSpecFactory.createMinimalFulu());
+    final DataColumnSidecar sidecarWithOwnCommitments =
+        fuluDataStructureUtil.randomDataColumnSidecar(
+            fuluDataStructureUtil.randomSignedBeaconBlockHeader(UInt64.ONE), UInt64.ZERO);
+    assertThat(sidecarWithOwnCommitments.getMaybeKzgCommitments()).isPresent();
+
+    assertThatSafeFuture(provider.getBlobKzgCommitments(sidecarWithOwnCommitments))
+        .isCompletedWithEmptyOptional();
+    verify(combinedChainDataClient)
+        .getBlockByBlockRoot(sidecarWithOwnCommitments.getBeaconBlockRoot());
+  }
+
+  @Test
+  void resolvesCommitmentsByRootForSidecarAtGloasSlotCarryingCommitments() {
+    final SignedBeaconBlock block =
+        dataStructureUtil.randomSignedBeaconBlockWithCommitments(UInt64.ONE, 2);
+    final SszList<SszKZGCommitment> bidCommitments =
+        block.getMessage().getBody().getOptionalBlobKzgCommitments().orElseThrow();
+    final DataStructureUtil fuluDataStructureUtil =
+        new DataStructureUtil(TestSpecFactory.createMinimalFulu());
+    final DataColumnSidecar sidecarWithOwnCommitments =
+        fuluDataStructureUtil.randomDataColumnSidecar(block.asHeader(), UInt64.ZERO);
+    provider.onNewBlock(block);
+
+    assertThatSafeFuture(provider.getBlobKzgCommitments(sidecarWithOwnCommitments))
+        .isCompletedWithOptionalContaining(bidCommitments);
+    assertThat(sidecarWithOwnCommitments.getMaybeKzgCommitments().orElseThrow().hashTreeRoot())
+        .isNotEqualTo(bidCommitments.hashTreeRoot());
   }
 
   @Test

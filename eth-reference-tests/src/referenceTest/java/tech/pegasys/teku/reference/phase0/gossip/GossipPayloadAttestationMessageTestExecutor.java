@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import org.opentest4j.TestAbortedException;
+import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.reference.BlsSetting;
@@ -38,6 +39,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestat
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessageSchema;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
+import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.statetransition.payloadattestation.PayloadAttestationMessageGossipValidator;
 import tech.pegasys.teku.statetransition.payloadattestation.ValidatablePayloadAttestationMessage;
@@ -138,7 +140,13 @@ public class GossipPayloadAttestationMessageTestExecutor implements TestExecutor
             .getPayloadAttestationMessageSchema();
     final PayloadAttestationMessageGossipValidator validator =
         new PayloadAttestationMessageGossipValidator(
-            spec, gossipValidationHelper, invalidBlockRoots);
+            spec,
+            gossipValidationHelper,
+            AsyncBLSSignatureVerifier.wrap(
+                signatureVerificationDisabled
+                    ? BLSSignatureVerifier.NOOP
+                    : BLSSignatureVerifier.SIMPLE),
+            invalidBlockRoots);
 
     for (final GossipPayloadAttestationMessageMetaData.Message message : metaData.getMessages()) {
       validationTimeMs[0] = UInt64.valueOf(message.getCurrentTimeMs());

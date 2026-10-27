@@ -69,7 +69,12 @@ jobs:
           # on a release tag also add `latest` and `maj.min` version tags if it's not an `rc`
           if [ "$EVENT_NAME" == "push" ] && [ "$REF_TYPE" == "tag" ]; then
             echo "buildVersion=$REF_NAME" >> "$GITHUB_OUTPUT"
-            dockertags="consensys/teku:$REF_NAME,consensys/teku:$REF_NAME-$JDK_VERSION"
+            dockertags="consensys/teku:$REF_NAME-$JDK_VERSION"
+            # Only the default jdk25 image gets the bare tags (as with `develop` below); otherwise
+            # each variant job pushes them and whichever finishes last wins.
+            if [ "$JDK_VERSION" = "jdk25" ]; then
+              dockertags="$dockertags,consensys/teku:$REF_NAME"
+            fi
 
             semver="$REF_NAME"
             if [[ ${semver,,} != *"-rc"* ]]; then
@@ -81,8 +86,10 @@ jobs:
               else
                 echo "Invalid semver string"
               fi              
-              dockertags="${dockertags},consensys/teku:${major_minor},consensys/teku:${major_minor}-${JDK_VERSION}"
-              dockertags="${dockertags},consensys/teku:latest,consensys/teku:latest-${JDK_VERSION}"
+              dockertags="${dockertags},consensys/teku:${major_minor}-${JDK_VERSION},consensys/teku:latest-${JDK_VERSION}"
+              if [ "$JDK_VERSION" = "jdk25" ]; then
+                dockertags="${dockertags},consensys/teku:${major_minor},consensys/teku:latest"
+              fi
             fi
             echo "dockertags=${dockertags}" >> "$GITHUB_OUTPUT"
 

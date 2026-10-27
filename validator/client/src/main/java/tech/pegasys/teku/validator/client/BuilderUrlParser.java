@@ -38,6 +38,13 @@ public class BuilderUrlParser {
         throw new InvalidConfigurationException(
             "Invalid configuration. Builder URL (" + builderUrl + ") must contain a valid host");
       }
+      // sanity check that we can resolve the default auth data without issues
+      try {
+        AuthDataResolver.resolveDefaultAuthData(parsedBuilderUrl);
+      } catch (Exception e) {
+        throw new InvalidConfigurationException(
+            "Invalid configuration. Cannot resolve the default auth data for " + builderUrl, e);
+      }
       return parsedBuilderUrl;
     } catch (IllegalArgumentException | MalformedURLException e) {
       throw new InvalidConfigurationException(

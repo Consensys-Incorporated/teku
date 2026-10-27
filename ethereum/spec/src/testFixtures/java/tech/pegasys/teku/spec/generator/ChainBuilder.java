@@ -816,6 +816,7 @@ public class ChainBuilder {
             options.getKzgCommitments(),
             options.getPayloadAttestations(),
             options.getParentExecutionRequests(),
+            options.isBuildOnEmptyParentEnabled(),
             options.isSkipStateTransitionEnabled()));
   }
 
@@ -880,6 +881,7 @@ public class ChainBuilder {
                   blobs,
                   options.getPayloadAttestations(),
                   options.getParentExecutionRequests(),
+                  options.isBuildOnEmptyParentEnabled(),
                   options.isSkipStateTransitionEnabled()));
     } else {
       nextBlockAndState =
@@ -903,6 +905,7 @@ public class ChainBuilder {
                   options.getKzgCommitments(),
                   options.getPayloadAttestations(),
                   options.getParentExecutionRequests(),
+                  options.isBuildOnEmptyParentEnabled(),
                   options.isSkipStateTransitionEnabled()));
     }
 
@@ -992,6 +995,7 @@ public class ChainBuilder {
                   blobs,
                   options.getPayloadAttestations(),
                   options.getParentExecutionRequests(),
+                  options.isBuildOnEmptyParentEnabled(),
                   options.isSkipStateTransitionEnabled()));
     } else {
       nextBlockAndState =
@@ -1015,6 +1019,7 @@ public class ChainBuilder {
                   options.getKzgCommitments(),
                   options.getPayloadAttestations(),
                   options.getParentExecutionRequests(),
+                  options.isBuildOnEmptyParentEnabled(),
                   options.isSkipStateTransitionEnabled()));
     }
 
@@ -1176,6 +1181,7 @@ public class ChainBuilder {
     private boolean skipStateTransition = false;
     private boolean wrongProposer = false;
     private boolean withholdExecutionPayload = false;
+    private boolean buildOnEmptyParent = false;
 
     private BlockOptions() {}
 
@@ -1302,6 +1308,15 @@ public class ChainBuilder {
       return this;
     }
 
+    /**
+     * Gloas only: build the block on the parent's EMPTY variant, as if the parent's payload had not
+     * been revealed, instead of on its FULL variant.
+     */
+    public BlockOptions setBuildOnEmptyParent(final boolean buildOnEmptyParent) {
+      this.buildOnEmptyParent = buildOnEmptyParent;
+      return this;
+    }
+
     private List<Attestation> getAttestations() {
       return attestations;
     }
@@ -1388,6 +1403,10 @@ public class ChainBuilder {
 
     public boolean isWithholdExecutionPayloadEnabled() {
       return withholdExecutionPayload;
+    }
+
+    public boolean isBuildOnEmptyParentEnabled() {
+      return buildOnEmptyParent;
     }
   }
 }

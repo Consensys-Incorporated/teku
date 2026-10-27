@@ -186,8 +186,11 @@ public class ExecutionPayloadEnvelopesByRangeIntegrationTest
             .advanceChain(
                 headSlot,
                 peerStorage.chainBuilder().createBlockOptionsBuildingOnEmptyParent(headSlot));
-    // the head payload has been stored but fork choice has not selected the FULL variant yet
+    // the head payload has been stored but fork choice has selected the EMPTY variant
     peerStorage.chainUpdater().updateBestBlock(head);
+    peerStorage
+        .recentChainData()
+        .updateHead(ForkChoiceNode.createEmpty(head.getRoot()), head.getSlot());
 
     final SignedExecutionPayloadEnvelope emptyPayloadEnvelope =
         peerStorage.chainBuilder().getExecutionPayloadAtSlot(emptyPayloadSlot).orElseThrow();

@@ -38,12 +38,15 @@ import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannel;
 import tech.pegasys.teku.spec.executionlayer.ForkChoiceState;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
 import tech.pegasys.teku.storage.client.ChainHead;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
@@ -59,6 +62,7 @@ class ProposersDataManagerTest {
   private final ChainHead chainHead = mock(ChainHead.class);
 
   private Spec spec;
+  private ProposerPreferencesManager proposerPreferencesManager;
   private DataStructureUtil dataStructureUtil;
   private InlineEventThread eventThread;
   private ProposersDataManager manager;
@@ -83,6 +87,9 @@ class ProposersDataManagerTest {
     dataStructureUtil = specContext.getDataStructureUtil();
     eventThread = new InlineEventThread();
     defaultAddress = dataStructureUtil.randomEth1Address();
+    proposerPreferencesManager = mock(ProposerPreferencesManager.class);
+    when(proposerPreferencesManager.getProposerPreferences(any(), any()))
+        .thenReturn(Optional.empty());
     manager =
         new ProposersDataManager(
             eventThread,
@@ -91,7 +98,8 @@ class ProposersDataManagerTest {
             channel,
             recentChainData,
             Optional.of(defaultAddress),
-            false);
+            false,
+            proposerPreferencesManager);
     proposers =
         List.of(
             new BeaconPreparableProposer(UInt64.ONE, dataStructureUtil.randomEth1Address()),
@@ -112,26 +120,26 @@ class ProposersDataManagerTest {
 
   @TestTemplate
   void isValidatorConnected_found_withPreparedProposer() {
-    manager.updatePreparedProposersFromPrepareBeaconProposer(proposers, UInt64.ONE);
+    prepareProposers();
     assertThat(manager.isValidatorConnected(1, UInt64.valueOf(1))).isTrue();
   }
 
   @TestTemplate
   void isValidatorConnected_notFound_withDifferentPreparedProposer() {
-    manager.updatePreparedProposersFromPrepareBeaconProposer(proposers, UInt64.ONE);
+    prepareProposers();
     assertThat(manager.isValidatorConnected(2, UInt64.valueOf(2))).isFalse();
   }
 
   @TestTemplate
   void isValidatorConnected_notFound_withExpiredPreparedProposer() {
-    manager.updatePreparedProposersFromPrepareBeaconProposer(proposers, UInt64.ONE);
+    prepareProposers();
     assertThat(manager.isValidatorConnected(1, UInt64.valueOf(26))).isFalse();
   }
 
   @TestTemplate
   void isBlockProposerConnected_notFound_currentEpoch() {
     doReturn(2).when(spec).getBeaconProposerIndex(any(), any());
-    manager.updatePreparedProposersFromPrepareBeaconProposer(proposers, UInt64.ONE);
+    prepareProposers();
 
     assertThat(manager.isBlockProposerConnected(UInt64.ONE)).isCompletedWithValue(false);
     verify(recentChainData, never()).retrieveBlockState(any(SlotAndBlockRoot.class));
@@ -140,7 +148,7 @@ class ProposersDataManagerTest {
   @TestTemplate
   void isBlockProposerConnected_found_currentEpoch() {
     doReturn(1).when(spec).getBeaconProposerIndex(any(), any());
-    manager.updatePreparedProposersFromPrepareBeaconProposer(proposers, UInt64.ONE);
+    prepareProposers();
 
     assertThat(manager.isBlockProposerConnected(UInt64.ONE)).isCompletedWithValue(true);
     verify(recentChainData, never()).retrieveBlockState(any(SlotAndBlockRoot.class));
@@ -149,7 +157,7 @@ class ProposersDataManagerTest {
   @TestTemplate
   void isBlockProposerConnected_notFound_nextEpoch() {
     doReturn(2).when(spec).getBeaconProposerIndex(any(), any());
-    manager.updatePreparedProposersFromPrepareBeaconProposer(proposers, UInt64.ONE);
+    prepareProposers();
 
     assertThat(manager.isBlockProposerConnected(UInt64.valueOf(10))).isCompletedWithValue(false);
     verify(recentChainData).retrieveBlockState(any(SlotAndBlockRoot.class));
@@ -158,7 +166,7 @@ class ProposersDataManagerTest {
   @TestTemplate
   void isBlockProposerConnected_found_nextEpoch() {
     doReturn(1).when(spec).getBeaconProposerIndex(any(), any());
-    manager.updatePreparedProposersFromPrepareBeaconProposer(proposers, UInt64.ONE);
+    prepareProposers();
 
     assertThat(manager.isBlockProposerConnected(UInt64.valueOf(10))).isCompletedWithValue(true);
     verify(recentChainData).retrieveBlockState(any(SlotAndBlockRoot.class));
@@ -194,5 +202,40 @@ class ProposersDataManagerTest {
         .join();
 
     verify(recentChainData).retrieveBlockState(new SlotAndBlockRoot(blockSlot, forkChoiceHeadRoot));
+  }
+
+  /**
+   * Seeds the prepared proposer cache the way the validator client does for the milestone under
+   * test: prepare_beacon_proposer pre-Gloas, accepted signed proposer preferences from Gloas on.
+   */
+  private void prepareProposers() {
+    if (!spec.areProposerAndBuilderPreferencesRequiredAtEpoch(
+        spec.computeEpochAtSlot(UInt64.ONE))) {
+      manager.updatePreparedProposersFromPrepareBeaconProposer(proposers, UInt64.ONE);
+      return;
+    }
+    final SchemaDefinitionsGloas schemaDefinitions =
+        SchemaDefinitionsGloas.required(spec.atSlot(UInt64.ONE).getSchemaDefinitions());
+    proposers.forEach(
+        proposer -> {
+          final Bytes32 dependentRoot = dataStructureUtil.randomBytes32();
+          final ProposerPreferences preferences =
+              schemaDefinitions
+                  .getProposerPreferencesSchema()
+                  .create(
+                      dependentRoot,
+                      UInt64.ONE,
+                      proposer.validatorIndex(),
+                      proposer.feeRecipient(),
+                      dataStructureUtil.randomUInt64());
+          when(proposerPreferencesManager.getProposerPreferences(UInt64.ONE, dependentRoot))
+              .thenReturn(Optional.of(preferences));
+          manager.updatePreparedProposersFromProposerPreferences(
+              List.of(
+                  schemaDefinitions
+                      .getSignedProposerPreferencesSchema()
+                      .create(preferences, dataStructureUtil.randomSignature())),
+              UInt64.ONE);
+        });
   }
 }

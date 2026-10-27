@@ -25,9 +25,6 @@ specrefs:
       - ENDIANNESS
       - EMPTY_BLOCK_HASH#bellatrix # tuweni library is used instead
 
-      # No light client support
-      - MAX_REQUEST_LIGHT_CLIENT_UPDATES
-
       # Constant in the KZG library
       - G2_POINT_AT_INFINITY
 

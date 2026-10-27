@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.networking.eth2.peers;
 
+import static tech.pegasys.teku.spec.constants.NetworkConstants.MAX_REQUEST_LIGHT_CLIENT_UPDATES;
+
 import java.util.Optional;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
@@ -90,6 +92,8 @@ public class Eth2PeerFactory {
             "data_column_sidecars"),
         RateTracker.create(
             peerBlocksRateLimit, TIME_OUT, timeProvider, "execution_payload_envelopes"),
+        RateTracker.create(
+            MAX_REQUEST_LIGHT_CLIENT_UPDATES, TIME_OUT, timeProvider, "light_client_updates"),
         RateTracker.create(peerRequestLimit, TIME_OUT, timeProvider, "request_tracker"),
         metricsSystem,
         timeProvider,

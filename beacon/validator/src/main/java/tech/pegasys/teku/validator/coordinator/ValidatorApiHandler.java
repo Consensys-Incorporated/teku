@@ -94,6 +94,8 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
@@ -586,56 +588,98 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
             .prepareForAttestationProduction(slot)
             .thenCompose(
                 __ ->
-                    combinedChainDataClient
-                        .getSignedBlockAndStateInEffectAtSlot(slot)
-                        .thenCompose(
-                            maybeBlockAndState -> {
-                              if (maybeBlockAndState.isEmpty()) {
-                                return SafeFuture.completedFuture(Optional.empty());
-                              }
-                              final SignedBlockAndState blockAndState = maybeBlockAndState.get();
-                              final BeaconBlock block = blockAndState.getBlock().getMessage();
-
-                              // The head block must not be optimistically synced.
-                              if (combinedChainDataClient.isOptimisticBlock(block.getRoot())) {
-                                return NodeSyncingException.failedFuture();
-                              }
-                              if (blockAndState.getSlot().compareTo(minQuerySlot) < 0) {
-                                // The current effective block is too far in the past - so roll the
-                                // state forward to the current epoch. Ensures we have the latest
-                                // justified checkpoint
-                                return combinedChainDataClient
-                                    .getCheckpointState(epoch, blockAndState)
-                                    .thenApply(
-                                        checkpointState ->
-                                            Optional.of(
-                                                createAttestationData(
-                                                    block,
-                                                    checkpointState.getState(),
-                                                    slot,
-                                                    computeCommitteeIndexForAttestation(
-                                                        slot, block, committeeIndex))));
-                              } else {
-                                final AttestationData attestationData =
-                                    createAttestationData(
-                                        block,
-                                        blockAndState.getState(),
-                                        slot,
-                                        computeCommitteeIndexForAttestation(
-                                            slot, block, committeeIndex));
-                                return SafeFuture.completedFuture(Optional.of(attestationData));
-                              }
-                            }));
+                    spec.isExecutionPayloadEnvelopeAvailableAtSlot(slot)
+                        ? createAttestationDataForForkChoiceNode(
+                            epoch, minQuerySlot, slot, committeeIndex)
+                        : createAttestationDataForBlockInEffect(
+                            epoch, minQuerySlot, slot, committeeIndex));
     result.always(context::stopTimer);
     return result;
   }
 
-  private int computeCommitteeIndexForAttestation(
-      final UInt64 slot, final BeaconBlock block, final int committeeIndex) {
-    return spec.atSlot(slot)
-        .getForkChoiceUtil()
-        .computeCommitteeIndexForAttestation(
-            slot, block, committeeIndex, combinedChainDataClient.getStore());
+  private SafeFuture<Optional<AttestationData>> createAttestationDataForBlockInEffect(
+      final UInt64 epoch, final UInt64 minQuerySlot, final UInt64 slot, final int committeeIndex) {
+    return combinedChainDataClient
+        .getSignedBlockAndStateInEffectAtSlot(slot)
+        .thenCompose(
+            maybeBlockAndState -> {
+              if (maybeBlockAndState.isEmpty()) {
+                return SafeFuture.completedFuture(Optional.empty());
+              }
+              final SignedBlockAndState blockAndState = maybeBlockAndState.get();
+              // The head block must not be optimistically synced.
+              if (combinedChainDataClient.isOptimisticBlock(blockAndState.getRoot())) {
+                return NodeSyncingException.failedFuture();
+              }
+              return createAttestationData(
+                  epoch, minQuerySlot, slot, committeeIndex, blockAndState, Optional.empty());
+            });
+  }
+
+  private SafeFuture<Optional<AttestationData>> createAttestationDataForForkChoiceNode(
+      final UInt64 epoch, final UInt64 minQuerySlot, final UInt64 slot, final int committeeIndex) {
+    // The payload variant is only known to fork choice, so slots it no longer tracks produce no
+    // attestation data.
+    final Optional<ProtoNodeData> maybeNode =
+        combinedChainDataClient.getForkChoiceNodeInEffectAtSlot(slot);
+    if (maybeNode.isEmpty()) {
+      // The head node is also dropped when its payload is found INVALID, until the head is
+      // re-selected. Report syncing, as for an optimistic head, so validator clients can fail over.
+      return combinedChainDataClient.isChainHeadOptimistic()
+          ? NodeSyncingException.failedFuture()
+          : SafeFuture.completedFuture(Optional.empty());
+    }
+    final ProtoNodeData node = maybeNode.get();
+    // The head block must not be optimistically synced.
+    if (node.isOptimistic()) {
+      return NodeSyncingException.failedFuture();
+    }
+    return combinedChainDataClient
+        .getStore()
+        .retrieveBlockAndState(node.getRoot())
+        .thenCompose(
+            maybeBlockAndState ->
+                maybeBlockAndState
+                    .map(
+                        blockAndState ->
+                            createAttestationData(
+                                epoch,
+                                minQuerySlot,
+                                slot,
+                                committeeIndex,
+                                blockAndState,
+                                Optional.of(node.getForkChoiceNode())))
+                    .orElseGet(() -> SafeFuture.completedFuture(Optional.empty())));
+  }
+
+  private SafeFuture<Optional<AttestationData>> createAttestationData(
+      final UInt64 epoch,
+      final UInt64 minQuerySlot,
+      final UInt64 slot,
+      final int committeeIndex,
+      final SignedBlockAndState blockAndState,
+      final Optional<ForkChoiceNode> selectedHead) {
+    final BeaconBlock block = blockAndState.getBlock().getMessage();
+    final int computedCommitteeIndex =
+        spec.atSlot(slot)
+            .getForkChoiceUtil()
+            .computeCommitteeIndexForAttestation(slot, block, committeeIndex, selectedHead);
+
+    if (blockAndState.getSlot().compareTo(minQuerySlot) < 0) {
+      // The current effective block is too far in the past - so roll the state forward to the
+      // current epoch. Ensures we have the latest justified checkpoint.
+      return combinedChainDataClient
+          .getCheckpointState(epoch, blockAndState)
+          .thenApply(
+              checkpointState ->
+                  Optional.of(
+                      createAttestationData(
+                          block, checkpointState.getState(), slot, computedCommitteeIndex)));
+    }
+
+    final AttestationData attestationData =
+        createAttestationData(block, blockAndState.getState(), slot, computedCommitteeIndex);
+    return SafeFuture.completedFuture(Optional.of(attestationData));
   }
 
   private AttestationData createAttestationData(

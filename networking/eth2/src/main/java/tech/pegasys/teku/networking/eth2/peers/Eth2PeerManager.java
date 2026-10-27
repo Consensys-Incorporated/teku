@@ -48,6 +48,7 @@ import tech.pegasys.teku.statetransition.datacolumns.BlobKzgCommitmentsProvider;
 import tech.pegasys.teku.statetransition.datacolumns.CustodyGroupCountManager;
 import tech.pegasys.teku.statetransition.datacolumns.DataColumnSidecarArchiveReconstructor;
 import tech.pegasys.teku.statetransition.datacolumns.log.rpc.DasReqRespLogger;
+import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
@@ -87,7 +88,8 @@ public class Eth2PeerManager implements PeerLookup, PeerHandler {
       final int eth2RpcOutstandingPingThreshold,
       final Duration eth2StatusUpdateInterval,
       final DataColumnSidecarArchiveReconstructor dataColumnSidecarArchiveReconstructor,
-      final DasReqRespLogger dasLogger) {
+      final DasReqRespLogger dasLogger,
+      final Optional<LightClientUpdateStore> lightClientUpdateStore) {
     this.asyncRunner = asyncRunner;
     this.recentChainData = recentChainData;
     this.eth2PeerFactory = eth2PeerFactory;
@@ -105,7 +107,8 @@ public class Eth2PeerManager implements PeerLookup, PeerHandler {
             metadataMessagesFactory,
             rpcEncoding,
             dataColumnSidecarArchiveReconstructor,
-            dasLogger);
+            dasLogger,
+            lightClientUpdateStore);
     this.eth2RpcPingInterval = eth2RpcPingInterval;
     this.eth2RpcOutstandingPingThreshold = eth2RpcOutstandingPingThreshold;
     this.eth2StatusUpdateInterval = eth2StatusUpdateInterval;
@@ -133,7 +136,8 @@ public class Eth2PeerManager implements PeerLookup, PeerHandler {
       final Spec spec,
       final DiscoveryNodeIdExtractor discoveryNodeIdExtractor,
       final DataColumnSidecarArchiveReconstructor dataColumnSidecarArchiveReconstructor,
-      final DasReqRespLogger dasLogger) {
+      final DasReqRespLogger dasLogger,
+      final Optional<LightClientUpdateStore> lightClientUpdateStore) {
     attestationSubnetService.subscribeToUpdates(
         metadataMessagesFactory::updateAttestationSubnetIds);
     syncCommitteeSubnetService.subscribeToUpdates(
@@ -166,7 +170,8 @@ public class Eth2PeerManager implements PeerLookup, PeerHandler {
         eth2RpcOutstandingPingThreshold,
         eth2StatusUpdateInterval,
         dataColumnSidecarArchiveReconstructor,
-        dasLogger);
+        dasLogger,
+        lightClientUpdateStore);
   }
 
   public MetadataMessage getMetadataMessage() {

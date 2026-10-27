@@ -19,10 +19,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.List;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.config.GasLimitScheduleEntry;
+import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
@@ -129,8 +132,10 @@ public class MiscHelpersGloasTest {
         .isEqualTo(builderIndex);
   }
 
-  @Test
-  public void isBidBuildingOnFullParent_shouldBeTrueWhenBidReferencesLatestCommittedBid() {
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  public void isBidBuildingOnFullParent_shouldCompareAgainstLatestCommittedBid(
+      final boolean matches) {
     final Bytes32 fullParentBlockHash = data.randomBytes32();
     final ExecutionPayloadBid latestExecutionPayloadBid =
         data.randomExecutionPayloadBid(
@@ -150,12 +155,51 @@ public class MiscHelpersGloasTest {
                     }));
     final ExecutionPayloadBid childBid =
         data.randomExecutionPayloadBid(
-            fullParentBlockHash,
+            matches ? fullParentBlockHash : data.randomBytes32(),
             data.randomSlot(),
             data.randomBuilderIndex(),
             UInt64.ZERO,
             UInt64.ZERO);
 
-    assertThat(miscHelpers.isBidBuildingOnFullParent(state, childBid)).isTrue();
+    assertThat(miscHelpers.isBidBuildingOnFullParent(state, childBid)).isEqualTo(matches);
+  }
+
+  @Test
+  public void isParentBlockFull_shouldCompareLatestBidBlockHashWithLatestBlockHash() {
+    final BeaconStateGloas state = BeaconStateGloas.required(data.randomBeaconState());
+    final Bytes32 bidBlockHash = state.getLatestExecutionPayloadBid().getBlockHash();
+    final BeaconStateGloas fullState =
+        BeaconStateGloas.required(
+            state.updated(
+                mutable ->
+                    MutableBeaconStateGloas.required(mutable).setLatestBlockHash(bidBlockHash)));
+    final BeaconStateGloas emptyState =
+        BeaconStateGloas.required(
+            state.updated(
+                mutable ->
+                    MutableBeaconStateGloas.required(mutable)
+                        .setLatestBlockHash(data.randomBytes32())));
+
+    assertThat(MiscHelpersGloas.isParentBlockFull(fullState)).isTrue();
+    assertThat(MiscHelpersGloas.isParentBlockFull(emptyState)).isFalse();
+  }
+
+  @Test
+  void verifyDataColumnSidecar_shouldAcceptGloasSidecar() {
+    final DataColumnSidecar sidecar =
+        data.randomDataColumnSidecar(
+            data.randomSignedBeaconBlockWithCommitments(UInt64.ONE, 3), UInt64.ZERO);
+
+    assertThat(miscHelpers.verifyDataColumnSidecar(sidecar)).isTrue();
+  }
+
+  @Test
+  void verifyDataColumnSidecar_shouldRejectSidecarOfAnotherFork() {
+    final DataStructureUtil fuluData = new DataStructureUtil(TestSpecFactory.createMinimalFulu());
+    final DataColumnSidecar fuluSidecar =
+        fuluData.randomDataColumnSidecar(
+            fuluData.randomSignedBeaconBlockHeader(UInt64.ONE), UInt64.ZERO);
+
+    assertThat(miscHelpers.verifyDataColumnSidecar(fuluSidecar)).isFalse();
   }
 }

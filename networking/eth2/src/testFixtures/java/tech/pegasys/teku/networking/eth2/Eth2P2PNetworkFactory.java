@@ -128,6 +128,7 @@ import tech.pegasys.teku.statetransition.datacolumns.CustodyGroupCountManager;
 import tech.pegasys.teku.statetransition.datacolumns.DataColumnSidecarArchiveReconstructor;
 import tech.pegasys.teku.statetransition.datacolumns.log.gossip.DasGossipLogger;
 import tech.pegasys.teku.statetransition.datacolumns.log.rpc.DasReqRespLogger;
+import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
 import tech.pegasys.teku.statetransition.util.DebugDataDumper;
 import tech.pegasys.teku.storage.api.StorageQueryChannel;
 import tech.pegasys.teku.storage.api.StubStorageQueryChannel;
@@ -178,6 +179,7 @@ public class Eth2P2PNetworkFactory {
         lightClientFinalityUpdateProcessor = Optional.empty();
     protected Optional<OperationProcessor<LightClientOptimisticUpdate>>
         lightClientOptimisticUpdateProcessor = Optional.empty();
+    protected Optional<LightClientUpdateStore> lightClientUpdateStore = Optional.empty();
     protected OperationProcessor<SignedBlsToExecutionChange> signedBlsToExecutionChangeProcessor;
     protected OperationProcessor<DataColumnSidecar> dataColumnSidecarOperationProcessor;
     protected OperationProcessor<ExecutionProof> executionProofOperationProcessor;
@@ -351,7 +353,8 @@ public class Eth2P2PNetworkFactory {
                 spec,
                 __ -> Optional.of(discoveryNodeId),
                 DataColumnSidecarArchiveReconstructor.NOOP,
-                DasReqRespLogger.NOOP);
+                DasReqRespLogger.NOOP,
+                lightClientUpdateStore);
 
         List<RpcMethod<?, ?, ?>> rpcMethods =
             eth2PeerManager.getBeaconChainMethods().all().stream()
@@ -911,6 +914,13 @@ public class Eth2P2PNetworkFactory {
         final OperationProcessor<LightClientOptimisticUpdate> processor) {
       checkNotNull(processor);
       this.lightClientOptimisticUpdateProcessor = Optional.of(processor);
+      return this;
+    }
+
+    public Eth2P2PNetworkBuilder lightClientUpdateStore(
+        final LightClientUpdateStore lightClientUpdateStore) {
+      checkNotNull(lightClientUpdateStore);
+      this.lightClientUpdateStore = Optional.of(lightClientUpdateStore);
       return this;
     }
 

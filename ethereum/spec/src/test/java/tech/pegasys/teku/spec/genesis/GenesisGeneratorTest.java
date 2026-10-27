@@ -213,8 +213,13 @@ class GenesisGeneratorTest {
             eth1BlockHash, UInt64.ZERO, deposits, Optional.empty());
 
     final BeaconStateGloas genesisStateGloas = BeaconStateGloas.required(genesisState);
+    // The genesis block is EMPTY, as in the consensus-specs genesis helper and eth-beacon-genesis:
+    // the bid names the EL genesis block as its parent and commits to no payload of its own
+    assertThat(genesisStateGloas.getLatestBlockHash()).isEqualTo(eth1BlockHash);
     assertThat(genesisStateGloas.getLatestExecutionPayloadBid().getParentBlockHash())
         .isEqualTo(eth1BlockHash);
+    assertThat(genesisStateGloas.getLatestExecutionPayloadBid().getBlockHash())
+        .isEqualTo(Bytes32.ZERO);
 
     final BeaconBlockBodySchema<?> bodySchema =
         gloasSpec.getGenesisSchemaDefinitions().getBeaconBlockBodySchema();

@@ -13,12 +13,7 @@
 
 package tech.pegasys.teku.validator.client;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.net.InetAddresses;
-import java.net.IDN;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -28,12 +23,10 @@ import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
-import tech.pegasys.teku.infrastructure.collections.cache.LRUCache;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
-import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfigSchema;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderEntry;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderRequestAuth;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.SignedBuilderRequestAuth;
@@ -51,9 +44,6 @@ public class DefaultBuilderConfigProvider implements BuilderConfigProvider, Vali
       new ConcurrentHashMap<>();
 
   private record ProposerPubkeyAndSlot(BLSPublicKey proposerPubkey, UInt64 slot) {}
-
-  private final LRUCache<String, Bytes> cachedDefaultAuthDataByHost =
-      LRUCache.create((int) BuilderConfigSchema.MAX_BUILDER_ENTRIES);
 
   private final Spec spec;
   private final ProposerConfigPropertiesProvider proposerConfigPropertiesProvider;
@@ -141,9 +131,8 @@ public class DefaultBuilderConfigProvider implements BuilderConfigProvider, Vali
       final ResolvedBuilderEntry builder, final Validator validator, final UInt64 slot) {
     return SafeFuture.of(
         () -> {
-          final Bytes authData = builder.authData().orElseGet(() -> getAuthData(builder.url()));
           final BuilderRequestAuth auth =
-              ApiSchemas.BUILDER_REQUEST_AUTH_SCHEMA.create(authData, slot);
+              ApiSchemas.BUILDER_REQUEST_AUTH_SCHEMA.create(builder.authData(), slot);
           return validator
               .getSigner()
               .signBuilderRequestAuth(auth)
@@ -151,24 +140,5 @@ public class DefaultBuilderConfigProvider implements BuilderConfigProvider, Vali
                   signature ->
                       ApiSchemas.SIGNED_BUILDER_REQUEST_AUTH_SCHEMA.create(auth, signature));
         });
-  }
-
-  private Bytes getAuthData(final URL builderUrl) {
-    return cachedDefaultAuthDataByHost.get(
-        builderUrl.getHost(),
-        __ -> Bytes.of(getDefaultAuthData(builderUrl).getBytes(StandardCharsets.US_ASCII)));
-  }
-
-  // Spec: hostname lowercased, ASCII, IPv6 in compressed form (RFC 5952) inside brackets
-  @VisibleForTesting
-  String getDefaultAuthData(final URL builderUrl) {
-    final String host = builderUrl.getHost();
-    // Handle IPv6 inside brackets
-    if (host.startsWith("[") && host.endsWith("]")) {
-      final String ipv6 = host.substring(1, host.length() - 1);
-      // toAddrString from Guava follows RFC 5952
-      return "[" + InetAddresses.toAddrString(InetAddresses.forString(ipv6)) + "]";
-    }
-    return IDN.toASCII(host).toLowerCase(Locale.ROOT);
   }
 }

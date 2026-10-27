@@ -40,4 +40,7 @@ public class RejectingSlashingProtector implements SlashingProtector {
   public Optional<ValidatorSigningRecord> getSigningRecord(final BLSPublicKey validator) {
     return Optional.empty();
   }
+
+  @Override
+  public void evictSigningRecord(final BLSPublicKey validator) {}
 }

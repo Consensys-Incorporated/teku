@@ -14,12 +14,13 @@
 package tech.pegasys.teku.spec.signatures;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -187,8 +188,10 @@ class SlashingProtectedSignerTest {
   }
 
   @Test
-  void delete_shouldCallDeleteOnDelegate() {
+  void delete_shouldCallDeleteOnDelegateAndEvictSigningRecord() {
     signer.delete();
-    verify(delegate).delete();
+    final InOrder inOrder = inOrder(delegate, slashingProtector);
+    inOrder.verify(delegate).delete();
+    inOrder.verify(slashingProtector).evictSigningRecord(publicKey);
   }
 }

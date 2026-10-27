@@ -16,12 +16,16 @@ package tech.pegasys.teku.beaconrestapi;
 import static org.mockito.Mockito.mock;
 
 import java.util.List;
+import java.util.function.UnaryOperator;
 import tech.pegasys.teku.api.ChainDataProvider;
 import tech.pegasys.teku.api.RewardCalculator;
 import tech.pegasys.teku.bls.BLSKeyGenerator;
 import tech.pegasys.teku.bls.BLSKeyPair;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.datastructures.interop.GenesisStateBuilder;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.logic.common.util.BlockRewardCalculatorUtil;
 import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
@@ -54,6 +58,17 @@ public class AbstractMigratedBeaconHandlerWithChainDataProviderTest
 
   public void genesis() {
     chainUpdater.initializeGenesis();
+  }
+
+  public void genesis(final UnaryOperator<BeaconState> genesisStateModifier) {
+    final BeaconState genesisState =
+        new GenesisStateBuilder()
+            .spec(spec)
+            .signDeposits(true)
+            .addValidators(VALIDATOR_KEYS)
+            .genesisTime(UInt64.ZERO)
+            .build();
+    chainUpdater.initializeGenesis(genesisStateModifier.apply(genesisState));
   }
 
   private void setupStorage(

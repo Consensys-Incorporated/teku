@@ -97,6 +97,11 @@ public class LocalSlashingProtectorConcurrentAccess implements SlashingProtector
     }
   }
 
+  @Override
+  public void evictSigningRecord(final BLSPublicKey validator) {
+    records.remove(validator);
+  }
+
   @VisibleForTesting
   LocalSlashingProtectionRecord getOrCreateSigningRecord(
       final BLSPublicKey validator, final Bytes32 genesisValidatorsRoot) {

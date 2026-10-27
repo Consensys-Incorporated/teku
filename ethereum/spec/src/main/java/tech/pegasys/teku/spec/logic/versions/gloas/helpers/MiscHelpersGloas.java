@@ -44,6 +44,7 @@ import tech.pegasys.teku.spec.config.SpecConfigElectra;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.fulu.MatrixEntry;
+import tech.pegasys.teku.spec.datastructures.blobs.versions.gloas.DataColumnSidecarGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
@@ -270,6 +271,15 @@ public class MiscHelpersGloas extends MiscHelpersFulu {
   }
 
   /**
+   * Spec mapping: {@code is_parent_block_full(state)}. Whether the execution payload of the latest
+   * block has been applied to the state: the latest bid's block hash is the state's latest block
+   * hash. A Gloas genesis state is never full, since its bid commits to no payload.
+   */
+  public static boolean isParentBlockFull(final BeaconStateGloas state) {
+    return state.getLatestExecutionPayloadBid().getBlockHash().equals(state.getLatestBlockHash());
+  }
+
+  /**
    * Whether {@code block} builds on the execution payload of {@code parentBlock}, i.e. the parent
    * block is FULL on the chain through {@code block}: the parent hash of the block's bid is the
    * block hash committed to by the parent's bid. Pre-Gloas parents have no execution payload
@@ -339,6 +349,13 @@ public class MiscHelpersGloas extends MiscHelpersFulu {
 
   @Override
   public boolean verifyDataColumnSidecar(final DataColumnSidecar dataColumnSidecar) {
+    if (!(dataColumnSidecar instanceof DataColumnSidecarGloas)) {
+      LOG.trace(
+          "DataColumnSidecar is a {}, expected a Gloas data column sidecar",
+          dataColumnSidecar.getClass().getSimpleName());
+      return false;
+    }
+
     final int numberOfColumns = specConfigGloas.getNumberOfColumns();
 
     // The sidecar index must be within the valid range

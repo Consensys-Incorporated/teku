@@ -22,7 +22,9 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import org.apache.logging.log4j.LogManager;
@@ -395,6 +397,16 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
   }
 
   @Override
+  public boolean contains(final ForkChoiceNode node) {
+    protoArrayLock.readLock().lock();
+    try {
+      return protoArray.getNode(node).isPresent();
+    } finally {
+      protoArrayLock.readLock().unlock();
+    }
+  }
+
+  @Override
   public Optional<UInt64> blockSlot(final Bytes32 blockRoot) {
     protoArrayLock.readLock().lock();
     try {
@@ -437,6 +449,18 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
               model ->
                   model.getExecutionGasLimitForBlockRootAndHash(
                       protoArray, blockNodeIndex, blockRoot, blockHash));
+    } finally {
+      protoArrayLock.readLock().unlock();
+    }
+  }
+
+  @Override
+  public boolean isAwaitingExecutionPayload(final Bytes32 blockRoot) {
+    protoArrayLock.readLock().lock();
+    try {
+      return getForkChoiceModelForRoot(blockRoot)
+          .map(model -> model.isAwaitingExecutionPayload(blockNodeIndex, blockRoot))
+          .orElse(false);
     } finally {
       protoArrayLock.readLock().unlock();
     }
@@ -597,6 +621,50 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
   @Override
   public Optional<ForkChoiceNode> getAncestorNode(final ForkChoiceNode node, final UInt64 slot) {
     return getAncestorProtoNode(node, slot).map(ProtoNode::getForkChoiceNode);
+  }
+
+  @Override
+  public NavigableMap<UInt64, ForkChoiceNode> getAncestorNodes(
+      final ForkChoiceNode node, final UInt64 startSlot, final UInt64 count) {
+    if (count.isZero()) {
+      return new TreeMap<>();
+    }
+    // minus(ONE) because the start block is included
+    final UInt64 endSlot = startSlot.plus(count).minusMinZero(1);
+    // The chain above the requested range is skipped one step at a time, taking the lock per
+    // step like any other walk: that distance is the whole protoarray during long non-finality
+    // and is chosen by the peer, so it must not be spent holding the lock against fork choice
+    // writers. A prune during the skip ends the walk early, as it did before.
+    Optional<ForkChoiceNode> rangeNode = Optional.of(node);
+    Optional<UInt64> rangeNodeSlot = blockSlot(node.blockRoot());
+    while (rangeNode.isPresent()
+        && rangeNodeSlot.isPresent()
+        && rangeNodeSlot.get().isGreaterThan(endSlot)) {
+      rangeNode = getParentBeaconBlockNode(rangeNode.get());
+      rangeNodeSlot = rangeNode.flatMap(parent -> blockSlot(parent.blockRoot()));
+    }
+    if (rangeNode.isEmpty()) {
+      return new TreeMap<>();
+    }
+    // The requested range itself, bounded by count, is walked under a single read lock so that a
+    // concurrent prune cannot truncate it. The lock is re-entrant, so the per-step acquisitions
+    // of the default walk all run under this one.
+    protoArrayLock.readLock().lock();
+    try {
+      return ReadOnlyForkChoiceStrategy.super.getAncestorNodes(rangeNode.get(), startSlot, count);
+    } finally {
+      protoArrayLock.readLock().unlock();
+    }
+  }
+
+  @Override
+  public Optional<ProtoNodeData> getAncestorNodeData(final ForkChoiceNode node, final UInt64 slot) {
+    protoArrayLock.readLock().lock();
+    try {
+      return getAncestorProtoNode(node, slot).map(ProtoNode::getBlockData);
+    } finally {
+      protoArrayLock.readLock().unlock();
+    }
   }
 
   @Override

@@ -55,6 +55,14 @@ class BlstPublicKey implements PublicKey {
   public static BlstPublicKey aggregate(final List<BlstPublicKey> publicKeys) {
     checkArgument(publicKeys.size() > 0);
 
+    if (publicKeys.size() == 1) {
+      // The sum of one key is the key itself: skip the projective addition and the affine
+      // conversion (a field inversion), which dominate the cost of per-signature aggregation in
+      // batch verification where nearly every signature carries a single key.
+      final BlstPublicKey publicKey = publicKeys.get(0);
+      return publicKey.isValid() ? publicKey : INFINITE_PUBLIC_KEY;
+    }
+
     P1 sum = new P1();
     for (BlstPublicKey publicKey : publicKeys) {
       if (!publicKey.isValid()) {

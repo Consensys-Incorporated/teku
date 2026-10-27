@@ -191,16 +191,20 @@ public class GenesisGenerator {
 
       final MutableBeaconStateGloas stateGloas = MutableBeaconStateGloas.required(state);
 
+      // The genesis bid names the EL genesis block as its parent and commits to no payload of its
+      // own (empty block hash), as the consensus-specs genesis helper and eth-beacon-genesis do.
+      // Since latest_block_hash != latest_execution_payload_bid.block_hash, the genesis block is
+      // EMPTY: the slot-1 block builds on EMPTY(genesis), whose execution hash is the EL genesis
+      // hash, and no execution payload is ever required for genesis.
       stateGloas.setLatestBlockHash(eth1BlockHash);
-      final Bytes32 parentBlockHash = eth1BlockHash;
 
       stateGloas.setLatestExecutionPayloadBid(
           schemaDefinitionsGloas
               .getExecutionPayloadBidSchema()
               .create(
-                  parentBlockHash,
+                  eth1BlockHash,
                   Bytes32.ZERO,
-                  parentBlockHash,
+                  Bytes32.ZERO,
                   Bytes32.ZERO,
                   Bytes20.ZERO,
                   UInt64.ZERO,

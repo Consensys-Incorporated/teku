@@ -45,6 +45,7 @@ import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateSchemaGloas;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.BeaconStateAccessorsGloas;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
@@ -180,6 +181,42 @@ public class BuilderBidValidatorTest {
             validGasLimit,
             validFeeRecipient);
     assertThat(validate(bid, state)).isFalse();
+  }
+
+  @Test
+  void rejectsZeroParentBlockHashWhenParentBidCommitsToNoPayload() {
+    // The Gloas genesis bid names the EL genesis block as its parent and commits to no payload
+    // (zero block hash), so a bid can only extend the EMPTY variant of genesis
+    final BeaconState genesisLikeState = withGenesisLikeBid(state);
+    final Bytes32 latestBlockHash =
+        BeaconStateGloas.required(genesisLikeState).getLatestBlockHash();
+
+    assertThat(
+            validate(
+                signedBidWith(
+                    BUILDER_INDEX,
+                    state.getSlot(),
+                    UInt64.ZERO,
+                    Bytes32.ZERO,
+                    validParentBlockRoot,
+                    validPrevRandao,
+                    validGasLimit,
+                    validFeeRecipient),
+                genesisLikeState))
+        .isFalse();
+    assertThat(
+            validate(
+                signedBidWith(
+                    BUILDER_INDEX,
+                    state.getSlot(),
+                    UInt64.ZERO,
+                    latestBlockHash,
+                    validParentBlockRoot,
+                    validPrevRandao,
+                    validGasLimit,
+                    validFeeRecipient),
+                genesisLikeState))
+        .isTrue();
   }
 
   @Test
@@ -491,6 +528,39 @@ public class BuilderBidValidatorTest {
     final ExecutionPayloadBid bid = signedBid.getMessage();
     return validator.validateBid(
         signedBid, state, bid.getParentBlockHash(), bid.getParentBlockRoot(), builderEntry);
+  }
+
+  /**
+   * Gives the state the layout of a Gloas genesis state: {@code latest_block_hash} is the EL
+   * genesis hash, and the bid names that hash as its parent while committing to no payload of its
+   * own.
+   */
+  private BeaconState withGenesisLikeBid(final BeaconState state) {
+    final SchemaDefinitionsGloas schemaDefinitions =
+        SchemaDefinitionsGloas.required(spec.atSlot(state.getSlot()).getSchemaDefinitions());
+    final Bytes32 executionGenesisBlockHash = dataStructureUtil.randomBytes32();
+    return state.updated(
+        mutable -> {
+          final MutableBeaconStateGloas stateGloas = MutableBeaconStateGloas.required(mutable);
+          final ExecutionPayloadBid bid = stateGloas.getLatestExecutionPayloadBid();
+          stateGloas.setLatestBlockHash(executionGenesisBlockHash);
+          stateGloas.setLatestExecutionPayloadBid(
+              schemaDefinitions
+                  .getExecutionPayloadBidSchema()
+                  .create(
+                      executionGenesisBlockHash,
+                      bid.getParentBlockRoot(),
+                      Bytes32.ZERO,
+                      bid.getPrevRandao(),
+                      bid.getFeeRecipient(),
+                      bid.getGasLimit(),
+                      bid.getBuilderIndex(),
+                      bid.getSlot(),
+                      bid.getValue(),
+                      bid.getExecutionPayment(),
+                      bid.getBlobKzgCommitments(),
+                      bid.getExecutionRequestsRoot()));
+        });
   }
 
   private BLSPublicKey builderPubkey() {

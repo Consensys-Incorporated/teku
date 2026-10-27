@@ -145,7 +145,10 @@ public class AggregateAttestationValidator {
               final Optional<BeaconState> maybeState = resultWithState.getState();
               if (maybeState.isEmpty()) {
                 // State isn't yet available. We've already handled ignore and reject conditions
-                // as not processable above so need to save for when the state is available
+                // as not processable above so need to save for when the state is available. No
+                // signature has been queued in the batch at this point, so the attestation isn't
+                // marked as verified and fork choice verifies it once its block and state are
+                // available.
                 LOG.trace("Saving aggregate for future because state is not yet available");
                 return SafeFuture.completedFuture(InternalValidationResult.SAVE_FOR_FUTURE);
               }
@@ -209,6 +212,9 @@ public class AggregateAttestationValidator {
                     reject("Rejecting aggregate with invalid signature"));
               }
 
+              // Capture only the result, not the state: the batch can wait in the signature
+              // verification queue for a while and the state must not be kept reachable for that
+              final InternalValidationResult attestationResult = resultWithState.getResult();
               return signatureVerifier
                   .batchVerify()
                   .thenApply(
@@ -217,8 +223,20 @@ public class AggregateAttestationValidator {
                           return reject("Rejecting aggregate with invalid batch signature");
                         }
 
+                        // SAVE_FOR_FUTURE with a state means the attestation signature was queued
+                        // in the batch, and the attestation already marked as a valid indexed
+                        // attestation so that fork choice won't verify it again. Such an aggregate
+                        // can only be deferred once the batch has been verified. As before, a
+                        // deferred aggregate isn't marked as seen, since only accepted ones are. It
+                        // isn't propagated either: gossip ignores it, and identical copies received
+                        // later are dropped by the gossip seen cache before reaching this
+                        // validator.
+                        if (attestationResult.isSaveForFuture()) {
+                          return attestationResult;
+                        }
+
                         return checkAndAddToSeenAggregates(
-                            attestation, aggregatorIndexAndEpoch, resultWithState.getResult());
+                            attestation, aggregatorIndexAndEpoch, attestationResult);
                       });
             });
   }
