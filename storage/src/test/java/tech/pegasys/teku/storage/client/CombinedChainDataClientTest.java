@@ -506,24 +506,9 @@ class CombinedChainDataClientTest {
 
   @Test
   public void getLightClientBootstrap_shouldCreateBootstrapFromStateInMemory() {
-    final SignedBeaconBlock candidate = dataStructureUtil.randomSignedBeaconBlock(1);
-    final BeaconState state =
-        dataStructureUtil
-            .randomBeaconState(UInt64.ONE)
-            .updated(
-                mutableState ->
-                    mutableState.setLatestBlockHeader(
-                        new BeaconBlockHeader(
-                            candidate.getSlot(),
-                            candidate.getMessage().getProposerIndex(),
-                            candidate.getParentRoot(),
-                            Bytes32.ZERO,
-                            candidate.getMessage().getBodyRoot())));
-    final SignedBeaconBlock block =
-        SignedBeaconBlock.create(
-            spec,
-            candidate.getMessage().withStateRoot(state.hashTreeRoot()),
-            candidate.getSignature());
+    final SignedBlockAndState blockAndState = blockAndPostState();
+    final SignedBeaconBlock block = blockAndState.getBlock();
+    final BeaconState state = blockAndState.getState();
     when(recentChainData.getStore()).thenReturn(store);
     when(store.getBlockStateIfAvailable(block.getRoot())).thenReturn(Optional.of(state));
     when(recentChainData.retrieveSignedBlockByRoot(block.getRoot()))
@@ -558,8 +543,39 @@ class CombinedChainDataClientTest {
     final Bytes32 otherRoot = dataStructureUtil.randomBytes32();
     givenStoredBootstrap(otherRoot, bootstrap);
 
+    when(store.retrieveBlockState(otherRoot))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+    when(historicalChainData.getFinalizedStateByBlockRoot(otherRoot))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+
     assertThat(client.getLightClientBootstrap(otherRoot)).isCompletedWithValue(Optional.empty());
-    verify(store, never()).retrieveBlockState(any(Bytes32.class));
+  }
+
+  @Test
+  public void getLightClientBootstrap_shouldFallBackToFinalizedStateWhenNotStored() {
+    final SignedBlockAndState blockAndState = blockAndPostState();
+    final SignedBeaconBlock block = blockAndState.getBlock();
+    final BeaconState state = blockAndState.getState();
+    final AnchorPoint finalized = mock(AnchorPoint.class);
+    when(recentChainData.getStore()).thenReturn(store);
+    when(store.getBlockStateIfAvailable(block.getRoot())).thenReturn(Optional.empty());
+    when(store.getLatestFinalized()).thenReturn(finalized);
+    when(recentChainData.getSlotForBlockRoot(block.getRoot()))
+        .thenReturn(Optional.of(block.getSlot()));
+    when(historicalChainData.getLightClientBootstrap(block.getSlot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+    when(store.retrieveBlockState(block.getRoot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+    when(historicalChainData.getFinalizedStateByBlockRoot(block.getRoot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(state)));
+    when(recentChainData.retrieveSignedBlockByRoot(block.getRoot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(block)));
+
+    final LightClientBootstrap bootstrap =
+        SafeFutureAssert.safeJoin(client.getLightClientBootstrap(block.getRoot())).orElseThrow();
+
+    assertThat(bootstrap.getLightClientHeader().getBeacon())
+        .isEqualTo(BeaconBlockHeader.fromState(state));
   }
 
   @Test
@@ -579,6 +595,28 @@ class CombinedChainDataClientTest {
 
     assertThat(client.getLightClientBootstrap(blockRoot))
         .isCompletedWithValue(Optional.of(bootstrap));
+  }
+
+  private SignedBlockAndState blockAndPostState() {
+    final SignedBeaconBlock candidate = dataStructureUtil.randomSignedBeaconBlock(1);
+    final BeaconState state =
+        dataStructureUtil
+            .randomBeaconState(UInt64.ONE)
+            .updated(
+                mutableState ->
+                    mutableState.setLatestBlockHeader(
+                        new BeaconBlockHeader(
+                            candidate.getSlot(),
+                            candidate.getMessage().getProposerIndex(),
+                            candidate.getParentRoot(),
+                            Bytes32.ZERO,
+                            candidate.getMessage().getBodyRoot())));
+    final SignedBeaconBlock block =
+        SignedBeaconBlock.create(
+            spec,
+            candidate.getMessage().withStateRoot(state.hashTreeRoot()),
+            candidate.getSignature());
+    return new SignedBlockAndState(block, state);
   }
 
   private void givenStoredBootstrap(final Bytes32 blockRoot, final LightClientBootstrap bootstrap) {
