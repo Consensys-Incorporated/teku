@@ -136,7 +136,7 @@ public class DefaultExecutionPayloadManager
                   signedExecutionPayload);
               recordIfExecutionPayloadIsSeenBeforeDeadline(
                   signedExecutionPayload, arrivalTimestamp);
-              importValidatedExecutionPayload(signedExecutionPayload).finishError(LOG);
+              importExecutionPayload(signedExecutionPayload, true).finishError(LOG);
             }
             case SAVE_FOR_FUTURE ->
                 saveForFuture(signedExecutionPayload, arrivalTimestamp, broadcastValidationLevel);
@@ -162,7 +162,7 @@ public class DefaultExecutionPayloadManager
                   recordIfExecutionPayloadIsSeenBeforeDeadline(
                       signedExecutionPayload, arrivalTimestamp);
                   return new ValidateAndImportResult(
-                      result, Optional.of(importValidatedExecutionPayload(signedExecutionPayload)));
+                      result, Optional.of(importExecutionPayload(signedExecutionPayload, true)));
                 }
                 case SAVE_FOR_FUTURE ->
                     saveForFuture(
@@ -205,30 +205,16 @@ public class DefaultExecutionPayloadManager
   public SafeFuture<ExecutionPayloadImportResult> importExecutionPayload(
       final SignedExecutionPayloadEnvelope signedExecutionPayload,
       final boolean payloadCommitmentVerified) {
-    // A payload which did not arrive over gossip was still seen, and the payload timeliness
-    // attestation only asks whether it was seen before the deadline. Recorded before the import
-    // begins, because the import is what reports the payload as available.
-    recordIfExecutionPayloadIsSeenBeforeDeadline(
-        signedExecutionPayload, recentChainData.getStore().getTimeInMillis());
-    return importValidatedExecutionPayload(signedExecutionPayload, payloadCommitmentVerified);
-  }
-
-  /** Imports a payload which was already recorded as seen when it was validated. */
-  private SafeFuture<ExecutionPayloadImportResult> importValidatedExecutionPayload(
-      final SignedExecutionPayloadEnvelope signedExecutionPayload) {
-    return importValidatedExecutionPayload(signedExecutionPayload, true);
-  }
-
-  private SafeFuture<ExecutionPayloadImportResult> importValidatedExecutionPayload(
-      final SignedExecutionPayloadEnvelope signedExecutionPayload,
-      final boolean payloadCommitmentVerified) {
+    // taken before anything else: verification and the data availability check which follow can
+    // take long enough to put an on time payload past its deadline
+    final UInt64 arrivalTimestamp = recentChainData.getStore().getTimeInMillis();
     return asyncRunner
         .runAsync(
             () ->
                 forkChoice.onExecutionPayloadEnvelope(
                     signedExecutionPayload,
                     executionLayer,
-                    Optional.of(receivedExecutionPayloadEventsChannelPublisher)))
+                    Optional.of(recordingSeenBeforeDeadline(arrivalTimestamp))))
         .thenPeek(
             result -> {
               if (result.isSuccessful()) {
@@ -355,11 +341,51 @@ public class DefaultExecutionPayloadManager
   private boolean isBeforePayloadDue(
       final SignedExecutionPayloadEnvelope signedExecutionPayload, final UInt64 arrivalTimestamp) {
     final UInt64 slot = signedExecutionPayload.getSlot();
-    return spec.isBeforeTimeInSlot(
-        slot,
-        recentChainData.getGenesisTimeMillis(),
-        arrivalTimestamp,
-        spec.getPayloadDueMillis(slot).orElseThrow());
+    // the slot comes from an envelope which may not have been verified yet, and a slot from before
+    // Gloas has no payload deadline to be before
+    return spec.getPayloadDueMillis(slot)
+        .map(
+            payloadDueMillis ->
+                spec.isBeforeTimeInSlot(
+                    slot,
+                    recentChainData.getGenesisTimeMillis(),
+                    arrivalTimestamp,
+                    payloadDueMillis))
+        .orElse(false);
+  }
+
+  /**
+   * Reports the payload as seen, at the time it arrived, as soon as fork choice reports it
+   * available, which it only does once it has verified the envelope and its data are available. A
+   * payload which arrived over gossip was already recorded with its arrival time, this covers the
+   * ones which did not, for example a payload fetched by root.
+   */
+  private ReceivedExecutionPayloadEventsChannel recordingSeenBeforeDeadline(
+      final UInt64 arrivalTimestamp) {
+    return new ReceivedExecutionPayloadEventsChannel() {
+      @Override
+      public void onExecutionPayloadValidated(
+          final SignedExecutionPayloadEnvelope executionPayload) {
+        receivedExecutionPayloadEventsChannelPublisher.onExecutionPayloadValidated(
+            executionPayload);
+      }
+
+      @Override
+      public void onExecutionPayloadAvailable(
+          final SignedExecutionPayloadEnvelope executionPayload) {
+        recordIfExecutionPayloadIsSeenBeforeDeadline(executionPayload, arrivalTimestamp);
+        receivedExecutionPayloadEventsChannelPublisher.onExecutionPayloadAvailable(
+            executionPayload);
+      }
+
+      @Override
+      public void onExecutionPayloadImported(
+          final SignedExecutionPayloadEnvelope executionPayload,
+          final boolean executionOptimistic) {
+        receivedExecutionPayloadEventsChannelPublisher.onExecutionPayloadImported(
+            executionPayload, executionOptimistic);
+      }
+    };
   }
 
   // publish payload in cases where initial validation wasn't accepted

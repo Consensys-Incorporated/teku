@@ -14,6 +14,8 @@
 package tech.pegasys.teku.statetransition.execution;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -33,6 +35,7 @@ import java.util.Set;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.SafeFutureAssert;
@@ -210,9 +213,7 @@ class DefaultExecutionPayloadManagerTest {
   public void shouldHandleInternalErrorsWhileImporting() {
     givenValidationResult(signedExecutionPayload, ACCEPT);
     when(forkChoice.onExecutionPayloadEnvelope(
-            signedExecutionPayload,
-            executionLayer,
-            Optional.of(receivedExecutionPayloadEventsChannelPublisher)))
+            eq(signedExecutionPayload), eq(executionLayer), any()))
         .thenThrow(new IllegalStateException("oopsy"));
 
     final SafeFuture<InternalValidationResult> resultFuture =
@@ -249,15 +250,9 @@ class DefaultExecutionPayloadManagerTest {
     verify(receivedExecutionPayloadEventsChannelPublisher)
         .onExecutionPayloadImported(earlyExecutionPayload, false);
     verify(forkChoice)
-        .onExecutionPayloadEnvelope(
-            earlyExecutionPayload,
-            executionLayer,
-            Optional.of(receivedExecutionPayloadEventsChannelPublisher));
+        .onExecutionPayloadEnvelope(eq(earlyExecutionPayload), eq(executionLayer), any());
     verify(forkChoice, never())
-        .onExecutionPayloadEnvelope(
-            lateExecutionPayload,
-            executionLayer,
-            Optional.of(receivedExecutionPayloadEventsChannelPublisher));
+        .onExecutionPayloadEnvelope(eq(lateExecutionPayload), eq(executionLayer), any());
     assertThat(publishedExecutionPayload).hasValue(earlyExecutionPayload);
     assertExecutionPayloadSeenBeforeDeadline(earlyExecutionPayload);
   }
@@ -285,15 +280,9 @@ class DefaultExecutionPayloadManagerTest {
     verify(receivedExecutionPayloadEventsChannelPublisher)
         .onExecutionPayloadImported(earlyExecutionPayload, false);
     verify(forkChoice)
-        .onExecutionPayloadEnvelope(
-            earlyExecutionPayload,
-            executionLayer,
-            Optional.of(receivedExecutionPayloadEventsChannelPublisher));
+        .onExecutionPayloadEnvelope(eq(earlyExecutionPayload), eq(executionLayer), any());
     verify(forkChoice, never())
-        .onExecutionPayloadEnvelope(
-            lateExecutionPayload,
-            executionLayer,
-            Optional.of(receivedExecutionPayloadEventsChannelPublisher));
+        .onExecutionPayloadEnvelope(eq(lateExecutionPayload), eq(executionLayer), any());
     assertThat(publishedExecutionPayload).hasValue(earlyExecutionPayload);
     assertExecutionPayloadSeenBeforeDeadline(earlyExecutionPayload);
   }
@@ -321,15 +310,9 @@ class DefaultExecutionPayloadManagerTest {
     verify(receivedExecutionPayloadEventsChannelPublisher)
         .onExecutionPayloadImported(secondExecutionPayload, false);
     verify(forkChoice)
-        .onExecutionPayloadEnvelope(
-            secondExecutionPayload,
-            executionLayer,
-            Optional.of(receivedExecutionPayloadEventsChannelPublisher));
+        .onExecutionPayloadEnvelope(eq(secondExecutionPayload), eq(executionLayer), any());
     verify(forkChoice, never())
-        .onExecutionPayloadEnvelope(
-            firstExecutionPayload,
-            executionLayer,
-            Optional.of(receivedExecutionPayloadEventsChannelPublisher));
+        .onExecutionPayloadEnvelope(eq(firstExecutionPayload), eq(executionLayer), any());
     assertThat(publishedExecutionPayload).hasValue(secondExecutionPayload);
     assertExecutionPayloadSeenBeforeDeadline(secondExecutionPayload);
   }
@@ -363,9 +346,7 @@ class DefaultExecutionPayloadManagerTest {
     final ExecutionPayloadImportResult failedImportResult =
         ExecutionPayloadImportResult.failedVerification(new RuntimeException("invalid"));
     when(forkChoice.onExecutionPayloadEnvelope(
-            signedExecutionPayload,
-            executionLayer,
-            Optional.of(receivedExecutionPayloadEventsChannelPublisher)))
+            eq(signedExecutionPayload), eq(executionLayer), any()))
         .thenReturn(completedFuture(failedImportResult));
 
     final SafeFuture<ExecutionPayloadImportResult> resultFuture =
@@ -383,9 +364,7 @@ class DefaultExecutionPayloadManagerTest {
         ExecutionPayloadImportResult.failedDataAvailabilityCheckInvalid(
             Optional.of(new RuntimeException("invalid")));
     when(forkChoice.onExecutionPayloadEnvelope(
-            signedExecutionPayload,
-            executionLayer,
-            Optional.of(receivedExecutionPayloadEventsChannelPublisher)))
+            eq(signedExecutionPayload), eq(executionLayer), any()))
         .thenReturn(completedFuture(failedImportResult));
 
     final SafeFuture<ExecutionPayloadImportResult> resultFuture =
@@ -398,41 +377,56 @@ class DefaultExecutionPayloadManagerTest {
   }
 
   @Test
-  public void shouldRecordExecutionPayloadImportedBeforeDeadlineAsSeen() {
-    // a payload which did not arrive over gossip, for example one fetched by root, was still seen
+  public void shouldRecordPayloadReportedAvailableBeforeDeadlineAsSeen() {
+    // a payload which did not arrive over gossip, for example one fetched by root, is recorded
+    // when fork choice reports it available, which it only does once it verified the envelope
     final UInt64 beforeDeadline = payloadDueDeadlineMillis(signedExecutionPayload).minus(1);
     when(store.getTimeInMillis()).thenReturn(beforeDeadline);
-    when(forkChoice.onExecutionPayloadEnvelope(
-            signedExecutionPayload,
-            executionLayer,
-            Optional.of(receivedExecutionPayloadEventsChannelPublisher)))
-        .thenReturn(
-            completedFuture(ExecutionPayloadImportResult.successful(signedExecutionPayload)));
 
-    final SafeFuture<ExecutionPayloadImportResult> resultFuture =
-        executionPayloadManager.importExecutionPayload(signedExecutionPayload, false);
-    asyncRunner.executeDueActions();
+    reportAvailableToForkChoicePublisher(signedExecutionPayload);
 
-    assertThat(resultFuture).isCompleted();
+    assertExecutionPayloadSeenBeforeDeadline(signedExecutionPayload);
+    verify(receivedExecutionPayloadEventsChannelPublisher)
+        .onExecutionPayloadAvailable(signedExecutionPayload);
+  }
+
+  @Test
+  public void shouldNotRecordPayloadReportedAvailableAfterDeadlineAsSeen() {
+    final UInt64 afterDeadline = payloadDueDeadlineMillis(signedExecutionPayload).plus(1);
+    when(store.getTimeInMillis()).thenReturn(afterDeadline);
+
+    reportAvailableToForkChoicePublisher(signedExecutionPayload);
+
+    assertExecutionPayloadNotSeenBeforeDeadline(signedExecutionPayload);
+  }
+
+  @Test
+  public void shouldRecordPayloadSeenBeforeDeadlineEvenWhenCheckingItTookPastTheDeadline() {
+    // the data availability check can take long enough to put an on time payload past its
+    // deadline, so the time it arrived is what counts
+    final UInt64 beforeDeadline = payloadDueDeadlineMillis(signedExecutionPayload).minus(1);
+    final UInt64 afterDeadline = payloadDueDeadlineMillis(signedExecutionPayload).plus(1000);
+    when(store.getTimeInMillis()).thenReturn(beforeDeadline);
+
+    reportAvailableToForkChoicePublisher(signedExecutionPayload, Optional.of(afterDeadline));
+
     assertExecutionPayloadSeenBeforeDeadline(signedExecutionPayload);
   }
 
   @Test
-  public void shouldNotRecordExecutionPayloadImportedAfterDeadlineAsSeen() {
-    final UInt64 afterDeadline = payloadDueDeadlineMillis(signedExecutionPayload).plus(1);
-    when(store.getTimeInMillis()).thenReturn(afterDeadline);
+  public void shouldNotRecordPayloadAsSeenBeforeForkChoiceReportsItAvailable() {
+    // the envelope has not been verified at this point, so a forged one must not be recorded
+    final UInt64 beforeDeadline = payloadDueDeadlineMillis(signedExecutionPayload).minus(1);
+    when(store.getTimeInMillis()).thenReturn(beforeDeadline);
     when(forkChoice.onExecutionPayloadEnvelope(
-            signedExecutionPayload,
-            executionLayer,
-            Optional.of(receivedExecutionPayloadEventsChannelPublisher)))
-        .thenReturn(
-            completedFuture(ExecutionPayloadImportResult.successful(signedExecutionPayload)));
+            eq(signedExecutionPayload), eq(executionLayer), any()))
+        .thenReturn(new SafeFuture<>());
 
     final SafeFuture<ExecutionPayloadImportResult> resultFuture =
         executionPayloadManager.importExecutionPayload(signedExecutionPayload, false);
     asyncRunner.executeDueActions();
 
-    assertThat(resultFuture).isCompleted();
+    assertThat(resultFuture).isNotCompleted();
     assertExecutionPayloadNotSeenBeforeDeadline(signedExecutionPayload);
   }
 
@@ -441,9 +435,7 @@ class DefaultExecutionPayloadManagerTest {
     final ExecutionPayloadImportResult failedImportResult =
         ExecutionPayloadImportResult.failedVerification(new RuntimeException("invalid"));
     when(forkChoice.onExecutionPayloadEnvelope(
-            signedExecutionPayload,
-            executionLayer,
-            Optional.of(receivedExecutionPayloadEventsChannelPublisher)))
+            eq(signedExecutionPayload), eq(executionLayer), any()))
         .thenReturn(completedFuture(failedImportResult));
 
     // Imports that did not verify the payload commitment (e.g. sync or RPC-by-root) must not poison
@@ -465,10 +457,7 @@ class DefaultExecutionPayloadManagerTest {
   }
 
   private void givenSuccessfulImport(final SignedExecutionPayloadEnvelope executionPayload) {
-    when(forkChoice.onExecutionPayloadEnvelope(
-            executionPayload,
-            executionLayer,
-            Optional.of(receivedExecutionPayloadEventsChannelPublisher)))
+    when(forkChoice.onExecutionPayloadEnvelope(eq(executionPayload), eq(executionLayer), any()))
         .thenReturn(completedFuture(ExecutionPayloadImportResult.successful(executionPayload)));
   }
 
@@ -486,6 +475,35 @@ class DefaultExecutionPayloadManagerTest {
   private void validateAndImportAndJoin(
       final SignedExecutionPayloadEnvelope executionPayload, final UInt64 arrivalTimestamp) {
     SafeFutureAssert.safeJoin(validateAndImport(executionPayload, arrivalTimestamp));
+  }
+
+  /** Runs the import and hands the publisher fork choice was given the availability report. */
+  private void reportAvailableToForkChoicePublisher(
+      final SignedExecutionPayloadEnvelope executionPayload) {
+    reportAvailableToForkChoicePublisher(executionPayload, Optional.empty());
+  }
+
+  /**
+   * Runs the import and hands the publisher fork choice was given the availability report, moving
+   * the clock on in between when a time is supplied, as verification and the data availability
+   * check would.
+   */
+  private void reportAvailableToForkChoicePublisher(
+      final SignedExecutionPayloadEnvelope executionPayload,
+      final Optional<UInt64> timeWhenAvailable) {
+    final ArgumentCaptor<Optional<ReceivedExecutionPayloadEventsChannel>> publisherCaptor =
+        ArgumentCaptor.captor();
+    when(forkChoice.onExecutionPayloadEnvelope(
+            eq(executionPayload), eq(executionLayer), publisherCaptor.capture()))
+        .thenReturn(completedFuture(ExecutionPayloadImportResult.successful(executionPayload)));
+
+    final SafeFuture<ExecutionPayloadImportResult> resultFuture =
+        executionPayloadManager.importExecutionPayload(executionPayload, false);
+    asyncRunner.executeDueActions();
+    assertThat(resultFuture).isCompleted();
+
+    timeWhenAvailable.ifPresent(time -> when(store.getTimeInMillis()).thenReturn(time));
+    publisherCaptor.getValue().orElseThrow().onExecutionPayloadAvailable(executionPayload);
   }
 
   private UInt64 payloadDueDeadlineMillis(final SignedExecutionPayloadEnvelope executionPayload) {
