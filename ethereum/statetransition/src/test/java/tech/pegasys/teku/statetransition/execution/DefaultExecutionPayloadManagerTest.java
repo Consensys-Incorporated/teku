@@ -44,10 +44,14 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
+import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannel;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.ExecutionPayloadImportResult;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.statetransition.execution.ExecutionPayloadManager.ValidateAndImportResult;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoice;
 import tech.pegasys.teku.statetransition.validation.ExecutionPayloadGossipValidator;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
@@ -100,10 +104,14 @@ class DefaultExecutionPayloadManagerTest {
   }
 
   @Test
-  public void shouldDelegateIsExecutionPayloadRecentlySeenToTheGossipValidator() {
+  public void isExecutionPayloadImportedOrImporting_shouldBeTrueWhenForkChoiceHasFullNode() {
     final Bytes32 beaconBlockRoot = dataStructureUtil.randomBytes32();
-    when(executionPayloadGossipValidator.isPayloadSeen(beaconBlockRoot)).thenReturn(true);
-    assertThat(executionPayloadManager.isExecutionPayloadRecentlySeen(beaconBlockRoot)).isTrue();
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy = mock(ReadOnlyForkChoiceStrategy.class);
+    when(forkChoiceStrategy.contains(ForkChoiceNode.createFull(beaconBlockRoot))).thenReturn(true);
+    when(recentChainData.getForkChoiceStrategy()).thenReturn(Optional.of(forkChoiceStrategy));
+
+    assertThat(executionPayloadManager.isExecutionPayloadImportedOrImporting(beaconBlockRoot))
+        .isTrue();
   }
 
   @Test
@@ -416,6 +424,72 @@ class DefaultExecutionPayloadManagerTest {
     assertThat(resultFuture).isCompletedWithValue(failedImportResult);
     assertThat(blockRootsWithInvalidExecutionPayload)
         .doesNotContain(signedExecutionPayload.getBeaconBlockRoot());
+  }
+
+  @Test
+  public void shouldNotCacheInvalidExecutionPayloadWhenBroadcastValidationWasNotRequired() {
+    // NOT_REQUIRED skips validation, so the envelope is not proven to be the committed payload
+    final Optional<BroadcastValidationLevel> notRequired =
+        Optional.of(BroadcastValidationLevel.NOT_REQUIRED);
+    when(executionPayloadGossipValidator.validate(signedExecutionPayload, notRequired))
+        .thenReturn(completedFuture(ACCEPT));
+    when(forkChoice.onExecutionPayloadEnvelope(
+            signedExecutionPayload,
+            executionLayer,
+            Optional.of(receivedExecutionPayloadEventsChannelPublisher)))
+        .thenReturn(
+            completedFuture(
+                ExecutionPayloadImportResult.failedVerification(new RuntimeException("invalid"))));
+
+    final SafeFuture<ValidateAndImportResult> resultFuture =
+        executionPayloadManager.validateAndImportExecutionPayloadForBroadcast(
+            signedExecutionPayload, notRequired);
+    asyncRunner.executeDueActions();
+
+    assertThat(resultFuture).isCompleted();
+    assertThat(blockRootsWithInvalidExecutionPayload)
+        .doesNotContain(signedExecutionPayload.getBeaconBlockRoot());
+  }
+
+  @Test
+  public void shouldRemoveInvalidExecutionPayloadCacheEntryWhenPayloadIsImported() {
+    blockRootsWithInvalidExecutionPayload.add(signedExecutionPayload.getBeaconBlockRoot());
+    givenSuccessfulImport(signedExecutionPayload);
+
+    final SafeFuture<ExecutionPayloadImportResult> resultFuture =
+        executionPayloadManager.importExecutionPayload(signedExecutionPayload, false);
+    asyncRunner.executeDueActions();
+
+    assertThat(resultFuture)
+        .isCompletedWithValueMatching(ExecutionPayloadImportResult::isSuccessful);
+    assertThat(blockRootsWithInvalidExecutionPayload)
+        .doesNotContain(signedExecutionPayload.getBeaconBlockRoot());
+  }
+
+  @Test
+  public void isExecutionPayloadImportedOrImporting_shouldBeTrueOnlyWhileImportIsInFlight() {
+    final Bytes32 beaconBlockRoot = signedExecutionPayload.getBeaconBlockRoot();
+    final SafeFuture<ExecutionPayloadImportResult> importResultFuture = new SafeFuture<>();
+    when(forkChoice.onExecutionPayloadEnvelope(
+            signedExecutionPayload,
+            executionLayer,
+            Optional.of(receivedExecutionPayloadEventsChannelPublisher)))
+        .thenReturn(importResultFuture);
+
+    final SafeFuture<ExecutionPayloadImportResult> resultFuture =
+        executionPayloadManager.importExecutionPayload(signedExecutionPayload, false);
+    asyncRunner.executeDueActions();
+
+    // no RPC fetch should be queued while the gossip import is still running
+    assertThat(executionPayloadManager.isExecutionPayloadImportedOrImporting(beaconBlockRoot))
+        .isTrue();
+
+    // a failed import releases the root so it can be fetched again
+    importResultFuture.complete(
+        ExecutionPayloadImportResult.failedVerification(new RuntimeException("invalid")));
+    assertThat(resultFuture).isCompleted();
+    assertThat(executionPayloadManager.isExecutionPayloadImportedOrImporting(beaconBlockRoot))
+        .isFalse();
   }
 
   private void givenValidationResult(

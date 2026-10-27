@@ -121,7 +121,7 @@ public class RecentExecutionPayloadsFetchService
       executionPayloadsRequestedDuringSync.add(beaconBlockRoot);
       return;
     }
-    if (executionPayloadManager.isExecutionPayloadRecentlySeen(beaconBlockRoot)) {
+    if (executionPayloadManager.isExecutionPayloadImportedOrImporting(beaconBlockRoot)) {
       // We've already got this execution payload
       return;
     }

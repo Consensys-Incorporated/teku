@@ -81,6 +81,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBodyBui
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelopeInvariants;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadBlockHashCalculator;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadHeader;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequestsDataCodec;
@@ -1247,6 +1248,14 @@ public class Spec {
             () ->
                 new IllegalStateException(
                     "Attempting to use execution requests data codec when spec does not have execution requests data codec"));
+  }
+
+  /**
+   * The execution block hash computed from the envelope content, to compare with the declared one
+   */
+  public Bytes32 computeExecutionPayloadBlockHash(final ExecutionPayloadEnvelope envelope) {
+    return ExecutionPayloadBlockHashCalculator.computeGloasBlockHash(
+        envelope, getExecutionRequestsDataCodec(envelope.getSlot()));
   }
 
   // Data Column Sidecar Util

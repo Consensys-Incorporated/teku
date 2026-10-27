@@ -29,7 +29,7 @@ public interface ExecutionPayloadManager {
   ExecutionPayloadManager NOOP =
       new ExecutionPayloadManager() {
         @Override
-        public boolean isExecutionPayloadRecentlySeen(final Bytes32 beaconBlockRoot) {
+        public boolean isExecutionPayloadImportedOrImporting(final Bytes32 beaconBlockRoot) {
           return false;
         }
 
@@ -76,10 +76,11 @@ public interface ExecutionPayloadManager {
       };
 
   /**
-   * {@link SignedExecutionPayloadEnvelope} has been recently seen referencing the block. This is
-   * used for RPC fetch de-duplication.
+   * {@link SignedExecutionPayloadEnvelope} referencing the block has been imported, or its import
+   * is in flight. This is used to skip RPC fetches for payloads we already have. Seeing an envelope
+   * on gossip is not enough, as its import may have failed.
    */
-  boolean isExecutionPayloadRecentlySeen(Bytes32 beaconBlockRoot);
+  boolean isExecutionPayloadImportedOrImporting(Bytes32 beaconBlockRoot);
 
   /**
    * {@link SignedExecutionPayloadEnvelope} was seen before {@code get_payload_due_ms()}. This

@@ -16,10 +16,7 @@ package tech.pegasys.teku.statetransition.validation;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
@@ -41,7 +38,6 @@ import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
-import tech.pegasys.teku.spec.datastructures.epbs.BlockRootAndBuilderIndex;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
@@ -54,6 +50,7 @@ import tech.pegasys.teku.spec.util.DataStructureUtil;
 @TestSpecContext(milestone = {SpecMilestone.GLOAS})
 public class ExecutionPayloadGossipValidatorTest {
   private final Spec spec = mock(Spec.class);
+  private Spec realSpec;
   private final GossipValidationHelper gossipValidationHelper = mock(GossipValidationHelper.class);
   private final BlockGossipValidator blockGossipValidator = mock(BlockGossipValidator.class);
   private final Map<Bytes32, BlockImportResult> invalidBlockRoots = new HashMap<>();
@@ -70,12 +67,15 @@ public class ExecutionPayloadGossipValidatorTest {
   @BeforeEach
   void setUp(final SpecContext specContext) {
     dataStructureUtil = specContext.getDataStructureUtil();
+    realSpec = specContext.getSpec();
     validator =
         new ExecutionPayloadGossipValidator(
             spec, gossipValidationHelper, blockGossipValidator, invalidBlockRoots);
 
     slot = dataStructureUtil.randomSlot();
-    signedEnvelope = dataStructureUtil.randomSignedExecutionPayloadEnvelope(slot.longValue());
+    signedEnvelope =
+        dataStructureUtil.randomSignedExecutionPayloadEnvelopeWithComputedBlockHash(
+            slot.longValue());
     envelope = signedEnvelope.getMessage();
     slot = envelope.getSlot();
     blockRoot = envelope.getBeaconBlockRoot();
@@ -109,6 +109,9 @@ public class ExecutionPayloadGossipValidatorTest {
     // Real config so the execution request and withdrawal limit rules see actual limits
     when(specVersion.getConfig()).thenReturn(specContext.getSpec().atSlot(slot).getConfig());
     when(spec.atSlot(slot)).thenReturn(specVersion);
+    when(gossipValidationHelper.computeExecutionPayloadBlockHash(any()))
+        .thenAnswer(
+            invocation -> realSpec.computeExecutionPayloadBlockHash(invocation.getArgument(0)));
     when(gossipValidationHelper.isSignatureValidWithRespectToBuilderIndex(
             any(), any(), any(), any()))
         .thenReturn(true);
@@ -117,46 +120,6 @@ public class ExecutionPayloadGossipValidatorTest {
   @TestTemplate
   void shouldAcceptWhenValid() {
     assertThatSafeFuture(validator.validate(signedEnvelope)).isCompletedWithValue(ACCEPT);
-  }
-
-  @TestTemplate
-  void shouldReportWhetherPayloadIsSeen() {
-    assertThat(validator.isPayloadSeen(blockRoot)).isFalse();
-
-    assertThatSafeFuture(validator.validate(signedEnvelope)).isCompletedWithValue(ACCEPT);
-
-    assertThat(validator.isPayloadSeen(blockRoot)).isTrue();
-    assertThat(validator.isPayloadSeen(dataStructureUtil.randomBytes32())).isFalse();
-  }
-
-  @TestTemplate
-  void shouldCheckPayloadSeenWhileAnotherPayloadIsValidated() {
-    final SignedExecutionPayloadEnvelope firstSignedEnvelope = spy(signedEnvelope);
-    final ExecutionPayloadEnvelope firstEnvelope = spy(envelope);
-    final BlockRootAndBuilderIndex firstKey = spy(envelope.getBlockRootAndBuilderIndex());
-    doReturn(firstEnvelope).when(firstSignedEnvelope).getMessage();
-    doReturn(firstKey).when(firstEnvelope).getBlockRootAndBuilderIndex();
-    final SignedExecutionPayloadEnvelope secondSignedEnvelope =
-        createSignedEnvelopeWithBlockRoot(dataStructureUtil.randomBytes32());
-    final SignedExecutionPayloadEnvelope thirdSignedEnvelope =
-        createSignedEnvelopeWithBlockRoot(dataStructureUtil.randomBytes32());
-
-    assertThatSafeFuture(validator.validate(firstSignedEnvelope)).isCompletedWithValue(ACCEPT);
-    assertThatSafeFuture(validator.validate(secondSignedEnvelope)).isCompletedWithValue(ACCEPT);
-
-    // Insert between iterator steps to deterministically reproduce a concurrent validation
-    doAnswer(
-            invocation -> {
-              assertThatSafeFuture(validator.validate(thirdSignedEnvelope))
-                  .isCompletedWithValue(ACCEPT);
-              return blockRoot;
-            })
-        .doReturn(blockRoot)
-        .when(firstKey)
-        .blockRoot();
-
-    assertThat(validator.isPayloadSeen(dataStructureUtil.randomBytes32())).isFalse();
-    assertThat(validator.isPayloadSeen(thirdSignedEnvelope.getBeaconBlockRoot())).isTrue();
   }
 
   @TestTemplate
@@ -285,6 +248,25 @@ public class ExecutionPayloadGossipValidatorTest {
   }
 
   @TestTemplate
+  void shouldIgnoreAndNotMarkAsSeenIfBlockHashDoesNotMatchContent() {
+    // Same block hash as the bid commits to, but the content was changed
+    final SignedExecutionPayloadEnvelope tamperedSignedEnvelope =
+        withTamperedStateRoot(signedEnvelope);
+    assertThat(tamperedSignedEnvelope.getMessage().getBlockRootAndBuilderIndex())
+        .isEqualTo(envelope.getBlockRootAndBuilderIndex());
+
+    assertThatSafeFuture(validator.validate(tamperedSignedEnvelope))
+        .isCompletedWithValue(
+            ignore(
+                "Execution payload envelope block hash %s does not match the block hash %s computed from its content",
+                envelope.getPayload().getBlockHash(),
+                realSpec.computeExecutionPayloadBlockHash(tamperedSignedEnvelope.getMessage())));
+
+    // not marked as seen, so the builder's correct envelope for the same key is still accepted
+    assertThatSafeFuture(validator.validate(signedEnvelope)).isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
   void shouldSaveForFutureIfStateIsUnavailable() {
     when(gossipValidationHelper.getStateAtBlockRoot(any(Bytes32.class)))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
@@ -374,21 +356,16 @@ public class ExecutionPayloadGossipValidatorTest {
         .isCompletedWithValue(ACCEPT);
   }
 
-  private SignedExecutionPayloadEnvelope createSignedEnvelopeWithBlockRoot(final Bytes32 root) {
-    final ExecutionPayloadEnvelope newEnvelope =
-        envelope
-            .getSchema()
-            .create(
-                envelope.getPayload(),
-                envelope.getExecutionRequests(),
-                envelope.getBuilderIndex(),
-                root,
-                envelope.getParentBeaconBlockRoot());
-    when(gossipValidationHelper.getSlotForBlockRoot(root)).thenReturn(Optional.of(slot));
-    when(gossipValidationHelper.retrieveBlockByRoot(root))
-        .thenReturn(SafeFuture.completedFuture(Optional.of(beaconBlock)));
-    when(spec.atSlot(slot).miscHelpers().computeSigningRoot(eq(newEnvelope), any()))
+  private SignedExecutionPayloadEnvelope withTamperedStateRoot(
+      final SignedExecutionPayloadEnvelope signedExecutionPayloadEnvelope) {
+    final SignedExecutionPayloadEnvelope tamperedSignedEnvelope =
+        dataStructureUtil.signedExecutionPayloadEnvelopeWithModifiedPayload(
+            signedExecutionPayloadEnvelope,
+            builder -> builder.stateRoot(dataStructureUtil.randomBytes32()));
+    when(spec.atSlot(slot)
+            .miscHelpers()
+            .computeSigningRoot(eq(tamperedSignedEnvelope.getMessage()), any()))
         .thenReturn(dataStructureUtil.randomBytes32());
-    return signedEnvelope.getSchema().create(newEnvelope, signedEnvelope.getSignature());
+    return tamperedSignedEnvelope;
   }
 }

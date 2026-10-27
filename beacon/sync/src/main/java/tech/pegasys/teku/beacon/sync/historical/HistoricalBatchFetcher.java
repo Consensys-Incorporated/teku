@@ -57,7 +57,6 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloa
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
-import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadBlockHashCalculator;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadHeader;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.BlobIdentifier;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
@@ -309,9 +308,7 @@ public class HistoricalBatchFetcher {
   private void validateExecutionPayloadBlockHash(
       final SignedExecutionPayloadEnvelope signedExecutionPayloadEnvelope) {
     final ExecutionPayloadEnvelope envelope = signedExecutionPayloadEnvelope.getMessage();
-    final Bytes32 computedBlockHash =
-        ExecutionPayloadBlockHashCalculator.computeGloasBlockHash(
-            envelope, spec.getExecutionRequestsDataCodec(envelope.getSlot()));
+    final Bytes32 computedBlockHash = spec.computeExecutionPayloadBlockHash(envelope);
     final Bytes32 payloadBlockHash = envelope.getPayload().getBlockHash();
     if (!computedBlockHash.equals(payloadBlockHash)) {
       throw new IllegalArgumentException(
