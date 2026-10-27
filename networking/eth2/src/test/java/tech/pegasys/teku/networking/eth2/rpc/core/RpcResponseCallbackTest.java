@@ -30,6 +30,7 @@ import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
+import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.networking.p2p.rpc.RpcStream;
 import tech.pegasys.teku.networking.p2p.rpc.StreamClosedException;
 
@@ -37,7 +38,8 @@ class RpcResponseCallbackTest {
 
   private static final String PROTOCOL_ID = "/eth2/beacon_chain/req/test/1/ssz_snappy";
 
-  private final StubAsyncRunner asyncRunner = new StubAsyncRunner();
+  private final StubTimeProvider timeProvider = StubTimeProvider.withTimeInSeconds(0);
+  private final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
   private final RpcStream rpcStream = mock(RpcStream.class);
 
   @SuppressWarnings("unchecked")
@@ -270,6 +272,41 @@ class RpcResponseCallbackTest {
 
     callback.completeSuccessfully();
 
+    verify(rpcStream, never()).closeAbruptly();
+  }
+
+  @Test
+  void completeSuccessfullyShouldCloseStreamAbruptlyWhenHalfCloseDoesNotComplete() {
+    // our FIN is stuck in the transport
+    when(rpcStream.closeWriteStream()).thenReturn(new SafeFuture<>());
+    when(rpcStream.closeAbruptly()).thenReturn(SafeFuture.COMPLETE);
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(RpcResponseCallback.class, Level.DEBUG)) {
+      callback.completeSuccessfully();
+
+      timeProvider.advanceTimeBy(RpcResponseCallback.RESPONSE_WRITE_TIMEOUT.minusMillis(1));
+      asyncRunner.executeDueActions();
+      verify(rpcStream, never()).closeAbruptly();
+
+      timeProvider.advanceTimeByMillis(1);
+      asyncRunner.executeDueActions();
+      verify(rpcStream).closeAbruptly();
+      logCaptor.assertDebugLog("Timed out half-closing RPC stream for " + PROTOCOL_ID);
+    }
+  }
+
+  @Test
+  void completeSuccessfullyShouldNotCloseStreamAbruptlyWhenHalfCloseCompletesInTime() {
+    final SafeFuture<Void> halfCloseFuture = new SafeFuture<>();
+    when(rpcStream.closeWriteStream()).thenReturn(halfCloseFuture);
+
+    callback.completeSuccessfully();
+    timeProvider.advanceTimeBy(RpcResponseCallback.RESPONSE_WRITE_TIMEOUT.minusMillis(1));
+    asyncRunner.executeDueActions();
+    halfCloseFuture.complete(null);
+
+    timeProvider.advanceTimeBy(RpcResponseCallback.RESPONSE_WRITE_TIMEOUT);
+    asyncRunner.executeDueActions();
     verify(rpcStream, never()).closeAbruptly();
   }
 

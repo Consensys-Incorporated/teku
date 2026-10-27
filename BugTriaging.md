@@ -180,7 +180,7 @@ All software has bugs. And sometimes we don't find them. This is something that 
 A proper triaged bug helps up to prioritize and act on bugs in a timely manner. Also, by analysing the severity and impact of our bugs, we can create/update processes to ensure we are better prepared for them in the future.
 
 #### How to triage a bug?
-All of our bugs are reported on GitHub issues. They are identified by the BUG label. We can make use of GitHub labels to categorize our bugs. We have 5 labels, P1, P2, ..., P5 to categorize a bug according to our [policy](#Bug-Priorities) shown above.
+All of our bugs are reported on GitHub issues. They are identified by the BUG label. We can make use of GitHub labels to categorize our bugs. We have 5 labels, P1, P2, ..., P5 to categorize a bug according to our [policy](#deciding-priority) shown above.
 
 ##### Step-by-step process (for maintainers)
 1) Identify that a bug doesn't have a priority (no Px label).

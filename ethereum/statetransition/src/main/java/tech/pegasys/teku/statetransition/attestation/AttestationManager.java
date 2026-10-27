@@ -13,7 +13,6 @@
 
 package tech.pegasys.teku.statetransition.attestation;
 
-import com.google.common.base.Throwables;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.RejectedExecutionException;
@@ -22,9 +21,11 @@ import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.ethereum.events.SlotEventsChannel;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.exceptions.ExceptionUtil;
 import tech.pegasys.teku.infrastructure.subscribers.Subscribers;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.service.serviceutils.Service;
+import tech.pegasys.teku.service.serviceutils.ServiceCapacityExceededException;
 import tech.pegasys.teku.spec.datastructures.attestation.ProcessedAttestationListener;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
@@ -173,15 +174,7 @@ public class AttestationManager extends Service
                     result ->
                         result.ifInvalid(
                             reason -> LOG.debug("Rejected received attestation: " + reason)),
-                    err -> {
-                      final Throwable rootException = Throwables.getRootCause(err);
-                      if (rootException instanceof RejectedExecutionException) {
-                        // these tend to flood the channel, and we're already struggling
-                        LOG.trace("Failed to process received attestation.: {}", err.getMessage());
-                      } else {
-                        LOG.error("Failed to process received attestation.", err);
-                      }
-                    });
+                    err -> logProcessingFailure("Failed to process received attestation.", err));
             notifyAllValidAttestationsSubscribers(attestation);
           }
         });
@@ -233,9 +226,8 @@ public class AttestationManager extends Service
                 onAttestation(attestation)
                     .finish(
                         err ->
-                            LOG.error(
-                                "Failed to process pending attestation dependent on {}",
-                                blockRoot,
+                            logProcessingFailure(
+                                "Failed to process pending attestation dependent on " + blockRoot,
                                 err)));
   }
 
@@ -256,10 +248,24 @@ public class AttestationManager extends Service
                 onAttestation(attestation)
                     .finish(
                         err ->
-                            LOG.error(
-                                "Failed to process pending attestation dependent on full payload {}",
-                                blockRoot,
+                            logProcessingFailure(
+                                "Failed to process pending attestation dependent on full payload "
+                                    + blockRoot,
                                 err)));
+  }
+
+  /**
+   * A full executor or signature verification queue means we're overloaded rather than broken, and
+   * fails a flood of attestations at once, so those failures are only traced: an error with a stack
+   * trace for each would flood the log while we're already struggling.
+   */
+  private static void logProcessingFailure(final String description, final Throwable err) {
+    if (ExceptionUtil.hasCause(
+        err, RejectedExecutionException.class, ServiceCapacityExceededException.class)) {
+      LOG.trace("{}: {}", description, err.getMessage());
+    } else {
+      LOG.error(description, err);
+    }
   }
 
   public SafeFuture<AttestationProcessingResult> onAttestation(
