@@ -444,8 +444,9 @@ public class ExecutionBuilderModule {
     return latestBuilderAvailability.get();
   }
 
-  void updateBuilderAvailability() {
-    if (builderClient.isEmpty()) {
+  void updateBuilderAvailability(final UInt64 slot) {
+    if (builderClient.isEmpty()
+        || spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS)) {
       return;
     }
     builderClient
