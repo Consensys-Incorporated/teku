@@ -1305,7 +1305,18 @@ public class KvStoreDatabase implements Database {
   @MustBeClosed
   public Stream<DataColumnSlotAndIdentifier> streamDataColumnIdentifiers(
       final UInt64 firstSlot, final UInt64 lastSlot) {
-    return dao.streamDataColumnIdentifiers(firstSlot, lastSlot);
+    // Everything up to and including the prune watermark has been deleted, so start the scan just
+    // above it. Seeking into the pruned range would land on the band of deletion tombstones left
+    // there - stepping over them can take minutes on a node that pruned many slots - and a range
+    // that is entirely pruned can skip the database altogether.
+    final UInt64 fromSlot =
+        dao.getLastDataColumnSidecarPrunedSlot()
+            .map(lastPruned -> lastPruned.plus(1).max(firstSlot))
+            .orElse(firstSlot);
+    if (fromSlot.isGreaterThan(lastSlot)) {
+      return Stream.empty();
+    }
+    return dao.streamDataColumnIdentifiers(fromSlot, lastSlot);
   }
 
   @Override
@@ -1321,16 +1332,10 @@ public class KvStoreDatabase implements Database {
     if (maybeFirstDataColumnSidecarSlot.isEmpty()) {
       return Optional.empty();
     }
-    // Start the scan just above the last pruned slot rather than at the first slot with data column
-    // sidecar support. Everything up to and including the watermark has been deleted, so seeking to
-    // watermark + 1 lands directly on live data instead of crossing the band of deletion tombstones
-    // left below it - a forward scan over those tombstones can take minutes on a backlogged node.
-    final UInt64 fromSlot =
-        dao.getLastDataColumnSidecarPrunedSlot()
-            .map(lastPruned -> lastPruned.plus(1))
-            .orElse(maybeFirstDataColumnSidecarSlot.get());
+    // streamDataColumnIdentifiers starts above the prune watermark, so this lands directly on live
+    // data rather than on the deletion tombstones left below it
     try (final Stream<DataColumnSlotAndIdentifier> identifiers =
-        streamDataColumnIdentifiers(fromSlot, UInt64.MAX_VALUE)) {
+        streamDataColumnIdentifiers(maybeFirstDataColumnSidecarSlot.get(), UInt64.MAX_VALUE)) {
       return identifiers.findFirst().map(DataColumnSlotAndIdentifier::slot);
     }
   }
@@ -1408,6 +1413,20 @@ public class KvStoreDatabase implements Database {
 
   @Override
   public void addSidecar(final DataColumnSidecar sidecar) {
+    // Reads treat everything at or below the prune watermark as pruned (see
+    // streamDataColumnIdentifiers) and pruning never revisits it, so a sidecar stored there would
+    // never be served by range nor pruned. It can only happen for a sidecar already outside the
+    // retention window, racing the prune that passed its slot.
+    final Optional<UInt64> maybeLastPrunedSlot = dao.getLastDataColumnSidecarPrunedSlot();
+    if (maybeLastPrunedSlot.isPresent()
+        && sidecar.getSlot().isLessThanOrEqualTo(maybeLastPrunedSlot.get())) {
+      LOG.debug(
+          "Not storing data column sidecar {} at slot {}: already pruned up to slot {}",
+          sidecar.toLogString(),
+          sidecar.getSlot(),
+          maybeLastPrunedSlot.get());
+      return;
+    }
     try (final FinalizedUpdater updater = finalizedUpdater()) {
       updater.addSidecar(sidecar);
       updater.commit();
