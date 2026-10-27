@@ -775,10 +775,8 @@ class Store extends CacheableStore {
   public SafeFuture<Optional<BeaconState>> retrieveBlockState(final Bytes32 blockRoot) {
     return getAndCacheBlockAndState(blockRoot)
         .thenApply(
-            maybeBlockAndState ->
-                maybeBlockAndState
-                    .map(SignedBlockAndState::getState)
-                    .or(() -> finalizedAnchor.getBlockPostState(blockRoot)));
+            maybeStateAndBlockSummary ->
+                maybeStateAndBlockSummary.map(StateAndBlockSummary::getState));
   }
 
   @Override

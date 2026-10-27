@@ -50,6 +50,7 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
+import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
@@ -60,6 +61,7 @@ import tech.pegasys.teku.storage.api.ReorgContext;
 import tech.pegasys.teku.storage.client.ChainHead;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 import tech.pegasys.teku.storage.client.RecentChainData;
+import tech.pegasys.teku.storage.store.UpdatableStore;
 
 @TestSpecContext(allMilestones = true, ignoredMilestones = SpecMilestone.PHASE0)
 public class LightClientServerServiceTest {
@@ -402,6 +404,38 @@ public class LightClientServerServiceTest {
     service.onNewFinalizedCheckpoint(checkpointAtPeriod(200), false);
 
     assertThat(store.getBestUpdatesInRange(UInt64.ZERO, 1)).isEmpty();
+  }
+
+  @TestTemplate
+  public void onNewFinalizedCheckpoint_shouldStoreBootstrapFromStateOnlyAnchor() {
+    final Chain chain = generateChain();
+    final SignedBlockAndState anchor = chain.attested();
+    final LightClientUpdateChannel channel =
+        mock(LightClientUpdateChannel.class, invocation -> SafeFuture.COMPLETE);
+    final AnchorPoint finalizedAnchor = mock(AnchorPoint.class);
+    when(finalizedAnchor.getBlockPostState(anchor.getRoot()))
+        .thenReturn(Optional.of(anchor.getState()));
+    final UpdatableStore forkChoiceStore = mock(UpdatableStore.class);
+    when(forkChoiceStore.getLatestFinalized()).thenReturn(finalizedAnchor);
+    final CombinedChainDataClient combinedChainDataClient = mock(CombinedChainDataClient.class);
+    when(combinedChainDataClient.getStore()).thenReturn(forkChoiceStore);
+    when(combinedChainDataClient.getBlockByBlockRoot(any()))
+        .thenAnswer(invocation -> lookUpBlock(invocation.getArgument(0)));
+    when(combinedChainDataClient.getStateByBlockRoot(any()))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+
+    new LightClientServerService(
+            spec,
+            new LightClientUpdateStore(spec, channel),
+            combinedChainDataClient,
+            asyncRunner,
+            timeProvider)
+        .onNewFinalizedCheckpoint(checkpointAt(anchor), false);
+
+    verify(channel)
+        .onNewLightClientBootstrap(
+            spec.getLightClientUtilRequired(anchor.getSlot())
+                .createLightClientBootstrap(anchor.getState(), anchor.getBlock()));
   }
 
   private Checkpoint checkpointAt(final SignedBlockAndState blockAndState) {
