@@ -1413,20 +1413,6 @@ public class KvStoreDatabase implements Database {
 
   @Override
   public void addSidecar(final DataColumnSidecar sidecar) {
-    // Reads treat everything at or below the prune watermark as pruned (see
-    // streamDataColumnIdentifiers) and pruning never revisits it, so a sidecar stored there would
-    // never be served by range nor pruned. It can only happen for a sidecar already outside the
-    // retention window, racing the prune that passed its slot.
-    final Optional<UInt64> maybeLastPrunedSlot = dao.getLastDataColumnSidecarPrunedSlot();
-    if (maybeLastPrunedSlot.isPresent()
-        && sidecar.getSlot().isLessThanOrEqualTo(maybeLastPrunedSlot.get())) {
-      LOG.debug(
-          "Not storing data column sidecar {} at slot {}: already pruned up to slot {}",
-          sidecar.toLogString(),
-          sidecar.getSlot(),
-          maybeLastPrunedSlot.get());
-      return;
-    }
     try (final FinalizedUpdater updater = finalizedUpdater()) {
       updater.addSidecar(sidecar);
       updater.commit();
