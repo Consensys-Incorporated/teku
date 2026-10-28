@@ -16,6 +16,7 @@ package tech.pegasys.teku.validator.remote.eventsource;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -380,6 +381,75 @@ class EventSourceHandlerTest {
     verify(validatorLogger).noHeadEventsReceivedFromBeaconNodeEventStream(ENDPOINT);
   }
 
+  @Test
+  void onMessage_shouldRequestPayloadAttestationWhenTheHeadPayloadBecomesAvailable()
+      throws Exception {
+    // Example payloads from https://github.com/ethereum/beacon-APIs apis/eventstream/index.yaml,
+    // which use the same block root for the head and for its execution payload
+    handler.onMessage(EventType.head_v2.name(), new MessageEvent(SPEC_HEAD_V2_EVENT));
+    clearInvocations(validatorTimingChannel);
+
+    handler.onMessage(
+        EventType.execution_payload_available.name(),
+        new MessageEvent(SPEC_EXECUTION_PAYLOAD_AVAILABLE_EVENT));
+
+    verify(validatorTimingChannel).onPayloadAttestationCreationDue(UInt64.valueOf(10));
+    verifyNoMoreInteractions(validatorTimingChannel);
+  }
+
+  @Test
+  void onMessage_shouldNotRequestPayloadAttestationForAPayloadOfAnotherBlock() throws Exception {
+    // the payload belongs to a block which is not the head, so it says nothing about the block the
+    // payload timeliness attestation will be about
+    handler.onMessage(EventType.head_v2.name(), headV2Event());
+    clearInvocations(validatorTimingChannel);
+
+    handler.onMessage(
+        EventType.execution_payload_available.name(),
+        new MessageEvent(SPEC_EXECUTION_PAYLOAD_AVAILABLE_EVENT));
+
+    verifyNoInteractions(validatorTimingChannel);
+  }
+
+  @Test
+  void onMessage_shouldNotRequestPayloadAttestationForTheHeadReportedBeforeAReconnect()
+      throws Exception {
+    handler.onMessage(EventType.head_v2.name(), new MessageEvent(SPEC_HEAD_V2_EVENT));
+    // the head may have moved on while the stream was down, so the beacon node has to report it
+    // again before a payload can be matched against it
+    handler.onOpen();
+    clearInvocations(validatorTimingChannel);
+
+    handler.onMessage(
+        EventType.execution_payload_available.name(),
+        new MessageEvent(SPEC_EXECUTION_PAYLOAD_AVAILABLE_EVENT));
+
+    verifyNoInteractions(validatorTimingChannel);
+  }
+
+  @Test
+  void onMessage_shouldNotRequestPayloadAttestationBeforeAnyHeadIsKnown() throws Exception {
+    handler.onMessage(
+        EventType.execution_payload_available.name(),
+        new MessageEvent(SPEC_EXECUTION_PAYLOAD_AVAILABLE_EVENT));
+
+    verifyNoInteractions(validatorTimingChannel);
+  }
+
+  @Test
+  void onMessage_shouldCountAnInvalidExecutionPayloadAvailableEventWithoutThrowing() {
+    final MessageEvent messageEvent = new MessageEvent("{\"slot\": \"10\"}");
+
+    assertDoesNotThrow(
+        () -> handler.onMessage(EventType.execution_payload_available.name(), messageEvent));
+
+    verifyNoInteractions(validatorTimingChannel);
+    assertThat(
+            metricsSystem.getCounterValue(
+                TekuMetricCategory.VALIDATOR, "event_stream_invalid_events_total"))
+        .isEqualTo(1);
+  }
+
   private EventSourceHandler createHandler(final boolean generateEarlyAttestations) {
     return new EventSourceHandler(
         validatorTimingChannel,
@@ -394,6 +464,29 @@ class EventSourceHandlerTest {
     return metricsSystem.getLabelledCounterValue(
         TekuMetricCategory.VALIDATOR, "event_stream_events_total", eventType.name());
   }
+
+  private static final String SPEC_BLOCK_ROOT =
+      "0x9a2fefd2fdb57f74993c7780ea5b9030d2897b615b89f808011ca5aebed54eaf";
+
+  private static final String SPEC_EXECUTION_PAYLOAD_AVAILABLE_EVENT =
+      "{\"slot\": \"10\", \"block_root\": \"" + SPEC_BLOCK_ROOT + "\"}";
+
+  private static final String SPEC_HEAD_V2_EVENT =
+      """
+      {"version": "gloas", "data":{\
+      "slot":"10", \
+      "block":\""""
+          + SPEC_BLOCK_ROOT
+          + """
+          ", \
+          "state":"0x600e852a08c1200654ddf11025f1ceacb3c2e74bdd5c630cde0838b2591b69f9", \
+          "payload_status": "full", \
+          "epoch_transition":false, \
+          "current_epoch_dependent_root":\
+          "0x5e0043f107cb57913498fbf2f99ff55e730bf1e151f02f221e977c91a90a0e91", \
+          "next_epoch_dependent_root":\
+          "0x1111111111111111111111111111111111111111111111111111111111111111", \
+          "execution_optimistic": false}}""";
 
   private MessageEvent headV2Event() throws Exception {
     final HeadV2Event event =

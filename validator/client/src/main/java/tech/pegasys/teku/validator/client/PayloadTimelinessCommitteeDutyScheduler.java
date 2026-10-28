@@ -15,6 +15,7 @@ package tech.pegasys.teku.validator.client;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
+import java.util.Optional;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
@@ -29,6 +30,8 @@ public class PayloadTimelinessCommitteeDutyScheduler extends AbstractDutySchedul
   private static final Logger LOG = LogManager.getLogger();
   private static final int LOOKAHEAD_EPOCHS = 1;
 
+  private Optional<UInt64> currentSlot = Optional.empty();
+
   public PayloadTimelinessCommitteeDutyScheduler(
       final MetricsSystem metricsSystem, final DutyLoader<?> dutyLoader, final Spec spec) {
     super(metricsSystem, "payload_attestation", dutyLoader, spec);
@@ -41,8 +44,21 @@ public class PayloadTimelinessCommitteeDutyScheduler extends AbstractDutySchedul
   }
 
   @Override
+  public void onSlot(final UInt64 slot) {
+    currentSlot = Optional.of(slot);
+    super.onSlot(slot);
+  }
+
+  /**
+   * A payload timeliness attestation is only meaningful for the current slot, and peers ignore any
+   * other, so a payload which became available for an earlier slot, for example while the beacon
+   * node catches up, must not start the duty.
+   */
+  @Override
   public void onPayloadAttestationCreationDue(final UInt64 slot) {
-    onProductionDue(slot);
+    if (currentSlot.map(slot::equals).orElse(false)) {
+      onProductionDue(slot);
+    }
   }
 
   @Override

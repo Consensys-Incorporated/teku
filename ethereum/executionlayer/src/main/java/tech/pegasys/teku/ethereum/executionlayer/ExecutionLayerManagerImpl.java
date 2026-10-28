@@ -166,7 +166,7 @@ public class ExecutionLayerManagerImpl implements ExecutionLayerManager {
 
   @Override
   public void onSlot(final UInt64 slot) {
-    executionBuilderModule.updateBuilderAvailability();
+    executionBuilderModule.updateBuilderAvailability(slot);
   }
 
   @Override

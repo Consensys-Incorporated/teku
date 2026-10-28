@@ -25,6 +25,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.config.GasLimitScheduleEntry;
+import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
@@ -181,5 +182,24 @@ public class MiscHelpersGloasTest {
 
     assertThat(MiscHelpersGloas.isParentBlockFull(fullState)).isTrue();
     assertThat(MiscHelpersGloas.isParentBlockFull(emptyState)).isFalse();
+  }
+
+  @Test
+  void verifyDataColumnSidecar_shouldAcceptGloasSidecar() {
+    final DataColumnSidecar sidecar =
+        data.randomDataColumnSidecar(
+            data.randomSignedBeaconBlockWithCommitments(UInt64.ONE, 3), UInt64.ZERO);
+
+    assertThat(miscHelpers.verifyDataColumnSidecar(sidecar)).isTrue();
+  }
+
+  @Test
+  void verifyDataColumnSidecar_shouldRejectSidecarOfAnotherFork() {
+    final DataStructureUtil fuluData = new DataStructureUtil(TestSpecFactory.createMinimalFulu());
+    final DataColumnSidecar fuluSidecar =
+        fuluData.randomDataColumnSidecar(
+            fuluData.randomSignedBeaconBlockHeader(UInt64.ONE), UInt64.ZERO);
+
+    assertThat(miscHelpers.verifyDataColumnSidecar(fuluSidecar)).isFalse();
   }
 }
