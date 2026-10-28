@@ -26,7 +26,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.LongStream;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
@@ -63,6 +66,8 @@ class RocksDbInstanceTest {
       KvStoreColumn.create(1, UINT64_SERIALIZER, UINT64_SERIALIZER);
 
   @TempDir Path databaseDir;
+
+  private final AtomicReference<ReadOptions> readOptions = new AtomicReference<>();
 
   private TransactionDB db;
   private ColumnFamilyHandle columnHandle;
@@ -124,7 +129,7 @@ class RocksDbInstanceTest {
   }
 
   @Test
-  void streamKeys_shouldNotStepOverTombstonesBeyondTheRange() {
+  void rangedStreams_shouldNotStepOverTombstonesBeyondTheRange() {
     db.setPerfLevel(PerfLevel.ENABLE_COUNT);
 
     db.getPerfContext().reset();
@@ -135,20 +140,15 @@ class RocksDbInstanceTest {
     assertThat(db.getPerfContext().getInternalDeleteSkippedCount())
         .isGreaterThanOrEqualTo(FIRST_LIVE_KEY);
 
+    // Only the tombstones of the requested range are visited
     db.getPerfContext().reset();
     try (final Stream<UInt64> keys =
         instance.streamKeys(column, UInt64.valueOf(100), UInt64.valueOf(109))) {
       assertThat(keys).isEmpty();
     }
-    // Only the tombstones of the requested range are visited
     assertThat(db.getPerfContext().getInternalDeleteSkippedCount()).isLessThanOrEqualTo(10);
-  }
 
-  @Test
-  void stream_shouldNotStepOverTombstonesBeyondTheRange() {
-    db.setPerfLevel(PerfLevel.ENABLE_COUNT);
     db.getPerfContext().reset();
-
     try (final Stream<ColumnEntry<UInt64, UInt64>> entries =
         instance.stream(column, UInt64.valueOf(100), UInt64.valueOf(109))) {
       assertThat(entries).isEmpty();
@@ -157,15 +157,11 @@ class RocksDbInstanceTest {
   }
 
   @Test
-  void streamKeys_shouldIncludeLastKeyOfRange() {
+  void rangedStreams_shouldIncludeLastKeyOfRange() {
     try (final Stream<UInt64> keys =
         instance.streamKeys(column, UInt64.valueOf(9_950), UInt64.valueOf(9_955))) {
       assertThat(keys).containsExactlyElementsOf(range(9_950, 9_955));
     }
-  }
-
-  @Test
-  void stream_shouldIncludeLastKeyOfRange() {
     try (final Stream<ColumnEntry<UInt64, UInt64>> entries =
         instance.stream(column, UInt64.valueOf(9_950), UInt64.valueOf(9_955))) {
       assertThat(entries)
@@ -216,40 +212,44 @@ class RocksDbInstanceTest {
   }
 
   @Test
-  void createBoundedIterator_shouldSetExclusiveUpperBoundAndHandBackResources() {
+  void createIterator_shouldSetExclusiveUpperBoundAndHandBackResources() {
     final RocksIterator rocksIterator = mock(RocksIterator.class);
-    final AtomicReference<ReadOptions> readOptions = new AtomicReference<>();
 
     final IteratorWithResources iterator =
-        RocksDbInstance.createBoundedIterator(
-            new byte[] {1, 2},
-            options -> {
-              readOptions.set(options);
-              return rocksIterator;
-            },
+        RocksDbInstance.createIterator(
+            Optional.of(new byte[] {1, (byte) 0xff}),
+            capturingReadOptions(() -> rocksIterator),
             it -> it.seek(new byte[] {1}));
 
     verify(rocksIterator).seek(new byte[] {1});
     assertThat(iterator.rocksIterator()).isSameAs(rocksIterator);
-    assertThat(readOptions.get().iterateUpperBound().data()).containsExactly(1, 2, 0);
+    // The smallest key above the last key of the range
+    assertThat(readOptions.get().iterateUpperBound().data()).containsExactly(1, 0xff, 0);
     assertThat(iterator.resources()).hasSize(2).first().isSameAs(readOptions.get());
     iterator.resources().forEach(AbstractNativeReference::close);
   }
 
   @Test
-  void createBoundedIterator_shouldCloseEverythingWhenSetupFails() {
+  void createIterator_shouldNotSetUpperBoundWithoutLastKey() {
+    final IteratorWithResources iterator =
+        RocksDbInstance.createIterator(
+            Optional.empty(), capturingReadOptions(() -> mock(RocksIterator.class)), it -> {});
+
+    assertThat(readOptions.get().iterateUpperBound()).isNull();
+    assertThat(iterator.resources()).containsExactly(readOptions.get());
+    iterator.resources().forEach(AbstractNativeReference::close);
+  }
+
+  @Test
+  void createIterator_shouldCloseEverythingWhenSetupFails() {
     final RocksIterator rocksIterator = mock(RocksIterator.class);
-    final AtomicReference<ReadOptions> readOptions = new AtomicReference<>();
     final RuntimeException error = new RuntimeException("seek failed");
 
     assertThatThrownBy(
             () ->
-                RocksDbInstance.createBoundedIterator(
-                    new byte[] {1},
-                    options -> {
-                      readOptions.set(options);
-                      return rocksIterator;
-                    },
+                RocksDbInstance.createIterator(
+                    Optional.of(new byte[] {1}),
+                    capturingReadOptions(() -> rocksIterator),
                     it -> {
                       throw error;
                     }))
@@ -260,28 +260,30 @@ class RocksDbInstanceTest {
   }
 
   @Test
-  void createBoundedIterator_shouldCloseReadOptionsWhenIteratorCannotBeCreated() {
-    final AtomicReference<ReadOptions> readOptions = new AtomicReference<>();
+  void createIterator_shouldCloseReadOptionsWhenIteratorCannotBeCreated() {
     final RuntimeException error = new RuntimeException("newIterator failed");
 
     assertThatThrownBy(
             () ->
-                RocksDbInstance.createBoundedIterator(
-                    new byte[] {1},
-                    options -> {
-                      readOptions.set(options);
-                      throw error;
-                    },
+                RocksDbInstance.createIterator(
+                    Optional.of(new byte[] {1}),
+                    capturingReadOptions(
+                        () -> {
+                          throw error;
+                        }),
                     it -> {}))
         .isSameAs(error);
 
     assertThat(readOptions.get().isOwningHandle()).isFalse();
   }
 
-  @Test
-  void exclusiveUpperBound_shouldBeSmallestKeyAboveLastKey() {
-    assertThat(RocksDbInstance.exclusiveUpperBound(new byte[] {1, (byte) 0xff}))
-        .containsExactly(1, 0xff, 0);
+  /** Records the ReadOptions the iterator is created with, so the test can inspect them. */
+  private Function<ReadOptions, RocksIterator> capturingReadOptions(
+      final Supplier<RocksIterator> newIterator) {
+    return options -> {
+      readOptions.set(options);
+      return newIterator.get();
+    };
   }
 
   private void flush() throws Exception {

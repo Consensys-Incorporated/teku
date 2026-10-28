@@ -1538,9 +1538,9 @@ public class KvStoreDatabase implements Database {
    * transaction. Pruning oldest-first keeps the earliest retained slot advancing and prevents a gap
    * from forming when sidecars are stored faster than they can be pruned.
    *
-   * <p>For canonical sidecars the forward scan resumes from the persisted prune watermark ({@link
-   * KvStoreCombinedDao#getLastDataColumnSidecarPrunedSlot()}) rather than the fixed first slot with
-   * data column sidecar support, so the opening seek lands directly on live data instead of
+   * <p>For canonical sidecars the forward scan resumes above the persisted prune watermark ({@link
+   * KvStoreCombinedDao#getLastDataColumnSidecarPrunedSlot()}, applied by {@link
+   * #streamDataColumnIdentifiers}), so the opening seek lands directly on live data instead of
    * crossing the deletion tombstones left below it - including across restarts. The watermark is
    * advanced atomically with the deletions. Non-canonical sidecars are sparse, so they always scan
    * from the first supported slot. Gaps between populated slots are skipped, so the batch always
@@ -1562,13 +1562,7 @@ public class KvStoreDatabase implements Database {
       return;
     }
 
-    final UInt64 firstSupportedSlot = maybeFirstDataColumnSidecarSlot.get();
-    final UInt64 fromSlot =
-        sidecarType == DataColumnSidecarType.CANONICAL
-            ? dao.getLastDataColumnSidecarPrunedSlot()
-                .map(lastPruned -> lastPruned.plus(1))
-                .orElse(firstSupportedSlot)
-            : firstSupportedSlot;
+    final UInt64 fromSlot = maybeFirstDataColumnSidecarSlot.get();
     if (fromSlot.isGreaterThan(tillSlotInclusive)) {
       return;
     }

@@ -52,9 +52,6 @@ class RocksDbIterator<T> implements Iterator<T>, AutoCloseable {
     this.resources = resources;
   }
 
-  /**
-   * @param readEntry reads the entry at the iterator's current position, e.g. its key
-   */
   @MustBeClosed
   public static <T> RocksDbIterator<T> create(
       final RocksIterator rocksIt,

@@ -38,6 +38,9 @@ import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.InOrder;
 import org.mockito.invocation.InvocationOnMock;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
@@ -401,74 +404,53 @@ class KvStoreDatabaseTest {
     assertThat(prunedWatermark).isEmpty();
   }
 
-  @Test
-  void streamDataColumnIdentifiers_shouldNotReadDatabaseForRangeAtOrBelowPruneWatermark() {
-    final KvStoreCombinedDao dao = columnIdentifiersDao(Optional.of(UInt64.valueOf(100)));
-    final KvStoreDatabase database =
-        new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, mock(Spec.class));
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("pruneWatermarkClampCases")
+  void streamDataColumnIdentifiers_shouldStartAbovePruneWatermark(
+      final String description,
+      final Optional<UInt64> watermark,
+      final long firstSlot,
+      final long lastSlot,
+      final List<SlotRange> expectedScans) {
+    final KvStoreDatabase database = database(UInt64.ZERO);
+    prunedWatermark = watermark;
 
     try (final Stream<DataColumnSlotAndIdentifier> identifiers =
-        database.streamDataColumnIdentifiers(UInt64.valueOf(10), UInt64.valueOf(100))) {
+        database.streamDataColumnIdentifiers(UInt64.valueOf(firstSlot), UInt64.valueOf(lastSlot))) {
       assertThat(identifiers).isEmpty();
     }
 
-    verify(dao, never()).streamDataColumnIdentifiers(any(), any());
+    assertThat(streamedRanges).isEqualTo(expectedScans);
   }
 
-  @Test
-  void streamDataColumnIdentifiers_shouldStartAbovePruneWatermark() {
-    final KvStoreCombinedDao dao = columnIdentifiersDao(Optional.of(UInt64.valueOf(100)));
-    final KvStoreDatabase database =
-        new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, mock(Spec.class));
-
-    try (final Stream<DataColumnSlotAndIdentifier> identifiers =
-        database.streamDataColumnIdentifiers(UInt64.valueOf(10), UInt64.valueOf(200))) {
-      assertThat(identifiers).containsExactly(identifier(101, 0));
-    }
-
-    verify(dao).streamDataColumnIdentifiers(UInt64.valueOf(101), UInt64.valueOf(200));
-  }
-
-  @Test
-  void streamDataColumnIdentifiers_shouldKeepRangeAbovePruneWatermark() {
-    final KvStoreCombinedDao dao = columnIdentifiersDao(Optional.of(UInt64.valueOf(100)));
-    final KvStoreDatabase database =
-        new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, mock(Spec.class));
-
-    try (final Stream<DataColumnSlotAndIdentifier> identifiers =
-        database.streamDataColumnIdentifiers(UInt64.valueOf(101), UInt64.valueOf(101))) {
-      assertThat(identifiers).containsExactly(identifier(101, 0));
-    }
-
-    verify(dao).streamDataColumnIdentifiers(UInt64.valueOf(101), UInt64.valueOf(101));
-  }
-
-  @Test
-  void streamDataColumnIdentifiers_shouldKeepRequestedStartWellAbovePruneWatermark() {
-    final KvStoreCombinedDao dao = columnIdentifiersDao(Optional.of(UInt64.valueOf(100)));
-    final KvStoreDatabase database =
-        new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, mock(Spec.class));
-
-    try (final Stream<DataColumnSlotAndIdentifier> identifiers =
-        database.streamDataColumnIdentifiers(UInt64.valueOf(150), UInt64.valueOf(200))) {
-      assertThat(identifiers).containsExactly(identifier(150, 0));
-    }
-
-    verify(dao).streamDataColumnIdentifiers(UInt64.valueOf(150), UInt64.valueOf(200));
-  }
-
-  @Test
-  void streamDataColumnIdentifiers_shouldKeepRangeWithoutPruneWatermark() {
-    final KvStoreCombinedDao dao = columnIdentifiersDao(Optional.empty());
-    final KvStoreDatabase database =
-        new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, mock(Spec.class));
-
-    try (final Stream<DataColumnSlotAndIdentifier> identifiers =
-        database.streamDataColumnIdentifiers(UInt64.valueOf(10), UInt64.valueOf(200))) {
-      assertThat(identifiers).containsExactly(identifier(10, 0));
-    }
-
-    verify(dao).streamDataColumnIdentifiers(UInt64.valueOf(10), UInt64.valueOf(200));
+  static Stream<Arguments> pruneWatermarkClampCases() {
+    final Optional<UInt64> watermark = Optional.of(UInt64.valueOf(100));
+    return Stream.of(
+        Arguments.of("fully pruned range skips the database", watermark, 10, 100, List.of()),
+        Arguments.of(
+            "straddling range starts above the watermark",
+            watermark,
+            10,
+            200,
+            List.of(new SlotRange(UInt64.valueOf(101), UInt64.valueOf(200)))),
+        Arguments.of(
+            "range just above the watermark is unchanged",
+            watermark,
+            101,
+            101,
+            List.of(new SlotRange(UInt64.valueOf(101), UInt64.valueOf(101)))),
+        Arguments.of(
+            "range well above the watermark is unchanged",
+            watermark,
+            150,
+            200,
+            List.of(new SlotRange(UInt64.valueOf(150), UInt64.valueOf(200)))),
+        Arguments.of(
+            "range without a watermark is unchanged",
+            Optional.empty(),
+            10,
+            200,
+            List.of(new SlotRange(UInt64.valueOf(10), UInt64.valueOf(200)))));
   }
 
   @Test
@@ -513,34 +495,19 @@ class KvStoreDatabaseTest {
         .thenReturn(Optional.of(firstFuluSlot));
     final KvStoreCombinedDao dao = mock(KvStoreCombinedDao.class);
     when(dao.getLastDataColumnSidecarPrunedSlot()).thenAnswer(__ -> prunedWatermark);
+    when(dao.streamDataColumnIdentifiers(any(), any()))
+        .thenAnswer(
+            invocation -> streamPopulated(invocation.getArgument(0), invocation.getArgument(1)));
+    when(dao.streamNonCanonicalDataColumnIdentifiers(any(), any()))
+        .thenAnswer(
+            invocation -> streamPopulated(invocation.getArgument(0), invocation.getArgument(1)));
     return new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec) {
 
       @Override
       protected FinalizedUpdater finalizedUpdater() {
         return countingUpdater();
       }
-
-      @Override
-      public Stream<DataColumnSlotAndIdentifier> streamDataColumnIdentifiers(
-          final UInt64 firstSlot, final UInt64 lastSlot) {
-        return streamPopulated(firstSlot, lastSlot);
-      }
-
-      @Override
-      public Stream<DataColumnSlotAndIdentifier> streamNonCanonicalDataColumnIdentifiers(
-          final UInt64 firstSlot, final UInt64 lastSlot) {
-        return streamPopulated(firstSlot, lastSlot);
-      }
     };
-  }
-
-  private static KvStoreCombinedDao columnIdentifiersDao(final Optional<UInt64> prunedWatermark) {
-    final KvStoreCombinedDao dao = mock(KvStoreCombinedDao.class);
-    when(dao.getLastDataColumnSidecarPrunedSlot()).thenReturn(prunedWatermark);
-    when(dao.streamDataColumnIdentifiers(any(), any()))
-        .thenAnswer(
-            invocation -> Stream.of(identifier(invocation.<UInt64>getArgument(0).longValue(), 0)));
-    return dao;
   }
 
   private Stream<DataColumnSlotAndIdentifier> streamPopulated(

@@ -256,11 +256,8 @@ public class RocksDbInstance implements KvStoreAccessor {
   }
 
   /**
-   * Streams the column from the position {@code setupIterator} seeks to. When {@code maybeLastKey}
-   * is present the stream ends after that key, and RocksDB enforces it as an upper bound so a seek
-   * stops at the end of the range instead of stepping over every deletion tombstone up to the next
-   * live key. Without the bound a seek into a pruned range has to walk all the tombstones left by
-   * pruning, however small the requested range is.
+   * Streams the column from the position {@code setupIterator} seeks to, ending after {@code
+   * maybeLastKey} when present.
    */
   @SuppressWarnings("MustBeClosedChecker")
   @MustBeClosed
@@ -274,56 +271,47 @@ public class RocksDbInstance implements KvStoreAccessor {
     if (handle == null) {
       return Stream.empty();
     }
-    final IteratorWithResources iterator;
-    if (maybeLastKey.isPresent()) {
-      iterator =
-          createBoundedIterator(
-              maybeLastKey.get(),
-              readOptions -> db.newIterator(handle, readOptions),
-              setupIterator);
-    } else {
-      final RocksIterator rocksIterator = db.newIterator(handle);
-      setupIterator.accept(rocksIterator);
-      iterator = new IteratorWithResources(rocksIterator, List.of());
-    }
+    final IteratorWithResources iterator =
+        createIterator(
+            maybeLastKey, readOptions -> db.newIterator(handle, readOptions), setupIterator);
     return RocksDbIterator.create(
             iterator.rocksIterator(), readEntry, closed::get, iterator.resources())
         .toStream();
   }
 
   /**
-   * Creates an iterator bounded just above {@code lastKey} and runs {@code setupIterator} on it.
-   * The bound and its {@link ReadOptions} are native resources that must outlive the iterator, so
-   * they are handed back to be closed after it, or closed here if the iterator cannot be set up.
+   * Creates an iterator and runs {@code setupIterator} on it. When {@code maybeLastKey} is present
+   * RocksDB enforces it as an upper bound, so a seek stops at the end of the range instead of
+   * stepping over every deletion tombstone up to the next live key. The {@link ReadOptions} and the
+   * bound are native resources that must outlive the iterator, so they are handed back to be closed
+   * after it, or closed here if the iterator cannot be set up.
    */
   @VisibleForTesting
-  static IteratorWithResources createBoundedIterator(
-      final byte[] lastKey,
+  static IteratorWithResources createIterator(
+      final Optional<byte[]> maybeLastKey,
       final Function<ReadOptions, RocksIterator> newIterator,
       final Consumer<RocksIterator> setupIterator) {
-    final Slice upperBound = new Slice(exclusiveUpperBound(lastKey));
-    final ReadOptions readOptions = new ReadOptions().setIterateUpperBound(upperBound);
+    // The bound is exclusive: with the default bytewise comparator the smallest key greater than
+    // lastKey is lastKey followed by a zero byte
+    final Optional<Slice> maybeUpperBound =
+        maybeLastKey.map(lastKey -> new Slice(Arrays.copyOf(lastKey, lastKey.length + 1)));
+    final ReadOptions readOptions = new ReadOptions();
+    maybeUpperBound.ifPresent(readOptions::setIterateUpperBound);
+    final List<AbstractNativeReference> resources =
+        Stream.<AbstractNativeReference>concat(Stream.of(readOptions), maybeUpperBound.stream())
+            .toList();
     RocksIterator rocksIterator = null;
     try {
       rocksIterator = newIterator.apply(readOptions);
       setupIterator.accept(rocksIterator);
-      return new IteratorWithResources(rocksIterator, List.of(readOptions, upperBound));
+      return new IteratorWithResources(rocksIterator, resources);
     } catch (final RuntimeException e) {
       if (rocksIterator != null) {
         rocksIterator.close();
       }
-      readOptions.close();
-      upperBound.close();
+      resources.forEach(AbstractNativeReference::close);
       throw e;
     }
-  }
-
-  /**
-   * RocksDB's upper bound is exclusive. With the default bytewise comparator the smallest key
-   * greater than {@code lastKey} is {@code lastKey} followed by a zero byte.
-   */
-  static byte[] exclusiveUpperBound(final byte[] lastKey) {
-    return Arrays.copyOf(lastKey, lastKey.length + 1);
   }
 
   record IteratorWithResources(
