@@ -264,6 +264,18 @@ public class ThrottlingStorageQueryChannel implements StorageQueryChannel {
   }
 
   @Override
+  public SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyDataColumnIdentifiers(
+      final UInt64 slot) {
+    return taskQueue.queueTask(() -> delegate.getCustodyDataColumnIdentifiers(slot));
+  }
+
+  @Override
+  public SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyDataColumnIdentifiers(
+      final UInt64 startSlot, final UInt64 endSlot) {
+    return taskQueue.queueTask(() -> delegate.getCustodyDataColumnIdentifiers(startSlot, endSlot));
+  }
+
+  @Override
   public SafeFuture<List<DataColumnSlotAndIdentifier>> getNonCanonicalDataColumnIdentifiers(
       final UInt64 slot) {
     return taskQueue.queueTask(() -> delegate.getNonCanonicalDataColumnIdentifiers(slot));

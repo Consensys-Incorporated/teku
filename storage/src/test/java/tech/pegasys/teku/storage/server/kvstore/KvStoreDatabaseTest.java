@@ -14,10 +14,12 @@
 package tech.pegasys.teku.storage.server.kvstore;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -34,6 +36,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -41,12 +44,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 import org.mockito.invocation.InvocationOnMock;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
@@ -68,6 +74,48 @@ import tech.pegasys.teku.storage.server.kvstore.schema.KvStoreColumn;
 import tech.pegasys.teku.storage.server.kvstore.schema.V6SchemaCombinedSnapshot;
 
 class KvStoreDatabaseTest {
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void archiveSidecarsProofs_propagatesStorageFailures(final boolean failCommit) {
+    final Spec spec = TestSpecFactory.createMinimalFulu();
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
+    final UInt64 slot = UInt64.valueOf(3);
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(slot);
+    final int columns = spec.getNumberOfDataColumns().orElseThrow();
+    final List<DataColumnSidecar> sidecars =
+        IntStream.range(0, columns)
+            .mapToObj(
+                index -> dataStructureUtil.randomDataColumnSidecar(block, UInt64.valueOf(index)))
+            .toList();
+    final KvStoreCombinedDao dao = mock(KvStoreCombinedDao.class);
+    final FinalizedUpdater updater = mock(FinalizedUpdater.class);
+    final KvStoreDatabase database = new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec);
+    when(dao.streamDataColumnIdentifiers(slot, slot))
+        .thenAnswer(__ -> sidecars.stream().map(DataColumnSlotAndIdentifier::fromDataColumn));
+    when(dao.getFinalizedBlockAtSlot(slot)).thenReturn(Optional.of(block));
+    when(dao.finalizedUpdater()).thenReturn(updater);
+    final IllegalStateException failure = new IllegalStateException("storage failure");
+    if (failCommit) {
+      sidecars.forEach(
+          sidecar ->
+              when(dao.getSidecar(DataColumnSlotAndIdentifier.fromDataColumn(sidecar)))
+                  .thenReturn(Optional.of(sidecar.sszSerialize())));
+      doThrow(failure).when(updater).commit();
+    } else {
+      when(dao.getSidecar(any())).thenThrow(failure);
+    }
+
+    assertThatThrownBy(() -> database.archiveSidecarsProofs(slot, slot)).isSameAs(failure);
+
+    verify(updater).close();
+    if (failCommit) {
+      verify(updater).commit();
+    } else {
+      verify(updater, never()).commit();
+      verify(updater, never()).removeSidecar(any());
+    }
+  }
 
   // Data column sidecar pruning is forward (oldest-first): each run removes the oldest up-to-limit
   // distinct populated slots at or before the cutoff, so the earliest retained slot keeps advancing

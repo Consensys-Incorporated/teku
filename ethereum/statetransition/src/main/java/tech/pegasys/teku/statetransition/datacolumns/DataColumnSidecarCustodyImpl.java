@@ -269,7 +269,7 @@ public class DataColumnSidecarCustodyImpl
     final SafeFuture<Optional<Bytes32>> maybeCanonicalBlockRoot = getBlockRootWithBlobs(slot);
     final Set<UInt64> requiredColumns = custodyGroupCountManager.getCustodyColumnIndices();
     final SafeFuture<List<DataColumnSlotAndIdentifier>> existingColumns =
-        db.getColumnIdentifiers(slot);
+        db.getCustodyColumnIdentifiers(slot);
     return SafeFuture.allOf(maybeCanonicalBlockRoot, existingColumns)
         .thenApply(
             __ ->

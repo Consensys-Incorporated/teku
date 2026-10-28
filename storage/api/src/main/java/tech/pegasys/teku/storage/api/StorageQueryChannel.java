@@ -137,6 +137,15 @@ public interface StorageQueryChannel extends ChannelInterface {
 
   SafeFuture<List<DataColumnSlotAndIdentifier>> getDataColumnIdentifiers(UInt64 slot);
 
+  /** Identifiers available for custody, including reconstructable archived columns. */
+  SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyDataColumnIdentifiers(UInt64 slot);
+
+  /**
+   * Custody identifiers in the inclusive slot range, including reconstructable archived columns.
+   */
+  SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyDataColumnIdentifiers(
+      UInt64 startSlot, UInt64 endSlot);
+
   SafeFuture<List<DataColumnSlotAndIdentifier>> getNonCanonicalDataColumnIdentifiers(UInt64 slot);
 
   SafeFuture<List<DataColumnSlotAndIdentifier>> getDataColumnIdentifiers(

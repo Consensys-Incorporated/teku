@@ -941,6 +941,16 @@ public class CombinedChainDataClient {
     return historicalChainData.getDataColumnIdentifiers(slot);
   }
 
+  public SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyDataColumnIdentifiers(
+      final UInt64 slot) {
+    return historicalChainData.getCustodyDataColumnIdentifiers(slot);
+  }
+
+  public SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyDataColumnIdentifiers(
+      final UInt64 fromSlot, final UInt64 toSlot) {
+    return historicalChainData.getCustodyDataColumnIdentifiers(fromSlot, toSlot);
+  }
+
   public SafeFuture<List<DataColumnSlotAndIdentifier>> getDataColumnIdentifiers(
       final UInt64 startSlot, final UInt64 endSlot, final UInt64 limit) {
     return historicalChainData.getDataColumnIdentifiers(startSlot, endSlot, limit);

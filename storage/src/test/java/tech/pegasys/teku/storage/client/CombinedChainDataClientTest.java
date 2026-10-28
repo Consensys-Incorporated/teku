@@ -88,6 +88,20 @@ class CombinedChainDataClientTest {
   }
 
   @Test
+  void getCustodyDataColumnIdentifiers_delegatesRangeAsOneQuery() {
+    final UInt64 startSlot = UInt64.valueOf(100);
+    final UInt64 endSlot = UInt64.valueOf(1000);
+    final SafeFuture<List<DataColumnSlotAndIdentifier>> result = new SafeFuture<>();
+    when(historicalChainData.getCustodyDataColumnIdentifiers(startSlot, endSlot))
+        .thenReturn(result);
+
+    assertThat(client.getCustodyDataColumnIdentifiers(startSlot, endSlot)).isSameAs(result);
+
+    verify(historicalChainData).getCustodyDataColumnIdentifiers(startSlot, endSlot);
+    verify(historicalChainData, never()).getCustodyDataColumnIdentifiers(any());
+  }
+
+  @Test
   public void getCommitteesFromStateWithCache_shouldReturnCommitteeAssignments() {
     BeaconState state = dataStructureUtil.randomBeaconState();
     List<CommitteeAssignment> data =
