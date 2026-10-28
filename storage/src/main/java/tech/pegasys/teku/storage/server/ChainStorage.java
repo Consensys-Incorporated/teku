@@ -101,21 +101,6 @@ public class ChainStorage
       final Spec spec,
       final StateStorageMode dataStorageMode,
       final int stateRebuildTimeoutSeconds,
-      final BlobSidecarsArchiver blobSidecarsArchiver) {
-    return create(
-        database,
-        spec,
-        dataStorageMode,
-        stateRebuildTimeoutSeconds,
-        blobSidecarsArchiver,
-        __ -> {});
-  }
-
-  public static ChainStorage create(
-      final Database database,
-      final Spec spec,
-      final StateStorageMode dataStorageMode,
-      final int stateRebuildTimeoutSeconds,
       final BlobSidecarsArchiver blobSidecarsArchiver,
       final Consumer<UInt64> sidecarStoredListener) {
     final int finalizedStateCacheSize = spec.getSlotsPerEpoch(SpecConfig.GENESIS_EPOCH) * 3;
@@ -519,7 +504,13 @@ public class ChainStorage
     if (!hasCompleteArchive) {
       return identifiers;
     }
-    final Optional<Bytes32> canonicalRoot = database.getFinalizedBlockRootBySlot(slot);
+    final Optional<Bytes32> canonicalRoot =
+        identifiers.stream()
+            .map(DataColumnSlotAndIdentifier::blockRoot)
+            .distinct()
+            .filter(
+                root -> database.getSlotForFinalizedBlockRoot(root).map(slot::equals).orElse(false))
+            .findFirst();
     if (canonicalRoot.isEmpty()) {
       return identifiers;
     }

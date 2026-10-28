@@ -104,6 +104,7 @@ import tech.pegasys.teku.storage.server.kvstore.schema.SchemaCombinedSnapshotSta
 import tech.pegasys.teku.storage.server.kvstore.schema.SchemaCombinedTreeState;
 import tech.pegasys.teku.storage.server.kvstore.schema.SchemaFinalizedSnapshotStateAdapter;
 import tech.pegasys.teku.storage.server.kvstore.schema.SchemaHotAdapter;
+import tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreDeserializationException;
 import tech.pegasys.teku.storage.server.state.StateRootRecorder;
 
 public class KvStoreDatabase implements Database {
@@ -1471,9 +1472,14 @@ public class KvStoreDatabase implements Database {
             archiveMap.lastKey());
         try (final FinalizedUpdater updater = finalizedUpdater()) {
           for (final UInt64 slot : archiveMap.keySet()) {
-            if (archiveSidecarsProofsForSlot(
-                slot, archiveMap.get(slot), numberOfColumns, updater)) {
-              ++archivedSlots;
+            try {
+              if (archiveSidecarsProofsForSlot(
+                  slot, archiveMap.get(slot), numberOfColumns, updater)) {
+                ++archivedSlots;
+              }
+            } catch (final SszDeserializeException | KvStoreDeserializationException error) {
+              // All reads for a slot precede its writes, so a malformed slot is left untouched.
+              LOG.warn("Skipping archival for slot {}: malformed stored data", slot, error);
             }
           }
           updater.commit();
@@ -1488,11 +1494,19 @@ public class KvStoreDatabase implements Database {
       final List<DataColumnSlotAndIdentifier> slotKeys,
       final int numberOfColumns,
       final FinalizedUpdater updater) {
-    final Optional<Bytes32> finalizedRoot = getFinalizedBlockRootBySlot(slot);
+    final int halfColumns = numberOfColumns / 2;
+    if (slotKeys.stream().noneMatch(key -> key.columnIndex().isGreaterThanOrEqualTo(halfColumns))) {
+      return false;
+    }
+    final Optional<Bytes32> finalizedRoot =
+        slotKeys.stream()
+            .map(DataColumnSlotAndIdentifier::blockRoot)
+            .distinct()
+            .filter(root -> getSlotForFinalizedBlockRoot(root).map(slot::equals).orElse(false))
+            .findFirst();
     if (finalizedRoot.isEmpty()) {
       return false;
     }
-    final int halfColumns = numberOfColumns / 2;
     final List<DataColumnSlotAndIdentifier> canonicalKeys =
         slotKeys.stream().filter(key -> key.blockRoot().equals(finalizedRoot.get())).toList();
     final List<DataColumnSlotAndIdentifier> extensionKeys =
@@ -1556,7 +1570,11 @@ public class KvStoreDatabase implements Database {
             .map(
                 key ->
                     dao.getSidecar(key)
-                        .flatMap(sidecar -> deserializeSidecarProofsForArchive(key, sidecar)))
+                        .map(
+                            sidecar ->
+                                spec.deserializeSidecar(sidecar, slot).getKzgProofs().stream()
+                                    .map(SszKZGProof::getKZGProof)
+                                    .toList()))
             .toList();
     if (!maybeProofs.stream().allMatch(Optional::isPresent)) {
       LOG.trace("Skipping archival for slot {}: extension columns could not be read", slot);
@@ -1570,23 +1588,6 @@ public class KvStoreDatabase implements Database {
         extensionKeys.size(),
         slot);
     return true;
-  }
-
-  private Optional<List<KZGProof>> deserializeSidecarProofsForArchive(
-      final DataColumnSlotAndIdentifier key, final Bytes sidecar) {
-    try {
-      return Optional.of(
-          spec.deserializeSidecar(sidecar, key.slot()).getKzgProofs().stream()
-              .map(SszKZGProof::getKZGProof)
-              .toList());
-    } catch (final SszDeserializeException error) {
-      LOG.warn(
-          "Skipping archival for slot {}: malformed data column sidecar {}",
-          key.slot(),
-          key,
-          error);
-      return Optional.empty();
-    }
   }
 
   /**

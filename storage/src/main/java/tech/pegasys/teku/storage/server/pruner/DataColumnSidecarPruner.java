@@ -204,6 +204,9 @@ public class DataColumnSidecarPruner extends Service implements SidecarArchivePr
 
   private void doArchiveDataColumnSidecars() {
     LOG.debug("Data column sidecars archiver task triggered");
+    if (pruneLimit == 0) {
+      return;
+    }
     final long signalledSlot = lastDataColumnSidecarArchivePrunableSlot.get();
     if (signalledSlot < 0) {
       LOG.debug("Not archiving data column sidecars: no prunable slot signal received yet.");
@@ -228,9 +231,9 @@ public class DataColumnSidecarPruner extends Service implements SidecarArchivePr
       processedSlotRanges.remove(Range.closedOpen(slot, slot + 1));
     }
 
-    final long earliestSlotLong =
-        database.getEarliestDataColumnSidecarSlot().map(UInt64::longValue).orElse(0L);
-    earliestDataColumnSidecarSlot.set(earliestSlotLong);
+    final Optional<UInt64> earliestSlot = database.getEarliestDataColumnSidecarSlot();
+    earliestDataColumnSidecarSlot.set(earliestSlot.map(UInt64::longValue).orElse(-1L));
+    final long earliestSlotLong = earliestSlot.map(UInt64::longValue).orElse(0L);
     if (earliestSlotLong > tillSlotLong) {
       LOG.debug(
           "No data column sidecars to archive: earliest stored slot {} is after prunable till slot {}",
@@ -254,7 +257,7 @@ public class DataColumnSidecarPruner extends Service implements SidecarArchivePr
       return;
     }
     final long upper = gapSlots.last();
-    final long lower = Math.max(gapSlots.first(), upper - pruneLimit);
+    final long lower = Math.max(gapSlots.first(), upper - pruneLimit + 1);
     LOG.debug(
         "Archiving data column sidecars to proofs from slot {} up to slot {} (limit {})",
         lower,
@@ -275,6 +278,7 @@ public class DataColumnSidecarPruner extends Service implements SidecarArchivePr
           elapsed,
           pruningWarnTimeout.toMillis());
     }
+    // Incomplete and malformed slots are examined too; later sidecar writes reopen them for retry.
     // Store as half-open [lower, upper+1) so adjacent chunks connect and merge in the RangeSet.
     // Range<Long> is real-valued: [9,19] and [20,30] are not connected, which would leave a
     // phantom gap (19,20) that is empty but gets picked as the highest unarchived range.

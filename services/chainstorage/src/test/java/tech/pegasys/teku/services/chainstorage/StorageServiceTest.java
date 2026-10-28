@@ -16,7 +16,11 @@ package tech.pegasys.teku.services.chainstorage;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyInt;
+import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockConstruction;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
@@ -29,17 +33,23 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.MockedConstruction;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunnerFactory;
 import tech.pegasys.teku.infrastructure.events.EventChannels;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.service.serviceutils.ServiceConfig;
 import tech.pegasys.teku.service.serviceutils.layout.DataDirLayout;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
+import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
+import tech.pegasys.teku.storage.api.SidecarArchivePrunableChannel;
 import tech.pegasys.teku.storage.server.DatabaseVersion;
 import tech.pegasys.teku.storage.server.StateStorageMode;
 import tech.pegasys.teku.storage.server.StorageConfiguration;
+import tech.pegasys.teku.storage.server.pruner.DataColumnSidecarPruner;
 import tech.pegasys.teku.storage.server.pruner.StatePruner;
 
 class StorageServiceTest {
@@ -149,5 +159,39 @@ class StorageServiceTest {
     // Service should start successfully even with forceClearDb enabled
     final SafeFuture<?> future = storageService.doStart();
     assertThat(future).isCompleted();
+  }
+
+  @Test
+  void shouldNotifyPrunerAfterSidecarWriteWithoutEnablingArchival() {
+    when(storageConfiguration.getDataStorageMode()).thenReturn(StateStorageMode.ARCHIVE);
+    when(spec.isMilestoneSupported(SpecMilestone.FULU)).thenReturn(true);
+    try (final MockedConstruction<DataColumnSidecarPruner> construction =
+        mockConstruction(
+            DataColumnSidecarPruner.class,
+            (pruner, context) -> when(pruner.start()).thenAnswer(__ -> SafeFuture.COMPLETE))) {
+      assertThat(storageService.start()).isCompleted();
+      assertThat(construction.constructed()).hasSize(1);
+      final DataColumnSidecarPruner pruner = construction.constructed().getFirst();
+      final DataColumnSidecar sidecar = mock(DataColumnSidecar.class);
+      final UInt64 slot = UInt64.valueOf(12);
+      when(sidecar.getSlot()).thenReturn(slot);
+
+      assertThat(storageService.getChainStorage().onNewSidecar(sidecar)).isCompleted();
+
+      verify(pruner).onSidecarStored(slot);
+      verify(eventChannels, never()).subscribe(eq(SidecarArchivePrunableChannel.class), any());
+    }
+  }
+
+  @Test
+  void shouldAcceptSidecarWriteWithoutPruner() {
+    when(storageConfiguration.getDataStorageMode()).thenReturn(StateStorageMode.ARCHIVE);
+    assertThat(storageService.start()).isCompleted();
+    final DataColumnSidecar sidecar = mock(DataColumnSidecar.class);
+    when(sidecar.getSlot()).thenReturn(UInt64.ONE);
+
+    assertThat(storageService.getChainStorage().onNewSidecar(sidecar)).isCompleted();
+
+    assertThat(storageService.getDataColumnSidecarPruner()).isEmpty();
   }
 }

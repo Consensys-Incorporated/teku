@@ -3447,44 +3447,82 @@ public class DatabaseTest {
   }
 
   @TestTemplate
-  public void archiveSidecarsProofs_skipsMalformedSidecarAndArchivesHealthySlots(
+  public void archiveSidecarsProofs_leavesMalformedSidecarUntouched(final DatabaseContext context)
+      throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+    final int columns = spec.getNumberOfDataColumns().orElseThrow();
+    storeColumnsWithMalformedSidecar(ONE, columns);
+
+    database.archiveSidecarsProofs(ONE, ONE);
+
+    assertThat(database.getDataColumnSidecarsProofs(ONE)).isEmpty();
+    assertThat(getStoredColumnIndices(ONE)).hasSize(columns);
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_archivesHealthySlotDespiteMalformedSidecar(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+    final int columns = spec.getNumberOfDataColumns().orElseThrow();
+    final UInt64 healthySlot = UInt64.valueOf(2);
+    storeColumnsWithMalformedSidecar(ONE, columns);
+    final List<DataColumnSidecar> healthySidecars =
+        storeColumns(storeFinalizedBlockForArchive(healthySlot), 0, columns);
+
+    database.archiveSidecarsProofs(ONE, healthySlot);
+
+    assertArchivedColumns(healthySlot, healthySidecars);
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_retriesBackfillWhileSkippingMalformedSidecar(
       final DatabaseContext context) throws IOException {
     setupWithSpec(TestSpecFactory.createMinimalFulu());
     initialize(context);
 
     final int columns = spec.getNumberOfDataColumns().orElseThrow();
-    final UInt64 corruptSlot = UInt64.valueOf(2);
-    final UInt64 lastSlot = UInt64.valueOf(3);
-    final List<List<KZGProof>> firstProofs = storeFullColumnSet(ONE, columns);
-    final List<DataColumnSidecar> corruptSlotSidecars =
-        storeColumns(storeFinalizedBlockForArchive(corruptSlot), 0, columns);
-    final List<List<KZGProof>> lastProofs = storeFullColumnSet(lastSlot, columns);
-    final DataColumnSidecar original = corruptSlotSidecars.getLast();
-    final DataColumnSidecar malformed = spy(original);
-    doReturn(Bytes.of(0)).when(malformed).sszSerialize();
-    database.addSidecar(malformed);
+    final UInt64 incompleteSlot = UInt64.valueOf(2);
+    storeColumnsWithMalformedSidecar(ONE, columns);
+    final List<DataColumnSidecar> sidecars =
+        storeColumns(storeFinalizedBlockForArchive(incompleteSlot), 0, columns);
+    final DataColumnSidecar missing = sidecars.getLast();
+    try (final FinalizedUpdater updater = finalizedUpdater()) {
+      updater.removeSidecar(DataColumnSlotAndIdentifier.fromDataColumn(missing));
+      updater.commit();
+    }
 
-    database.archiveSidecarsProofs(ZERO, lastSlot);
+    try (final SidecarArchiveTestContext archive = startSidecarArchiver(incompleteSlot)) {
+      archive.runner().executeDueActions();
+      assertThat(database.getDataColumnSidecarsProofs(incompleteSlot)).isEmpty();
 
-    assertThat(database.getDataColumnSidecarsProofs(ONE)).contains(firstProofs);
-    assertThat(database.getDataColumnSidecarsProofs(lastSlot)).contains(lastProofs);
-    assertThat(getStoredColumnIndices(ONE)).hasSize(columns / 2);
-    assertThat(getStoredColumnIndices(lastSlot)).hasSize(columns / 2);
-    assertThat(database.getDataColumnSidecarsProofs(corruptSlot)).isEmpty();
-    assertThat(getStoredColumnIndices(corruptSlot)).hasSize(columns);
+      assertThat(archive.storage().onNewSidecar(missing)).isCompleted();
+      archive.runner().executeQueuedActions();
 
-    database.addSidecar(original);
-    database.archiveSidecarsProofs(corruptSlot, corruptSlot);
+      assertArchivedColumns(incompleteSlot, sidecars);
+    }
+  }
 
-    assertThat(getStoredColumnIndices(corruptSlot)).hasSize(columns / 2);
-    assertThat(database.getDataColumnSidecarsProofs(corruptSlot))
-        .contains(
-            corruptSlotSidecars.stream()
-                .skip(columns / 2)
-                .map(
-                    sidecar ->
-                        sidecar.getKzgProofs().stream().map(SszKZGProof::getKZGProof).toList())
-                .toList());
+  @TestTemplate
+  public void archiveSidecarsProofs_retriesRepairedSidecar(final DatabaseContext context)
+      throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int columns = spec.getNumberOfDataColumns().orElseThrow();
+    final UInt64 slot = UInt64.valueOf(2);
+    final List<DataColumnSidecar> sidecars = storeColumnsWithMalformedSidecar(slot, columns);
+
+    try (final SidecarArchiveTestContext archive = startSidecarArchiver(slot)) {
+      archive.runner().executeDueActions();
+      assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
+
+      assertThat(archive.storage().onNewSidecar(sidecars.getLast())).isCompleted();
+      archive.runner().executeQueuedActions();
+
+      assertArchivedColumns(slot, sidecars);
+    }
   }
 
   @TestTemplate
@@ -3646,21 +3684,7 @@ public class DatabaseTest {
     }
     final StubTimeProvider time = StubTimeProvider.withTimeInSeconds(0);
     final StubAsyncRunner runner = new StubAsyncRunner(time);
-    final DataColumnSidecarPruner pruner =
-        new DataColumnSidecarPruner(
-            spec,
-            database,
-            new StubMetricsSystem(),
-            runner,
-            runner,
-            time,
-            Duration.ofSeconds(1),
-            10,
-            false,
-            "test",
-            mock(SettableLabelledGauge.class),
-            mock(SettableLabelledGauge.class),
-            Duration.ofMinutes(1));
+    final DataColumnSidecarPruner pruner = createArchivePruner(runner, time);
     final ChainStorage storage =
         ChainStorage.create(
             database,
@@ -3693,7 +3717,8 @@ public class DatabaseTest {
     }
     restartStorage();
     final ChainStorage restarted =
-        ChainStorage.create(database, spec, StateStorageMode.PRUNE, 10, BlobSidecarsArchiver.NOOP);
+        ChainStorage.create(
+            database, spec, StateStorageMode.PRUNE, 10, BlobSidecarsArchiver.NOOP, __ -> {});
     assertThat(restarted.getCustodyDataColumnIdentifiers(slot))
         .isCompletedWithValueMatching(ids -> ids.size() == columns);
     assertThat(restarted.getCustodyDataColumnIdentifiers(UInt64.ZERO, slot.plus(100)))
@@ -3706,6 +3731,75 @@ public class DatabaseTest {
         .skip(numberOfColumns / 2)
         .map(sidecar -> sidecar.getKzgProofs().stream().map(SszKZGProof::getKZGProof).toList())
         .toList();
+  }
+
+  private DataColumnSidecarPruner createArchivePruner(
+      final StubAsyncRunner runner, final StubTimeProvider time) {
+    return new DataColumnSidecarPruner(
+        spec,
+        database,
+        new StubMetricsSystem(),
+        runner,
+        runner,
+        time,
+        Duration.ofSeconds(1),
+        10,
+        false,
+        "test",
+        mock(SettableLabelledGauge.class),
+        mock(SettableLabelledGauge.class),
+        Duration.ofMinutes(1));
+  }
+
+  private List<DataColumnSidecar> storeColumnsWithMalformedSidecar(
+      final UInt64 slot, final int columns) {
+    final List<DataColumnSidecar> sidecars =
+        storeColumns(storeFinalizedBlockForArchive(slot), 0, columns);
+    final DataColumnSidecar malformed = spy(sidecars.getLast());
+    doReturn(Bytes.of(0)).when(malformed).sszSerialize();
+    database.addSidecar(malformed);
+    return sidecars;
+  }
+
+  private void assertArchivedColumns(final UInt64 slot, final List<DataColumnSidecar> sidecars) {
+    final int halfColumns = sidecars.size() / 2;
+    assertThat(getStoredColumnIndices(slot))
+        .containsExactlyElementsOf(
+            sidecars.stream().limit(halfColumns).map(DataColumnSidecar::getIndex).toList());
+    assertThat(database.getDataColumnSidecarsProofs(slot))
+        .contains(
+            sidecars.stream()
+                .skip(halfColumns)
+                .map(
+                    sidecar ->
+                        sidecar.getKzgProofs().stream().map(SszKZGProof::getKZGProof).toList())
+                .toList());
+  }
+
+  private SidecarArchiveTestContext startSidecarArchiver(final UInt64 tillSlot) {
+    final StubTimeProvider time = StubTimeProvider.withTimeInSeconds(0);
+    final StubAsyncRunner runner = new StubAsyncRunner(time);
+    final DataColumnSidecarPruner pruner = createArchivePruner(runner, time);
+    final ChainStorage storage =
+        ChainStorage.create(
+            database,
+            spec,
+            StateStorageMode.PRUNE,
+            10,
+            BlobSidecarsArchiver.NOOP,
+            pruner::onSidecarStored);
+    assertThat(pruner.start()).isCompleted();
+    pruner.onSidecarArchivePrunableSlot(tillSlot);
+    return new SidecarArchiveTestContext(runner, storage, pruner);
+  }
+
+  private record SidecarArchiveTestContext(
+      StubAsyncRunner runner, ChainStorage storage, DataColumnSidecarPruner pruner)
+      implements AutoCloseable {
+    @Override
+    public void close() {
+      assertThat(pruner.stop()).isCompleted();
+    }
   }
 
   private List<DataColumnSidecar> storeColumns(

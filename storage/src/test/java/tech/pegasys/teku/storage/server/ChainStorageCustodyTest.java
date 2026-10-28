@@ -14,6 +14,7 @@
 package tech.pegasys.teku.storage.server;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -60,7 +61,7 @@ class ChainStorageCustodyTest {
   @BeforeEach
   void setUp() {
     when(database.streamDataColumnIdentifiers(slot)).thenAnswer(__ -> firstHalf.stream());
-    when(database.getFinalizedBlockRootBySlot(slot)).thenReturn(Optional.of(root));
+    when(database.getSlotForFinalizedBlockRoot(root)).thenReturn(Optional.of(slot));
     when(database.getDataColumnSidecarsProofs(slot))
         .thenReturn(
             Optional.of(
@@ -72,6 +73,8 @@ class ChainStorageCustodyTest {
     assertThat(storage.getCustodyDataColumnIdentifiers(slot))
         .isCompletedWithValueMatching(ids -> ids.size() == columns);
     assertThat(storage.getDataColumnIdentifiers(slot)).isCompletedWithValue(firstHalf);
+    verify(database).getSlotForFinalizedBlockRoot(root);
+    verify(database, never()).getFinalizedBlockRootBySlot(any());
   }
 
   @Test
@@ -79,6 +82,7 @@ class ChainStorageCustodyTest {
     when(database.getDataColumnSidecarsProofs(slot)).thenReturn(Optional.empty());
     assertThat(storage.getCustodyDataColumnIdentifiers(slot)).isCompletedWithValue(firstHalf);
     verify(database, never()).getFinalizedBlockRootBySlot(slot);
+    verify(database, never()).getSlotForFinalizedBlockRoot(any());
   }
 
   @Test
@@ -89,14 +93,13 @@ class ChainStorageCustodyTest {
 
   @Test
   void unfinalizedSlotDoesNotUseArchivedProofs() {
-    when(database.getFinalizedBlockRootBySlot(slot)).thenReturn(Optional.empty());
+    when(database.getSlotForFinalizedBlockRoot(root)).thenReturn(Optional.empty());
     assertThat(storage.getCustodyDataColumnIdentifiers(slot)).isCompletedWithValue(firstHalf);
   }
 
   @Test
   void strayFirstHalfDoesNotEstablishCanonicalCustody() {
-    when(database.getFinalizedBlockRootBySlot(slot))
-        .thenReturn(Optional.of(Bytes32.fromHexStringLenient("0x01")));
+    when(database.getSlotForFinalizedBlockRoot(root)).thenReturn(Optional.of(slot.increment()));
     assertThat(storage.getCustodyDataColumnIdentifiers(slot)).isCompletedWithValue(firstHalf);
   }
 
@@ -107,6 +110,7 @@ class ChainStorageCustodyTest {
     assertThat(storage.getCustodyDataColumnIdentifiers(slot)).isCompletedWithValue(incomplete);
     verify(database, never()).getFinalizedBlockRootBySlot(slot);
     verify(database, never()).getDataColumnSidecarsProofs(slot);
+    verify(database, never()).getSlotForFinalizedBlockRoot(any());
   }
 
   @Test
@@ -121,6 +125,7 @@ class ChainStorageCustodyTest {
     assertThat(storage.getCustodyDataColumnIdentifiers(slot)).isCompletedWithValue(allColumns);
     verify(database, never()).getDataColumnSidecarsProofs(slot);
     verify(database, never()).getFinalizedBlockRootBySlot(slot);
+    verify(database, never()).getSlotForFinalizedBlockRoot(any());
   }
 
   @Test
@@ -137,6 +142,24 @@ class ChainStorageCustodyTest {
         .isCompletedWithValueMatching(
             ids -> ids.stream().filter(id -> id.blockRoot().equals(root)).count() == columns);
     verify(database).getDataColumnSidecarsProofs(slot);
+  }
+
+  @Test
+  void findsCanonicalRootAfterStrayRootUsingIndexOnly() {
+    final Bytes32 strayRoot = Bytes32.fromHexStringLenient("0x01");
+    final List<DataColumnSlotAndIdentifier> mixed = new ArrayList<>();
+    firstHalf.forEach(
+        id -> mixed.add(new DataColumnSlotAndIdentifier(slot, strayRoot, id.columnIndex())));
+    mixed.addAll(firstHalf);
+    when(database.streamDataColumnIdentifiers(slot)).thenAnswer(__ -> mixed.stream());
+
+    assertThat(storage.getCustodyDataColumnIdentifiers(slot))
+        .isCompletedWithValueMatching(
+            ids -> ids.stream().filter(id -> id.blockRoot().equals(root)).count() == columns);
+
+    verify(database).getSlotForFinalizedBlockRoot(strayRoot);
+    verify(database).getSlotForFinalizedBlockRoot(root);
+    verify(database, never()).getFinalizedBlockRootBySlot(any());
   }
 
   @Test
@@ -163,7 +186,7 @@ class ChainStorageCustodyTest {
 
     verify(database).streamDataColumnIdentifiers(slot, endSlot);
     verify(database).getDataColumnSidecarsProofs(slot);
-    verify(database).getFinalizedBlockRootBySlot(slot);
+    verify(database).getSlotForFinalizedBlockRoot(root);
     verify(database).getDataColumnSidecarsProofs(unarchivedSlot);
     verifyNoMoreInteractions(database);
     verify(onClose).run();

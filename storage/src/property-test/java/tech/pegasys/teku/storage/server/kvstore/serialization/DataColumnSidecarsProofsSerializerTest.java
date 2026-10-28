@@ -18,7 +18,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
 import java.util.stream.Stream;
+import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.kzg.KZGCommitment;
@@ -39,6 +42,22 @@ public class DataColumnSidecarsProofsSerializerTest {
   final SchemaDefinitionsFulu schemaDefinitionsFulu =
       SchemaDefinitionsFulu.required(spec.forMilestone(SpecMilestone.FULU).getSchemaDefinitions());
   final DataColumnSidecarsProofsSerializer serializer = new DataColumnSidecarsProofsSerializer();
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {"0x", "0x000000", "0xffffffff", "0x01000000", "0x0000000000", "0x0100000000"})
+  void rejectsMalformedStoredProofs(final String hex) {
+    assertThatThrownBy(() -> serializer.deserialize(Bytes.fromHexString(hex).toArrayUnsafe()))
+        .isInstanceOf(KvStoreDeserializationException.class);
+  }
+
+  @Test
+  void rejectsIncompleteColumn() {
+    final byte[] bytes = serializer.serialize(List.of(List.of(dataStructureUtil.randomKZGProof())));
+    bytes[0] = 2;
+    assertThatThrownBy(() -> serializer.deserialize(bytes))
+        .isInstanceOf(KvStoreDeserializationException.class);
+  }
 
   @Test
   final void testEmpty() {
