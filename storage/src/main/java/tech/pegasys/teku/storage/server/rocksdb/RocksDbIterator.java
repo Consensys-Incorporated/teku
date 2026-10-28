@@ -15,80 +15,78 @@ package tech.pegasys.teku.storage.server.rocksdb;
 
 import com.google.errorprone.annotations.MustBeClosed;
 import java.util.Iterator;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Spliterator;
 import java.util.Spliterators;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Predicate;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.rocksdb.AbstractNativeReference;
 import org.rocksdb.RocksDBException;
 import org.rocksdb.RocksIterator;
 import tech.pegasys.teku.storage.server.ShuttingDownException;
-import tech.pegasys.teku.storage.server.kvstore.ColumnEntry;
-import tech.pegasys.teku.storage.server.kvstore.schema.KvStoreColumn;
 
-class RocksDbIterator<TKey, TValue>
-    implements Iterator<ColumnEntry<byte[], byte[]>>, AutoCloseable {
+class RocksDbIterator<T> implements Iterator<T>, AutoCloseable {
   private static final Logger LOG = LogManager.getLogger();
 
-  private final KvStoreColumn<TKey, TValue> column;
   private final RocksIterator rocksIterator;
+  private final Function<RocksIterator, T> readEntry;
   private final AtomicBoolean closed = new AtomicBoolean(false);
-  private final Predicate<TKey> continueTest;
   private final Supplier<Boolean> isDatabaseClosed;
+  // Native resources the iterator depends on (e.g. its ReadOptions), closed after the iterator
+  private final List<AbstractNativeReference> resources;
 
   private RocksDbIterator(
-      final KvStoreColumn<TKey, TValue> column,
       final RocksIterator rocksIterator,
-      final Predicate<TKey> continueTest,
-      final Supplier<Boolean> isDatabaseClosed) {
-    this.column = column;
+      final Function<RocksIterator, T> readEntry,
+      final Supplier<Boolean> isDatabaseClosed,
+      final List<AbstractNativeReference> resources) {
     this.rocksIterator = rocksIterator;
-    this.continueTest = continueTest;
+    this.readEntry = readEntry;
     this.isDatabaseClosed = isDatabaseClosed;
+    this.resources = resources;
   }
 
   @MustBeClosed
-  public static <K, V> RocksDbIterator<K, V> create(
-      final KvStoreColumn<K, V> column,
+  public static <T> RocksDbIterator<T> create(
       final RocksIterator rocksIt,
-      final Predicate<K> continueTest,
-      final Supplier<Boolean> isDatabaseClosed) {
-    return new RocksDbIterator<>(column, rocksIt, continueTest, isDatabaseClosed);
+      final Function<RocksIterator, T> readEntry,
+      final Supplier<Boolean> isDatabaseClosed,
+      final List<AbstractNativeReference> resources) {
+    return new RocksDbIterator<>(rocksIt, readEntry, isDatabaseClosed, resources);
   }
 
   @Override
   public boolean hasNext() {
     assertOpen();
-    return rocksIterator.isValid()
-        && continueTest.test(column.getKeySerializer().deserialize(rocksIterator.key()));
+    return rocksIterator.isValid();
   }
 
   @Override
-  public ColumnEntry<byte[], byte[]> next() {
+  public T next() {
     assertOpen();
     try {
       rocksIterator.status();
     } catch (final RocksDBException e) {
-      LOG.error("RocksDbEntryIterator encountered a problem while iterating.", e);
+      LOG.error("RocksDbIterator encountered a problem while iterating.", e);
     }
     if (!hasNext()) {
       throw new NoSuchElementException();
     }
-    final ColumnEntry<byte[], byte[]> entry =
-        ColumnEntry.create(rocksIterator.key(), rocksIterator.value());
+    final T entry = readEntry.apply(rocksIterator);
     rocksIterator.next();
     return entry;
   }
 
   @MustBeClosed
-  public Stream<ColumnEntry<byte[], byte[]>> toStream() {
+  public Stream<T> toStream() {
     assertOpen();
-    final Spliterator<ColumnEntry<byte[], byte[]>> split =
+    final Spliterator<T> split =
         Spliterators.spliteratorUnknownSize(
             this,
             Spliterator.IMMUTABLE
@@ -114,6 +112,7 @@ class RocksDbIterator<TKey, TValue>
   public void close() {
     if (closed.compareAndSet(false, true)) {
       rocksIterator.close();
+      resources.forEach(AbstractNativeReference::close);
     }
   }
 }
