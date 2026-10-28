@@ -15,7 +15,9 @@ package tech.pegasys.teku.statetransition.validation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
+import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
 import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.IGNORE;
+import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.REJECT;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -35,7 +37,9 @@ import tech.pegasys.teku.spec.config.builder.SpecConfigBuilder;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
+import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationSchema;
+import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.generator.AttestationGenerator;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
@@ -144,6 +148,110 @@ abstract class AbstractAttestationValidatorTest {
     assertThat(validate(attestation2).code()).isEqualTo(IGNORE);
   }
 
+  /**
+   * [IGNORE] The block being voted for has been seen (a client MAY queue attestations for
+   * processing once block is retrieved). The signature is still verified before deferring, against
+   * the target checkpoint state.
+   */
+  @Test
+  public void shouldVerifySignatureBeforeDeferringAttestationForUnknownBlock() {
+    final StateAndBlockSummary unknownBlock = chainBuilder.generateBlockAtSlot(ONE).toUnsigned();
+    chainUpdater.setCurrentSlot(ONE);
+    final ValidatableAttestation attestation =
+        fromNetwork(attestationGenerator.validAttestation(unknownBlock));
+
+    assertThat(validator.validate(attestation))
+        .isCompletedWithValue(InternalValidationResult.SAVE_FOR_FUTURE);
+    // Cached, so fork choice doesn't verify it again once the block is imported
+    assertThat(attestation.isValidIndexedAttestation()).isTrue();
+  }
+
+  @Test
+  public void shouldRejectAttestationForUnknownBlockWithInvalidSignature() {
+    final StateAndBlockSummary unknownBlock = chainBuilder.generateBlockAtSlot(ONE).toUnsigned();
+    chainUpdater.setCurrentSlot(ONE);
+
+    assertThat(validate(attestationGenerator.attestationWithInvalidSignature(unknownBlock)).code())
+        .isEqualTo(REJECT);
+  }
+
+  @Test
+  public void shouldDeferAttestationWithoutVerifyingWhenBlockAndTargetAreUnknown() {
+    final StateAndBlockSummary unknownBlock = chainBuilder.generateBlockAtSlot(ONE).toUnsigned();
+    chainUpdater.setCurrentSlot(ONE);
+    final ValidatableAttestation attestation =
+        fromNetwork(
+            withTargetRoot(attestationGenerator.validAttestation(unknownBlock), Bytes32.random()));
+
+    assertThat(validator.validate(attestation))
+        .isCompletedWithValue(InternalValidationResult.SAVE_FOR_FUTURE);
+    // There's no state to verify it against, so verifying it is left to fork choice
+    assertThat(attestation.isValidIndexedAttestation()).isFalse();
+  }
+
+  @Test
+  public void shouldRejectAttestationForUnknownBlockWithTargetBlockFromAfterTargetEpochStart() {
+    final StateAndBlockSummary knownBlock = chainUpdater.addNewBestBlock();
+    final StateAndBlockSummary unknownBlock =
+        chainBuilder.generateBlockAtSlot(knownBlock.getSlot().plus(ONE)).toUnsigned();
+    chainUpdater.setCurrentSlot(unknownBlock.getSlot());
+    // The known block can't be the target: it's from after the first slot of the target epoch
+    final Attestation attestation =
+        withTargetRoot(attestationGenerator.validAttestation(unknownBlock), knownBlock.getRoot());
+    assertThat(knownBlock.getSlot())
+        .isGreaterThan(attestation.getData().getTarget().getEpochStartSlot(spec));
+
+    assertThat(validator.validate(fromNetwork(attestation)))
+        .matches(
+            rejected("is from after the start of target epoch"),
+            "Rejected target block from after the target epoch start");
+  }
+
+  @Test
+  public void shouldVerifyAttestationForUnknownBlockAgainstCachedTargetCheckpointState() {
+    final Attestation attestation = attestationForUnknownBlockWithTargetBeforeEpochStart();
+    // Precomputed, as the epoch transition of the head is
+    assertThat(safeJoin(recentChainData.retrieveCheckpointState(attestation.getData().getTarget())))
+        .isPresent();
+    final ValidatableAttestation validatableAttestation = fromNetwork(attestation);
+
+    assertThat(validator.validate(validatableAttestation))
+        .isCompletedWithValue(InternalValidationResult.SAVE_FOR_FUTURE);
+    assertThat(validatableAttestation.isValidIndexedAttestation()).isTrue();
+  }
+
+  @Test
+  public void shouldDeferAttestationForUnknownBlockWithoutRegeneratingTargetCheckpointState() {
+    final Attestation attestation = attestationForUnknownBlockWithTargetBeforeEpochStart();
+    final Checkpoint target = attestation.getData().getTarget();
+    assertThat(recentChainData.getStore().getCheckpointStateIfAvailable(target)).isEmpty();
+    final ValidatableAttestation validatableAttestation = fromNetwork(attestation);
+
+    assertThat(validator.validate(validatableAttestation))
+        .isCompletedWithValue(InternalValidationResult.SAVE_FOR_FUTURE);
+    // The target is chosen by the sender, so its state isn't regenerated just to verify the
+    // signature, which is left to fork choice instead
+    assertThat(validatableAttestation.isValidIndexedAttestation()).isFalse();
+    assertThat(recentChainData.getStore().getCheckpointStateIfAvailable(target)).isEmpty();
+  }
+
+  /**
+   * An attestation for a block that isn't imported, whose target is the last block of the previous
+   * epoch: unlike a block from the start of the epoch, its state isn't the checkpoint state.
+   */
+  private Attestation attestationForUnknownBlockWithTargetBeforeEpochStart() {
+    final UInt64 epochStartSlot = spec.computeStartSlotAtEpoch(ONE);
+    final StateAndBlockSummary targetBlock = chainUpdater.advanceChain(epochStartSlot.minus(ONE));
+    final StateAndBlockSummary unknownBlock =
+        chainBuilder.generateBlockAtSlot(epochStartSlot.plus(ONE)).toUnsigned();
+    chainUpdater.setCurrentSlot(unknownBlock.getSlot());
+    final Attestation attestation = attestationGenerator.validAttestation(unknownBlock);
+    // Sanity check
+    assertThat(attestation.getData().getTarget())
+        .isEqualTo(new Checkpoint(ONE, targetBlock.getRoot()));
+    return attestation;
+  }
+
   protected Predicate<? super CompletableFuture<InternalValidationResult>> rejected(
       final String messageContents) {
     return result -> {
@@ -159,13 +267,28 @@ abstract class AbstractAttestationValidatorTest {
   }
 
   protected InternalValidationResult validate(final Attestation attestation) {
-    final BeaconState state = safeJoin(recentChainData.getBestState().orElseThrow());
+    return validator.validate(fromNetwork(attestation)).join();
+  }
 
-    return validator
-        .validate(
-            ValidatableAttestation.fromNetwork(
-                spec, attestation, spec.computeSubnetForAttestation(state, attestation)))
-        .join();
+  /** Received on the subnet the attestation is expected on. */
+  protected ValidatableAttestation fromNetwork(final Attestation attestation) {
+    final BeaconState state = safeJoin(recentChainData.getBestState().orElseThrow());
+    return ValidatableAttestation.fromNetwork(
+        spec, attestation, spec.computeSubnetForAttestation(state, attestation));
+  }
+
+  private Attestation withTargetRoot(final Attestation attestation, final Bytes32 targetRoot) {
+    final AttestationData data = attestation.getData();
+    return attestationSchema.create(
+        attestation.getAggregationBits(),
+        new AttestationData(
+            data.getSlot(),
+            data.getIndex(),
+            data.getBeaconBlockRoot(),
+            data.getSource(),
+            new Checkpoint(data.getTarget().getEpoch(), targetRoot)),
+        attestation.getAggregateSignature(),
+        attestation::getCommitteeBitsRequired);
   }
 
   protected boolean hasSameValidators(

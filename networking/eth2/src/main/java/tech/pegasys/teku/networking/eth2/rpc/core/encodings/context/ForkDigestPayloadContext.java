@@ -69,6 +69,11 @@ public interface ForkDigestPayloadContext<TPayload extends SszData> {
         }
 
         @Override
+        public boolean rejectsContextSlotMismatch() {
+          return true;
+        }
+
+        @Override
         public SszSchema<DataColumnSidecar> getSchemaFromSchemaDefinitions(
             final SchemaDefinitions schemaDefinitions) {
           return SchemaDefinitionsFulu.required(schemaDefinitions).getDataColumnSidecarSchema();
@@ -166,4 +171,11 @@ public interface ForkDigestPayloadContext<TPayload extends SszData> {
   UInt64 getSlotFromPayload(final TPayload responsePayload);
 
   SszSchema<TPayload> getSchemaFromSchemaDefinitions(final SchemaDefinitions schemaDefinitions);
+
+  /**
+   * Whether a chunk whose fork digest does not match the fork at the payload's slot is rejected.
+   */
+  default boolean rejectsContextSlotMismatch() {
+    return false;
+  }
 }

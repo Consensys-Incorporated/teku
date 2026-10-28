@@ -170,29 +170,8 @@ public class ForkChoiceUtil {
       final ForkChoiceNode node,
       final UInt64 startSlot,
       final UInt64 count) {
-    final NavigableMap<UInt64, ForkChoiceNode> nodes = new TreeMap<>();
-    if (count.isZero()) {
-      return nodes;
-    }
-    // minus(ONE) because the start block is included
-    final UInt64 endSlot = startSlot.plus(count).minusMinZero(1);
-    Optional<ForkChoiceNode> currentNode = Optional.of(node);
-    Optional<UInt64> currentSlot = forkChoiceStrategy.blockSlot(node.blockRoot());
-    while (currentNode.isPresent() && currentSlot.isPresent()) {
-      final UInt64 slot = currentSlot.get();
-      if (slot.isLessThan(startSlot)) {
-        break;
-      }
-      if (slot.isLessThanOrEqualTo(endSlot)) {
-        nodes.put(slot, currentNode.get());
-      }
-      if (slot.equals(startSlot)) {
-        break;
-      }
-      currentNode = forkChoiceStrategy.getParentBeaconBlockNode(currentNode.get());
-      currentSlot = currentNode.flatMap(parent -> forkChoiceStrategy.blockSlot(parent.blockRoot()));
-    }
-    return nodes;
+    // The strategy walks its own structure, under a single lock where it has one
+    return forkChoiceStrategy.getAncestorNodes(node, startSlot, count);
   }
 
   /**

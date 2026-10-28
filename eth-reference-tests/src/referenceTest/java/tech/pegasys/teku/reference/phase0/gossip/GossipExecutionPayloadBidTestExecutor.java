@@ -23,7 +23,6 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -277,10 +276,9 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
           }
 
           @Override
-          public Collection<ProposerPreferences> getProposerPreferencesForSlot(final UInt64 slot) {
-            return Optional.ofNullable(acceptedPreferences.get(slot))
-                .map(preferencesByDependentRoot -> List.copyOf(preferencesByDependentRoot.values()))
-                .orElse(List.of());
+          public List<SignedProposerPreferences> getSignedProposerPreferences(
+              final Optional<UInt64> maybeSlot, final Optional<Bytes32> maybeDependentRoot) {
+            return List.of();
           }
 
           @Override

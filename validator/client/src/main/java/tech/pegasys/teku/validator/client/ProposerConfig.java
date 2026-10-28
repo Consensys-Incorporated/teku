@@ -22,19 +22,16 @@ import static tech.pegasys.teku.spec.datastructures.builder.versions.gloas.Build
 import static tech.pegasys.teku.spec.schemas.ApiSchemas.MAX_BUILDER_PUBKEYS;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
 import java.net.URL;
-import java.util.Collections;
-import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.Function;
-import java.util.stream.Collectors;
+import java.util.Set;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes48;
 import tech.pegasys.teku.bls.BLSPublicKey;
@@ -168,10 +165,8 @@ public class ProposerConfig {
     @JsonProperty(value = "builder_boost_factor")
     private final UInt64 builderBoostFactor;
 
-    @JsonProperty(value = "urls")
-    private final Map<String, BuilderOverrides> urls;
-
-    private final Map<String, URL> parsedUrls;
+    @JsonProperty(value = "builders")
+    private final List<BuilderEntry> builders;
 
     @JsonCreator
     public BuilderConfig(
@@ -181,33 +176,34 @@ public class ProposerConfig {
             final RegistrationOverrides registrationOverrides,
         @JsonProperty(value = "min_bid") final UInt64 minBid,
         @JsonProperty(value = "builder_boost_factor") final UInt64 builderBoostFactor,
-        @JsonProperty(value = "urls") final Map<String, BuilderOverrides> urls) {
+        @JsonProperty(value = "builders") final List<BuilderEntry> builders) {
       this.enabled = enabled;
       this.gasLimit = gasLimit;
       this.registrationOverrides = registrationOverrides;
       this.minBid = minBid;
       this.builderBoostFactor = builderBoostFactor;
-      this.urls = urls == null ? null : replaceNullOverrides(urls);
-      // keeping a cache of the parsed URL objects to avoid creating them on the fly
-      this.parsedUrls =
-          urls == null
-              ? ImmutableMap.of()
-              : urls.keySet().stream()
-                  .collect(
-                      Collectors.toMap(Function.identity(), BuilderUrlParser::parseBuilderUrl));
+      this.builders = builders == null ? null : validateBuilders(builders);
     }
 
-    private Map<String, BuilderOverrides> replaceNullOverrides(
-        final Map<String, BuilderOverrides> urls) {
+    private record BuilderUrlAndAuthData(String url, Optional<Bytes> authData) {}
+
+    private static List<BuilderEntry> validateBuilders(final List<BuilderEntry> builders) {
       checkArgument(
-          urls.size() <= MAX_BUILDER_ENTRIES,
-          "\"urls\" must contain at most %s entries",
+          builders.size() <= MAX_BUILDER_ENTRIES,
+          "\"builders\" must contain at most %s entries",
           MAX_BUILDER_ENTRIES);
-      final Map<String, BuilderOverrides> result = new LinkedHashMap<>();
-      urls.forEach(
-          (url, overrides) ->
-              result.put(url, requireNonNullElse(overrides, BuilderOverrides.EMPTY)));
-      return Collections.unmodifiableMap(result);
+      // no two entries may share both their url (exact string) and their auth_data (bytes)
+      final Set<BuilderUrlAndAuthData> seen = new HashSet<>();
+      for (final BuilderEntry builder : builders) {
+        checkArgument(builder != null, "\"builders\" must not contain null entries");
+        checkArgument(
+            seen.add(
+                new BuilderUrlAndAuthData(
+                    builder.getUrl().toExternalForm(), builder.getAuthData())),
+            "\"builders\" contain duplicate url %s with the same auth_data",
+            builder.getUrl());
+      }
+      return builders;
     }
 
     public Optional<Boolean> isEnabled() {
@@ -230,13 +226,8 @@ public class ProposerConfig {
       return Optional.ofNullable(builderBoostFactor);
     }
 
-    public Optional<Map<String, BuilderOverrides>> getUrls() {
-      return Optional.ofNullable(urls);
-    }
-
-    @JsonIgnore
-    public URL getParsedUrl(final String url) {
-      return parsedUrls.get(url);
+    public Optional<List<BuilderEntry>> getBuilders() {
+      return Optional.ofNullable(builders);
     }
 
     @Override
@@ -253,13 +244,13 @@ public class ProposerConfig {
           && Objects.equals(registrationOverrides, that.registrationOverrides)
           && Objects.equals(minBid, that.minBid)
           && Objects.equals(builderBoostFactor, that.builderBoostFactor)
-          && Objects.equals(urls, that.urls);
+          && Objects.equals(builders, that.builders);
     }
 
     @Override
     public int hashCode() {
       return Objects.hash(
-          enabled, gasLimit, registrationOverrides, minBid, builderBoostFactor, urls);
+          enabled, gasLimit, registrationOverrides, minBid, builderBoostFactor, builders);
     }
   }
 
@@ -305,26 +296,17 @@ public class ProposerConfig {
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)
-  public static class BuilderOverrides {
-    @JsonProperty(value = "auth_data")
+  public static class BuilderEntry {
+    private final URL url;
     private final Bytes authData;
-
-    @JsonProperty(value = "builder_pubkeys")
     private final List<BLSPublicKey> builderPubkeys;
-
-    @JsonProperty(value = "min_bid")
     private final UInt64 minBid;
-
-    @JsonProperty(value = "builder_boost_factor")
     private final UInt64 builderBoostFactor;
-
-    @JsonProperty(value = "max_execution_payment")
     private final UInt64 maxExecutionPayment;
 
-    public static final BuilderOverrides EMPTY = new BuilderOverrides(null, null, null, null, null);
-
     @JsonCreator
-    public BuilderOverrides(
+    public BuilderEntry(
+        @JsonProperty(value = "url") final String url,
         @JsonProperty(value = "auth_data") final Bytes authData,
         @JsonProperty(value = "builder_pubkeys") final List<BLSPublicKey> builderPubkeys,
         @JsonProperty(value = "min_bid") final UInt64 minBid,
@@ -339,11 +321,16 @@ public class ProposerConfig {
           builderPubkeys == null || builderPubkeys.size() <= MAX_BUILDER_PUBKEYS,
           "\"builder_pubkeys\" must contain at most %s entries",
           MAX_BUILDER_PUBKEYS);
+      this.url = BuilderUrlParser.parseBuilderUrl(url);
       this.authData = authData;
       this.builderPubkeys = builderPubkeys;
       this.minBid = minBid;
       this.builderBoostFactor = builderBoostFactor;
       this.maxExecutionPayment = maxExecutionPayment;
+    }
+
+    public URL getUrl() {
+      return url;
     }
 
     public Optional<Bytes> getAuthData() {
@@ -366,6 +353,7 @@ public class ProposerConfig {
       return Optional.ofNullable(maxExecutionPayment);
     }
 
+    // compares the url as text, URL.equals would resolve the host
     @Override
     public boolean equals(final Object o) {
       if (this == o) {
@@ -374,8 +362,9 @@ public class ProposerConfig {
       if (o == null || getClass() != o.getClass()) {
         return false;
       }
-      final BuilderOverrides that = (BuilderOverrides) o;
-      return Objects.equals(authData, that.authData)
+      final BuilderEntry that = (BuilderEntry) o;
+      return url.toExternalForm().equals(that.url.toExternalForm())
+          && Objects.equals(authData, that.authData)
           && Objects.equals(builderPubkeys, that.builderPubkeys)
           && Objects.equals(minBid, that.minBid)
           && Objects.equals(builderBoostFactor, that.builderBoostFactor)
@@ -385,7 +374,12 @@ public class ProposerConfig {
     @Override
     public int hashCode() {
       return Objects.hash(
-          authData, builderPubkeys, minBid, builderBoostFactor, maxExecutionPayment);
+          url.toExternalForm(),
+          authData,
+          builderPubkeys,
+          minBid,
+          builderBoostFactor,
+          maxExecutionPayment);
     }
   }
 }

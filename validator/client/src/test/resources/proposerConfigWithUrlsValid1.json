@@ -7,15 +7,17 @@
         "gas_limit": "30000000",
         "min_bid": "1000000000",
         "builder_boost_factor": "90",
-        "urls": {
-          "https://builder-a.example.com": {
+        "builders": [
+          {
+            "url": "https://builder-a.example.com",
             "min_bid": "2000000000",
             "builder_boost_factor": "110"
           },
-          "https://builder-b.example.com": {
+          {
+            "url": "https://builder-b.example.com",
             "builder_boost_factor": "80"
           }
-        }
+        ]
       }
     }
   },

@@ -904,6 +904,57 @@ public class DatabaseTest {
     assertThat(database.getSignedBlock(parent.getRoot())).contains(parent.getBlock());
   }
 
+  @TestTemplate
+  public void
+      shouldNotStoreBlindedExecutionPayloadEnvelopeArrivingWithTheFinalizationOfItsOrphanedBlock(
+          final DatabaseContext context) throws IOException {
+    assertEnvelopeArrivingWithFinalizationIsStoredOnlyIfChainBuiltOnIt(
+        context, StateStorageMode.PRUNE);
+  }
+
+  @TestTemplate
+  public void
+      shouldNotStoreBlindedExecutionPayloadEnvelopeArrivingWithTheFinalizationOfItsOrphanedBlockInArchiveMode(
+          final DatabaseContext context) throws IOException {
+    assertEnvelopeArrivingWithFinalizationIsStoredOnlyIfChainBuiltOnIt(
+        context, StateStorageMode.ARCHIVE);
+  }
+
+  private void assertEnvelopeArrivingWithFinalizationIsStoredOnlyIfChainBuiltOnIt(
+      final DatabaseContext context, final StateStorageMode storageMode) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalGloas(), BLSKeyGenerator.generateKeyPairs(8));
+    initialize(context, storageMode);
+    final SignedBlockAndState parent = chainBuilder.generateNextBlock();
+    final SignedBlockAndState child =
+        chainBuilder.generateBlockAtSlot(
+            2, chainBuilder.createBlockOptionsBuildingOnEmptyParent(UInt64.valueOf(2)));
+    final SignedBlindedExecutionPayloadEnvelope childEnvelope =
+        getSignedBlindedExecutionPayloadEnvelope(child);
+
+    // Both envelopes arrive with the finalization of their blocks. The child built on the EMPTY
+    // variant of the parent, so the parent's envelope must not survive; the child's is retained.
+    database.update(
+        storageUpdateWithBlindedExecutionPayloads(
+            Optional.of(
+                FinalizedChainData.builder()
+                    .latestFinalized(AnchorPoint.fromInitialBlockAndState(spec, child))
+                    .finalizedChildAndParent(parent.getRoot(), parent.getParentRoot())
+                    .finalizedChildAndParent(
+                        genesisBlockAndState.getRoot(), genesisBlockAndState.getParentRoot())
+                    .finalizedBlock(parent.getBlock())
+                    .build()),
+            Map.of(
+                parent.getRoot(),
+                getSignedBlindedExecutionPayloadEnvelope(parent),
+                child.getRoot(),
+                childEnvelope)));
+
+    assertThat(database.getBlindedExecutionPayloadEnvelope(parent.getRoot())).isEmpty();
+    assertThat(database.getSignedBlock(parent.getRoot())).contains(parent.getBlock());
+    assertThat(database.getBlindedExecutionPayloadEnvelope(child.getRoot()))
+        .contains(childEnvelope);
+  }
+
   private StorageUpdate storageUpdateWithBlindedExecutionPayloads(
       final Optional<FinalizedChainData> finalizedChainData,
       final Map<Bytes32, SignedBlindedExecutionPayloadEnvelope> blindedExecutionPayloads) {

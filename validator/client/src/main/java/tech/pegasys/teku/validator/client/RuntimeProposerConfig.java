@@ -22,11 +22,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Path;
-import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.bls.BLSPublicKey;
@@ -38,7 +37,6 @@ import tech.pegasys.teku.infrastructure.json.types.StringValueTypeDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.validator.client.restapi.ValidatorTypes;
 import tech.pegasys.teku.validator.client.restapi.apis.schema.BuilderConfig;
-import tech.pegasys.teku.validator.client.restapi.apis.schema.BuilderEntry;
 
 public class RuntimeProposerConfig {
   private final Optional<Path> storagePath;
@@ -128,6 +126,21 @@ public class RuntimeProposerConfig {
     storagePath.ifPresent(this::save);
   }
 
+  synchronized void updateBuilderConfig(
+      final BLSPublicKey publicKey, final BuilderConfig builderConfig) {
+    Preconditions.checkNotNull(builderConfig, "should delete rather than update to null");
+    final Optional<RuntimeConfig> currentConfig = getProposerConfig(publicKey);
+    if (currentConfig.isEmpty()) {
+      proposerConfigMap.put(
+          publicKey, new RuntimeConfigBuilder().builderConfig(Optional.of(builderConfig)).build());
+    } else {
+      RuntimeConfigBuilder configBuilder = new RuntimeConfigBuilder(currentConfig.get());
+      configBuilder.builderConfig(Optional.of(builderConfig));
+      updateEntry(publicKey, configBuilder.build());
+    }
+    storagePath.ifPresent(this::save);
+  }
+
   private synchronized void updateEntry(final BLSPublicKey publicKey, final RuntimeConfig config) {
     if (config.isEmpty()) {
       proposerConfigMap.remove(publicKey);
@@ -151,6 +164,16 @@ public class RuntimeProposerConfig {
     if (currentConfig.isPresent()) {
       RuntimeConfigBuilder builder = new RuntimeConfigBuilder(currentConfig.get());
       builder.gasLimit(Optional.empty());
+      updateEntry(publicKey, builder.build());
+      storagePath.ifPresent(this::save);
+    }
+  }
+
+  synchronized void deleteBuilderConfig(final BLSPublicKey publicKey) {
+    final Optional<RuntimeConfig> currentConfig = getProposerConfig(publicKey);
+    if (currentConfig.isPresent()) {
+      RuntimeConfigBuilder builder = new RuntimeConfigBuilder(currentConfig.get());
+      builder.builderConfig(Optional.empty());
       updateEntry(publicKey, builder.build());
       storagePath.ifPresent(this::save);
     }
@@ -189,34 +212,29 @@ public class RuntimeProposerConfig {
     private static ProposerConfig.BuilderConfig createBuilder(
         final Optional<UInt64> gasLimit, final Optional<BuilderConfig> builderConfig) {
       if (gasLimit.isPresent() || builderConfig.isPresent()) {
-        final Optional<Map<String, ProposerConfig.BuilderOverrides>> urls =
+        final Optional<List<ProposerConfig.BuilderEntry>> builders =
             builderConfig
                 .flatMap(BuilderConfig::builders)
                 .map(
-                    builders ->
-                        builders.stream()
-                            .collect(
-                                Collectors.toMap(
-                                    BuilderEntry::url,
-                                    builderEntry ->
-                                        new ProposerConfig.BuilderOverrides(
-                                            builderEntry.authData().orElse(null),
-                                            builderEntry.builderPubkeys().orElse(null),
-                                            builderEntry.minBid().orElse(null),
-                                            builderEntry.builderBoostFactor().orElse(null),
-                                            builderEntry.maxExecutionPayment().orElse(null)),
-                                    (__, ___) -> {
-                                      throw new IllegalArgumentException(
-                                          "builders contain duplicate url");
-                                    },
-                                    LinkedHashMap::new)));
+                    builderEntries ->
+                        builderEntries.stream()
+                            .map(
+                                builderEntry ->
+                                    new ProposerConfig.BuilderEntry(
+                                        builderEntry.url(),
+                                        builderEntry.authData().orElse(null),
+                                        builderEntry.builderPubkeys().orElse(null),
+                                        builderEntry.minBid().orElse(null),
+                                        builderEntry.builderBoostFactor().orElse(null),
+                                        builderEntry.maxExecutionPayment().orElse(null)))
+                            .toList());
         return new ProposerConfig.BuilderConfig(
             null,
             gasLimit.orElse(null),
             null,
             builderConfig.flatMap(BuilderConfig::minBid).orElse(null),
             builderConfig.flatMap(BuilderConfig::builderBoostFactor).orElse(null),
-            urls.orElse(null));
+            builders.orElse(null));
       } else {
         return null;
       }

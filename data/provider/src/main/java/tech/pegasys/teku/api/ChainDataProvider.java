@@ -60,7 +60,6 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.ssz.Merkleizable;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
-import tech.pegasys.teku.infrastructure.ssz.collections.SszUInt64Vector;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -90,9 +89,6 @@ import tech.pegasys.teku.spec.datastructures.state.CommitteeAssignment;
 import tech.pegasys.teku.spec.datastructures.state.SyncCommittee;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
-import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingConsolidation;
-import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDeposit;
-import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingPartialWithdrawal;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.logic.common.statetransition.epoch.status.ValidatorStatuses;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.EpochProcessingException;
@@ -1039,113 +1035,27 @@ public class ChainDataProvider {
         .thenApply(maybeState -> maybeState.map(BeaconState::getSlot));
   }
 
-  public SafeFuture<Optional<ObjectAndMetaData<SszList<PendingDeposit>>>> getStatePendingDeposits(
-      final String stateIdParam) {
+  public <T> SafeFuture<Optional<ObjectAndMetaData<T>>> getStateField(
+      final String stateIdParam,
+      final SpecMilestone minimumMilestone,
+      final String fieldLabel,
+      final Function<BeaconState, T> fieldExtractor) {
     return stateSelectorFactory
         .createSelectorForStateId(stateIdParam)
         .getState()
-        .thenApply(this::getPendingDeposits);
+        .thenApply(
+            maybeStateAndMetadata ->
+                getStateField(maybeStateAndMetadata, minimumMilestone, fieldLabel, fieldExtractor));
   }
 
-  public SafeFuture<Optional<ObjectAndMetaData<SszList<PendingPartialWithdrawal>>>>
-      getStatePendingPartialWithdrawals(final String stateIdParam) {
-    return stateSelectorFactory
-        .createSelectorForStateId(stateIdParam)
-        .getState()
-        .thenApply(this::getPendingPartialWithdrawals);
-  }
-
-  public SafeFuture<Optional<ObjectAndMetaData<SszUInt64Vector>>> getStateProposerLookahead(
-      final String stateIdParam) {
-    return stateSelectorFactory
-        .createSelectorForStateId(stateIdParam)
-        .getState()
-        .thenApply(this::getProposerLookahead);
-  }
-
-  Optional<ObjectAndMetaData<SszUInt64Vector>> getProposerLookahead(
-      final Optional<StateAndMetaData> maybeStateAndMetadata) {
-    checkMinimumMilestone(maybeStateAndMetadata, SpecMilestone.FULU, "proposer lookahead");
-
-    return maybeStateAndMetadata.map(
-        stateAndMetaData -> {
-          final SszUInt64Vector proposerLookahead =
-              stateAndMetaData.getData().toVersionFulu().orElseThrow().getProposerLookahead();
-          return new ObjectAndMetaData<>(
-              proposerLookahead,
-              stateAndMetaData.getMilestone(),
-              stateAndMetaData.isExecutionOptimistic(),
-              stateAndMetaData.isCanonical(),
-              stateAndMetaData.isFinalized());
-        });
-  }
-
-  public SafeFuture<Optional<ObjectAndMetaData<SszList<PendingConsolidation>>>>
-      getStatePendingConsolidations(final String stateIdParam) {
-    return stateSelectorFactory
-        .createSelectorForStateId(stateIdParam)
-        .getState()
-        .thenApply(this::getPendingConsolidations);
-  }
-
-  Optional<ObjectAndMetaData<SszList<PendingDeposit>>> getPendingDeposits(
-      final Optional<StateAndMetaData> maybeStateAndMetadata) {
-
-    checkMinimumMilestone(maybeStateAndMetadata, SpecMilestone.ELECTRA, "pending deposits");
-    return maybeStateAndMetadata.map(
-        stateAndMetaData -> {
-          final SszList<PendingDeposit> deposits =
-              stateAndMetaData.getData().toVersionElectra().orElseThrow().getPendingDeposits();
-          return new ObjectAndMetaData<>(
-              deposits,
-              stateAndMetaData.getMilestone(),
-              stateAndMetaData.isExecutionOptimistic(),
-              stateAndMetaData.isCanonical(),
-              stateAndMetaData.isFinalized());
-        });
-  }
-
-  Optional<ObjectAndMetaData<SszList<PendingPartialWithdrawal>>> getPendingPartialWithdrawals(
-      final Optional<StateAndMetaData> maybeStateAndMetadata) {
-    checkMinimumMilestone(
-        maybeStateAndMetadata, SpecMilestone.ELECTRA, "pending partial withdrawals");
-
-    return maybeStateAndMetadata.map(
-        stateAndMetaData -> {
-          final SszList<PendingPartialWithdrawal> withdrawals =
-              stateAndMetaData
-                  .getData()
-                  .toVersionElectra()
-                  .orElseThrow()
-                  .getPendingPartialWithdrawals();
-          return new ObjectAndMetaData<>(
-              withdrawals,
-              stateAndMetaData.getMilestone(),
-              stateAndMetaData.isExecutionOptimistic(),
-              stateAndMetaData.isCanonical(),
-              stateAndMetaData.isFinalized());
-        });
-  }
-
-  Optional<ObjectAndMetaData<SszList<PendingConsolidation>>> getPendingConsolidations(
-      final Optional<StateAndMetaData> maybeStateAndMetadata) {
-    checkMinimumMilestone(maybeStateAndMetadata, SpecMilestone.ELECTRA, "pending consolidations");
-
-    return maybeStateAndMetadata.map(
-        stateAndMetaData -> {
-          final SszList<PendingConsolidation> consolidations =
-              stateAndMetaData
-                  .getData()
-                  .toVersionElectra()
-                  .orElseThrow()
-                  .getPendingConsolidations();
-          return new ObjectAndMetaData<>(
-              consolidations,
-              stateAndMetaData.getMilestone(),
-              stateAndMetaData.isExecutionOptimistic(),
-              stateAndMetaData.isCanonical(),
-              stateAndMetaData.isFinalized());
-        });
+  @VisibleForTesting
+  <T> Optional<ObjectAndMetaData<T>> getStateField(
+      final Optional<StateAndMetaData> maybeStateAndMetadata,
+      final SpecMilestone minimumMilestone,
+      final String fieldLabel,
+      final Function<BeaconState, T> fieldExtractor) {
+    checkMinimumMilestone(maybeStateAndMetadata, minimumMilestone, fieldLabel);
+    return maybeStateAndMetadata.map(stateAndMetaData -> stateAndMetaData.map(fieldExtractor));
   }
 
   void checkMinimumMilestone(

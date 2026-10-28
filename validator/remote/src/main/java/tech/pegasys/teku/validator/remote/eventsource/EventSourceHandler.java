@@ -18,8 +18,10 @@ import com.google.common.base.Throwables;
 import com.launchdarkly.eventsource.MessageEvent;
 import com.launchdarkly.eventsource.background.BackgroundEventHandler;
 import java.net.SocketTimeoutException;
+import java.util.Optional;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
 import org.hyperledger.besu.plugin.services.metrics.LabelledMetric;
@@ -68,6 +70,13 @@ class EventSourceHandler implements BackgroundEventHandler {
    */
   private boolean headEventReceivedSinceConnected = false;
 
+  /**
+   * The block of the head last reported by the beacon node, which the payload timeliness
+   * attestation will be about. An execution payload for any other block says nothing about it, so
+   * it must not bring the duty forward.
+   */
+  private Optional<Bytes32> lastReportedHead = Optional.empty();
+
   private final Spec spec;
 
   public EventSourceHandler(
@@ -109,6 +118,9 @@ class EventSourceHandler implements BackgroundEventHandler {
   public void onOpen() {
     connected = true;
     headEventReceivedSinceConnected = false;
+    // the head may have moved on while the stream was down, so what it was before says nothing
+    // about the block the next payload timeliness attestation will be about
+    lastReportedHead = Optional.empty();
     validatorLogger.connectedToBeaconNodeEventStream();
     // We might have missed some events while connecting or reconnected so ensure the duties are
     // recalculated
@@ -135,6 +147,8 @@ class EventSourceHandler implements BackgroundEventHandler {
           handleHeadV2Event(messageEvent.getData());
           headEventReceivedSinceConnected = true;
         }
+        case execution_payload_available ->
+            handleExecutionPayloadAvailableEvent(messageEvent.getData());
         case attester_slashing -> handleAttesterSlashingEvent(messageEvent.getData());
         case proposer_slashing -> handleProposerSlashingEvent(messageEvent.getData());
         default -> {
@@ -155,6 +169,7 @@ class EventSourceHandler implements BackgroundEventHandler {
 
   private void handleHeadEvent(final String data) throws JsonProcessingException {
     final HeadEvent headEvent = JsonUtil.parse(data, HeadEvent.TYPE_DEFINITION);
+    lastReportedHead = Optional.of(headEvent.block());
     validatorTimingChannel.onHeadUpdate(
         headEvent.slot(),
         headEvent.previousDutyDependentRoot(),
@@ -165,6 +180,7 @@ class EventSourceHandler implements BackgroundEventHandler {
 
   private void handleHeadV2Event(final String data) throws JsonProcessingException {
     final HeadV2Event headEvent = JsonUtil.parse(data, HeadV2Event.TYPE_DEFINITION);
+    lastReportedHead = Optional.of(headEvent.data().block());
     validatorTimingChannel.onHeadUpdate(
         headEvent.data().slot(),
         headEvent.data().currentEpochDependentRoot(),
@@ -181,6 +197,21 @@ class EventSourceHandler implements BackgroundEventHandler {
     // Build the inclusion list on the slot's block as soon as it's head
     if (spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.HEZE)) {
       validatorTimingChannel.onInclusionListCreationDue(slot);
+    }
+  }
+
+  /**
+   * The payload timeliness attestation should be sent as soon as the execution payload and its data
+   * are available, rather than waiting for the deadline scheduled by the time based adapter. A
+   * payload for any block other than the head is ignored, so that the duty is not performed early
+   * against a block which is not the one being attested to.
+   */
+  private void handleExecutionPayloadAvailableEvent(final String data)
+      throws JsonProcessingException {
+    final ExecutionPayloadAvailableEvent executionPayloadAvailableEvent =
+        JsonUtil.parse(data, ExecutionPayloadAvailableEvent.TYPE_DEFINITION);
+    if (lastReportedHead.map(executionPayloadAvailableEvent.blockRoot()::equals).orElse(false)) {
+      validatorTimingChannel.onPayloadAttestationCreationDue(executionPayloadAvailableEvent.slot());
     }
   }
 

@@ -198,5 +198,9 @@ public class SlashingProtectedSigner implements Signer {
   @Override
   public void delete() {
     delegate.delete();
+    // A later re-import of this key may bring in slashing protection history that is written to
+    // storage, so the cached record must not outlive the signer. Evicting is only safe because
+    // DeletableSigner calls this with in-flight signing drained and further signing blocked.
+    slashingProtector.evictSigningRecord(validatorPublicKey);
   }
 }

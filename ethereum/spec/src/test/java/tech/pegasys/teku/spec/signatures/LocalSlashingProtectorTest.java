@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -26,6 +27,7 @@ import java.util.List;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -71,6 +73,73 @@ class LocalSlashingProtectorTest {
 
   protected SlashingProtector getSlashingProtector() {
     return slashingProtectionStorage;
+  }
+
+  @Test
+  void getSigningRecord_shouldNotCacheRecordReadFromStorage() throws Exception {
+    final ValidatorSigningRecord storedRecord =
+        new ValidatorSigningRecord(
+            Optional.of(GENESIS_VALIDATORS_ROOT),
+            UInt64.valueOf(3),
+            UInt64.valueOf(4),
+            UInt64.valueOf(6));
+    when(dataWriter.read(signingRecordPath)).thenReturn(Optional.of(storedRecord.toBytes()));
+    assertThat(getSlashingProtector().getSigningRecord(validator)).contains(storedRecord);
+
+    // history raised in storage after the query, before the key signs
+    final ValidatorSigningRecord importedRecord =
+        new ValidatorSigningRecord(
+            Optional.of(GENESIS_VALIDATORS_ROOT),
+            UInt64.valueOf(5000),
+            UInt64.valueOf(905),
+            UInt64.valueOf(906));
+    when(dataWriter.read(signingRecordPath)).thenReturn(Optional.of(importedRecord.toBytes()));
+
+    assertThat(
+            getSlashingProtector()
+                .maySignAttestation(
+                    validator, GENESIS_VALIDATORS_ROOT, UInt64.valueOf(4), UInt64.valueOf(8)))
+        .isCompletedWithValue(false);
+    verify(dataWriter, never()).syncedWrite(any(), any());
+  }
+
+  @Test
+  void evictSigningRecord_shouldReloadRecordUpdatedInStorage() throws Exception {
+    final ValidatorSigningRecord initialRecord =
+        new ValidatorSigningRecord(
+            Optional.of(GENESIS_VALIDATORS_ROOT),
+            UInt64.valueOf(3),
+            UInt64.valueOf(4),
+            UInt64.valueOf(6));
+    when(dataWriter.read(signingRecordPath)).thenReturn(Optional.of(initialRecord.toBytes()));
+    assertThat(
+            getSlashingProtector()
+                .maySignAttestation(
+                    validator, GENESIS_VALIDATORS_ROOT, UInt64.valueOf(4), UInt64.valueOf(7)))
+        .isCompletedWithValue(true);
+
+    // record is cached, then raised in storage by an import while the key is not loaded
+    final ValidatorSigningRecord importedRecord =
+        new ValidatorSigningRecord(
+            Optional.of(GENESIS_VALIDATORS_ROOT),
+            UInt64.valueOf(5000),
+            UInt64.valueOf(905),
+            UInt64.valueOf(906));
+    when(dataWriter.read(signingRecordPath)).thenReturn(Optional.of(importedRecord.toBytes()));
+    getSlashingProtector().evictSigningRecord(validator);
+
+    assertThat(getSlashingProtector().getSigningRecord(validator)).contains(importedRecord);
+    assertThat(
+            getSlashingProtector()
+                .maySignAttestation(
+                    validator, GENESIS_VALIDATORS_ROOT, UInt64.valueOf(4), UInt64.valueOf(8)))
+        .isCompletedWithValue(false);
+    assertThat(
+            getSlashingProtector()
+                .maySignBlock(validator, GENESIS_VALIDATORS_ROOT, UInt64.valueOf(4999)))
+        .isCompletedWithValue(false);
+    // only the first signature was written, the imported record was not overwritten
+    verify(dataWriter, times(1)).syncedWrite(any(), any());
   }
 
   static List<Arguments> blockCases() {

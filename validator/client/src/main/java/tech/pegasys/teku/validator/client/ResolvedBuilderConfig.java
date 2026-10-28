@@ -15,7 +15,6 @@ package tech.pegasys.teku.validator.client;
 
 import java.net.URL;
 import java.util.List;
-import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -37,7 +36,7 @@ public record ResolvedBuilderConfig(
 
   public record ResolvedBuilderEntry(
       URL url,
-      Optional<Bytes> authData,
+      Bytes authData,
       List<BLSPublicKey> builderPubkeys,
       UInt64 maxExecutionPayment,
       UInt64 minBid,

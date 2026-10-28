@@ -28,6 +28,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -43,11 +44,12 @@ import tech.pegasys.teku.spec.config.GasLimitScheduleEntry;
 import tech.pegasys.teku.spec.signatures.Signer;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.api.ValidatorConfig;
-import tech.pegasys.teku.validator.client.ProposerConfig.BuilderOverrides;
+import tech.pegasys.teku.validator.client.ProposerConfig.BuilderEntry;
 import tech.pegasys.teku.validator.client.ProposerConfig.RegistrationOverrides;
 import tech.pegasys.teku.validator.client.ResolvedBuilderConfig.ResolvedBuilderEntry;
 import tech.pegasys.teku.validator.client.loader.OwnedValidators;
 import tech.pegasys.teku.validator.client.proposerconfig.ProposerConfigProvider;
+import tech.pegasys.teku.validator.client.restapi.apis.schema.BuilderConfig;
 
 public class ProposerConfigManagerTest {
 
@@ -86,8 +88,11 @@ public class ProposerConfigManagerTest {
 
   private UInt64 cliBuilderMinBid;
   private UInt64 cliBuilderBoostFactor;
+  private UInt64 cliP2pBuilderMinBid;
+  private UInt64 cliP2pBuilderBoostFactor;
   private UInt64 cliBuilderMaxExecutionPayment;
   private URL cliBuilderUrl;
+  ;
 
   private final ValidatorConfig validatorConfig = mock(ValidatorConfig.class);
   private final ProposerConfigProvider proposerConfigProvider = mock(ProposerConfigProvider.class);
@@ -118,11 +123,15 @@ public class ProposerConfigManagerTest {
 
     cliBuilderMinBid = dataStructureUtil.randomUInt64();
     cliBuilderBoostFactor = dataStructureUtil.randomUInt64();
+    cliP2pBuilderMinBid = dataStructureUtil.randomUInt64();
+    cliP2pBuilderBoostFactor = dataStructureUtil.randomUInt64();
     cliBuilderMaxExecutionPayment = dataStructureUtil.randomUInt64();
     cliBuilderUrl = URI.create("https://cli-builder.example.com").toURL();
 
     when(validatorConfig.getBuilderMinBid()).thenReturn(cliBuilderMinBid);
     when(validatorConfig.getBuilderBoostFactor()).thenReturn(cliBuilderBoostFactor);
+    when(validatorConfig.getP2pBuilderMinBid()).thenReturn(cliP2pBuilderMinBid);
+    when(validatorConfig.getP2pBuilderBoostFactor()).thenReturn(cliP2pBuilderBoostFactor);
     when(validatorConfig.getBuilderMaxExecutionPayment()).thenReturn(cliBuilderMaxExecutionPayment);
     when(validatorConfig.getBuilderUrls()).thenReturn(List.of(cliBuilderUrl));
 
@@ -217,14 +226,14 @@ public class ProposerConfigManagerTest {
                     .builderBoostFactor())
             .isEqualTo(randomBoostFactor);
       }
-      case BUILDER_URLS -> {
-        final BuilderOverrides overrides = randomBuilderOverrides();
-        prepareConfigWithValidatorSpecificProperty(property, Map.of(BUILDER_URL, overrides), true);
+      case BUILDERS -> {
+        final BuilderEntry builder = randomBuilderEntry();
+        prepareConfigWithValidatorSpecificProperty(property, List.of(builder), true);
         assertThat(
                 proposerConfigManager
                     .resolveBuilderConfig(validatorInConfig.getPublicKey())
                     .builders())
-            .containsExactly(expectedBuilderEntry(overrides));
+            .containsExactly(expectedBuilderEntry(builder));
       }
     }
   }
@@ -298,14 +307,14 @@ public class ProposerConfigManagerTest {
                     .builderBoostFactor())
             .isEqualTo(randomBoostFactor);
       }
-      case BUILDER_URLS -> {
-        final BuilderOverrides overrides = randomBuilderOverrides();
-        prepareConfigWithDefaultConfigProperty(property, Map.of(BUILDER_URL, overrides));
+      case BUILDERS -> {
+        final BuilderEntry builder = randomBuilderEntry();
+        prepareConfigWithDefaultConfigProperty(property, List.of(builder));
         assertThat(
                 proposerConfigManager
                     .resolveBuilderConfig(validatorNotInConfig.getPublicKey())
                     .builders())
-            .containsExactly(expectedBuilderEntry(overrides));
+            .containsExactly(expectedBuilderEntry(builder));
       }
     }
   }
@@ -318,12 +327,12 @@ public class ProposerConfigManagerTest {
     assertThat(proposerConfigManager.resolveBuilderConfig(validatorNotInConfig.getPublicKey()))
         .isEqualTo(
             new ResolvedBuilderConfig(
-                cliBuilderMinBid,
-                cliBuilderBoostFactor,
+                cliP2pBuilderMinBid,
+                cliP2pBuilderBoostFactor,
                 List.of(
                     new ResolvedBuilderEntry(
                         cliBuilderUrl,
-                        Optional.empty(),
+                        expectedAuthData(cliBuilderUrl),
                         List.of(),
                         cliBuilderMaxExecutionPayment,
                         cliBuilderMinBid,
@@ -346,7 +355,7 @@ public class ProposerConfigManagerTest {
                         null,
                         keyMinBid,
                         keyBoostFactor,
-                        Map.of(BUILDER_URL, new BuilderOverrides(null, null, null, null, null))))),
+                        List.of(builderEntry(BUILDER_URL))))),
             new ProposerConfig.Config(defaultFeeRecipientConfig, null));
     when(proposerConfigProvider.getProposerConfig())
         .thenReturn(SafeFuture.completedFuture(Optional.of(proposerConfig)));
@@ -360,7 +369,7 @@ public class ProposerConfigManagerTest {
                 List.of(
                     new ResolvedBuilderEntry(
                         URI.create(BUILDER_URL).toURL(),
-                        Optional.empty(),
+                        expectedAuthData(BUILDER_URL),
                         List.of(),
                         cliBuilderMaxExecutionPayment,
                         keyMinBid,
@@ -386,11 +395,11 @@ public class ProposerConfigManagerTest {
         .isEqualTo(
             new ResolvedBuilderConfig(
                 runtimeMinBid,
-                cliBuilderBoostFactor,
+                cliP2pBuilderBoostFactor,
                 List.of(
                     new ResolvedBuilderEntry(
                         URI.create(BUILDER_URL).toURL(),
-                        Optional.empty(),
+                        expectedAuthData(BUILDER_URL),
                         List.of(),
                         cliBuilderMaxExecutionPayment,
                         runtimeBuilderMinBid,
@@ -437,7 +446,7 @@ public class ProposerConfigManagerTest {
                             new ProposerConfig.Config(
                                 null,
                                 new ProposerConfig.BuilderConfig(
-                                    null, null, null, null, null, Map.of()))),
+                                    null, null, null, null, null, List.of()))),
                         new ProposerConfig.Config(
                             defaultFeeRecipientConfig,
                             new ProposerConfig.BuilderConfig(
@@ -446,7 +455,7 @@ public class ProposerConfigManagerTest {
                                 null,
                                 null,
                                 null,
-                                Map.of(defaultBuilderUrl, BuilderOverrides.EMPTY)))))));
+                                List.of(builderEntry(defaultBuilderUrl))))))));
     setUpProposerConfigManager(Optional.empty(), Optional.empty());
 
     assertThat(
@@ -469,7 +478,7 @@ public class ProposerConfigManagerTest {
                         new ProposerConfig.Config(
                             defaultFeeRecipientConfig,
                             new ProposerConfig.BuilderConfig(
-                                true, null, null, null, null, Map.of()))))));
+                                true, null, null, null, null, List.of()))))));
     setUpProposerConfigManager(Optional.empty(), Optional.empty());
 
     assertThat(
@@ -488,12 +497,7 @@ public class ProposerConfigManagerTest {
                 new ProposerConfig.Config(
                     null,
                     new ProposerConfig.BuilderConfig(
-                        false,
-                        null,
-                        null,
-                        null,
-                        null,
-                        Map.of(BUILDER_URL, new BuilderOverrides(null, null, null, null, null))))),
+                        false, null, null, null, null, List.of(builderEntry(BUILDER_URL))))),
             new ProposerConfig.Config(defaultFeeRecipientConfig, null));
     when(proposerConfigProvider.getProposerConfig())
         .thenReturn(SafeFuture.completedFuture(Optional.of(proposerConfig)));
@@ -517,12 +521,7 @@ public class ProposerConfigManagerTest {
             new ProposerConfig.Config(
                 defaultFeeRecipientConfig,
                 new ProposerConfig.BuilderConfig(
-                    true,
-                    null,
-                    null,
-                    null,
-                    null,
-                    Map.of(BUILDER_URL, new BuilderOverrides(null, null, null, null, null)))));
+                    true, null, null, null, null, List.of(builderEntry(BUILDER_URL)))));
     when(proposerConfigProvider.getProposerConfig())
         .thenReturn(SafeFuture.completedFuture(Optional.of(proposerConfig)));
     setUpProposerConfigManager(Optional.empty(), Optional.empty());
@@ -791,6 +790,62 @@ public class ProposerConfigManagerTest {
         .isInstanceOf(IllegalArgumentException.class);
   }
 
+  @Test
+  void setBuilderConfig_shouldUpdateRuntimeBuilderConfig(@TempDir final Path tempDir)
+      throws IOException {
+    final UInt64 minBid = dataStructureUtil.randomUInt64();
+    proposerWithRuntimeConfiguration(tempDir);
+
+    proposerConfigManager.setBuilderConfig(
+        validatorNotInConfig.getPublicKey(),
+        new BuilderConfig(Optional.of(minBid), Optional.empty(), Optional.empty()));
+
+    assertThat(proposerConfigManager.resolveBuilderConfig(validatorNotInConfig.getPublicKey()))
+        .extracting(ResolvedBuilderConfig::minBid)
+        .isEqualTo(minBid);
+  }
+
+  @Test
+  void setBuilderConfig_shouldNotAcceptForConfiguredPubkey() throws IOException {
+    prepareConfigWithValidatorSpecificProperty(
+        Properties.BUILDER_MIN_BID, dataStructureUtil.randomUInt64());
+
+    assertThatThrownBy(
+            () ->
+                proposerConfigManager.setBuilderConfig(
+                    validatorInConfig.getPublicKey(),
+                    new BuilderConfig(Optional.empty(), Optional.empty(), Optional.empty())))
+        .isInstanceOf(SetBuilderConfigException.class)
+        .hasMessage("Cannot update builder config via api.");
+  }
+
+  @Test
+  void deleteBuilderConfig_shouldRemoveRuntimeBuilderConfig(@TempDir final Path tempDir)
+      throws IOException {
+    proposerWithRuntimeConfiguration(tempDir);
+    proposerConfigManager.setBuilderConfig(
+        validatorNotInConfig.getPublicKey(),
+        new BuilderConfig(
+            Optional.of(dataStructureUtil.randomUInt64()), Optional.empty(), Optional.empty()));
+
+    assertThat(proposerConfigManager.deleteBuilderConfig(validatorNotInConfig.getPublicKey()))
+        .isTrue();
+
+    // falls back to the validator client's own config
+    assertThat(proposerConfigManager.resolveBuilderConfig(validatorNotInConfig.getPublicKey()))
+        .extracting(ResolvedBuilderConfig::minBid)
+        .isEqualTo(cliP2pBuilderMinBid);
+  }
+
+  @Test
+  void deleteBuilderConfig_shouldReturnFalseIfConfigurationSetsBuilderConfig() throws IOException {
+    prepareConfigWithValidatorSpecificProperty(
+        Properties.BUILDER_MIN_BID, dataStructureUtil.randomUInt64());
+
+    assertThat(proposerConfigManager.deleteBuilderConfig(validatorInConfig.getPublicKey()))
+        .isFalse();
+  }
+
   private void setUpWithGasLimitSchedule() throws IOException {
     when(proposerConfigProvider.getProposerConfig())
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
@@ -885,19 +940,24 @@ public class ProposerConfigManagerTest {
               isDefault ? defaultFeeRecipientConfig : null,
               new ProposerConfig.BuilderConfig(
                   isDefault ? true : null, null, null, null, (UInt64) value, null));
-      case BUILDER_URLS -> {
+      case BUILDERS -> {
         @SuppressWarnings("unchecked")
-        final Map<String, BuilderOverrides> urls = (Map<String, BuilderOverrides>) value;
+        final List<BuilderEntry> builders = (List<BuilderEntry>) value;
         yield new ProposerConfig.Config(
             isDefault ? defaultFeeRecipientConfig : null,
             new ProposerConfig.BuilderConfig(
-                isDefault ? true : null, null, null, null, null, urls));
+                isDefault ? true : null, null, null, null, null, builders));
       }
     };
   }
 
-  private BuilderOverrides randomBuilderOverrides() {
-    return new BuilderOverrides(
+  private static BuilderEntry builderEntry(final String url) {
+    return new BuilderEntry(url, null, null, null, null, null);
+  }
+
+  private BuilderEntry randomBuilderEntry() {
+    return new BuilderEntry(
+        BUILDER_URL,
         dataStructureUtil.randomBytes(32),
         List.of(dataStructureUtil.randomPublicKey()),
         dataStructureUtil.randomUInt64(),
@@ -905,15 +965,14 @@ public class ProposerConfigManagerTest {
         dataStructureUtil.randomUInt64());
   }
 
-  private ResolvedBuilderEntry expectedBuilderEntry(final BuilderOverrides overrides)
-      throws IOException {
+  private static ResolvedBuilderEntry expectedBuilderEntry(final BuilderEntry builder) {
     return new ResolvedBuilderEntry(
-        URI.create(BUILDER_URL).toURL(),
-        overrides.getAuthData(),
-        overrides.getBuilderPubkeys().orElseThrow(),
-        overrides.getMaxExecutionPayment().orElseThrow(),
-        overrides.getMinBid().orElseThrow(),
-        overrides.getBuilderBoostFactor().orElseThrow());
+        builder.getUrl(),
+        builder.getAuthData().orElseThrow(),
+        builder.getBuilderPubkeys().orElseThrow(),
+        builder.getMaxExecutionPayment().orElseThrow(),
+        builder.getMinBid().orElseThrow(),
+        builder.getBuilderBoostFactor().orElseThrow());
   }
 
   private void proposerWithRuntimeConfiguration(final Path tempDir) throws IOException {
@@ -957,6 +1016,15 @@ public class ProposerConfigManagerTest {
     assertThat(proposerConfigManager.isReadyToProvideProperties()).isTrue();
   }
 
+  private Bytes expectedAuthData(final String url) throws IOException {
+    return expectedAuthData(URI.create(url).toURL());
+  }
+
+  private Bytes expectedAuthData(final URL url) {
+    return Bytes.of(
+        AuthDataResolver.resolveDefaultAuthData(url).getBytes(StandardCharsets.US_ASCII));
+  }
+
   enum Properties {
     FEE_RECIPIENT,
     BUILDER_ENABLED,
@@ -965,6 +1033,6 @@ public class ProposerConfigManagerTest {
     BUILDER_REGISTRATION_OVERRIDE_TIMESTAMP,
     BUILDER_MIN_BID,
     BUILDER_BOOST_FACTOR,
-    BUILDER_URLS
+    BUILDERS
   }
 }

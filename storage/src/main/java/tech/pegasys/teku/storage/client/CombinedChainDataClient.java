@@ -43,6 +43,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
@@ -214,6 +215,23 @@ public class CombinedChainDataClient {
                 maybeBlock
                     .map(this::getStateForBlock)
                     .orElseGet(() -> SafeFuture.completedFuture(Optional.empty())));
+  }
+
+  /**
+   * Returns the fork choice node on the canonical chain that is in effect at {@code slot},
+   * including its Gloas payload variant (FULL or EMPTY) and optimistic status. See {@link
+   * RecentChainData#getForkChoiceNodeInEffectBySlot(UInt64)}.
+   *
+   * <p>Unlike {@link #getSignedBlockAndStateInEffectAtSlot(UInt64)}, this only covers slots tracked
+   * by fork choice and never falls back to finalized storage: the payload variant of a block is
+   * only known to fork choice. Callers that must serve historical slots need their own fallback.
+   *
+   * @return the node in effect at {@code slot}, or empty if there is no chain head yet, {@code
+   *     slot} is before the fork choice anchor, or the head node is no longer tracked by fork
+   *     choice (e.g. its payload was just found INVALID and the head has not been re-selected yet)
+   */
+  public Optional<ProtoNodeData> getForkChoiceNodeInEffectAtSlot(final UInt64 slot) {
+    return recentChainData.getForkChoiceNodeInEffectBySlot(slot);
   }
 
   /**

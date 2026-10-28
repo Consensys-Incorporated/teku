@@ -33,4 +33,13 @@ public interface SlashingProtector {
 
   Optional<ValidatorSigningRecord> getSigningRecord(final BLSPublicKey validator)
       throws IOException;
+
+  /**
+   * Discard any in-memory copy of the signing record for the validator, so the next access reads it
+   * from storage again.
+   *
+   * <p>Callers must ensure no signing for the validator is in progress or can start until the
+   * eviction completes, otherwise the cached record may be written back to storage.
+   */
+  void evictSigningRecord(final BLSPublicKey validator);
 }

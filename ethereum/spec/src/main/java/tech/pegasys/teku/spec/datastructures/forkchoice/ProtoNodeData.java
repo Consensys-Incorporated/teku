@@ -111,6 +111,10 @@ public class ProtoNodeData implements MinimalBeaconBlockSummary {
     return payloadStatus;
   }
 
+  public ForkChoiceNode getForkChoiceNode() {
+    return new ForkChoiceNode(root, payloadStatus);
+  }
+
   @Override
   public boolean equals(final Object o) {
     if (this == o) {

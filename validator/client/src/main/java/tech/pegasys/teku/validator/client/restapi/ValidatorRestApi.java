@@ -37,11 +37,13 @@ import tech.pegasys.teku.validator.client.ProposerConfigManager;
 import tech.pegasys.teku.validator.client.ValidatorClientService;
 import tech.pegasys.teku.validator.client.VoluntaryExitDataProvider;
 import tech.pegasys.teku.validator.client.doppelganger.DoppelgangerDetector;
+import tech.pegasys.teku.validator.client.restapi.apis.DeleteBuilderConfig;
 import tech.pegasys.teku.validator.client.restapi.apis.DeleteFeeRecipient;
 import tech.pegasys.teku.validator.client.restapi.apis.DeleteGasLimit;
 import tech.pegasys.teku.validator.client.restapi.apis.DeleteGraffiti;
 import tech.pegasys.teku.validator.client.restapi.apis.DeleteKeys;
 import tech.pegasys.teku.validator.client.restapi.apis.DeleteRemoteKeys;
+import tech.pegasys.teku.validator.client.restapi.apis.GetBuilderConfig;
 import tech.pegasys.teku.validator.client.restapi.apis.GetFeeRecipient;
 import tech.pegasys.teku.validator.client.restapi.apis.GetGasLimit;
 import tech.pegasys.teku.validator.client.restapi.apis.GetGraffiti;
@@ -50,6 +52,7 @@ import tech.pegasys.teku.validator.client.restapi.apis.GetRemoteKeys;
 import tech.pegasys.teku.validator.client.restapi.apis.PostKeys;
 import tech.pegasys.teku.validator.client.restapi.apis.PostRemoteKeys;
 import tech.pegasys.teku.validator.client.restapi.apis.PostVoluntaryExit;
+import tech.pegasys.teku.validator.client.restapi.apis.SetBuilderConfig;
 import tech.pegasys.teku.validator.client.restapi.apis.SetFeeRecipient;
 import tech.pegasys.teku.validator.client.restapi.apis.SetGasLimit;
 import tech.pegasys.teku.validator.client.restapi.apis.SetGraffiti;
@@ -61,6 +64,7 @@ public class ValidatorRestApi {
   public static final String TAG_KEY_MANAGEMENT = "Key Management";
   public static final String TAG_FEE_RECIPIENT = "Fee Recipient";
   public static final String TAG_GAS_LIMIT = "Gas Limit";
+  public static final String TAG_BUILDER_CONFIG = "Builder Config";
   public static final String TAG_GRAFFITI = "Graffiti";
 
   public static RestApi create(
@@ -133,6 +137,9 @@ public class ValidatorRestApi {
         .endpoint(new SetGasLimit(proposerConfigManager))
         .endpoint(new DeleteFeeRecipient(proposerConfigManager))
         .endpoint(new DeleteGasLimit(proposerConfigManager))
+        .endpoint(new GetBuilderConfig(proposerConfigManager))
+        .endpoint(new SetBuilderConfig(proposerConfigManager))
+        .endpoint(new DeleteBuilderConfig(proposerConfigManager))
         .endpoint(new PostVoluntaryExit(voluntaryExitDataProvider, keyManager))
         .endpoint(new GetGraffiti(keyManager))
         .endpoint(new SetGraffiti(keyManager, graffitiManager))

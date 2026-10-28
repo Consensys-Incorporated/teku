@@ -37,6 +37,7 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
+import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateAccessors;
@@ -314,6 +315,23 @@ public class GossipValidationHelper {
   public SafeFuture<Optional<BeaconState>> getStateForAttestationValidation(
       final AttestationData attestationData) {
     return attestationStateSelector.getStateToValidate(attestationData);
+  }
+
+  /**
+   * Returns the checkpoint state only if it's already available, never regenerating it, so that a
+   * checkpoint chosen by a gossip sender can't make us do expensive state work. The canonical
+   * checkpoint states are normally cached, as the epoch transition of the head is precomputed.
+   */
+  public Optional<BeaconState> getCheckpointStateIfAvailable(final Checkpoint checkpoint) {
+    final ReadOnlyStore store = recentChainData.getStore();
+    return store
+        .getCheckpointStateIfAvailable(checkpoint)
+        // The state of a block from the start of the epoch is also the checkpoint state
+        .or(
+            () ->
+                store
+                    .getBlockStateIfAvailable(checkpoint.getRoot())
+                    .filter(state -> state.getSlot().equals(checkpoint.getEpochStartSlot(spec))));
   }
 
   public UInt64 getGenesisTime() {

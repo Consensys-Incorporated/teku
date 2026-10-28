@@ -14,7 +14,9 @@
 package tech.pegasys.teku.spec.datastructures.forkchoice;
 
 import java.util.List;
+import java.util.NavigableMap;
 import java.util.Optional;
+import java.util.TreeMap;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
@@ -107,6 +109,45 @@ public interface ReadOnlyForkChoiceStrategy {
   }
 
   Optional<ForkChoiceNode> getParentBeaconBlockNode(ForkChoiceNode node);
+
+  /**
+   * Walks the chain of fork choice nodes leading to {@code node} and returns the node on that chain
+   * for every slot in {@code [startSlot, startSlot + count)} that has a block, indexed by slot, so
+   * that each entry carries the payload status the block has on that chain.
+   *
+   * <p>The default walks one step at a time through {@link
+   * #getParentBeaconBlockNode(ForkChoiceNode)} and {@link #blockSlot(Bytes32)}. Implementations
+   * backed by a shared structure should override it to walk under a single lock, so that a
+   * concurrent prune cannot truncate the walk part way.
+   *
+   * @return the nodes by slot; empty when {@code node} is unknown or {@code count} is zero
+   */
+  default NavigableMap<UInt64, ForkChoiceNode> getAncestorNodes(
+      final ForkChoiceNode node, final UInt64 startSlot, final UInt64 count) {
+    final NavigableMap<UInt64, ForkChoiceNode> nodes = new TreeMap<>();
+    if (count.isZero()) {
+      return nodes;
+    }
+    // minus(ONE) because the start block is included
+    final UInt64 endSlot = startSlot.plus(count).minusMinZero(1);
+    Optional<ForkChoiceNode> currentNode = Optional.of(node);
+    Optional<UInt64> currentSlot = blockSlot(node.blockRoot());
+    while (currentNode.isPresent() && currentSlot.isPresent()) {
+      final UInt64 slot = currentSlot.get();
+      if (slot.isLessThan(startSlot)) {
+        break;
+      }
+      if (slot.isLessThanOrEqualTo(endSlot)) {
+        nodes.put(slot, currentNode.get());
+      }
+      if (slot.equals(startSlot)) {
+        break;
+      }
+      currentNode = getParentBeaconBlockNode(currentNode.get());
+      currentSlot = currentNode.flatMap(parent -> blockSlot(parent.blockRoot()));
+    }
+    return nodes;
+  }
 
   Optional<SlotAndBlockRoot> findCommonAncestor(Bytes32 blockRoot1, Bytes32 blockRoot2);
 

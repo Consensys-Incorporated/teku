@@ -286,7 +286,8 @@ spotless {
 		allprojects.collect { project -> project.file('build.gradle') }.findAll { it.isFile() })
 		trimTrailingWhitespace()
 		endWithNewline()
-		greclipse()
+		// greclipse() temporarily disabled: it provisions Eclipse jars via P2 from download.eclipse.org,
+		// which is down for maintenance and fails every CI run. Re-enable once the site is back.
 	}
 }
 
