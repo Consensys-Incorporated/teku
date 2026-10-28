@@ -41,6 +41,23 @@ public class CompletionAwareResponseCallbackTest {
   }
 
   @Test
+  void getStreamClosedFutureDelegates() {
+    final SafeFuture<Void> streamClosed = new SafeFuture<>();
+    when(delegate.getStreamClosedFuture()).thenReturn(streamClosed);
+
+    assertThat(callback.getStreamClosedFuture()).isSameAs(streamClosed);
+  }
+
+  @Test
+  void isClosedDelegates() {
+    assertThat(callback.isClosed()).isFalse();
+
+    when(delegate.isClosed()).thenReturn(true);
+
+    assertThat(callback.isClosed()).isTrue();
+  }
+
+  @Test
   void completionActionRunsOnCompleteSuccessfully() {
     final AtomicInteger counter = new AtomicInteger(0);
     callback.onCompletion(counter::incrementAndGet);

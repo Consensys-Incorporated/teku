@@ -51,10 +51,13 @@ import tech.pegasys.teku.spec.logic.versions.deneb.types.VersionedHash;
 public class ThrottlingExecutionEngineClient implements ExecutionEngineClient {
   private final ExecutionEngineClient delegate;
   private final ThrottlingTaskQueue taskQueue;
+  private final ThrottlingTaskQueue payloadBodiesTaskQueue;
 
   public ThrottlingExecutionEngineClient(
       final ExecutionEngineClient delegate,
       final int maximumConcurrentRequests,
+      final int maximumConcurrentPayloadBodiesRequests,
+      final int maximumQueuedPayloadBodiesRequests,
       final MetricsSystem metricsSystem) {
     this.delegate = delegate;
     taskQueue =
@@ -65,6 +68,14 @@ public class ThrottlingExecutionEngineClient implements ExecutionEngineClient {
             TekuMetricCategory.BEACON,
             "ee_request_queue_size",
             "ee_request_queue_rejected");
+    payloadBodiesTaskQueue =
+        ThrottlingTaskQueue.create(
+            maximumConcurrentPayloadBodiesRequests,
+            maximumQueuedPayloadBodiesRequests,
+            metricsSystem,
+            TekuMetricCategory.BEACON,
+            "ee_payload_bodies_request_queue_size",
+            "ee_payload_bodies_request_queue_rejected");
   }
 
   @Override
@@ -207,9 +218,10 @@ public class ThrottlingExecutionEngineClient implements ExecutionEngineClient {
     return taskQueue.queueTask(() -> delegate.getBlobsV2(blobVersionedHashes));
   }
 
+  /** Peer-driven, so served from a separate bounded queue to never delay critical engine calls. */
   @Override
   public SafeFuture<Response<List<ExecutionPayloadBodyV2>>> getPayloadBodiesByHashV2(
       final List<Bytes32> blockHashes) {
-    return taskQueue.queueTask(() -> delegate.getPayloadBodiesByHashV2(blockHashes));
+    return payloadBodiesTaskQueue.queueTask(() -> delegate.getPayloadBodiesByHashV2(blockHashes));
   }
 }

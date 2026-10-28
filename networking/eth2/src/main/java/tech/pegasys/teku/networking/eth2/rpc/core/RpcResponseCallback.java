@@ -40,16 +40,29 @@ class RpcResponseCallback<TResponse extends SszData> implements ResponseCallback
   private final RpcStream rpcStream;
   private final AsyncRunner asyncRunner;
   private final String protocolId;
+  private final SafeFuture<Void> streamClosed;
 
   public RpcResponseCallback(
       final RpcStream rpcStream,
       final RpcResponseEncoder<TResponse, ?> responseEncoder,
       final AsyncRunner asyncRunner,
-      final String protocolId) {
+      final String protocolId,
+      final SafeFuture<Void> streamClosed) {
     this.rpcStream = rpcStream;
     this.responseEncoder = responseEncoder;
     this.asyncRunner = asyncRunner;
     this.protocolId = protocolId;
+    this.streamClosed = streamClosed;
+  }
+
+  @Override
+  public boolean isClosed() {
+    return streamClosed.isDone();
+  }
+
+  @Override
+  public SafeFuture<Void> getStreamClosedFuture() {
+    return streamClosed;
   }
 
   @Override

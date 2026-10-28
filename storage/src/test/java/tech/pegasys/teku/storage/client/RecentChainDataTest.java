@@ -770,6 +770,50 @@ class RecentChainDataTest {
   }
 
   @Test
+  public void getExecutionPayloadIfAvailable_shouldReturnEmptyWhenStoreUnavailable() {
+    initPreGenesis();
+
+    assertThat(recentChainData.getExecutionPayloadIfAvailable(Bytes32.ZERO)).isEmpty();
+  }
+
+  @Test
+  public void getExecutionPayloadIfAvailable_shouldReturnEmptyWhenPayloadUnavailable() {
+    initPostGenesis();
+
+    assertThat(recentChainData.getExecutionPayloadIfAvailable(dataStructureUtil.randomBytes32()))
+        .isEmpty();
+  }
+
+  @Test
+  public void getExecutionPayloadIfAvailable_shouldReturnPayloadWhenAvailable() {
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final StorageSystem gloasStorage =
+        InMemoryStorageSystemBuilder.create()
+            .specProvider(gloasSpec)
+            .storageMode(StateStorageMode.PRUNE)
+            .storeConfig(StoreConfig.builder().build())
+            .build();
+    final ChainBuilder gloasChainBuilder = gloasStorage.chainBuilder();
+    final RecentChainData gloasRecentChainData = gloasStorage.recentChainData();
+    final SignedBlockAndState gloasGenesis = gloasChainBuilder.generateGenesis();
+    gloasRecentChainData.initializeFromGenesis(gloasGenesis.getState(), UInt64.ZERO);
+
+    final SignedBlockAndState block = gloasChainBuilder.generateBlockAtSlot(1);
+    final SignedExecutionPayloadEnvelope executionPayload =
+        gloasChainBuilder.getExecutionPayloadAtSlot(block.getSlot()).orElseThrow();
+
+    assertThat(gloasRecentChainData.getExecutionPayloadIfAvailable(block.getRoot())).isEmpty();
+
+    final StoreTransaction transaction = gloasRecentChainData.startStoreTransaction();
+    transaction.putBlockAndState(block, gloasSpec.calculateBlockCheckpoints(block.getState()));
+    transaction.putExecutionPayload(executionPayload, false);
+    transaction.commit().join();
+
+    assertThat(gloasRecentChainData.getExecutionPayloadIfAvailable(block.getRoot()))
+        .contains(executionPayload);
+  }
+
+  @Test
   public void updateHead_reorgEventWhenChainSwitchesToNewBlockAtSameSlot() {
     initPreGenesis();
     final ChainBuilder chainBuilder =

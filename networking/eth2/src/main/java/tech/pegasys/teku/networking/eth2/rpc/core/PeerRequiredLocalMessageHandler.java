@@ -60,7 +60,7 @@ public abstract class PeerRequiredLocalMessageHandler<I, O> implements LocalMess
     }
 
     if (rootCause instanceof QueueIsFullException) {
-      LOG.trace("Storage queue full while processing {} request", type, error);
+      LOG.trace("Task queue full while processing {} request", type, error);
       callback.completeWithUnexpectedError(error);
       return;
     }

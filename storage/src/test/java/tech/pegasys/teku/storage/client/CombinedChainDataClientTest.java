@@ -25,13 +25,16 @@ import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.dataproviders.lookup.BlockProvider;
 import tech.pegasys.teku.dataproviders.lookup.EarliestBlobSidecarSlotProvider;
+import tech.pegasys.teku.dataproviders.lookup.ExecutionPayloadProvider;
 import tech.pegasys.teku.dataproviders.lookup.StateAndBlockSummaryProvider;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.SafeFutureAssert;
@@ -46,6 +49,7 @@ import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockAndMetaData;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
@@ -499,5 +503,84 @@ class CombinedChainDataClientTest {
                 return Optional.empty();
               }
             });
+  }
+
+  @Test
+  void getExecutionPayloadsByBlockRoots_shouldServeHotPayloadsAndBatchTheRestThroughProvider() {
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final DataStructureUtil gloasDataStructureUtil = new DataStructureUtil(gloasSpec);
+    final SignedExecutionPayloadEnvelope hotEnvelope =
+        gloasDataStructureUtil.randomSignedExecutionPayloadEnvelope(1);
+    final SignedExecutionPayloadEnvelope finalizedEnvelope =
+        gloasDataStructureUtil.randomSignedExecutionPayloadEnvelope(2);
+    final Bytes32 unknownRoot = gloasDataStructureUtil.randomBytes32();
+
+    final List<Set<Bytes32>> providerRequests = new ArrayList<>();
+    final ExecutionPayloadProvider executionPayloadProvider =
+        roots -> {
+          providerRequests.add(roots);
+          return SafeFuture.completedFuture(
+              Map.of(finalizedEnvelope.getBeaconBlockRoot(), finalizedEnvelope));
+        };
+    final CombinedChainDataClient clientWithProvider =
+        new CombinedChainDataClient(
+            recentChainData, historicalChainData, gloasSpec, executionPayloadProvider);
+    when(recentChainData.getExecutionPayloadIfAvailable(hotEnvelope.getBeaconBlockRoot()))
+        .thenReturn(Optional.of(hotEnvelope));
+
+    final SafeFuture<Map<Bytes32, SignedExecutionPayloadEnvelope>> result =
+        clientWithProvider.getExecutionPayloadsByBlockRoots(
+            Set.of(
+                hotEnvelope.getBeaconBlockRoot(),
+                finalizedEnvelope.getBeaconBlockRoot(),
+                unknownRoot));
+
+    assertThat(result)
+        .isCompletedWithValue(
+            Map.of(
+                hotEnvelope.getBeaconBlockRoot(),
+                hotEnvelope,
+                finalizedEnvelope.getBeaconBlockRoot(),
+                finalizedEnvelope));
+    // The roots not available in the hot store are resolved with a single provider call
+    assertThat(providerRequests)
+        .containsExactly(Set.of(finalizedEnvelope.getBeaconBlockRoot(), unknownRoot));
+  }
+
+  @Test
+  void getExecutionPayloadsByBlockRoots_shouldNotQueryProviderWhenAllPayloadsAreHot() {
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final DataStructureUtil gloasDataStructureUtil = new DataStructureUtil(gloasSpec);
+    final SignedExecutionPayloadEnvelope hotEnvelope =
+        gloasDataStructureUtil.randomSignedExecutionPayloadEnvelope(1);
+
+    final ExecutionPayloadProvider executionPayloadProvider =
+        roots -> {
+          throw new AssertionError("Provider should not be queried");
+        };
+    final CombinedChainDataClient clientWithProvider =
+        new CombinedChainDataClient(
+            recentChainData, historicalChainData, gloasSpec, executionPayloadProvider);
+    when(recentChainData.getExecutionPayloadIfAvailable(hotEnvelope.getBeaconBlockRoot()))
+        .thenReturn(Optional.of(hotEnvelope));
+
+    assertThat(
+            clientWithProvider.getExecutionPayloadsByBlockRoots(
+                Set.of(hotEnvelope.getBeaconBlockRoot())))
+        .isCompletedWithValue(Map.of(hotEnvelope.getBeaconBlockRoot(), hotEnvelope));
+  }
+
+  @Test
+  void getExecutionPayloadsByBlockRoots_shouldReturnEmptyMapForNoRoots() {
+    final ExecutionPayloadProvider executionPayloadProvider =
+        roots -> {
+          throw new AssertionError("Provider should not be queried");
+        };
+    final CombinedChainDataClient clientWithProvider =
+        new CombinedChainDataClient(
+            recentChainData, historicalChainData, spec, executionPayloadProvider);
+
+    assertThat(clientWithProvider.getExecutionPayloadsByBlockRoots(Set.of()))
+        .isCompletedWithValue(Map.of());
   }
 }

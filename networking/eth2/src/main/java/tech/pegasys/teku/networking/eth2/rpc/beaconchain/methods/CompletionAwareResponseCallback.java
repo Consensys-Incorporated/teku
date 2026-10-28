@@ -78,6 +78,16 @@ public class CompletionAwareResponseCallback<T> implements ResponseCallback<T> {
     }
   }
 
+  @Override
+  public boolean isClosed() {
+    return delegate.isClosed();
+  }
+
+  @Override
+  public SafeFuture<Void> getStreamClosedFuture() {
+    return delegate.getStreamClosedFuture();
+  }
+
   private void runCompletionActions() {
     if (!completionActionsRan.compareAndSet(false, true)) {
       return;

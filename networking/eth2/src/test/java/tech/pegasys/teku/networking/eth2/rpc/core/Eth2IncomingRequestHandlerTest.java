@@ -17,12 +17,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import io.netty.buffer.ByteBuf;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -141,6 +143,37 @@ public class Eth2IncomingRequestHandlerTest
     reqHandler.closed(nodeId, rpcStream);
 
     // Should not throw any exceptions
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  public void shouldReportStreamClosureToResponseCallback() {
+    final AtomicReference<ResponseCallback<SignedBeaconBlock>> capturedCallback =
+        new AtomicReference<>();
+    final Eth2RpcMethod<BeaconBlocksByRangeRequestMessage, SignedBeaconBlock> method =
+        beaconChainMethods.beaconBlocksByRange();
+    final RpcResponseEncoder<SignedBeaconBlock, ?> responseEncoder = mock(RpcResponseEncoder.class);
+    final Eth2IncomingRequestHandler<BeaconBlocksByRangeRequestMessage, SignedBeaconBlock>
+        requestHandler =
+            new Eth2IncomingRequestHandler<>(
+                method.getIds().get(0),
+                responseEncoder,
+                new RpcRequestDecoder<>(
+                    BeaconBlocksByRangeRequestMessage.SSZ_SCHEMA, getRpcEncoding()),
+                asyncRunner,
+                peerLookup,
+                (protocolId, peer, request, callback) -> capturedCallback.set(callback));
+
+    requestHandler.processData(nodeId, rpcStream, Utils.toByteBuf(requestData));
+
+    assertThat(capturedCallback.get()).isNotNull();
+    assertThat(capturedCallback.get().isClosed()).isFalse();
+    assertThat(capturedCallback.get().getStreamClosedFuture()).isNotDone();
+
+    requestHandler.closed(nodeId, rpcStream);
+
+    assertThat(capturedCallback.get().isClosed()).isTrue();
+    assertThat(capturedCallback.get().getStreamClosedFuture()).isCompleted();
   }
 
   @Test
