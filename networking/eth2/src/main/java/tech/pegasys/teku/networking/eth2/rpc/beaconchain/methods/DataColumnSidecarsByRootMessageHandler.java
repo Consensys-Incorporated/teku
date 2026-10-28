@@ -173,34 +173,19 @@ public class DataColumnSidecarsByRootMessageHandler
         dataColumnSidecarArchiveReconstructor.isSidecarPruned(
             identifier.slot(), identifier.columnIndex());
     if (isSuperNodePruned) {
-      return combinedChainDataClient
-          .getBlockByBlockRoot(identifier.blockRoot())
-          .thenCompose(
-              maybeBlock -> {
-                if (maybeBlock.isEmpty()) {
-                  LOG.debug(
-                      "Cannot reconstruct pruned data column sidecar slot {} index {} blockRoot {}: "
-                          + "block not available",
-                      identifier.slot(),
-                      identifier.columnIndex(),
-                      identifier.blockRoot());
-                  return SafeFuture.completedFuture(Optional.empty());
-                }
-
-                return dataColumnSidecarArchiveReconstructor
-                    .reconstructDataColumnSidecar(
-                        maybeBlock.get(), identifier.columnIndex(), messageId)
-                    .thenPeek(
-                        maybeSidecar ->
-                            maybeSidecar.ifPresent(
-                                sidecar ->
-                                    LOG.debug(
-                                        "Serving reconstructed data column sidecar slot {} index {} "
-                                            + "blockRoot {} for by-root request",
-                                        sidecar.getSlot(),
-                                        sidecar.getIndex(),
-                                        identifier.blockRoot())));
-              });
+      return dataColumnSidecarArchiveReconstructor
+          .reconstructDataColumnSidecar(
+              identifier.getSlotAndBlockRoot(), identifier.columnIndex(), messageId)
+          .thenPeek(
+              maybeSidecar ->
+                  maybeSidecar.ifPresent(
+                      sidecar ->
+                          LOG.debug(
+                              "Serving reconstructed data column sidecar slot {} index {} "
+                                  + "blockRoot {} for by-root request",
+                              sidecar.getSlot(),
+                              sidecar.getIndex(),
+                              identifier.blockRoot())));
     }
 
     return SafeFuture.completedFuture(Optional.empty());
