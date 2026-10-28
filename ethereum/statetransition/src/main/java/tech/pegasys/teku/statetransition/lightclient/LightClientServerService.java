@@ -18,6 +18,7 @@ import static tech.pegasys.teku.spec.config.SpecConfig.GENESIS_SLOT;
 
 import java.time.Duration;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -77,9 +78,12 @@ public class LightClientServerService
   private final AtomicReference<Optional<PendingBootstrap>> pendingBootstrap =
       new AtomicReference<>(Optional.empty());
   private final Map<UInt64, PendingUpdate> pendingUpdatesByPeriod = new ConcurrentHashMap<>();
+  private final Map<Bytes32, BoundaryBootstrap> boundaryBootstraps = new ConcurrentHashMap<>();
 
   /** Period of the latest finalized checkpoint seen; nothing below it can be orphaned. */
   private volatile UInt64 finalizedPeriod = UInt64.ZERO;
+
+  private volatile UInt64 finalizedSlot = UInt64.ZERO;
 
   public LightClientServerService(
       final Spec spec,
@@ -167,6 +171,8 @@ public class LightClientServerService
       return;
     }
 
+    captureBoundaryBootstraps(block);
+
     final Optional<SyncAggregate> maybeSyncAggregate =
         block.getMessage().getBody().getOptionalSyncAggregate();
 
@@ -207,6 +213,7 @@ public class LightClientServerService
 
     final SyncCommitteeUtil syncCommitteeUtil = spec.getSyncCommitteeUtilRequired(finalizedSlot);
     this.finalizedPeriod = syncCommitteeUtil.computeSyncCommitteePeriod(checkpoint.getEpoch());
+    this.finalizedSlot = finalizedSlot;
 
     final UInt64 oldestRetainedEpoch =
         checkpoint
@@ -218,8 +225,110 @@ public class LightClientServerService
     pendingUpdatesByPeriod.keySet().removeIf(period -> period.isLessThan(oldestRetainedPeriod));
 
     pendingBootstrap.getAndSet(Optional.empty()).ifPresent(this::retryPendingBootstrap);
-    storeBootstrap(checkpoint.getRoot(), retrieveStateByRoot.apply(checkpoint.getRoot()));
+    final SafeFuture<Optional<BeaconState>> finalizedState =
+        retrieveStateByRoot.apply(checkpoint.getRoot());
+    storeBootstrap(checkpoint.getRoot(), finalizedState);
+    storeFinalizedBoundaryBootstraps(finalizedSlot, finalizedState);
     pendingUpdatesByPeriod.forEach(this::retryPendingUpdate);
+  }
+
+  private void captureBoundaryBootstraps(final SignedBeaconBlock block) {
+    final UInt64 epochStartSlot =
+        spec.computeStartSlotAtEpoch(spec.computeEpochAtSlot(block.getSlot()));
+    if (block.getSlot().equals(epochStartSlot)) {
+      captureBoundaryBootstrap(epochStartSlot, block);
+    }
+    retrieveBlockByRoot
+        .apply(block.getParentRoot())
+        .thenAccept(
+            maybeParent ->
+                maybeParent.ifPresent(
+                    parent -> {
+                      final UInt64 nextEpochStartSlot =
+                          spec.computeStartSlotAtEpoch(
+                              spec.computeEpochAtSlot(parent.getSlot()).increment());
+                      if (nextEpochStartSlot.isLessThan(block.getSlot())) {
+                        captureBoundaryBootstrap(nextEpochStartSlot, parent);
+                      }
+                    }))
+        .finish(
+            error ->
+                LOG.warn(
+                    "Failed to capture light client bootstrap for parent of block {}",
+                    block.getRoot(),
+                    error));
+  }
+
+  private void captureBoundaryBootstrap(
+      final UInt64 boundarySlot, final SignedBeaconBlock boundaryBlock) {
+    if (boundarySlot.isLessThanOrEqualTo(finalizedSlot)) {
+      return;
+    }
+    boundaryBootstraps.computeIfAbsent(
+        boundaryBlock.getRoot(),
+        blockRoot ->
+            new BoundaryBootstrap(
+                boundarySlot,
+                blockRoot,
+                retrieveStateByRoot
+                    .apply(blockRoot)
+                    .thenApply(
+                        maybeState ->
+                            createBootstrap(
+                                boundaryBlock, maybeState.filter(this::isBlockPostState)))));
+  }
+
+  private void storeFinalizedBoundaryBootstraps(
+      final UInt64 finalizedSlot, final SafeFuture<Optional<BeaconState>> finalizedStateFuture) {
+    final List<BoundaryBootstrap> finalizedCandidates =
+        boundaryBootstraps.values().stream()
+            .filter(candidate -> candidate.slot().isLessThanOrEqualTo(finalizedSlot))
+            .toList();
+    boundaryBootstraps.values().removeAll(finalizedCandidates);
+    finalizedStateFuture
+        .thenAccept(
+            maybeState ->
+                maybeState.ifPresent(
+                    state ->
+                        finalizedCandidates.stream()
+                            .filter(candidate -> isCanonicalBoundary(state, candidate))
+                            .forEach(
+                                candidate ->
+                                    candidate
+                                        .bootstrap()
+                                        .finish(
+                                            maybeBootstrap ->
+                                                maybeBootstrap.ifPresent(
+                                                    lightClientStore::addBootstrap),
+                                            error ->
+                                                LOG.warn(
+                                                    "Failed to create light client bootstrap for block {}",
+                                                    candidate.blockRoot(),
+                                                    error)))))
+        .finish(error -> LOG.warn("Failed to store finalized light client bootstraps", error));
+  }
+
+  private boolean isCanonicalBoundary(
+      final BeaconState finalizedState, final BoundaryBootstrap candidate) {
+    final UInt64 slot = candidate.slot();
+    return slot.isLessThan(finalizedState.getSlot())
+        && finalizedState
+            .getSlot()
+            .isLessThanOrEqualTo(
+                slot.plus(spec.atSlot(slot).getConfig().getSlotsPerHistoricalRoot()))
+        && spec.getBlockRootAtSlot(finalizedState, slot).equals(candidate.blockRoot());
+  }
+
+  private boolean isBlockPostState(final BeaconState state) {
+    return state.getSlot().equals(state.getLatestBlockHeader().getSlot());
+  }
+
+  private Optional<LightClientBootstrap> createBootstrap(
+      final SignedBeaconBlock block, final Optional<BeaconState> maybeState) {
+    return maybeState.flatMap(
+        state ->
+            spec.getLightClientUtil(block.getSlot())
+                .map(util -> util.createLightClientBootstrap(state, block)));
   }
 
   private void retryPendingBootstrap(final PendingBootstrap pending) {
@@ -278,10 +387,7 @@ public class LightClientServerService
     retrieveBlockByRoot
         .apply(blockRoot)
         .thenCombine(
-            stateFuture.thenApply(
-                maybeState ->
-                    maybeState.filter(
-                        state -> state.getSlot().equals(state.getLatestBlockHeader().getSlot()))),
+            stateFuture.thenApply(maybeState -> maybeState.filter(this::isBlockPostState)),
             (maybeBlock, maybeState) -> {
               if (maybeBlock.isEmpty()) {
                 maybeState
@@ -296,11 +402,7 @@ public class LightClientServerService
                                         state.createCurrentSyncCommitteeProof()))));
                 return Optional.<LightClientBootstrap>empty();
               }
-              final SignedBeaconBlock block = maybeBlock.get();
-              return maybeState.flatMap(
-                  state ->
-                      spec.getLightClientUtil(block.getSlot())
-                          .map(util -> util.createLightClientBootstrap(state, block)));
+              return createBootstrap(maybeBlock.get(), maybeState);
             })
         .finish(
             maybeBootstrap -> maybeBootstrap.ifPresent(lightClientStore::addBootstrap),
@@ -468,6 +570,9 @@ public class LightClientServerService
     }
     return retrieveBlockByRoot.apply(spec.getBlockRootAtSlot(attestedState, GENESIS_SLOT));
   }
+
+  private record BoundaryBootstrap(
+      UInt64 slot, Bytes32 blockRoot, SafeFuture<Optional<LightClientBootstrap>> bootstrap) {}
 
   private record PendingBootstrap(
       Bytes32 blockRoot,
