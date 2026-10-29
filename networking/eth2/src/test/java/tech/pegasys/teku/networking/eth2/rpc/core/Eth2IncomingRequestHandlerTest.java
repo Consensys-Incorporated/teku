@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -112,22 +113,35 @@ public class Eth2IncomingRequestHandlerTest
   }
 
   @Test
-  public void shouldReleaseBuffersWhenStreamClosedAfterPartialData() {
-    // Send partial data (incomplete request) - this will cause the decoder to retain the buffer
+  public void shouldNotRetainInputWhenStreamClosedAfterPartialData() {
+    // Send partial data (incomplete request); the decoder copies what it has to keep
     final ByteBuf partialData = Utils.toByteBuf(requestData.slice(0, requestData.size() / 2));
     final int initialRefCnt = partialData.refCnt();
 
     reqHandler.processData(nodeId, rpcStream, partialData);
-
-    // Buffer should have been retained by the decoder's CompositeByteBuf
-    assertThat(partialData.refCnt()).isGreaterThanOrEqualTo(initialRefCnt);
-
-    // Close the stream - this should release the retained buffers
-    reqHandler.closed(nodeId, rpcStream);
-
-    // After close, the buffer's reference count should be back to initial
-    // (the retained slice should have been released)
     assertThat(partialData.refCnt()).isEqualTo(initialRefCnt);
+
+    reqHandler.closed(nodeId, rpcStream);
+    assertThat(partialData.refCnt()).isEqualTo(initialRefCnt);
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  public void closedShouldCloseRequestDecoder() {
+    final RpcRequestDecoder<BeaconBlocksByRangeRequestMessage> requestDecoder =
+        mock(RpcRequestDecoder.class);
+    final Eth2IncomingRequestHandler<BeaconBlocksByRangeRequestMessage, SignedBeaconBlock> handler =
+        new Eth2IncomingRequestHandler<>(
+            "protocol",
+            mock(RpcResponseEncoder.class),
+            requestDecoder,
+            asyncRunner,
+            peerLookup,
+            mock(LocalMessageHandler.class));
+
+    handler.closed(nodeId, rpcStream);
+
+    verify(requestDecoder).close();
   }
 
   @Test
