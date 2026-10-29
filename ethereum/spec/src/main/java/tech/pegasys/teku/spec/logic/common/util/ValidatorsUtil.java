@@ -51,8 +51,19 @@ public class ValidatorsUtil {
   }
 
   public boolean isEligibleForActivation(final UInt64 finalizedEpoch, final Validator validator) {
-    return validator.getActivationEligibilityEpoch().compareTo(finalizedEpoch) <= 0
-        && validator.getActivationEpoch().equals(SpecConfig.FAR_FUTURE_EPOCH);
+    return isEligibleForActivation(
+        finalizedEpoch,
+        validator.getActivationEpoch().longValue(),
+        validator.getActivationEligibilityEpoch().longValue());
+  }
+
+  /** is_eligible_for_activation from the validator's raw uint64 epoch bits, compared unsigned. */
+  public static boolean isEligibleForActivation(
+      final UInt64 finalizedEpoch,
+      final long activationEpoch,
+      final long activationEligibilityEpoch) {
+    return Long.compareUnsigned(activationEligibilityEpoch, finalizedEpoch.longValue()) <= 0
+        && activationEpoch == SpecConfig.FAR_FUTURE_EPOCH.longValue();
   }
 
   public Optional<Integer> getValidatorIndex(
