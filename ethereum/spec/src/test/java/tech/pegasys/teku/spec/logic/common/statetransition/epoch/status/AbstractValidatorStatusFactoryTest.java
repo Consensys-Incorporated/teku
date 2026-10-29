@@ -17,6 +17,7 @@ import static java.util.Collections.emptyList;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -303,19 +304,77 @@ public abstract class AbstractValidatorStatusFactoryTest {
     final UInt64 currentEpoch = spec.computeEpochAtSlot(state.getSlot());
     final ValidatorStatuses validatorStatuses = factory.createValidatorStatuses(state);
 
-    // Created ValidatorStatus for all validators in state
-    verify(factory, times(validatorCount)).createValidatorStatus(any(), any(), any());
+    // Statuses of the validators in the state are decoded from the packed validator bytes, not
+    // from Validator views
+    assertThat(validatorStatuses.getValidatorCount()).isEqualTo(validatorCount);
+    verify(factory, never()).createValidatorStatus(any(), any(), any());
 
     final Validator newValidator = dataStructureUtil.validatorBuilder().slashed(true).build();
     final ValidatorStatus newValidatorStatus =
         factory.createValidatorStatus(newValidator, currentEpoch.minusMinZero(1), currentEpoch);
     // Created ValidatorStatus for the new validator
-    verify(factory, times(validatorCount + 1)).createValidatorStatus(any(), any(), any());
+    verify(factory, times(1)).createValidatorStatus(any(), any(), any());
 
     factory.recreateValidatorStatuses(validatorStatuses, List.of(newValidatorStatus));
 
     // Verifying that recreateValidatorStatuses does not trigger any ValidatorStatus creation
-    verify(factory, times(validatorCount + 1)).createValidatorStatus(any(), any(), any());
+    verify(factory, times(1)).createValidatorStatus(any(), any(), any());
+  }
+
+  @Test
+  public void shouldDecodeStatusesFromBytesLikeFromViews() {
+    final ValidatorStatusFactory factory = createFactory();
+    final BeaconState state =
+        dataStructureUtil
+            .stateBuilder(spec.getGenesisSpec().getMilestone(), 300, 1)
+            .build()
+            .updated(
+                mutable -> {
+                  // Mix of active, exited, withdrawable, slashed and pending validators
+                  mutable
+                      .getValidators()
+                      .update(0, v -> v.withSlashed(true).withExitEpoch(UInt64.valueOf(3)));
+                  mutable.getValidators().update(1, v -> v.withActivationEpoch(FAR_FUTURE_EPOCH));
+                  mutable
+                      .getValidators()
+                      .update(
+                          2,
+                          v ->
+                              v.withExitEpoch(UInt64.ZERO)
+                                  .withWithdrawableEpoch(UInt64.ZERO)
+                                  .withEffectiveBalance(UInt64.ZERO));
+                });
+    final UInt64 currentEpoch = spec.computeEpochAtSlot(state.getSlot());
+    final UInt64 previousEpoch = currentEpoch.minusMinZero(1);
+    // The built state has a plain validators tree, the deserialized one packs supernodes
+    assertStatusesMatchViews(factory, state, previousEpoch, currentEpoch);
+    assertStatusesMatchViews(
+        factory, spec.deserializeBeaconState(state.sszSerialize()), previousEpoch, currentEpoch);
+  }
+
+  private static void assertStatusesMatchViews(
+      final ValidatorStatusFactory factory,
+      final BeaconState state,
+      final UInt64 previousEpoch,
+      final UInt64 currentEpoch) {
+    final List<ValidatorStatus> statuses =
+        ((AbstractValidatorStatusFactory) factory)
+            .createInitialValidatorStatuses(state.getValidators(), currentEpoch, previousEpoch);
+    assertThat(statuses).hasSize(state.getValidators().size());
+    for (int i = 0; i < statuses.size(); i++) {
+      final ValidatorStatus expected =
+          factory.createValidatorStatus(state.getValidators().get(i), previousEpoch, currentEpoch);
+      final ValidatorStatus actual = statuses.get(i);
+      assertThat(actual.isSlashed()).isEqualTo(expected.isSlashed());
+      assertThat(actual.isWithdrawableInCurrentEpoch())
+          .isEqualTo(expected.isWithdrawableInCurrentEpoch());
+      assertThat(actual.getCurrentEpochEffectiveBalance())
+          .isEqualTo(expected.getCurrentEpochEffectiveBalance());
+      assertThat(actual.getWithdrawableEpoch()).isEqualTo(expected.getWithdrawableEpoch());
+      assertThat(actual.isActiveInCurrentEpoch()).isEqualTo(expected.isActiveInCurrentEpoch());
+      assertThat(actual.isActiveInPreviousEpoch()).isEqualTo(expected.isActiveInPreviousEpoch());
+      assertThat(actual.isActiveInNextEpoch()).isEqualTo(expected.isActiveInNextEpoch());
+    }
   }
 
   private ValidatorStatus createValidator(final int effectiveBalance) {

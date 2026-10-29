@@ -19,10 +19,10 @@ import static tech.pegasys.teku.spec.logic.common.helpers.MathHelpers.uint64ToBy
 
 import it.unimi.dsi.fastutil.ints.Int2IntMap;
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.Collection;
 import java.util.Optional;
-import java.util.stream.IntStream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
@@ -36,6 +36,7 @@ import tech.pegasys.teku.spec.constants.Domain;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
+import tech.pegasys.teku.spec.datastructures.state.ValidatorFields;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
 
@@ -122,11 +123,23 @@ public abstract class BeaconStateAccessors {
         .get(
             epoch,
             e -> {
-              SszList<Validator> validators = state.getValidators();
-              return IntList.of(
-                  IntStream.range(0, validators.size())
-                      .filter(index -> predicates.isActiveValidator(validators.get(index), epoch))
-                      .toArray());
+              // Read from the packed validator bytes: no Validator view per index
+              final SszList<Validator> validators = state.getValidators();
+              final IntArrayList activeIndices = new IntArrayList(validators.size());
+              final long epochBits = epoch.longValue();
+              validators.forEachElementSsz(
+                  0,
+                  (index, data, offset) -> {
+                    if (predicates.isActiveValidator(
+                        ValidatorFields.activationEpoch(data, offset),
+                        ValidatorFields.exitEpoch(data, offset),
+                        epochBits)) {
+                      activeIndices.add(index);
+                    }
+                    return true;
+                  });
+              // Copied to its exact size: the cached list must not pin the registry-sized buffer
+              return IntList.of(activeIndices.toIntArray());
             });
   }
 
