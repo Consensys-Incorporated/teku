@@ -39,6 +39,7 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
 import tech.pegasys.teku.storage.archive.BlobSidecarsArchiver;
+import tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreDeserializationException;
 
 class ChainStorageCustodyTest {
   private final Spec spec = TestSpecFactory.createMinimalFulu();
@@ -89,6 +90,37 @@ class ChainStorageCustodyTest {
   void incompleteProofArchiveDoesNotSatisfyFullCustody() {
     when(database.getDataColumnSidecarsProofs(slot)).thenReturn(Optional.of(List.of()));
     assertThat(storage.getCustodyDataColumnIdentifiers(slot)).isCompletedWithValue(firstHalf);
+  }
+
+  @Test
+  void malformedProofArchiveReturnsPhysicalIdentifiers() {
+    when(database.getDataColumnSidecarsProofs(slot))
+        .thenThrow(new KvStoreDeserializationException("malformed proofs"));
+
+    assertThat(storage.getCustodyDataColumnIdentifiers(slot)).isCompletedWithValue(firstHalf);
+    verify(database, never()).getSlotForFinalizedBlockRoot(any());
+  }
+
+  @Test
+  void proofArchiveReadFailurePropagates() {
+    when(database.getDataColumnSidecarsProofs(slot))
+        .thenThrow(new IllegalStateException("proof read failed"));
+
+    assertThat(storage.getCustodyDataColumnIdentifiers(slot)).isCompletedExceptionally();
+  }
+
+  @Test
+  void rangeQueryContinuesAfterMalformedProofArchive() {
+    final UInt64 malformedSlot = slot.decrement();
+    final List<DataColumnSlotAndIdentifier> physical = identifiers(malformedSlot, columns / 2);
+    when(database.streamDataColumnIdentifiers(malformedSlot, slot))
+        .thenReturn(Stream.concat(physical.stream(), firstHalf.stream()));
+    when(database.getDataColumnSidecarsProofs(malformedSlot))
+        .thenThrow(new KvStoreDeserializationException("malformed proofs"));
+
+    assertThat(storage.getCustodyDataColumnIdentifiers(malformedSlot, slot))
+        .isCompletedWithValue(
+            Stream.concat(physical.stream(), identifiers(slot, columns).stream()).toList());
   }
 
   @Test

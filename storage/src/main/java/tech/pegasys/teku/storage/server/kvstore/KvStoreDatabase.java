@@ -1530,10 +1530,20 @@ public class KvStoreDatabase implements Database {
 
   private boolean hasCompleteSidecarArchive(
       final UInt64 slot, final int firstHalfColumnCount, final int halfColumns) {
-    return firstHalfColumnCount == halfColumns
-        && getDataColumnSidecarsProofs(slot)
-            .map(proofs -> proofs.size() == halfColumns)
-            .orElse(false);
+    if (firstHalfColumnCount != halfColumns) {
+      return false;
+    }
+    try {
+      return getDataColumnSidecarsProofs(slot)
+          .map(proofs -> proofs.size() == halfColumns)
+          .orElse(false);
+    } catch (final KvStoreDeserializationException error) {
+      LOG.warn(
+          "Ignoring malformed archived proofs at slot {}: a complete column set is required to rebuild them",
+          slot,
+          error);
+      return false;
+    }
   }
 
   private boolean hasUniqueCompleteCanonicalBlock(

@@ -61,6 +61,7 @@ import tech.pegasys.teku.storage.api.VoteUpdateChannel;
 import tech.pegasys.teku.storage.api.WeakSubjectivityState;
 import tech.pegasys.teku.storage.api.WeakSubjectivityUpdate;
 import tech.pegasys.teku.storage.archive.BlobSidecarsArchiver;
+import tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreDeserializationException;
 import tech.pegasys.teku.storage.server.state.FinalizedStateCache;
 
 public class ChainStorage
@@ -496,12 +497,7 @@ public class ChainStorage
     }
     // Read proofs after identifiers so concurrent archival cannot hide availability.
     // Avoid loading the finalized block entirely when no archive exists.
-    final boolean hasCompleteArchive =
-        database
-            .getDataColumnSidecarsProofs(slot)
-            .map(proofs -> proofs.size() == halfColumns)
-            .orElse(false);
-    if (!hasCompleteArchive) {
+    if (!hasCompleteSidecarArchive(slot, halfColumns)) {
       return identifiers;
     }
     final Optional<Bytes32> canonicalRoot =
@@ -516,6 +512,18 @@ public class ChainStorage
     }
     return expandCanonicalCustodyIdentifiers(
         slot, canonicalRoot.get(), identifiers, numberOfColumns);
+  }
+
+  private boolean hasCompleteSidecarArchive(final UInt64 slot, final int halfColumns) {
+    try {
+      return database
+          .getDataColumnSidecarsProofs(slot)
+          .map(proofs -> proofs.size() == halfColumns)
+          .orElse(false);
+    } catch (final KvStoreDeserializationException error) {
+      LOG.warn("Ignoring malformed archived proofs for custody at slot {}", slot, error);
+      return false;
+    }
   }
 
   private boolean hasCompletePhysicalColumns(
