@@ -30,6 +30,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.config.SpecConfigElectra;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
+import tech.pegasys.teku.spec.datastructures.state.ValidatorFields;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.BeaconStateElectra;
@@ -37,6 +38,7 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingConsolidation;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDeposit;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateMutators;
+import tech.pegasys.teku.spec.logic.common.statetransition.epoch.status.ProgressiveTotalBalancesUpdates;
 import tech.pegasys.teku.spec.logic.common.statetransition.epoch.status.ValidatorStatus;
 import tech.pegasys.teku.spec.logic.common.statetransition.epoch.status.ValidatorStatusFactory;
 import tech.pegasys.teku.spec.logic.common.statetransition.epoch.status.ValidatorStatuses;
@@ -100,48 +102,42 @@ public class EpochProcessorElectra extends EpochProcessorCapella {
       final UInt64 activationEpoch =
           miscHelpers.computeActivationExitEpoch(miscHelpers.computeEpochAtSlot(state.getSlot()));
 
-      for (int index = 0; index < validators.size(); index++) {
-        final ValidatorStatus status = statuses.get(index);
-
-        final Validator validator = validators.get(index);
-        if (isEligibleForActivationQueue(validator, status)) {
-          state
-              .getValidators()
-              .update(index, v -> v.withActivationEligibilityEpoch(currentEpoch.plus(UInt64.ONE)));
-        } else if (status.isActiveInCurrentEpoch()
-            && status.getCurrentEpochEffectiveBalance().isLessThanOrEqualTo(ejectionBalance)) {
-          beaconStateMutators.initiateValidatorExit(state, index, validatorExitContextSupplier);
-        } else if (isEligibleForActivation(finalizedEpoch, validator)) {
-          state.getValidators().update(index, v -> v.withActivationEpoch(activationEpoch));
-        }
-      }
+      // The spec's single loop over the packed validator bytes. Updating while walking is safe:
+      // the walk reads an immutable tree and each action changes only the validator it visits.
+      validators.forEachElementSsz(
+          0,
+          (index, data, offset) -> {
+            final ValidatorStatus status = statuses.get(index);
+            final long eligibilityEpoch = ValidatorFields.activationEligibilityEpoch(data, offset);
+            if (isEligibleForActivationQueue(eligibilityEpoch, status)) {
+              validators.update(
+                  index, v -> v.withActivationEligibilityEpoch(currentEpoch.plus(UInt64.ONE)));
+            } else if (status.isActiveInCurrentEpoch()
+                && status.getCurrentEpochEffectiveBalance().isLessThanOrEqualTo(ejectionBalance)) {
+              beaconStateMutators.initiateValidatorExit(state, index, validatorExitContextSupplier);
+            } else if (ValidatorsUtil.isEligibleForActivation(
+                finalizedEpoch, ValidatorFields.activationEpoch(data, offset), eligibilityEpoch)) {
+              validators.update(index, v -> v.withActivationEpoch(activationEpoch));
+            }
+            return true;
+          });
     } catch (IllegalArgumentException e) {
       throw new EpochProcessingException(e);
     }
   }
 
-  protected boolean isEligibleForActivation(
-      final UInt64 finalizedEpoch, final Validator validator) {
-    return validator.getActivationEpoch().equals(FAR_FUTURE_EPOCH)
-        && validator.getActivationEligibilityEpoch().isLessThanOrEqualTo(finalizedEpoch);
-  }
-
   /**
    * is_eligible_for_activation_queue
    *
+   * @param activationEligibilityEpoch - raw activation eligibility epoch of the validator
    * @param status - Validator status
    */
   @Override
   protected boolean isEligibleForActivationQueue(
-      final Validator validator, final ValidatorStatus status) {
+      final long activationEligibilityEpoch, final ValidatorStatus status) {
     return !status.isActiveInCurrentEpoch()
         && status.getCurrentEpochEffectiveBalance().isGreaterThanOrEqualTo(minActivationBalance)
-        && validator.getActivationEligibilityEpoch().equals(SpecConfig.FAR_FUTURE_EPOCH);
-  }
-
-  @Override
-  protected UInt64 getEffectiveBalanceLimitForValidator(final Validator validator) {
-    return miscHelpers.getMaxEffectiveBalance(validator);
+        && activationEligibilityEpoch == SpecConfig.FAR_FUTURE_EPOCH.longValue();
   }
 
   // process_effective_balance_updates
@@ -155,32 +151,43 @@ public class EpochProcessorElectra extends EpochProcessorCapella {
     final UInt64 hysteresisDownwardMultiplier = specConfig.getHysteresisDownwardMultiplier();
     final UInt64 hysteresisQuotient = specConfig.getHysteresisQuotient();
     final UInt64 effectiveBalanceIncrement = specConfig.getEffectiveBalanceIncrement();
-    for (int index = 0; index < statuses.size(); index++) {
-      final ValidatorStatus status = statuses.get(index);
-      final UInt64 balance = balances.getElement(index);
-
-      final UInt64 hysteresisIncrement = effectiveBalanceIncrement.dividedBy(hysteresisQuotient);
-      final UInt64 currentEffectiveBalance = status.getCurrentEpochEffectiveBalance();
-      final Validator validator = validators.get(index);
-      final UInt64 maxEffectiveBalance = getEffectiveBalanceLimitForValidator(validator);
-      if (shouldDecreaseEffectiveBalance(
-              balance, hysteresisIncrement, currentEffectiveBalance, hysteresisDownwardMultiplier)
-          || shouldIncreaseEffectiveBalance(
-              balance,
-              hysteresisIncrement,
-              currentEffectiveBalance,
-              hysteresisUpwardMultiplier,
-              maxEffectiveBalance)) {
-        final UInt64 effectiveBalanceLimit = getEffectiveBalanceLimitForValidator(validator);
-        final UInt64 newEffectiveBalance =
-            effectiveBalanceLimit.min(
-                balance.minus(balance.mod(effectiveBalanceIncrement)).min(maxEffectiveBalance));
-        BeaconStateCache.getTransitionCaches(state)
-            .getProgressiveTotalBalances()
-            .onEffectiveBalanceChange(status, newEffectiveBalance);
-        validators.set(index, validator.withEffectiveBalance(newEffectiveBalance));
-      }
-    }
+    final UInt64 hysteresisIncrement = effectiveBalanceIncrement.dividedBy(hysteresisQuotient);
+    final MiscHelpersElectra miscHelpersElectra = MiscHelpersElectra.required(miscHelpers);
+    final ProgressiveTotalBalancesUpdates progressiveTotalBalances =
+        BeaconStateCache.getTransitionCaches(state).getProgressiveTotalBalances();
+    // The spec's loop over the packed validator bytes (only the withdrawal credentials prefix is
+    // read). Updating while walking is safe: the walk reads an immutable tree and each update
+    // changes only the validator it visits.
+    validators.forEachElementSsz(
+        0,
+        (index, data, offset) -> {
+          if (index >= statuses.size()) {
+            return false;
+          }
+          final ValidatorStatus status = statuses.get(index);
+          final UInt64 balance = balances.getElement(index);
+          final UInt64 currentEffectiveBalance = status.getCurrentEpochEffectiveBalance();
+          final UInt64 maxEffectiveBalance =
+              miscHelpersElectra.getMaxEffectiveBalanceForCredentialsPrefix(
+                  ValidatorFields.withdrawalCredentialsPrefix(data, offset));
+          if (shouldDecreaseEffectiveBalance(
+                  balance,
+                  hysteresisIncrement,
+                  currentEffectiveBalance,
+                  hysteresisDownwardMultiplier)
+              || shouldIncreaseEffectiveBalance(
+                  balance,
+                  hysteresisIncrement,
+                  currentEffectiveBalance,
+                  hysteresisUpwardMultiplier,
+                  maxEffectiveBalance)) {
+            final UInt64 newEffectiveBalance =
+                balance.minus(balance.mod(effectiveBalanceIncrement)).min(maxEffectiveBalance);
+            progressiveTotalBalances.onEffectiveBalanceChange(status, newEffectiveBalance);
+            validators.set(index, validators.get(index).withEffectiveBalance(newEffectiveBalance));
+          }
+          return true;
+        });
   }
 
   /** apply_pending_deposit */

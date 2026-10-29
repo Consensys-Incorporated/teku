@@ -41,7 +41,6 @@ public class MiscHelpersElectra extends MiscHelpersDeneb {
   // 2**16 - 1
   public static final UInt64 MAX_RANDOM_VALUE = UInt64.valueOf(65535);
   private final SpecConfigElectra specConfigElectra;
-  private final PredicatesElectra predicatesElectra;
 
   public MiscHelpersElectra(
       final SpecConfigElectra specConfig,
@@ -52,7 +51,6 @@ public class MiscHelpersElectra extends MiscHelpersDeneb {
         predicates,
         SchemaDefinitionsDeneb.required(schemaDefinitions));
     this.specConfigElectra = specConfig;
-    this.predicatesElectra = predicates;
   }
 
   public static MiscHelpersElectra required(final MiscHelpers miscHelpers) {
@@ -108,7 +106,15 @@ public class MiscHelpersElectra extends MiscHelpersDeneb {
 
   @Override
   public UInt64 getMaxEffectiveBalance(final Validator validator) {
-    return predicatesElectra.hasCompoundingWithdrawalCredential(validator)
+    return getMaxEffectiveBalanceForCredentialsPrefix(validator.getWithdrawalCredentials().get(0));
+  }
+
+  /**
+   * get_max_effective_balance from the first byte of the validator's withdrawal credentials, for
+   * scans reading the packed validator bytes.
+   */
+  public UInt64 getMaxEffectiveBalanceForCredentialsPrefix(final byte withdrawalCredentialsPrefix) {
+    return PredicatesElectra.isCompoundingWithdrawalCredential(withdrawalCredentialsPrefix)
         ? specConfigElectra.getMaxEffectiveBalanceElectra()
         : specConfigElectra.getMinActivationBalance();
   }

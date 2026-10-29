@@ -23,6 +23,8 @@ import java.util.stream.Stream;
 import tech.pegasys.teku.infrastructure.ssz.InvalidValueSchemaException;
 import tech.pegasys.teku.infrastructure.ssz.SszComposite;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
+import tech.pegasys.teku.infrastructure.ssz.SszElementVisitor;
+import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.SszMutableComposite;
 import tech.pegasys.teku.infrastructure.ssz.SszMutableData;
 import tech.pegasys.teku.infrastructure.ssz.SszMutableRefComposite;
@@ -134,6 +136,37 @@ public abstract class AbstractSszMutableComposite<
       }
       return newChangeRecord.getRefValue();
     }
+  }
+
+  /**
+   * See {@link SszList#forEachElementSsz}: the elements changed so far are serialized from their
+   * changes, the others are read from the backing immutable data. Supported on collections only.
+   */
+  public boolean forEachElementSsz(final int fromIndex, final SszElementVisitor visitor) {
+    // Snapshot the size and the changed indices first: the visitor may change the element it visits
+    final int size = size();
+    final int[] changedIndices = childrenChanges.keySet().tailSet(fromIndex).toIntArray();
+    final int[] nextChanged = {0};
+    final boolean completed =
+        backingImmutableData.forEachElementSsz(
+            fromIndex,
+            (index, data, offset) -> {
+              if (nextChanged[0] < changedIndices.length
+                  && changedIndices[nextChanged[0]] == index) {
+                nextChanged[0]++;
+                return visitor.visit(index, get(index).sszSerialize(), 0);
+              }
+              return visitor.visit(index, data, offset);
+            });
+    if (!completed) {
+      return false;
+    }
+    for (int i = Math.max(fromIndex, backingImmutableData.size()); i < size; i++) {
+      if (!visitor.visit(i, get(i).sszSerialize(), 0)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   @Override

@@ -85,6 +85,26 @@ public class ValidatorIndexCacheTest {
   }
 
   @Test
+  public void shouldPopulateCacheItemsFromPackedState() {
+    // A deserialized state packs its validators in supernodes: the scan reads their bytes
+    final BeaconState packedState =
+        dataStructureUtil.getSpec().deserializeBeaconState(state.sszSerialize());
+    final ValidatorIndexCache validatorIndexCache = new ValidatorIndexCache();
+    final int lastIndex = packedState.getValidators().size() - 1;
+    final BLSPublicKey foundKey = packedState.getValidators().get(lastIndex).getPublicKey();
+
+    assertThat(validatorIndexCache.getValidatorIndex(packedState, foundKey)).contains(lastIndex);
+    assertThat(validatorIndexCache.getLastCachedIndex()).isEqualTo(lastIndex);
+    for (int i = 0; i <= lastIndex; i++) {
+      assertThat(
+              validatorIndexCache
+                  .getValidatorIndices()
+                  .getCached(packedState.getValidators().get(i).getPublicKey()))
+          .contains(i);
+    }
+  }
+
+  @Test
   public void shouldFilterItemsBeyondStateIndex() {
     final ValidatorIndexCache validatorIndexCache = new ValidatorIndexCache();
     validatorIndexCache.invalidateWithNewValue(missingPublicKey, 100);

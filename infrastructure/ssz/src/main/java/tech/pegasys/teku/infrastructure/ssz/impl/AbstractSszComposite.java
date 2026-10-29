@@ -13,13 +13,25 @@
 
 package tech.pegasys.teku.infrastructure.ssz.impl;
 
+import static com.google.common.base.Preconditions.checkArgument;
+
 import java.util.function.Supplier;
+import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.infrastructure.ssz.SszComposite;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
+import tech.pegasys.teku.infrastructure.ssz.SszElementVisitor;
+import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.cache.ArrayIntCache;
 import tech.pegasys.teku.infrastructure.ssz.cache.IntCache;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszCollectionSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszCompositeSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszSchema;
+import tech.pegasys.teku.infrastructure.ssz.tree.BranchNode;
+import tech.pegasys.teku.infrastructure.ssz.tree.GIndexUtil;
+import tech.pegasys.teku.infrastructure.ssz.tree.GIndexUtil.NodeRelation;
+import tech.pegasys.teku.infrastructure.ssz.tree.SszSuperNode;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
+import tech.pegasys.teku.infrastructure.ssz.tree.TreeVisitor;
 
 /**
  * Base backing class for immutable composite ssz structures (lists, vectors, containers)
@@ -156,6 +168,18 @@ public abstract class AbstractSszComposite<SszChildT extends SszData>
    */
   protected abstract void checkIndex(int index);
 
+  /** See {@link SszList#forEachElementSsz}. Supported on collections only. */
+  public boolean forEachElementSsz(final int fromIndex, final SszElementVisitor visitor) {
+    checkArgument(fromIndex >= 0, "Negative start index %s", fromIndex);
+    final int size = size();
+    if (fromIndex >= size) {
+      return true;
+    }
+    final ElementWalker walker = new ElementWalker(getSchema(), size, fromIndex, visitor);
+    getBackingNode().iterate(GIndexUtil.SELF_G_INDEX, walker.nextGIndex, walker);
+    return !walker.stopped;
+  }
+
   @Override
   public boolean equals(final Object o) {
     if (this == o) {
@@ -171,5 +195,88 @@ public abstract class AbstractSszComposite<SszChildT extends SszData>
   @Override
   public int hashCode() {
     return hashTreeRoot().slice(28).toInt();
+  }
+
+  /**
+   * Walks the backing tree in order (self, left subtree, right subtree), which is element order on
+   * bounded and progressive lists alike, following the generalized index of the next element. The
+   * walk starts at the first element and stops after the last one, so the zero subtrees past the
+   * end of the list are never visited.
+   */
+  private static final class ElementWalker implements TreeVisitor {
+    private final SszCompositeSchema<?> schema;
+    private final SszSchema<?> elementSchema;
+    private final int elementSize;
+    private final int size;
+    private final SszElementVisitor visitor;
+    private int next;
+    private long nextGIndex;
+    private boolean stopped;
+
+    private ElementWalker(
+        final SszCompositeSchema<?> schema,
+        final int size,
+        final int fromIndex,
+        final SszElementVisitor visitor) {
+      checkArgument(
+          schema instanceof SszCollectionSchema<?, ?> collectionSchema
+              && !collectionSchema.getElementSchema().isPrimitive()
+              && collectionSchema.getElementSchema().isFixedSize(),
+          "Only collections of fixed-size composite elements are supported: %s",
+          schema);
+      this.schema = schema;
+      this.elementSchema = ((SszCollectionSchema<?, ?>) schema).getElementSchema();
+      this.elementSize = elementSchema.getSszFixedPartSize();
+      this.size = size;
+      this.visitor = visitor;
+      this.next = fromIndex;
+      this.nextGIndex = schema.getChildGeneralizedIndex(fromIndex);
+    }
+
+    @Override
+    public boolean visit(final TreeNode node, final long gIndex) {
+      final NodeRelation relation = GIndexUtil.gIdxCompare(gIndex, nextGIndex);
+      if (relation == NodeRelation.SAME
+          || (relation == NodeRelation.PREDECESSOR && !(node instanceof BranchNode))) {
+        return visitElementsUnder(node, gIndex);
+      }
+      // A branch above the next element, or a node inside an element already visited
+      return true;
+    }
+
+    /** Visits the elements of the subtree {@code node}, from the next one, in index order. */
+    private boolean visitElementsUnder(final TreeNode node, final long gIndex) {
+      final int depth = GIndexUtil.gIdxGetDepth(nextGIndex) - GIndexUtil.gIdxGetDepth(gIndex);
+      final long first = nextGIndex - (gIndex << depth);
+      final long end = Math.min(1L << depth, first + size - next);
+      final Bytes packed =
+          node instanceof SszSuperNode superNode && superNode.getDepth() == depth
+              ? superNode.getData()
+              : null;
+      for (long i = first; i < end; i++) {
+        final boolean proceed;
+        if (packed == null) {
+          final TreeNode element =
+              node.get(GIndexUtil.gIdxChildGIndex(GIndexUtil.SELF_G_INDEX, i, depth));
+          proceed = visitor.visit(next, elementSchema.sszSerializeTree(element), 0);
+        } else if ((i + 1) * elementSize <= packed.size()) {
+          proceed = visitor.visit(next, packed, Math.toIntExact(i * elementSize));
+        } else {
+          // Past the supernode's content: a zero element. Reachable on a tree loaded from storage,
+          // where an all-zero chunk inside the list is restored as an empty supernode.
+          proceed = visitor.visit(next, Bytes.wrap(new byte[elementSize]), 0);
+        }
+        next++;
+        if (!proceed) {
+          stopped = true;
+          return false;
+        }
+      }
+      if (next == size) {
+        return false;
+      }
+      nextGIndex = schema.getChildGeneralizedIndex(next);
+      return true;
+    }
   }
 }

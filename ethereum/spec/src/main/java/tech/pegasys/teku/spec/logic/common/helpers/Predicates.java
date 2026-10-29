@@ -50,7 +50,14 @@ public class Predicates {
 
   public boolean isActiveValidator(
       final UInt64 activationEpoch, final UInt64 exitEpoch, final UInt64 epoch) {
-    return activationEpoch.compareTo(epoch) <= 0 && epoch.compareTo(exitEpoch) < 0;
+    return isActiveValidator(activationEpoch.longValue(), exitEpoch.longValue(), epoch.longValue());
+  }
+
+  /** is_active_validator from raw uint64 epoch bits, compared unsigned. */
+  public boolean isActiveValidator(
+      final long activationEpoch, final long exitEpoch, final long epoch) {
+    return Long.compareUnsigned(activationEpoch, epoch) <= 0
+        && Long.compareUnsigned(epoch, exitEpoch) < 0;
   }
 
   public boolean isValidMerkleBranch(
