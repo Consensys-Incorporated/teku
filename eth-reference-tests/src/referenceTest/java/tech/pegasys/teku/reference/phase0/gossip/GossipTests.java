@@ -65,8 +65,36 @@ public class GossipTests {
               new GossipExecutionPayloadEnvelopeTestExecutor())
           .put(
               "networking/gossip_execution_payload_bid",
-              // TODO: https://github.com/Consensys-Incorporated/teku/issues/11233
               new GossipExecutionPayloadBidTestExecutor(
+                  // TODO: Remove these temporary skips once reference tests include:
+                  // https://github.com/ethereum/consensus-specs/pull/5741
+                  "gossip_execution_payload_bid__ignore_duplicate_from_builder",
+                  "gossip_execution_payload_bid__ignore_equal_value",
+                  "gossip_execution_payload_bid__ignore_not_highest_value",
+                  "gossip_execution_payload_bid__reject_builder_index_out_of_range",
+                  "gossip_execution_payload_bid__reject_builder_not_active",
+                  "gossip_execution_payload_bid__reject_builder_not_payload_version",
+                  "gossip_execution_payload_bid__reject_incorrect_prev_randao",
+                  "gossip_execution_payload_bid__reject_invalid_signature",
+                  "gossip_execution_payload_bid__reject_too_many_blobs",
+                  "gossip_execution_payload_bid__valid",
+                  "gossip_execution_payload_bid__valid_gas_limit_after_empty_parent",
+                  "gossip_execution_payload_bid__valid_gas_limit_decrease_exceeding_limit",
+                  "gossip_execution_payload_bid__valid_gas_limit_decrease_within_limit",
+                  "gossip_execution_payload_bid__valid_gas_limit_increase_exceeding_limit",
+                  "gossip_execution_payload_bid__valid_gas_limit_increase_within_limit",
+                  "gossip_execution_payload_bid__valid_gas_limit_parent_under_step",
+                  "gossip_execution_payload_bid__valid_gas_limit_target_equals_parent",
+                  "gossip_execution_payload_bid__valid_higher_value",
+                  "gossip_execution_payload_bid__valid_inclusion_list_bits_inclusive",
+                  "gossip_execution_payload_bid__valid_max_blobs",
+                  "gossip_execution_payload_bid__valid_on_head_parent_uses_parent_randao",
+                  "gossip_execution_payload_bid__valid_parent_exit_unknown_pubkey",
+                  "gossip_execution_payload_bid__valid_parent_exit_wrong_source_address",
+                  "gossip_execution_payload_bid__valid_requires_state_advanced_across_epoch",
+                  "gossip_execution_payload_bid__valid_slot_at_lower_disparity",
+                  "gossip_execution_payload_bid__valid_zero_value_first_bid",
+                  // TODO: https://github.com/Consensys-Incorporated/teku/issues/11233
                   "gossip_execution_payload_bid__ignore_builder_exit_in_parent_payload",
                   "gossip_execution_payload_bid__ignore_builder_exit_with_pending_balance"))
           .build();
