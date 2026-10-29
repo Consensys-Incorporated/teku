@@ -800,8 +800,12 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
             candidate.getSignature());
     final BeaconBlockHeader expectedBlockHeader = BeaconBlockHeader.fromState(internalState);
 
-    when(mockCombinedChainDataClient.getStateByBlockRoot(eq(block.getRoot())))
-        .thenReturn(completedFuture(Optional.of(internalState)));
+    when(mockCombinedChainDataClient.getLightClientBootstrap(eq(block.getRoot())))
+        .thenReturn(
+            completedFuture(
+                Optional.of(
+                    spec.getLightClientUtilRequired(block.getSlot())
+                        .createLightClientBootstrap(internalState, block))));
     when(mockCombinedChainDataClient.getBlockByBlockRoot(eq(block.getRoot())))
         .thenReturn(completedFuture(Optional.of(block)));
     when(mockCombinedChainDataClient.getRecentChainData()).thenReturn(recentChainData);

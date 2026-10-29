@@ -1720,6 +1720,23 @@ public class BeaconChainController extends Service implements BeaconChainControl
             updates -> {
               lightClientServerService.loadUpdates(updates);
               LOG.debug("Loaded {} light client updates from storage", updates.size());
+              recentChainData
+                  .getFinalizedCheckpoint()
+                  .ifPresent(
+                      checkpoint ->
+                          lightClientServerService.onNewFinalizedCheckpoint(checkpoint, false));
+              combinedChainDataClient
+                  .getChainHead()
+                  .ifPresent(
+                      head ->
+                          head.getBlock()
+                              .thenAccept(
+                                  maybeBlock ->
+                                      maybeBlock.ifPresent(
+                                          block ->
+                                              lightClientServerService.onBlockImported(
+                                                  block, head.isOptimistic())))
+                              .finishError(LOG));
             })
         .exceptionally(
             error -> {

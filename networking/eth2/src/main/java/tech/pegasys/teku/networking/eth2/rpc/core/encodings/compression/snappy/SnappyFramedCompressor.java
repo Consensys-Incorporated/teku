@@ -15,9 +15,6 @@ package tech.pegasys.teku.networking.eth2.rpc.core.encodings.compression.snappy;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.util.ReferenceCounted;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
 import org.apache.tuweni.bytes.Bytes;
@@ -49,13 +46,16 @@ public class SnappyFramedCompressor implements Compressor {
     private final SnappyFrameDecoder snappyFrameDecoder;
     private final int uncompressedPayloadSize;
     private int consumedCompressedSize = 0;
-    private final List<ByteBuf> decodedSnappyFrames = new ArrayList<>();
+    // decoded frames are copied here as they arrive, so per-frame work is O(1)
+    private ByteBuf decodedPayload;
     private boolean broken = false;
     private boolean disposed = false;
 
     public SnappyFramedDecompressor(final int uncompressedPayloadSize) {
       this.snappyFrameDecoder = decoderSupplier.get();
       this.uncompressedPayloadSize = uncompressedPayloadSize;
+      // grows as frames arrive, so nothing is allocated before data is received
+      this.decodedPayload = Unpooled.buffer(0, uncompressedPayloadSize);
     }
 
     @Override
@@ -77,7 +77,21 @@ public class SnappyFramedCompressor implements Compressor {
           } catch (Exception e) {
             throw new CompressionException("Error in Snappy decompressor", e);
           }
-          byteBuf.ifPresent(decodedSnappyFrames::add);
+          if (byteBuf.isPresent()) {
+            final ByteBuf frame = byteBuf.get();
+            try {
+              if (frame.readableBytes() > decodedPayload.maxWritableBytes()) {
+                throw new PayloadLargerThanExpectedException(
+                    "Decoded snappy frames len is "
+                        + (decodedPayload.readableBytes() + frame.readableBytes())
+                        + " while expecting "
+                        + uncompressedPayloadSize);
+              }
+              decodedPayload.writeBytes(frame);
+            } finally {
+              frame.release();
+            }
+          }
 
           if (consumedCompressedSize > getMaxCompressedLength(uncompressedPayloadSize)) {
             throw new CompressionException(
@@ -89,20 +103,11 @@ public class SnappyFramedCompressor implements Compressor {
           if (byteBuf.isEmpty()) {
             break;
           }
-          int decodedFramesLength =
-              decodedSnappyFrames.stream().mapToInt(ByteBuf::readableBytes).sum();
-          if (decodedFramesLength == uncompressedPayloadSize) {
-            // wrapped ByteBuf takes ownership of the underlying buffers
-            ByteBuf ret = Unpooled.wrappedBuffer(decodedSnappyFrames.toArray(new ByteBuf[0]));
-            decodedSnappyFrames.clear();
+          if (decodedPayload.readableBytes() == uncompressedPayloadSize) {
+            final ByteBuf ret = decodedPayload;
+            decodedPayload = null;
             snappyFrameDecoder.complete();
             return Optional.of(ret);
-          } else if (decodedFramesLength > uncompressedPayloadSize) {
-            throw new PayloadLargerThanExpectedException(
-                "Decoded snappy frames len is "
-                    + decodedFramesLength
-                    + " while expecting "
-                    + uncompressedPayloadSize);
           }
         } catch (Exception e) {
           broken = true;
@@ -123,7 +128,7 @@ public class SnappyFramedCompressor implements Compressor {
           throw new DisposedDecompressorException();
         }
         disposed = true;
-        boolean unreturnedFrames = !decodedSnappyFrames.isEmpty();
+        final boolean unreturnedFrames = decodedPayload != null && decodedPayload.isReadable();
         if (unreturnedFrames) {
           throw new PayloadSmallerThanExpectedException("Unread uncompressed frames on complete");
         }
@@ -134,8 +139,10 @@ public class SnappyFramedCompressor implements Compressor {
 
     @Override
     public void close() {
-      decodedSnappyFrames.forEach(ReferenceCounted::release);
-      decodedSnappyFrames.clear();
+      if (decodedPayload != null) {
+        decodedPayload.release();
+        decodedPayload = null;
+      }
       snappyFrameDecoder.close();
     }
   }

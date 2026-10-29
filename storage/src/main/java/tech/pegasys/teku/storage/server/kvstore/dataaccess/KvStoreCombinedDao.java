@@ -210,6 +210,16 @@ public interface KvStoreCombinedDao extends AutoCloseable {
 
   Optional<Bytes32> getBestLightClientUpdateSignatureBlockRoot(UInt64 period);
 
+  Optional<Bytes> getLightClientBootstrap(UInt64 slot);
+
+  Optional<Bytes> getLightClientSyncCommittee(UInt64 period);
+
+  @MustBeClosed
+  Stream<UInt64> streamLightClientBootstrapSlots();
+
+  @MustBeClosed
+  Stream<UInt64> streamLightClientSyncCommitteePeriods();
+
   /** Triggers a full, blocking compaction of the underlying storage to reclaim freed space. */
   void compact();
 
@@ -244,6 +254,12 @@ public interface KvStoreCombinedDao extends AutoCloseable {
         UInt64 period, LightClientUpdate update, Bytes32 signatureBlockRoot);
 
     void removeBestLightClientUpdate(UInt64 period);
+
+    void addLightClientBootstrap(UInt64 slot, Bytes bootstrap, UInt64 period, Bytes syncCommittee);
+
+    void removeLightClientBootstrap(UInt64 slot);
+
+    void removeLightClientSyncCommittee(UInt64 period);
 
     void setWeakSubjectivityCheckpoint(Checkpoint checkpoint);
 

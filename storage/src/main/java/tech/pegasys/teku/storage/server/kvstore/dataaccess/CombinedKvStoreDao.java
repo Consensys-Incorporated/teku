@@ -771,6 +771,28 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
     return db.get(schema.getBestLightClientUpdateSignatureBlockRootsByPeriod(), period);
   }
 
+  @Override
+  public Optional<Bytes> getLightClientBootstrap(final UInt64 slot) {
+    return db.get(schema.getLightClientBootstrapsBySlot(), slot);
+  }
+
+  @Override
+  public Optional<Bytes> getLightClientSyncCommittee(final UInt64 period) {
+    return db.get(schema.getLightClientSyncCommitteesByPeriod(), period);
+  }
+
+  @Override
+  @MustBeClosed
+  public Stream<UInt64> streamLightClientBootstrapSlots() {
+    return db.streamKeys(schema.getLightClientBootstrapsBySlot());
+  }
+
+  @Override
+  @MustBeClosed
+  public Stream<UInt64> streamLightClientSyncCommitteePeriods() {
+    return db.streamKeys(schema.getLightClientSyncCommitteesByPeriod());
+  }
+
   static class V4CombinedUpdater<S extends SchemaCombined> implements CombinedUpdater {
     private final KvStoreTransaction transaction;
 
@@ -1145,6 +1167,23 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
     public void removeBestLightClientUpdate(final UInt64 period) {
       transaction.delete(schema.getBestLightClientUpdatesByPeriod(), period);
       transaction.delete(schema.getBestLightClientUpdateSignatureBlockRootsByPeriod(), period);
+    }
+
+    @Override
+    public void addLightClientBootstrap(
+        final UInt64 slot, final Bytes bootstrap, final UInt64 period, final Bytes syncCommittee) {
+      transaction.put(schema.getLightClientBootstrapsBySlot(), slot, bootstrap);
+      transaction.put(schema.getLightClientSyncCommitteesByPeriod(), period, syncCommittee);
+    }
+
+    @Override
+    public void removeLightClientBootstrap(final UInt64 slot) {
+      transaction.delete(schema.getLightClientBootstrapsBySlot(), slot);
+    }
+
+    @Override
+    public void removeLightClientSyncCommittee(final UInt64 period) {
+      transaction.delete(schema.getLightClientSyncCommitteesByPeriod(), period);
     }
   }
 }

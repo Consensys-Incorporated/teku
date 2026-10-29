@@ -47,6 +47,7 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockAndMetaData;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
@@ -685,6 +686,64 @@ public class CombinedChainDataClient {
 
   public SafeFuture<List<StoredLightClientUpdate>> getBestLightClientUpdates() {
     return historicalChainData.getBestLightClientUpdates();
+  }
+
+  public SafeFuture<Optional<LightClientBootstrap>> getLightClientBootstrap(
+      final Bytes32 blockRoot) {
+    final UpdatableStore store = getStore();
+    if (store == null) {
+      return SafeFuture.completedFuture(Optional.empty());
+    }
+    final Optional<BeaconState> maybeState =
+        store
+            .getBlockStateIfAvailable(blockRoot)
+            .or(() -> store.getLatestFinalized().getBlockPostState(blockRoot))
+            .filter(this::isBlockPostState);
+    if (maybeState.isPresent()) {
+      return createLightClientBootstrap(blockRoot, maybeState.get());
+    }
+    return getSlotByBlockRoot(blockRoot)
+        .thenCompose(
+            maybeSlot ->
+                maybeSlot
+                    .map(historicalChainData::getLightClientBootstrap)
+                    .orElse(SafeFuture.completedFuture(Optional.empty())))
+        .thenCompose(
+            maybeBootstrap -> {
+              final Optional<LightClientBootstrap> maybeStoredBootstrap =
+                  maybeBootstrap.filter(
+                      bootstrap ->
+                          bootstrap
+                              .getLightClientHeader()
+                              .getBeacon()
+                              .hashTreeRoot()
+                              .equals(blockRoot));
+              if (maybeStoredBootstrap.isPresent()) {
+                return SafeFuture.completedFuture(maybeStoredBootstrap);
+              }
+              return getStateByBlockRoot(blockRoot)
+                  .thenCompose(
+                      maybeRetrievedState ->
+                          maybeRetrievedState
+                              .filter(this::isBlockPostState)
+                              .map(state -> createLightClientBootstrap(blockRoot, state))
+                              .orElse(SafeFuture.completedFuture(Optional.empty())));
+            });
+  }
+
+  private boolean isBlockPostState(final BeaconState state) {
+    return state.getSlot().equals(state.getLatestBlockHeader().getSlot());
+  }
+
+  private SafeFuture<Optional<LightClientBootstrap>> createLightClientBootstrap(
+      final Bytes32 blockRoot, final BeaconState state) {
+    return getBlockByBlockRoot(blockRoot)
+        .thenApply(
+            maybeBlock ->
+                maybeBlock.flatMap(
+                    block ->
+                        spec.getLightClientUtil(block.getSlot())
+                            .map(util -> util.createLightClientBootstrap(state, block))));
   }
 
   /**

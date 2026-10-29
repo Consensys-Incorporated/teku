@@ -91,6 +91,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
 import tech.pegasys.teku.spec.datastructures.execution.SlotAndExecutionPayloadSummary;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
@@ -4338,6 +4339,44 @@ public class DatabaseTest {
 
     assertThat(getBestLightClientUpdates()).containsOnlyKeys(ZERO, UInt64.valueOf(2));
     assertThat(database.getBestLightClientUpdateSignatureBlockRoot(ONE)).isEmpty();
+  }
+
+  @TestTemplate
+  public void lightClientBootstraps_shouldSurviveRestart(final DatabaseContext context)
+      throws IOException {
+    initialize(context);
+    final LightClientBootstrap periodZero =
+        dataStructureUtil.randomLightClientBoostrapWithHeaderSlot(UInt64.valueOf(8));
+    final LightClientBootstrap periodOne =
+        dataStructureUtil.randomLightClientBoostrapWithHeaderSlot(UInt64.valueOf(70));
+    database.storeLightClientBootstrap(periodZero);
+    database.storeLightClientBootstrap(periodOne);
+
+    restartStorage();
+
+    assertThat(database.getLightClientBootstrap(UInt64.valueOf(8))).contains(periodZero);
+    assertThat(database.getLightClientBootstrap(UInt64.valueOf(70))).contains(periodOne);
+    assertThat(database.getLightClientBootstrap(UInt64.valueOf(9))).isEmpty();
+  }
+
+  @TestTemplate
+  public void pruneBestLightClientUpdatesBefore_shouldDeleteBootstrapsBelowGivenPeriod(
+      final DatabaseContext context) throws IOException {
+    initialize(context);
+    final LightClientBootstrap periodTwo =
+        dataStructureUtil.randomLightClientBoostrapWithHeaderSlot(UInt64.valueOf(140));
+    database.storeLightClientBootstrap(
+        dataStructureUtil.randomLightClientBoostrapWithHeaderSlot(UInt64.valueOf(8)));
+    database.storeLightClientBootstrap(
+        dataStructureUtil.randomLightClientBoostrapWithHeaderSlot(UInt64.valueOf(70)));
+    database.storeLightClientBootstrap(periodTwo);
+
+    database.pruneBestLightClientUpdatesBefore(UInt64.valueOf(2));
+    restartStorage();
+
+    assertThat(database.getLightClientBootstrap(UInt64.valueOf(8))).isEmpty();
+    assertThat(database.getLightClientBootstrap(UInt64.valueOf(70))).isEmpty();
+    assertThat(database.getLightClientBootstrap(UInt64.valueOf(140))).contains(periodTwo);
   }
 
   private void storeBestLightClientUpdates(final long... periods) {

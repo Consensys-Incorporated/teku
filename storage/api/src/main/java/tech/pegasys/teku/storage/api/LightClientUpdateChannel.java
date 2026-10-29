@@ -18,6 +18,7 @@ import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.events.ChannelInterface;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 
 public interface LightClientUpdateChannel extends ChannelInterface {
@@ -28,6 +29,8 @@ public interface LightClientUpdateChannel extends ChannelInterface {
   SafeFuture<Void> onRemoveBestLightClientUpdates(Collection<UInt64> periods);
 
   SafeFuture<Void> onPruneBestLightClientUpdatesBefore(UInt64 period);
+
+  SafeFuture<Void> onNewLightClientBootstrap(LightClientBootstrap bootstrap);
 
   LightClientUpdateChannel NOOP =
       new LightClientUpdateChannel() {
@@ -44,6 +47,11 @@ public interface LightClientUpdateChannel extends ChannelInterface {
 
         @Override
         public SafeFuture<Void> onPruneBestLightClientUpdatesBefore(final UInt64 period) {
+          return SafeFuture.COMPLETE;
+        }
+
+        @Override
+        public SafeFuture<Void> onNewLightClientBootstrap(final LightClientBootstrap bootstrap) {
           return SafeFuture.COMPLETE;
         }
       };

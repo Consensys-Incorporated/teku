@@ -139,6 +139,24 @@ public class V4HotKvStoreDao {
     return db.get(schema.getLightClientUpdateSignatureBlockRootsByPeriod(), period);
   }
 
+  public Optional<Bytes> getLightClientBootstrap(final UInt64 slot) {
+    return db.get(schema.getLightClientBootstrapsBySlot(), slot);
+  }
+
+  public Optional<Bytes> getLightClientSyncCommittee(final UInt64 period) {
+    return db.get(schema.getLightClientSyncCommitteesByPeriod(), period);
+  }
+
+  @MustBeClosed
+  public Stream<UInt64> streamLightClientBootstrapSlots() {
+    return db.streamKeys(schema.getLightClientBootstrapsBySlot());
+  }
+
+  @MustBeClosed
+  public Stream<UInt64> streamLightClientSyncCommitteePeriods() {
+    return db.streamKeys(schema.getLightClientSyncCommitteesByPeriod());
+  }
+
   @MustBeClosed
   public Stream<Map.Entry<Bytes, Bytes>> streamHotBlocksAsSsz() {
     return streamRawColumn(schema.getColumnHotBlocksByRoot()).map(entry -> entry);
@@ -295,6 +313,23 @@ public class V4HotKvStoreDao {
     public void removeBestLightClientUpdate(final UInt64 period) {
       transaction.delete(schema.getLightClientUpdatesByPeriod(), period);
       transaction.delete(schema.getLightClientUpdateSignatureBlockRootsByPeriod(), period);
+    }
+
+    @Override
+    public void addLightClientBootstrap(
+        final UInt64 slot, final Bytes bootstrap, final UInt64 period, final Bytes syncCommittee) {
+      transaction.put(schema.getLightClientBootstrapsBySlot(), slot, bootstrap);
+      transaction.put(schema.getLightClientSyncCommitteesByPeriod(), period, syncCommittee);
+    }
+
+    @Override
+    public void removeLightClientBootstrap(final UInt64 slot) {
+      transaction.delete(schema.getLightClientBootstrapsBySlot(), slot);
+    }
+
+    @Override
+    public void removeLightClientSyncCommittee(final UInt64 period) {
+      transaction.delete(schema.getLightClientSyncCommitteesByPeriod(), period);
     }
 
     @Override

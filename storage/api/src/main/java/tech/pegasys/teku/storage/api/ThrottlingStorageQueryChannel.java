@@ -33,6 +33,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
@@ -300,5 +301,10 @@ public class ThrottlingStorageQueryChannel implements StorageQueryChannel {
   @Override
   public SafeFuture<List<StoredLightClientUpdate>> getBestLightClientUpdates() {
     return taskQueue.queueTask(delegate::getBestLightClientUpdates);
+  }
+
+  @Override
+  public SafeFuture<Optional<LightClientBootstrap>> getLightClientBootstrap(final UInt64 slot) {
+    return taskQueue.queueTask(() -> delegate.getLightClientBootstrap(slot));
   }
 }
