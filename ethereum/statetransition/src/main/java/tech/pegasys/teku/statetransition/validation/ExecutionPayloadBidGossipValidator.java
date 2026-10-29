@@ -44,12 +44,12 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloa
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.heze.ExecutionPayloadBidHeze;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsGloas;
 import tech.pegasys.teku.spec.datastructures.forkchoice.InclusionListStore;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
+import tech.pegasys.teku.spec.logic.versions.heze.util.InclusionListUtil;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
 import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
 
@@ -110,6 +110,13 @@ public class ExecutionPayloadBidGossipValidator {
     if (!gossipValidationHelper.isSlotCurrentOrNext(bid.getSlot())) {
       return completedFuture(
           ignoreBid(bid, "must be for current or next slot but was for slot %s", bid.getSlot()));
+    }
+
+    /*
+     * [IGNORE] The bid is received after the inclusion list deadline of the previous slot
+     */
+    if (!gossipValidationHelper.isAfterInclusionListDeadline(bid.getSlot())) {
+      return completedFuture(ignoreBid(bid, "bid is received before the inclusion list deadline"));
     }
 
     /*
@@ -384,21 +391,20 @@ public class ExecutionPayloadBidGossipValidator {
               /*
                * [IGNORE] The bid's inclusion list bits is inclusive
                */
-              if (bid instanceof ExecutionPayloadBidHeze hezeBid) {
+              final Optional<InclusionListUtil> maybeInclusionListUtil =
+                  spec.atSlot(bid.getSlot()).getInclusionListUtil();
+              if (maybeInclusionListUtil.isPresent()) {
+                final InclusionListUtil inclusionListUtil = maybeInclusionListUtil.get();
                 final SlotAndBlockRoot inclusionListKey =
                     gossipValidationHelper.getInclusionListKey(
                         bid.getParentBlockRoot(), state, bid.getSlot());
                 final SszBitvector inclusionListBits =
                     inclusionListStore.getInclusionListBits(
-                        spec.atSlot(bid.getSlot())
-                            .getInclusionListUtil()
-                            .orElseThrow()
-                            .getInclusionListCommittee(state, inclusionListKey.getSlot()),
+                        inclusionListUtil.getInclusionListCommittee(
+                            state, inclusionListKey.getSlot()),
                         inclusionListKey,
                         true);
-                if (!inclusionListBits
-                    .streamAllSetBits()
-                    .allMatch(hezeBid.getInclusionListBits()::getBit)) {
+                if (!inclusionListUtil.isInclusionListBitsInclusive(bid, inclusionListBits)) {
                   return ignoreBid(bid, "inclusion list bits are not inclusive");
                 }
               }

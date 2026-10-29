@@ -45,7 +45,6 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloa
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.heze.ExecutionPayloadBidHeze;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.heze.ExecutionPayloadBidSchemaHeze;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
 import tech.pegasys.teku.spec.datastructures.execution.GetPayloadResponse;
@@ -304,7 +303,12 @@ public class DefaultExecutionPayloadBidManager
     return localBidFuture.thenCombine(
         remoteBidFuture,
         (maybePayload, builderBids) -> {
-          final Optional<SszBitvector> inclusionListBits = getInclusionListBits(state, parentRoot);
+          final Optional<InclusionListBitViews> inclusionListBitViews =
+              getInclusionListBitViews(state, parentRoot);
+          final Optional<SszBitvector> allInclusionListBits =
+              inclusionListBitViews.map(InclusionListBitViews::all);
+          final Optional<SszBitvector> timelyInclusionListBits =
+              inclusionListBitViews.map(InclusionListBitViews::timely);
           Optional<LocalBid> maybeLocalBid = Optional.empty();
           try {
             maybeLocalBid =
@@ -312,7 +316,7 @@ public class DefaultExecutionPayloadBidManager
                     payload ->
                         new LocalBid(
                             createLocalSelfBuiltSignedBid(
-                                payload, slot, parentRoot, inclusionListBits),
+                                payload, slot, parentRoot, allInclusionListBits),
                             payload.getExecutionPayloadValue(),
                             payload.getShouldOverrideBuilder()));
           } catch (final Exception error) {
@@ -325,11 +329,13 @@ public class DefaultExecutionPayloadBidManager
               final Set<RemoteBid> p2pBids =
                   considerP2PBidsDuringBlockProduction
                       ? getP2PBidsForSlot(slot).stream()
-                          .filter(bid -> isInclusive(bid, inclusionListBits))
+                          .filter(bid -> isInclusive(bid, timelyInclusionListBits))
                           .collect(Collectors.toUnmodifiableSet())
                       : Collections.emptySet();
               final List<RemoteBid> inclusiveBuilderBids =
-                  builderBids.stream().filter(bid -> isInclusive(bid, inclusionListBits)).toList();
+                  builderBids.stream()
+                      .filter(bid -> isInclusive(bid, timelyInclusionListBits))
+                      .toList();
               maybeRemoteBid =
                   bidSelector.selectBestRemoteBid(
                       p2pBids,
@@ -347,7 +353,7 @@ public class DefaultExecutionPayloadBidManager
         });
   }
 
-  private Optional<SszBitvector> getInclusionListBits(
+  private Optional<InclusionListBitViews> getInclusionListBitViews(
       final BeaconState state, final Bytes32 parentRoot) {
     return spec.atSlot(state.getSlot())
         .getInclusionListUtil()
@@ -356,10 +362,13 @@ public class DefaultExecutionPayloadBidManager
               final SlotAndBlockRoot inclusionListKey =
                   ShufflingDependentRootUtil.getInclusionListKey(
                       spec, forkChoiceStrategySupplier.get(), parentRoot, state, state.getSlot());
-              return inclusionListStore.getInclusionListBits(
-                  util.getInclusionListCommittee(state, inclusionListKey.getSlot()),
-                  inclusionListKey,
-                  false);
+              final var inclusionListCommittee =
+                  util.getInclusionListCommittee(state, inclusionListKey.getSlot());
+              return new InclusionListBitViews(
+                  inclusionListStore.getInclusionListBits(
+                      inclusionListCommittee, inclusionListKey, false),
+                  inclusionListStore.getInclusionListBits(
+                      inclusionListCommittee, inclusionListKey, true));
             });
   }
 
@@ -367,10 +376,14 @@ public class DefaultExecutionPayloadBidManager
     return localBits
         .map(
             bits ->
-                bid.bid().getMessage() instanceof ExecutionPayloadBidHeze hezeBid
-                    && bits.streamAllSetBits().allMatch(hezeBid.getInclusionListBits()::getBit))
+                spec.atSlot(bid.bid().getMessage().getSlot())
+                    .getInclusionListUtil()
+                    .map(util -> util.isInclusionListBitsInclusive(bid.bid().getMessage(), bits))
+                    .orElse(false))
         .orElse(true);
   }
+
+  private record InclusionListBitViews(SszBitvector all, SszBitvector timely) {}
 
   /**
    * P2P bids are scored solely by `bid.value`, the on-chain collateral commitment.

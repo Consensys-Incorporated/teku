@@ -21,9 +21,11 @@ import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfigHeze;
 import tech.pegasys.teku.spec.constants.Domain;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionList;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.SignedInclusionList;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
@@ -54,6 +56,15 @@ public class InclusionListUtil {
   public boolean validatorIndexWithinCommittee(
       final BeaconState state, final UInt64 slot, final UInt64 validatorIndex) {
     return getInclusionListCommittee(state, slot).contains(validatorIndex.intValue());
+  }
+
+  public boolean isInclusionListBitsInclusive(
+      final ExecutionPayloadBid bid, final SszBitvector requiredInclusionListBits) {
+    return bid.getOptionalInclusionListBits()
+        .map(
+            bidInclusionListBits ->
+                requiredInclusionListBits.streamAllSetBits().allMatch(bidInclusionListBits::getBit))
+        .orElse(false);
   }
 
   /**

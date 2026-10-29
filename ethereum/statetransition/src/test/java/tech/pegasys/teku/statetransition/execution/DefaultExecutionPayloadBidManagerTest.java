@@ -51,7 +51,6 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
-import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
@@ -206,7 +205,7 @@ public class DefaultExecutionPayloadBidManagerTest {
   }
 
   @TestTemplate
-  void filtersNonInclusiveRemoteBidsBeforeSelectingHighestBid() {
+  void ignoresUntimelyInclusionListsWhenSelectingHighestRemoteBid() {
     assumeTrue(spec.isMilestoneSupported(SpecMilestone.HEZE));
     final UInt64 slot = UInt64.valueOf(64);
     final BeaconStateGloas state = stateAtSlot(slot);
@@ -235,11 +234,11 @@ public class DefaultExecutionPayloadBidManagerTest {
                 BuilderConfig.NO_OP,
                 blockProductionPerformance));
 
-    assertThat(selected.bid()).isEqualTo(inclusiveBid);
+    assertThat(selected.bid()).isEqualTo(missingBits);
   }
 
   @TestTemplate
-  void fallsBackToSelfBuildWhenAllRemoteBidsOmitLateLists() {
+  void selectsRemoteBidWhenItOnlyOmitsUntimelyLists() {
     assumeTrue(spec.isMilestoneSupported(SpecMilestone.HEZE));
     final UInt64 slot = UInt64.valueOf(64);
     final BeaconStateGloas state = stateAtSlot(slot);
@@ -264,10 +263,7 @@ public class DefaultExecutionPayloadBidManagerTest {
     addLateInclusionList(state);
     builderFuture.complete(List.of(toRemoteBid(missingBits)));
 
-    final ExecutionPayloadBidHeze selected =
-        (ExecutionPayloadBidHeze) SafeFutureAssert.safeJoin(result).bid().getMessage();
-    assertThat(selected.getBuilderIndex()).isEqualTo(SpecConfigGloas.BUILDER_INDEX_SELF_BUILD);
-    assertThat(selected.getInclusionListBits().getBit(0)).isTrue();
+    assertThat(SafeFutureAssert.safeJoin(result).bid()).isEqualTo(missingBits);
   }
 
   @TestTemplate
@@ -286,7 +282,7 @@ public class DefaultExecutionPayloadBidManagerTest {
         .thenReturn(
             SafeFuture.completedFuture(
                 List.of(toRemoteBid(missingBits), toRemoteBid(inclusiveBid))));
-    addLateInclusionList(state);
+    addInclusionList(state, true);
 
     final BidForBlock selected =
         SafeFutureAssert.safeJoin(
@@ -445,6 +441,10 @@ public class DefaultExecutionPayloadBidManagerTest {
   }
 
   private void addLateInclusionList(final BeaconStateGloas state) {
+    addInclusionList(state, false);
+  }
+
+  private void addInclusionList(final BeaconStateGloas state, final boolean timely) {
     final UInt64 slot = state.getSlot();
     final int validatorIndex =
         spec.atSlot(slot)
@@ -470,7 +470,7 @@ public class DefaultExecutionPayloadBidManagerTest {
                                 .getTransactionSchema()
                                 .fromBytes(Bytes.of(1)))),
                 BLSSignature.empty()),
-        false);
+        timely);
   }
 
   private SignedExecutionPayloadBid withAllInclusionListBits(

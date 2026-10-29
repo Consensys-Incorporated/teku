@@ -70,7 +70,7 @@ import tech.pegasys.teku.storage.store.UpdatableStore;
 
 @TestSpecContext(
     signatureVerifierNoop = true,
-    milestone = {SpecMilestone.PHASE0, SpecMilestone.FULU, SpecMilestone.GLOAS})
+    milestone = {SpecMilestone.PHASE0, SpecMilestone.FULU, SpecMilestone.GLOAS, SpecMilestone.HEZE})
 public class GossipValidationHelperTest {
   private Spec spec;
   private RecentChainData recentChainData;
@@ -83,7 +83,7 @@ public class GossipValidationHelperTest {
     spec = specContext.getSpec();
     dataStructureUtil = specContext.getDataStructureUtil();
     storageSystem = InMemoryStorageSystemBuilder.buildDefault(spec);
-    storageSystem.chainUpdater().initializeGenesis(false);
+    storageSystem.chainUpdater().initializeGenesis();
     recentChainData = storageSystem.recentChainData();
 
     gossipValidationHelper =
@@ -352,8 +352,8 @@ public class GossipValidationHelperTest {
   }
 
   @TestTemplate
-  void isProposerTheExpectedProposer_GetsProposerFromStateInFulu() {
-    assumeThat(spec.atEpoch(ZERO).getMilestone()).isGreaterThanOrEqualTo(SpecMilestone.FULU);
+  void isProposerTheExpectedProposer_GetsProposerFromStateInFulu(final SpecContext specContext) {
+    specContext.assumeMilestonesActive(SpecMilestone.FULU, SpecMilestone.GLOAS);
     final UInt64 defaultProposerIndex = UInt64.valueOf(1234);
 
     final UInt64 nextSlot = recentChainData.getHeadSlot().plus(ONE);
@@ -718,6 +718,30 @@ public class GossipValidationHelperTest {
 
     storageSystem.chainUpdater().setTimeMillis(justBeforeNextSlot);
     assertThat(gossipValidationHelper.isSlotCurrentOrNext(slot.plus(2))).isTrue();
+  }
+
+  @TestTemplate
+  void isAfterInclusionListDeadline_shouldNotRestrictForksWithoutInclusionLists() {
+    final UInt64 bidSlot = UInt64.valueOf(5);
+    assumeThat(spec.getInclusionListDueMillis(bidSlot)).isEmpty();
+
+    assertThat(gossipValidationHelper.isAfterInclusionListDeadline(bidSlot)).isTrue();
+  }
+
+  @TestTemplate
+  void isAfterInclusionListDeadline_shouldUseBidForkAndPreviousSlotStart() {
+    final UInt64 bidSlot = UInt64.valueOf(5);
+    final Optional<Integer> maybeInclusionListDueMillis = spec.getInclusionListDueMillis(bidSlot);
+    assumeThat(maybeInclusionListDueMillis).isPresent();
+    final UInt64 inclusionListDeadlineMillis =
+        spec.computeTimeMillisAtSlot(bidSlot.decrement(), recentChainData.getGenesisTimeMillis())
+            .plus(maybeInclusionListDueMillis.orElseThrow());
+
+    storageSystem.chainUpdater().setTimeMillis(inclusionListDeadlineMillis.decrement());
+    assertThat(gossipValidationHelper.isAfterInclusionListDeadline(bidSlot)).isFalse();
+
+    storageSystem.chainUpdater().setTimeMillis(inclusionListDeadlineMillis);
+    assertThat(gossipValidationHelper.isAfterInclusionListDeadline(bidSlot)).isTrue();
   }
 
   @TestTemplate

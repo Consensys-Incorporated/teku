@@ -13,10 +13,12 @@
 
 package tech.pegasys.teku.spec.datastructures.epbs.versions.gloas;
 
+import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.infrastructure.ssz.SszContainer;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
 
@@ -48,4 +50,8 @@ public interface ExecutionPayloadBid extends SszContainer {
   SszList<SszKZGCommitment> getBlobKzgCommitments();
 
   Bytes32 getExecutionRequestsRoot();
+
+  default Optional<SszBitvector> getOptionalInclusionListBits() {
+    return Optional.empty();
+  }
 }
