@@ -80,7 +80,8 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
 
   @Override
   public void runTest(final TestDefinition testDefinition) throws Throwable {
-    if (testsToSkip.contains(testDefinition.getTestName())) {
+    if (testsToSkip.contains(testDefinition.getTestName())
+        || testsToSkip.contains(testDefinition.getFork() + "/" + testDefinition.getTestName())) {
       throw new TestAbortedException(
           "Test " + testDefinition.getDisplayName() + " has been ignored");
     }
