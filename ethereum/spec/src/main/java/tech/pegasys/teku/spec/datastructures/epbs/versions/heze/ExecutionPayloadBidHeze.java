@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.spec.datastructures.epbs.versions.heze;
 
+import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.infrastructure.bytes.Bytes20;
@@ -143,6 +144,11 @@ public class ExecutionPayloadBidHeze
 
   public SszBitvector getInclusionListBits() {
     return getField12();
+  }
+
+  @Override
+  public Optional<SszBitvector> getOptionalInclusionListBits() {
+    return Optional.of(getInclusionListBits());
   }
 
   @Override

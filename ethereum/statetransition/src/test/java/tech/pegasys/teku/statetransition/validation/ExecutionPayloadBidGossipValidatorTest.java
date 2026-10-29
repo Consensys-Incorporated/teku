@@ -174,6 +174,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .thenReturn(Optional.of(proposerPreferences));
 
     when(gossipValidationHelper.isSlotCurrentOrNext(slot)).thenReturn(true);
+    when(gossipValidationHelper.isAfterInclusionListDeadline(slot)).thenReturn(true);
     when(gossipValidationHelper.isWithinParentProposerLookahead(any(), any())).thenReturn(true);
     when(gossipValidationHelper.getShufflingDependentRoot(parentBlockRoot, slot))
         .thenReturn(Optional.of(dependentRoot));
@@ -218,6 +219,29 @@ public class ExecutionPayloadBidGossipValidatorTest {
     assumeTrue(bid instanceof ExecutionPayloadBidHeze);
     addInclusionList(false);
     assertThatSafeFuture(bidValidator.validate(signedBid)).isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldNotLetPreDeadlineHighBidSuppressPostDeadlineLowerBid() {
+    assumeTrue(bid instanceof ExecutionPayloadBidHeze);
+    final UInt64 highBidValue = UInt64.valueOf(20_000);
+    final SignedExecutionPayloadBid highBid =
+        signedBidForParent(parentBlockHash, parentBlockRoot, builderIndex, highBidValue);
+    mockBidValidation(highBid, builderIndex, highBidValue);
+    when(gossipValidationHelper.isAfterInclusionListDeadline(slot)).thenReturn(false);
+
+    assertThatSafeFuture(bidValidator.validate(highBid))
+        .isCompletedWithValue(
+            ignoreBid(highBid, "bid is received before the inclusion list deadline"));
+
+    final UInt64 lowerBidValue = UInt64.valueOf(10_000);
+    final UInt64 differentBuilderIndex = builderIndex.increment();
+    final SignedExecutionPayloadBid lowerBid =
+        signedBidForParent(parentBlockHash, parentBlockRoot, differentBuilderIndex, lowerBidValue);
+    mockBidValidation(lowerBid, differentBuilderIndex, lowerBidValue);
+    when(gossipValidationHelper.isAfterInclusionListDeadline(slot)).thenReturn(true);
+
+    assertThatSafeFuture(bidValidator.validate(lowerBid)).isCompletedWithValue(ACCEPT);
   }
 
   @TestTemplate
@@ -1326,6 +1350,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
       final SignedExecutionPayloadBid bid, final UInt64 builderIndex, final UInt64 bidValue) {
     final ExecutionPayloadBid message = bid.getMessage();
     final UInt64 slot = message.getSlot();
+    when(gossipValidationHelper.isAfterInclusionListDeadline(slot)).thenReturn(true);
     mockInclusionListContext(message, spec.atSlot(slot));
     final ProposerPreferences matchingPreferences = mock(ProposerPreferences.class);
     when(matchingPreferences.getFeeRecipient()).thenReturn(message.getFeeRecipient());
@@ -1355,6 +1380,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
       final ExecutionPayloadBid message, final SpecVersion specVersion) {
     if (message instanceof ExecutionPayloadBidHeze hezeBid) {
       final InclusionListUtil inclusionListUtil = mock(InclusionListUtil.class);
+      when(inclusionListUtil.isInclusionListBitsInclusive(any(), any())).thenCallRealMethod();
       when(inclusionListUtil.getInclusionListCommittee(postState, message.getSlot().decrement()))
           .thenReturn(
               new IntArrayList(

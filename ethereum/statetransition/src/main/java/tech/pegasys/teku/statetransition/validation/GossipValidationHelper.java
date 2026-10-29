@@ -374,6 +374,20 @@ public class GossipValidationHelper {
     return isSlotCurrent(slot) || (!slot.isZero() && isSlotCurrent(slot.decrement()));
   }
 
+  public boolean isAfterInclusionListDeadline(final UInt64 bidSlot) {
+    return spec.getInclusionListDueMillis(bidSlot)
+        .map(
+            inclusionListDueMillis -> {
+              final UInt64 inclusionListSlot = bidSlot.minusMinZero(ONE);
+              final UInt64 inclusionListDueTimeMillis =
+                  spec.computeTimeMillisAtSlot(
+                          inclusionListSlot, recentChainData.getGenesisTimeMillis())
+                      .plus(inclusionListDueMillis);
+              return getCurrentTimeMillis().isGreaterThanOrEqualTo(inclusionListDueTimeMillis);
+            })
+        .orElse(true);
+  }
+
   /**
    * Returns true when the block with the given {@code root} is a possible dependent block for the
    * epoch starting at {@code epochStartSlot} -- i.e. spec {@code is_valid_dependent_root}. That
