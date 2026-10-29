@@ -15,13 +15,18 @@ package tech.pegasys.teku.spec.logic.common.statetransition.epoch.status;
 
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.MAX_VALUE;
 
+import com.google.common.annotations.VisibleForTesting;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
+import tech.pegasys.teku.spec.datastructures.state.ValidatorFields;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.common.TransitionCaches;
@@ -31,6 +36,8 @@ import tech.pegasys.teku.spec.logic.common.util.AttestationUtil;
 import tech.pegasys.teku.spec.logic.common.util.BeaconStateUtil;
 
 public abstract class AbstractValidatorStatusFactory implements ValidatorStatusFactory {
+
+  private static final int STATUS_RANGE_SIZE = 1 << 16;
   protected final SpecConfig specConfig;
   protected final BeaconStateUtil beaconStateUtil;
   protected final AttestationUtil attestationUtil;
@@ -92,32 +99,77 @@ public abstract class AbstractValidatorStatusFactory implements ValidatorStatusF
         .orElseGet(() -> createTotalBalances(statuses));
   }
 
-  private List<ValidatorStatus> createInitialValidatorStatuses(
+  @VisibleForTesting
+  List<ValidatorStatus> createInitialValidatorStatuses(
       final SszList<Validator> validators, final UInt64 currentEpoch, final UInt64 previousEpoch) {
-    // Note: parallel() here is being used with great care. The iteration of the list is done by a
-    // single thread and then the conversion of individual Validator to ValidatorStatus is done by
-    // worker pools. Thus, each Validator instance is still only accessed by a single thread at a
-    // time. By the time we get the list back we're back to single threaded mode.
-    return validators.stream()
+    // Statuses are decoded from the packed validator bytes, without creating Validator views. The
+    // index space is split into ranges converted in parallel: each worker walks the immutable
+    // backing tree of its own range and writes its own slots of the array.
+    final int size = validators.size();
+    final ValidatorStatus[] statuses = new ValidatorStatus[size];
+    final int ranges = (size + STATUS_RANGE_SIZE - 1) / STATUS_RANGE_SIZE;
+    final long previous = previousEpoch.longValue();
+    final long current = currentEpoch.longValue();
+    final long next = currentEpoch.plus(1).longValue();
+    IntStream.range(0, ranges)
         .parallel()
-        .map(validator -> createValidatorStatus(validator, previousEpoch, currentEpoch))
-        .toList();
+        .forEach(
+            range -> {
+              final int end = Math.min(size, (range + 1) * STATUS_RANGE_SIZE);
+              validators.forEachElementSsz(
+                  range * STATUS_RANGE_SIZE,
+                  (index, data, offset) -> {
+                    if (index >= end) {
+                      return false;
+                    }
+                    statuses[index] =
+                        createValidatorStatus(
+                            ValidatorFields.slashed(data, offset),
+                            ValidatorFields.effectiveBalance(data, offset),
+                            ValidatorFields.activationEpoch(data, offset),
+                            ValidatorFields.exitEpoch(data, offset),
+                            ValidatorFields.withdrawableEpoch(data, offset),
+                            previous,
+                            current,
+                            next);
+                    return true;
+                  });
+            });
+    return Collections.unmodifiableList(Arrays.asList(statuses));
+  }
+
+  /** Builds a status from the validator's raw uint64 fields and epochs (compared unsigned). */
+  private ValidatorStatus createValidatorStatus(
+      final boolean slashed,
+      final long effectiveBalance,
+      final long activationEpoch,
+      final long exitEpoch,
+      final long withdrawableEpoch,
+      final long previousEpoch,
+      final long currentEpoch,
+      final long nextEpoch) {
+    return new ValidatorStatus(
+        slashed,
+        Long.compareUnsigned(withdrawableEpoch, currentEpoch) <= 0,
+        UInt64.fromLongBits(effectiveBalance),
+        UInt64.fromLongBits(withdrawableEpoch),
+        predicates.isActiveValidator(activationEpoch, exitEpoch, currentEpoch),
+        predicates.isActiveValidator(activationEpoch, exitEpoch, previousEpoch),
+        predicates.isActiveValidator(activationEpoch, exitEpoch, nextEpoch));
   }
 
   @Override
   public ValidatorStatus createValidatorStatus(
       final Validator validator, final UInt64 previousEpoch, final UInt64 currentEpoch) {
-    final UInt64 activationEpoch = validator.getActivationEpoch();
-    final UInt64 exitEpoch = validator.getExitEpoch();
-    final UInt64 withdrawableEpoch = validator.getWithdrawableEpoch();
-    return new ValidatorStatus(
+    return createValidatorStatus(
         validator.isSlashed(),
-        withdrawableEpoch.isLessThanOrEqualTo(currentEpoch),
-        validator.getEffectiveBalance(),
-        withdrawableEpoch,
-        predicates.isActiveValidator(activationEpoch, exitEpoch, currentEpoch),
-        predicates.isActiveValidator(activationEpoch, exitEpoch, previousEpoch),
-        predicates.isActiveValidator(activationEpoch, exitEpoch, currentEpoch.plus(1)));
+        validator.getEffectiveBalance().longValue(),
+        validator.getActivationEpoch().longValue(),
+        validator.getExitEpoch().longValue(),
+        validator.getWithdrawableEpoch().longValue(),
+        previousEpoch.longValue(),
+        currentEpoch.longValue(),
+        currentEpoch.plus(1).longValue());
   }
 
   protected TotalBalances createTotalBalances(final List<ValidatorStatus> statuses) {
