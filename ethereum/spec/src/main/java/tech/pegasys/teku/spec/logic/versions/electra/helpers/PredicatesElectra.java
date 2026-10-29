@@ -116,6 +116,11 @@ public class PredicatesElectra extends Predicates {
    * @return
    */
   public boolean isCompoundingWithdrawalCredential(final Bytes32 withdrawalCredentials) {
-    return withdrawalCredentials.get(0) == COMPOUNDING_WITHDRAWAL_BYTE;
+    return isCompoundingWithdrawalCredential(withdrawalCredentials.get(0));
+  }
+
+  /** is_compounding_withdrawal_credential from the first byte of the withdrawal credentials. */
+  public static boolean isCompoundingWithdrawalCredential(final byte withdrawalCredentialsPrefix) {
+    return withdrawalCredentialsPrefix == COMPOUNDING_WITHDRAWAL_BYTE;
   }
 }
