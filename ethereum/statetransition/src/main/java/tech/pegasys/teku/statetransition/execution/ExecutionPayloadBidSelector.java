@@ -16,8 +16,9 @@ package tech.pegasys.teku.statetransition.execution;
 import static tech.pegasys.teku.infrastructure.logging.Converter.weiToEth;
 import static tech.pegasys.teku.infrastructure.logging.LogFormatter.formatAbbreviatedHashRoot;
 import static tech.pegasys.teku.spec.constants.EthConstants.GWEI_TO_WEI;
+import static tech.pegasys.teku.spec.executionlayer.BuilderBoostFactorEvaluator.BUILDER_BOOST_FACTOR_PREFER_BUILDER;
+import static tech.pegasys.teku.spec.executionlayer.BuilderBoostFactorEvaluator.BUILDER_BOOST_FACTOR_PREFER_EXECUTION;
 
-import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -53,10 +54,11 @@ public class ExecutionPayloadBidSelector {
   }
 
   /**
-   * Selects the highest-value bid from p2p and builder bids. P2P bids are filtered by parent root,
+   * Selects the highest-ranked bid from p2p and builder bids. P2P bids are filtered by parent root,
    * parent block hash, min bid, and {@code isBuilderAllowed}; builder bids are filtered by min bid
    * and {@code isBuilderAllowed} only because all validation is done during fetching the bids. On
-   * equal value, the builder bid is preferred.
+   * equal boosted scores, the higher raw value wins, followed by a preference for Builder API bids.
+   * The configured preferences are retained even when the local payload is unavailable.
    */
   public Optional<RemoteBid> selectBestRemoteBid(
       final Set<RemoteBid> p2pBids,
@@ -67,7 +69,7 @@ public class ExecutionPayloadBidSelector {
       final BuilderConfig builderConfig) {
     final Predicate<RemoteBid> circuitBreakerPredicate =
         bid -> executionPayloadBidCircuitBreaker.isBuilderAllowed(bid.builderIndex(), state);
-    // A remote bid is eligible only if `bid_score >= min_bid
+    // A remote bid is eligible only if its raw value is at least min_bid.
     final Predicate<RemoteBid> minBidPredicate =
         bid -> {
           final UInt64 minBid =
@@ -91,18 +93,33 @@ public class ExecutionPayloadBidSelector {
         .filter(circuitBreakerPredicate)
         .filter(minBidPredicate)
         .forEach(eligibleRemoteBids::add);
-    // selecting the highest bid value based on their boosted values, with a Builder API bid (the
-    // only kind carrying an entry) winning a tie
     final Comparator<RemoteBid> remoteBidByBoostedValueAscending =
-        Comparator.<RemoteBid, BigInteger>comparing(
-                bid -> {
-                  final UInt64 builderBoostFactor = bid.builderBoostFactor(builderConfig);
-                  return bid.valueInGwei()
-                      .bigIntegerValue()
-                      .multiply(builderBoostFactor.bigIntegerValue());
-                })
-            .thenComparing(bid -> bid.builderEntry().isPresent());
-    return eligibleRemoteBids.stream().max(remoteBidByBoostedValueAscending);
+        (a, b) -> compareBoostedValues(a, b, builderConfig);
+    return eligibleRemoteBids.stream()
+        .max(
+            remoteBidByBoostedValueAscending
+                .thenComparing(RemoteBid::valueInGwei)
+                .thenComparing(bid -> bid.builderEntry().isPresent()));
+  }
+
+  private int compareBoostedValues(
+      final RemoteBid a, final RemoteBid b, final BuilderConfig builderConfig) {
+    final UInt64 factorA = a.builderBoostFactor(builderConfig);
+    final UInt64 factorB = b.builderBoostFactor(builderConfig);
+    final boolean preferBuilderA = factorA.equals(BUILDER_BOOST_FACTOR_PREFER_BUILDER);
+    final boolean preferBuilderB = factorB.equals(BUILDER_BOOST_FACTOR_PREFER_BUILDER);
+    if (preferBuilderA || preferBuilderB) {
+      return Boolean.compare(preferBuilderA, preferBuilderB);
+    }
+    final boolean preferExecutionA = factorA.equals(BUILDER_BOOST_FACTOR_PREFER_EXECUTION);
+    final boolean preferExecutionB = factorB.equals(BUILDER_BOOST_FACTOR_PREFER_EXECUTION);
+    if (preferExecutionA || preferExecutionB) {
+      return Boolean.compare(preferExecutionB, preferExecutionA);
+    }
+    return a.valueInGwei()
+        .bigIntegerValue()
+        .multiply(factorA.bigIntegerValue())
+        .compareTo(b.valueInGwei().bigIntegerValue().multiply(factorB.bigIntegerValue()));
   }
 
   /**
@@ -116,8 +133,8 @@ public class ExecutionPayloadBidSelector {
    * <ol>
    *   <li>If {@code useShouldOverrideBuilderFlag} is enabled and the EL returns {@code
    *       should_override_builder}, the local payload wins.
-   *   <li>Otherwise, {@code builderConfig.getBuilderBoostFactor()} is used to scale the remote
-   *       value. Equal adjusted values select the local payload.
+   *   <li>Otherwise, the remote bid's BuilderEntry boost factor (or the top-level factor for P2P)
+   *       is used to scale the remote value. Equal adjusted values select the local payload.
    * </ol>
    */
   public BidForBlock selectBestBidForBlock(
