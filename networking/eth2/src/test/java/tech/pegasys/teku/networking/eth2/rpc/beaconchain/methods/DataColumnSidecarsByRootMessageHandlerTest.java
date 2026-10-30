@@ -167,6 +167,33 @@ public class DataColumnSidecarsByRootMessageHandlerTest {
   }
 
   @TestTemplate
+  public void shouldValidateColumnIndexBoundsBeforeStorageAccess() {
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    for (final UInt64 index : List.of(UInt64.valueOf(numberOfColumns), UInt64.MAX_VALUE)) {
+      assertThat(
+              handler.validateRequest(
+                  protocolId,
+                  messageSchema.of(
+                      identifierSchema.create(dataStructureUtil.randomBytes32(), List.of(index)))))
+          .hasValueSatisfying(
+              error ->
+                  assertThat(error.getErrorMessageString())
+                      .isEqualTo("Requested column index is out of range"));
+    }
+    assertThat(
+            handler.validateRequest(
+                protocolId,
+                messageSchema.of(
+                    identifierSchema.create(
+                        dataStructureUtil.randomBytes32(),
+                        List.of(UInt64.valueOf(numberOfColumns - 1))))))
+        .isEmpty();
+    verify(combinedChainDataClient, never()).getSlotByBlockRoot(any());
+    verify(dataColumnSidecarArchiveReconstructor, never())
+        .reconstructDataColumnSidecar(any(), any(), anyInt());
+  }
+
+  @TestTemplate
   public void shouldNotSendDataColumnSidecarsIfPeerIsRateLimited() {
 
     when(peer.approveDataColumnSidecarsRequest(any(), anyLong())).thenReturn(Optional.empty());

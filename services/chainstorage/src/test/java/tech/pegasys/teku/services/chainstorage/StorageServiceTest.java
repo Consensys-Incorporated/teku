@@ -151,6 +151,37 @@ class StorageServiceTest {
   }
 
   @Test
+  void shouldNotSetupDataColumnSidecarPrunerWhenFuluNotSupported() {
+    when(storageConfiguration.getDataStorageMode()).thenReturn(StateStorageMode.PRUNE);
+    when(spec.isMilestoneSupported(SpecMilestone.FULU)).thenReturn(false);
+
+    final SafeFuture<?> future = storageService.doStart();
+
+    assertThat(future).isCompleted();
+    // without Fulu there is no data column sidecar pruner, so archiveSidecarsProofs can never run
+    assertThat(storageService.getDataColumnSidecarPruner()).isEmpty();
+    verify(eventChannels, never()).subscribe(eq(SidecarArchivePrunableChannel.class), any());
+  }
+
+  @Test
+  void shouldSetupDataColumnSidecarPrunerWhenFuluSupported() {
+    when(storageConfiguration.getDataStorageMode()).thenReturn(StateStorageMode.PRUNE);
+    when(spec.isMilestoneSupported(SpecMilestone.FULU)).thenReturn(true);
+    when(storageConfiguration.getDataColumnPruningInterval()).thenReturn(Duration.ofSeconds(60));
+    when(storageConfiguration.getDataColumnPruningLimit()).thenReturn(10);
+
+    final SafeFuture<?> future = storageService.doStart();
+
+    assertThat(future).isCompleted();
+    assertThat(storageService.getDataColumnSidecarPruner()).isPresent();
+    // the pruner is wired to receive archive-prunable slot signals
+    verify(eventChannels)
+        .subscribe(
+            eq(SidecarArchivePrunableChannel.class),
+            eq(storageService.getDataColumnSidecarPruner().get()));
+  }
+
+  @Test
   void shouldStartSuccessfullyWhenForceClearDbEnabled() {
     // Set forceClearDb to true
     when(storageConfiguration.isForceClearDb()).thenReturn(true);
@@ -162,7 +193,7 @@ class StorageServiceTest {
   }
 
   @Test
-  void shouldNotifyPrunerAfterSidecarWriteWithoutEnablingArchival() {
+  void shouldNotifyPrunerAfterSidecarWrite() {
     when(storageConfiguration.getDataStorageMode()).thenReturn(StateStorageMode.ARCHIVE);
     when(spec.isMilestoneSupported(SpecMilestone.FULU)).thenReturn(true);
     try (final MockedConstruction<DataColumnSidecarPruner> construction =
@@ -179,7 +210,6 @@ class StorageServiceTest {
       assertThat(storageService.getChainStorage().onNewSidecar(sidecar)).isCompleted();
 
       verify(pruner).onSidecarStored(slot);
-      verify(eventChannels, never()).subscribe(eq(SidecarArchivePrunableChannel.class), any());
     }
   }
 

@@ -158,8 +158,15 @@ public abstract class Node {
   }
 
   public void waitForLogMessageContaining(final String filter) {
+    waitForLogMessageContaining(filter, 2, TimeUnit.MINUTES);
+  }
+
+  public void waitForLogMessageContaining(
+      final String filter, final int timeoutAmount, final TimeUnit timeoutUnit) {
     waitFor(
-        () -> assertThat(getFilteredOutputContaining(filter)).isNotEmpty(), 2, TimeUnit.MINUTES);
+        () -> assertThat(getFilteredOutputContaining(filter)).isNotEmpty(),
+        timeoutAmount,
+        timeoutUnit);
   }
 
   public void waitForLogMessageEndingWith(final String filter) {
@@ -222,7 +229,7 @@ public abstract class Node {
         timeoutUnit);
   }
 
-  protected void waitFor(
+  public void waitFor(
       final Waiter.Condition condition, final int timeoutAmount, final TimeUnit timeoutUnit) {
     try {
       Waiter.waitFor(condition, timeoutAmount, timeoutUnit);

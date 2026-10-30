@@ -301,7 +301,7 @@ public class CombinedChainDataClient {
                     .filter(
                         identifier ->
                             identifier.blockRoot().equals(slotAndBlockRoot.getBlockRoot())))
-        .thenCompose(this::getDataColumnSidecars);
+        .thenCompose(identifiers -> historicalChainData.getSidecars(identifiers.toList()));
   }
 
   public SafeFuture<List<List<KZGProof>>> getDataColumnSidecarProofs(final UInt64 slot) {

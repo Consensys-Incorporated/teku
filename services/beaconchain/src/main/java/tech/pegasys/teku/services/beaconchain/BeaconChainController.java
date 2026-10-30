@@ -415,6 +415,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
   protected volatile GossipValidationHelper gossipValidationHelper;
   protected volatile DasGossipLogger dasGossipLogger;
   protected volatile DasReqRespLogger dasReqRespLogger;
+  protected volatile DataColumnSidecarArchiveReconstructor dataColumnSidecarArchiveReconstructor =
+      DataColumnSidecarArchiveReconstructor.NOOP;
   protected volatile LightClientUpdateStore lightClientUpdateStore;
   protected volatile LightClientServerService lightClientServerService;
   protected volatile SyncCommitteeSubscriptionManager syncCommitteeSubscriptionManager;
@@ -2186,7 +2188,6 @@ public class BeaconChainController extends Service implements BeaconChainControl
     final SuperNodeSupplier isSuperNodeSupplier =
         new SuperNodeSupplier(spec, () -> custodyGroupCountManager);
 
-    final DataColumnSidecarArchiveReconstructor dataColumnSidecarArchiveReconstructor;
     if (spec.isMilestoneSupported(SpecMilestone.FULU)) {
       dataColumnSidecarArchiveReconstructor =
           new DataColumnSidecarArchiveReconstructorImpl(
@@ -2773,6 +2774,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
     }
     slotProcessor.setCurrentSlot(currentSlot);
     performanceTracker.start(currentSlot);
+    dataColumnSidecarArchiveReconstructor.onNewFinalizedCheckpoint(
+        recentChainData.getStore().getFinalizedCheckpoint(), false);
   }
 
   protected UInt64 getCurrentSlot(final UInt64 genesisTime) {

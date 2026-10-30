@@ -146,6 +146,20 @@ public class DataColumnSidecarsByRangeMessageHandlerTest {
   }
 
   @TestTemplate
+  public void validateRequest_shouldRejectOutOfRangeColumns() {
+    for (final UInt64 index : List.of(UInt64.valueOf(numberOfColumns), UInt64.MAX_VALUE)) {
+      assertThat(
+              handler.validateRequest(
+                  protocolId,
+                  dataColumnSidecarsByRangeRequestMessageSchema.create(
+                      startSlot, ONE, List.of(index))))
+          .hasValueSatisfying(
+              error -> assertThat(error.getResponseCode()).isEqualTo(INVALID_REQUEST_CODE));
+    }
+    verifyNoInteractions(combinedChainDataClient, dataColumnSidecarArchiveReconstructor);
+  }
+
+  @TestTemplate
   public void validateRequest_validRequest() {
     final Optional<RpcException> result =
         handler.validateRequest(
@@ -616,7 +630,7 @@ public class DataColumnSidecarsByRangeMessageHandlerTest {
   }
 
   @TestTemplate
-  public void shouldLeaveLoadingTheBlockToTheReconstructor() {
+  public void shouldResolveFinalizedRootOncePerSlotBeforeReconstruction() {
     // request only a pruned extension column
     final UInt64 prunedColumn = UInt64.valueOf(72);
     final DataColumnSidecarsByRangeRequestMessage request =
@@ -625,7 +639,7 @@ public class DataColumnSidecarsByRangeMessageHandlerTest {
 
     when(combinedChainDataClient.getSidecar(any()))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
-    // stored identifiers only provide the canonical slots/roots to expand against
+    // Stored identifiers locate populated slots; finalized blocks establish their canonical roots.
     final List<DataColumnSidecar> storedSidecars =
         setUpDataColumnSidecarsData(
             startSlot, request.getMaxSlot(), new ArrayList<>(List.of(UInt64.valueOf(1))));
@@ -639,15 +653,82 @@ public class DataColumnSidecarsByRangeMessageHandlerTest {
 
     verify(listener, never()).respond(any());
     verify(listener).completeSuccessfully();
-    // each archived block is passed by slot and root; the handler loads no block itself
+    // Use the finalized lookup, not a hot/non-canonical block lookup.
     verify(combinedChainDataClient, never()).getBlockAtSlotExact(any());
     verify(dataColumnSidecarArchiveReconstructor, times(count.intValue()))
         .reconstructDataColumnSidecar(any(), eq(prunedColumn), anyInt());
     storedSidecars.forEach(
-        sidecar ->
-            verify(dataColumnSidecarArchiveReconstructor)
-                .reconstructDataColumnSidecar(
-                    eq(sidecar.getSlotAndBlockRoot()), eq(prunedColumn), anyInt()));
+        sidecar -> {
+          verify(combinedChainDataClient).getFinalizedBlockAtSlotExact(sidecar.getSlot());
+          verify(dataColumnSidecarArchiveReconstructor)
+              .reconstructDataColumnSidecar(
+                  eq(sidecar.getSlotAndBlockRoot()), eq(prunedColumn), anyInt());
+        });
+  }
+
+  @TestTemplate
+  public void shouldExpandAgainstCanonicalRootWhenStrayRootSortsFirst() {
+    final SignedBeaconBlock first = dataStructureUtil.randomSignedBeaconBlock(startSlot);
+    final SignedBeaconBlock second = dataStructureUtil.randomSignedBeaconBlock(startSlot);
+    final boolean firstRootIsLower = first.getRoot().compareTo(second.getRoot()) < 0;
+    final SignedBeaconBlock stray = firstRootIsLower ? first : second;
+    final SignedBeaconBlock canonical = firstRootIsLower ? second : first;
+    final UInt64 extension = UInt64.valueOf(72);
+    final DataColumnSlotAndIdentifier strayKey =
+        new DataColumnSlotAndIdentifier(startSlot, stray.getRoot(), ZERO);
+    final DataColumnSlotAndIdentifier canonicalKey =
+        new DataColumnSlotAndIdentifier(startSlot, canonical.getRoot(), extension);
+    when(combinedChainDataClient.getSidecar(any()))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+    final DataColumnSidecar expected =
+        setUpDataColumnSidecarDataForKey(Pair.of(canonical.asHeader(), canonicalKey));
+    final DataColumnSlotAndIdentifier retainedKey =
+        new DataColumnSlotAndIdentifier(startSlot, canonical.getRoot(), ZERO);
+    final DataColumnSidecar retained =
+        setUpDataColumnSidecarDataForKey(Pair.of(canonical.asHeader(), retainedKey));
+    when(combinedChainDataClient.getDataColumnIdentifiers(eq(startSlot), eq(startSlot), any()))
+        .thenReturn(SafeFuture.completedFuture(List.of(strayKey, retainedKey, canonicalKey)));
+    when(combinedChainDataClient.getFinalizedBlockAtSlotExact(startSlot))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(canonical)));
+    when(dataColumnSidecarArchiveReconstructor.isSidecarPruned(any(), any())).thenReturn(true);
+    final DataColumnSidecarsByRangeRequestMessage request =
+        dataColumnSidecarsByRangeRequestMessageSchema.create(
+            startSlot, ONE, List.of(ZERO, extension));
+
+    handler.onIncomingMessage(protocolId, peer, request, listener);
+
+    verify(listener).respond(expected);
+    verify(listener).respond(retained);
+    verify(listener).completeSuccessfully();
+    verify(combinedChainDataClient).getFinalizedBlockAtSlotExact(startSlot);
+    verify(combinedChainDataClient, never())
+        .getSidecar(new DataColumnSlotAndIdentifier(startSlot, stray.getRoot(), extension));
+    verify(dataColumnSidecarArchiveReconstructor, never())
+        .reconstructDataColumnSidecar(any(), any(), anyInt());
+  }
+
+  @TestTemplate
+  public void shouldNotExpandStrayColumnsWhenNoFinalizedBlockExists() {
+    final DataColumnSlotAndIdentifier strayKey =
+        new DataColumnSlotAndIdentifier(startSlot, dataStructureUtil.randomBytes32(), ZERO);
+    when(combinedChainDataClient.getDataColumnIdentifiers(eq(startSlot), eq(startSlot), any()))
+        .thenReturn(SafeFuture.completedFuture(List.of(strayKey)));
+    when(combinedChainDataClient.getFinalizedBlockAtSlotExact(startSlot))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+    when(dataColumnSidecarArchiveReconstructor.isSidecarPruned(any(), any())).thenReturn(true);
+
+    handler.onIncomingMessage(
+        protocolId,
+        peer,
+        dataColumnSidecarsByRangeRequestMessageSchema.create(
+            startSlot, ONE, List.of(UInt64.valueOf(72))),
+        listener);
+
+    verify(listener).completeSuccessfully();
+    verify(listener, never()).respond(any());
+    verify(combinedChainDataClient, never()).getSidecar(any());
+    verify(dataColumnSidecarArchiveReconstructor, never())
+        .reconstructDataColumnSidecar(any(), any(), anyInt());
   }
 
   private List<DataColumnSidecar> setUpDataColumnSidecarsData(
@@ -683,6 +764,8 @@ public class DataColumnSidecarsByRangeMessageHandlerTest {
         .forEach(
             slot -> {
               final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(slot);
+              when(combinedChainDataClient.getFinalizedBlockAtSlotExact(slot))
+                  .thenReturn(SafeFuture.completedFuture(Optional.of(block)));
               columnIndices.forEach(
                   columnIndex -> {
                     headersAndDataColumnSlotAndIdentifiers.add(

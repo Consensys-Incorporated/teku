@@ -17,7 +17,6 @@ import static tech.pegasys.teku.networking.eth2.rpc.core.RpcResponseStatus.INVAL
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSortedMap;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
@@ -35,6 +34,7 @@ import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
 import org.hyperledger.besu.plugin.services.metrics.LabelledMetric;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.async.stream.AsyncStream;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.peers.Eth2Peer;
@@ -114,6 +114,12 @@ public class DataColumnSidecarsByRangeMessageHandler
           new RpcException(
               INVALID_REQUEST_CODE,
               "Data column sidecars not supported for the requested slot range"));
+    }
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    if (request.getColumns().stream()
+        .anyMatch(index -> index.isGreaterThanOrEqualTo(numberOfColumns))) {
+      return Optional.of(
+          new RpcException(INVALID_REQUEST_CODE, "Requested column index is out of range"));
     }
     if (requestedCount == -1 || requestedCount > maxRequestDataColumnSidecars) {
       requestCounter.labels("count_too_big").inc();
@@ -312,13 +318,12 @@ public class DataColumnSidecarsByRangeMessageHandler
         // Reconstruction by range is therefore best-effort within the normal sidecar cap.
         return combinedChainDataClient
             .getDataColumnIdentifiers(startSlot, endSlot, maxRequestDataColumnSidecars)
+            .thenCompose(this::filterIdentifiers)
             .thenCompose(
                 keys -> {
                   dataColumnSidecarKeysIterator =
                       Optional.of(
-                          filterIdentifiers(keys).stream()
-                              .limit(maxRequestDataColumnSidecars.longValue())
-                              .iterator());
+                          keys.stream().limit(maxRequestDataColumnSidecars.longValue()).iterator());
                   return getNextDataColumnSidecar(dataColumnSidecarKeysIterator.get());
                 });
       } else {
@@ -326,7 +331,7 @@ public class DataColumnSidecarsByRangeMessageHandler
       }
     }
 
-    private List<DataColumnSlotAndIdentifier> filterIdentifiers(
+    private SafeFuture<List<DataColumnSlotAndIdentifier>> filterIdentifiers(
         final List<DataColumnSlotAndIdentifier> dbIdentifiers) {
       final NavigableMap<UInt64, List<DataColumnSlotAndIdentifier>> canonicalSlotToColumnIds =
           dbIdentifiers.stream()
@@ -334,27 +339,40 @@ public class DataColumnSidecarsByRangeMessageHandler
               .collect(
                   Collectors.groupingBy(
                       DataColumnSlotAndIdentifier::slot, TreeMap::new, Collectors.toList()));
-      final List<DataColumnSlotAndIdentifier> matchingKeys = new ArrayList<>();
-      for (final UInt64 slot : canonicalSlotToColumnIds.navigableKeySet()) {
-        if (maybeSuperNodePruned && !canonicalSlotToColumnIds.get(slot).isEmpty()) {
-          // Adding all requested, we expect we either have it
-          // or can reconstruct from proof archives
-          final DataColumnSlotAndIdentifier first = canonicalSlotToColumnIds.get(slot).getFirst();
-          columns.stream()
-              .sorted()
-              .forEach(
-                  column ->
-                      matchingKeys.add(
-                          new DataColumnSlotAndIdentifier(
-                              first.slot(), first.blockRoot(), column)));
-        } else {
-          canonicalSlotToColumnIds.get(slot).stream()
-              .filter(key -> columns.contains(key.columnIndex()))
-              .forEach(matchingKeys::add);
-        }
-      }
-
-      return matchingKeys;
+      return AsyncStream.createUnsafe(canonicalSlotToColumnIds.entrySet().iterator())
+          .mapAsync(
+              entry -> {
+                if (!maybeSuperNodePruned) {
+                  return SafeFuture.completedFuture(
+                      entry.getValue().stream()
+                          .filter(key -> columns.contains(key.columnIndex()))
+                          .toList());
+                }
+                final UInt64 slot = entry.getKey();
+                // A finalized slot can still contain columns from never-imported blocks.
+                // Resolve its canonical root once, not once for each requested column.
+                final SafeFuture<Optional<Bytes32>> canonicalRoot =
+                    slot.isLessThanOrEqualTo(finalizedSlot)
+                        ? combinedChainDataClient
+                            .getFinalizedBlockAtSlotExact(slot)
+                            .thenApply(block -> block.map(value -> value.getRoot()))
+                        : SafeFuture.completedFuture(
+                            Optional.ofNullable(canonicalHotRoots.get(slot)));
+                return canonicalRoot.thenApply(
+                    root ->
+                        root.map(
+                                value ->
+                                    columns.stream()
+                                        .sorted()
+                                        .map(
+                                            column ->
+                                                new DataColumnSlotAndIdentifier(
+                                                    slot, value, column))
+                                        .toList())
+                            .orElseGet(List::of));
+              })
+          .toList()
+          .thenApply(lists -> lists.stream().flatMap(List::stream).toList());
     }
 
     private boolean isCanonicalHotOrFinalizedDataColumnSidecar(
