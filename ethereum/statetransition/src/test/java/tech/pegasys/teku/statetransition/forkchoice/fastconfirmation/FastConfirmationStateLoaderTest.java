@@ -126,12 +126,18 @@ class FastConfirmationStateLoaderTest {
   }
 
   @Test
-  void shouldReturnEmptyWhenPreviousBalanceSourceUnavailableAtEpochStart() {
+  void shouldLoadWithoutPreviousBalanceSourceWhenUnavailableAtEpochStart() {
+    // The previous observed justified checkpoint state has been pruned. Only reconfirmation reads
+    // it, so the other sources still load and the calculator decides whether it needed it.
     stubCheckpointState(previousObserved, Optional.empty());
     stubCheckpointState(currentObserved, Optional.of(currentState));
     stubHeadState(Optional.of(headState));
 
-    assertThat(load(true).join()).isEmpty();
+    final FastConfirmationStates states = load(true).join().orElseThrow();
+
+    assertThat(states.previousBalanceSource()).isEmpty();
+    assertThat(states.currentBalanceSource()).isSameAs(currentState);
+    assertThat(states.pulledUpHeadState()).isSameAs(headState);
   }
 
   private SafeFuture<Optional<FastConfirmationStates>> load(
