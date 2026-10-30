@@ -63,6 +63,7 @@ public class StoreBuilder {
       Optional.empty();
   private ForkChoiceStrategy forkChoiceStrategy = null;
   private Optional<UInt64> custodyGroupCount = Optional.empty();
+  private Optional<Bytes32> fastConfirmedRoot = Optional.empty();
 
   private StoreBuilder() {}
 
@@ -101,6 +102,7 @@ public class StoreBuilder {
         blockInfo,
         new HashMap<>(),
         Optional.empty(),
+        Optional.empty(),
         Optional.empty());
   }
 
@@ -115,7 +117,8 @@ public class StoreBuilder {
         .bestJustifiedCheckpoint(data.bestJustifiedCheckpoint())
         .blockInformation(data.blockInformation())
         .votes(data.votes())
-        .latestCanonicalBlockRoot(data.latestCanonicalBlockRoot());
+        .latestCanonicalBlockRoot(data.latestCanonicalBlockRoot())
+        .fastConfirmedRoot(data.fastConfirmedRoot());
   }
 
   public UpdatableStore build() {
@@ -141,7 +144,8 @@ public class StoreBuilder {
           votes,
           storeConfig,
           forkChoiceStrategy,
-          custodyGroupCount);
+          custodyGroupCount,
+          fastConfirmedRoot);
     }
     return Store.create(
         asyncRunner,
@@ -163,7 +167,8 @@ public class StoreBuilder {
         latestCanonicalBlockRoot,
         votes,
         storeConfig,
-        custodyGroupCount);
+        custodyGroupCount,
+        fastConfirmedRoot);
   }
 
   private void assertValid() {
@@ -269,6 +274,12 @@ public class StoreBuilder {
   public StoreBuilder custodyGroupCount(final Optional<UInt64> custodyGroupCount) {
     checkNotNull(custodyGroupCount);
     this.custodyGroupCount = custodyGroupCount;
+    return this;
+  }
+
+  public StoreBuilder fastConfirmedRoot(final Optional<Bytes32> fastConfirmedRoot) {
+    checkNotNull(fastConfirmedRoot);
+    this.fastConfirmedRoot = fastConfirmedRoot;
     return this;
   }
 

@@ -286,6 +286,7 @@ public class DatabaseTest {
             Optional.empty(),
             Optional.empty(),
             Optional.empty(),
+            Optional.empty(),
             true,
             false,
             false));
@@ -303,6 +304,7 @@ public class DatabaseTest {
             Map.of(),
             Map.of(),
             false,
+            Optional.empty(),
             Optional.empty(),
             Optional.empty(),
             Optional.empty(),
@@ -456,6 +458,7 @@ public class DatabaseTest {
             Optional.empty(),
             Optional.empty(),
             Optional.empty(),
+            Optional.empty(),
             true,
             false,
             false));
@@ -473,6 +476,7 @@ public class DatabaseTest {
             Map.of(block3Sidecar0.getBlockRoot(), block3Sidecar0.getSlot()),
             Map.of(),
             false,
+            Optional.empty(),
             Optional.empty(),
             Optional.empty(),
             Optional.empty(),
@@ -594,6 +598,29 @@ public class DatabaseTest {
   }
 
   @TestTemplate
+  public void canPersistAndRestoreFastConfirmedRoot(final DatabaseContext context)
+      throws IOException {
+    initialize(context);
+    assertThat(recentChainData.getStore().getFastConfirmedRootBeforeRestart()).isEmpty();
+
+    final Bytes32 fastConfirmedRoot = dataStructureUtil.randomBytes32();
+    final StoreTransaction transaction = recentChainData.startStoreTransaction();
+    transaction.setFastConfirmedRoot(fastConfirmedRoot);
+    assertThat(transaction.commit()).isCompleted();
+    // Only persisted: the in-memory store keeps the value loaded at startup
+    assertThat(recentChainData.getStore().getFastConfirmedRootBeforeRestart()).isEmpty();
+
+    // A transaction that does not set it leaves the persisted value untouched
+    final StoreTransaction unrelatedTransaction = recentChainData.startStoreTransaction();
+    unrelatedTransaction.setCustodyGroupCount(UInt64.ONE);
+    assertThat(unrelatedTransaction.commit()).isCompleted();
+
+    restartStorage();
+    assertThat(recentChainData.getStore().getFastConfirmedRootBeforeRestart())
+        .contains(fastConfirmedRoot);
+  }
+
+  @TestTemplate
   public void updateWeakSubjectivityState_clearValue(final DatabaseContext context)
       throws IOException {
     initialize(context);
@@ -651,6 +678,7 @@ public class DatabaseTest {
             Map.of(),
             Map.of(),
             false,
+            Optional.empty(),
             Optional.empty(),
             Optional.empty(),
             Optional.empty(),
@@ -761,6 +789,7 @@ public class DatabaseTest {
             Optional.empty(),
             Optional.empty(),
             Optional.empty(),
+            Optional.empty(),
             true,
             false,
             true));
@@ -780,6 +809,7 @@ public class DatabaseTest {
             Map.of(genesisBlockAndState.getRoot(), genesisBlockAndState.getSlot()),
             Map.of(),
             false,
+            Optional.empty(),
             Optional.empty(),
             Optional.empty(),
             Optional.empty(),
@@ -986,6 +1016,7 @@ public class DatabaseTest {
         Optional.empty(),
         Optional.empty(),
         Optional.empty(),
+        Optional.empty(),
         true,
         false,
         true);
@@ -1040,6 +1071,7 @@ public class DatabaseTest {
             Optional.empty(),
             Optional.empty(),
             Optional.empty(),
+            Optional.empty(),
             true,
             false,
             true));
@@ -1074,6 +1106,7 @@ public class DatabaseTest {
             Optional.empty(),
             Optional.empty(),
             Optional.empty(),
+            Optional.empty(),
             true,
             false,
             true));
@@ -1097,6 +1130,7 @@ public class DatabaseTest {
             Map.of(blockAndState.getRoot(), blockAndState.getSlot()),
             Map.of(),
             false,
+            Optional.empty(),
             Optional.empty(),
             Optional.empty(),
             Optional.empty(),
@@ -1142,6 +1176,7 @@ public class DatabaseTest {
             Map.of(),
             Map.of(),
             false,
+            Optional.empty(),
             Optional.empty(),
             Optional.empty(),
             Optional.empty(),

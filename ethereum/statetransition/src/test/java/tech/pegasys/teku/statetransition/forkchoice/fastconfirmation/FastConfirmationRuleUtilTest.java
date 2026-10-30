@@ -115,6 +115,30 @@ class FastConfirmationRuleUtilTest {
   }
 
   @Test
+  void shouldDetectWhenBlockShouldBeFinalized() {
+    // Minimal preset: SLOTS_PER_EPOCH == 8. A block at an epoch start is its own epoch's
+    // checkpoint (epoch 1), which can be finalized at the earliest at the start of epoch 3.
+    assertThat(
+            FastConfirmationRuleUtil.blockShouldBeFinalized(
+                spec, UInt64.valueOf(8), UInt64.valueOf(23)))
+        .isFalse();
+    assertThat(
+            FastConfirmationRuleUtil.blockShouldBeFinalized(
+                spec, UInt64.valueOf(8), UInt64.valueOf(24)))
+        .isTrue();
+    // Any later block in the epoch is only covered by the next checkpoint (epoch 2), so finality is
+    // not expected before the start of epoch 4.
+    assertThat(
+            FastConfirmationRuleUtil.blockShouldBeFinalized(
+                spec, UInt64.valueOf(9), UInt64.valueOf(31)))
+        .isFalse();
+    assertThat(
+            FastConfirmationRuleUtil.blockShouldBeFinalized(
+                spec, UInt64.valueOf(15), UInt64.valueOf(32)))
+        .isTrue();
+  }
+
+  @Test
   void shouldComputeSlotsSinceEpochStart() {
     // Minimal preset: SLOTS_PER_EPOCH == 8
     assertThat(FastConfirmationRuleUtil.computeSlotsSinceEpochStart(spec, UInt64.valueOf(8)))

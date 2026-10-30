@@ -114,6 +114,8 @@ public interface SchemaCombined extends Schema {
 
   KvStoreVariable<UInt64> getVariableCustodyGroupCount();
 
+  KvStoreVariable<Bytes32> getVariableFastConfirmedRoot();
+
   KvStoreVariable<UInt64> getVariableEarliestBlockSlot();
 
   KvStoreVariable<DepositTreeSnapshot> getVariableFinalizedDepositSnapshot();

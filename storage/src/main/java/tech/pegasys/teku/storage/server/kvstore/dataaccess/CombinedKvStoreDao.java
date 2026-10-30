@@ -406,6 +406,11 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
   }
 
   @Override
+  public Optional<Bytes32> getFastConfirmedRoot() {
+    return db.get(schema.getVariableFastConfirmedRoot());
+  }
+
+  @Override
   public Optional<SlotAndBlockRoot> getSlotAndBlockRootForFinalizedStateRoot(
       final Bytes32 stateRoot) {
     Optional<UInt64> maybeSlot = db.get(schema.getColumnSlotsByFinalizedStateRoot(), stateRoot);
@@ -554,6 +559,7 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
             "OPTIMISTIC_TRANSITION_BLOCK_SLOT",
             getOptimisticTransitionBlockSlot().map(Objects::toString))
         .put("CUSTODY_GROUP_COUNT", getCustodyGroupCount().map(Objects::toString))
+        .put("FAST_CONFIRMED_ROOT", getFastConfirmedRoot().map(Bytes32::toString))
         .put(
             "EARLIEST_AVAILABLE_DATA_COLUMN_SLOT",
             getEarliestAvailableDataColumnSlot().map(Objects::toString))
@@ -843,6 +849,11 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
     @Override
     public void setCustodyGroupCount(final UInt64 custodyGroupCount) {
       transaction.put(schema.getVariableCustodyGroupCount(), custodyGroupCount);
+    }
+
+    @Override
+    public void setFastConfirmedRoot(final Bytes32 fastConfirmedRoot) {
+      transaction.put(schema.getVariableFastConfirmedRoot(), fastConfirmedRoot);
     }
 
     @Override
