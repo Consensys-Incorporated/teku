@@ -71,15 +71,19 @@ public class ExecutionPayloadBidSelectorTest {
     "100, 100, 90, 100, true",
     "1000, 0, 1, 1, false",
     "1, 1, 1000, 0, true",
-    "0, 1, 1000, 0, true",
+    // PREFER_EXECUTION scores zero, so the raw value breaks the tie with other zero scores
+    "0, 1, 1000, 0, false",
     "1000, 0, 10, 0, true",
     "10, 0, 1000, 0, false",
-    "0, 18446744073709551615, 1000, 100, true",
-    "1000, 100, 0, 18446744073709551615, false",
+    "1, 18446744073709551615, 1000, 100, true",
+    "1000, 100, 1, 18446744073709551615, false",
+    // a zero-value bid is not preferred even with PREFER_BUILDER
+    "0, 18446744073709551615, 1000, 100, false",
+    "1000, 100, 0, 18446744073709551615, true",
     "5, 18446744073709551615, 10, 18446744073709551615, false",
     "10, 18446744073709551615, 5, 18446744073709551615, true",
-    "0, 18446744073709551615, 1000, 0, true",
-    "1000, 0, 0, 18446744073709551615, false",
+    "0, 18446744073709551615, 1000, 0, false",
+    "1000, 0, 0, 18446744073709551615, true",
     "18446744073709551615, 100, 18446744073709551614, 101, false"
   })
   void ranksRemoteBidsByPreferenceThenBoostedScoreThenRawValue(
@@ -107,7 +111,7 @@ public class ExecutionPayloadBidSelectorTest {
             Set.of(p2pBid), List.of(builderBid), parentRoot, parentBlockHash, state, builderConfig);
 
     assertThat(bestRemote).contains(aWins ? p2pBid : builderBid);
-    // Without a local payload, preserve the configured preference between remote bids.
+    // Without a local payload, the remote ranking is retained
     assertThat(
             selector.selectBestBidForBlock(Optional.empty(), bestRemote, builderConfig, slot).bid())
         .isEqualTo(aWins ? bidA : bidB);

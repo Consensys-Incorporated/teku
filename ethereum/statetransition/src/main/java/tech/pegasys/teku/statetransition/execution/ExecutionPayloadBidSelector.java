@@ -17,7 +17,7 @@ import static tech.pegasys.teku.infrastructure.logging.Converter.weiToEth;
 import static tech.pegasys.teku.infrastructure.logging.LogFormatter.formatAbbreviatedHashRoot;
 import static tech.pegasys.teku.spec.constants.EthConstants.GWEI_TO_WEI;
 import static tech.pegasys.teku.spec.executionlayer.BuilderBoostFactorEvaluator.BUILDER_BOOST_FACTOR_PREFER_BUILDER;
-import static tech.pegasys.teku.spec.executionlayer.BuilderBoostFactorEvaluator.BUILDER_BOOST_FACTOR_PREFER_EXECUTION;
+import static tech.pegasys.teku.spec.executionlayer.BuilderBoostFactorEvaluator.computeBoostedValue;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -56,9 +56,18 @@ public class ExecutionPayloadBidSelector {
   /**
    * Selects the highest-ranked bid from p2p and builder bids. P2P bids are filtered by parent root,
    * parent block hash, min bid, and {@code isBuilderAllowed}; builder bids are filtered by min bid
-   * and {@code isBuilderAllowed} only because all validation is done during fetching the bids. On
-   * equal boosted scores, the higher raw value wins, followed by a preference for Builder API bids.
-   * The configured preferences are retained even when the local payload is unavailable.
+   * and {@code isBuilderAllowed} only because all validation is done during fetching the bids.
+   *
+   * <p>Eligible bids are ranked by:
+   *
+   * <ol>
+   *   <li>Non-zero bids with a {@code PREFER_BUILDER} boost factor first.
+   *   <li>The boosted score ({@code value × boost factor}). A {@code PREFER_EXECUTION} boost factor
+   *       scores zero, so such a bid loses to any positive score but is not ranked below other
+   *       zero-score bids.
+   *   <li>The higher raw value.
+   *   <li>Builder API bids over P2P bids.
+   * </ol>
    */
   public Optional<RemoteBid> selectBestRemoteBid(
       final Set<RemoteBid> p2pBids,
@@ -93,33 +102,21 @@ public class ExecutionPayloadBidSelector {
         .filter(circuitBreakerPredicate)
         .filter(minBidPredicate)
         .forEach(eligibleRemoteBids::add);
-    final Comparator<RemoteBid> remoteBidByBoostedValueAscending =
-        (a, b) -> compareBoostedValues(a, b, builderConfig);
-    return eligibleRemoteBids.stream()
-        .max(
-            remoteBidByBoostedValueAscending
-                .thenComparing(RemoteBid::valueInGwei)
-                .thenComparing(bid -> bid.builderEntry().isPresent()));
+    final Comparator<RemoteBid> remoteBidRanking =
+        Comparator.comparing((RemoteBid bid) -> isPreferredBuilderBid(bid, builderConfig))
+            .thenComparing(
+                bid ->
+                    computeBoostedValue(
+                        bid.valueInGwei().bigIntegerValue(), bid.builderBoostFactor(builderConfig)))
+            .thenComparing(RemoteBid::valueInGwei)
+            .thenComparing(bid -> bid.builderEntry().isPresent());
+    return eligibleRemoteBids.stream().max(remoteBidRanking);
   }
 
-  private int compareBoostedValues(
-      final RemoteBid a, final RemoteBid b, final BuilderConfig builderConfig) {
-    final UInt64 factorA = a.builderBoostFactor(builderConfig);
-    final UInt64 factorB = b.builderBoostFactor(builderConfig);
-    final boolean preferBuilderA = factorA.equals(BUILDER_BOOST_FACTOR_PREFER_BUILDER);
-    final boolean preferBuilderB = factorB.equals(BUILDER_BOOST_FACTOR_PREFER_BUILDER);
-    if (preferBuilderA || preferBuilderB) {
-      return Boolean.compare(preferBuilderA, preferBuilderB);
-    }
-    final boolean preferExecutionA = factorA.equals(BUILDER_BOOST_FACTOR_PREFER_EXECUTION);
-    final boolean preferExecutionB = factorB.equals(BUILDER_BOOST_FACTOR_PREFER_EXECUTION);
-    if (preferExecutionA || preferExecutionB) {
-      return Boolean.compare(preferExecutionB, preferExecutionA);
-    }
-    return a.valueInGwei()
-        .bigIntegerValue()
-        .multiply(factorA.bigIntegerValue())
-        .compareTo(b.valueInGwei().bigIntegerValue().multiply(factorB.bigIntegerValue()));
+  // A zero-value bid is not preferred, so it can't outrank paying bids
+  private boolean isPreferredBuilderBid(final RemoteBid bid, final BuilderConfig builderConfig) {
+    return bid.builderBoostFactor(builderConfig).equals(BUILDER_BOOST_FACTOR_PREFER_BUILDER)
+        && !bid.valueInGwei().isZero();
   }
 
   /**
@@ -127,8 +124,8 @@ public class ExecutionPayloadBidSelector {
    *
    * <p>If {@code maybeRemoteBid} is empty, the local bid is returned unconditionally (the caller
    * already decided to self-build). If {@code maybeLocalBid} is empty (local payload unavailable),
-   * the remote bid is returned unconditionally. When both are present, selection follows this
-   * precedence:
+   * the remote bid is returned unconditionally, so the ranking from {@link #selectBestRemoteBid} is
+   * retained. When both are present, selection follows this precedence:
    *
    * <ol>
    *   <li>If {@code useShouldOverrideBuilderFlag} is enabled and the EL returns {@code
@@ -136,6 +133,9 @@ public class ExecutionPayloadBidSelector {
    *   <li>Otherwise, the remote bid's BuilderEntry boost factor (or the top-level factor for P2P)
    *       is used to scale the remote value. Equal adjusted values select the local payload.
    * </ol>
+   *
+   * <p>A {@code PREFER_BUILDER} boost factor selects the remote bid regardless of its value, so
+   * {@code min_bid} is the only guard against using a zero-value remote bid in that case.
    */
   public BidForBlock selectBestBidForBlock(
       final Optional<LocalBid> maybeLocalBid,
