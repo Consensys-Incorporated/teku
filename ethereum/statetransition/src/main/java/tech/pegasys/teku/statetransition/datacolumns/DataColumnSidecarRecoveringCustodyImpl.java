@@ -329,12 +329,7 @@ public class DataColumnSidecarRecoveringCustodyImpl implements DataColumnSidecar
   @Override
   public SafeFuture<Void> onNewValidatedDataColumnSidecar(
       final DataColumnSidecar dataColumnSidecar, final RemoteOrigin remoteOrigin) {
-    if (completedSlots.contains(dataColumnSidecar.getSlotAndBlockRoot())) {
-      return SafeFuture.COMPLETE;
-    }
-    // Recovery is not needed for locally produced or recovered data,
-    // we will get everything for it in custody w/o reconstruction
-    if (remoteOrigin.equals(RemoteOrigin.RPC) || remoteOrigin.equals(RemoteOrigin.GOSSIP)) {
+    if (isRecoveryTrackingRequired(dataColumnSidecar, remoteOrigin)) {
       LOG.debug(
           "sidecar: {} {} - remoteOrigin: {}",
           dataColumnSidecar::getSlotAndBlockRoot,
@@ -342,7 +337,27 @@ public class DataColumnSidecarRecoveringCustodyImpl implements DataColumnSidecar
           () -> remoteOrigin);
       createOrUpdateRecoveryTaskForDataColumnSidecar(dataColumnSidecar);
     }
+    // stored even for a completed block, so a column that didn't reach custody earlier, e.g.
+    // because its write failed, is stored when it arrives again
     return delegate.onNewValidatedDataColumnSidecar(dataColumnSidecar, remoteOrigin);
+  }
+
+  private boolean isRecoveryTrackingRequired(
+      final DataColumnSidecar dataColumnSidecar, final RemoteOrigin remoteOrigin) {
+    if (completedSlots.contains(dataColumnSidecar.getSlotAndBlockRoot())) {
+      return false;
+    }
+    // Recovery is not needed for locally produced or recovered data,
+    // we will get everything for it in custody w/o reconstruction
+    if (!remoteOrigin.equals(RemoteOrigin.RPC) && !remoteOrigin.equals(RemoteOrigin.GOSSIP)) {
+      return false;
+    }
+    // The recovery stores only the columns it wasn't given, so it must be given only columns the
+    // delegate stores. A column sampled outside custody, before custody grew to all groups, would
+    // never be stored otherwise.
+    return custodyGroupCountManager
+        .getCustodyColumnIndices()
+        .contains(dataColumnSidecar.getIndex());
   }
 
   private void createOrUpdateRecoveryTaskForDataColumnSidecar(final DataColumnSidecar sidecar) {

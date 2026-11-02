@@ -24,7 +24,6 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.statetransition.datacolumns.DasCustodyStand.createCustodyGroupCountManager;
 
@@ -428,10 +427,78 @@ public class DataColumnSidecarRecoveringCustodyTest {
 
     assertThat(custody.getCompletedSlots()).contains(signedBeaconBlock.getSlotAndBlockRoot());
 
-    // doesn't pass sidecars further when it's proved as completed
-    custody.onNewValidatedDataColumnSidecar(
-        sidecars.values().stream().findFirst().get(), RemoteOrigin.RPC);
-    verifyNoMoreInteractions(delegate);
+    // a completed block needs no recovery, but sidecars arriving for it are still stored
+    final DataColumnSidecar sidecar = sidecars.values().stream().findFirst().orElseThrow();
+    custody.onNewValidatedDataColumnSidecar(sidecar, RemoteOrigin.RPC);
+    verify(delegate, times(2)).onNewValidatedDataColumnSidecar(sidecar, RemoteOrigin.RPC);
+    assertThat(
+            custody
+                .getRecoveryTasks()
+                .get(signedBeaconBlock.getSlotAndBlockRoot())
+                .existingSidecars())
+        .isEmpty();
+  }
+
+  @Test
+  public void shouldStoreColumnsSampledOutsideCustodyBeforeBecomingSupernode() {
+    final CustodyGroupCountManager custodyGroupCountManager = mock(CustodyGroupCountManager.class);
+    when(custodyGroupCountManager.getCustodyGroupCount()).thenReturn(4);
+    when(custodyGroupCountManager.getCustodyColumnIndices())
+        .thenReturn(columnIndices.get().limit(4).collect(Collectors.toSet()));
+    this.custody =
+        new DataColumnSidecarRecoveringCustodyImpl(
+            delegate,
+            stubAsyncRunner,
+            spec,
+            dataColumnSidecarPublisher,
+            custodyGroupCountManager,
+            config.getNumberOfColumns(),
+            config.getNumberOfCustodyGroups(),
+            __ -> Duration.ofSeconds(2),
+            stubMetricsSystem,
+            stubTimeProvider);
+
+    final Map<UInt64, DataColumnSidecar> sidecars =
+        columnIndices
+            .get()
+            .map(i -> dataStructureUtil.randomDataColumnSidecar(signedBeaconBlock.asHeader(), i))
+            .collect(Collectors.toMap(DataColumnSidecar::getIndex, sidecar -> sidecar));
+    // 8 columns sampled while custodying 4 groups, the delegate stores only columns 0-3
+    columnIndices
+        .get()
+        .limit(8)
+        .forEach(i -> custody.onNewValidatedDataColumnSidecar(sidecars.get(i), RemoteOrigin.RPC));
+
+    // custody grows to all groups, the next slot times out the recovery task
+    when(custodyGroupCountManager.getCustodyGroupCount())
+        .thenReturn(config.getNumberOfCustodyGroups());
+    when(custodyGroupCountManager.getCustodyColumnIndices())
+        .thenReturn(columnIndices.get().collect(Collectors.toSet()));
+    custody.onSlot(slot);
+    stubTimeProvider.advanceTimeBySeconds(2);
+    stubAsyncRunner.executeDueActionsRepeatedly();
+
+    // the backfill brings the columns missing from custody, recovery starts with half of them
+    when(miscHelpersFulu.reconstructAllDataColumnSidecars(anyCollection()))
+        .thenReturn(sidecars.values().stream().toList());
+    columnIndices
+        .get()
+        .skip(8)
+        .limit(60)
+        .forEach(i -> custody.onNewValidatedDataColumnSidecar(sidecars.get(i), RemoteOrigin.RPC));
+    stubAsyncRunner.executeDueActionsRepeatedly();
+
+    verify(miscHelpersFulu).reconstructAllDataColumnSidecars(anyCollection());
+    // columns 4-7 were never stored, so the recovery stores them with the never received ones
+    columnIndices
+        .get()
+        .skip(4)
+        .limit(4)
+        .forEach(
+            i ->
+                verify(delegate)
+                    .onNewValidatedDataColumnSidecar(sidecars.get(i), RemoteOrigin.RECOVERED));
+    verify(delegate, times(64)).onNewValidatedDataColumnSidecar(any(), eq(RemoteOrigin.RECOVERED));
   }
 
   @Test
