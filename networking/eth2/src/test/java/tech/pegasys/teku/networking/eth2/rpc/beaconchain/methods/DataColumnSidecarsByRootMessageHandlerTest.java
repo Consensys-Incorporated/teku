@@ -480,6 +480,8 @@ public class DataColumnSidecarsByRootMessageHandlerTest {
 
     assertThat(respondedDataColumnSidecarBlockRoots)
         .containsExactlyElementsOf(expectedDataColumnIdentifiersBlockRoots);
+    assertThat(sentSidecars(DataColumnSidecarSource.STORED)).isEqualTo(4);
+    assertThat(sentSidecars(DataColumnSidecarSource.RECONSTRUCTED)).isZero();
   }
 
   @TestTemplate
@@ -597,6 +599,15 @@ public class DataColumnSidecarsByRootMessageHandlerTest {
     assertThat(datacolumnSidecarCaptor.getAllValues())
         .hasSize(4)
         .allSatisfy(sidecar -> assertThat(sidecar.getIndex()).isEqualTo(ZERO));
+    assertThat(sentSidecars(DataColumnSidecarSource.RECONSTRUCTED)).isEqualTo(4);
+    assertThat(sentSidecars(DataColumnSidecarSource.STORED)).isZero();
+  }
+
+  private long sentSidecars(final DataColumnSidecarSource source) {
+    return metricsSystem.getLabelledCounterValue(
+        TekuMetricCategory.NETWORK,
+        "rpc_data_column_sidecars_by_root_sent_sidecars_total",
+        source.metricLabel());
   }
 
   @TestTemplate

@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods;
 
+import static tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.DataColumnSidecarSource.RECONSTRUCTED;
+import static tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.DataColumnSidecarSource.STORED;
 import static tech.pegasys.teku.networking.eth2.rpc.core.RpcResponseStatus.INVALID_REQUEST_CODE;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -67,6 +69,7 @@ public class DataColumnSidecarsByRangeMessageHandler
   private final CombinedChainDataClient combinedChainDataClient;
   private final LabelledMetric<Counter> requestCounter;
   private final Counter totalDataColumnSidecarsRequestedCounter;
+  private final LabelledMetric<Counter> sentSidecarsCounter;
   private final DataColumnSidecarArchiveReconstructor dataColumnSidecarArchiveReconstructor;
   private final DasReqRespLogger dasLogger;
 
@@ -89,6 +92,13 @@ public class DataColumnSidecarsByRangeMessageHandler
             TekuMetricCategory.NETWORK,
             "rpc_data_column_sidecars_by_range_requested_sidecars_total",
             "Total number of data column sidecars requested in accepted blob sidecars by range requests from peers");
+    sentSidecarsCounter =
+        metricsSystem.createLabelledCounter(
+            TekuMetricCategory.NETWORK,
+            "rpc_data_column_sidecars_by_range_sent_sidecars_total",
+            "Total number of data column sidecars sent in response to by range requests, by whether "
+                + "they were stored or reconstructed from the archive",
+            "source");
     this.dasLogger = dasLogger;
     this.dataColumnSidecarArchiveReconstructor = dataColumnSidecarArchiveReconstructor;
   }
@@ -256,7 +266,8 @@ public class DataColumnSidecarsByRangeMessageHandler
 
   /** Sends the data column sidecar and returns true if the request is now complete. */
   private SafeFuture<Boolean> handleLoadedDataColumnSidecar(
-      final RequestState requestState, final Optional<DataColumnSidecar> maybeDataColumnSidecar) {
+      final RequestState requestState,
+      final Optional<LoadedDataColumnSidecar> maybeDataColumnSidecar) {
     return maybeDataColumnSidecar
         .map(requestState::sendDataColumnSidecar)
         .orElse(SafeFuture.COMPLETE)
@@ -306,11 +317,17 @@ public class DataColumnSidecarsByRangeMessageHandler
               || dataColumnSidecarArchiveReconstructor.isSidecarPruned(endSlot, highestIndex);
     }
 
-    SafeFuture<Void> sendDataColumnSidecar(final DataColumnSidecar dataColumnSidecar) {
-      return callback.respond(dataColumnSidecar).thenRun(sentDataColumnSidecars::incrementAndGet);
+    SafeFuture<Void> sendDataColumnSidecar(final LoadedDataColumnSidecar loaded) {
+      return callback
+          .respond(loaded.sidecar())
+          .thenRun(
+              () -> {
+                sentDataColumnSidecars.incrementAndGet();
+                sentSidecarsCounter.labels(loaded.source().metricLabel()).inc();
+              });
     }
 
-    SafeFuture<Optional<DataColumnSidecar>> loadNextDataColumnSidecar() {
+    SafeFuture<Optional<LoadedDataColumnSidecar>> loadNextDataColumnSidecar() {
       if (dataColumnSidecarKeysIterator.isEmpty()) {
         // Intentionally cap the stored identifiers scanned before expanding pruned supernode
         // columns. A valid sparse request can ask for one reconstructed column across many
@@ -387,7 +404,7 @@ public class DataColumnSidecarsByRangeMessageHandler
           || dataColumnSidecarKeysIterator.map(iterator -> !iterator.hasNext()).orElse(false);
     }
 
-    private SafeFuture<Optional<DataColumnSidecar>> getNextDataColumnSidecar(
+    private SafeFuture<Optional<LoadedDataColumnSidecar>> getNextDataColumnSidecar(
         final Iterator<DataColumnSlotAndIdentifier> dataColumnSidecarIdentifiers) {
       if (dataColumnSidecarIdentifiers.hasNext()) {
         final DataColumnSlotAndIdentifier columnSlotAndIdentifier =
@@ -398,9 +415,15 @@ public class DataColumnSidecarsByRangeMessageHandler
             .thenCompose(
                 maybeSidecar -> {
                   if (maybeSidecar.isPresent()) {
-                    return SafeFuture.completedFuture(maybeSidecar);
+                    return SafeFuture.completedFuture(
+                        maybeSidecar.map(sidecar -> new LoadedDataColumnSidecar(sidecar, STORED)));
                   } else {
-                    return tryArchiveSidecarReconstruction(columnSlotAndIdentifier);
+                    return tryArchiveSidecarReconstruction(columnSlotAndIdentifier)
+                        .thenApply(
+                            maybeReconstructed ->
+                                maybeReconstructed.map(
+                                    sidecar ->
+                                        new LoadedDataColumnSidecar(sidecar, RECONSTRUCTED)));
                   }
                 });
       }
@@ -440,4 +463,7 @@ public class DataColumnSidecarsByRangeMessageHandler
           .orElse(false);
     }
   }
+
+  /** A sidecar ready to send, with where it came from for sentSidecarsCounter. */
+  record LoadedDataColumnSidecar(DataColumnSidecar sidecar, DataColumnSidecarSource source) {}
 }

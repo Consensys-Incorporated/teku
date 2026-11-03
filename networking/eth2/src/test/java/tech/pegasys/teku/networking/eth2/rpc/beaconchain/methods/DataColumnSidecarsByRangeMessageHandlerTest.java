@@ -312,6 +312,8 @@ public class DataColumnSidecarsByRangeMessageHandlerTest {
     final List<DataColumnSidecar> actualSent = argumentCaptor.getAllValues();
     verify(listener).completeSuccessfully();
     AssertionsForInterfaceTypes.assertThat(actualSent).hasSameElementsAs(expectedSent);
+    assertThat(sentSidecars(DataColumnSidecarSource.STORED)).isEqualTo(expectedSent.size());
+    assertThat(sentSidecars(DataColumnSidecarSource.RECONSTRUCTED)).isZero();
   }
 
   @TestTemplate
@@ -627,6 +629,18 @@ public class DataColumnSidecarsByRangeMessageHandlerTest {
         .isEqualTo((long) eligibleStoredColumnSidecars.size());
     assertThat(respondedCountByColumnIndex.get(prunedColumn))
         .isEqualTo((long) eligibleStoredColumnSidecars.size());
+    // the sent sidecars are counted by where they came from
+    assertThat(sentSidecars(DataColumnSidecarSource.STORED))
+        .isEqualTo(eligibleStoredColumnSidecars.size());
+    assertThat(sentSidecars(DataColumnSidecarSource.RECONSTRUCTED))
+        .isEqualTo(eligibleStoredColumnSidecars.size());
+  }
+
+  private long sentSidecars(final DataColumnSidecarSource source) {
+    return metricsSystem.getLabelledCounterValue(
+        TekuMetricCategory.NETWORK,
+        "rpc_data_column_sidecars_by_range_sent_sidecars_total",
+        source.metricLabel());
   }
 
   @TestTemplate
