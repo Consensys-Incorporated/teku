@@ -20,19 +20,25 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static tech.pegasys.teku.spec.schemas.ApiSchemas.BUILDER_CONFIG_SCHEMA;
+import static tech.pegasys.teku.spec.schemas.ApiSchemas.BUILDER_ENTRY_SCHEMA;
 
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import tech.pegasys.teku.builder.rest.StakedBuilderClient;
 import tech.pegasys.teku.builder.rest.StakedBuilderClientProvider;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionPerformance;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.SafeFutureAssert;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfig;
+import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
@@ -107,6 +113,49 @@ public class BuilderBidFetcherTest {
         .containsExactly(
             Optional.of(builderConfig.getBuilders().get(0)),
             Optional.of(builderConfig.getBuilders().get(1)));
+  }
+
+  @ParameterizedTest
+  @CsvSource({"0, 10", "10, 20", "100, 30"})
+  void includesExecutionPaymentCappedByBuilderEntry(
+      final long executionPayment, final long expectedValue) {
+    final BeaconState state = dataStructureUtil.randomBeaconState();
+    final SignedExecutionPayloadBid bid =
+        dataStructureUtil.randomSignedExecutionPayloadBid(
+            dataStructureUtil.randomExecutionPayloadBid(
+                dataStructureUtil.randomBytes32(),
+                state.getSlot(),
+                dataStructureUtil.randomBuilderIndex(),
+                UInt64.valueOf(10),
+                UInt64.valueOf(executionPayment)));
+    final BuilderEntry template = dataStructureUtil.randomBuilderEntry();
+    final BuilderEntry builderEntry =
+        BUILDER_ENTRY_SCHEMA.create(
+            template.getUrlBytes(),
+            template.getAuth(),
+            List.of(),
+            UInt64.valueOf(20),
+            UInt64.ZERO,
+            UInt64.valueOf(100));
+    final BuilderConfig builderConfig =
+        BUILDER_CONFIG_SCHEMA.create(UInt64.ZERO, UInt64.valueOf(100), List.of(builderEntry));
+    when(stakedBuilderClientProvider.getClient(any())).thenReturn(builderClient);
+    when(builderClient.getExecutionPayloadBid(any(), any(), any(), any(), any()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(bid)));
+
+    final List<RemoteBid> result =
+        SafeFutureAssert.safeJoin(
+            fetcher.getBuilderBids(
+                state,
+                state.getSlot(),
+                builderConfig,
+                dataStructureUtil.randomBytes32(),
+                dataStructureUtil.randomBytes32(),
+                blockProductionPerformance));
+
+    assertThat(result)
+        .containsExactly(
+            new RemoteBid(bid, UInt64.valueOf(expectedValue), Optional.of(builderEntry)));
   }
 
   @Test
