@@ -307,19 +307,20 @@ public class DataColumnSidecarRecoveringCustodyImpl implements DataColumnSidecar
     final Set<UInt64> existingSidecarsIndices =
         sidecars.stream().map(DataColumnSidecar::getIndex).collect(Collectors.toUnmodifiableSet());
     totalDataAvailabilityReconstructedColumns.inc(recoveredSidecars.size() - sidecars.size());
-    recoveredSidecars.stream()
-        .filter(sidecar -> !existingSidecarsIndices.contains(sidecar.getIndex()))
-        .forEach(
-            dataColumnSidecar -> {
-              delegate
-                  .onNewValidatedDataColumnSidecar(dataColumnSidecar, RECOVERED)
-                  .finishError(LOG);
-              if (inSync) {
-                dataColumnSidecarPublisher.accept(dataColumnSidecar, RECOVERED);
-              }
-              recoveredColumnSidecarSubscribers.forEach(
-                  subscriber -> subscriber.onNewValidSidecar(dataColumnSidecar, RECOVERED));
-            });
+    recoveredSidecars.forEach(
+        dataColumnSidecar -> {
+          // A received column isn't necessarily stored, e.g. one sampled before custody grew to
+          // it, so custody gets every column and skips the ones it already stored
+          delegate.onNewValidatedDataColumnSidecar(dataColumnSidecar, RECOVERED).finishError(LOG);
+          if (existingSidecarsIndices.contains(dataColumnSidecar.getIndex())) {
+            return;
+          }
+          if (inSync) {
+            dataColumnSidecarPublisher.accept(dataColumnSidecar, RECOVERED);
+          }
+          recoveredColumnSidecarSubscribers.forEach(
+              subscriber -> subscriber.onNewValidSidecar(dataColumnSidecar, RECOVERED));
+        });
     completedSlots.add(sidecars.stream().findFirst().orElseThrow().getSlotAndBlockRoot());
     recoveryTask.existingSidecars.clear();
     LOG.debug(
@@ -329,7 +330,12 @@ public class DataColumnSidecarRecoveringCustodyImpl implements DataColumnSidecar
   @Override
   public SafeFuture<Void> onNewValidatedDataColumnSidecar(
       final DataColumnSidecar dataColumnSidecar, final RemoteOrigin remoteOrigin) {
-    if (isRecoveryTrackingRequired(dataColumnSidecar, remoteOrigin)) {
+    if (completedSlots.contains(dataColumnSidecar.getSlotAndBlockRoot())) {
+      return SafeFuture.COMPLETE;
+    }
+    // Recovery is not needed for locally produced or recovered data,
+    // we will get everything for it in custody w/o reconstruction
+    if (remoteOrigin.equals(RemoteOrigin.RPC) || remoteOrigin.equals(RemoteOrigin.GOSSIP)) {
       LOG.debug(
           "sidecar: {} {} - remoteOrigin: {}",
           dataColumnSidecar::getSlotAndBlockRoot,
@@ -337,27 +343,7 @@ public class DataColumnSidecarRecoveringCustodyImpl implements DataColumnSidecar
           () -> remoteOrigin);
       createOrUpdateRecoveryTaskForDataColumnSidecar(dataColumnSidecar);
     }
-    // stored even for a completed block: completed means the recovery ran, not that custody holds
-    // every column
     return delegate.onNewValidatedDataColumnSidecar(dataColumnSidecar, remoteOrigin);
-  }
-
-  private boolean isRecoveryTrackingRequired(
-      final DataColumnSidecar dataColumnSidecar, final RemoteOrigin remoteOrigin) {
-    if (completedSlots.contains(dataColumnSidecar.getSlotAndBlockRoot())) {
-      return false;
-    }
-    // Recovery is not needed for locally produced or recovered data,
-    // we will get everything for it in custody w/o reconstruction
-    if (!remoteOrigin.equals(RemoteOrigin.RPC) && !remoteOrigin.equals(RemoteOrigin.GOSSIP)) {
-      return false;
-    }
-    // The recovery stores only the columns it wasn't given, so it must be given only columns the
-    // delegate stores. A column sampled outside custody, before custody grew to all groups, would
-    // never be stored otherwise.
-    return custodyGroupCountManager
-        .getCustodyColumnIndices()
-        .contains(dataColumnSidecar.getIndex());
   }
 
   private void createOrUpdateRecoveryTaskForDataColumnSidecar(final DataColumnSidecar sidecar) {
