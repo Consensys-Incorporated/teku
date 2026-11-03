@@ -1251,7 +1251,8 @@ public class Spec {
   }
 
   /**
-   * The execution block hash computed from the envelope content, to compare with the declared one
+   * The execution block hash computed locally from the envelope content, with the same header rules
+   * the execution client applies and without an Engine API call, to compare with the declared one.
    */
   public Bytes32 computeExecutionPayloadBlockHash(final ExecutionPayloadEnvelope envelope) {
     return ExecutionPayloadBlockHashCalculator.computeGloasBlockHash(

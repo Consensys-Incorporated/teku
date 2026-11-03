@@ -300,10 +300,9 @@ public class ExecutionPayloadGossipValidator {
                 return reject("Invalid signed execution payload envelope signature");
               }
               /*
-               * [IGNORE] The payload's block hash matches the hash computed from its content.
-               * Not a spec rule: it keeps a forged envelope carrying the bid's block hash from
-               * being marked as seen, which would otherwise shadow the builder's real envelope.
-               * IGNORE rather than REJECT because spec-compliant peers relay such envelopes.
+               * [REJECT] The payload's block hash is computed correctly from its content
+               * (proposed in consensus-specs PR 5770). A forged envelope carrying the bid's block
+               * hash must not be marked as seen, as that would shadow the builder's real envelope.
                */
               return validateBlockHashMatchesContent(envelope.getMessage());
             });
@@ -316,12 +315,12 @@ public class ExecutionPayloadGossipValidator {
         gossipValidationHelper.computeExecutionPayloadBlockHash(envelope);
     if (!computedBlockHash.equals(declaredBlockHash)) {
       LOG.debug(
-          "Execution payload envelope for block root {} from builder {} declares block hash {} but its content hashes to {}. Ignoring the execution payload envelope",
+          "Execution payload envelope for block root {} from builder {} declares block hash {} but its content hashes to {}. Rejecting the execution payload envelope",
           envelope.getBeaconBlockRoot(),
           envelope.getBuilderIndex(),
           declaredBlockHash,
           computedBlockHash);
-      return ignore(
+      return reject(
           "Execution payload envelope block hash %s does not match the block hash %s computed from its content",
           declaredBlockHash, computedBlockHash);
     }
