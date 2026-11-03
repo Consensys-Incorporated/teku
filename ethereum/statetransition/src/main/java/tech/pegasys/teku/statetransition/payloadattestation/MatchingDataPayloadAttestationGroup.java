@@ -20,6 +20,7 @@ import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import tech.pegasys.teku.bls.BLS;
 import tech.pegasys.teku.bls.BLSSignature;
@@ -70,7 +71,15 @@ class MatchingDataPayloadAttestationGroup {
         == null;
   }
 
-  PayloadAttestation createAggregatedPayloadAttestation(final IntList payloadTimelinessCommittee) {
+  /**
+   * Aggregates the payload attestation messages of this group according to the positions of their
+   * validators in the Payload Timeliness Committee.
+   *
+   * @return the aggregated payload attestation, or empty if the aggregated signature is the point
+   *     at infinity, which is invalid with non-empty participation
+   */
+  Optional<PayloadAttestation> createAggregatedPayloadAttestation(
+      final IntList payloadTimelinessCommittee) {
     checkArgument(!payloadAttestationMessages.isEmpty(), "Nothing to aggregate");
     // relative positions of the validator indices with respect to the Payload Timeliness Committee
     final IntList setBitIndices = new IntArrayList();
@@ -86,11 +95,15 @@ class MatchingDataPayloadAttestationGroup {
         signatures.add(payloadAttestationMessage.getSignature());
       }
     }
+    final BLSSignature aggregatedSignature = BLS.aggregate(signatures);
+    if (aggregatedSignature.isInfinity()) {
+      return Optional.empty();
+    }
     final PayloadAttestationSchema payloadAttestationSchema =
         SchemaDefinitionsGloas.required(spec.atSlot(data.getSlot()).getSchemaDefinitions())
             .getPayloadAttestationSchema();
     final SszBitvector aggregationBits =
         payloadAttestationSchema.getAggregationBitsSchema().ofBits(setBitIndices);
-    return payloadAttestationSchema.create(aggregationBits, data, BLS.aggregate(signatures));
+    return Optional.of(payloadAttestationSchema.create(aggregationBits, data, aggregatedSignature));
   }
 }
