@@ -149,10 +149,7 @@ public class DoppelgangerDetector {
                       "Unable to get genesis time to calculate the current epoch: "
                           + extractErrorMessage(throwable)))
           .thenCompose(
-              currentEpoch ->
-                  checkRequiredEpochs(
-                          currentEpoch, epochAtStart.isEmpty() || maxEpochsReached(currentEpoch))
-                      .thenApply(ignored -> currentEpoch))
+              currentEpoch -> checkRequiredEpochs(currentEpoch).thenApply(ignored -> currentEpoch))
           .handleComposed(
               (currentEpoch, throwable) ->
                   throwable == null
@@ -170,9 +167,19 @@ public class DoppelgangerDetector {
                       spec.getCurrentSlot(timeProvider.getTimeInSeconds(), genesisTime)));
     }
 
-    private SafeFuture<Void> checkRequiredEpochs(
-        final UInt64 currentEpoch, final boolean includePreviousEpoch) {
-      if (!includePreviousEpoch || currentEpoch.isZero()) {
+    private SafeFuture<Void> checkRequiredEpochs(final UInt64 currentEpoch) {
+      if (epochAtStart.isEmpty()) {
+        epochAtStart = Optional.of(currentEpoch);
+        return checkPreviousAndCurrentEpochs(currentEpoch);
+      }
+      if (!maxEpochsReached(currentEpoch)) {
+        return checkDoppelgangersAtEpoch(currentEpoch);
+      }
+      return checkPreviousAndCurrentEpochs(currentEpoch);
+    }
+
+    private SafeFuture<Void> checkPreviousAndCurrentEpochs(final UInt64 currentEpoch) {
+      if (currentEpoch.isZero()) {
         return checkDoppelgangersAtEpoch(currentEpoch);
       }
       return checkDoppelgangersAtEpoch(currentEpoch.minus(UInt64.ONE))
@@ -185,7 +192,6 @@ public class DoppelgangerDetector {
 
     private SafeFuture<Void> handleSuccessfulCheck(final UInt64 currentEpoch) {
       markAvailable();
-      captureEpochAtStart(currentEpoch);
       if (!allKeysAreActive() && !maxEpochsReached(currentEpoch)) {
         return SafeFuture.COMPLETE;
       }
@@ -305,12 +311,6 @@ public class DoppelgangerDetector {
 
     private <T> SafeFuture<T> unavailable(final String reason) {
       return SafeFuture.failedFuture(new NodeDataUnavailableException(reason));
-    }
-
-    private void captureEpochAtStart(final UInt64 epoch) {
-      if (epochAtStart.isEmpty()) {
-        epochAtStart = Optional.of(epoch);
-      }
     }
 
     private boolean maxEpochsReached(final UInt64 epoch) {

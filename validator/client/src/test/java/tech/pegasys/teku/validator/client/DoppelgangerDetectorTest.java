@@ -701,6 +701,32 @@ public class DoppelgangerDetectorTest {
     assertThat(doppelgangerDetectorFuture).isCompletedWithValue(doppelgangers);
   }
 
+  @Test
+  public void shouldCheckCurrentEpochOnNextAttemptAfterInitialPreviousEpochCheckFails() {
+    timeProvider.advanceTimeBy(Duration.of(20, ChronoUnit.MINUTES));
+    final UInt64 currentEpoch =
+        spec.computeEpochAtSlot(spec.getCurrentSlot(timeProvider.getTimeInSeconds(), UInt64.ZERO));
+    when(validatorApiChannel.getValidatorsLiveness(any(), eq(currentEpoch.minus(UInt64.ONE))))
+        .thenReturn(SafeFuture.failedFuture(new Exception("Previous epoch unavailable")));
+    when(validatorApiChannel.getValidatorsLiveness(any(), eq(currentEpoch)))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                Optional.of(List.of(new ValidatorLivenessAtEpoch(UInt64.ONE, false)))));
+    final SafeFuture<Map<UInt64, BLSPublicKey>> detection =
+        doppelgangerDetector.performDoppelgangerDetection(Set.of(pubKey1));
+
+    asyncRunner.executeQueuedActions();
+    assertThat(detection).isNotDone();
+
+    timeProvider.advanceTimeBy(checkDelay);
+    asyncRunner.executeQueuedActions();
+
+    verify(validatorApiChannel)
+        .getValidatorsLiveness(List.of(UInt64.ONE), currentEpoch.minus(UInt64.ONE));
+    verify(validatorApiChannel).getValidatorsLiveness(List.of(UInt64.ONE), currentEpoch);
+    assertThat(detection).isNotDone();
+  }
+
   private Stream<String> toAbbreviatedKeys(final Set<BLSPublicKey> pubKeys) {
     return pubKeys.stream().map(BLSPublicKey::toAbbreviatedString);
   }
