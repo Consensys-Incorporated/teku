@@ -158,10 +158,14 @@ public class BeaconStateMutators {
     final ValidatorExitContext validatorExitContext =
         new ValidatorExitContext(beaconStateAccessors.getValidatorChurnLimit(state));
 
-    // The latest exit epoch set in the registry and how many validators exit at it, read from the
-    // packed validator bytes without creating a Validator view per index
+    final UInt64 activationExitEpoch =
+        miscHelpers.computeActivationExitEpoch(beaconStateAccessors.getCurrentEpoch(state));
+
+    // The exit queue epoch is the latest of the activation exit epoch and the registry's exit
+    // epochs, the churn the number of validators exiting at it. Read from the packed validator
+    // bytes without creating a Validator view per index.
     final long farFutureEpoch = FAR_FUTURE_EPOCH.longValue();
-    final long[] exitQueueEpochAndCount = {0L, 0L};
+    final ExitQueueAccumulator exitQueue = new ExitQueueAccumulator(activationExitEpoch);
     state
         .getValidators()
         .forEachElementSsz(
@@ -172,27 +176,30 @@ public class BeaconStateMutators {
                 return true;
               }
               final int comparison =
-                  Long.compareUnsigned(validatorExitEpoch, exitQueueEpochAndCount[0]);
+                  Long.compareUnsigned(validatorExitEpoch, exitQueue.exitQueueEpoch);
               if (comparison == 0) {
-                exitQueueEpochAndCount[1]++;
+                exitQueue.exitQueueChurn++;
               } else if (comparison > 0) {
-                exitQueueEpochAndCount[0] = validatorExitEpoch;
-                exitQueueEpochAndCount[1] = 1;
+                exitQueue.exitQueueEpoch = validatorExitEpoch;
+                exitQueue.exitQueueChurn = 1;
               }
               return true;
             });
-    validatorExitContext.exitQueueEpoch = UInt64.fromLongBits(exitQueueEpochAndCount[0]);
-    final UInt64 activationExitEpoch =
-        miscHelpers.computeActivationExitEpoch(beaconStateAccessors.getCurrentEpoch(state));
-
-    if (activationExitEpoch.isGreaterThan(validatorExitContext.exitQueueEpoch)) {
-      validatorExitContext.exitQueueEpoch = activationExitEpoch;
-      validatorExitContext.exitQueueChurn = UInt64.ZERO;
-    } else {
-      validatorExitContext.exitQueueChurn = UInt64.valueOf(exitQueueEpochAndCount[1]);
-    }
+    validatorExitContext.exitQueueEpoch = UInt64.fromLongBits(exitQueue.exitQueueEpoch);
+    validatorExitContext.exitQueueChurn = UInt64.valueOf(exitQueue.exitQueueChurn);
 
     return validatorExitContext;
+  }
+
+  /** The exit queue epoch (raw uint64 bits) and churn accumulated over the registry scan. */
+  private static final class ExitQueueAccumulator {
+    private long exitQueueEpoch;
+    private long exitQueueChurn;
+
+    private ExitQueueAccumulator(final UInt64 activationExitEpoch) {
+      this.exitQueueEpoch = activationExitEpoch.longValue();
+      this.exitQueueChurn = 0;
+    }
   }
 
   public static class ValidatorExitContext {

@@ -102,12 +102,22 @@ public abstract class AbstractValidatorStatusFactory implements ValidatorStatusF
   @VisibleForTesting
   List<ValidatorStatus> createInitialValidatorStatuses(
       final SszList<Validator> validators, final UInt64 currentEpoch, final UInt64 previousEpoch) {
+    return createInitialValidatorStatuses(
+        validators, currentEpoch, previousEpoch, STATUS_RANGE_SIZE);
+  }
+
+  @VisibleForTesting
+  List<ValidatorStatus> createInitialValidatorStatuses(
+      final SszList<Validator> validators,
+      final UInt64 currentEpoch,
+      final UInt64 previousEpoch,
+      final int rangeSize) {
     // Statuses are decoded from the packed validator bytes, without creating Validator views. The
     // index space is split into ranges converted in parallel: each worker walks the immutable
     // backing tree of its own range and writes its own slots of the array.
     final int size = validators.size();
     final ValidatorStatus[] statuses = new ValidatorStatus[size];
-    final int ranges = (size + STATUS_RANGE_SIZE - 1) / STATUS_RANGE_SIZE;
+    final int ranges = (size + rangeSize - 1) / rangeSize;
     final long previous = previousEpoch.longValue();
     final long current = currentEpoch.longValue();
     final long next = currentEpoch.plus(1).longValue();
@@ -115,13 +125,11 @@ public abstract class AbstractValidatorStatusFactory implements ValidatorStatusF
         .parallel()
         .forEach(
             range -> {
-              final int end = Math.min(size, (range + 1) * STATUS_RANGE_SIZE);
+              final int start = range * rangeSize;
               validators.forEachElementSsz(
-                  range * STATUS_RANGE_SIZE,
+                  start,
+                  Math.min(size, start + rangeSize),
                   (index, data, offset) -> {
-                    if (index >= end) {
-                      return false;
-                    }
                     statuses[index] =
                         createValidatorStatus(
                             ValidatorFields.slashed(data, offset),

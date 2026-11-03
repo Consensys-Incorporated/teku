@@ -352,6 +352,44 @@ public abstract class AbstractValidatorStatusFactoryTest {
         factory, spec.deserializeBeaconState(state.sszSerialize()), previousEpoch, currentEpoch);
   }
 
+  static Stream<Arguments> rangeSplits() {
+    // Validator counts just below, at and above one and two ranges, with ranges aligned and not
+    // aligned to the registry's supernodes
+    return Stream.of(
+        Arguments.of(5, 4),
+        Arguments.of(5, 5),
+        Arguments.of(5, 6),
+        Arguments.of(5, 10),
+        Arguments.of(5, 11),
+        Arguments.of(8, 7),
+        Arguments.of(8, 8),
+        Arguments.of(8, 9),
+        Arguments.of(8, 16),
+        Arguments.of(8, 17));
+  }
+
+  @ParameterizedTest(name = "rangeSize={0}, validators={1}")
+  @MethodSource("rangeSplits")
+  public void shouldFillEveryStatusWhenSplittingTheRegistryIntoRanges(
+      final int rangeSize, final int validatorCount) {
+    final AbstractValidatorStatusFactory factory = createFactory();
+    final BeaconState built =
+        dataStructureUtil
+            .stateBuilder(spec.getGenesisSpec().getMilestone(), validatorCount, 1)
+            .build();
+    final UInt64 currentEpoch = spec.computeEpochAtSlot(built.getSlot());
+    final UInt64 previousEpoch = currentEpoch.minusMinZero(1);
+    // The built state has a plain validators tree, the deserialized one packs supernodes
+    for (final BeaconState state :
+        List.of(built, spec.deserializeBeaconState(built.sszSerialize()))) {
+      final List<ValidatorStatus> statuses =
+          factory.createInitialValidatorStatuses(
+              state.getValidators(), currentEpoch, previousEpoch, rangeSize);
+      assertThat(statuses).hasSize(validatorCount).doesNotContainNull();
+      assertStatusesMatchViews(factory, state, statuses, previousEpoch, currentEpoch);
+    }
+  }
+
   private static void assertStatusesMatchViews(
       final ValidatorStatusFactory factory,
       final BeaconState state,
@@ -360,6 +398,15 @@ public abstract class AbstractValidatorStatusFactoryTest {
     final List<ValidatorStatus> statuses =
         ((AbstractValidatorStatusFactory) factory)
             .createInitialValidatorStatuses(state.getValidators(), currentEpoch, previousEpoch);
+    assertStatusesMatchViews(factory, state, statuses, previousEpoch, currentEpoch);
+  }
+
+  private static void assertStatusesMatchViews(
+      final ValidatorStatusFactory factory,
+      final BeaconState state,
+      final List<ValidatorStatus> statuses,
+      final UInt64 previousEpoch,
+      final UInt64 currentEpoch) {
     assertThat(statuses).hasSize(state.getValidators().size());
     for (int i = 0; i < statuses.size(); i++) {
       final ValidatorStatus expected =

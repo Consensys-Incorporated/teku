@@ -17,7 +17,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.spec.config.SpecConfig.FAR_FUTURE_EPOCH;
 
 import java.util.List;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecVersion;
@@ -34,8 +35,9 @@ class BeaconStateMutatorsTest {
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
   private final BeaconStateMutators mutators = genesisSpec.beaconStateMutators();
 
-  @Test
-  void exitContextCountsTheValidatorsExitingAtTheLatestExitEpoch() {
+  @ParameterizedTest(name = "packed={0}")
+  @ValueSource(booleans = {false, true})
+  void exitContextCountsTheValidatorsExitingAtTheLatestExitEpoch(final boolean packed) {
     // Minimal spec: 64 validators, so the registry spans several supernodes
     final BeaconState base = dataStructureUtil.randomBeaconState(64);
     final UInt64 currentEpoch = spec.getCurrentEpoch(base);
@@ -50,7 +52,8 @@ class BeaconStateMutatorsTest {
                 exit(2, latest.minus(1)),
                 exit(3, latest),
                 exit(40, latest),
-                exit(63, activationExitEpoch)));
+                exit(63, activationExitEpoch)),
+            packed);
 
     final ValidatorExitContext context = mutators.createValidatorExitContextSupplier(state).get();
 
@@ -60,14 +63,16 @@ class BeaconStateMutatorsTest {
         .isEqualTo(genesisSpec.beaconStateAccessors().getValidatorChurnLimit(state));
   }
 
-  @Test
-  void exitContextStartsAtTheActivationExitEpochWhenNoValidatorExitsLater() {
+  @ParameterizedTest(name = "packed={0}")
+  @ValueSource(booleans = {false, true})
+  void exitContextStartsAtTheActivationExitEpochWhenNoValidatorExitsLater(final boolean packed) {
     final BeaconState base = dataStructureUtil.randomBeaconState(64);
     final UInt64 currentEpoch = spec.getCurrentEpoch(base);
     final UInt64 activationExitEpoch =
         genesisSpec.miscHelpers().computeActivationExitEpoch(currentEpoch);
     final BeaconState state =
-        withExitEpochs(base, List.of(exit(5, activationExitEpoch.minus(1)), exit(6, UInt64.ONE)));
+        withExitEpochs(
+            base, List.of(exit(5, activationExitEpoch.minus(1)), exit(6, UInt64.ONE)), packed);
 
     final ValidatorExitContext context = mutators.createValidatorExitContextSupplier(state).get();
 
@@ -75,8 +80,31 @@ class BeaconStateMutatorsTest {
     assertThat(context.getExitQueueChurn()).isEqualTo(UInt64.ZERO);
   }
 
-  @Test
-  void exitContextMatchesTheReferenceLoopOverValidatorViews() {
+  @ParameterizedTest(name = "packed={0}")
+  @ValueSource(booleans = {false, true})
+  void exitContextCountsTheValidatorsExitingAtTheActivationExitEpoch(final boolean packed) {
+    final BeaconState base = dataStructureUtil.randomBeaconState(64);
+    final UInt64 currentEpoch = spec.getCurrentEpoch(base);
+    final UInt64 activationExitEpoch =
+        genesisSpec.miscHelpers().computeActivationExitEpoch(currentEpoch);
+    final BeaconState state =
+        withExitEpochs(
+            base,
+            List.of(
+                exit(4, activationExitEpoch),
+                exit(9, activationExitEpoch.minus(1)),
+                exit(50, activationExitEpoch)),
+            packed);
+
+    final ValidatorExitContext context = mutators.createValidatorExitContextSupplier(state).get();
+
+    assertThat(context.getExitQueueEpoch()).isEqualTo(activationExitEpoch);
+    assertThat(context.getExitQueueChurn()).isEqualTo(UInt64.valueOf(2));
+  }
+
+  @ParameterizedTest(name = "packed={0}")
+  @ValueSource(booleans = {false, true})
+  void exitContextMatchesTheReferenceLoopOverValidatorViews(final boolean packed) {
     final BeaconState base = dataStructureUtil.randomBeaconState(64);
     final UInt64 currentEpoch = spec.getCurrentEpoch(base);
     final UInt64 activationExitEpoch =
@@ -89,7 +117,8 @@ class BeaconStateMutatorsTest {
                 exit(7, activationExitEpoch.plus(2)),
                 exit(8, activationExitEpoch.plus(1)),
                 exit(31, activationExitEpoch.plus(2)),
-                exit(32, activationExitEpoch)));
+                exit(32, activationExitEpoch)),
+            packed);
 
     final ValidatorExitContext context = mutators.createValidatorExitContextSupplier(state).get();
 
@@ -122,16 +151,23 @@ class BeaconStateMutatorsTest {
     return new Exit(index, epoch);
   }
 
-  private static BeaconState withExitEpochs(final BeaconState state, final List<Exit> exits) {
-    return state.updated(
-        mutable -> {
-          // Every validator starts with no exit set, so only the listed ones count
-          for (int i = 0; i < mutable.getValidators().size(); i++) {
-            mutable.getValidators().update(i, v -> v.withExitEpoch(FAR_FUTURE_EPOCH));
-          }
-          for (final Exit exit : exits) {
-            mutable.getValidators().update(exit.index(), v -> v.withExitEpoch(exit.epoch()));
-          }
-        });
+  /**
+   * Sets the listed exit epochs. A packed state is deserialized from SSZ, which packs the validator
+   * registry in supernodes, while the updated state keeps a plain validator tree.
+   */
+  private BeaconState withExitEpochs(
+      final BeaconState state, final List<Exit> exits, final boolean packed) {
+    final BeaconState updated =
+        state.updated(
+            mutable -> {
+              // Every validator starts with no exit set, so only the listed ones count
+              for (int i = 0; i < mutable.getValidators().size(); i++) {
+                mutable.getValidators().update(i, v -> v.withExitEpoch(FAR_FUTURE_EPOCH));
+              }
+              for (final Exit exit : exits) {
+                mutable.getValidators().update(exit.index(), v -> v.withExitEpoch(exit.epoch()));
+              }
+            });
+    return packed ? spec.deserializeBeaconState(updated.sszSerialize()) : updated;
   }
 }

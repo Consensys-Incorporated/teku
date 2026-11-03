@@ -389,8 +389,8 @@ public abstract class AbstractEpochProcessor implements EpochProcessor {
           });
 
       // Queue validators eligible for activation and not yet dequeued for activation, reading the
-      // registry as updated above: {activation eligibility epoch, index} pairs
-      final List<long[]> candidates = new ArrayList<>();
+      // registry as updated above
+      final List<ActivationCandidate> candidates = new ArrayList<>();
       validators.forEachElementSsz(
           0,
           (index, data, offset) -> {
@@ -401,22 +401,24 @@ public abstract class AbstractEpochProcessor implements EpochProcessor {
             final long eligibilityEpoch = ValidatorFields.activationEligibilityEpoch(data, offset);
             if (ValidatorsUtil.isEligibleForActivation(
                 finalizedEpoch, ValidatorFields.activationEpoch(data, offset), eligibilityEpoch)) {
-              candidates.add(new long[] {eligibilityEpoch, index});
+              candidates.add(new ActivationCandidate(index, eligibilityEpoch));
             }
             return true;
           });
       // Order by eligibility epoch, then index: candidates are in index order and the sort is
       // stable, so sorting on the epoch alone keeps the index tie-break
-      candidates.sort((a, b) -> Long.compareUnsigned(a[0], b[0]));
+      candidates.sort(
+          (a, b) ->
+              Long.compareUnsigned(a.activationEligibilityEpoch(), b.activationEligibilityEpoch()));
 
       // Dequeued validators for activation up to churn limit (without resetting activation epoch)
       int churnLimit = beaconStateAccessors.getValidatorActivationChurnLimit(state).intValue();
       int sublistSize = Math.min(churnLimit, candidates.size());
-      for (final long[] candidate : candidates.subList(0, sublistSize)) {
+      for (final ActivationCandidate candidate : candidates.subList(0, sublistSize)) {
         state
             .getValidators()
             .update(
-                (int) candidate[1],
+                candidate.index(),
                 validator ->
                     validator.withActivationEpoch(
                         miscHelpers.computeActivationExitEpoch(currentEpoch)));
@@ -425,6 +427,9 @@ public abstract class AbstractEpochProcessor implements EpochProcessor {
       throw new EpochProcessingException(e);
     }
   }
+
+  /** A validator eligible for activation, with its raw activation eligibility epoch. */
+  private record ActivationCandidate(int index, long activationEligibilityEpoch) {}
 
   /**
    * Can't be eligible for activation if already active or if effective balance is too low.

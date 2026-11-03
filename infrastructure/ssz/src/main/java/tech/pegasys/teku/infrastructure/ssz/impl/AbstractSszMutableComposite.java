@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.infrastructure.ssz.impl;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 
 import it.unimi.dsi.fastutil.ints.Int2ObjectRBTreeMap;
@@ -139,17 +140,24 @@ public abstract class AbstractSszMutableComposite<
   }
 
   /**
-   * See {@link SszList#forEachElementSsz}: the elements changed so far are serialized from their
-   * changes, the others are read from the backing immutable data. Supported on collections only.
+   * See {@link SszList#forEachElementSsz(int, int, SszElementVisitor)}: the elements changed so far
+   * are serialized from their changes, the others are read from the backing immutable data.
+   * Supported on collections only.
    */
-  public boolean forEachElementSsz(final int fromIndex, final SszElementVisitor visitor) {
-    // Snapshot the size and the changed indices first: the visitor may change the element it visits
-    final int size = size();
-    final int[] changedIndices = childrenChanges.keySet().tailSet(fromIndex).toIntArray();
+  public boolean forEachElementSsz(
+      final int fromIndex, final int toIndex, final SszElementVisitor visitor) {
+    checkArgument(fromIndex >= 0, "Negative start index %s", fromIndex);
+    // Snapshot the end and the changed indices first: the visitor may change the element it visits
+    final int endIndex = Math.min(size(), toIndex);
+    if (fromIndex >= endIndex) {
+      return true;
+    }
+    final int[] changedIndices = childrenChanges.keySet().subSet(fromIndex, endIndex).toIntArray();
     final int[] nextChanged = {0};
     final boolean completed =
         backingImmutableData.forEachElementSsz(
             fromIndex,
+            endIndex,
             (index, data, offset) -> {
               if (nextChanged[0] < changedIndices.length
                   && changedIndices[nextChanged[0]] == index) {
@@ -161,7 +169,7 @@ public abstract class AbstractSszMutableComposite<
     if (!completed) {
       return false;
     }
-    for (int i = Math.max(fromIndex, backingImmutableData.size()); i < size; i++) {
+    for (int i = Math.max(fromIndex, backingImmutableData.size()); i < endIndex; i++) {
       if (!visitor.visit(i, get(i).sszSerialize(), 0)) {
         return false;
       }
