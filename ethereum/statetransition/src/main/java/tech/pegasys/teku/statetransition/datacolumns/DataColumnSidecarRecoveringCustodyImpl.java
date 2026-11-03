@@ -337,8 +337,8 @@ public class DataColumnSidecarRecoveringCustodyImpl implements DataColumnSidecar
           () -> remoteOrigin);
       createOrUpdateRecoveryTaskForDataColumnSidecar(dataColumnSidecar);
     }
-    // stored even for a completed block, so a column that didn't reach custody earlier, e.g.
-    // because its write failed, is stored when it arrives again
+    // stored even for a completed block: completed means the recovery ran, not that custody holds
+    // every column
     return delegate.onNewValidatedDataColumnSidecar(dataColumnSidecar, remoteOrigin);
   }
 
