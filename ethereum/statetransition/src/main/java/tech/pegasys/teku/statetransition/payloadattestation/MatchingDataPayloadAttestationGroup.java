@@ -22,6 +22,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.bls.BLS;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
@@ -37,6 +39,7 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
  * PayloadAttestationMessage} which all share the same {@link PayloadAttestationData}.
  */
 class MatchingDataPayloadAttestationGroup {
+  private static final Logger LOG = LogManager.getLogger();
 
   private final Map<Integer, PayloadAttestationMessage> payloadAttestationMessages =
       new ConcurrentHashMap<>();
@@ -97,6 +100,10 @@ class MatchingDataPayloadAttestationGroup {
     }
     final BLSSignature aggregatedSignature = BLS.aggregate(signatures);
     if (aggregatedSignature.isInfinity()) {
+      LOG.debug(
+          "Not creating payload attestation with infinity signature for slot {}, block root {}",
+          data.getSlot(),
+          data.getBeaconBlockRoot());
       return Optional.empty();
     }
     final PayloadAttestationSchema payloadAttestationSchema =
