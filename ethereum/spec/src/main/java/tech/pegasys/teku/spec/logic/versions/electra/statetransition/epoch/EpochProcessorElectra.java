@@ -160,10 +160,8 @@ public class EpochProcessorElectra extends EpochProcessorCapella {
     // changes only the validator it visits.
     validators.forEachElementSsz(
         0,
+        statuses.size(),
         (index, data, offset) -> {
-          if (index >= statuses.size()) {
-            return false;
-          }
           final ValidatorStatus status = statuses.get(index);
           final UInt64 balance = balances.getElement(index);
           final UInt64 currentEffectiveBalance = status.getCurrentEpochEffectiveBalance();

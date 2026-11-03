@@ -34,7 +34,18 @@ public interface SszList<SszElementT extends SszData> extends SszCollection<SszE
 
   /**
    * Visits the serialized bytes of the elements {@code fromIndex} to {@code size() - 1} in index
-   * order, without creating element views. Only lists of fixed-size composite elements are
+   * order, see {@link #forEachElementSsz(int, int, SszElementVisitor)}.
+   *
+   * @return {@code true} when every element was visited, {@code false} when the visitor stopped
+   */
+  default boolean forEachElementSsz(final int fromIndex, final SszElementVisitor visitor) {
+    return forEachElementSsz(fromIndex, Integer.MAX_VALUE, visitor);
+  }
+
+  /**
+   * Visits the serialized bytes of the elements {@code fromIndex} (inclusive) to {@code toIndex}
+   * (exclusive, clamped to {@code size()}) in index order, without creating element views. Nothing
+   * is visited when {@code toIndex <= fromIndex}. Only lists of fixed-size composite elements are
    * supported.
    *
    * <p>Elements packed in supernodes are handed out as a range of the supernode's own content, so a
@@ -47,5 +58,5 @@ public interface SszList<SszElementT extends SszData> extends SszCollection<SszE
    *
    * @return {@code true} when every element was visited, {@code false} when the visitor stopped
    */
-  boolean forEachElementSsz(int fromIndex, SszElementVisitor visitor);
+  boolean forEachElementSsz(int fromIndex, int toIndex, SszElementVisitor visitor);
 }

@@ -168,14 +168,18 @@ public abstract class AbstractSszComposite<SszChildT extends SszData>
    */
   protected abstract void checkIndex(int index);
 
-  /** See {@link SszList#forEachElementSsz}. Supported on collections only. */
-  public boolean forEachElementSsz(final int fromIndex, final SszElementVisitor visitor) {
+  /**
+   * See {@link SszList#forEachElementSsz(int, int, SszElementVisitor)}. Supported on collections
+   * only.
+   */
+  public boolean forEachElementSsz(
+      final int fromIndex, final int toIndex, final SszElementVisitor visitor) {
     checkArgument(fromIndex >= 0, "Negative start index %s", fromIndex);
-    final int size = size();
-    if (fromIndex >= size) {
+    final int endIndex = Math.min(size(), toIndex);
+    if (fromIndex >= endIndex) {
       return true;
     }
-    final ElementWalker walker = new ElementWalker(getSchema(), size, fromIndex, visitor);
+    final ElementWalker walker = new ElementWalker(getSchema(), endIndex, fromIndex, visitor);
     getBackingNode().iterate(GIndexUtil.SELF_G_INDEX, walker.nextGIndex, walker);
     return !walker.stopped;
   }
@@ -200,14 +204,14 @@ public abstract class AbstractSszComposite<SszChildT extends SszData>
   /**
    * Walks the backing tree in order (self, left subtree, right subtree), which is element order on
    * bounded and progressive lists alike, following the generalized index of the next element. The
-   * walk starts at the first element and stops after the last one, so the zero subtrees past the
-   * end of the list are never visited.
+   * walk starts at the first element and stops after the last one before the end index, so the zero
+   * subtrees past the end of the list are never visited.
    */
   private static final class ElementWalker implements TreeVisitor {
     private final SszCompositeSchema<?> schema;
     private final SszSchema<?> elementSchema;
     private final int elementSize;
-    private final int size;
+    private final int endIndex;
     private final SszElementVisitor visitor;
     private int next;
     private long nextGIndex;
@@ -215,7 +219,7 @@ public abstract class AbstractSszComposite<SszChildT extends SszData>
 
     private ElementWalker(
         final SszCompositeSchema<?> schema,
-        final int size,
+        final int endIndex,
         final int fromIndex,
         final SszElementVisitor visitor) {
       checkArgument(
@@ -227,7 +231,7 @@ public abstract class AbstractSszComposite<SszChildT extends SszData>
       this.schema = schema;
       this.elementSchema = ((SszCollectionSchema<?, ?>) schema).getElementSchema();
       this.elementSize = elementSchema.getSszFixedPartSize();
-      this.size = size;
+      this.endIndex = endIndex;
       this.visitor = visitor;
       this.next = fromIndex;
       this.nextGIndex = schema.getChildGeneralizedIndex(fromIndex);
@@ -248,7 +252,7 @@ public abstract class AbstractSszComposite<SszChildT extends SszData>
     private boolean visitElementsUnder(final TreeNode node, final long gIndex) {
       final int depth = GIndexUtil.gIdxGetDepth(nextGIndex) - GIndexUtil.gIdxGetDepth(gIndex);
       final long first = nextGIndex - (gIndex << depth);
-      final long end = Math.min(1L << depth, first + size - next);
+      final long end = Math.min(1L << depth, first + endIndex - next);
       final Bytes packed =
           node instanceof SszSuperNode superNode && superNode.getDepth() == depth
               ? superNode.getData()
@@ -272,7 +276,7 @@ public abstract class AbstractSszComposite<SszChildT extends SszData>
           return false;
         }
       }
-      if (next == size) {
+      if (next == endIndex) {
         return false;
       }
       nextGIndex = schema.getChildGeneralizedIndex(next);
