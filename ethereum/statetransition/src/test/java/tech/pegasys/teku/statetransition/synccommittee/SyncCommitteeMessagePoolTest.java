@@ -34,7 +34,10 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.bls.BLS;
+import tech.pegasys.teku.bls.BLSKeyPair;
 import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.bls.BLSTestUtil;
+import tech.pegasys.teku.bls.BLSTestUtil.NegatedKeyPairs;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -47,6 +50,8 @@ import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.OperationAddedSubscriber;
 
 class SyncCommitteeMessagePoolTest {
+
+  private static final NegatedKeyPairs KEYS = BLSTestUtil.negatedKeyPairs(1);
 
   private final Spec spec = TestSpecFactory.createMinimalAltair();
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
@@ -378,6 +383,37 @@ class SyncCommitteeMessagePoolTest {
     assertMessagesAbsentForSlots(blockRoot, subcommitteeIndex, 0, 1, 2);
   }
 
+  @Test
+  void shouldNotCreateContributionWithInfinitySignature() {
+    final int subcommitteeIndex = 3;
+    final UInt64 slot = UInt64.valueOf(5);
+    final Bytes32 blockRoot = dataStructureUtil.randomBytes32();
+    addValidLocal(createSignedMessage(slot, blockRoot, subcommitteeIndex, 1, KEYS.p()));
+    addValidLocal(createSignedMessage(slot, blockRoot, subcommitteeIndex, 2, KEYS.minusP()));
+
+    assertThat(pool.createContribution(slot, blockRoot, subcommitteeIndex)).isEmpty();
+  }
+
+  @Test
+  void shouldCreateContributionWhenSignatureIsNotInfinity() {
+    final int subcommitteeIndex = 3;
+    final UInt64 slot = UInt64.valueOf(5);
+    final Bytes32 blockRoot = dataStructureUtil.randomBytes32();
+    final ValidatableSyncCommitteeMessage messageP =
+        createSignedMessage(slot, blockRoot, subcommitteeIndex, 1, KEYS.p());
+    final ValidatableSyncCommitteeMessage messageMinusP =
+        createSignedMessage(slot, blockRoot, subcommitteeIndex, 2, KEYS.minusP());
+    final ValidatableSyncCommitteeMessage messageQ =
+        createSignedMessage(slot, blockRoot, subcommitteeIndex, 4, KEYS.q());
+    addValidLocal(messageP);
+    addValidLocal(messageMinusP);
+    addValidLocal(messageQ);
+
+    final SyncCommitteeContribution expected =
+        createContributionFrom(subcommitteeIndex, messageP, messageMinusP, messageQ);
+    assertThat(pool.createContribution(slot, blockRoot, subcommitteeIndex)).contains(expected);
+  }
+
   private void addValidLocal(final ValidatableSyncCommitteeMessage message0) {
     assertThat(pool.addLocal(message0)).isCompletedWithValue(ACCEPT);
   }
@@ -412,12 +448,39 @@ class SyncCommitteeMessagePoolTest {
 
   private ValidatableSyncCommitteeMessage createMessageInSlot(
       final Bytes32 blockRoot, final int subcommitteeIndex, final int slot) {
+    return createMessage(
+        UInt64.valueOf(slot), blockRoot, subcommitteeIndex, 1, dataStructureUtil.randomSignature());
+  }
+
+  private ValidatableSyncCommitteeMessage createMessage(
+      final UInt64 slot,
+      final Bytes32 blockRoot,
+      final int subcommitteeIndex,
+      final int participationBit,
+      final BLSSignature signature) {
     final ValidatableSyncCommitteeMessage message =
         ValidatableSyncCommitteeMessage.fromValidator(
-            dataStructureUtil.randomSyncCommitteeMessage(UInt64.valueOf(slot), blockRoot));
+            spec.getGenesisSchemaDefinitions()
+                .toVersionAltair()
+                .orElseThrow()
+                .getSyncCommitteeMessageSchema()
+                .create(slot, blockRoot, dataStructureUtil.randomUInt64(), signature));
     message.setSubcommitteeAssignments(
-        SyncSubcommitteeAssignments.builder().addAssignment(subcommitteeIndex, 1).build());
+        SyncSubcommitteeAssignments.builder()
+            .addAssignment(subcommitteeIndex, participationBit)
+            .build());
     return message;
+  }
+
+  private ValidatableSyncCommitteeMessage createSignedMessage(
+      final UInt64 slot,
+      final Bytes32 blockRoot,
+      final int subcommitteeIndex,
+      final int participationBit,
+      final BLSKeyPair keyPair) {
+    // the pool never verifies signatures; any message shared by all participants will do
+    final BLSSignature signature = BLS.sign(keyPair.getSecretKey(), blockRoot);
+    return createMessage(slot, blockRoot, subcommitteeIndex, participationBit, signature);
   }
 
   private SyncCommitteeContribution createContributionFrom(
