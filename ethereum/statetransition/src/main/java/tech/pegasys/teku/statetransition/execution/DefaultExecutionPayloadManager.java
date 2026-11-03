@@ -62,8 +62,9 @@ public class DefaultExecutionPayloadManager
   private final Set<Bytes32> executionPayloadsSeenBeforePayloadDue =
       LimitedSet.createSynchronizedNatural(VALID_EXECUTION_PAYLOAD_SET_SIZE);
 
-  // block roots whose payload import is in flight, so RPC fetches are not queued for them
-  private final Set<Bytes32> executionPayloadImportsInProgress = ConcurrentHashMap.newKeySet();
+  // number of in-flight imports per block root, so RPC fetches are not queued for a payload
+  // that is already being imported
+  private final Map<Bytes32, Integer> executionPayloadImportsInProgress = new ConcurrentHashMap<>();
 
   // pending pool
   private final Map<BlockRootAndBuilderIndex, PendingExecutionPayload> pendingExecutionPayloads =
@@ -109,7 +110,7 @@ public class DefaultExecutionPayloadManager
   @Override
   public boolean isExecutionPayloadImportedOrImporting(final Bytes32 beaconBlockRoot) {
     // a FULL fork choice node is the authoritative signal that the payload has been imported
-    return executionPayloadImportsInProgress.contains(beaconBlockRoot)
+    return executionPayloadImportsInProgress.containsKey(beaconBlockRoot)
         || recentChainData
             .getForkChoiceStrategy()
             .map(strategy -> strategy.contains(ForkChoiceNode.createFull(beaconBlockRoot)))
@@ -162,10 +163,7 @@ public class DefaultExecutionPayloadManager
       final Optional<BroadcastValidationLevel> broadcastValidationLevel) {
     final UInt64 arrivalTimestamp = recentChainData.getStore().getTimeInMillis();
     // NOT_REQUIRED skips validation, so the envelope is not proven to be the committed payload
-    final boolean payloadCommitmentVerified =
-        broadcastValidationLevel
-            .map(level -> level != BroadcastValidationLevel.NOT_REQUIRED)
-            .orElse(true);
+    final boolean payloadCommitmentVerified = !skipsValidation(broadcastValidationLevel);
     return executionPayloadGossipValidator
         .validate(signedExecutionPayload, broadcastValidationLevel)
         .thenApply(
@@ -231,7 +229,7 @@ public class DefaultExecutionPayloadManager
     // take long enough to put an on time payload past its deadline
     final UInt64 arrivalTimestamp = recentChainData.getStore().getTimeInMillis();
     final Bytes32 beaconBlockRoot = signedExecutionPayload.getBeaconBlockRoot();
-    executionPayloadImportsInProgress.add(beaconBlockRoot);
+    executionPayloadImportsInProgress.merge(beaconBlockRoot, 1, Integer::sum);
     return asyncRunner
         .runAsync(
             () ->
@@ -282,7 +280,16 @@ public class DefaultExecutionPayloadManager
               LOG.error(internalErrorMessage, ex);
               return ExecutionPayloadImportResult.internalError(ex);
             })
-        .alwaysRun(() -> executionPayloadImportsInProgress.remove(beaconBlockRoot));
+        .alwaysRun(
+            () ->
+                executionPayloadImportsInProgress.computeIfPresent(
+                    beaconBlockRoot, (root, count) -> count == 1 ? null : count - 1));
+  }
+
+  private static boolean skipsValidation(
+      final Optional<BroadcastValidationLevel> broadcastValidationLevel) {
+    return broadcastValidationLevel.isPresent()
+        && broadcastValidationLevel.get() == BroadcastValidationLevel.NOT_REQUIRED;
   }
 
   private void logFailedExecutionPayloadImport(

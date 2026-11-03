@@ -81,6 +81,12 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsBellatrix;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsDeneb;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsElectra;
 
+/**
+ * An in-process stand-in for an execution client, used by interop and acceptance tests through the
+ * {@code unsafe-test-stub} endpoint. It treats every payload as valid and builds payloads with
+ * synthetic transactions. From Gloas on it stamps each payload with the block hash computed from
+ * its content, since gossip validation checks that hash against the content.
+ */
 public class ExecutionLayerChannelStub implements ExecutionLayerChannel {
 
   private static final Logger LOG = LogManager.getLogger();

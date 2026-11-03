@@ -519,6 +519,36 @@ class DefaultExecutionPayloadManagerTest {
         .isFalse();
   }
 
+  @Test
+  public void isExecutionPayloadImportedOrImporting_shouldStayTrueUntilEveryImportOfRootEnds() {
+    final Bytes32 beaconBlockRoot = signedExecutionPayload.getBeaconBlockRoot();
+    final SafeFuture<ExecutionPayloadImportResult> firstImport = new SafeFuture<>();
+    final SafeFuture<ExecutionPayloadImportResult> secondImport = new SafeFuture<>();
+    when(forkChoice.onExecutionPayloadEnvelope(
+            eq(signedExecutionPayload), eq(executionLayer), any()))
+        .thenReturn(firstImport)
+        .thenReturn(secondImport);
+
+    final SafeFuture<ExecutionPayloadImportResult> firstResult =
+        executionPayloadManager.importExecutionPayload(signedExecutionPayload, false);
+    final SafeFuture<ExecutionPayloadImportResult> secondResult =
+        executionPayloadManager.importExecutionPayload(signedExecutionPayload, false);
+    asyncRunner.executeDueActions();
+
+    // both imports fail, so no FULL fork choice node can stand in for the in-flight tracking
+    final ExecutionPayloadImportResult failure =
+        ExecutionPayloadImportResult.failedVerification(new RuntimeException("invalid"));
+    firstImport.complete(failure);
+    assertThat(firstResult).isCompleted();
+    assertThat(executionPayloadManager.isExecutionPayloadImportedOrImporting(beaconBlockRoot))
+        .isTrue();
+
+    secondImport.complete(failure);
+    assertThat(secondResult).isCompleted();
+    assertThat(executionPayloadManager.isExecutionPayloadImportedOrImporting(beaconBlockRoot))
+        .isFalse();
+  }
+
   private void givenValidationResult(
       final SignedExecutionPayloadEnvelope executionPayload,
       final InternalValidationResult validationResult) {

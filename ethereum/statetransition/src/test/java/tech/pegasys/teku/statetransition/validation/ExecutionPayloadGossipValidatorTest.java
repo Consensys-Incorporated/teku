@@ -365,7 +365,7 @@ public class ExecutionPayloadGossipValidatorTest {
   }
 
   @TestTemplate
-  void shouldIgnoreAndNotMarkAsSeenIfBlockHashDoesNotMatchContent() {
+  void shouldRejectAndNotMarkAsSeenIfBlockHashDoesNotMatchContent() {
     // Same block hash as the bid commits to, but the content hashes to something else
     final Bytes32 computedBlockHash = dataStructureUtil.randomBytes32();
     when(gossipValidationHelper.computeExecutionPayloadBlockHash(envelope))
@@ -373,7 +373,7 @@ public class ExecutionPayloadGossipValidatorTest {
 
     assertThatSafeFuture(validator.validate(signedEnvelope))
         .isCompletedWithValue(
-            ignore(
+            reject(
                 "Execution payload envelope block hash %s does not match the block hash %s computed from its content",
                 payload.getBlockHash(), computedBlockHash));
 
