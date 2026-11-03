@@ -30,8 +30,10 @@ import static tech.pegasys.teku.statetransition.datacolumns.DasCustodyStand.crea
 
 import java.time.Duration;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
@@ -97,23 +99,29 @@ public class DataColumnSidecarRecoveringCustodyTest {
   @BeforeEach
   public void setup() {
     this.custody =
-        new DataColumnSidecarRecoveringCustodyImpl(
-            delegate,
-            stubAsyncRunner,
-            spec,
-            dataColumnSidecarPublisher,
+        createCustody(
             createCustodyGroupCountManager(
-                config.getNumberOfCustodyGroups(), config.getSamplesPerSlot()),
-            config.getNumberOfColumns(),
-            config.getNumberOfCustodyGroups(),
-            __ -> Duration.ofSeconds(2),
-            stubMetricsSystem,
-            stubTimeProvider);
+                config.getNumberOfCustodyGroups(), config.getSamplesPerSlot()));
     doReturn(specVersion).when(spec).atSlot(any());
     doReturn(miscHelpersFulu).when(specVersion).miscHelpers();
     when(miscHelpersFulu.toVersionFulu()).thenReturn(Optional.of(miscHelpersFulu));
     when(delegate.onNewValidatedDataColumnSidecar(any(), any())).thenReturn(SafeFuture.COMPLETE);
     custody.onSyncingStatusChanged(true); // default in sync
+  }
+
+  private DataColumnSidecarRecoveringCustodyImpl createCustody(
+      final CustodyGroupCountManager custodyGroupCountManager) {
+    return new DataColumnSidecarRecoveringCustodyImpl(
+        delegate,
+        stubAsyncRunner,
+        spec,
+        dataColumnSidecarPublisher,
+        custodyGroupCountManager,
+        config.getNumberOfColumns(),
+        config.getNumberOfCustodyGroups(),
+        __ -> Duration.ofSeconds(2),
+        stubMetricsSystem,
+        stubTimeProvider);
   }
 
   @Test
@@ -138,18 +146,7 @@ public class DataColumnSidecarRecoveringCustodyTest {
 
   @Test
   public void shouldNotWorkOnNonSupernode() {
-    final DataColumnSidecarRecoveringCustody custody =
-        new DataColumnSidecarRecoveringCustodyImpl(
-            delegate,
-            stubAsyncRunner,
-            spec,
-            dataColumnSidecarPublisher,
-            CustodyGroupCountManager.NOOP,
-            config.getNumberOfColumns(),
-            config.getNumberOfCustodyGroups(),
-            __ -> Duration.ofSeconds(2),
-            stubMetricsSystem,
-            stubTimeProvider);
+    final DataColumnSidecarRecoveringCustody custody = createCustody(CustodyGroupCountManager.NOOP);
 
     custody.onSlot(slot);
     assertThat(stubAsyncRunner.hasDelayedActions()).isFalse();
@@ -338,33 +335,39 @@ public class DataColumnSidecarRecoveringCustodyTest {
   public void shouldStoreColumnsSampledOutsideCustodyBeforeBecomingSupernode() {
     final CustodyGroupCountManager custodyGroupCountManager = mock(CustodyGroupCountManager.class);
     when(custodyGroupCountManager.getCustodyGroupCount()).thenReturn(4);
-    this.custody =
-        new DataColumnSidecarRecoveringCustodyImpl(
-            delegate,
-            stubAsyncRunner,
-            spec,
-            dataColumnSidecarPublisher,
-            custodyGroupCountManager,
-            config.getNumberOfColumns(),
-            config.getNumberOfCustodyGroups(),
-            __ -> Duration.ofSeconds(2),
-            stubMetricsSystem,
-            stubTimeProvider);
+    when(custodyGroupCountManager.getCustodyColumnIndices())
+        .thenReturn(columnIndices.get().limit(4).collect(Collectors.toSet()));
+    this.custody = createCustody(custodyGroupCountManager);
+    // like DataColumnSidecarCustodyImpl, the delegate stores only columns in custody
+    final Set<UInt64> storedColumns = new HashSet<>();
+    when(delegate.onNewValidatedDataColumnSidecar(any(), any()))
+        .thenAnswer(
+            invocation -> {
+              final DataColumnSidecar sidecar = invocation.getArgument(0);
+              if (custodyGroupCountManager.getCustodyColumnIndices().contains(sidecar.getIndex())) {
+                storedColumns.add(sidecar.getIndex());
+              }
+              return SafeFuture.COMPLETE;
+            });
 
     final Map<UInt64, DataColumnSidecar> sidecars =
         columnIndices
             .get()
             .map(i -> dataStructureUtil.randomDataColumnSidecar(signedBeaconBlock.asHeader(), i))
             .collect(Collectors.toMap(DataColumnSidecar::getIndex, sidecar -> sidecar));
-    // 8 columns sampled while custodying 4 groups, custody doesn't store the 4 outside it
+    // 8 columns sampled while custodying 4 groups, only the 4 in custody are stored
     columnIndices
         .get()
         .limit(8)
         .forEach(i -> custody.onNewValidatedDataColumnSidecar(sidecars.get(i), RemoteOrigin.RPC));
+    assertThat(storedColumns)
+        .containsExactlyInAnyOrderElementsOf(columnIndices.get().limit(4).toList());
 
     // custody grows to all groups, the next slot times out the recovery task
     when(custodyGroupCountManager.getCustodyGroupCount())
         .thenReturn(config.getNumberOfCustodyGroups());
+    when(custodyGroupCountManager.getCustodyColumnIndices())
+        .thenReturn(columnIndices.get().collect(Collectors.toSet()));
     custody.onSlot(slot);
     stubTimeProvider.advanceTimeBySeconds(2);
     stubAsyncRunner.executeDueActionsRepeatedly();
@@ -380,14 +383,8 @@ public class DataColumnSidecarRecoveringCustodyTest {
     stubAsyncRunner.executeDueActionsRepeatedly();
 
     verify(miscHelpersFulu).reconstructAllDataColumnSidecars(anyCollection());
-    // custody gets the sampled columns again, now that they're in custody they are stored
-    columnIndices
-        .get()
-        .limit(8)
-        .forEach(
-            i ->
-                verify(delegate)
-                    .onNewValidatedDataColumnSidecar(sidecars.get(i), RemoteOrigin.RECOVERED));
+    // the recovery hands the sampled columns to custody again, so every column ends up stored
+    assertThat(storedColumns).containsExactlyInAnyOrderElementsOf(columnIndices.get().toList());
   }
 
   @Test
