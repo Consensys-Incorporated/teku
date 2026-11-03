@@ -27,7 +27,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
-import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import static tech.pegasys.teku.infrastructure.ssz.SszDataAssert.assertThatSszData;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
 import static tech.pegasys.teku.spec.config.SpecConfig.FAR_FUTURE_EPOCH;
@@ -209,12 +208,11 @@ class RemoteValidatorApiHandlerTest {
 
   @Test
   void getValidatorIndices_WithEmptyPublicKeys_ReturnsEmptyMap() {
-    final SafeFuture<Map<BLSPublicKey, Integer>> future =
+    final SafeFuture<Optional<Map<BLSPublicKey, Integer>>> future =
         apiHandler.getValidatorIndices(emptyList());
 
     asyncRunner.executeQueuedActions();
-    assertThat(future).isCompleted();
-    assertThat(safeJoin(future)).isEmpty();
+    assertThat(future).isCompletedWithValue(Optional.of(Map.of()));
   }
 
   @Test
@@ -230,13 +228,39 @@ class RemoteValidatorApiHandlerTest {
     when(typeDefClient.postStateValidators(expectedValidatorIds))
         .thenReturn(Optional.of(List.of(stateValidatorData(1, key1), stateValidatorData(2, key2))));
 
-    final SafeFuture<Map<BLSPublicKey, Integer>> future =
+    final SafeFuture<Optional<Map<BLSPublicKey, Integer>>> future =
         apiHandler.getValidatorIndices(List.of(key1, key2, key3));
 
     asyncRunner.executeQueuedActions();
     assertThat(future).isCompleted();
-    assertThat(safeJoin(future)).containsOnly(entry(key1, 1), entry(key2, 2));
+    assertThat(unwrapToValue(future)).containsOnly(entry(key1, 1), entry(key2, 2));
     verify(typeDefClient).postStateValidators(expectedValidatorIds);
+  }
+
+  @Test
+  void getValidatorIndices_WhenResponseIsAbsent_ReturnsEmptyOptional() {
+    final BLSPublicKey publicKey = dataStructureUtil.randomPublicKey();
+    when(typeDefClient.postStateValidators(List.of(publicKey.toHexString())))
+        .thenReturn(Optional.empty());
+
+    final SafeFuture<Optional<Map<BLSPublicKey, Integer>>> future =
+        apiHandler.getValidatorIndices(List.of(publicKey));
+
+    asyncRunner.executeQueuedActions();
+    assertThat(future).isCompletedWithValue(Optional.empty());
+  }
+
+  @Test
+  void getValidatorIndices_WhenResponseDataIsEmpty_ReturnsEmptyMap() {
+    final BLSPublicKey publicKey = dataStructureUtil.randomPublicKey();
+    when(typeDefClient.postStateValidators(List.of(publicKey.toHexString())))
+        .thenReturn(Optional.of(List.of()));
+
+    final SafeFuture<Optional<Map<BLSPublicKey, Integer>>> future =
+        apiHandler.getValidatorIndices(List.of(publicKey));
+
+    asyncRunner.executeQueuedActions();
+    assertThat(future).isCompletedWithValue(Optional.of(Map.of()));
   }
 
   @Test
@@ -257,16 +281,16 @@ class RemoteValidatorApiHandlerTest {
         .thenReturn(Optional.of(List.of(stateValidatorData(1, key1), stateValidatorData(2, key2))));
 
     // call method twice
-    final SafeFuture<Map<BLSPublicKey, Integer>> future =
+    final SafeFuture<Optional<Map<BLSPublicKey, Integer>>> future =
         apiHandler.getValidatorIndices(List.of(key1, key2, key3));
-    final SafeFuture<Map<BLSPublicKey, Integer>> future1 =
+    final SafeFuture<Optional<Map<BLSPublicKey, Integer>>> future1 =
         apiHandler.getValidatorIndices(List.of(key1, key2, key3));
 
     asyncRunner.executeQueuedActions();
     assertThat(future).isCompleted();
     assertThat(future1).isCompleted();
-    assertThat(safeJoin(future)).containsOnly(entry(key1, 1), entry(key2, 2));
-    assertThat(safeJoin(future1)).containsOnly(entry(key1, 1), entry(key2, 2));
+    assertThat(unwrapToValue(future)).containsOnly(entry(key1, 1), entry(key2, 2));
+    assertThat(unwrapToValue(future1)).containsOnly(entry(key1, 1), entry(key2, 2));
     // POST only called once
     verify(typeDefClient, times(1)).postStateValidators(expectedValidatorIds);
     // GET called twice
@@ -289,12 +313,12 @@ class RemoteValidatorApiHandlerTest {
     when(typeDefClient.getStateValidators(expectedValidatorIds))
         .thenReturn(Optional.of(List.of(stateValidatorData(1, key1), stateValidatorData(2, key2))));
 
-    final SafeFuture<Map<BLSPublicKey, Integer>> future =
+    final SafeFuture<Optional<Map<BLSPublicKey, Integer>>> future =
         apiHandler.getValidatorIndices(List.of(key1, key2, key3));
 
     asyncRunner.executeQueuedActions();
     assertThat(future).isCompleted();
-    assertThat(safeJoin(future)).containsOnly(entry(key1, 1), entry(key2, 2));
+    assertThat(unwrapToValue(future)).containsOnly(entry(key1, 1), entry(key2, 2));
     verify(typeDefClient).getStateValidators(expectedValidatorIds);
   }
 
@@ -333,11 +357,12 @@ class RemoteValidatorApiHandlerTest {
     when(typeDefClient.getStateValidators(expectedBatch2)).thenReturn(Optional.of(batch2Data));
     when(typeDefClient.getStateValidators(expectedBatch3)).thenReturn(Optional.of(batch3Data));
 
-    final SafeFuture<Map<BLSPublicKey, Integer>> future = apiHandler.getValidatorIndices(allKeys);
+    final SafeFuture<Optional<Map<BLSPublicKey, Integer>>> future =
+        apiHandler.getValidatorIndices(allKeys);
 
     asyncRunner.executeQueuedActions();
     assertThat(future).isCompleted();
-    assertThat(safeJoin(future))
+    assertThat(unwrapToValue(future))
         .containsOnly(
             entry(allKeys.get(0), 10),
             entry(allKeys.get(3), 11),

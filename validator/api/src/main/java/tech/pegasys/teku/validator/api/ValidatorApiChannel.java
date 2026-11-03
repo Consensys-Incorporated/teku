@@ -68,9 +68,9 @@ public interface ValidatorApiChannel extends BuilderApiChannel, ChannelInterface
         }
 
         @Override
-        public SafeFuture<Map<BLSPublicKey, Integer>> getValidatorIndices(
+        public SafeFuture<Optional<Map<BLSPublicKey, Integer>>> getValidatorIndices(
             final Collection<BLSPublicKey> publicKeys) {
-          return SafeFuture.completedFuture(Map.of());
+          return SafeFuture.completedFuture(Optional.empty());
         }
 
         @Override
@@ -278,7 +278,8 @@ public interface ValidatorApiChannel extends BuilderApiChannel, ChannelInterface
 
   SafeFuture<Optional<GenesisData>> getGenesisData();
 
-  SafeFuture<Map<BLSPublicKey, Integer>> getValidatorIndices(Collection<BLSPublicKey> publicKeys);
+  SafeFuture<Optional<Map<BLSPublicKey, Integer>>> getValidatorIndices(
+      Collection<BLSPublicKey> publicKeys);
 
   SafeFuture<Optional<Map<BLSPublicKey, StateValidatorData>>> getValidatorStatuses(
       Collection<BLSPublicKey> validatorIdentifiers);

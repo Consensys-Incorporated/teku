@@ -130,15 +130,12 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
   }
 
   @Override
-  public SafeFuture<Map<BLSPublicKey, Integer>> getValidatorIndices(
+  public SafeFuture<Optional<Map<BLSPublicKey, Integer>>> getValidatorIndices(
       final Collection<BLSPublicKey> publicKeys) {
     if (publicKeys.isEmpty()) {
-      return SafeFuture.completedFuture(emptyMap());
+      return SafeFuture.completedFuture(Optional.of(emptyMap()));
     }
-    return sendRequest(
-        () ->
-            makeValidatorRequest(publicKeys, StateValidatorData::getIntegerIndex)
-                .orElse(emptyMap()));
+    return sendRequest(() -> makeValidatorRequest(publicKeys, StateValidatorData::getIntegerIndex));
   }
 
   @Override
