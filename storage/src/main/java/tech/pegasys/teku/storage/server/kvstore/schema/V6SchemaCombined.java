@@ -15,6 +15,7 @@ package tech.pegasys.teku.storage.server.kvstore.schema;
 
 import static tech.pegasys.teku.storage.server.kvstore.schema.KvStoreVariable.asVariableId;
 import static tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreSerializer.BYTES32_SERIALIZER;
+import static tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreSerializer.BYTES_SERIALIZER;
 import static tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreSerializer.CHECKPOINT_EPOCHS_SERIALIZER;
 import static tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreSerializer.CHECKPOINT_SERIALIZER;
 import static tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreSerializer.DEPOSITS_FROM_BLOCK_EVENT_SERIALIZER;
@@ -67,6 +68,10 @@ public abstract class V6SchemaCombined implements SchemaCombined {
           KvStoreColumn.create(7, BYTES32_SERIALIZER, CHECKPOINT_EPOCHS_SERIALIZER);
   private final KvStoreColumn<UInt64, LightClientUpdate> lightClientUpdatesByPeriod;
   private final KvStoreColumn<UInt64, Bytes32> lightClientUpdateSignatureBlockRootsByPeriod;
+  private static final KvStoreColumn<UInt64, Bytes> LIGHT_CLIENT_BOOTSTRAPS_BY_SLOT =
+      KvStoreColumn.create(10, UINT64_SERIALIZER, BYTES_SERIALIZER);
+  private static final KvStoreColumn<UInt64, Bytes> LIGHT_CLIENT_SYNC_COMMITTEES_BY_PERIOD =
+      KvStoreColumn.create(11, UINT64_SERIALIZER, BYTES_SERIALIZER);
 
   // Variables
   private static final KvStoreVariable<UInt64> GENESIS_TIME =
@@ -173,6 +178,16 @@ public abstract class V6SchemaCombined implements SchemaCombined {
   @Override
   public KvStoreColumn<UInt64, Bytes32> getBestLightClientUpdateSignatureBlockRootsByPeriod() {
     return lightClientUpdateSignatureBlockRootsByPeriod;
+  }
+
+  @Override
+  public KvStoreColumn<UInt64, Bytes> getLightClientBootstrapsBySlot() {
+    return LIGHT_CLIENT_BOOTSTRAPS_BY_SLOT;
+  }
+
+  @Override
+  public KvStoreColumn<UInt64, Bytes> getLightClientSyncCommitteesByPeriod() {
+    return LIGHT_CLIENT_SYNC_COMMITTEES_BY_PERIOD;
   }
 
   @Override
@@ -290,6 +305,8 @@ public abstract class V6SchemaCombined implements SchemaCombined {
         .put(
             "LIGHT_CLIENT_UPDATE_SIGNATURE_BLOCK_ROOTS_BY_PERIOD",
             getBestLightClientUpdateSignatureBlockRootsByPeriod())
+        .put("LIGHT_CLIENT_BOOTSTRAPS_BY_SLOT", getLightClientBootstrapsBySlot())
+        .put("LIGHT_CLIENT_SYNC_COMMITTEES_BY_PERIOD", getLightClientSyncCommitteesByPeriod())
         .build();
   }
 

@@ -27,10 +27,12 @@ import tech.pegasys.teku.beaconrestapi.AbstractDataBackedRestAPIIntegrationTest;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.lightclient.GetLightClientBootstrap;
 import tech.pegasys.teku.ethereum.json.types.SharedApiTypes;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrapSchema;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
@@ -61,6 +63,31 @@ public class GetLightClientBootstrapIntegrationTest
             .getData();
 
     final Response response = get(headBlockRoot);
+    assertThat(response.code()).isEqualTo(SC_OK);
+    assertThat(response.header(HEADER_CONSENSUS_VERSION))
+        .isEqualTo(specContext.getSpecMilestone().lowerCaseName());
+
+    final LightClientBootstrapSchema lightClientBootstrapSchema =
+        SchemaDefinitionsAltair.required(spec.getGenesisSchemaDefinitions())
+            .getLightClientBootstrapSchema();
+    final LightClientBootstrap parsedBootstrapResponse =
+        JsonUtil.parse(
+            response.body().string(), SharedApiTypes.withDataWrapper(lightClientBootstrapSchema));
+
+    assertThat(parsedBootstrapResponse).isEqualTo(expectedBootstrap);
+  }
+
+  @TestTemplate
+  void shouldReturnBootstrapForFinalizedCheckpointAfterGenesis(
+      final TestSpecInvocationContextProvider.SpecContext specContext) throws IOException {
+    final UInt64 checkpointSlot = spec.computeStartSlotAtEpoch(UInt64.ONE);
+    createBlocksAtSlots(checkpointSlot, checkpointSlot.plus(1));
+    final SignedBlockAndState checkpoint = chainUpdater.finalizeEpoch(UInt64.ONE);
+    final LightClientBootstrap expectedBootstrap =
+        spec.getLightClientUtilRequired(checkpoint.getSlot())
+            .createLightClientBootstrap(checkpoint.getState(), checkpoint.getBlock());
+
+    final Response response = get(checkpoint.getRoot());
     assertThat(response.code()).isEqualTo(SC_OK);
     assertThat(response.header(HEADER_CONSENSUS_VERSION))
         .isEqualTo(specContext.getSpecMilestone().lowerCaseName());

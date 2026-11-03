@@ -297,6 +297,12 @@ public class DataColumnSidecarUtilFulu implements DataColumnSidecarUtil {
   }
 
   @Override
+  public Optional<SszList<SszKZGCommitment>> getMaybeKzgCommitments(
+      final DataColumnSidecar dataColumnSidecar) {
+    return dataColumnSidecar.getMaybeKzgCommitments();
+  }
+
+  @Override
   public List<DataColumnSidecar> reconstructAllDataColumnSidecars(
       final List<DataColumnSidecar> dataColumnSidecars) {
     return miscHelpersFulu.reconstructAllDataColumnSidecars(dataColumnSidecars);

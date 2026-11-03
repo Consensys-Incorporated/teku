@@ -85,13 +85,29 @@ class RpcResponseCallback<TResponse extends SszData> implements ResponseCallback
             });
   }
 
-  /** Half-closes the stream after a complete response, closing it fully if that is not possible. */
+  /**
+   * Half-closes the stream after a complete response, closing it fully if that is not possible.
+   * Over QUIC our FIN can sit in the transport's write queue forever, so the half-close is bounded
+   * like a write.
+   */
   private void closeWriteStream() {
+    final SafeFuture.Interruptor timeoutInterruptor =
+        SafeFuture.createInterruptor(
+            asyncRunner.getDelayedFuture(RESPONSE_WRITE_TIMEOUT),
+            () ->
+                new RpcTimeoutException(
+                    "Timed out half-closing RPC stream for protocol " + protocolId,
+                    RESPONSE_WRITE_TIMEOUT));
     rpcStream
         .closeWriteStream()
+        .orInterrupt(timeoutInterruptor)
         .finish(
             error -> {
-              LOG.trace("Failed to half-close stream after response, closing it", error);
+              if (Throwables.getRootCause(error) instanceof RpcTimeoutException) {
+                LOG.debug("Timed out half-closing RPC stream for {}, closing it", protocolId);
+              } else {
+                LOG.trace("Failed to half-close stream after response, closing it", error);
+              }
               closeStreamAbruptly();
             });
   }

@@ -27,6 +27,11 @@ public final class BuilderBoostFactorEvaluator {
 
   private BuilderBoostFactorEvaluator() {}
 
+  public static BigInteger computeBoostedValue(
+      final BigInteger builderValue, final UInt64 builderBoostFactor) {
+    return builderValue.multiply(builderBoostFactor.bigIntegerValue());
+  }
+
   public static boolean isLocalValueWinning(
       final UInt256 localValue, final UInt256 builderValue, final UInt64 builderBoostFactor) {
     if (builderBoostFactor.equals(BUILDER_BOOST_FACTOR_PREFER_EXECUTION)) {
@@ -36,7 +41,7 @@ public final class BuilderBoostFactorEvaluator {
       return false;
     }
     final BigInteger boostedBuilderValue =
-        builderValue.toBigInteger().multiply(builderBoostFactor.bigIntegerValue());
+        computeBoostedValue(builderValue.toBigInteger(), builderBoostFactor);
     final BigInteger scaledLocalValue = localValue.toBigInteger().multiply(HUNDRED_PERCENT);
     return boostedBuilderValue.compareTo(scaledLocalValue) <= 0;
   }

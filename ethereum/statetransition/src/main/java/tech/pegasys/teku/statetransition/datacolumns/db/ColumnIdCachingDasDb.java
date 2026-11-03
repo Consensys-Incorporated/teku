@@ -65,6 +65,13 @@ class ColumnIdCachingDasDb implements DataColumnSidecarDB {
   }
 
   @Override
+  public SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyColumnIdentifiers(
+      final UInt64 slot) {
+    // Archive and prune writes bypass this cache.
+    return delegateDb.getCustodyColumnIdentifiers(slot);
+  }
+
+  @Override
   public SafeFuture<Void> addSidecar(final DataColumnSidecar sidecar) {
     if (!latestAdded.add(DataColumnSlotAndIdentifier.fromDataColumn(sidecar))) {
       return SafeFuture.COMPLETE;

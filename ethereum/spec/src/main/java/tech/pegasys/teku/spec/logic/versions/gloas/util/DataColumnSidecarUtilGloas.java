@@ -221,6 +221,13 @@ public class DataColumnSidecarUtilGloas implements DataColumnSidecarUtil {
   }
 
   @Override
+  public Optional<SszList<SszKZGCommitment>> getMaybeKzgCommitments(
+      final DataColumnSidecar dataColumnSidecar) {
+    // Gloas sidecars carry none; the bid's commitments are the only source
+    return Optional.empty();
+  }
+
+  @Override
   public SafeFuture<Optional<DataColumnSidecarValidationError>> validateAndVerifyKzgProofs(
       final DataColumnSidecar dataColumnSidecar,
       final Function<DataColumnSidecar, SafeFuture<Optional<SszList<SszKZGCommitment>>>>

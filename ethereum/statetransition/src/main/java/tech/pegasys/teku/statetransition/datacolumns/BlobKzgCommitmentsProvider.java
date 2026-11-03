@@ -40,10 +40,10 @@ import tech.pegasys.teku.storage.client.CombinedChainDataClient;
  * blob_kzg_commitments}; consequently a root to commitments entry is immutable and can be populated
  * before full block import without conflict risk.
  *
- * <p>When a data column sidecar already carries commitments, as in Fulu, those commitments are
- * returned directly without caching. The cache is only a temporary pre-import source for forks
- * where the sidecar omits commitments, as in Gloas. Store lookup is retained as a lazy fallback for
- * cache misses.
+ * <p>When a data column sidecar carries commitments and the fork at its slot defines them, as in
+ * Fulu, they are returned directly without caching; from Gloas on only the block's bid is trusted.
+ * The cache is only a temporary pre-import source for forks where the sidecar omits commitments.
+ * Store lookup is retained as a lazy fallback for cache misses.
  */
 public class BlobKzgCommitmentsProvider
     implements ReceivedBlockEventsChannel, FinalizedCheckpointChannel {
@@ -75,8 +75,8 @@ public class BlobKzgCommitmentsProvider
 
   public SafeFuture<Optional<SszList<SszKZGCommitment>>> getBlobKzgCommitments(
       final DataColumnSidecar dataColumnSidecar) {
-    return dataColumnSidecar
-        .getMaybeKzgCommitments()
+    return spec.getDataColumnSidecarUtil(dataColumnSidecar.getSlot())
+        .getMaybeKzgCommitments(dataColumnSidecar)
         .map(commitments -> SafeFuture.completedFuture(Optional.of(commitments)))
         .orElseGet(() -> getBlobKzgCommitments(dataColumnSidecar.getBeaconBlockRoot()));
   }

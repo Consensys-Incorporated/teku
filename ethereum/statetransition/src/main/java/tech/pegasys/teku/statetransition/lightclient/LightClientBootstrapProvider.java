@@ -63,20 +63,8 @@ public class LightClientBootstrapProvider {
                         .map(SignedBeaconBlock::getRoot)
                         .filter(blockRoot::equals)
                         .isPresent()
-                    ? createBootstrap(blockRoot, block)
+                    ? combinedChainDataClient.getLightClientBootstrap(blockRoot)
                     : SafeFuture.completedFuture(Optional.empty()));
-  }
-
-  private SafeFuture<Optional<LightClientBootstrap>> createBootstrap(
-      final Bytes32 blockRoot, final SignedBeaconBlock block) {
-    return combinedChainDataClient
-        .getStateByBlockRoot(blockRoot)
-        .thenApply(
-            maybeState ->
-                maybeState.flatMap(
-                    state ->
-                        spec.getLightClientUtil(block.getSlot())
-                            .map(util -> util.createLightClientBootstrap(state, block))));
   }
 
   private boolean isWithinServableRange(final UInt64 boundaryEpoch) {

@@ -407,6 +407,28 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
   }
 
   @Override
+  public Optional<Bytes> getLightClientBootstrap(final UInt64 slot) {
+    return hotDao.getLightClientBootstrap(slot);
+  }
+
+  @Override
+  public Optional<Bytes> getLightClientSyncCommittee(final UInt64 period) {
+    return hotDao.getLightClientSyncCommittee(period);
+  }
+
+  @Override
+  @MustBeClosed
+  public Stream<UInt64> streamLightClientBootstrapSlots() {
+    return hotDao.streamLightClientBootstrapSlots();
+  }
+
+  @Override
+  @MustBeClosed
+  public Stream<UInt64> streamLightClientSyncCommitteePeriods() {
+    return hotDao.streamLightClientSyncCommitteePeriods();
+  }
+
+  @Override
   public Optional<List<List<KZGProof>>> getDataColumnSidecarsProofs(final UInt64 slot) {
     return finalizedDao.getDataColumnSidecarProofs(slot);
   }
@@ -557,6 +579,22 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
     @Override
     public void removeBestLightClientUpdate(final UInt64 period) {
       hotUpdater.removeBestLightClientUpdate(period);
+    }
+
+    @Override
+    public void addLightClientBootstrap(
+        final UInt64 slot, final Bytes bootstrap, final UInt64 period, final Bytes syncCommittee) {
+      hotUpdater.addLightClientBootstrap(slot, bootstrap, period, syncCommittee);
+    }
+
+    @Override
+    public void removeLightClientBootstrap(final UInt64 slot) {
+      hotUpdater.removeLightClientBootstrap(slot);
+    }
+
+    @Override
+    public void removeLightClientSyncCommittee(final UInt64 period) {
+      hotUpdater.removeLightClientSyncCommittee(period);
     }
 
     @Override

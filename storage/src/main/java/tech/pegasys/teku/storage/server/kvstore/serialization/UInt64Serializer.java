@@ -20,6 +20,9 @@ class UInt64Serializer implements KvStoreSerializer<UInt64> {
 
   @Override
   public UInt64 deserialize(final byte[] data) {
+    if (data.length != Long.BYTES) {
+      throw new KvStoreDeserializationException("Expected 8 bytes for UInt64, got " + data.length);
+    }
     return UInt64.fromLongBits(Longs.fromByteArray(data));
   }
 

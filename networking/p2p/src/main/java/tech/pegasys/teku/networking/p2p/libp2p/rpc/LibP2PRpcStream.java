@@ -31,12 +31,18 @@ public class LibP2PRpcStream implements RpcStream {
   private final ChannelHandlerContext ctx;
   private final AtomicBoolean writeStreamClosed = new AtomicBoolean(false);
   private final NodeId nodeId;
+  private final Runnable onWriteStreamClosed;
+  private volatile SafeFuture<Void> halfCloseFuture;
 
   public LibP2PRpcStream(
-      final NodeId nodeId, final Stream p2pStream, final ChannelHandlerContext ctx) {
+      final NodeId nodeId,
+      final Stream p2pStream,
+      final ChannelHandlerContext ctx,
+      final Runnable onWriteStreamClosed) {
     this.nodeId = nodeId;
     this.p2pStream = p2pStream;
     this.ctx = ctx;
+    this.onWriteStreamClosed = onWriteStreamClosed;
   }
 
   @Override
@@ -59,7 +65,19 @@ public class LibP2PRpcStream implements RpcStream {
   @Override
   public SafeFuture<Void> closeWriteStream() {
     writeStreamClosed.set(true);
-    return SafeFuture.of(p2pStream.closeWrite()).thenApply((res) -> null);
+    final SafeFuture<Void> future =
+        SafeFuture.of(p2pStream.closeWrite()).thenRun(onWriteStreamClosed);
+    halfCloseFuture = future;
+    return future;
+  }
+
+  boolean isHalfCloseRequested() {
+    return halfCloseFuture != null;
+  }
+
+  boolean isHalfCloseCompleted() {
+    final SafeFuture<Void> future = halfCloseFuture;
+    return future != null && future.isDone();
   }
 
   private SafeFuture<Void> toSafeFuture(final ChannelFuture channelFuture) {

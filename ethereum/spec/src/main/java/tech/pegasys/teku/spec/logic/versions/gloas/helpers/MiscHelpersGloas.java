@@ -44,6 +44,7 @@ import tech.pegasys.teku.spec.config.SpecConfigElectra;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.fulu.MatrixEntry;
+import tech.pegasys.teku.spec.datastructures.blobs.versions.gloas.DataColumnSidecarGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
@@ -348,6 +349,13 @@ public class MiscHelpersGloas extends MiscHelpersFulu {
 
   @Override
   public boolean verifyDataColumnSidecar(final DataColumnSidecar dataColumnSidecar) {
+    if (!(dataColumnSidecar instanceof DataColumnSidecarGloas)) {
+      LOG.trace(
+          "DataColumnSidecar is a {}, expected a Gloas data column sidecar",
+          dataColumnSidecar.getClass().getSimpleName());
+      return false;
+    }
+
     final int numberOfColumns = specConfigGloas.getNumberOfColumns();
 
     // The sidecar index must be within the valid range

@@ -79,6 +79,22 @@ public class LightClientUtilTest {
   }
 
   @TestTemplate
+  public void createLightClientBootstrap_shouldMatchBootstrapCreatedFromState() {
+    final SignedBlockAndState blockAndState =
+        blockWithPostState(1, dataStructureUtil.randomBytes32());
+    final BeaconStateAltair state = BeaconStateAltair.required(blockAndState.getState());
+
+    assertThat(
+            lightClientUtil.createLightClientBootstrap(
+                blockAndState.getBlock(),
+                state.getCurrentSyncCommittee(),
+                state.createCurrentSyncCommitteeProof()))
+        .isEqualTo(
+            lightClientUtil.createLightClientBootstrap(
+                blockAndState.getState(), blockAndState.getBlock()));
+  }
+
+  @TestTemplate
   public void currentSyncCommitteeProof_shouldReconstructStateRoot() {
     final BeaconState state = dataStructureUtil.randomBeaconState();
     final BeaconStateAltair stateAltair = BeaconStateAltair.required(state);
@@ -189,6 +205,37 @@ public class LightClientUtilTest {
         finalizedBlock.getRoot(),
         update.getFinalityBranch(),
         finalizedRootGIndex(attested.getState()));
+  }
+
+  @TestTemplate
+  public void withFinalizedHeader_shouldMatchUpdateCreatedWithFinalizedBlock() {
+    final SignedBeaconBlock finalizedBlock = dataStructureUtil.randomSignedBeaconBlock(1);
+    final SignedBlockAndState attested =
+        blockWithPostState(
+            2,
+            dataStructureUtil.randomBytes32(),
+            Optional.of(new Checkpoint(UInt64.ZERO, finalizedBlock.getRoot())));
+    final SignedBlockAndState signature = blockWithPostState(3, attested.getBlock().getRoot());
+    final LightClientUpdate withoutFinality =
+        lightClientUtil.createLightClientUpdate(
+            signature.getState(),
+            signature.getBlock(),
+            attested.getState(),
+            attested.getBlock(),
+            Optional.empty());
+
+    assertThat(
+            lightClientUtil.withFinalizedHeader(
+                withoutFinality,
+                BeaconStateAltair.required(attested.getState()).createFinalityBranchProof(),
+                finalizedBlock))
+        .isEqualTo(
+            lightClientUtil.createLightClientUpdate(
+                signature.getState(),
+                signature.getBlock(),
+                attested.getState(),
+                attested.getBlock(),
+                Optional.of(finalizedBlock)));
   }
 
   @TestTemplate

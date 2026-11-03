@@ -144,6 +144,12 @@ public class AnchorPoint extends StateAndBlockSummary {
     return blockSummary.getSlot();
   }
 
+  public Optional<BeaconState> getBlockPostState(final Bytes32 blockRoot) {
+    return getRoot().equals(blockRoot) && getState().getSlot().equals(getBlockSlot())
+        ? Optional.of(getState())
+        : Optional.empty();
+  }
+
   public UInt64 getEpoch() {
     return checkpoint.getEpoch();
   }

@@ -17,6 +17,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ZERO;
@@ -35,6 +37,7 @@ import tech.pegasys.teku.spec.datastructures.blobs.versions.gloas.DataColumnSide
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 public class DataColumnSidecarsByRangeListenerValidatingProxyGloasTest
     extends AbstractDataColumnSidecarsByRangeListenerValidatingProxyTest {
@@ -109,5 +112,38 @@ public class DataColumnSidecarsByRangeListenerValidatingProxyGloasTest
                 .DATA_COLUMN_SIDECAR_KZG_VERIFICATION_FAILED
                 .describe())
         .hasMessageContaining("DataColumnSidecar's KZG proofs do not match the bid's KZG proofs");
+  }
+
+  @Test
+  void fuluSchemaSidecarForGloasBlockFailsValidation() {
+    final SignedBeaconBlock block1 = createBlock(ONE);
+    final List<UInt64> columns = List.of(ZERO, ONE);
+    listenerWrapper =
+        new DataColumnSidecarsByRangeListenerValidatingProxy(
+            spec,
+            peer,
+            listener,
+            metricsSystem,
+            timeProvider,
+            signatureValidator,
+            ONE,
+            UInt64.valueOf(1),
+            columns,
+            blobKzgCommitmentsProvider);
+    final DataColumnSidecar fuluSchemaSidecar =
+        new DataStructureUtil(TestSpecFactory.createMainnetFulu())
+            .randomDataColumnSidecar(block1.asHeader(), ZERO);
+
+    final SafeFuture<?> result = listenerWrapper.onResponse(fuluSchemaSidecar);
+    assertThat(result).isCompletedExceptionally();
+    assertThatThrownBy(result::get)
+        .hasCauseExactlyInstanceOf(DataColumnSidecarsResponseInvalidResponseException.class);
+    assertThatThrownBy(result::get)
+        .hasMessageContaining(
+            DataColumnSidecarsResponseInvalidResponseException.InvalidResponseType
+                .DATA_COLUMN_SIDECAR_VALIDITY_CHECK_FAILED
+                .describe());
+    verify(blobKzgCommitmentsProvider, never()).getBlobKzgCommitments(fuluSchemaSidecar);
+    verify(listener, never()).onResponse(any());
   }
 }
