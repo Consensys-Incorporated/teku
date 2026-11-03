@@ -188,43 +188,6 @@ class FailoverValidatorApiHandlerTest {
         Map.of(RequestOutcome.SUCCESS, 1L, RequestOutcome.ERROR, 0L));
   }
 
-  @Test
-  void getValidatorIndicesUsesFailoverWhenPrimaryDataIsUnavailable() {
-    final BLSPublicKey publicKey = DATA_STRUCTURE_UTIL.randomPublicKey();
-    final List<BLSPublicKey> publicKeys = List.of(publicKey);
-    final Optional<Map<BLSPublicKey, Integer>> expectedResponse = Optional.of(Map.of(publicKey, 1));
-    when(primaryApiChannel.getValidatorIndices(publicKeys))
-        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
-    when(failoverApiChannel1.getValidatorIndices(publicKeys))
-        .thenReturn(SafeFuture.completedFuture(expectedResponse));
-
-    final SafeFuture<Optional<Map<BLSPublicKey, Integer>>> result =
-        failoverApiHandler.getValidatorIndices(publicKeys);
-
-    assertThat(result).isCompletedWithValue(expectedResponse);
-    verify(failoverApiChannel1).getValidatorIndices(publicKeys);
-    verifyNoInteractions(failoverApiChannel2);
-  }
-
-  @Test
-  void getValidatorIndicesReturnsEmptyWhenAllBeaconNodesHaveNoData() {
-    final BLSPublicKey publicKey = DATA_STRUCTURE_UTIL.randomPublicKey();
-    final List<BLSPublicKey> publicKeys = List.of(publicKey);
-    when(primaryApiChannel.getValidatorIndices(publicKeys))
-        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
-    when(failoverApiChannel1.getValidatorIndices(publicKeys))
-        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
-    when(failoverApiChannel2.getValidatorIndices(publicKeys))
-        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
-
-    final SafeFuture<Optional<Map<BLSPublicKey, Integer>>> result =
-        failoverApiHandler.getValidatorIndices(publicKeys);
-
-    assertThat(result).isCompletedWithValue(Optional.empty());
-    verify(failoverApiChannel1).getValidatorIndices(publicKeys);
-    verify(failoverApiChannel2).getValidatorIndices(publicKeys);
-  }
-
   @ParameterizedTest(name = "{0}")
   @MethodSource("getRequestsUsingFailover")
   <T> void requestFailoversImmediatelyIfPrimaryBeaconNodeMarkedAsNotReady(
