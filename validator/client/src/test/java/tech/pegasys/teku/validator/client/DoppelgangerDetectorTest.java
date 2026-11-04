@@ -396,7 +396,7 @@ public class DoppelgangerDetectorTest {
   }
 
   @Test
-  public void shouldResumeSameCycleWhenValidatorsLivenessBecomesAvailableAgain() {
+  public void shouldRestartObservationWindowWhenValidatorsLivenessBecomesAvailableAgain() {
     final AtomicBoolean beaconNodeAvailable = new AtomicBoolean(true);
     when(validatorApiChannel.getValidatorsLiveness(any(), any()))
         .thenAnswer(
@@ -412,10 +412,13 @@ public class DoppelgangerDetectorTest {
     final Set<BLSPublicKey> pubKeys = Set.of(pubKey1, pubKey2, pubKey3);
     final SafeFuture<Map<UInt64, BLSPublicKey>> doppelgangerDetectorFuture =
         doppelgangerDetector.performDoppelgangerDetection(pubKeys);
+    final long secondsPerEpoch =
+        (long) spec.getGenesisSpecConfig().getSlotsPerEpoch()
+            * spec.getGenesisSpecConfig().getSecondsPerSlot();
 
     asyncRunner.executeQueuedActions();
     beaconNodeAvailable.set(false);
-    timeProvider.advanceTimeBy(Duration.ofMinutes(5));
+    timeProvider.advanceTimeBySeconds(secondsPerEpoch * maxEpochs);
     asyncRunner.executeQueuedActions();
     assertThat(doppelgangerDetectorFuture).isNotDone();
 
@@ -424,7 +427,43 @@ public class DoppelgangerDetectorTest {
     asyncRunner.executeQueuedActions();
     verify(statusLog)
         .doppelgangerDetectionResumed(toAbbreviatedKeys(pubKeys).collect(Collectors.toSet()));
+    assertThat(doppelgangerDetectorFuture).isNotDone();
+
+    timeProvider.advanceTimeBySeconds(secondsPerEpoch * maxEpochs);
+    asyncRunner.executeQueuedActions();
     assertThat(doppelgangerDetectorFuture).isCompletedWithValue(Map.ofEntries());
+  }
+
+  @Test
+  public void shouldStartObservationWindowWhenLivenessFirstBecomesAvailable() {
+    final AtomicBoolean beaconNodeAvailable = new AtomicBoolean(false);
+    when(validatorApiChannel.getValidatorsLiveness(any(), any()))
+        .thenAnswer(
+            __ ->
+                beaconNodeAvailable.get()
+                    ? SafeFuture.completedFuture(
+                        Optional.of(List.of(new ValidatorLivenessAtEpoch(UInt64.ONE, false))))
+                    : SafeFuture.failedFuture(new Exception("Validator Liveness Exception")));
+    final long secondsPerEpoch =
+        (long) spec.getGenesisSpecConfig().getSlotsPerEpoch()
+            * spec.getGenesisSpecConfig().getSecondsPerSlot();
+    timeProvider.advanceTimeBySeconds(secondsPerEpoch * 10);
+    final SafeFuture<Map<UInt64, BLSPublicKey>> detection =
+        doppelgangerDetector.performDoppelgangerDetection(Set.of(pubKey1));
+
+    asyncRunner.executeQueuedActions();
+    timeProvider.advanceTimeBySeconds(secondsPerEpoch * (maxEpochs + 1));
+    asyncRunner.executeQueuedActions();
+    assertThat(detection).isNotDone();
+
+    beaconNodeAvailable.set(true);
+    timeProvider.advanceTimeBy(checkDelay);
+    asyncRunner.executeQueuedActions();
+    assertThat(detection).isNotDone();
+
+    timeProvider.advanceTimeBySeconds(secondsPerEpoch * maxEpochs);
+    asyncRunner.executeQueuedActions();
+    assertThat(detection).isCompletedWithValue(Map.of());
   }
 
   @Test
@@ -702,12 +741,16 @@ public class DoppelgangerDetectorTest {
   }
 
   @Test
-  public void shouldCheckCurrentEpochOnNextAttemptAfterInitialPreviousEpochCheckFails() {
+  public void
+      shouldRecheckPreviousAndCurrentEpochOnNextAttemptAfterInitialPreviousEpochCheckFails() {
     timeProvider.advanceTimeBy(Duration.of(20, ChronoUnit.MINUTES));
     final UInt64 currentEpoch =
         spec.computeEpochAtSlot(spec.getCurrentSlot(timeProvider.getTimeInSeconds(), UInt64.ZERO));
     when(validatorApiChannel.getValidatorsLiveness(any(), eq(currentEpoch.minus(UInt64.ONE))))
-        .thenReturn(SafeFuture.failedFuture(new Exception("Previous epoch unavailable")));
+        .thenReturn(SafeFuture.failedFuture(new Exception("Previous epoch unavailable")))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                Optional.of(List.of(new ValidatorLivenessAtEpoch(UInt64.ONE, false)))));
     when(validatorApiChannel.getValidatorsLiveness(any(), eq(currentEpoch)))
         .thenReturn(
             SafeFuture.completedFuture(
@@ -721,7 +764,7 @@ public class DoppelgangerDetectorTest {
     timeProvider.advanceTimeBy(checkDelay);
     asyncRunner.executeQueuedActions();
 
-    verify(validatorApiChannel)
+    verify(validatorApiChannel, times(2))
         .getValidatorsLiveness(List.of(UInt64.ONE), currentEpoch.minus(UInt64.ONE));
     verify(validatorApiChannel).getValidatorsLiveness(List.of(UInt64.ONE), currentEpoch);
     assertThat(detection).isNotDone();

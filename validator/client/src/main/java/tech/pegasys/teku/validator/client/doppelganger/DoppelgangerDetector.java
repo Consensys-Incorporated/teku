@@ -213,6 +213,7 @@ public class DoppelgangerDetector {
         statusLog.doppelgangerDetectionUnavailable(
             mapToAbbreviatedKeys(pubKeys).collect(Collectors.toSet()), reason);
       }
+      epochAtStart = Optional.empty();
       wasUnavailable = true;
     }
 
