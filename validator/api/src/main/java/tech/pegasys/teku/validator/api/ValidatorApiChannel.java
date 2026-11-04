@@ -278,6 +278,14 @@ public interface ValidatorApiChannel extends BuilderApiChannel, ChannelInterface
 
   SafeFuture<Optional<GenesisData>> getGenesisData();
 
+  /**
+   * Looks up validator indices for the supplied public keys.
+   *
+   * @param publicKeys public keys to look up
+   * @return a future containing a map of known public keys to indices. An empty map means the
+   *     lookup succeeded but found no matching validators. {@link Optional#empty()} means the
+   *     beacon node could not provide index data
+   */
   SafeFuture<Optional<Map<BLSPublicKey, Integer>>> getValidatorIndices(
       Collection<BLSPublicKey> publicKeys);
 
