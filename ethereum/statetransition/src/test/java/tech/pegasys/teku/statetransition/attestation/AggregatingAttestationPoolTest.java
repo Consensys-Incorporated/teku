@@ -42,6 +42,7 @@ import org.assertj.core.api.AbstractIntegerAssert;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import org.mockito.ArgumentMatchers;
+import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBitlist;
@@ -790,23 +791,38 @@ abstract class AggregatingAttestationPoolTest {
   }
 
   protected Attestation addAttestationFromValidators(
+      final AttestationData data, final BLSSignature signature, final int... validators) {
+    return addAttestationFromValidators(aggregatingPool, data, spec, signature, validators);
+  }
+
+  protected Attestation addAttestationFromValidators(
       final AggregatingAttestationPool aggregatingAttestationPool,
       final AttestationData data,
       final Spec spec,
       final int... validators) {
+    return addAttestationFromValidators(
+        aggregatingAttestationPool, data, spec, dataStructureUtil.randomSignature(), validators);
+  }
+
+  protected Attestation addAttestationFromValidators(
+      final AggregatingAttestationPool aggregatingAttestationPool,
+      final AttestationData data,
+      final Spec spec,
+      final BLSSignature signature,
+      final int... validators) {
     final Attestation attestationFromValidators;
     final Attestation attestation;
     if (specMilestone.isGreaterThanOrEqualTo(ELECTRA) && validators.length == 1) {
-      attestationFromValidators = createSingleAttestation(data, validators[0]);
+      attestationFromValidators = createSingleAttestation(data, validators[0], signature);
     } else {
-      attestationFromValidators = createAttestation(data, spec, validators);
+      attestationFromValidators = createAttestation(data, spec, signature, validators);
     }
 
     final ValidatableAttestation validatableAttestation =
         createValidatableAttestationFromAttestation(attestationFromValidators, true, true);
 
     if (attestationFromValidators.isSingleAttestation()) {
-      attestation = createAttestation(data, spec, validators);
+      attestation = createAttestation(data, spec, signature, validators);
       validatableAttestation.convertToAggregatedFormatFromSingleAttestation(attestation);
     } else {
       attestation = attestationFromValidators;
@@ -875,6 +891,11 @@ abstract class AggregatingAttestationPoolTest {
 
   protected SingleAttestation createSingleAttestation(
       final AttestationData data, final int validatorIndex) {
+    return createSingleAttestation(data, validatorIndex, dataStructureUtil.randomSignature());
+  }
+
+  protected SingleAttestation createSingleAttestation(
+      final AttestationData data, final int validatorIndex, final BLSSignature signature) {
     final SingleAttestationSchema attestationSchema =
         spec.getGenesisSchemaDefinitions()
             .toVersionElectra()
@@ -882,14 +903,19 @@ abstract class AggregatingAttestationPoolTest {
             .getSingleAttestationSchema();
 
     return attestationSchema.create(
-        committeeIndex.orElseThrow(),
-        UInt64.valueOf(validatorIndex),
-        data,
-        dataStructureUtil.randomSignature());
+        committeeIndex.orElseThrow(), UInt64.valueOf(validatorIndex), data, signature);
   }
 
   protected Attestation createAttestation(
       final AttestationData data, final Spec spec, final int... validators) {
+    return createAttestation(data, spec, dataStructureUtil.randomSignature(), validators);
+  }
+
+  protected Attestation createAttestation(
+      final AttestationData data,
+      final Spec spec,
+      final BLSSignature signature,
+      final int... validators) {
     final AttestationSchema<?> attestationSchema =
         spec.getGenesisSchemaDefinitions().getAttestationSchema();
     final SszBitlist bitlist =
@@ -910,8 +936,7 @@ abstract class AggregatingAttestationPoolTest {
     } else {
       committeeBits = () -> null;
     }
-    return attestationSchema.create(
-        bitlist, data, dataStructureUtil.randomSignature(), committeeBits);
+    return attestationSchema.create(bitlist, data, signature, committeeBits);
   }
 
   protected AbstractIntegerAssert<?> assertSize() {
