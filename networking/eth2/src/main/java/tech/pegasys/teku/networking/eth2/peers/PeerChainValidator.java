@@ -119,6 +119,17 @@ public class PeerChainValidator {
       return SafeFuture.completedFuture(false);
     }
 
+    // Allow one slot of clock skew before treating the advertised head as invalid.
+    final UInt64 currentSlot = chainDataClient.getCurrentSlot();
+    if (status.getHeadSlot().minusMinZero(currentSlot).isGreaterThan(UInt64.ONE)) {
+      LOG.debug(
+          "Peer is advertising invalid head slot {} more than one slot ahead of our current slot {}: {}",
+          status.getHeadSlot(),
+          currentSlot,
+          peer.getId());
+      return SafeFuture.completedFuture(false);
+    }
+
     // Skip remaining checks if only genesis is finalized
     if (status.getFinalizedEpoch().equals(UInt64.ZERO)) {
       return SafeFuture.completedFuture(true);

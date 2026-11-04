@@ -22,10 +22,14 @@ import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.spec.config.SpecConfig.GENESIS_EPOCH;
 
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -103,6 +107,7 @@ public class PeerChainValidatorTest {
     when(peer.hasStatus()).thenReturn(true);
     when(peer.disconnectCleanly(any())).thenReturn(SafeFuture.COMPLETE);
 
+    when(combinedChainData.getCurrentSlot()).thenReturn(laterBlockSlot);
     when(combinedChainData.getCurrentEpoch()).thenReturn(spec.computeEpochAtSlot(laterBlockSlot));
     when(combinedChainData.getStore()).thenReturn(store);
   }
@@ -187,6 +192,68 @@ public class PeerChainValidatorTest {
 
     final SafeFuture<Boolean> result = peerChainValidator.validate(peer, remoteStatus);
     assertPeerChainVerified(result);
+  }
+
+  @ParameterizedTest
+  @MethodSource("headSlotValidationCases")
+  public void shouldValidateHeadSlotAgainstCurrentSlot(
+      final boolean genesisFinalized,
+      final UInt64 currentSlot,
+      final UInt64 headSlot,
+      final boolean expectedValid) {
+    setupRemoteStatusAndValidator(genesisFinalized ? genesisCheckpoint : remoteFinalizedCheckpoint);
+    forksMatch();
+    finalizedCheckpointsMatch();
+    when(combinedChainData.getCurrentSlot()).thenReturn(currentSlot);
+    when(combinedChainData.getCurrentEpoch()).thenReturn(spec.computeEpochAtSlot(currentSlot));
+
+    final SafeFuture<Boolean> result =
+        peerChainValidator.validate(peer, statusWithHeadSlot(headSlot));
+
+    if (expectedValid) {
+      assertPeerChainVerified(result);
+    } else {
+      assertPeerChainRejected(result, DisconnectReason.IRRELEVANT_NETWORK);
+    }
+  }
+
+  private static Stream<Arguments> headSlotValidationCases() {
+    final UInt64 currentSlot = UInt64.valueOf(1_000);
+    return Stream.of(true, false)
+        .flatMap(
+            genesisFinalized ->
+                Stream.of(
+                    Arguments.of(genesisFinalized, currentSlot, currentSlot.minus(1), true),
+                    Arguments.of(genesisFinalized, currentSlot, currentSlot, true),
+                    Arguments.of(genesisFinalized, currentSlot, currentSlot.plus(1), true),
+                    Arguments.of(genesisFinalized, currentSlot, currentSlot.plus(2), false),
+                    Arguments.of(genesisFinalized, currentSlot, UInt64.MAX_VALUE, false),
+                    Arguments.of(
+                        genesisFinalized, UInt64.MAX_VALUE.minus(1), UInt64.MAX_VALUE, true),
+                    Arguments.of(genesisFinalized, UInt64.MAX_VALUE, UInt64.MAX_VALUE, true)));
+  }
+
+  @Test
+  public void shouldAcceptHeadFarAheadOfLocalHeadWhenNotAheadOfCurrentSlot() {
+    forksMatch();
+    finalizedCheckpointsMatch();
+    final UInt64 currentSlot = UInt64.valueOf(1_000);
+    when(combinedChainData.getHeadSlot()).thenReturn(genesisSlot);
+    when(combinedChainData.getCurrentSlot()).thenReturn(currentSlot);
+    when(combinedChainData.getCurrentEpoch()).thenReturn(spec.computeEpochAtSlot(currentSlot));
+
+    assertPeerChainVerified(peerChainValidator.validate(peer, statusWithHeadSlot(currentSlot)));
+  }
+
+  @Test
+  public void shouldRejectFutureHeadAfterValidStatus() {
+    forksMatch();
+    finalizedCheckpointsMatch();
+    assertPeerChainVerified(peerChainValidator.validate(peer, remoteStatus));
+
+    assertPeerChainRejected(
+        peerChainValidator.validate(peer, statusWithHeadSlot(UInt64.MAX_VALUE)),
+        DisconnectReason.IRRELEVANT_NETWORK);
   }
 
   @Test
@@ -489,6 +556,16 @@ public class PeerChainValidatorTest {
 
   private Checkpoint getFinalizedCheckpoint(final PeerStatus status) {
     return new Checkpoint(status.getFinalizedEpoch(), status.getFinalizedRoot());
+  }
+
+  private PeerStatus statusWithHeadSlot(final UInt64 headSlot) {
+    return new PeerStatus(
+        remoteStatus.getForkDigest(),
+        remoteStatus.getFinalizedRoot(),
+        remoteStatus.getFinalizedEpoch(),
+        remoteStatus.getHeadRoot(),
+        headSlot,
+        remoteStatus.getEarliestAvailableSlot());
   }
 
   private void withLocalFinalizedAnchor(final AnchorPoint finalizedAnchor) {
