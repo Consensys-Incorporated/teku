@@ -104,21 +104,15 @@ public class DoppelgangerDetector {
     return doppelgangerDetectionTask.performDoppelgangerDetectionTask();
   }
 
-  private enum Availability {
-    UNKNOWN,
-    AVAILABLE,
-    UNAVAILABLE
-  }
-
   private class DoppelgangerDetectionTask {
 
     private volatile Cancellable doppelgangerDetectionTask;
-    private Optional<SafeFuture<Map<UInt64, BLSPublicKey>>> doppelgangerCheckFinished =
-        Optional.empty();
+    private final SafeFuture<Map<UInt64, BLSPublicKey>> doppelgangerCheckFinished =
+        new SafeFuture<>();
     private final Set<BLSPublicKey> pubKeys;
     private Optional<UInt64> epochAtStart = Optional.empty();
     private final Map<UInt64, BLSPublicKey> detectedDoppelgangers = new HashMap<>();
-    private Availability availability = Availability.UNKNOWN;
+    private boolean wasUnavailable;
 
     private DoppelgangerDetectionTask(final Set<BLSPublicKey> pubKeys) {
       this.pubKeys = pubKeys;
@@ -127,7 +121,6 @@ public class DoppelgangerDetector {
     private synchronized SafeFuture<Map<UInt64, BLSPublicKey>> performDoppelgangerDetectionTask() {
       statusLog.doppelgangerDetectionStart(
           mapToAbbreviatedKeys(pubKeys).collect(Collectors.toSet()));
-      doppelgangerCheckFinished = Optional.of(new SafeFuture<>());
       doppelgangerDetectionTask =
           asyncRunner.runWithFixedDelay(
               this::performDoppelgangerCheck,
@@ -138,7 +131,7 @@ public class DoppelgangerDetector {
                       "Error while checking validators doppelgangers for keys {}. The check could not be performed correctly.",
                       mapToAbbreviatedKeys(pubKeys).collect(Collectors.joining(", ")),
                       throwable));
-      return doppelgangerCheckFinished.orElseThrow();
+      return doppelgangerCheckFinished;
     }
 
     private SafeFuture<Void> performDoppelgangerCheck() {
@@ -208,32 +201,29 @@ public class DoppelgangerDetector {
     }
 
     private void markAvailable() {
-      if (availability == Availability.UNAVAILABLE) {
+      if (wasUnavailable) {
         statusLog.doppelgangerDetectionResumed(
             mapToAbbreviatedKeys(pubKeys).collect(Collectors.toSet()));
       }
-      availability = Availability.AVAILABLE;
+      wasUnavailable = false;
     }
 
     private void markUnavailable(final String reason) {
-      if (availability != Availability.UNAVAILABLE) {
+      if (!wasUnavailable) {
         statusLog.doppelgangerDetectionUnavailable(
             mapToAbbreviatedKeys(pubKeys).collect(Collectors.toSet()), reason);
       }
-      availability = Availability.UNAVAILABLE;
+      wasUnavailable = true;
     }
 
     private synchronized SafeFuture<Void> completeDoppelgangerDetection() {
-      final SafeFuture<Map<UInt64, BLSPublicKey>> finishedFuture =
-          doppelgangerCheckFinished.orElseThrow(
-              () -> new IllegalStateException("Doppelganger detection is already stopped"));
-      doppelgangerCheckFinished = Optional.empty();
-      finishedFuture.complete(detectedDoppelgangers);
+      if (!doppelgangerCheckFinished.complete(detectedDoppelgangers)) {
+        throw new IllegalStateException("Doppelganger detection is already stopped");
+      }
       return cancelScheduledTask();
     }
 
     private SafeFuture<Void> cancelScheduledTask() {
-      epochAtStart = Optional.empty();
       return SafeFuture.fromRunnable(
           () -> Optional.ofNullable(doppelgangerDetectionTask).ifPresent(Cancellable::cancel));
     }
