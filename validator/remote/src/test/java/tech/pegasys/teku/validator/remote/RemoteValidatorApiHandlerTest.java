@@ -238,7 +238,7 @@ class RemoteValidatorApiHandlerTest {
   }
 
   @Test
-  void getValidatorIndices_WhenResponseIsAbsent_ReturnsEmptyOptional() {
+  void getValidatorIndices_WhenResponseIsAbsent_Fails() {
     final BLSPublicKey publicKey = dataStructureUtil.randomPublicKey();
     when(typeDefClient.postStateValidators(List.of(publicKey.toHexString())))
         .thenReturn(Optional.empty());
@@ -247,7 +247,26 @@ class RemoteValidatorApiHandlerTest {
         apiHandler.getValidatorIndices(List.of(publicKey));
 
     asyncRunner.executeQueuedActions();
-    assertThat(future).isCompletedWithValue(Optional.empty());
+    assertThatSafeFuture(future)
+        .isCompletedExceptionallyWith(IllegalStateException.class)
+        .message()
+        .contains("Beacon node returned no validator data");
+  }
+
+  @Test
+  void getValidatorStatuses_WhenResponseIsAbsent_Fails() {
+    final BLSPublicKey publicKey = dataStructureUtil.randomPublicKey();
+    when(typeDefClient.postStateValidators(List.of(publicKey.toHexString())))
+        .thenReturn(Optional.empty());
+
+    final SafeFuture<Optional<Map<BLSPublicKey, StateValidatorData>>> future =
+        apiHandler.getValidatorStatuses(List.of(publicKey));
+
+    asyncRunner.executeQueuedActions();
+    assertThatSafeFuture(future)
+        .isCompletedExceptionallyWith(IllegalStateException.class)
+        .message()
+        .contains("Beacon node returned no validator data");
   }
 
   @Test
