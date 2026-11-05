@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.test.acceptance;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import com.google.common.io.Resources;
 import java.io.IOException;
 import java.net.URL;
@@ -181,6 +183,59 @@ public class DoppelgangerDetectorAcceptanceTest extends AcceptanceTestBase {
     secondNode.waitForLogMessageContaining("Shutting down...");
 
     secondNode.stop();
+    eth1Node.stop();
+  }
+
+  @Test
+  void shouldKeepDutiesDisabledUntilDoppelgangerDetectionResumes() throws Exception {
+    eth1Node.start();
+
+    final ValidatorKeystores beaconNodeKeystores =
+        createValidatorKeyGenerator().generateValidatorKeys(3);
+    final ValidatorKeystores validatorClientKeystores =
+        createValidatorKeyGenerator().generateValidatorKeys(1);
+    final ValidatorKeystores allValidatorKeystores =
+        ValidatorKeystores.add(beaconNodeKeystores, validatorClientKeystores);
+
+    final GenesisGenerator.InitialStateData genesis =
+        createGenesisGenerator()
+            .network(networkName)
+            .validatorKeys(allValidatorKeystores)
+            .generate();
+
+    final TekuBeaconNode beaconNode =
+        createTekuBeaconNode(
+            configureBeaconNode(eth1Node)
+                .withInitialState(genesis)
+                .withReadOnlyKeystorePath(beaconNodeKeystores)
+                .withValidatorLivenessTracking()
+                .build());
+    final TekuValidatorNode validatorClient =
+        createValidatorNode(
+            TekuNodeConfigBuilder.createValidatorClient()
+                .withInteropModeDisabled()
+                .withBeaconNodes(beaconNode)
+                .withNetwork(networkName)
+                .withReadOnlyKeystorePath(validatorClientKeystores)
+                .withDoppelgangerDetectionEnabled()
+                .build());
+
+    validatorClient.start();
+
+    validatorClient.waitForLogMessageContaining(
+        "Duties for these public keys remain disabled while Teku retries");
+    assertThat(validatorClient.getFilteredOutputContaining("Published attestation")).isEmpty();
+
+    beaconNode.start();
+
+    validatorClient.waitForLogMessageContaining(
+        "Beacon node is available. Resuming doppelganger detection");
+    validatorClient.waitForLogMessageContaining("Doppelganger detection check finished");
+    validatorClient.waitForLogMessageContaining("No validators doppelganger detected");
+    validatorClient.waitForLogMessageContaining("Published attestation");
+
+    validatorClient.stop();
+    beaconNode.stop();
     eth1Node.stop();
   }
 

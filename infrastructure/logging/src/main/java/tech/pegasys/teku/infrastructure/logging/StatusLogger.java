@@ -183,13 +183,18 @@ public class StatusLogger {
     log.info("Starting doppelganger detection for public keys: {}", String.join(", ", publicKeys));
   }
 
-  public void doppelgangerDetectionTimeout(final Set<String> publicKeys) {
-    log.warn(
-        "Doppelganger Detection for public keys {} stopped due to a timeout. "
-            + "The doppelganger check couldn't be performed correctly due to "
-            + "epoch calculation errors. Some validators with the same keys could "
-            + "be active in the network. "
-            + "Please check the logs and consider running a new validator doppelgangers check",
+  public void doppelgangerDetectionUnavailable(final Set<String> publicKeys, final String reason) {
+    log.error(
+        "Doppelganger detection is temporarily unavailable for public keys {}. "
+            + "Duties for these public keys remain disabled while Teku retries. "
+            + "Reason: {}",
+        String.join(", ", publicKeys),
+        reason);
+  }
+
+  public void doppelgangerDetectionResumed(final Set<String> publicKeys) {
+    log.info(
+        "Beacon node is available. Resuming doppelganger detection for public keys {}.",
         String.join(", ", publicKeys));
   }
 
