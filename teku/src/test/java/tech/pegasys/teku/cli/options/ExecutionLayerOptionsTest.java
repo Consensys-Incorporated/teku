@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static tech.pegasys.teku.services.executionlayer.ExecutionLayerConfiguration.BUILDER_CIRCUIT_BREAKER_WINDOW_HARD_CAP;
 import static tech.pegasys.teku.services.executionlayer.ExecutionLayerConfiguration.DEFAULT_BUILDER_CIRCUIT_BREAKER_ALLOWED_CONSECUTIVE_FAULTS;
 import static tech.pegasys.teku.services.executionlayer.ExecutionLayerConfiguration.DEFAULT_BUILDER_CIRCUIT_BREAKER_ALLOWED_FAULTS;
+import static tech.pegasys.teku.services.executionlayer.ExecutionLayerConfiguration.DEFAULT_BUILDER_CIRCUIT_BREAKER_BAN_URL_EPOCHS;
 import static tech.pegasys.teku.services.executionlayer.ExecutionLayerConfiguration.DEFAULT_BUILDER_CIRCUIT_BREAKER_WINDOW;
 
 import org.junit.jupiter.api.Test;
@@ -85,6 +86,8 @@ public class ExecutionLayerOptionsTest extends AbstractBeaconNodeCommandTest {
         .isEqualTo(DEFAULT_BUILDER_CIRCUIT_BREAKER_ALLOWED_FAULTS);
     assertThat(config.executionLayer().getBuilderCircuitBreakerAllowedConsecutiveFaults())
         .isEqualTo(DEFAULT_BUILDER_CIRCUIT_BREAKER_ALLOWED_CONSECUTIVE_FAULTS);
+    assertThat(config.executionLayer().getBuilderCircuitBreakerBanUrlEpochs())
+        .isEqualTo(DEFAULT_BUILDER_CIRCUIT_BREAKER_BAN_URL_EPOCHS);
   }
 
   @Test
@@ -97,7 +100,9 @@ public class ExecutionLayerOptionsTest extends AbstractBeaconNodeCommandTest {
       "--Xbuilder-circuit-breaker-allowed-faults",
       "2",
       "--Xbuilder-circuit-breaker-allowed-consecutive-faults",
-      "20"
+      "20",
+      "--Xbuilder-circuit-breaker-ban-url-epochs",
+      "3"
     };
     final TekuConfiguration config = getTekuConfigurationFromArguments(args);
 
@@ -106,6 +111,18 @@ public class ExecutionLayerOptionsTest extends AbstractBeaconNodeCommandTest {
     assertThat(config.executionLayer().getBuilderCircuitBreakerAllowedFaults()).isEqualTo(2);
     assertThat(config.executionLayer().getBuilderCircuitBreakerAllowedConsecutiveFaults())
         .isEqualTo(20);
+    assertThat(config.executionLayer().getBuilderCircuitBreakerBanUrlEpochs()).isEqualTo(3);
+  }
+
+  @Test
+  public void shouldThrowWithNegativeBuilderCircuitBreakerBanUrlEpochs() {
+    assertThatThrownBy(
+            () ->
+                createConfigBuilder()
+                    .executionLayer(b -> b.builderCircuitBreakerBanUrlEpochs(-1).build()))
+        .isInstanceOf(InvalidConfigurationException.class)
+        .hasMessage(
+            "Builder Circuit Breaker epochs for banning a builder URL must not be negative");
   }
 
   @Test
