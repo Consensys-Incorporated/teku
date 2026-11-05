@@ -211,11 +211,22 @@ public class DataColumnSidecarRecoveringCustodyImpl implements DataColumnSidecar
       if (!isSuperNode.get()) {
         LOG.debug(
             "Number of required custody groups reached maximum. Activating super node reconstruction.");
+        storeColumnsReceivedBeforeSuperNode();
         isSuperNode.set(true);
       }
       return false;
     }
     return true;
+  }
+
+  // Tasks may hold columns sampled while custody was smaller, which weren't stored. Custody now
+  // covers every group, so they're stored here and tasks hold only stored columns from now on.
+  private void storeColumnsReceivedBeforeSuperNode() {
+    recoveryTasks.values().stream()
+        .flatMap(task -> task.existingSidecars().values().stream())
+        .forEach(
+            sidecar ->
+                delegate.onNewValidatedDataColumnSidecar(sidecar, RECOVERED).finishError(LOG));
   }
 
   protected void maybeStartRecovery(final RecoveryTask task) {
