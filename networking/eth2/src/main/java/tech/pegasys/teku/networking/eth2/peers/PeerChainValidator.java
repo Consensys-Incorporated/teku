@@ -25,6 +25,7 @@ import org.hyperledger.besu.plugin.services.metrics.LabelledMetric;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
+import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.p2p.peer.DisconnectReason;
 import tech.pegasys.teku.spec.Spec;
@@ -39,6 +40,7 @@ public class PeerChainValidator {
 
   private final Spec spec;
   private final CombinedChainDataClient chainDataClient;
+  private final TimeProvider timeProvider;
   private final Counter validationStartedCounter;
   private final Counter chainValidCounter;
   private final Counter chainInvalidCounter;
@@ -52,9 +54,11 @@ public class PeerChainValidator {
       final Spec spec,
       final MetricsSystem metricsSystem,
       final CombinedChainDataClient chainDataClient,
+      final TimeProvider timeProvider,
       final Optional<Checkpoint> requiredCheckpoint) {
     this.spec = spec;
     this.chainDataClient = chainDataClient;
+    this.timeProvider = timeProvider;
     this.requiredCheckpoint = requiredCheckpoint;
 
     final LabelledMetric<Counter> validationCounter =
@@ -74,8 +78,10 @@ public class PeerChainValidator {
       final Spec spec,
       final MetricsSystem metricsSystem,
       final CombinedChainDataClient chainDataClient,
+      final TimeProvider timeProvider,
       final Optional<Checkpoint> requiredCheckpoint) {
-    return new PeerChainValidator(spec, metricsSystem, chainDataClient, requiredCheckpoint);
+    return new PeerChainValidator(
+        spec, metricsSystem, chainDataClient, timeProvider, requiredCheckpoint);
   }
 
   public SafeFuture<Boolean> validate(final Eth2Peer peer, final PeerStatus newStatus) {
@@ -158,8 +164,12 @@ public class PeerChainValidator {
   }
 
   private boolean isHeadSlotFromFuture(final Eth2Peer peer, final PeerStatus status) {
-    // Allow one slot of clock skew before treating the advertised head as invalid.
-    final UInt64 currentSlot = chainDataClient.getCurrentSlot();
+    // Use the wall clock rather than the fork choice store time, which only advances on timer
+    // ticks and can lag behind. Allow one slot of clock skew.
+    final UInt64 currentSlot =
+        spec.getCurrentSlotFromTimeMillis(
+            timeProvider.getTimeInMillis(),
+            chainDataClient.getRecentChainData().getGenesisTimeMillis());
     if (status.getHeadSlot().minusMinZero(currentSlot).isGreaterThan(UInt64.ONE)) {
       LOG.debug(
           "Peer is advertising head slot {} more than one slot ahead of our current slot {}: {}",

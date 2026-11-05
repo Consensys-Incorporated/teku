@@ -25,6 +25,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
+import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.peers.Eth2Peer;
 import tech.pegasys.teku.networking.eth2.peers.PeerStatus;
@@ -165,8 +166,7 @@ public class PeerStatusIntegrationTest {
 
     assertStatusMatchesStorage(recentChainData1, network2ViewOfPeer1.getStatus());
 
-    // Both clocks advance, but only peer 1 imports the new block.
-    storageSystem2.chainUpdater().setCurrentSlot(UInt64.valueOf(10));
+    // Peer 1 advances and imports the new block.
     storageSystem.chainUpdater().updateBestBlock(storageSystem.chainUpdater().advanceChain(10));
 
     final PeerStatus updatedStatusData = waitFor(network2ViewOfPeer1.sendStatus());
@@ -202,8 +202,7 @@ public class PeerStatusIntegrationTest {
 
     assertStatusMatchesStorage(recentChainData1, network2ViewOfPeer1.getStatus());
 
-    // Both clocks advance, but only peer 1 imports the new block.
-    storageSystem2.chainUpdater().setCurrentSlot(UInt64.valueOf(10));
+    // Peer 1 advances and imports the new block.
     storageSystem.chainUpdater().updateBestBlock(storageSystem.chainUpdater().advanceChain(10));
 
     waitFor(() -> assertStatusMatchesStorage(recentChainData1, network2ViewOfPeer1.getStatus()));
@@ -223,12 +222,15 @@ public class PeerStatusIntegrationTest {
             .rpcEncoding(rpcEncoding)
             .recentChainData(recentChainData1)
             .startNetwork();
+    final RecentChainData recentChainData2 = createStorageSystem().recentChainData();
+    // network2's wall clock is at genesis, so a peer head at slot 2 is from the future
     final Eth2P2PNetwork network2 =
         networkFactory
             .builder()
             .spec(spec)
             .rpcEncoding(rpcEncoding)
-            .recentChainData(createStorageSystem().recentChainData())
+            .recentChainData(recentChainData2)
+            .timeProvider(StubTimeProvider.withTimeInSeconds(recentChainData2.getGenesisTime()))
             .startNetwork();
 
     final Peer connection =

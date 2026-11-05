@@ -79,7 +79,6 @@ public class BlockPropagationIntegrationTest {
             networkFactory,
             validatorKeys,
             c -> c.rpcEncoding(rpcEncoding).gossipEncoding(gossipEncoding));
-    node2.getChainUpdater().setCurrentSlot(currentSlot);
 
     // Connect networks
     Waiter.waitFor(node1.connect(node2));
