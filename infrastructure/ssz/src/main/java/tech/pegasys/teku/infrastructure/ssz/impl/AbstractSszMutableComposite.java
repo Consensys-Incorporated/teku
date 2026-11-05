@@ -145,7 +145,7 @@ public abstract class AbstractSszMutableComposite<
    * Supported on collections only.
    */
   public boolean forEachElementSsz(
-      final int fromIndex, final int toIndex, final SszElementVisitor visitor) {
+      final int fromIndex, final int toIndex, final SszElementVisitor<SszChildT> visitor) {
     checkArgument(fromIndex >= 0, "Negative start index %s", fromIndex);
     // Snapshot the end and the changed indices first: the visitor may change the element it visits
     final int endIndex = Math.min(size(), toIndex);
@@ -153,24 +153,41 @@ public abstract class AbstractSszMutableComposite<
       return true;
     }
     final int[] changedIndices = childrenChanges.keySet().subSet(fromIndex, endIndex).toIntArray();
+    final SszElementBytes<SszChildT> element =
+        new SszElementBytes<>(AbstractSszComposite.fixedSizeElementSchema(getSchema()));
+    try {
+      return walkElements(fromIndex, endIndex, changedIndices, element, visitor);
+    } finally {
+      element.invalidate();
+    }
+  }
+
+  private boolean walkElements(
+      final int fromIndex,
+      final int endIndex,
+      final int[] changedIndices,
+      final SszElementBytes<SszChildT> element,
+      final SszElementVisitor<SszChildT> visitor) {
     final int[] nextChanged = {0};
-    final boolean completed =
-        backingImmutableData.forEachElementSsz(
+    final int backingEndIndex = Math.min(backingImmutableData.size(), endIndex);
+    if (fromIndex < backingEndIndex
+        && !backingImmutableData.walkElements(
             fromIndex,
-            endIndex,
-            (index, data, offset) -> {
+            backingEndIndex,
+            element,
+            (index, backingElement) -> {
               if (nextChanged[0] < changedIndices.length
                   && changedIndices[nextChanged[0]] == index) {
                 nextChanged[0]++;
-                return visitor.visit(index, get(index).sszSerialize(), 0);
+                backingElement.moveTo(get(index).sszSerialize(), 0);
               }
-              return visitor.visit(index, data, offset);
-            });
-    if (!completed) {
+              return visitor.visit(index, backingElement);
+            })) {
       return false;
     }
     for (int i = Math.max(fromIndex, backingImmutableData.size()); i < endIndex; i++) {
-      if (!visitor.visit(i, get(i).sszSerialize(), 0)) {
+      element.moveTo(get(i).sszSerialize(), 0);
+      if (!visitor.visit(i, element)) {
         return false;
       }
     }

@@ -173,15 +173,45 @@ public abstract class AbstractSszComposite<SszChildT extends SszData>
    * only.
    */
   public boolean forEachElementSsz(
-      final int fromIndex, final int toIndex, final SszElementVisitor visitor) {
+      final int fromIndex, final int toIndex, final SszElementVisitor<SszChildT> visitor) {
     checkArgument(fromIndex >= 0, "Negative start index %s", fromIndex);
     final int endIndex = Math.min(size(), toIndex);
     if (fromIndex >= endIndex) {
       return true;
     }
-    final ElementWalker walker = new ElementWalker(getSchema(), endIndex, fromIndex, visitor);
+    final SszElementBytes<SszChildT> element =
+        new SszElementBytes<>(fixedSizeElementSchema(getSchema()));
+    try {
+      return walkElements(fromIndex, endIndex, element, visitor);
+    } finally {
+      element.invalidate();
+    }
+  }
+
+  /**
+   * Walks the elements {@code fromIndex} to {@code endIndex} (both within the list), moving {@code
+   * element} to each before visiting it. The caller invalidates the cursor when its walk ends.
+   */
+  boolean walkElements(
+      final int fromIndex,
+      final int endIndex,
+      final SszElementBytes<SszChildT> element,
+      final SszElementVisitor<SszChildT> visitor) {
+    final ElementWalker<SszChildT> walker =
+        new ElementWalker<>(getSchema(), endIndex, fromIndex, element, visitor);
     getBackingNode().iterate(GIndexUtil.SELF_G_INDEX, walker.nextGIndex, walker);
     return !walker.stopped;
+  }
+
+  /** The element schema of a collection of fixed-size composite elements. */
+  static SszSchema<?> fixedSizeElementSchema(final SszCompositeSchema<?> schema) {
+    checkArgument(
+        schema instanceof SszCollectionSchema<?, ?> collectionSchema
+            && !collectionSchema.getElementSchema().isPrimitive()
+            && collectionSchema.getElementSchema().isFixedSize(),
+        "Only collections of fixed-size composite elements are supported: %s",
+        schema);
+    return ((SszCollectionSchema<?, ?>) schema).getElementSchema();
   }
 
   @Override
@@ -207,12 +237,13 @@ public abstract class AbstractSszComposite<SszChildT extends SszData>
    * walk starts at the first element and stops after the last one before the end index, so the zero
    * subtrees past the end of the list are never visited.
    */
-  private static final class ElementWalker implements TreeVisitor {
+  private static final class ElementWalker<E extends SszData> implements TreeVisitor {
     private final SszCompositeSchema<?> schema;
     private final SszSchema<?> elementSchema;
     private final int elementSize;
     private final int endIndex;
-    private final SszElementVisitor visitor;
+    private final SszElementBytes<E> element;
+    private final SszElementVisitor<E> visitor;
     private int next;
     private long nextGIndex;
     private boolean stopped;
@@ -221,17 +252,13 @@ public abstract class AbstractSszComposite<SszChildT extends SszData>
         final SszCompositeSchema<?> schema,
         final int endIndex,
         final int fromIndex,
-        final SszElementVisitor visitor) {
-      checkArgument(
-          schema instanceof SszCollectionSchema<?, ?> collectionSchema
-              && !collectionSchema.getElementSchema().isPrimitive()
-              && collectionSchema.getElementSchema().isFixedSize(),
-          "Only collections of fixed-size composite elements are supported: %s",
-          schema);
+        final SszElementBytes<E> element,
+        final SszElementVisitor<E> visitor) {
       this.schema = schema;
-      this.elementSchema = ((SszCollectionSchema<?, ?>) schema).getElementSchema();
+      this.elementSchema = fixedSizeElementSchema(schema);
       this.elementSize = elementSchema.getSszFixedPartSize();
       this.endIndex = endIndex;
+      this.element = element;
       this.visitor = visitor;
       this.next = fromIndex;
       this.nextGIndex = schema.getChildGeneralizedIndex(fromIndex);
@@ -258,18 +285,18 @@ public abstract class AbstractSszComposite<SszChildT extends SszData>
               ? superNode.getData()
               : null;
       for (long i = first; i < end; i++) {
-        final boolean proceed;
         if (packed == null) {
-          final TreeNode element =
+          final TreeNode elementNode =
               node.get(GIndexUtil.gIdxChildGIndex(GIndexUtil.SELF_G_INDEX, i, depth));
-          proceed = visitor.visit(next, elementSchema.sszSerializeTree(element), 0);
+          element.moveTo(elementSchema.sszSerializeTree(elementNode), 0);
         } else if ((i + 1) * elementSize <= packed.size()) {
-          proceed = visitor.visit(next, packed, Math.toIntExact(i * elementSize));
+          element.moveTo(packed, Math.toIntExact(i * elementSize));
         } else {
           // Past the supernode's content: a zero element. Reachable on a tree loaded from storage,
           // where an all-zero chunk inside the list is restored as an empty supernode.
-          proceed = visitor.visit(next, Bytes.wrap(new byte[elementSize]), 0);
+          element.moveTo(Bytes.wrap(new byte[elementSize]), 0);
         }
+        final boolean proceed = visitor.visit(next, element);
         next++;
         if (!proceed) {
           stopped = true;

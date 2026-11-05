@@ -21,7 +21,10 @@ import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema8;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBit;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBytes32;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszBooleanField;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszByteVectorField;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszPrimitiveSchemas;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszUInt64Field;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -73,6 +76,23 @@ public class Validator
   }
 
   public static final ValidatorSchema SSZ_SCHEMA = new ValidatorSchema();
+
+  // Handles on the validator fields, for scans reading the serialized registry without views (see
+  // SszList#forEachElementSsz). Epochs and balances read as raw uint64 bits: compare them unsigned.
+  public static final SszByteVectorField<Validator> PUBKEY =
+      SSZ_SCHEMA.byteVectorField("pubkey", Bytes48.SIZE);
+  public static final SszByteVectorField<Validator> WITHDRAWAL_CREDENTIALS =
+      SSZ_SCHEMA.byteVectorField("withdrawal_credentials", Bytes32.SIZE);
+  public static final SszUInt64Field<Validator> EFFECTIVE_BALANCE =
+      SSZ_SCHEMA.uint64Field("effective_balance");
+  public static final SszBooleanField<Validator> SLASHED = SSZ_SCHEMA.booleanField("slashed");
+  public static final SszUInt64Field<Validator> ACTIVATION_ELIGIBILITY_EPOCH =
+      SSZ_SCHEMA.uint64Field("activation_eligibility_epoch");
+  public static final SszUInt64Field<Validator> ACTIVATION_EPOCH =
+      SSZ_SCHEMA.uint64Field("activation_epoch");
+  public static final SszUInt64Field<Validator> EXIT_EPOCH = SSZ_SCHEMA.uint64Field("exit_epoch");
+  public static final SszUInt64Field<Validator> WITHDRAWABLE_EPOCH =
+      SSZ_SCHEMA.uint64Field("withdrawable_epoch");
 
   private Validator(final ValidatorSchema type, final TreeNode backingNode) {
     super(type, backingNode);

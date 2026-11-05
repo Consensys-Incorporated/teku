@@ -13,16 +13,19 @@
 
 package tech.pegasys.teku.infrastructure.ssz;
 
-import org.apache.tuweni.bytes.Bytes;
+import tech.pegasys.teku.infrastructure.ssz.impl.SszElementBytes;
 
-/** Receives the serialized bytes of one element, see {@link SszList#forEachElementSsz}. */
+/**
+ * Receives the serialized bytes of one element, see {@link SszList#forEachElementSsz}.
+ *
+ * @param <E> the element view type
+ */
 @FunctionalInterface
-public interface SszElementVisitor {
+public interface SszElementVisitor<E extends SszData> {
   /**
    * @param index the element index
-   * @param data bytes holding the element, valid only during the call and not to be modified
-   * @param offset offset of the element in {@code data}
+   * @param element the element's bytes, valid only during the call and never to be retained
    * @return {@code false} to stop the iteration
    */
-  boolean visit(int index, Bytes data, int offset);
+  boolean visit(int index, SszElementBytes<E> element);
 }
