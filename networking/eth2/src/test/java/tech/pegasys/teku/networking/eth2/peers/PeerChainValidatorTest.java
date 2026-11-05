@@ -213,7 +213,7 @@ public class PeerChainValidatorTest {
     if (expectedValid) {
       assertPeerChainVerified(result);
     } else {
-      assertPeerChainRejected(result, DisconnectReason.IRRELEVANT_NETWORK);
+      assertPeerChainRejected(result, DisconnectReason.UNRESPONSIVE);
     }
   }
 
@@ -253,7 +253,28 @@ public class PeerChainValidatorTest {
 
     assertPeerChainRejected(
         peerChainValidator.validate(peer, statusWithHeadSlot(UInt64.MAX_VALUE)),
+        DisconnectReason.UNRESPONSIVE);
+  }
+
+  @Test
+  public void shouldRejectFutureHeadOnDifferentForkAsIrrelevantNetwork() {
+    forksDontMatch();
+
+    assertPeerChainRejected(
+        peerChainValidator.validate(peer, statusWithHeadSlot(UInt64.MAX_VALUE)),
         DisconnectReason.IRRELEVANT_NETWORK);
+  }
+
+  @Test
+  public void shouldRejectFutureHeadWithoutRequestingFinalizedBlocks() {
+    forksMatch();
+    remoteChainIsAheadOnSameChain();
+
+    assertPeerChainRejected(
+        peerChainValidator.validate(peer, statusWithHeadSlot(UInt64.MAX_VALUE)),
+        DisconnectReason.UNRESPONSIVE);
+    verify(peer, never()).requestBlockBySlot(any());
+    verify(peer, never()).requestBlockByRoot(any());
   }
 
   @Test
@@ -437,6 +458,7 @@ public class PeerChainValidatorTest {
       final SafeFuture<Boolean> result, final DisconnectReason goodbyeReason) {
     assertThat(result).isCompletedWithValue(false);
     verify(peer).disconnectCleanly(goodbyeReason);
+    verify(peer).disconnectCleanly(any());
   }
 
   private void assertPeerChainVerified(final SafeFuture<Boolean> result) {

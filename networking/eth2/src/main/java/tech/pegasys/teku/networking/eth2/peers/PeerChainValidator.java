@@ -42,6 +42,7 @@ public class PeerChainValidator {
   private final Counter validationStartedCounter;
   private final Counter chainValidCounter;
   private final Counter chainInvalidCounter;
+  private final Counter futureHeadCounter;
   private final Counter validationErrorCounter;
 
   private final Optional<Checkpoint> requiredCheckpoint;
@@ -65,6 +66,7 @@ public class PeerChainValidator {
     validationStartedCounter = validationCounter.labels("started");
     chainValidCounter = validationCounter.labels("valid");
     chainInvalidCounter = validationCounter.labels("invalid");
+    futureHeadCounter = validationCounter.labels("future_head");
     validationErrorCounter = validationCounter.labels("error");
   }
 
@@ -79,20 +81,29 @@ public class PeerChainValidator {
   public SafeFuture<Boolean> validate(final Eth2Peer peer, final PeerStatus newStatus) {
     LOG.trace("Validate chain of peer: {}", peer.getId());
     validationStartedCounter.inc();
-    return isRemoteChainValid(peer, newStatus)
+    return validateRemoteChain(peer, newStatus)
         .thenApply(
-            isValid -> {
-              if (!isValid) {
-                // We are not on the same chain
-                LOG.trace("Disconnecting peer on different chain: {}", peer.getId());
-                chainInvalidCounter.inc();
-                peer.disconnectCleanly(DisconnectReason.IRRELEVANT_NETWORK).finishStackTrace();
-              } else {
-                LOG.trace("Validated peer's chain: {}", peer.getId());
-                chainValidCounter.inc();
-              }
-              return isValid;
-            })
+            result ->
+                switch (result) {
+                  case VALID -> {
+                    LOG.trace("Validated peer's chain: {}", peer.getId());
+                    chainValidCounter.inc();
+                    yield true;
+                  }
+                  case DIFFERENT_CHAIN -> {
+                    LOG.trace("Disconnecting peer on different chain: {}", peer.getId());
+                    chainInvalidCounter.inc();
+                    peer.disconnectCleanly(DisconnectReason.IRRELEVANT_NETWORK).finishStackTrace();
+                    yield false;
+                  }
+                  case FUTURE_HEAD -> {
+                    // Clock skew on either side can cause this, so disconnect with a short
+                    // reconnect cooldown rather than the long ban IRRELEVANT_NETWORK applies
+                    futureHeadCounter.inc();
+                    peer.disconnectCleanly(DisconnectReason.UNRESPONSIVE).finishStackTrace();
+                    yield false;
+                  }
+                })
         .exceptionally(
             err -> {
               validationErrorCounter.inc();
@@ -114,25 +125,19 @@ public class PeerChainValidator {
             });
   }
 
-  private SafeFuture<Boolean> isRemoteChainValid(final Eth2Peer peer, final PeerStatus status) {
+  private SafeFuture<ValidationResult> validateRemoteChain(
+      final Eth2Peer peer, final PeerStatus status) {
     if (!isForkValid(peer, status)) {
-      return SafeFuture.completedFuture(false);
+      return SafeFuture.completedFuture(ValidationResult.DIFFERENT_CHAIN);
     }
 
-    // Allow one slot of clock skew before treating the advertised head as invalid.
-    final UInt64 currentSlot = chainDataClient.getCurrentSlot();
-    if (status.getHeadSlot().minusMinZero(currentSlot).isGreaterThan(UInt64.ONE)) {
-      LOG.debug(
-          "Peer is advertising invalid head slot {} more than one slot ahead of our current slot {}: {}",
-          status.getHeadSlot(),
-          currentSlot,
-          peer.getId());
-      return SafeFuture.completedFuture(false);
+    if (isHeadSlotFromFuture(peer, status)) {
+      return SafeFuture.completedFuture(ValidationResult.FUTURE_HEAD);
     }
 
     // Skip remaining checks if only genesis is finalized
     if (status.getFinalizedEpoch().equals(UInt64.ZERO)) {
-      return SafeFuture.completedFuture(true);
+      return SafeFuture.completedFuture(ValidationResult.VALID);
     }
 
     return isConsistentWithRequiredCheckpoint(peer, status)
@@ -148,7 +153,22 @@ public class PeerChainValidator {
               }
 
               return isFinalizedCheckpointValid(peer, status);
-            });
+            })
+        .thenApply(isValid -> isValid ? ValidationResult.VALID : ValidationResult.DIFFERENT_CHAIN);
+  }
+
+  private boolean isHeadSlotFromFuture(final Eth2Peer peer, final PeerStatus status) {
+    // Allow one slot of clock skew before treating the advertised head as invalid.
+    final UInt64 currentSlot = chainDataClient.getCurrentSlot();
+    if (status.getHeadSlot().minusMinZero(currentSlot).isGreaterThan(UInt64.ONE)) {
+      LOG.debug(
+          "Peer is advertising head slot {} more than one slot ahead of our current slot {}: {}",
+          status.getHeadSlot(),
+          currentSlot,
+          peer.getId());
+      return true;
+    }
+    return false;
   }
 
   private boolean isForkValid(final Eth2Peer peer, final PeerStatus status) {
@@ -359,5 +379,11 @@ public class PeerChainValidator {
           remoteRoot);
     }
     return rootsMatch;
+  }
+
+  private enum ValidationResult {
+    VALID,
+    DIFFERENT_CHAIN,
+    FUTURE_HEAD
   }
 }
