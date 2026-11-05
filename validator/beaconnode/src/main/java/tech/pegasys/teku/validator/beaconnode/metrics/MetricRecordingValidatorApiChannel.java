@@ -101,9 +101,9 @@ public class MetricRecordingValidatorApiChannel implements ValidatorApiChannel {
   }
 
   @Override
-  public SafeFuture<Map<BLSPublicKey, Integer>> getValidatorIndices(
+  public SafeFuture<Optional<Map<BLSPublicKey, Integer>>> getValidatorIndices(
       final Collection<BLSPublicKey> publicKeys) {
-    return countDataRequest(
+    return countOptionalDataRequest(
         delegate.getValidatorIndices(publicKeys),
         BeaconNodeRequestLabels.GET_VALIDATOR_INDICES_METHOD);
   }
