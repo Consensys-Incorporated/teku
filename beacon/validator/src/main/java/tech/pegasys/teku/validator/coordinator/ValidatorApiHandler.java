@@ -266,24 +266,26 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
   }
 
   @Override
-  public SafeFuture<Map<BLSPublicKey, Integer>> getValidatorIndices(
+  public SafeFuture<Optional<Map<BLSPublicKey, Integer>>> getValidatorIndices(
       final Collection<BLSPublicKey> publicKeys) {
+    if (publicKeys.isEmpty()) {
+      return SafeFuture.completedFuture(Optional.of(Map.of()));
+    }
     return combinedChainDataClient
         .getBestState()
-        .orElseGet(
-            () ->
-                SafeFuture.failedFuture(
-                    new IllegalStateException("Head state is not yet available")))
-        .thenApply(
-            state -> {
-              @SuppressWarnings("UseFastutil")
-              final Map<BLSPublicKey, Integer> results = new HashMap<>();
-              publicKeys.forEach(
-                  publicKey ->
-                      spec.getValidatorIndex(state, publicKey)
-                          .ifPresent(index -> results.put(publicKey, index)));
-              return results;
-            });
+        .map(
+            beaconStateSafeFuture ->
+                beaconStateSafeFuture.thenApply(
+                    state -> {
+                      @SuppressWarnings("UseFastutil")
+                      final Map<BLSPublicKey, Integer> results = new HashMap<>();
+                      publicKeys.forEach(
+                          publicKey ->
+                              spec.getValidatorIndex(state, publicKey)
+                                  .ifPresent(index -> results.put(publicKey, index)));
+                      return Optional.of(results);
+                    }))
+        .orElseGet(() -> SafeFuture.completedFuture(Optional.empty()));
   }
 
   @Override
