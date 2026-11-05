@@ -76,8 +76,6 @@ public class ExecutionPayloadBidSelector {
       final Bytes32 parentBlockHash,
       final BeaconState state,
       final BuilderConfig builderConfig) {
-    final Predicate<RemoteBid> circuitBreakerPredicate =
-        bid -> executionPayloadBidCircuitBreaker.isBuilderAllowed(bid.builderIndex(), state);
     // A remote bid is eligible only if its raw value is at least min_bid.
     final Predicate<RemoteBid> minBidPredicate =
         bid -> {
@@ -96,7 +94,8 @@ public class ExecutionPayloadBidSelector {
     p2pBids.stream()
         .filter(bid -> bid.bid().getMessage().getParentBlockRoot().equals(parentRoot))
         .filter(bid -> bid.bid().getMessage().getParentBlockHash().equals(parentBlockHash))
-        .filter(circuitBreakerPredicate)
+        .filter(
+            bid -> executionPayloadBidCircuitBreaker.isBuilderAllowed(bid.builderIndex(), state))
         .filter(minBidPredicate)
         .forEach(eligibleRemoteBids::add);
     final Comparator<RemoteBid> remoteBidRanking =
