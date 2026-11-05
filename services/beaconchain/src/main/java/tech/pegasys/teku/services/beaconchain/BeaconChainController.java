@@ -210,6 +210,7 @@ import tech.pegasys.teku.statetransition.datacolumns.retriever.DataColumnSidecar
 import tech.pegasys.teku.statetransition.datacolumns.retriever.SimpleSidecarRetriever;
 import tech.pegasys.teku.statetransition.datacolumns.retriever.recovering.SidecarRetriever;
 import tech.pegasys.teku.statetransition.datacolumns.util.SuperNodeSupplier;
+import tech.pegasys.teku.statetransition.execution.BannedBuilderUrls;
 import tech.pegasys.teku.statetransition.execution.BuilderBidFetcher;
 import tech.pegasys.teku.statetransition.execution.BuilderBidValidator;
 import tech.pegasys.teku.statetransition.execution.DefaultExecutionPayloadBidManager;
@@ -1040,8 +1041,17 @@ public class BeaconChainController extends Service implements BeaconChainControl
       final BuilderBidValidator bidValidator =
           new BuilderBidValidator(
               spec, proposerPreferencesManager, recentChainData, gossipValidationHelper);
+      final BannedBuilderUrls bannedBuilderUrls =
+          new BannedBuilderUrls(
+              spec, beaconConfig.executionLayerConfig().getBuilderCircuitBreakerBanUrlEpochs());
+      eventChannels.subscribe(SlotEventsChannel.class, bannedBuilderUrls);
       final BuilderBidFetcher builderBidFetcher =
-          new BuilderBidFetcher(spec, stakedBuilderClientProvider, bidValidator);
+          new BuilderBidFetcher(
+              spec,
+              stakedBuilderClientProvider,
+              bidValidator,
+              executionPayloadBidCircuitBreaker,
+              bannedBuilderUrls);
       final ExecutionPayloadBidSelector executionPayloadBidSelector =
           new ExecutionPayloadBidSelector(
               beaconConfig.executionLayerConfig().getUseShouldOverrideBuilderFlag(),
