@@ -19,6 +19,7 @@ import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.ssz.SszContainer;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.impl.SszContainerImpl;
+import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszByteVectorSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.impl.AbstractSszContainerSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.impl.AbstractSszContainerSchema.NamedSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.impl.LoadingUtil;
@@ -154,6 +155,41 @@ public interface SszContainerSchema<C extends SszContainer> extends SszComposite
       final TreeNodeSource nodeSource, final Bytes32 childHash, final long childGIndex) {
     final int childIndex = GIndexUtil.gIdxChildIndexFromGIndex(childGIndex, treeDepth());
     return getChildSchema(childIndex).loadBackingNodes(nodeSource, childHash, childGIndex);
+  }
+
+  /**
+   * A handle on the top-level {@code uint64} field {@code fieldName} of this fixed-size container,
+   * for reading it from serialized elements without views, see {@link SszFixedField}. Fields of
+   * nested containers are not supported.
+   *
+   * @throws IllegalArgumentException if this container is not fixed-size, has no such field or the
+   *     field is not a {@code uint64}
+   */
+  default SszUInt64Field<C> uint64Field(final String fieldName) {
+    return new SszUInt64Field<>(this, fieldName);
+  }
+
+  /**
+   * A handle on the top-level bit field {@code fieldName} of this fixed-size container, see {@link
+   * #uint64Field(String)}.
+   *
+   * @throws IllegalArgumentException if this container is not fixed-size, has no such field or the
+   *     field is not a bit
+   */
+  default SszBooleanField<C> booleanField(final String fieldName) {
+    return new SszBooleanField<>(this, fieldName);
+  }
+
+  /**
+   * A handle on the top-level byte vector field {@code fieldName} of {@code length} bytes of this
+   * fixed-size container (a {@link SszByteVectorSchema} of that length, {@code Bytes32} and {@code
+   * Bytes4} included), see {@link #uint64Field(String)}.
+   *
+   * @throws IllegalArgumentException if this container is not fixed-size, has no such field or the
+   *     field is not a byte vector of that length
+   */
+  default SszByteVectorField<C> byteVectorField(final String fieldName, final int length) {
+    return new SszByteVectorField<>(this, fieldName, length);
   }
 
   /** Returns this container name */

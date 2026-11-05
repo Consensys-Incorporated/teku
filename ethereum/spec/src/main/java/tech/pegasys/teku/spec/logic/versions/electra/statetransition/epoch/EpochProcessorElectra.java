@@ -30,7 +30,6 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.config.SpecConfigElectra;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
-import tech.pegasys.teku.spec.datastructures.state.ValidatorFields;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.BeaconStateElectra;
@@ -106,9 +105,9 @@ public class EpochProcessorElectra extends EpochProcessorCapella {
       // the walk reads an immutable tree and each action changes only the validator it visits.
       validators.forEachElementSsz(
           0,
-          (index, data, offset) -> {
+          (index, validator) -> {
             final ValidatorStatus status = statuses.get(index);
-            final long eligibilityEpoch = ValidatorFields.activationEligibilityEpoch(data, offset);
+            final long eligibilityEpoch = validator.get(Validator.ACTIVATION_ELIGIBILITY_EPOCH);
             if (isEligibleForActivationQueue(eligibilityEpoch, status)) {
               validators.update(
                   index, v -> v.withActivationEligibilityEpoch(currentEpoch.plus(UInt64.ONE)));
@@ -116,7 +115,7 @@ public class EpochProcessorElectra extends EpochProcessorCapella {
                 && status.getCurrentEpochEffectiveBalance().isLessThanOrEqualTo(ejectionBalance)) {
               beaconStateMutators.initiateValidatorExit(state, index, validatorExitContextSupplier);
             } else if (ValidatorsUtil.isEligibleForActivation(
-                finalizedEpoch, ValidatorFields.activationEpoch(data, offset), eligibilityEpoch)) {
+                finalizedEpoch, validator.get(Validator.ACTIVATION_EPOCH), eligibilityEpoch)) {
               validators.update(index, v -> v.withActivationEpoch(activationEpoch));
             }
             return true;
@@ -161,13 +160,13 @@ public class EpochProcessorElectra extends EpochProcessorCapella {
     validators.forEachElementSsz(
         0,
         statuses.size(),
-        (index, data, offset) -> {
+        (index, validator) -> {
           final ValidatorStatus status = statuses.get(index);
           final UInt64 balance = balances.getElement(index);
           final UInt64 currentEffectiveBalance = status.getCurrentEpochEffectiveBalance();
           final UInt64 maxEffectiveBalance =
               miscHelpersElectra.getMaxEffectiveBalanceForCredentialsPrefix(
-                  ValidatorFields.withdrawalCredentialsPrefix(data, offset));
+                  validator.getByte(Validator.WITHDRAWAL_CREDENTIALS, 0));
           if (shouldDecreaseEffectiveBalance(
                   balance,
                   hysteresisIncrement,

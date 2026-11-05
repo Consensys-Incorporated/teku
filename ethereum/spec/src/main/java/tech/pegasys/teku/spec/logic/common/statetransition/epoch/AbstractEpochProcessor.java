@@ -36,7 +36,6 @@ import tech.pegasys.teku.spec.datastructures.blocks.BlockCheckpoints;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.HistoricalBatch;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
-import tech.pegasys.teku.spec.datastructures.state.ValidatorFields;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
@@ -375,10 +374,10 @@ public abstract class AbstractEpochProcessor implements EpochProcessor {
       // reads an immutable tree and each action changes only the validator it visits.
       validators.forEachElementSsz(
           0,
-          (index, data, offset) -> {
+          (index, validator) -> {
             final ValidatorStatus status = statuses.get(index);
             if (isEligibleForActivationQueue(
-                ValidatorFields.activationEligibilityEpoch(data, offset), status)) {
+                validator.get(Validator.ACTIVATION_ELIGIBILITY_EPOCH), status)) {
               validators.update(
                   index, v -> v.withActivationEligibilityEpoch(currentEpoch.plus(UInt64.ONE)));
             } else if (status.isActiveInCurrentEpoch()
@@ -393,14 +392,14 @@ public abstract class AbstractEpochProcessor implements EpochProcessor {
       final List<ActivationCandidate> candidates = new ArrayList<>();
       validators.forEachElementSsz(
           0,
-          (index, data, offset) -> {
+          (index, validator) -> {
             // Cheap filter first before accessing state
             if (statuses.get(index).isActiveInCurrentEpoch()) {
               return true;
             }
-            final long eligibilityEpoch = ValidatorFields.activationEligibilityEpoch(data, offset);
+            final long eligibilityEpoch = validator.get(Validator.ACTIVATION_ELIGIBILITY_EPOCH);
             if (ValidatorsUtil.isEligibleForActivation(
-                finalizedEpoch, ValidatorFields.activationEpoch(data, offset), eligibilityEpoch)) {
+                finalizedEpoch, validator.get(Validator.ACTIVATION_EPOCH), eligibilityEpoch)) {
               candidates.add(new ActivationCandidate(index, eligibilityEpoch));
             }
             return true;

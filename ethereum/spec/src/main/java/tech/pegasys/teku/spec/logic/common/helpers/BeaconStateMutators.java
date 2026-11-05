@@ -24,7 +24,6 @@ import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
-import tech.pegasys.teku.spec.datastructures.state.ValidatorFields;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
@@ -170,8 +169,8 @@ public class BeaconStateMutators {
         .getValidators()
         .forEachElementSsz(
             0,
-            (index, data, offset) -> {
-              final long validatorExitEpoch = ValidatorFields.exitEpoch(data, offset);
+            (index, validator) -> {
+              final long validatorExitEpoch = validator.get(Validator.EXIT_EPOCH);
               if (validatorExitEpoch == farFutureEpoch) {
                 return true;
               }

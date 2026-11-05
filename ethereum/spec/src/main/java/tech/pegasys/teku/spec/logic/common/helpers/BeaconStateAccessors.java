@@ -36,7 +36,6 @@ import tech.pegasys.teku.spec.constants.Domain;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
-import tech.pegasys.teku.spec.datastructures.state.ValidatorFields;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
 
@@ -129,10 +128,10 @@ public abstract class BeaconStateAccessors {
               final long epochBits = epoch.longValue();
               validators.forEachElementSsz(
                   0,
-                  (index, data, offset) -> {
+                  (index, validator) -> {
                     if (predicates.isActiveValidator(
-                        ValidatorFields.activationEpoch(data, offset),
-                        ValidatorFields.exitEpoch(data, offset),
+                        validator.get(Validator.ACTIVATION_EPOCH),
+                        validator.get(Validator.EXIT_EPOCH),
                         epochBits)) {
                       activeIndices.add(index);
                     }

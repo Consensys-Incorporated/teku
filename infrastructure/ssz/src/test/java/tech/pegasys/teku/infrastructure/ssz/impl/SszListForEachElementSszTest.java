@@ -15,10 +15,12 @@ package tech.pegasys.teku.infrastructure.ssz.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -33,10 +35,12 @@ import tech.pegasys.teku.infrastructure.ssz.cache.IntCache;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBytes32;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
 import tech.pegasys.teku.infrastructure.ssz.schema.InMemoryStoringTreeNodeStore;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszByteVectorField;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszContainerSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszPrimitiveSchemas;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszSchemaHints;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszUInt64Field;
 import tech.pegasys.teku.infrastructure.ssz.schema.impl.AbstractSszContainerSchema.NamedSchema;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -50,7 +54,9 @@ class SszListForEachElementSszTest {
               NamedSchema.of("a", SszPrimitiveSchemas.UINT64_SCHEMA),
               NamedSchema.of("b", SszPrimitiveSchemas.BYTES32_SCHEMA)),
           SszContainerImpl::new);
-  private static final int ELEMENT_SIZE = ELEMENT_SCHEMA.getSszFixedPartSize();
+  private static final SszUInt64Field<SszContainer> A = ELEMENT_SCHEMA.uint64Field("a");
+  private static final SszByteVectorField<SszContainer> B =
+      ELEMENT_SCHEMA.byteVectorField("b", Bytes32.SIZE);
 
   private static final SszListSchema<SszContainer, ?> BOUNDED_PLAIN =
       SszListSchema.create(ELEMENT_SCHEMA, 1024);
@@ -117,14 +123,20 @@ class SszListForEachElementSszTest {
         Arguments.of("packed", packed(PROGRESSIVE_PACKED, 21)));
   }
 
-  private static List<Bytes> collect(final SszList<?> list, final int fromIndex) {
+  /** The element's serialized form, rebuilt from its fields read through the handles. */
+  private static Bytes read(final SszElementBytes<SszContainer> element) {
+    return Bytes.concatenate(
+        Bytes.ofUnsignedLong(element.get(A), ByteOrder.LITTLE_ENDIAN), Bytes.wrap(element.copy(B)));
+  }
+
+  private static List<Bytes> collect(final SszList<SszContainer> list, final int fromIndex) {
     final List<Bytes> result = new ArrayList<>();
     final boolean completed =
         list.forEachElementSsz(
             fromIndex,
-            (index, data, offset) -> {
+            (index, bytes) -> {
               assertThat(index).isEqualTo(fromIndex + result.size());
-              result.add(data.slice(offset, ELEMENT_SIZE).copy());
+              result.add(read(bytes));
               return true;
             });
     assertThat(completed).isTrue();
@@ -132,15 +144,15 @@ class SszListForEachElementSszTest {
   }
 
   private static List<Bytes> collect(
-      final SszList<?> list, final int fromIndex, final int toIndex) {
+      final SszList<SszContainer> list, final int fromIndex, final int toIndex) {
     final List<Bytes> result = new ArrayList<>();
     final boolean completed =
         list.forEachElementSsz(
             fromIndex,
             toIndex,
-            (index, data, offset) -> {
+            (index, bytes) -> {
               assertThat(index).isEqualTo(fromIndex + result.size());
-              result.add(data.slice(offset, ELEMENT_SIZE).copy());
+              result.add(read(bytes));
               return true;
             });
     assertThat(completed).isTrue();
@@ -274,8 +286,8 @@ class SszListForEachElementSszTest {
     final boolean completed =
         mutable.forEachElementSsz(
             0,
-            (index, data, offset) -> {
-              visited.add(data.slice(offset, ELEMENT_SIZE).copy());
+            (index, bytes) -> {
+              visited.add(read(bytes));
               mutable.getByRef(index).set(0, SszUInt64.of(UInt64.valueOf(2000 + index)));
               return index < 4;
             });
@@ -329,8 +341,8 @@ class SszListForEachElementSszTest {
     final List<Bytes> visited = new ArrayList<>();
     mutable.forEachElementSsz(
         0,
-        (index, data, offset) -> {
-          visited.add(data.slice(offset, ELEMENT_SIZE).copy());
+        (index, bytes) -> {
+          visited.add(read(bytes));
           mutable.set(index, element(2000 + index));
           return true;
         });
@@ -346,7 +358,7 @@ class SszListForEachElementSszTest {
     final boolean completed =
         list.forEachElementSsz(
             0,
-            (index, data, offset) -> {
+            (index, bytes) -> {
               visited.add(index);
               return index < 2;
             });

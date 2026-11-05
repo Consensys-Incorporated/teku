@@ -28,7 +28,6 @@ import tech.pegasys.teku.spec.datastructures.blocks.MinimalBeaconBlockSummary;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
-import tech.pegasys.teku.spec.datastructures.state.ValidatorFields;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateAccessors;
@@ -141,15 +140,15 @@ public class BeaconStateUtil {
               final long epochBits = epoch.longValue();
               validators.forEachElementSsz(
                   0,
-                  (index, data, offset) -> {
+                  (index, validator) -> {
                     final boolean active =
                         predicates.isActiveValidator(
-                            ValidatorFields.activationEpoch(data, offset),
-                            ValidatorFields.exitEpoch(data, offset),
+                            validator.get(Validator.ACTIVATION_EPOCH),
+                            validator.get(Validator.EXIT_EPOCH),
                             epochBits);
                     balances[index] =
-                        active && !ValidatorFields.slashed(data, offset)
-                            ? UInt64.fromLongBits(ValidatorFields.effectiveBalance(data, offset))
+                        active && !validator.get(Validator.SLASHED)
+                            ? UInt64.fromLongBits(validator.get(Validator.EFFECTIVE_BALANCE))
                             : UInt64.ZERO;
                     return true;
                   });

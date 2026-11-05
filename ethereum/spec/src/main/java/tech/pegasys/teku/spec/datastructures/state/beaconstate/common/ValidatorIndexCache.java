@@ -16,13 +16,13 @@ package tech.pegasys.teku.spec.datastructures.state.beaconstate.common;
 import com.google.common.annotations.VisibleForTesting;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.apache.tuweni.bytes.Bytes48;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.collections.cache.Cache;
 import tech.pegasys.teku.infrastructure.collections.cache.LRUCache;
 import tech.pegasys.teku.infrastructure.collections.cache.NoOpCache;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
-import tech.pegasys.teku.spec.datastructures.state.ValidatorFields;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 
 public class ValidatorIndexCache {
@@ -88,9 +88,9 @@ public class ValidatorIndexCache {
     // is built over a copy of its 48 bytes, so the cache never pins the registry's packed arrays.
     validatorList.forEachElementSsz(
         Math.max(lastCachedIndex.get() + 1, 0),
-        (i, data, offset) -> {
+        (i, validator) -> {
           final BLSPublicKey pubKey =
-              BLSPublicKey.fromBytesCompressed(ValidatorFields.pubkey(data, offset));
+              BLSPublicKey.fromBytesCompressed(Bytes48.wrap(validator.copy(Validator.PUBKEY)));
           validatorIndices.invalidateWithNewValue(pubKey, i);
           if (pubKey.equals(publicKey)) {
             foundIndex[0] = i;

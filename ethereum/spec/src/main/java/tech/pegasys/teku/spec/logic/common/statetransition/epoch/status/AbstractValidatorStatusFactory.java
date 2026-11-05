@@ -26,7 +26,6 @@ import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
-import tech.pegasys.teku.spec.datastructures.state.ValidatorFields;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.common.TransitionCaches;
@@ -129,14 +128,14 @@ public abstract class AbstractValidatorStatusFactory implements ValidatorStatusF
               validators.forEachElementSsz(
                   start,
                   Math.min(size, start + rangeSize),
-                  (index, data, offset) -> {
+                  (index, validator) -> {
                     statuses[index] =
                         createValidatorStatus(
-                            ValidatorFields.slashed(data, offset),
-                            ValidatorFields.effectiveBalance(data, offset),
-                            ValidatorFields.activationEpoch(data, offset),
-                            ValidatorFields.exitEpoch(data, offset),
-                            ValidatorFields.withdrawableEpoch(data, offset),
+                            validator.get(Validator.SLASHED),
+                            validator.get(Validator.EFFECTIVE_BALANCE),
+                            validator.get(Validator.ACTIVATION_EPOCH),
+                            validator.get(Validator.EXIT_EPOCH),
+                            validator.get(Validator.WITHDRAWABLE_EPOCH),
                             previous,
                             current,
                             next);
