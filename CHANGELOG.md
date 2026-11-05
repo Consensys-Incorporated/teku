@@ -20,6 +20,7 @@
  - Added the `GET /eth/v1/beacon/proposer_preferences` Gloas Beacon API endpoint, which returns the signed proposer preferences known by the node, optionally filtered by `slot` and `dependent_root`. [#11548](https://github.com/Consensys-Incorporated/teku/pull/11548)
 
 ### Bug Fixes
+ - Reject peer status messages with head slots more than one slot ahead of the local clock, preventing invalid peer heads from keeping a synced node in `SYNCING` and blocking validator duties. [#11615](https://github.com/Consensys-Incorporated/teku/pull/11615)
  - With doppelganger detection enabled, Teku no longer starts validator duties after a 15-minute beacon-node outage without checking for doppelgangers. Detection remains pending and retries until the beacon node provides the required data. [#11598](https://github.com/Consensys-Incorporated/teku/issues/11598)
  - Docker images no longer trust the emSign ECC Root CA - G3, emSign Root CA - G1, emSign Root CA - G2 or AAA Certificate Services roots, which OpenJDK removed after the eMudhra intermediate certificate authorities were compromised in October 2026. The Eclipse Temurin base images do not include this fix yet.
  - Close an inbound RPC stream when its response cannot be written, instead of half-closing it. Over QUIC a peer that cancelled its request (STOP_SENDING) refuses our FIN, so such streams stayed open until the peer disconnected and could exhaust the node-wide limit of 128 inbound RPC streams, after which every other peer's requests were rejected.

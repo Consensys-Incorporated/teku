@@ -19,15 +19,21 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static tech.pegasys.teku.infrastructure.time.TimeUtilities.secondsToMillis;
 import static tech.pegasys.teku.spec.config.SpecConfig.GENESIS_EPOCH;
 
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
+import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.p2p.mock.MockNodeId;
 import tech.pegasys.teku.networking.p2p.peer.DisconnectReason;
@@ -39,14 +45,19 @@ import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
+import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.storage.store.UpdatableStore;
 
 public class PeerChainValidatorTest {
+  private static final UInt64 GENESIS_TIME = UInt64.valueOf(1_000);
+
   private final Spec spec = TestSpecFactory.createDefault();
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
   private final Eth2Peer peer = mock(Eth2Peer.class);
   private final CombinedChainDataClient combinedChainData = mock(CombinedChainDataClient.class);
+  private final RecentChainData recentChainData = mock(RecentChainData.class);
   private final UpdatableStore store = mock(UpdatableStore.class);
+  private final StubTimeProvider timeProvider = StubTimeProvider.withTimeInSeconds(GENESIS_TIME);
 
   private final Bytes4 remoteForkDigest = dataStructureUtil.randomBytes4();
   private final Bytes4 otherForkDigest = dataStructureUtil.randomBytes4();
@@ -105,6 +116,9 @@ public class PeerChainValidatorTest {
 
     when(combinedChainData.getCurrentEpoch()).thenReturn(spec.computeEpochAtSlot(laterBlockSlot));
     when(combinedChainData.getStore()).thenReturn(store);
+    when(combinedChainData.getRecentChainData()).thenReturn(recentChainData);
+    when(recentChainData.getGenesisTimeMillis()).thenReturn(secondsToMillis(GENESIS_TIME));
+    setWallClockSlot(laterBlockSlot);
   }
 
   @Test
@@ -187,6 +201,114 @@ public class PeerChainValidatorTest {
 
     final SafeFuture<Boolean> result = peerChainValidator.validate(peer, remoteStatus);
     assertPeerChainVerified(result);
+  }
+
+  @ParameterizedTest
+  @MethodSource("headSlotValidationCases")
+  public void shouldValidateHeadSlotAgainstCurrentSlot(
+      final boolean genesisFinalized,
+      final UInt64 currentSlot,
+      final UInt64 headSlot,
+      final boolean expectedValid) {
+    setupRemoteStatusAndValidator(genesisFinalized ? genesisCheckpoint : remoteFinalizedCheckpoint);
+    forksMatch();
+    finalizedCheckpointsMatch();
+    setWallClockSlot(currentSlot);
+    when(combinedChainData.getCurrentEpoch()).thenReturn(spec.computeEpochAtSlot(currentSlot));
+
+    final SafeFuture<Boolean> result =
+        peerChainValidator.validate(peer, statusWithHeadSlot(headSlot));
+
+    if (expectedValid) {
+      assertPeerChainVerified(result);
+    } else {
+      assertPeerChainRejected(result, DisconnectReason.UNRESPONSIVE);
+    }
+  }
+
+  private static Stream<Arguments> headSlotValidationCases() {
+    final UInt64 currentSlot = UInt64.valueOf(1_000);
+    return Stream.of(true, false)
+        .flatMap(
+            genesisFinalized ->
+                Stream.of(
+                    Arguments.of(genesisFinalized, currentSlot, currentSlot.minus(1), true),
+                    Arguments.of(genesisFinalized, currentSlot, currentSlot, true),
+                    Arguments.of(genesisFinalized, currentSlot, currentSlot.plus(1), true),
+                    Arguments.of(genesisFinalized, currentSlot, currentSlot.plus(2), false),
+                    Arguments.of(genesisFinalized, currentSlot, UInt64.MAX_VALUE, false)));
+  }
+
+  @Test
+  public void shouldAcceptHeadFarAheadOfLocalHeadWhenNotAheadOfCurrentSlot() {
+    forksMatch();
+    finalizedCheckpointsMatch();
+    final UInt64 currentSlot = UInt64.valueOf(1_000);
+    when(combinedChainData.getHeadSlot()).thenReturn(genesisSlot);
+    setWallClockSlot(currentSlot);
+    when(combinedChainData.getCurrentEpoch()).thenReturn(spec.computeEpochAtSlot(currentSlot));
+
+    assertPeerChainVerified(peerChainValidator.validate(peer, statusWithHeadSlot(currentSlot)));
+  }
+
+  @Test
+  public void shouldCheckHeadSlotAgainstWallClockRatherThanStoreTime() {
+    setupRemoteStatusAndValidator(genesisCheckpoint);
+    forksMatch();
+    // Fork choice store time lags behind the wall clock
+    when(combinedChainData.getCurrentSlot()).thenReturn(genesisSlot);
+    final UInt64 currentSlot = UInt64.valueOf(1_000);
+    setWallClockSlot(currentSlot);
+
+    assertPeerChainVerified(peerChainValidator.validate(peer, statusWithHeadSlot(currentSlot)));
+  }
+
+  @Test
+  public void shouldAllowNextSlotHeadJustBeforeSlotStarts() {
+    setupRemoteStatusAndValidator(genesisCheckpoint);
+    forksMatch();
+    final UInt64 currentSlot = UInt64.valueOf(1_000);
+    setWallClockSlot(currentSlot);
+    // Last millisecond of the current slot, so slot + 2 is still more than one slot away
+    timeProvider.advanceTimeByMillis(spec.getSlotDurationMillis(currentSlot) - 1);
+
+    assertPeerChainVerified(
+        peerChainValidator.validate(peer, statusWithHeadSlot(currentSlot.plus(1))));
+    assertPeerChainRejected(
+        peerChainValidator.validate(peer, statusWithHeadSlot(currentSlot.plus(2))),
+        DisconnectReason.UNRESPONSIVE);
+  }
+
+  @Test
+  public void shouldRejectFutureHeadAfterValidStatus() {
+    forksMatch();
+    finalizedCheckpointsMatch();
+    assertPeerChainVerified(peerChainValidator.validate(peer, remoteStatus));
+
+    assertPeerChainRejected(
+        peerChainValidator.validate(peer, statusWithHeadSlot(UInt64.MAX_VALUE)),
+        DisconnectReason.UNRESPONSIVE);
+  }
+
+  @Test
+  public void shouldRejectFutureHeadOnDifferentForkAsIrrelevantNetwork() {
+    forksDontMatch();
+
+    assertPeerChainRejected(
+        peerChainValidator.validate(peer, statusWithHeadSlot(UInt64.MAX_VALUE)),
+        DisconnectReason.IRRELEVANT_NETWORK);
+  }
+
+  @Test
+  public void shouldRejectFutureHeadWithoutRequestingFinalizedBlocks() {
+    forksMatch();
+    remoteChainIsAheadOnSameChain();
+
+    assertPeerChainRejected(
+        peerChainValidator.validate(peer, statusWithHeadSlot(UInt64.MAX_VALUE)),
+        DisconnectReason.UNRESPONSIVE);
+    verify(peer, never()).requestBlockBySlot(any());
+    verify(peer, never()).requestBlockByRoot(any());
   }
 
   @Test
@@ -354,7 +476,7 @@ public class PeerChainValidatorTest {
   public void remoteChainIsBehindLocalAnchorPoint_disallow() {
     peerChainValidator =
         PeerChainValidator.create(
-            spec, new NoOpMetricsSystem(), combinedChainData, Optional.empty());
+            spec, new NoOpMetricsSystem(), combinedChainData, timeProvider, Optional.empty());
 
     // Setup mocks
     forksMatch();
@@ -370,6 +492,7 @@ public class PeerChainValidatorTest {
       final SafeFuture<Boolean> result, final DisconnectReason goodbyeReason) {
     assertThat(result).isCompletedWithValue(false);
     verify(peer).disconnectCleanly(goodbyeReason);
+    verify(peer).disconnectCleanly(any());
   }
 
   private void assertPeerChainVerified(final SafeFuture<Boolean> result) {
@@ -491,6 +614,16 @@ public class PeerChainValidatorTest {
     return new Checkpoint(status.getFinalizedEpoch(), status.getFinalizedRoot());
   }
 
+  private PeerStatus statusWithHeadSlot(final UInt64 headSlot) {
+    return new PeerStatus(
+        remoteStatus.getForkDigest(),
+        remoteStatus.getFinalizedRoot(),
+        remoteStatus.getFinalizedEpoch(),
+        remoteStatus.getHeadRoot(),
+        headSlot,
+        remoteStatus.getEarliestAvailableSlot());
+  }
+
   private void withLocalFinalizedAnchor(final AnchorPoint finalizedAnchor) {
     withLocalFinalizedAnchor(finalizedAnchor, true);
   }
@@ -532,6 +665,12 @@ public class PeerChainValidatorTest {
     remoteStatus = status;
     peerChainValidator =
         PeerChainValidator.create(
-            spec, new NoOpMetricsSystem(), combinedChainData, requiredCheckpoint);
+            spec, new NoOpMetricsSystem(), combinedChainData, timeProvider, requiredCheckpoint);
+  }
+
+  /** Moves the wall clock forward to the start of {@code slot}. */
+  private void setWallClockSlot(final UInt64 slot) {
+    final UInt64 slotStartMillis = secondsToMillis(spec.computeTimeAtSlot(slot, GENESIS_TIME));
+    timeProvider.advanceTimeByMillis(slotStartMillis.minus(timeProvider.getTimeInMillis()));
   }
 }

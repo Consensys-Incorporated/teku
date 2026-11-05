@@ -280,21 +280,9 @@ public class SyncManager extends Service {
         ourFinalizedEpoch);
 
     final PeerStatus peerStatus = peer.getStatus();
+    // Statuses from the future are rejected by PeerChainValidator before they are stored
     return !peersWithSyncErrors.contains(peer.getId())
-        && peerStatusIsConsistentWithOurNode(peerStatus)
         && peerIsAheadOfOurNode(peerStatus, ourFinalizedEpoch);
-  }
-
-  /** Make sure remote peer is not broadcasting a chain state from the future. */
-  private boolean peerStatusIsConsistentWithOurNode(final PeerStatus peerStatus) {
-    final UInt64 currentSlot = recentChainData.getCurrentSlot().orElse(UInt64.ZERO);
-    final UInt64 currentEpoch =
-        currentSlot.dividedBy(
-            spec.getSlotsPerEpoch(recentChainData.getCurrentSlot().orElse(UInt64.ZERO)));
-    final UInt64 slotErrorThreshold = UInt64.ONE;
-
-    return peerStatus.getFinalizedEpoch().isLessThanOrEqualTo(currentEpoch)
-        && peerStatus.getHeadSlot().isLessThanOrEqualTo(currentSlot.plus(slotErrorThreshold));
   }
 
   private boolean peerIsAheadOfOurNode(

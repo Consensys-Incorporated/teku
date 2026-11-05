@@ -42,6 +42,7 @@ dependencies {
 	integrationTestImplementation testFixtures(project(':networking:eth2'))
 	integrationTestImplementation testFixtures(project(':infrastructure:events'))
 	integrationTestImplementation testFixtures(project(':infrastructure:kzg'))
+	integrationTestImplementation testFixtures(project(':infrastructure:time'))
 
 	testFixturesImplementation testFixtures(project(':ethereum:spec'))
 	testFixturesImplementation testFixtures(project(':ethereum:statetransition'))
