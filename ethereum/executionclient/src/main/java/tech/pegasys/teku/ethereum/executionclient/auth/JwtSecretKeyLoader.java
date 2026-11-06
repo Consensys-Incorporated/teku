@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.ethereum.executionclient.auth;
 
+import static tech.pegasys.teku.infrastructure.logging.StatusLogger.STATUS_LOG;
+
 import io.jsonwebtoken.Jwts.SIG;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -28,6 +30,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
+import tech.pegasys.teku.infrastructure.io.SecretFiles;
 
 public class JwtSecretKeyLoader {
 
@@ -61,7 +64,8 @@ public class JwtSecretKeyLoader {
       if (!beaconDataDirectory.toFile().mkdirs() && !beaconDataDirectory.toFile().isDirectory()) {
         throw new IOException("Unable to create directory " + beaconDataDirectory);
       }
-      Files.writeString(generatedKeyFilePath, Bytes.wrap(key.getEncoded()).toHexString());
+      SecretFiles.writeStringOwnerOnly(
+          generatedKeyFilePath, Bytes.wrap(key.getEncoded()).toHexString());
       LOG.info(
           "New execution engine JWT secret generated in {}", generatedKeyFilePath.toAbsolutePath());
     } catch (final IOException e) {
@@ -75,6 +79,9 @@ public class JwtSecretKeyLoader {
     try {
       final Bytes bytesFromHex = Bytes.fromHexString(Files.readString(filePath).trim());
       LOG.info("JWT secret loaded from {}", filePath.toAbsolutePath());
+      if (SecretFiles.isReadableByOthers(filePath)) {
+        STATUS_LOG.warnJwtSecretFileReadableByOthers(filePath);
+      }
       return new SecretKeySpec(bytesFromHex.toArray(), HMAC_SHA256_ALGORITHM_NAME);
     } catch (final FileNotFoundException | NoSuchFileException e) {
       throw new InvalidConfigurationException(

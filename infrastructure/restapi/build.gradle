@@ -10,6 +10,7 @@ dependencies {
 	implementation project(':infrastructure:async')
 	implementation project(':infrastructure:exceptions')
 	implementation project(':infrastructure:http')
+	implementation project(':infrastructure:io')
 	implementation project(':infrastructure:json')
 	implementation project(':infrastructure:logging')
 	implementation project(':infrastructure:serviceutils')
