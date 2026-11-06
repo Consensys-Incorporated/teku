@@ -678,7 +678,7 @@ public class TekuBeaconNode extends TekuNode {
     return fetchBeaconHeadRootData().map(Pair::getLeft);
   }
 
-  private Optional<UInt64> getFinalizedEpoch() {
+  public Optional<UInt64> getFinalizedEpoch() {
     try {
       final String result =
           httpClient.get(getRestApiUrl(), "/eth/v1/beacon/states/head/finality_checkpoints");
@@ -797,10 +797,22 @@ public class TekuBeaconNode extends TekuNode {
   }
 
   public int getDataColumnSidecarCount(final String blockId) throws IOException {
+    return getDataColumnSidecarsJson(blockId).size();
+  }
+
+  public List<UInt64> getDataColumnSidecarIndices(final String blockId) throws IOException {
+    final List<UInt64> indices = new ArrayList<>();
+    for (final JsonNode sidecar : getDataColumnSidecarsJson(blockId)) {
+      indices.add(UInt64.valueOf(sidecar.get("index").asText()));
+    }
+    return indices;
+  }
+
+  private JsonNode getDataColumnSidecarsJson(final String blockId) throws IOException {
     final String result =
         httpClient.get(getRestApiUrl(), "/eth/v1/debug/beacon/data_column_sidecars/" + blockId);
     final JsonNode jsonNode = OBJECT_MAPPER.readTree(result);
-    return jsonNode.get("data").size();
+    return jsonNode.get("data");
   }
 
   public Optional<List<Blob>> getBlobsAtSlot(final UInt64 slot) throws IOException {

@@ -13,6 +13,10 @@
 
 package tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods;
 
+import static tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.DataColumnSidecarSource.RECONSTRUCTED;
+import static tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.DataColumnSidecarSource.STORED;
+import static tech.pegasys.teku.networking.eth2.rpc.core.RpcResponseStatus.INVALID_REQUEST_CODE;
+
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -31,6 +35,7 @@ import tech.pegasys.teku.networking.eth2.peers.Eth2Peer;
 import tech.pegasys.teku.networking.eth2.peers.RequestKey;
 import tech.pegasys.teku.networking.eth2.rpc.core.PeerRequiredLocalMessageHandler;
 import tech.pegasys.teku.networking.eth2.rpc.core.ResponseCallback;
+import tech.pegasys.teku.networking.eth2.rpc.core.RpcException;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.DataColumnSidecarsByRootRequestMessage;
@@ -64,6 +69,7 @@ public class DataColumnSidecarsByRootMessageHandler
 
   private final LabelledMetric<Counter> requestCounter;
   private final Counter totalDataColumnSidecarsRequestedCounter;
+  private final LabelledMetric<Counter> sentSidecarsCounter;
   private final DasReqRespLogger dasLogger;
   private final DataColumnSidecarArchiveReconstructor dataColumnSidecarArchiveReconstructor;
 
@@ -91,6 +97,26 @@ public class DataColumnSidecarsByRootMessageHandler
             "rpc_data_column_sidecars_by_root_requested_sidecars_total",
             "Total number of data column sidecars requested in accepted data column sidecars by root requests from "
                 + "peers");
+    sentSidecarsCounter =
+        metricsSystem.createLabelledCounter(
+            TekuMetricCategory.NETWORK,
+            "rpc_data_column_sidecars_by_root_sent_sidecars_total",
+            "Total number of data column sidecars sent in response to by root requests, by whether "
+                + "they were stored or reconstructed from the archive",
+            "source");
+  }
+
+  @Override
+  public Optional<RpcException> validateRequest(
+      final String protocolId, final DataColumnSidecarsByRootRequestMessage request) {
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    if (request.stream()
+        .flatMap(identifier -> identifier.getColumns().stream())
+        .anyMatch(index -> index.isGreaterThanOrEqualTo(numberOfColumns))) {
+      return Optional.of(
+          new RpcException(INVALID_REQUEST_CODE, "Requested column index is out of range"));
+    }
+    return Optional.empty();
   }
 
   @Override
@@ -241,25 +267,33 @@ public class DataColumnSidecarsByRootMessageHandler
       final DataColumnSlotAndIdentifier dataColumnSlotAndIdentifier,
       final int messageId,
       final ResponseCallback<DataColumnSidecar> callback) {
-    return retrieveDataColumnSidecar(dataColumnSlotAndIdentifier, messageId)
-        .thenCompose(
-            maybeSidecar ->
-                maybeSidecar
-                    .map(sidecar -> callback.respond(sidecar).thenApply(__ -> 1L))
-                    .orElse(SafeFuture.completedFuture(0L)));
-  }
-
-  private SafeFuture<Optional<DataColumnSidecar>> retrieveDataColumnSidecar(
-      final DataColumnSlotAndIdentifier dataColumnSlotAndIdentifier, final int messageId) {
     return combinedChainDataClient
         .getSidecar(dataColumnSlotAndIdentifier)
         .thenCompose(
             maybeSidecar -> {
               if (maybeSidecar.isPresent()) {
-                return SafeFuture.completedFuture(maybeSidecar);
+                return respond(callback, maybeSidecar.get(), STORED);
               }
               // Fallback to compacted archive reconstruction if the canonical one is not found
-              return tryArchiveReconstruction(dataColumnSlotAndIdentifier, messageId);
+              return tryArchiveReconstruction(dataColumnSlotAndIdentifier, messageId)
+                  .thenCompose(
+                      maybeReconstructed ->
+                          maybeReconstructed
+                              .map(sidecar -> respond(callback, sidecar, RECONSTRUCTED))
+                              .orElse(SafeFuture.completedFuture(0L)));
+            });
+  }
+
+  private SafeFuture<Long> respond(
+      final ResponseCallback<DataColumnSidecar> callback,
+      final DataColumnSidecar sidecar,
+      final DataColumnSidecarSource source) {
+    return callback
+        .respond(sidecar)
+        .thenApply(
+            __ -> {
+              sentSidecarsCounter.labels(source.metricLabel()).inc();
+              return 1L;
             });
   }
 }

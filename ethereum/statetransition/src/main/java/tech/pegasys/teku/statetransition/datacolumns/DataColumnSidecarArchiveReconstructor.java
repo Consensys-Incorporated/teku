@@ -68,6 +68,7 @@ public interface DataColumnSidecarArchiveReconstructor
   SafeFuture<Optional<DataColumnSidecar>> reconstructDataColumnSidecar(
       SlotAndBlockRoot slotAndBlockRoot, UInt64 index, int requestId);
 
+  /** Whether a missing sidecar may be served from an archive, regardless of current retention. */
   boolean isSidecarPruned(UInt64 slot, UInt64 index);
 
   /** Should be called on request completion, releasing any state kept for the request */
