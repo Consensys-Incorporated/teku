@@ -785,6 +785,10 @@ class FastConfirmationCalculator {
    * the current-epoch observed justified checkpoint up to {@code confirmedRoot}, is LMD-GHOST safe
    * against the previous balance source. Run at the start of each epoch to relax the synchrony
    * assumption (reconfirmation).
+   *
+   * <p>The previous balance source is only read once the checkpoint check has passed and there are
+   * blocks to score, as in the spec. If it is needed but was pruned, the chain cannot be shown safe
+   * and this returns {@code false}, reverting to the finalized block.
    */
   boolean isConfirmedChainSafe(final Bytes32 confirmedRoot) {
     final Checkpoint observedJustified = fcrStore.currentEpochObservedJustifiedCheckpoint();
@@ -809,14 +813,15 @@ class FastConfirmationCalculator {
               : ancestorAtPreviousEpochStart;
     }
 
-    final BeaconState previousBalanceSource =
-        states
-            .previousBalanceSource()
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "Previous balance source is required for reconfirmation"));
     final List<Bytes32> chainToReconfirm = getAncestorRoots(confirmedRoot, startRootExclusive);
+    if (chainToReconfirm.isEmpty()) {
+      return true;
+    }
+    final Optional<BeaconState> maybePreviousBalanceSource = states.previousBalanceSource();
+    if (maybePreviousBalanceSource.isEmpty()) {
+      return false;
+    }
+    final BeaconState previousBalanceSource = maybePreviousBalanceSource.get();
     // Score the whole chain in a single pass over the validator set instead of one per block.
     final Map<Bytes32, UInt64> chainScores =
         computeChainAttestationScores(chainToReconfirm, previousBalanceSource);
