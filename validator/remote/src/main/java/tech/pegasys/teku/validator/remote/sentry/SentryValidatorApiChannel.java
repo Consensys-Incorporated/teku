@@ -84,7 +84,7 @@ public class SentryValidatorApiChannel implements ValidatorApiChannel {
   }
 
   @Override
-  public SafeFuture<Map<BLSPublicKey, Integer>> getValidatorIndices(
+  public SafeFuture<Optional<Map<BLSPublicKey, Integer>>> getValidatorIndices(
       final Collection<BLSPublicKey> publicKeys) {
     return dutiesProviderChannel.getValidatorIndices(publicKeys);
   }
