@@ -52,19 +52,27 @@ public class BuilderBidFetcher {
   private final Spec spec;
   private final StakedBuilderClientProvider stakedBuilderClientProvider;
   private final BuilderBidValidator bidValidator;
+  private final ExecutionPayloadBidCircuitBreaker executionPayloadBidCircuitBreaker;
+  private final BannedBuilderUrls bannedBuilderUrls;
 
   public BuilderBidFetcher(
       final Spec spec,
       final StakedBuilderClientProvider stakedBuilderClientProvider,
-      final BuilderBidValidator bidValidator) {
+      final BuilderBidValidator bidValidator,
+      final ExecutionPayloadBidCircuitBreaker executionPayloadBidCircuitBreaker,
+      final BannedBuilderUrls bannedBuilderUrls) {
     this.spec = spec;
     this.stakedBuilderClientProvider = stakedBuilderClientProvider;
     this.bidValidator = bidValidator;
+    this.executionPayloadBidCircuitBreaker = executionPayloadBidCircuitBreaker;
+    this.bannedBuilderUrls = bannedBuilderUrls;
   }
 
   /**
    * Requests a bid from every configured builder in parallel and returns the ones that both
    * answered and passed validation, so a failing or misbehaving builder cannot hold up the others.
+   * Bids from builders banned by the circuit breaker are dropped before validation, and the URL
+   * which returned such a bid is banned via {@link BannedBuilderUrls}.
    *
    * @return the valid bids, which may be empty, never a failed future
    */
@@ -83,12 +91,19 @@ public class BuilderBidFetcher {
         spec.atSlot(slot).beaconStateAccessors().getBeaconProposerIndex(state, slot);
     final BLSPublicKey proposerPubkey =
         spec.getValidatorPubKey(state, UInt64.valueOf(proposerIndex)).orElseThrow();
+    final List<BuilderEntry> buildersToRequest =
+        configuredBuilders.stream()
+            .filter(builderEntry -> !isUrlBanned(builderEntry, slot))
+            .toList();
+    if (buildersToRequest.isEmpty()) {
+      return SafeFuture.completedFuture(Collections.emptyList());
+    }
     // Tracks how many builder responses (successful or not) are still outstanding, so
     // blockProductionPerformance.builderGetHeader() can fire as soon as the last one lands, before
     // validation runs.
-    final AtomicInteger pendingResponses = new AtomicInteger(configuredBuilders.size());
+    final AtomicInteger pendingResponses = new AtomicInteger(buildersToRequest.size());
     final Stream<SafeFuture<Optional<RemoteBid>>> builderBids =
-        configuredBuilders.stream()
+        buildersToRequest.stream()
             .map(
                 builderEntry ->
                     getExecutionPayloadBid(
@@ -102,6 +117,7 @@ public class BuilderBidFetcher {
                         .thenApply(
                             maybeBid ->
                                 maybeBid
+                                    .filter(bid -> isBuilderAllowed(bid, state, slot, builderEntry))
                                     .filter(
                                         bid ->
                                             validateBid(
@@ -138,6 +154,40 @@ public class BuilderBidFetcher {
               blockProductionPerformance.builderBidValidated();
               return validatedBids;
             });
+  }
+
+  private boolean isUrlBanned(final BuilderEntry builderEntry, final UInt64 slot) {
+    final boolean urlBanned = bannedBuilderUrls.isBanned(builderEntry.getUrl(), slot);
+    if (urlBanned) {
+      LOG.info(
+          "Skipping bid request to {} for block at slot {} because the URL is banned",
+          builderEntry.getUrl(),
+          slot);
+    }
+    return urlBanned;
+  }
+
+  /**
+   * Checks the bid's builder against the circuit breaker before validation, so no work is wasted on
+   * bids which can't be selected. If the builder is banned, the URL which returned the bid is
+   * banned as well.
+   */
+  private boolean isBuilderAllowed(
+      final SignedExecutionPayloadBid bid,
+      final BeaconState state,
+      final UInt64 slot,
+      final BuilderEntry builderEntry) {
+    final UInt64 builderIndex = bid.getMessage().getBuilderIndex();
+    if (executionPayloadBidCircuitBreaker.isBuilderAllowed(builderIndex, state)) {
+      return true;
+    }
+    LOG.info(
+        "Ignoring bid from {} for block at slot {} because builder index {} is banned by the circuit breaker",
+        builderEntry.getUrl(),
+        slot,
+        builderIndex);
+    bannedBuilderUrls.ban(builderEntry.getUrl(), slot);
+    return false;
   }
 
   private SafeFuture<Optional<SignedExecutionPayloadBid>> getExecutionPayloadBid(

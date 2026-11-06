@@ -56,7 +56,7 @@ public class ExecutionPayloadBidSelector {
   /**
    * Selects the highest-ranked bid from p2p and builder bids. P2P bids are filtered by parent root,
    * parent block hash, min bid, and {@code isBuilderAllowed}; builder bids are filtered by min bid
-   * and {@code isBuilderAllowed} only because all validation is done during fetching the bids.
+   * only because validation and the circuit breaker check are done by {@link BuilderBidFetcher}.
    *
    * <p>Eligible bids are ranked by:
    *
@@ -76,8 +76,6 @@ public class ExecutionPayloadBidSelector {
       final Bytes32 parentBlockHash,
       final BeaconState state,
       final BuilderConfig builderConfig) {
-    final Predicate<RemoteBid> circuitBreakerPredicate =
-        bid -> executionPayloadBidCircuitBreaker.isBuilderAllowed(bid.builderIndex(), state);
     // A remote bid is eligible only if its raw value is at least min_bid.
     final Predicate<RemoteBid> minBidPredicate =
         bid -> {
@@ -90,16 +88,14 @@ public class ExecutionPayloadBidSelector {
           return bid.valueInGwei().isGreaterThanOrEqualTo(minBid);
         };
     final List<RemoteBid> eligibleRemoteBids = new ArrayList<>();
-    // Add eligible builder bids
-    builderBids.stream()
-        .filter(circuitBreakerPredicate)
-        .filter(minBidPredicate)
-        .forEach(eligibleRemoteBids::add);
+    // Add eligible builder bids (circuit breaker has already been applied by BuilderBidFetcher)
+    builderBids.stream().filter(minBidPredicate).forEach(eligibleRemoteBids::add);
     // Add eligible p2p bids
     p2pBids.stream()
         .filter(bid -> bid.bid().getMessage().getParentBlockRoot().equals(parentRoot))
         .filter(bid -> bid.bid().getMessage().getParentBlockHash().equals(parentBlockHash))
-        .filter(circuitBreakerPredicate)
+        .filter(
+            bid -> executionPayloadBidCircuitBreaker.isBuilderAllowed(bid.builderIndex(), state))
         .filter(minBidPredicate)
         .forEach(eligibleRemoteBids::add);
     final Comparator<RemoteBid> remoteBidRanking =
