@@ -126,6 +126,7 @@ class Store extends CacheableStore {
   private VoteTracker[] votes;
   private UInt64 highestVotedValidatorIndex;
   private Optional<UInt64> custodyGroupCount = Optional.empty();
+  private final Optional<Bytes32> fastConfirmedRootBeforeRestart;
   private final Map<Bytes32, SignedExecutionPayloadEnvelope> executionPayloads;
 
   private UInt64 reorgThreshold = UInt64.ZERO;
@@ -155,6 +156,7 @@ class Store extends CacheableStore {
       final Optional<Map<Bytes32, StateAndBlockSummary>> maybeEpochStates,
       final Map<SlotAndBlockRoot, List<BlobSidecar>> blobSidecars,
       final Optional<UInt64> custodyGroupCount,
+      final Optional<Bytes32> fastConfirmedRoot,
       final Map<Bytes32, SignedExecutionPayloadEnvelope> executionPayloads) {
     checkArgument(
         time.isGreaterThanOrEqualTo(genesisTime),
@@ -206,6 +208,7 @@ class Store extends CacheableStore {
 
     this.earliestBlobSidecarSlotProvider = earliestBlobSidecarSlotProvider;
     this.custodyGroupCount = custodyGroupCount;
+    this.fastConfirmedRootBeforeRestart = fastConfirmedRoot;
 
     this.executionPayloads = executionPayloads;
 
@@ -288,7 +291,8 @@ class Store extends CacheableStore {
       final Map<UInt64, VoteTracker> votes,
       final StoreConfig config,
       final ForkChoiceStrategy forkChoiceStrategy,
-      final Optional<UInt64> custodyGroupCount) {
+      final Optional<UInt64> custodyGroupCount,
+      final Optional<Bytes32> fastConfirmedRoot) {
     final Map<Bytes32, SignedBeaconBlock> blocks =
         LimitedMap.createSynchronizedNatural(config.getBlockCacheSize());
     final CachingTaskQueue<SlotAndBlockRoot, BeaconState> checkpointStateTaskQueue =
@@ -333,6 +337,7 @@ class Store extends CacheableStore {
         maybeEpochStates,
         blobSidecars,
         custodyGroupCount,
+        fastConfirmedRoot,
         executionPayloads);
   }
 
@@ -356,7 +361,8 @@ class Store extends CacheableStore {
       final Optional<Bytes32> initialCanonicalBlockRoot,
       final Map<UInt64, VoteTracker> votes,
       final StoreConfig config,
-      final Optional<UInt64> custodyGroupCount) {
+      final Optional<UInt64> custodyGroupCount,
+      final Optional<Bytes32> fastConfirmedRoot) {
     final UInt64 currentEpoch = spec.computeEpochAtSlot(spec.getCurrentSlot(time, genesisTime));
     final ForkChoiceStrategy forkChoiceStrategy =
         ForkChoiceStrategy.initialize(
@@ -388,7 +394,8 @@ class Store extends CacheableStore {
         votes,
         config,
         forkChoiceStrategy,
-        custodyGroupCount);
+        custodyGroupCount,
+        fastConfirmedRoot);
   }
 
   private static Optional<Bytes32> getInitialCanonicalBlockRoot(
@@ -591,6 +598,11 @@ class Store extends CacheableStore {
     } finally {
       readLock.unlock();
     }
+  }
+
+  @Override
+  public Optional<Bytes32> getFastConfirmedRootBeforeRestart() {
+    return fastConfirmedRootBeforeRestart;
   }
 
   @Override

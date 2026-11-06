@@ -215,6 +215,7 @@ public class V6SchemaCombinedTreeState extends V6SchemaCombined implements Schem
         .put("EARLIEST_BLOCK_SLOT", getVariableEarliestBlockSlot())
         .put("LATEST_CANONICAL_BLOCK_ROOT", getVariableLatestCanonicalBlockRoot())
         .put("CUSTODY_GROUP_COUNT", getVariableCustodyGroupCount())
+        .put("FAST_CONFIRMED_ROOT", getVariableFastConfirmedRoot())
         .put("FIRST_CUSTODY_INCOMPLETE_SLOT", getVariableFirstCustodyIncompleteSlot())
         .put("EARLIEST_AVAILABLE_DATA_COLUMN_SLOT", getVariableEarliestAvailableDataColumnSlot())
         .put("LAST_DATA_COLUMN_SLOT_PRUNED", getVariableLastDataColumnSidecarPrunedSlot())

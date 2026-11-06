@@ -67,6 +67,16 @@ public interface ReadOnlyStore extends TimeProvider {
   Optional<UInt64> getCustodyGroupCount();
 
   /**
+   * Returns the fast confirmed root persisted by the previous run of this node, as loaded at
+   * startup: the fast confirmation rule's {@code get_root_confirmed_before_restart}. Not changed by
+   * {@link MutableStore#setFastConfirmedRoot}, which only persists the root for the next start.
+   *
+   * @return The fast confirmed root from before the restart, empty if fast confirmation has never
+   *     run on this database.
+   */
+  Optional<Bytes32> getFastConfirmedRootBeforeRestart();
+
+  /**
    * Return the slot of the latest finalized block. This slot may be at or prior to the epoch
    * boundary slot which this block finalizes.
    *

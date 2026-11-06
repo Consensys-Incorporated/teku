@@ -240,6 +240,7 @@ import tech.pegasys.teku.statetransition.forkchoice.TickProcessingPerformance;
 import tech.pegasys.teku.statetransition.forkchoice.TickProcessor;
 import tech.pegasys.teku.statetransition.forkchoice.fastconfirmation.FastConfirmationEventChannel;
 import tech.pegasys.teku.statetransition.forkchoice.fastconfirmation.FastConfirmationTracker;
+import tech.pegasys.teku.statetransition.forkchoice.fastconfirmation.StoredFastConfirmedRootUpdater;
 import tech.pegasys.teku.statetransition.lightclient.LightClientServerService;
 import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
 import tech.pegasys.teku.statetransition.payloadattestation.AggregatingPayloadAttestationPool;
@@ -813,6 +814,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
     initRestAPI();
     initOperationsReOrgManager();
     initStoredLatestCanonicalBlockUpdater();
+    initStoredFastConfirmedRootUpdater();
   }
 
   private void initKeyValueStore() {
@@ -2542,6 +2544,11 @@ public class BeaconChainController extends Service implements BeaconChainControl
     syncService.subscribeToSyncStateChangesAndUpdate(
         syncState -> forkChoiceNotifier.onSyncingStatusChanged(syncState.isInSync()));
 
+    // fastConfirmationTracker subscription, the confirmed root from before a restart is only
+    // restored once in sync
+    syncService.subscribeToSyncStateChangesAndUpdate(
+        syncState -> fastConfirmationTracker.onSyncingStatusChanged(syncState.isInSync()));
+
     // forkChoice subscription
     forkChoice.subscribeToOptimisticHeadChangesAndUpdate(syncService.getOptimisticSyncSubscriber());
 
@@ -2588,6 +2595,15 @@ public class BeaconChainController extends Service implements BeaconChainControl
         new StoredLatestCanonicalBlockUpdater(recentChainData, spec);
 
     eventChannels.subscribe(SlotEventsChannel.class, storedLatestCanonicalBlockUpdater);
+  }
+
+  protected void initStoredFastConfirmedRootUpdater() {
+    if (!fastConfirmationTracker.isEnabled()) {
+      return;
+    }
+    LOG.debug("BeaconChainController.initStoredFastConfirmedRootUpdater()");
+    eventChannels.subscribe(
+        FastConfirmationEventChannel.class, new StoredFastConfirmedRootUpdater(recentChainData));
   }
 
   protected void initForkChoiceStateProvider() {

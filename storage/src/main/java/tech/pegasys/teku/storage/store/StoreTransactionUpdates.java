@@ -126,6 +126,7 @@ class StoreTransactionUpdates {
         optimisticTransitionBlockRoot,
         latestCanonicalBlockRoot,
         custodyGroupCount,
+        tx.maybeFastConfirmedRoot,
         blobSidecarsEnabled,
         dataColumnSidecarsEnabled,
         executionPayloadEnvelopesEnabled);

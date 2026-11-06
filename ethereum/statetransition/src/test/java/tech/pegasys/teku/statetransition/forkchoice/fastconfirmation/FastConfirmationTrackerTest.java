@@ -717,6 +717,160 @@ class FastConfirmationTrackerTest {
     }
   }
 
+  @Test
+  void shouldRestoreRootConfirmedBeforeRestartWhenAheadOfConfirmedRootAndCanonical() {
+    final FastConfirmationTracker tracker = createTracker(spec);
+    final Bytes32 rootBeforeRestart = knownRoot(UInt64.valueOf(13));
+    final Bytes32 headRoot = knownRoot(UInt64.valueOf(14));
+    onSameChain(rootBeforeRestart, headRoot);
+    final Bytes32 confirmedRoot = knownRoot(UInt64.valueOf(12));
+
+    assertThat(
+            tracker.getRestartResilientConfirmedRoot(
+                UInt64.valueOf(14), headRoot, forkChoice, confirmedRoot, rootBeforeRestart))
+        .isEqualTo(rootBeforeRestart);
+  }
+
+  @Test
+  void shouldKeepConfirmedRootWhenItCaughtUpWithRootConfirmedBeforeRestart() {
+    final FastConfirmationTracker tracker = createTracker(spec);
+    final Bytes32 rootBeforeRestart = knownRoot(UInt64.valueOf(13));
+    final Bytes32 headRoot = knownRoot(UInt64.valueOf(14));
+    onSameChain(rootBeforeRestart, headRoot);
+    final Bytes32 confirmedRootAtSameSlot = knownRoot(UInt64.valueOf(13));
+    final Bytes32 confirmedRootBeyond = knownRoot(UInt64.valueOf(14));
+
+    assertThat(
+            tracker.getRestartResilientConfirmedRoot(
+                UInt64.valueOf(14),
+                headRoot,
+                forkChoice,
+                confirmedRootAtSameSlot,
+                rootBeforeRestart))
+        .isEqualTo(confirmedRootAtSameSlot);
+    assertThat(
+            tracker.getRestartResilientConfirmedRoot(
+                UInt64.valueOf(15), headRoot, forkChoice, confirmedRootBeyond, rootBeforeRestart))
+        .isEqualTo(confirmedRootBeyond);
+  }
+
+  @Test
+  void shouldKeepConfirmedRootWhenRootConfirmedBeforeRestartShouldBeFinalized() {
+    final FastConfirmationTracker tracker = createTracker(spec);
+    final Bytes32 rootBeforeRestart = knownRoot(UInt64.valueOf(13));
+    final Bytes32 headRoot = knownRoot(UInt64.valueOf(14));
+    onSameChain(rootBeforeRestart, headRoot);
+    final Bytes32 confirmedRoot = knownRoot(UInt64.valueOf(12));
+
+    // Minimal SLOTS_PER_EPOCH == 8: a block at slot 13 is covered by the epoch 2 checkpoint, which
+    // can be finalized from the start of epoch 4 (slot 32) on.
+    assertThat(
+            tracker.getRestartResilientConfirmedRoot(
+                UInt64.valueOf(31), headRoot, forkChoice, confirmedRoot, rootBeforeRestart))
+        .isEqualTo(rootBeforeRestart);
+    assertThat(
+            tracker.getRestartResilientConfirmedRoot(
+                UInt64.valueOf(32), headRoot, forkChoice, confirmedRoot, rootBeforeRestart))
+        .isEqualTo(confirmedRoot);
+  }
+
+  @Test
+  void shouldKeepConfirmedRootWhenRootConfirmedBeforeRestartIsNotCanonical() {
+    final FastConfirmationTracker tracker = createTracker(spec);
+    final Bytes32 rootBeforeRestart = knownRoot(UInt64.valueOf(13));
+    // No ancestry stubbed: the head is on another chain
+    final Bytes32 headRoot = knownRoot(UInt64.valueOf(14));
+    final Bytes32 confirmedRoot = knownRoot(UInt64.valueOf(12));
+
+    assertThat(
+            tracker.getRestartResilientConfirmedRoot(
+                UInt64.valueOf(14), headRoot, forkChoice, confirmedRoot, rootBeforeRestart))
+        .isEqualTo(confirmedRoot);
+  }
+
+  @Test
+  void shouldKeepConfirmedRootWhenRootConfirmedBeforeRestartIsNotInForkChoice() {
+    final FastConfirmationTracker tracker = createTracker(spec);
+    final Bytes32 rootBeforeRestart = Bytes32.random();
+    when(forkChoice.blockSlot(rootBeforeRestart)).thenReturn(Optional.empty());
+    final Bytes32 confirmedRoot = knownRoot(UInt64.valueOf(12));
+
+    assertThat(
+            tracker.getRestartResilientConfirmedRoot(
+                UInt64.valueOf(14),
+                knownRoot(UInt64.valueOf(14)),
+                forkChoice,
+                confirmedRoot,
+                rootBeforeRestart))
+        .isEqualTo(confirmedRoot);
+  }
+
+  @Test
+  void shouldKeepRestoringRootConfirmedBeforeRestartUntilItShouldBeFinalized() {
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner();
+    final Bytes32 rootBeforeRestart = knownRoot(UInt64.valueOf(13));
+    final Bytes32 headRoot = knownRoot(UInt64.valueOf(14));
+    onSameChain(rootBeforeRestart, headRoot);
+    final FastConfirmationTracker tracker =
+        createTrackerAfterRestart(asyncRunner, Optional.of(rootBeforeRestart));
+    tracker.onSyncingStatusChanged(true);
+
+    // No source states are loaded, so the rule itself lands on the finalized block every slot: the
+    // root before restart is restored over it on every update, not just the first one
+    applyUpdate(tracker, asyncRunner, UInt64.valueOf(14), headRoot);
+    assertThat(confirmedRoot(tracker)).isEqualTo(rootBeforeRestart);
+    applyUpdate(tracker, asyncRunner, UInt64.valueOf(17), headRoot);
+    assertThat(confirmedRoot(tracker)).isEqualTo(rootBeforeRestart);
+    verify(eventChannel)
+        .onFastConfirmation(rootBeforeRestart, UInt64.valueOf(13), UInt64.valueOf(17));
+
+    // Minimal SLOTS_PER_EPOCH == 8: a block at slot 13 should be finalized from slot 32 on
+    final Bytes32 laterHeadRoot = knownRoot(UInt64.valueOf(30));
+    onSameChain(rootBeforeRestart, laterHeadRoot);
+    applyUpdate(tracker, asyncRunner, UInt64.valueOf(30), laterHeadRoot);
+    assertThat(confirmedRoot(tracker)).isEqualTo(rootBeforeRestart);
+    applyUpdate(tracker, asyncRunner, UInt64.valueOf(33), laterHeadRoot);
+    assertThat(confirmedRoot(tracker)).isEqualTo(finalizedCheckpoint.getRoot());
+  }
+
+  @Test
+  void shouldRestoreRootConfirmedBeforeRestartOnlyWhileInSync() {
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner();
+    final Bytes32 rootBeforeRestart = knownRoot(UInt64.valueOf(13));
+    final Bytes32 headRoot = knownRoot(UInt64.valueOf(14));
+    onSameChain(rootBeforeRestart, headRoot);
+    final FastConfirmationTracker tracker =
+        createTrackerAfterRestart(asyncRunner, Optional.of(rootBeforeRestart));
+    final Bytes32 finalizedRoot = finalizedCheckpoint.getRoot();
+
+    applyUpdate(tracker, asyncRunner, UInt64.valueOf(14), headRoot);
+    assertThat(confirmedRoot(tracker)).isEqualTo(finalizedRoot);
+
+    tracker.onSyncingStatusChanged(true);
+    applyUpdate(tracker, asyncRunner, UInt64.valueOf(17), headRoot);
+    assertThat(confirmedRoot(tracker)).isEqualTo(rootBeforeRestart);
+
+    tracker.onSyncingStatusChanged(false);
+    applyUpdate(tracker, asyncRunner, UInt64.valueOf(18), headRoot);
+    assertThat(confirmedRoot(tracker)).isEqualTo(finalizedRoot);
+
+    tracker.onSyncingStatusChanged(true);
+    applyUpdate(tracker, asyncRunner, UInt64.valueOf(19), headRoot);
+    assertThat(confirmedRoot(tracker)).isEqualTo(rootBeforeRestart);
+  }
+
+  @Test
+  void shouldNotRestoreConfirmedRootWhenNothingWasConfirmedBeforeRestart() {
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner();
+    final FastConfirmationTracker tracker =
+        createTrackerAfterRestart(asyncRunner, Optional.empty());
+    tracker.onSyncingStatusChanged(true);
+
+    applyUpdate(tracker, asyncRunner, UInt64.valueOf(14), knownRoot(UInt64.valueOf(14)));
+
+    assertThat(confirmedRoot(tracker)).isEqualTo(finalizedCheckpoint.getRoot());
+  }
+
   private static Stream<Arguments> specs() {
     return Stream.of(
         Arguments.of(Named.of("fulu", TestSpecFactory.createMinimalFulu())),
@@ -738,6 +892,22 @@ class FastConfirmationTrackerTest {
     tracker.initialize(store);
     confirmBeyondFinality(tracker);
     return tracker;
+  }
+
+  /** A tracker initialized from a store that persisted {@code rootBeforeRestart}. */
+  private FastConfirmationTracker createTrackerAfterRestart(
+      final StubAsyncRunner asyncRunner, final Optional<Bytes32> rootBeforeRestart) {
+    when(store.getFinalizedCheckpoint()).thenReturn(finalizedCheckpoint);
+    when(store.getFastConfirmedRootBeforeRestart()).thenReturn(rootBeforeRestart);
+    final FastConfirmationTracker tracker =
+        FastConfirmationTracker.create(
+            spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
+    tracker.initialize(store);
+    return tracker;
+  }
+
+  private Bytes32 confirmedRoot(final FastConfirmationTracker tracker) {
+    return tracker.getFastConfirmationStore().orElseThrow().confirmedRoot();
   }
 
   /**

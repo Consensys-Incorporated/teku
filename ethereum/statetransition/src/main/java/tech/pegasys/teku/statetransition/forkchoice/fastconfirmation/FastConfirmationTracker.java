@@ -135,6 +135,20 @@ public class FastConfirmationTracker {
    */
   private final AtomicBoolean warmedUp = new AtomicBoolean(false);
 
+  /**
+   * {@code get_root_confirmed_before_restart}: the confirmed root persisted by the previous run of
+   * this node (see {@link StoredFastConfirmedRootUpdater}), captured on initialization. Empty when
+   * nothing was persisted (fast confirmation never ran on this database).
+   */
+  private final AtomicReference<Optional<Bytes32>> rootConfirmedBeforeRestart =
+      new AtomicReference<>(Optional.empty());
+
+  /**
+   * Whether the node is in sync: {@code get_restart_resilient_confirmed_root} MUST only be called
+   * once the node is fully synced.
+   */
+  private final AtomicBoolean inSync = new AtomicBoolean(false);
+
   private final Optional<AsyncRunner> asyncRunner;
 
   /**
@@ -224,7 +238,15 @@ public class FastConfirmationTracker {
     warmedUp.set(false);
     lastConfirmationOutcome.set(ConfirmationOutcome.fallback());
     previousSlotWasReorg.set(false);
+    rootConfirmedBeforeRestart.set(store.getFastConfirmedRootBeforeRestart());
     fastConfirmationStore.set(FastConfirmationStore.create(store));
+  }
+
+  public void onSyncingStatusChanged(final boolean inSync) {
+    if (!enabled) {
+      return;
+    }
+    this.inSync.set(inSync);
   }
 
   /**
@@ -471,11 +493,13 @@ public class FastConfirmationTracker {
   private void applyConfirmedRoot(
       final FastConfirmationInput input,
       final FastConfirmationStore rotatedStore,
-      final Bytes32 confirmedRoot) {
-    fastConfirmationStore.set(rotatedStore.withConfirmedRoot(confirmedRoot));
-
+      final Bytes32 computedConfirmedRoot) {
     final ReadOnlyForkChoiceStrategy forkChoiceStrategy =
         rotatedStore.store().getForkChoiceStrategy();
+    final Bytes32 confirmedRoot =
+        restoreConfirmedRootAfterRestart(input, forkChoiceStrategy, computedConfirmedRoot);
+    fastConfirmationStore.set(rotatedStore.withConfirmedRoot(confirmedRoot));
+
     final UInt64 confirmedSlot = forkChoiceStrategy.blockSlot(confirmedRoot).orElse(UInt64.ZERO);
     latestConfirmedSlot.set(confirmedSlot.intValue());
     recordReorgOutcome(
@@ -487,11 +511,87 @@ public class FastConfirmationTracker {
         input.headRoot(),
         confirmedRoot,
         confirmedSlot,
-        warmedUp.get() ? "" : " (warmup stage)");
+        confirmedRoot.equals(computedConfirmedRoot)
+            ? (warmedUp.get() ? "" : " (warmup stage)")
+            : " (restored from before restart)");
 
     // The fast_confirmation event is emitted every time the algorithm runs, regardless of whether
     // the confirmed block changed (per the Beacon API event stream spec).
     fastConfirmationEventChannel.onFastConfirmation(confirmedRoot, confirmedSlot, input.slot());
+  }
+
+  /**
+   * Restores the confirmed root from before a restart: while the node is in sync, every update sets
+   * {@code fcr_store.confirmed_root} to {@code get_restart_resilient_confirmed_root(fcr_store)}
+   * once {@code on_fast_confirmation} has produced {@code computedConfirmedRoot}.
+   *
+   * <p>Applied on every update rather than once, as the rule, still warming up from the finalized
+   * checkpoint, would otherwise drop the restored root again (on the next update when its source
+   * states cannot be loaded yet, at the latest at the next epoch start). This keeps it until {@code
+   * confirmed_root} catches up with it, it leaves the canonical chain, or it is old enough to have
+   * been finalized. From then on this is a couple of fork choice lookups, down to one once
+   * finalization prunes it from fork choice.
+   */
+  private Bytes32 restoreConfirmedRootAfterRestart(
+      final FastConfirmationInput input,
+      final ReadOnlyForkChoiceStrategy forkChoiceStrategy,
+      final Bytes32 computedConfirmedRoot) {
+    if (!inSync.get()) {
+      return computedConfirmedRoot;
+    }
+    return rootConfirmedBeforeRestart
+        .get()
+        .map(
+            rootBeforeRestart ->
+                getRestartResilientConfirmedRoot(
+                    input.slot(),
+                    input.headRoot(),
+                    forkChoiceStrategy,
+                    computedConfirmedRoot,
+                    rootBeforeRestart))
+        .orElse(computedConfirmedRoot);
+  }
+
+  /**
+   * Implements {@code get_restart_resilient_confirmed_root} from the Fast Confirmation spec, with
+   * {@code confirmedRoot} as {@code fcr_store.confirmed_root} and {@code rootBeforeRestart} as
+   * {@code get_root_confirmed_before_restart()}. A root before restart that fork choice no longer
+   * knows (pruned once finalization moved past it, or its fork was dropped) cannot be restored, so
+   * {@code confirmedRoot} is returned for it.
+   */
+  @VisibleForTesting
+  Bytes32 getRestartResilientConfirmedRoot(
+      final UInt64 slot,
+      final Bytes32 headRoot,
+      final ReadOnlyForkChoiceStrategy forkChoiceStrategy,
+      final Bytes32 confirmedRoot,
+      final Bytes32 rootBeforeRestart) {
+    final Optional<UInt64> maybeRootBeforeRestartSlot =
+        forkChoiceStrategy.blockSlot(rootBeforeRestart);
+    if (maybeRootBeforeRestartSlot.isEmpty()) {
+      return confirmedRoot;
+    }
+    final UInt64 rootBeforeRestartSlot = maybeRootBeforeRestartSlot.get();
+
+    // Recently confirmed block has advanced beyond the block that was confirmed before the node
+    // restart
+    final UInt64 confirmedSlot = forkChoiceStrategy.blockSlot(confirmedRoot).orElse(UInt64.ZERO);
+    if (rootBeforeRestartSlot.isLessThanOrEqualTo(confirmedSlot)) {
+      return confirmedRoot;
+    }
+
+    // If the block is old enough it either has been finalized already or finality has been delayed
+    // which makes block confirmed before restart unreliable
+    if (FastConfirmationRuleUtil.blockShouldBeFinalized(spec, rootBeforeRestartSlot, slot)) {
+      return confirmedRoot;
+    }
+
+    // If a block confirmed before the restart is not canonical, return the recently confirmed block
+    if (!isAncestor(slot, forkChoiceStrategy, headRoot, rootBeforeRestart)) {
+      return confirmedRoot;
+    }
+
+    return rootBeforeRestart;
   }
 
   /**

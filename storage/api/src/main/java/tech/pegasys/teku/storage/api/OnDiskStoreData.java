@@ -33,4 +33,5 @@ public record OnDiskStoreData(
     Map<Bytes32, StoredBlockMetadata> blockInformation,
     Map<UInt64, VoteTracker> votes,
     Optional<Bytes32> latestCanonicalBlockRoot,
-    Optional<UInt64> custodyGroupCount) {}
+    Optional<UInt64> custodyGroupCount,
+    Optional<Bytes32> fastConfirmedRoot) {}
