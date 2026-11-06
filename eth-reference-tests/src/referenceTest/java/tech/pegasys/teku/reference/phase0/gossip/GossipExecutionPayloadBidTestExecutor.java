@@ -37,6 +37,7 @@ import tech.pegasys.teku.reference.BlsSetting;
 import tech.pegasys.teku.reference.TestExecutor;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBidSchema;
@@ -201,6 +202,13 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
           @Override
           public UInt64 getCurrentTimeMillis() {
             return validationTimeMs[0];
+          }
+
+          @Override
+          public Bytes32 computeExecutionPayloadBlockHash(final ExecutionPayloadEnvelope envelope) {
+            // The fixtures carry a zero payload block hash, so Teku's content check (not a spec
+            // rule) must treat the declared hash as matching
+            return envelope.getPayload().getBlockHash();
           }
 
           @Override
