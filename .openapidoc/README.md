@@ -4,7 +4,7 @@ This directory contains NodeJS project which publishes Teku OpenAPI specificatio
 [`gh-pages`](https://github.com/Consensys-Incorporated/teku/tree/gh-pages) branch via CI job after tests are green.
 See `publishOpenApiSpec` job in `.circleci/config.yml`.
 
-The actual up-to-date generated doc is available at https://docs.teku.consensys.io/reference/rest
+The actual up-to-date generated doc is available at https://docs.teku.consensys.com/reference/rest
 
 ## Procedure
 
@@ -51,7 +51,7 @@ npm module to automate this step.
 
 Following environment variables can be used to override defaults
 
-* `OA_GIT_URL`            (default: `git@github.com:Consensys/teku.git`)
+* `OA_GIT_URL`            (default: `https://github.com/Consensys-Incorporated/teku.git`)
 * `OA_GH_PAGES_BRANCH`    (default: `gh-pages`)
 * `OA_GIT_USERNAME`       (default: `CircleCI Build`)
 * `OA_GIT_EMAIL`          (default: `ci-build@consensys.net`)
