@@ -19,10 +19,10 @@ import static tech.pegasys.teku.spec.logic.common.helpers.MathHelpers.uint64ToBy
 
 import it.unimi.dsi.fastutil.ints.Int2IntMap;
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.Collection;
 import java.util.Optional;
-import java.util.stream.IntStream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
@@ -122,11 +122,23 @@ public abstract class BeaconStateAccessors {
         .get(
             epoch,
             e -> {
-              SszList<Validator> validators = state.getValidators();
-              return IntList.of(
-                  IntStream.range(0, validators.size())
-                      .filter(index -> predicates.isActiveValidator(validators.get(index), epoch))
-                      .toArray());
+              // Read from the packed validator bytes: no Validator view per index
+              final SszList<Validator> validators = state.getValidators();
+              final IntArrayList activeIndices = new IntArrayList(validators.size());
+              final long epochBits = epoch.longValue();
+              validators.forEachElementSsz(
+                  0,
+                  (index, validator) -> {
+                    if (predicates.isActiveValidator(
+                        validator.get(Validator.ACTIVATION_EPOCH),
+                        validator.get(Validator.EXIT_EPOCH),
+                        epochBits)) {
+                      activeIndices.add(index);
+                    }
+                    return true;
+                  });
+              // Copied to its exact size: the cached list must not pin the registry-sized buffer
+              return IntList.of(activeIndices.toIntArray());
             });
   }
 

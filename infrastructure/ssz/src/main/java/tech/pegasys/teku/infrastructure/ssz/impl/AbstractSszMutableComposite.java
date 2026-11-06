@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.infrastructure.ssz.impl;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 
 import it.unimi.dsi.fastutil.ints.Int2ObjectRBTreeMap;
@@ -23,6 +24,8 @@ import java.util.stream.Stream;
 import tech.pegasys.teku.infrastructure.ssz.InvalidValueSchemaException;
 import tech.pegasys.teku.infrastructure.ssz.SszComposite;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
+import tech.pegasys.teku.infrastructure.ssz.SszElementVisitor;
+import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.SszMutableComposite;
 import tech.pegasys.teku.infrastructure.ssz.SszMutableData;
 import tech.pegasys.teku.infrastructure.ssz.SszMutableRefComposite;
@@ -134,6 +137,61 @@ public abstract class AbstractSszMutableComposite<
       }
       return newChangeRecord.getRefValue();
     }
+  }
+
+  /**
+   * See {@link SszList#forEachElementSsz(int, int, SszElementVisitor)}: the elements changed so far
+   * are serialized from their changes, the others are read from the backing immutable data.
+   * Supported on collections only.
+   */
+  public boolean forEachElementSsz(
+      final int fromIndex, final int toIndex, final SszElementVisitor<SszChildT> visitor) {
+    checkArgument(fromIndex >= 0, "Negative start index %s", fromIndex);
+    // Snapshot the end and the changed indices first: the visitor may change the element it visits
+    final int endIndex = Math.min(size(), toIndex);
+    if (fromIndex >= endIndex) {
+      return true;
+    }
+    final int[] changedIndices = childrenChanges.keySet().subSet(fromIndex, endIndex).toIntArray();
+    final SszElementBytes<SszChildT> element =
+        new SszElementBytes<>(AbstractSszComposite.fixedSizeElementSchema(getSchema()));
+    try {
+      return walkElements(fromIndex, endIndex, changedIndices, element, visitor);
+    } finally {
+      element.invalidate();
+    }
+  }
+
+  private boolean walkElements(
+      final int fromIndex,
+      final int endIndex,
+      final int[] changedIndices,
+      final SszElementBytes<SszChildT> element,
+      final SszElementVisitor<SszChildT> visitor) {
+    final int[] nextChanged = {0};
+    final int backingEndIndex = Math.min(backingImmutableData.size(), endIndex);
+    if (fromIndex < backingEndIndex
+        && !backingImmutableData.walkElements(
+            fromIndex,
+            backingEndIndex,
+            element,
+            (index, backingElement) -> {
+              if (nextChanged[0] < changedIndices.length
+                  && changedIndices[nextChanged[0]] == index) {
+                nextChanged[0]++;
+                backingElement.moveTo(get(index).sszSerialize(), 0);
+              }
+              return visitor.visit(index, backingElement);
+            })) {
+      return false;
+    }
+    for (int i = Math.max(fromIndex, backingImmutableData.size()); i < endIndex; i++) {
+      element.moveTo(get(i).sszSerialize(), 0);
+      if (!visitor.visit(i, element)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   @Override

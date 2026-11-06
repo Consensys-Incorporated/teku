@@ -16,6 +16,7 @@ package tech.pegasys.teku.spec.datastructures.state.beaconstate.common;
 import com.google.common.annotations.VisibleForTesting;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.apache.tuweni.bytes.Bytes48;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.collections.cache.Cache;
 import tech.pegasys.teku.infrastructure.collections.cache.LRUCache;
@@ -82,15 +83,26 @@ public class ValidatorIndexCache {
   private Optional<Integer> findIndexFromState(
       final SszList<Validator> validatorList, final BLSPublicKey publicKey) {
     final int initialCacheSize = getCacheSize();
-    for (int i = Math.max(lastCachedIndex.get() + 1, 0); i < validatorList.size(); i++) {
-      final BLSPublicKey pubKey = validatorList.get(i).getPublicKey();
-      validatorIndices.invalidateWithNewValue(pubKey, i);
-      if (pubKey.equals(publicKey)) {
-        if (initialCacheSize < getCacheSize()) {
-          updateLastIndex(i);
-        }
-        return Optional.of(i);
+    final int[] foundIndex = {INDEX_NONE};
+    // Read the pubkeys from the packed validator bytes, without creating Validator views. Each key
+    // is built over a copy of its 48 bytes, so the cache never pins the registry's packed arrays.
+    validatorList.forEachElementSsz(
+        Math.max(lastCachedIndex.get() + 1, 0),
+        (i, validator) -> {
+          final BLSPublicKey pubKey =
+              BLSPublicKey.fromBytesCompressed(Bytes48.wrap(validator.copy(Validator.PUBKEY)));
+          validatorIndices.invalidateWithNewValue(pubKey, i);
+          if (pubKey.equals(publicKey)) {
+            foundIndex[0] = i;
+            return false;
+          }
+          return true;
+        });
+    if (foundIndex[0] != INDEX_NONE) {
+      if (initialCacheSize < getCacheSize()) {
+        updateLastIndex(foundIndex[0]);
       }
+      return Optional.of(foundIndex[0]);
     }
     if (initialCacheSize < getCacheSize()) {
       updateLastIndex(getCacheSize() - 1);

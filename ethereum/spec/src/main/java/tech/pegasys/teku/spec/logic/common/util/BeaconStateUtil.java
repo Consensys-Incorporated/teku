@@ -13,10 +13,13 @@
 
 package tech.pegasys.teku.spec.logic.common.util;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfig;
@@ -24,6 +27,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.MinimalBeaconBlockSummary;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
+import tech.pegasys.teku.spec.datastructures.state.Validator;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateAccessors;
@@ -129,14 +133,27 @@ public class BeaconStateUtil {
         .getEffectiveBalances()
         .get(
             beaconStateAccessors.getCurrentEpoch(state),
-            epoch ->
-                state.getValidators().stream()
-                    .map(
-                        validator ->
-                            predicates.isActiveValidator(validator, epoch) && !validator.isSlashed()
-                                ? validator.getEffectiveBalance()
-                                : UInt64.ZERO)
-                    .toList());
+            epoch -> {
+              // Read from the packed validator bytes: no Validator view per index
+              final SszList<Validator> validators = state.getValidators();
+              final UInt64[] balances = new UInt64[validators.size()];
+              final long epochBits = epoch.longValue();
+              validators.forEachElementSsz(
+                  0,
+                  (index, validator) -> {
+                    final boolean active =
+                        predicates.isActiveValidator(
+                            validator.get(Validator.ACTIVATION_EPOCH),
+                            validator.get(Validator.EXIT_EPOCH),
+                            epochBits);
+                    balances[index] =
+                        active && !validator.get(Validator.SLASHED)
+                            ? UInt64.fromLongBits(validator.get(Validator.EFFECTIVE_BALANCE))
+                            : UInt64.ZERO;
+                    return true;
+                  });
+              return Collections.unmodifiableList(Arrays.asList(balances));
+            });
   }
 
   public boolean all(final SszBitvector bitvector, final int start, final int end) {

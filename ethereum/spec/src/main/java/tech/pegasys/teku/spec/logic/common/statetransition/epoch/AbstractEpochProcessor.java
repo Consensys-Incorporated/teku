@@ -20,7 +20,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import java.util.stream.IntStream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
@@ -364,61 +363,61 @@ public abstract class AbstractEpochProcessor implements EpochProcessor {
     try {
 
       // Process activation eligibility and ejections
-      SszMutableList<Validator> validators = state.getValidators();
+      final SszMutableList<Validator> validators = state.getValidators();
       final UInt64 currentEpoch = beaconStateAccessors.getCurrentEpoch(state);
       final UInt64 finalizedEpoch = state.getFinalizedCheckpoint().getEpoch();
       final UInt64 ejectionBalance = specConfig.getEjectionBalance();
       final Supplier<ValidatorExitContext> validatorExitContextSupplier =
           beaconStateMutators.createValidatorExitContextSupplier(state);
 
-      for (int index = 0; index < validators.size(); index++) {
-        final ValidatorStatus status = statuses.get(index);
+      // The spec's loop over the packed validator bytes. Updating while walking is safe: the walk
+      // reads an immutable tree and each action changes only the validator it visits.
+      validators.forEachElementSsz(
+          0,
+          (index, validator) -> {
+            final ValidatorStatus status = statuses.get(index);
+            if (isEligibleForActivationQueue(
+                validator.get(Validator.ACTIVATION_ELIGIBILITY_EPOCH), status)) {
+              validators.update(
+                  index, v -> v.withActivationEligibilityEpoch(currentEpoch.plus(UInt64.ONE)));
+            } else if (status.isActiveInCurrentEpoch()
+                && status.getCurrentEpochEffectiveBalance().isLessThanOrEqualTo(ejectionBalance)) {
+              beaconStateMutators.initiateValidatorExit(state, index, validatorExitContextSupplier);
+            }
+            return true;
+          });
 
-        final Validator validator = validators.get(index);
-        if (isEligibleForActivationQueue(validator, status)) {
-          validators.set(
-              index, validator.withActivationEligibilityEpoch(currentEpoch.plus(UInt64.ONE)));
-        } else if (status.isActiveInCurrentEpoch()
-            && status.getCurrentEpochEffectiveBalance().isLessThanOrEqualTo(ejectionBalance)) {
-          beaconStateMutators.initiateValidatorExit(state, index, validatorExitContextSupplier);
-        }
-      }
-      // Queue validators eligible for activation and not yet dequeued for activation
-      List<Integer> activationQueue =
-          IntStream.range(0, state.getValidators().size())
-              // Cheap filter first before accessing state
-              .filter(index -> !statuses.get(index).isActiveInCurrentEpoch())
-              .filter(
-                  index -> {
-                    Validator validator = state.getValidators().get(index);
-                    return validatorsUtil.isEligibleForActivation(finalizedEpoch, validator);
-                  })
-              .boxed()
-              .sorted(
-                  (index1, index2) -> {
-                    int comparisonResult =
-                        state
-                            .getValidators()
-                            .get(index1)
-                            .getActivationEligibilityEpoch()
-                            .compareTo(
-                                state.getValidators().get(index2).getActivationEligibilityEpoch());
-                    if (comparisonResult == 0) {
-                      return index1.compareTo(index2);
-                    } else {
-                      return comparisonResult;
-                    }
-                  })
-              .toList();
+      // Queue validators eligible for activation and not yet dequeued for activation, reading the
+      // registry as updated above
+      final List<ActivationCandidate> candidates = new ArrayList<>();
+      validators.forEachElementSsz(
+          0,
+          (index, validator) -> {
+            // Cheap filter first before accessing state
+            if (statuses.get(index).isActiveInCurrentEpoch()) {
+              return true;
+            }
+            final long eligibilityEpoch = validator.get(Validator.ACTIVATION_ELIGIBILITY_EPOCH);
+            if (ValidatorsUtil.isEligibleForActivation(
+                finalizedEpoch, validator.get(Validator.ACTIVATION_EPOCH), eligibilityEpoch)) {
+              candidates.add(new ActivationCandidate(index, eligibilityEpoch));
+            }
+            return true;
+          });
+      // Order by eligibility epoch, then index: candidates are in index order and the sort is
+      // stable, so sorting on the epoch alone keeps the index tie-break
+      candidates.sort(
+          (a, b) ->
+              Long.compareUnsigned(a.activationEligibilityEpoch(), b.activationEligibilityEpoch()));
 
       // Dequeued validators for activation up to churn limit (without resetting activation epoch)
       int churnLimit = beaconStateAccessors.getValidatorActivationChurnLimit(state).intValue();
-      int sublistSize = Math.min(churnLimit, activationQueue.size());
-      for (Integer index : activationQueue.subList(0, sublistSize)) {
+      int sublistSize = Math.min(churnLimit, candidates.size());
+      for (final ActivationCandidate candidate : candidates.subList(0, sublistSize)) {
         state
             .getValidators()
             .update(
-                index,
+                candidate.index(),
                 validator ->
                     validator.withActivationEpoch(
                         miscHelpers.computeActivationExitEpoch(currentEpoch)));
@@ -428,17 +427,21 @@ public abstract class AbstractEpochProcessor implements EpochProcessor {
     }
   }
 
+  /** A validator eligible for activation, with its raw activation eligibility epoch. */
+  private record ActivationCandidate(int index, long activationEligibilityEpoch) {}
+
   /**
    * Can't be eligible for activation if already active or if effective balance is too low.
    *
+   * @param activationEligibilityEpoch - raw activation eligibility epoch of the validator
    * @param status - Validator status
    * @return true if validator is eligible to be added to the activation queue
    */
   protected boolean isEligibleForActivationQueue(
-      final Validator validator, final ValidatorStatus status) {
+      final long activationEligibilityEpoch, final ValidatorStatus status) {
     return !status.isActiveInCurrentEpoch()
         && status.getCurrentEpochEffectiveBalance().equals(maxEffectiveBalance)
-        && validator.getActivationEligibilityEpoch().equals(SpecConfig.FAR_FUTURE_EPOCH);
+        && activationEligibilityEpoch == SpecConfig.FAR_FUTURE_EPOCH.longValue();
   }
 
   /** Processes slashings */
