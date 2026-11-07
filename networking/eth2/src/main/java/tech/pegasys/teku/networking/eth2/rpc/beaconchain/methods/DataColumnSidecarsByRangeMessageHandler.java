@@ -286,7 +286,7 @@ public class DataColumnSidecarsByRangeMessageHandler
     private final UInt64 finalizedSlot;
     private final Map<UInt64, Bytes32> canonicalHotRoots;
     private final int messageId;
-    private final boolean maybeSuperNodePruned;
+    private final UInt64 highestIndex;
 
     // since our storage stores hot and finalized data columns sidecar on the same "table", this
     // iterator can span over hot and finalized data column sidecar
@@ -310,11 +310,7 @@ public class DataColumnSidecarsByRangeMessageHandler
       this.finalizedSlot = finalizedSlot;
       this.canonicalHotRoots = canonicalHotRoots;
       this.messageId = messageId;
-      final UInt64 highestIndex =
-          columns.stream().max(Comparator.naturalOrder()).orElse(UInt64.ZERO);
-      this.maybeSuperNodePruned =
-          dataColumnSidecarArchiveReconstructor.isSidecarPruned(startSlot, highestIndex)
-              || dataColumnSidecarArchiveReconstructor.isSidecarPruned(endSlot, highestIndex);
+      this.highestIndex = columns.stream().max(Comparator.naturalOrder()).orElse(UInt64.ZERO);
     }
 
     SafeFuture<Void> sendDataColumnSidecar(final LoadedDataColumnSidecar loaded) {
@@ -359,13 +355,15 @@ public class DataColumnSidecarsByRangeMessageHandler
       return AsyncStream.createUnsafe(canonicalSlotToColumnIds.entrySet().iterator())
           .mapAsync(
               entry -> {
-                if (!maybeSuperNodePruned) {
+                final UInt64 slot = entry.getKey();
+                // Archived columns have no stored identifiers, so they are requested by expanding
+                // the slot. Decided per slot, as archived slots can sit anywhere in the range.
+                if (!dataColumnSidecarArchiveReconstructor.isSidecarArchived(slot, highestIndex)) {
                   return SafeFuture.completedFuture(
                       entry.getValue().stream()
                           .filter(key -> columns.contains(key.columnIndex()))
                           .toList());
                 }
-                final UInt64 slot = entry.getKey();
                 // A finalized slot can still contain columns from never-imported blocks.
                 // Resolve its canonical root once, not once for each requested column.
                 final SafeFuture<Optional<Bytes32>> canonicalRoot =
@@ -433,9 +431,8 @@ public class DataColumnSidecarsByRangeMessageHandler
 
     private SafeFuture<Optional<DataColumnSidecar>> tryArchiveSidecarReconstruction(
         final DataColumnSlotAndIdentifier columnSlotAndIdentifier) {
-      if (!maybeSuperNodePruned
-          || !dataColumnSidecarArchiveReconstructor.isSidecarPruned(
-              columnSlotAndIdentifier.slot(), columnSlotAndIdentifier.columnIndex())) {
+      if (!dataColumnSidecarArchiveReconstructor.isSidecarArchived(
+          columnSlotAndIdentifier.slot(), columnSlotAndIdentifier.columnIndex())) {
         return SafeFuture.completedFuture(Optional.empty());
       }
 

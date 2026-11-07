@@ -526,7 +526,7 @@ public class DataColumnSidecarsByRootMessageHandlerTest {
 
     when(combinedChainDataClient.getSidecar(any(DataColumnSlotAndIdentifier.class)))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
-    when(dataColumnSidecarArchiveReconstructor.isSidecarPruned(any(), any())).thenReturn(true);
+    when(dataColumnSidecarArchiveReconstructor.isSidecarArchived(any(), any())).thenReturn(true);
     when(dataColumnSidecarArchiveReconstructor.reconstructDataColumnSidecar(any(), any(), anyInt()))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
     handler.onIncomingMessage(
@@ -563,7 +563,7 @@ public class DataColumnSidecarsByRootMessageHandlerTest {
 
     when(combinedChainDataClient.getSidecar(any(DataColumnSlotAndIdentifier.class)))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
-    when(dataColumnSidecarArchiveReconstructor.isSidecarPruned(any(), any())).thenReturn(true);
+    when(dataColumnSidecarArchiveReconstructor.isSidecarArchived(any(), any())).thenReturn(true);
     when(dataColumnSidecarArchiveReconstructor.reconstructDataColumnSidecar(any(), any(), anyInt()))
         .thenAnswer(
             invocation -> {
@@ -618,7 +618,7 @@ public class DataColumnSidecarsByRootMessageHandlerTest {
 
     when(combinedChainDataClient.getSidecar(any(DataColumnSlotAndIdentifier.class)))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
-    when(dataColumnSidecarArchiveReconstructor.isSidecarPruned(any(), any())).thenReturn(true);
+    when(dataColumnSidecarArchiveReconstructor.isSidecarArchived(any(), any())).thenReturn(true);
     when(dataColumnSidecarArchiveReconstructor.reconstructDataColumnSidecar(any(), any(), anyInt()))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
 

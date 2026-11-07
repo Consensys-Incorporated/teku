@@ -272,6 +272,11 @@ public class StubStorageQueryChannel implements StorageQueryChannel {
   }
 
   @Override
+  public SafeFuture<Optional<UInt64>> getLastDataColumnSidecarArchivedSlot() {
+    return SafeFuture.completedFuture(Optional.empty());
+  }
+
+  @Override
   public SafeFuture<Optional<UInt64>> getEarliestAvailableDataColumnSlot() {
     return SafeFuture.completedFuture(Optional.empty());
   }

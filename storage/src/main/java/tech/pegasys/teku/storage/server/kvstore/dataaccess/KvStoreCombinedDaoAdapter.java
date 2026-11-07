@@ -338,6 +338,11 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
   }
 
   @Override
+  public Optional<UInt64> getLastDataColumnSidecarArchivedSlot() {
+    return finalizedDao.getLastDataColumnSidecarArchivedSlot();
+  }
+
+  @Override
   @MustBeClosed
   public Stream<Map.Entry<Bytes32, UInt64>> getFinalizedStateRoots() {
     return finalizedDao.getFinalizedStateRoots();
@@ -382,11 +387,6 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
   public List<DataColumnSlotAndIdentifier> getDataColumnIdentifiers(
       final SlotAndBlockRoot slotAndBlockRoot) {
     return finalizedDao.getDataColumnIdentifiers(slotAndBlockRoot);
-  }
-
-  @Override
-  public Optional<UInt64> getLastDataColumnSidecarsProofsSlot() {
-    return finalizedDao.getLastDataColumnSidecarsProofsSlot();
   }
 
   @Override
@@ -776,6 +776,11 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
     @Override
     public void setLastDataColumnSidecarPrunedSlot(final UInt64 slot) {
       finalizedUpdater.setLastDataColumnSidecarPrunedSlot(slot);
+    }
+
+    @Override
+    public void setLastDataColumnSidecarArchivedSlot(final UInt64 slot) {
+      finalizedUpdater.setLastDataColumnSidecarArchivedSlot(slot);
     }
 
     @Override

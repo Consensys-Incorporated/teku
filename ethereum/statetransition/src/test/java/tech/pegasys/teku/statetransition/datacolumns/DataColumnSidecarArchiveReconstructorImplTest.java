@@ -297,7 +297,7 @@ public class DataColumnSidecarArchiveReconstructorImplTest {
                   reconstructor.reconstructDataColumnSidecar(
                       block.getSlotAndBlockRoot(), index, reconstructor.onRequest()))
           .isInstanceOf(IllegalArgumentException.class);
-      assertThat(reconstructor.isSidecarPruned(block.getSlot(), index)).isFalse();
+      assertThat(reconstructor.isSidecarArchived(block.getSlot(), index)).isFalse();
     }
     verify(chainDataClient, never()).getDataColumnSidecarProofs(any());
     verify(chainDataClient, never()).getDataColumnSidecars(any(SlotAndBlockRoot.class), anyList());
@@ -1083,86 +1083,130 @@ public class DataColumnSidecarArchiveReconstructorImplTest {
   }
 
   @TestTemplate
-  public void isSidecarPruned_falseWhenNotSuperNode() {
+  public void isSidecarArchived_falseWhenNotSuperNode() {
     final DataColumnSidecarArchiveReconstructorImpl nonSuperNode =
-        newReconstructor(spec, () -> false, 0);
+        newReconstructor(availabilityRequiredSpec(), () -> false, 0);
+    loadLastArchivedSlot(nonSuperNode, UInt64.valueOf(100));
 
-    assertThat(nonSuperNode.isSidecarPruned(UInt64.valueOf(8), UInt64.valueOf(halfColumns)))
+    assertThat(nonSuperNode.isSidecarArchived(UInt64.valueOf(8), UInt64.valueOf(halfColumns)))
         .isFalse();
   }
 
   @TestTemplate
-  public void isSidecarPruned_falseForFirstHalfIndex() {
-    assertThat(reconstructor.isSidecarPruned(UInt64.valueOf(8), UInt64.valueOf(halfColumns - 1)))
+  public void isSidecarArchived_falseForFirstHalfIndex() {
+    final DataColumnSidecarArchiveReconstructorImpl spiedReconstructor =
+        newReconstructor(availabilityRequiredSpec(), () -> true, 0);
+    loadLastArchivedSlot(spiedReconstructor, UInt64.valueOf(100));
+
+    assertThat(
+            spiedReconstructor.isSidecarArchived(
+                UInt64.valueOf(8), UInt64.valueOf(halfColumns - 1)))
         .isFalse();
   }
 
   @TestTemplate
-  public void isSidecarPruned_falseWhenAvailabilityNotRequired() {
+  public void isSidecarArchived_falseWhenAvailabilityNotRequired() {
     final Spec spiedSpec = spy(spec);
     doReturn(false).when(spiedSpec).isAvailabilityOfDataColumnSidecarsRequiredAtEpoch(any(), any());
     final DataColumnSidecarArchiveReconstructorImpl spiedReconstructor =
         newReconstructor(spiedSpec, () -> true, 0);
+    loadLastArchivedSlot(spiedReconstructor, UInt64.valueOf(100));
 
-    assertThat(spiedReconstructor.isSidecarPruned(UInt64.valueOf(8), UInt64.valueOf(halfColumns)))
+    assertThat(spiedReconstructor.isSidecarArchived(UInt64.valueOf(8), UInt64.valueOf(halfColumns)))
         .isFalse();
   }
 
   @TestTemplate
-  public void isSidecarPruned_falseWhenFinalizedCheckpointIsGenesis() {
-    final Spec spiedSpec = spy(spec);
-    doReturn(true).when(spiedSpec).isAvailabilityOfDataColumnSidecarsRequiredAtEpoch(any(), any());
-    when(store.getFinalizedCheckpoint())
-        .thenReturn(new Checkpoint(ZERO, dataStructureUtil.randomBytes32()));
-    final DataColumnSidecarArchiveReconstructorImpl spiedReconstructor =
-        newReconstructor(spiedSpec, () -> true, 0);
-
-    assertThat(spiedReconstructor.isSidecarPruned(UInt64.valueOf(8), UInt64.valueOf(halfColumns)))
-        .isFalse();
-  }
-
-  @TestTemplate
-  public void isSidecarPruned_trueWhenSlotBeforePruningBoundary() {
-    final Spec spiedSpec = spy(spec);
-    doReturn(true).when(spiedSpec).isAvailabilityOfDataColumnSidecarsRequiredAtEpoch(any(), any());
-    final UInt64 currentEpoch = spec.getCurrentEpoch(store);
-    // finalized at the current epoch, so the pruning boundary is well above epoch 0
-    when(store.getFinalizedCheckpoint())
-        .thenReturn(new Checkpoint(currentEpoch, dataStructureUtil.randomBytes32()));
-    final DataColumnSidecarArchiveReconstructorImpl spiedReconstructor =
-        newReconstructor(spiedSpec, () -> true, 0);
-
-    assertThat(spiedReconstructor.isSidecarPruned(ZERO, UInt64.valueOf(halfColumns))).isTrue();
-  }
-
-  @TestTemplate
-  public void isSidecarPruned_canServeExistingArchivesWithDefaultRetentionEpochs() {
-    final Spec spiedSpec = spy(spec);
-    doReturn(true).when(spiedSpec).isAvailabilityOfDataColumnSidecarsRequiredAtEpoch(any(), any());
-    final UInt64 currentEpoch = spec.getCurrentEpoch(store);
-    // Restoring default retention must not hide archives written with a shorter retention.
-    when(store.getFinalizedCheckpoint())
-        .thenReturn(new Checkpoint(currentEpoch, dataStructureUtil.randomBytes32()));
+  public void isSidecarArchived_falseWhenNothingArchived() {
+    // Archiving is off by default, so a default-config supernode must not attempt
+    // reconstructions for its finalized slots: none of their columns were ever archived.
+    when(store.getTimeSeconds()).thenReturn(UInt64.valueOf(10000));
     final DataColumnSidecarArchiveReconstructorImpl defaultRetention =
-        newReconstructor(spiedSpec, () -> true, Integer.MAX_VALUE);
+        newReconstructor(availabilityRequiredSpec(), () -> true, Integer.MAX_VALUE);
+    when(chainDataClient.getLastDataColumnSidecarArchivedSlot())
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+    assertThat(defaultRetention.loadLastArchivedSlot()).isCompleted();
 
-    assertThat(defaultRetention.isSidecarPruned(ZERO, UInt64.valueOf(halfColumns))).isTrue();
+    defaultRetention.onNewFinalizedCheckpoint(
+        new Checkpoint(UInt64.valueOf(10), dataStructureUtil.randomBytes32()), false);
+
+    assertThat(defaultRetention.isSidecarArchived(ZERO, UInt64.valueOf(halfColumns))).isFalse();
   }
 
   @TestTemplate
-  public void isSidecarPruned_falseWhenSlotAtOrAfterPruningBoundary() {
+  public void isSidecarArchived_trueUpToSignalledArchivePrunableSlot() {
+    when(store.getTimeSeconds()).thenReturn(UInt64.valueOf(10000));
+    final DataColumnSidecarArchiveReconstructorImpl spiedReconstructor =
+        newReconstructor(availabilityRequiredSpec(), () -> true, 0);
+    final UInt64 finalizedEpoch = UInt64.valueOf(10);
+
+    spiedReconstructor.onNewFinalizedCheckpoint(
+        new Checkpoint(finalizedEpoch, dataStructureUtil.randomBytes32()), false);
+
+    final UInt64 lastPrunableSlot = spec.computeStartSlotAtEpoch(finalizedEpoch).minusMinZero(1);
+    assertThat(spiedReconstructor.isSidecarArchived(lastPrunableSlot, UInt64.valueOf(halfColumns)))
+        .isTrue();
+    assertThat(
+            spiedReconstructor.isSidecarArchived(
+                lastPrunableSlot.increment(), UInt64.valueOf(halfColumns)))
+        .isFalse();
+  }
+
+  @TestTemplate
+  public void isSidecarArchived_canServeExistingArchivesWithDefaultRetentionEpochs() {
+    // Restoring default retention must not hide archives written with a shorter retention.
+    final DataColumnSidecarArchiveReconstructorImpl defaultRetention =
+        newReconstructor(availabilityRequiredSpec(), () -> true, Integer.MAX_VALUE);
+    final UInt64 archivedSlot = UInt64.valueOf(100);
+    loadLastArchivedSlot(defaultRetention, archivedSlot);
+
+    assertThat(defaultRetention.isSidecarArchived(archivedSlot, UInt64.valueOf(halfColumns)))
+        .isTrue();
+    assertThat(
+            defaultRetention.isSidecarArchived(
+                archivedSlot.increment(), UInt64.valueOf(halfColumns)))
+        .isFalse();
+  }
+
+  @TestTemplate
+  public void isSidecarArchived_lowerSignalKeepsLoadedArchives() {
+    when(store.getTimeSeconds()).thenReturn(UInt64.valueOf(10000));
+    final DataColumnSidecarArchiveReconstructorImpl spiedReconstructor =
+        newReconstructor(availabilityRequiredSpec(), () -> true, 0);
+    final UInt64 finalizedEpoch = UInt64.valueOf(10);
+    // archives from an earlier run can extend past what this run signals
+    final UInt64 archivedSlot = spec.computeStartSlotAtEpoch(finalizedEpoch.plus(5));
+    loadLastArchivedSlot(spiedReconstructor, archivedSlot);
+
+    spiedReconstructor.onNewFinalizedCheckpoint(
+        new Checkpoint(finalizedEpoch, dataStructureUtil.randomBytes32()), false);
+
+    assertThat(spiedReconstructor.isSidecarArchived(archivedSlot, UInt64.valueOf(halfColumns)))
+        .isTrue();
+  }
+
+  @TestTemplate
+  public void loadLastArchivedSlot_shouldNotFailStartupWhenStorageReadFails() {
+    final DataColumnSidecarArchiveReconstructorImpl spiedReconstructor =
+        newReconstructor(availabilityRequiredSpec(), () -> true, 0);
+    when(chainDataClient.getLastDataColumnSidecarArchivedSlot())
+        .thenReturn(SafeFuture.failedFuture(new IllegalStateException("corrupt row")));
+
+    assertThat(spiedReconstructor.loadLastArchivedSlot()).isCompleted();
+    assertThat(spiedReconstructor.isSidecarArchived(ZERO, UInt64.valueOf(halfColumns))).isFalse();
+  }
+
+  private Spec availabilityRequiredSpec() {
     final Spec spiedSpec = spy(spec);
     doReturn(true).when(spiedSpec).isAvailabilityOfDataColumnSidecarsRequiredAtEpoch(any(), any());
-    final UInt64 currentEpoch = spec.getCurrentEpoch(store);
-    when(store.getFinalizedCheckpoint())
-        .thenReturn(new Checkpoint(currentEpoch, dataStructureUtil.randomBytes32()));
-    final DataColumnSidecarArchiveReconstructorImpl spiedReconstructor =
-        newReconstructor(spiedSpec, () -> true, 0);
+    return spiedSpec;
+  }
 
-    // a slot in the current epoch is at/after the boundary and therefore not pruned
-    final UInt64 recentSlot = spec.computeStartSlotAtEpoch(currentEpoch);
-    assertThat(spiedReconstructor.isSidecarPruned(recentSlot, UInt64.valueOf(halfColumns)))
-        .isFalse();
+  private void loadLastArchivedSlot(
+      final DataColumnSidecarArchiveReconstructorImpl target, final UInt64 lastArchivedSlot) {
+    when(chainDataClient.getLastDataColumnSidecarArchivedSlot())
+        .thenReturn(SafeFuture.completedFuture(Optional.of(lastArchivedSlot)));
+    assertThat(target.loadLastArchivedSlot()).isCompleted();
   }
 
   private DataColumnSidecarArchiveReconstructorImpl newReconstructor(

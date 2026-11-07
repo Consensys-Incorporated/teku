@@ -725,6 +725,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
         // Init other services
         .thenRun(this::initAll)
         .thenCompose(__ -> loadLightClientUpdates())
+        // before startServices starts the p2p network, so ReqResp handlers see existing archives
+        .thenCompose(__ -> dataColumnSidecarArchiveReconstructor.loadLastArchivedSlot())
         .thenRun(
             () -> {
               // complete spec initialization

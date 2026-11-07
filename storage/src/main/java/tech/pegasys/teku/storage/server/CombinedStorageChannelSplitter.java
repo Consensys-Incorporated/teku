@@ -359,6 +359,11 @@ public class CombinedStorageChannelSplitter implements CombinedStorageChannel {
   }
 
   @Override
+  public SafeFuture<Optional<UInt64>> getLastDataColumnSidecarArchivedSlot() {
+    return asyncRunner.runAsync(queryDelegate::getLastDataColumnSidecarArchivedSlot);
+  }
+
+  @Override
   public SafeFuture<List<StoredLightClientUpdate>> getBestLightClientUpdates() {
     return asyncRunner.runAsync(queryDelegate::getBestLightClientUpdates);
   }

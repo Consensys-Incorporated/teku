@@ -305,6 +305,11 @@ public class ThrottlingStorageQueryChannel implements StorageQueryChannel {
   }
 
   @Override
+  public SafeFuture<Optional<UInt64>> getLastDataColumnSidecarArchivedSlot() {
+    return taskQueue.queueTask(delegate::getLastDataColumnSidecarArchivedSlot);
+  }
+
+  @Override
   public SafeFuture<List<StoredLightClientUpdate>> getBestLightClientUpdates() {
     return taskQueue.queueTask(delegate::getBestLightClientUpdates);
   }

@@ -3284,8 +3284,6 @@ public class DatabaseTest {
       updater.commit();
     }
 
-    assertThat(database.getLastDataColumnSidecarsProofsSlot())
-        .contains(header.getMessage().getSlot());
     assertThat(database.getDataColumnSidecarsProofs(header.getMessage().getSlot()))
         .contains(expectedProofs);
 
@@ -3295,7 +3293,6 @@ public class DatabaseTest {
       updater.commit();
     }
 
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
     assertThat(database.getDataColumnSidecarsProofs(header.getMessage().getSlot())).isEmpty();
   }
 
@@ -3319,7 +3316,7 @@ public class DatabaseTest {
             Stream.iterate(ZERO, UInt64::increment).limit(halfColumns).toList());
     // the proofs of the dropped extension columns are archived for reconstruction
     assertThat(database.getDataColumnSidecarsProofs(slot)).contains(expectedExtensionProofs);
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).contains(slot);
+    assertThat(database.getLastDataColumnSidecarArchivedSlot()).contains(slot);
   }
 
   @TestTemplate
@@ -3338,7 +3335,7 @@ public class DatabaseTest {
 
     // nothing archived and no column dropped: reconstruction from a partial half is impossible
     assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    assertThat(database.getLastDataColumnSidecarArchivedSlot()).isEmpty();
     assertThat(getStoredColumnIndices(slot)).hasSize(numberOfColumns - 1);
   }
 
@@ -3358,7 +3355,7 @@ public class DatabaseTest {
 
     // archiving must be skipped: a missing first-half column makes extension data irrecoverable
     assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    assertThat(database.getLastDataColumnSidecarArchivedSlot()).isEmpty();
     assertThat(getStoredColumnIndices(slot)).hasSize(numberOfColumns - 1);
   }
 
@@ -3412,7 +3409,7 @@ public class DatabaseTest {
     database.archiveSidecarsProofs(ZERO, slot);
 
     assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    assertThat(database.getLastDataColumnSidecarArchivedSlot()).isEmpty();
     assertThat(getStoredColumnIndices(slot)).hasSize(numberOfColumns);
   }
 
@@ -3432,7 +3429,7 @@ public class DatabaseTest {
     database.archiveSidecarsProofs(ZERO, slot);
 
     assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    assertThat(database.getLastDataColumnSidecarArchivedSlot()).isEmpty();
     assertThat(getStoredColumnIndices(slot)).hasSize(2 * numberOfColumns);
   }
 
@@ -3444,7 +3441,7 @@ public class DatabaseTest {
 
     assertThatCode(() -> database.archiveSidecarsProofs(ZERO, UInt64.valueOf(3)))
         .doesNotThrowAnyException();
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    assertThat(database.getLastDataColumnSidecarArchivedSlot()).isEmpty();
   }
 
   @TestTemplate
@@ -3551,7 +3548,27 @@ public class DatabaseTest {
     assertThat(getStoredColumnIndices(incompleteSlot)).hasSize(numberOfColumns - 1);
     assertThat(database.getDataColumnSidecarsProofs(lastSlot)).contains(lastProofs);
     assertThat(getStoredColumnIndices(lastSlot)).hasSize(halfColumns);
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).contains(lastSlot);
+    assertThat(database.getLastDataColumnSidecarArchivedSlot()).contains(lastSlot);
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_olderRangeKeepsLastArchivedSlot(final DatabaseContext context)
+      throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final UInt64 olderSlot = UInt64.valueOf(2);
+    final UInt64 newerSlot = UInt64.valueOf(5);
+    storeFullColumnSet(olderSlot, numberOfColumns);
+    storeFullColumnSet(newerSlot, numberOfColumns);
+
+    // the archiver takes the highest range first; older history (e.g. backfill) comes later
+    database.archiveSidecarsProofs(UInt64.valueOf(3), newerSlot);
+    database.archiveSidecarsProofs(ZERO, olderSlot);
+
+    assertThat(database.getDataColumnSidecarsProofs(olderSlot)).isPresent();
+    assertThat(database.getLastDataColumnSidecarArchivedSlot()).contains(newerSlot);
   }
 
   @TestTemplate
@@ -3620,14 +3637,14 @@ public class DatabaseTest {
     storeFullColumnSet(slot, numberOfColumns);
     database.archiveSidecarsProofs(ZERO, slot);
     assertThat(database.getDataColumnSidecarsProofs(slot)).isPresent();
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).contains(slot);
 
     // pruning the slot must drop the retained proofs alongside the sidecars
     database.pruneAllSidecars(slot, 10);
 
     assertThat(getStoredColumnIndices(slot)).isEmpty();
     assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    // never lowered: readers exclude slots pruned with the DA window themselves
+    assertThat(database.getLastDataColumnSidecarArchivedSlot()).contains(slot);
   }
 
   private List<List<KZGProof>> storeFullColumnSet(final UInt64 slot, final int numberOfColumns) {

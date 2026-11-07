@@ -511,6 +511,11 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
   }
 
   @Override
+  public Optional<UInt64> getLastDataColumnSidecarArchivedSlot() {
+    return db.get(schema.getVariableLastDataColumnSidecarArchivedSlot());
+  }
+
+  @Override
   public Map<String, Long> getColumnCounts(final Optional<String> maybeColumnFilter) {
     final Map<String, Long> columnCounts = new LinkedHashMap<>();
     schema
@@ -559,7 +564,10 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
             getEarliestAvailableDataColumnSlot().map(Objects::toString))
         .put(
             "LAST_DATA_COLUMN_SLOT_PRUNED",
-            getLastDataColumnSidecarPrunedSlot().map(Objects::toString));
+            getLastDataColumnSidecarPrunedSlot().map(Objects::toString))
+        .put(
+            "LAST_DATA_COLUMN_SLOT_ARCHIVED",
+            getLastDataColumnSidecarArchivedSlot().map(Objects::toString));
 
     // get a list of the known keys, so that we can add missing variables
     final Map<String, Optional<String>> knownVariables = knownVariablesBuilder.build();
@@ -738,11 +746,6 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
                 slotAndBlockRoot.getSlot(), slotAndBlockRoot.getBlockRoot(), UInt64.MAX_VALUE)); ) {
       return columnSlotAndIdentifierStream.toList();
     }
-  }
-
-  @Override
-  public Optional<UInt64> getLastDataColumnSidecarsProofsSlot() {
-    return db.getLastKey(schema.getColumnDataColumnSidecarsProofsBySlot());
   }
 
   @Override
@@ -944,6 +947,11 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
     @Override
     public void setLastDataColumnSidecarPrunedSlot(final UInt64 slot) {
       transaction.put(schema.getVariableLastDataColumnSidecarPrunedSlot(), slot);
+    }
+
+    @Override
+    public void setLastDataColumnSidecarArchivedSlot(final UInt64 slot) {
+      transaction.put(schema.getVariableLastDataColumnSidecarArchivedSlot(), slot);
     }
 
     @Override

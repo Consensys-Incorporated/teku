@@ -159,6 +159,8 @@ public interface StorageQueryChannel extends ChannelInterface {
 
   SafeFuture<Optional<List<List<KZGProof>>>> getDataColumnSidecarsProofs(UInt64 slot);
 
+  SafeFuture<Optional<UInt64>> getLastDataColumnSidecarArchivedSlot();
+
   SafeFuture<List<StoredLightClientUpdate>> getBestLightClientUpdates();
 
   SafeFuture<Optional<LightClientBootstrap>> getLightClientBootstrap(UInt64 slot);

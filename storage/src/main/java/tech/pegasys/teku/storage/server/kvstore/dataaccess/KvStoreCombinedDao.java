@@ -198,7 +198,7 @@ public interface KvStoreCombinedDao extends AutoCloseable {
 
   Optional<UInt64> getLastDataColumnSidecarPrunedSlot();
 
-  Optional<UInt64> getLastDataColumnSidecarsProofsSlot();
+  Optional<UInt64> getLastDataColumnSidecarArchivedSlot();
 
   Optional<List<List<KZGProof>>> getDataColumnSidecarsProofs(UInt64 slot);
 
@@ -346,6 +346,8 @@ public interface KvStoreCombinedDao extends AutoCloseable {
     void setEarliestAvailableDataColumnSlot(UInt64 slot);
 
     void setLastDataColumnSidecarPrunedSlot(UInt64 slot);
+
+    void setLastDataColumnSidecarArchivedSlot(UInt64 slot);
 
     void deleteEarliestBlockSlot();
 

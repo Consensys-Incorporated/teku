@@ -195,10 +195,10 @@ public class DataColumnSidecarsByRootMessageHandler
 
   private SafeFuture<Optional<DataColumnSidecar>> tryArchiveReconstruction(
       final DataColumnSlotAndIdentifier identifier, final int messageId) {
-    final boolean isSuperNodePruned =
-        dataColumnSidecarArchiveReconstructor.isSidecarPruned(
+    final boolean isArchived =
+        dataColumnSidecarArchiveReconstructor.isSidecarArchived(
             identifier.slot(), identifier.columnIndex());
-    if (isSuperNodePruned) {
+    if (isArchived) {
       return dataColumnSidecarArchiveReconstructor
           .reconstructDataColumnSidecar(
               identifier.getSlotAndBlockRoot(), identifier.columnIndex(), messageId)

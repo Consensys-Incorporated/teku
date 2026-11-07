@@ -28,6 +28,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -124,6 +125,13 @@ public class DataColumnSidecarArchiveReconstructorImpl
   // peer's per-chunk timeout; such a request is served only completed reconstructions and starts no
   // new ones. Cleared by onRequestCompleted.
   private final Set<Integer> requestsPastDeadline = ConcurrentHashMap.newKeySet();
+  // Highest slot whose extension columns may have been archived to proofs, deciding whether a
+  // missing sidecar is worth reconstructing. Loaded from storage before ReqResp serving starts,
+  // then raised on each archive-prunable signal, as archives are only written up to a signalled
+  // slot. Empty while nothing was ever archived (archiving is off by default). Never lowered:
+  // archives pruned with the DA window fall out of isSidecarArchived by its availability check.
+  private final AtomicReference<Optional<UInt64>> lastArchivedSlot =
+      new AtomicReference<>(Optional.empty());
   private final int halfColumns;
 
   private final Supplier<Boolean> isSuperNodeSupplier;
@@ -612,7 +620,7 @@ public class DataColumnSidecarArchiveReconstructorImpl
   }
 
   @Override
-  public boolean isSidecarPruned(final UInt64 slot, final UInt64 index) {
+  public boolean isSidecarArchived(final UInt64 slot, final UInt64 index) {
     if (!isSuperNodeSupplier.get()) {
       return false;
     }
@@ -627,9 +635,30 @@ public class DataColumnSidecarArchiveReconstructorImpl
       return false;
     }
 
-    final UInt64 finalizedEpoch = store.getFinalizedCheckpoint().getEpoch();
-    // Retention controls new archive writes, not whether existing archives can be served.
-    return slotEpoch.isLessThan(finalizedEpoch);
+    // Retention controls new archive writes, not whether existing archives can be served, so this
+    // follows what was actually archived.
+    return lastArchivedSlot.get().map(slot::isLessThanOrEqualTo).orElse(false);
+  }
+
+  @Override
+  public SafeFuture<Void> loadLastArchivedSlot() {
+    return chainDataClient
+        .getLastDataColumnSidecarArchivedSlot()
+        .thenAccept(
+            maybeSlot -> {
+              LOG.debug("Loaded last archived data column sidecar slot {}", maybeSlot);
+              maybeSlot.ifPresent(this::raiseLastArchivedSlot);
+            })
+        .exceptionally(
+            error -> {
+              // not fatal: only archives beyond the next archive-prunable signal go unserved
+              LOG.warn("Failed to load last archived data column sidecar slot from storage", error);
+              return null;
+            });
+  }
+
+  private void raiseLastArchivedSlot(final UInt64 slot) {
+    lastArchivedSlot.updateAndGet(current -> Optional.of(current.map(slot::max).orElse(slot)));
   }
 
   @Override
@@ -660,6 +689,8 @@ public class DataColumnSidecarArchiveReconstructorImpl
         finalizedEpoch,
         currentEpoch,
         dataColumnSidecarExtensionRetentionEpochs);
+    // raised before signalling, so slots are already served from the archive once storage writes it
+    raiseLastArchivedSlot(lastPrunableSlot);
     sidecarArchivePrunableChannel.onSidecarArchivePrunableSlot(lastPrunableSlot);
   }
 

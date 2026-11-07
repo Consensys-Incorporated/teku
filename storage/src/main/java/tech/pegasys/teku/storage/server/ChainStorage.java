@@ -602,6 +602,11 @@ public class ChainStorage
   }
 
   @Override
+  public SafeFuture<Optional<UInt64>> getLastDataColumnSidecarArchivedSlot() {
+    return SafeFuture.of(database::getLastDataColumnSidecarArchivedSlot);
+  }
+
+  @Override
   public SafeFuture<Void> onFirstCustodyIncompleteSlot(final UInt64 slot) {
     return SafeFuture.fromRunnable(() -> database.setFirstCustodyIncompleteSlot(slot));
   }

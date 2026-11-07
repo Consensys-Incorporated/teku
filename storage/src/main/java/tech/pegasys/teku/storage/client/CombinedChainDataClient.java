@@ -310,6 +310,10 @@ public class CombinedChainDataClient {
         .thenApply(maybeProofs -> maybeProofs.orElseGet(List::of));
   }
 
+  public SafeFuture<Optional<UInt64>> getLastDataColumnSidecarArchivedSlot() {
+    return historicalChainData.getLastDataColumnSidecarArchivedSlot();
+  }
+
   private Stream<DataColumnSlotAndIdentifier> filterDataColumnSidecarKeys(
       final List<DataColumnSlotAndIdentifier> identifiers, final List<UInt64> indices) {
     if (indices.isEmpty()) {

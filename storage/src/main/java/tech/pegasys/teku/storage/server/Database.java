@@ -313,7 +313,11 @@ public interface Database extends AutoCloseable {
 
   Optional<UInt64> getEarliestAvailableDataColumnSlot();
 
-  Optional<UInt64> getLastDataColumnSidecarsProofsSlot();
+  /**
+   * Highest slot ever archived to proofs, kept as a variable so it is read without seeking the
+   * proofs column. Never lowered: archives later pruned with the DA window keep it.
+   */
+  Optional<UInt64> getLastDataColumnSidecarArchivedSlot();
 
   Optional<List<List<KZGProof>>> getDataColumnSidecarsProofs(UInt64 slot);
 
