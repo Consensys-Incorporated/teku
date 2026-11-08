@@ -823,6 +823,33 @@ public class DataColumnSidecarsByRangeMessageHandlerTest {
         .reconstructDataColumnSidecar(any(), any(), anyInt());
   }
 
+  @TestTemplate
+  public void shouldServeStoredSidecarsOfArchivedSlotWithoutFinalizedBlock() {
+    final UInt64 storedColumn = ONE;
+    final UInt64 prunedColumn = UInt64.valueOf(72);
+    final DataColumnSidecarsByRangeRequestMessage request =
+        dataColumnSidecarsByRangeRequestMessageSchema.create(
+            startSlot, count, List.of(storedColumn, prunedColumn));
+    final List<DataColumnSidecar> storedSidecars =
+        setUpDataColumnSidecarsData(
+            startSlot, request.getMaxSlot(), new ArrayList<>(List.of(storedColumn)));
+    when(combinedChainDataClient.getAncestorRoots(any(), any(), any()))
+        .thenReturn(ImmutableSortedMap.of());
+    final UInt64 archivedSlot = storedSidecars.get(2).getSlot();
+    when(dataColumnSidecarArchiveReconstructor.isSidecarArchived(eq(archivedSlot), any()))
+        .thenReturn(true);
+    when(combinedChainDataClient.getFinalizedBlockAtSlotExact(archivedSlot))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+
+    handler.onIncomingMessage(protocolId, peer, request, listener);
+
+    storedSidecars.forEach(sidecar -> verify(listener).respond(sidecar));
+    verify(listener, times(storedSidecars.size())).respond(any());
+    verify(listener).completeSuccessfully();
+    verify(dataColumnSidecarArchiveReconstructor, never())
+        .reconstructDataColumnSidecar(any(), any(), anyInt());
+  }
+
   private List<DataColumnSidecar> setUpDataColumnSidecarsData(
       final UInt64 startSlot, final UInt64 maxSlot, final List<UInt64> columns) {
     final List<Pair<SignedBeaconBlockHeader, DataColumnSlotAndIdentifier>>

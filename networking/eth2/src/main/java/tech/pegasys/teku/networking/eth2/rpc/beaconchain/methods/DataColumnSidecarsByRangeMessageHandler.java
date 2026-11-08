@@ -358,13 +358,14 @@ public class DataColumnSidecarsByRangeMessageHandler
           .mapAsync(
               entry -> {
                 final UInt64 slot = entry.getKey();
+                final List<DataColumnSlotAndIdentifier> storedRequested =
+                    entry.getValue().stream()
+                        .filter(key -> columns.contains(key.columnIndex()))
+                        .toList();
                 // Archived columns have no stored identifiers, so they are requested by expanding
                 // the slot. Decided per slot, as archived slots can sit anywhere in the range.
                 if (!dataColumnSidecarArchiveReconstructor.isSidecarArchived(slot, highestIndex)) {
-                  return SafeFuture.completedFuture(
-                      entry.getValue().stream()
-                          .filter(key -> columns.contains(key.columnIndex()))
-                          .toList());
+                  return SafeFuture.completedFuture(storedRequested);
                 }
                 // A finalized slot can still contain columns from never-imported blocks.
                 // Resolve its canonical root once, not once for each requested column.
@@ -385,7 +386,8 @@ public class DataColumnSidecarsByRangeMessageHandler
                                                 new DataColumnSlotAndIdentifier(
                                                     slot, value, column))
                                         .toList())
-                            .orElseGet(List::of));
+                            // without a canonical root, still serve what is stored
+                            .orElse(storedRequested));
               })
           .toList()
           .thenApply(lists -> lists.stream().flatMap(List::stream).toList());
