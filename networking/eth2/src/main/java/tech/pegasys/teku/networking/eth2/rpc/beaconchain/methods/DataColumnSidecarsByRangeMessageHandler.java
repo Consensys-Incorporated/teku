@@ -126,12 +126,6 @@ public class DataColumnSidecarsByRangeMessageHandler
               INVALID_REQUEST_CODE,
               "Data column sidecars not supported for the requested slot range"));
     }
-    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
-    if (request.getColumns().stream()
-        .anyMatch(index -> index.isGreaterThanOrEqualTo(numberOfColumns))) {
-      return Optional.of(
-          new RpcException(INVALID_REQUEST_CODE, "Requested column index is out of range"));
-    }
     if (requestedCount == -1 || requestedCount > maxRequestDataColumnSidecars) {
       requestCounter.labels("count_too_big").inc();
       return Optional.of(
@@ -283,7 +277,9 @@ public class DataColumnSidecarsByRangeMessageHandler
     private final UInt64 maxRequestDataColumnSidecars;
     private final UInt64 startSlot;
     private final UInt64 endSlot;
-    // distinct and sorted, so expanding an archived slot sends each requested column once, in order
+    // distinct and sorted, so expanding an archived slot sends each requested column once, in
+    // order.
+    // Out-of-range columns are ignored, like any other column we don't have.
     private final SortedSet<UInt64> columns;
     private final UInt64 finalizedSlot;
     private final Map<UInt64, Bytes32> canonicalHotRoots;
@@ -308,7 +304,11 @@ public class DataColumnSidecarsByRangeMessageHandler
       this.maxRequestDataColumnSidecars = UInt64.valueOf(maxRequestDataColumnSidecars);
       this.startSlot = startSlot;
       this.endSlot = endSlot;
-      this.columns = new TreeSet<>(columns);
+      final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+      this.columns =
+          columns.stream()
+              .filter(column -> column.isLessThan(numberOfColumns))
+              .collect(Collectors.toCollection(TreeSet::new));
       this.finalizedSlot = finalizedSlot;
       this.canonicalHotRoots = canonicalHotRoots;
       this.messageId = messageId;

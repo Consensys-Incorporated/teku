@@ -148,20 +148,6 @@ public class DataColumnSidecarsByRangeMessageHandlerTest {
   }
 
   @TestTemplate
-  public void validateRequest_shouldRejectOutOfRangeColumns() {
-    for (final UInt64 index : List.of(UInt64.valueOf(numberOfColumns), UInt64.MAX_VALUE)) {
-      assertThat(
-              handler.validateRequest(
-                  protocolId,
-                  dataColumnSidecarsByRangeRequestMessageSchema.create(
-                      startSlot, ONE, List.of(index))))
-          .hasValueSatisfying(
-              error -> assertThat(error.getResponseCode()).isEqualTo(INVALID_REQUEST_CODE));
-    }
-    verifyNoInteractions(combinedChainDataClient, dataColumnSidecarArchiveReconstructor);
-  }
-
-  @TestTemplate
   public void validateRequest_validRequest() {
     final Optional<RpcException> result =
         handler.validateRequest(
@@ -847,6 +833,45 @@ public class DataColumnSidecarsByRangeMessageHandlerTest {
     verify(listener, times(storedSidecars.size())).respond(any());
     verify(listener).completeSuccessfully();
     verify(dataColumnSidecarArchiveReconstructor, never())
+        .reconstructDataColumnSidecar(any(), any(), anyInt());
+  }
+
+  @TestTemplate
+  public void shouldIgnoreOutOfRangeColumnsAndServeTheRest() {
+    final UInt64 storedColumn = ONE;
+    final UInt64 prunedColumn = UInt64.valueOf(72);
+    final DataColumnSidecarsByRangeRequestMessage request =
+        dataColumnSidecarsByRangeRequestMessageSchema.create(
+            startSlot,
+            count,
+            List.of(storedColumn, prunedColumn, UInt64.valueOf(numberOfColumns), UInt64.MAX_VALUE));
+    assertThat(handler.validateRequest(protocolId, request)).isEmpty();
+    when(combinedChainDataClient.getSidecar(any()))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+    final List<DataColumnSidecar> storedSidecars =
+        setUpDataColumnSidecarsData(
+            startSlot, request.getMaxSlot(), new ArrayList<>(List.of(storedColumn)));
+    when(combinedChainDataClient.getAncestorRoots(any(), any(), any()))
+        .thenReturn(ImmutableSortedMap.of());
+    final DataColumnSidecar archivedSlotSidecar = storedSidecars.get(2);
+    final UInt64 archivedSlot = archivedSlotSidecar.getSlot();
+    // archived only for in-range columns, so out-of-range ones must not decide the expansion
+    when(dataColumnSidecarArchiveReconstructor.isSidecarArchived(archivedSlot, prunedColumn))
+        .thenReturn(true);
+    final DataColumnSidecar reconstructed =
+        dataStructureUtil.randomDataColumnSidecar(
+            dataStructureUtil.randomSignedBeaconBlock(archivedSlot), prunedColumn);
+    when(dataColumnSidecarArchiveReconstructor.reconstructDataColumnSidecar(
+            eq(archivedSlotSidecar.getSlotAndBlockRoot()), eq(prunedColumn), anyInt()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(reconstructed)));
+
+    handler.onIncomingMessage(protocolId, peer, request, listener);
+
+    storedSidecars.forEach(sidecar -> verify(listener).respond(sidecar));
+    verify(listener).respond(reconstructed);
+    verify(listener, times(storedSidecars.size() + 1)).respond(any());
+    verify(listener).completeSuccessfully();
+    verify(dataColumnSidecarArchiveReconstructor, times(1))
         .reconstructDataColumnSidecar(any(), any(), anyInt());
   }
 
