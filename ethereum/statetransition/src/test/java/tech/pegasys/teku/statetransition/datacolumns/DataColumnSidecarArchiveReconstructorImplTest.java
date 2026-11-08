@@ -109,11 +109,11 @@ public class DataColumnSidecarArchiveReconstructorImplTest {
             block.getSlotAndBlockRoot(), UInt64.valueOf(halfColumns), reconstructor.onRequest());
 
     assertThat(result).isNotDone();
-    verify(chainDataClient, never()).getBlockByBlockRoot(any());
+    verify(chainDataClient, never()).getFinalizedBlockAtSlotExact(any());
     verify(chainDataClient, never()).getDataColumnSidecars(any(SlotAndBlockRoot.class), anyList());
     pendingProofs.complete(createSecondHalfProofs(block).subList(0, halfColumns - 1));
     assertThat(result).isCompletedWithValue(Optional.empty());
-    verify(chainDataClient, never()).getBlockByBlockRoot(any());
+    verify(chainDataClient, never()).getFinalizedBlockAtSlotExact(any());
     verify(chainDataClient, never()).getDataColumnSidecars(any(SlotAndBlockRoot.class), anyList());
   }
 
@@ -212,7 +212,7 @@ public class DataColumnSidecarArchiveReconstructorImplTest {
   public void shouldReturnEmptyWhenFirstHalfSidecarsAreForDifferentBlockRoot() {
     final UInt64 slot = UInt64.ONE;
     final SignedBeaconBlock block = createBlockWithBlobs(slot);
-    final SignedBeaconBlock competingBlock = createBlockWithBlobs(slot);
+    final SignedBeaconBlock competingBlock = dataStructureUtil.randomSignedBeaconBlock(slot);
     final List<DataColumnSidecar> firstHalfSidecars = createFirstHalfSidecars(competingBlock);
     final List<List<KZGProof>> secondHalfProofs = createSecondHalfProofs(block);
 
@@ -350,7 +350,7 @@ public class DataColumnSidecarArchiveReconstructorImplTest {
     // Should have only called getDataColumnSidecars once (same task reused)
     verify(chainDataClient).getDataColumnSidecars(any(SlotAndBlockRoot.class), anyList());
     // and loaded the block only to start the reconstruction, not to serve the reused result
-    verify(chainDataClient).getBlockByBlockRoot(block.getRoot());
+    verify(chainDataClient).getFinalizedBlockAtSlotExact(block.getSlot());
   }
 
   @TestTemplate
@@ -537,7 +537,7 @@ public class DataColumnSidecarArchiveReconstructorImplTest {
     verify(chainDataClient, never())
         .getDataColumnSidecars(eq(unreconstructedBlock.getSlotAndBlockRoot()), anyList());
     // nor does it load blocks it is not going to reconstruct
-    verify(chainDataClient, never()).getBlockByBlockRoot(unreconstructedBlock.getRoot());
+    verify(chainDataClient, never()).getFinalizedBlockAtSlotExact(unreconstructedBlock.getSlot());
 
     // a completed request leaves no state behind, so its id waits for reconstructions again
     slowReconstructor.onRequestCompleted(requestId);
@@ -905,7 +905,7 @@ public class DataColumnSidecarArchiveReconstructorImplTest {
     final SignedBeaconBlock block = createBlockWithBlobs(UInt64.ONE);
     when(chainDataClient.getDataColumnSidecarProofs(block.getSlot()))
         .thenReturn(SafeFuture.completedFuture(createSecondHalfProofs(block)));
-    when(chainDataClient.getBlockByBlockRoot(block.getRoot()))
+    when(chainDataClient.getFinalizedBlockAtSlotExact(block.getSlot()))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
 
     assertThat(
@@ -915,6 +915,27 @@ public class DataColumnSidecarArchiveReconstructorImplTest {
                 reconstructor.onRequest()))
         .isCompletedWithValue(Optional.empty());
     // nothing else is read for a block that cannot be loaded
+    verify(chainDataClient, never()).getDataColumnSidecars(any(SlotAndBlockRoot.class), anyList());
+    assertThat(failures("unavailable")).isEqualTo(1);
+  }
+
+  @TestTemplate
+  public void shouldNotReconstructNonCanonicalBlockWithArchivedProofsOfItsSlot() {
+    final SignedBeaconBlock canonicalBlock = createBlockWithBlobs(UInt64.ONE);
+    final SignedBeaconBlock nonCanonicalBlock =
+        dataStructureUtil.randomSignedBeaconBlock(UInt64.ONE);
+    when(chainDataClient.getDataColumnSidecarProofs(UInt64.ONE))
+        .thenReturn(SafeFuture.completedFuture(createSecondHalfProofs(canonicalBlock)));
+    when(chainDataClient.getDataColumnSidecars(any(SlotAndBlockRoot.class), anyList()))
+        .thenReturn(SafeFuture.completedFuture(createFirstHalfSidecars(nonCanonicalBlock)));
+
+    assertThat(
+            reconstructor.reconstructDataColumnSidecar(
+                nonCanonicalBlock.getSlotAndBlockRoot(),
+                UInt64.valueOf(halfColumns),
+                reconstructor.onRequest()))
+        .isCompletedWithValue(Optional.empty());
+    // the slot's proofs belong to the canonical block, so another block's cells are never read
     verify(chainDataClient, never()).getDataColumnSidecars(any(SlotAndBlockRoot.class), anyList());
     assertThat(failures("unavailable")).isEqualTo(1);
   }
@@ -1343,8 +1364,8 @@ public class DataColumnSidecarArchiveReconstructorImplTest {
 
   private SignedBeaconBlock createBlockWithBlobs(final UInt64 slot) {
     final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(slot);
-    // a reconstruction loads its block by root when it starts
-    when(chainDataClient.getBlockByBlockRoot(block.getRoot()))
+    // a reconstruction loads the canonical block at its slot when it starts
+    when(chainDataClient.getFinalizedBlockAtSlotExact(block.getSlot()))
         .thenReturn(SafeFuture.completedFuture(Optional.of(block)));
     return block;
   }

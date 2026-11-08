@@ -111,7 +111,7 @@ public class DataColumnSidecarArchiveReconstructorImplRealKzgTest {
             .map(sidecar -> sidecar.getKzgProofs().stream().map(SszKZGProof::getKZGProof).toList())
             .toList();
 
-    when(chainDataClient.getBlockByBlockRoot(block.getRoot()))
+    when(chainDataClient.getFinalizedBlockAtSlotExact(block.getSlot()))
         .thenReturn(SafeFuture.completedFuture(Optional.of(block)));
     when(chainDataClient.getDataColumnSidecars(any(SlotAndBlockRoot.class), anyList()))
         .thenReturn(SafeFuture.completedFuture(firstHalfSidecars));

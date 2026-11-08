@@ -494,14 +494,22 @@ public class DataColumnSidecarArchiveReconstructorImpl
                                 halfColumns);
                             return SafeFuture.completedFuture(emptyResult());
                           }
+                          // the proofs are keyed by slot, so only the canonical block matches them
                           return chainDataClient
-                              .getBlockByBlockRoot(slotAndBlockRoot.getBlockRoot())
+                              .getFinalizedBlockAtSlotExact(slotAndBlockRoot.getSlot())
+                              .thenApply(
+                                  maybeBlock ->
+                                      maybeBlock.filter(
+                                          block ->
+                                              block
+                                                  .getRoot()
+                                                  .equals(slotAndBlockRoot.getBlockRoot())))
                               .thenCompose(
                                   maybeBlock -> {
                                     if (maybeBlock.isEmpty()) {
                                       LOG.debug(
                                           "Cannot reconstruct extension data column sidecars for slot {} "
-                                              + "blockRoot {}: block not available",
+                                              + "blockRoot {}: canonical block not available",
                                           slotAndBlockRoot.getSlot(),
                                           slotAndBlockRoot.getBlockRoot());
                                       return SafeFuture.completedFuture(emptyResult());
