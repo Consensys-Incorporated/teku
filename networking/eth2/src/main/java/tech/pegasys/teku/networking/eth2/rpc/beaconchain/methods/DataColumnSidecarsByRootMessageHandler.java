@@ -15,7 +15,6 @@ package tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods;
 
 import static tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.DataColumnSidecarSource.RECONSTRUCTED;
 import static tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.DataColumnSidecarSource.STORED;
-import static tech.pegasys.teku.networking.eth2.rpc.core.RpcResponseStatus.INVALID_REQUEST_CODE;
 
 import java.util.List;
 import java.util.Optional;
@@ -35,7 +34,6 @@ import tech.pegasys.teku.networking.eth2.peers.Eth2Peer;
 import tech.pegasys.teku.networking.eth2.peers.RequestKey;
 import tech.pegasys.teku.networking.eth2.rpc.core.PeerRequiredLocalMessageHandler;
 import tech.pegasys.teku.networking.eth2.rpc.core.ResponseCallback;
-import tech.pegasys.teku.networking.eth2.rpc.core.RpcException;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.DataColumnSidecarsByRootRequestMessage;
@@ -104,19 +102,6 @@ public class DataColumnSidecarsByRootMessageHandler
             "Total number of data column sidecars sent in response to by root requests, by whether "
                 + "they were stored or reconstructed from the archive",
             "source");
-  }
-
-  @Override
-  public Optional<RpcException> validateRequest(
-      final String protocolId, final DataColumnSidecarsByRootRequestMessage request) {
-    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
-    if (request.stream()
-        .flatMap(identifier -> identifier.getColumns().stream())
-        .anyMatch(index -> index.isGreaterThanOrEqualTo(numberOfColumns))) {
-      return Optional.of(
-          new RpcException(INVALID_REQUEST_CODE, "Requested column index is out of range"));
-    }
-    return Optional.empty();
   }
 
   @Override

@@ -167,28 +167,29 @@ public class DataColumnSidecarsByRootMessageHandlerTest {
   }
 
   @TestTemplate
-  public void shouldValidateColumnIndexBoundsBeforeStorageAccess() {
-    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
-    for (final UInt64 index : List.of(UInt64.valueOf(numberOfColumns), UInt64.MAX_VALUE)) {
-      assertThat(
-              handler.validateRequest(
-                  protocolId,
-                  messageSchema.of(
-                      identifierSchema.create(dataStructureUtil.randomBytes32(), List.of(index)))))
-          .hasValueSatisfying(
-              error ->
-                  assertThat(error.getErrorMessageString())
-                      .isEqualTo("Requested column index is out of range"));
-    }
-    assertThat(
-            handler.validateRequest(
-                protocolId,
-                messageSchema.of(
-                    identifierSchema.create(
-                        dataStructureUtil.randomBytes32(),
-                        List.of(UInt64.valueOf(numberOfColumns - 1))))))
-        .isEmpty();
-    verify(combinedChainDataClient, never()).getSlotByBlockRoot(any());
+  public void shouldIgnoreOutOfRangeColumnsAndServeTheRest() {
+    final UInt64 outOfRange = UInt64.valueOf(spec.getNumberOfDataColumns().orElseThrow());
+    final DataColumnsByRootIdentifier identifier =
+        identifierSchema.create(
+            dataStructureUtil.randomBytes32(), List.of(ZERO, outOfRange, UInt64.MAX_VALUE));
+    final DataColumnSidecarsByRootRequestMessage request = messageSchema.of(identifier);
+    // even a custody set holding an out-of-range index only makes it a storage miss
+    when(custodyGroupCountManager.getCustodyColumnIndices()).thenReturn(Set.of(ZERO, outOfRange));
+    final DataColumnSidecar sidecar = dataStructureUtil.randomDataColumnSidecar();
+    when(combinedChainDataClient.getSidecar(any()))
+        .thenAnswer(
+            invocation ->
+                SafeFuture.completedFuture(
+                    invocation.<DataColumnSlotAndIdentifier>getArgument(0).columnIndex().isZero()
+                        ? Optional.of(sidecar)
+                        : Optional.empty()));
+
+    assertThat(handler.validateRequest(protocolId, request)).isEmpty();
+    handler.onIncomingMessage(protocolId, peer, request, callback);
+
+    verify(callback).respond(sidecar);
+    verify(callback, times(1)).respond(any());
+    verify(callback).completeSuccessfully();
     verify(dataColumnSidecarArchiveReconstructor, never())
         .reconstructDataColumnSidecar(any(), any(), anyInt());
   }
