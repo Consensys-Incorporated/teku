@@ -19,14 +19,15 @@ import static tech.pegasys.teku.networking.eth2.rpc.core.RpcResponseStatus.INVAL
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSortedMap;
-import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.SortedMap;
+import java.util.SortedSet;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
@@ -282,7 +283,8 @@ public class DataColumnSidecarsByRangeMessageHandler
     private final UInt64 maxRequestDataColumnSidecars;
     private final UInt64 startSlot;
     private final UInt64 endSlot;
-    private final List<UInt64> columns;
+    // distinct and sorted, so expanding an archived slot sends each requested column once, in order
+    private final SortedSet<UInt64> columns;
     private final UInt64 finalizedSlot;
     private final Map<UInt64, Bytes32> canonicalHotRoots;
     private final int messageId;
@@ -306,11 +308,11 @@ public class DataColumnSidecarsByRangeMessageHandler
       this.maxRequestDataColumnSidecars = UInt64.valueOf(maxRequestDataColumnSidecars);
       this.startSlot = startSlot;
       this.endSlot = endSlot;
-      this.columns = columns;
+      this.columns = new TreeSet<>(columns);
       this.finalizedSlot = finalizedSlot;
       this.canonicalHotRoots = canonicalHotRoots;
       this.messageId = messageId;
-      this.highestIndex = columns.stream().max(Comparator.naturalOrder()).orElse(UInt64.ZERO);
+      this.highestIndex = this.columns.isEmpty() ? UInt64.ZERO : this.columns.last();
     }
 
     SafeFuture<Void> sendDataColumnSidecar(final LoadedDataColumnSidecar loaded) {
@@ -378,7 +380,6 @@ public class DataColumnSidecarsByRangeMessageHandler
                         root.map(
                                 value ->
                                     columns.stream()
-                                        .sorted()
                                         .map(
                                             column ->
                                                 new DataColumnSlotAndIdentifier(

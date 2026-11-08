@@ -18,6 +18,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -42,6 +43,7 @@ import org.assertj.core.api.AssertionsForInterfaceTypes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
@@ -780,6 +782,43 @@ public class DataColumnSidecarsByRangeMessageHandlerTest {
     // the canonical root is only resolved for the expanded, archived slot
     verify(combinedChainDataClient).getFinalizedBlockAtSlotExact(archivedSlot);
     verify(combinedChainDataClient, times(1)).getFinalizedBlockAtSlotExact(any());
+    verify(dataColumnSidecarArchiveReconstructor, times(1))
+        .reconstructDataColumnSidecar(any(), any(), anyInt());
+  }
+
+  @TestTemplate
+  public void shouldSendDuplicateRequestedColumnOnceWhenExpandingArchivedSlot() {
+    final UInt64 storedColumn = ONE;
+    final UInt64 prunedColumn = UInt64.valueOf(72);
+    final DataColumnSidecarsByRangeRequestMessage request =
+        dataColumnSidecarsByRangeRequestMessageSchema.create(
+            startSlot, count, List.of(prunedColumn, storedColumn, prunedColumn));
+    when(combinedChainDataClient.getSidecar(any()))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+    final List<DataColumnSidecar> storedSidecars =
+        setUpDataColumnSidecarsData(
+            startSlot, request.getMaxSlot(), new ArrayList<>(List.of(storedColumn)));
+    when(combinedChainDataClient.getAncestorRoots(any(), any(), any()))
+        .thenReturn(ImmutableSortedMap.of());
+    final DataColumnSidecar archivedSlotSidecar = storedSidecars.get(2);
+    final UInt64 archivedSlot = archivedSlotSidecar.getSlot();
+    when(dataColumnSidecarArchiveReconstructor.isSidecarArchived(eq(archivedSlot), any()))
+        .thenReturn(true);
+    final DataColumnSidecar reconstructed =
+        dataStructureUtil.randomDataColumnSidecar(
+            dataStructureUtil.randomSignedBeaconBlock(archivedSlot), prunedColumn);
+    when(dataColumnSidecarArchiveReconstructor.reconstructDataColumnSidecar(
+            eq(archivedSlotSidecar.getSlotAndBlockRoot()), eq(prunedColumn), anyInt()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(reconstructed)));
+
+    handler.onIncomingMessage(protocolId, peer, request, listener);
+
+    // the expanded slot sends each requested column once, in column order
+    final InOrder inOrder = inOrder(listener);
+    inOrder.verify(listener).respond(archivedSlotSidecar);
+    inOrder.verify(listener).respond(reconstructed);
+    verify(listener, times(storedSidecars.size() + 1)).respond(any());
+    verify(listener).completeSuccessfully();
     verify(dataColumnSidecarArchiveReconstructor, times(1))
         .reconstructDataColumnSidecar(any(), any(), anyInt());
   }
