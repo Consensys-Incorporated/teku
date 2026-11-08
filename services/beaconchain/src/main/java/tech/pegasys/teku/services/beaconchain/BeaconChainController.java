@@ -2205,8 +2205,6 @@ public class BeaconChainController extends Service implements BeaconChainControl
       eventChannels
           .subscribe(FinalizedCheckpointChannel.class, dataColumnSidecarArchiveReconstructor)
           .subscribe(SlotEventsChannel.class, dataColumnSidecarArchiveReconstructor);
-    } else {
-      dataColumnSidecarArchiveReconstructor = DataColumnSidecarArchiveReconstructor.NOOP;
     }
 
     final Eth2P2PNetworkBuilder p2pNetworkBuilder =
