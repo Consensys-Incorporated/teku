@@ -115,8 +115,9 @@ public class DataColumnSidecarArchiveReconstructorImpl
   // entries deduplicate any number of concurrent/overlapping requests onto a single reconstruction
   // (not capacity-bounded); successful entries are reused regardless of age and pruned on each slot
   // once unrequested for RESULT_RETENTION, or evicted least recently requested first to keep at
-  // most maxRetainedResults of them. Failed entries are replaced by the next request, so it
-  // retries.
+  // most maxRetainedResults of them. Failed entries are reused the same way until the next slot's
+  // prune, so a block that can't be reconstructed is tried once per slot, not once per requested
+  // column; the first request after the prune retries it.
   private final Map<SlotAndBlockRoot, ReconstructionCacheEntry> reconstructions =
       new ConcurrentHashMap<>();
   private final int maxRetainedResults;
@@ -242,9 +243,7 @@ public class DataColumnSidecarArchiveReconstructorImpl
             slotAndBlockRoot,
             (__, existing) -> {
               final ReconstructionCacheEntry maybeReused =
-                  existing != null && !existing.hasFailed()
-                      ? existing
-                      : new ReconstructionCacheEntry(RESULT_RETENTION, now);
+                  existing != null ? existing : new ReconstructionCacheEntry(RESULT_RETENTION, now);
               maybeReused.lastRequestedAtMillis = now;
               return maybeReused;
             });
@@ -257,9 +256,11 @@ public class DataColumnSidecarArchiveReconstructorImpl
         requestId,
         started
             ? "starting a new reconstruction"
-            : entry.future.isDone()
-                ? "reusing the completed result"
-                : "joining the running reconstruction");
+            : entry.hasFailed()
+                ? "reusing the failed result until the next slot"
+                : entry.future.isDone()
+                    ? "reusing the completed result"
+                    : "joining the running reconstruction");
     if (started) {
       startReconstruction(slotAndBlockRoot, entry);
     }
@@ -722,8 +723,8 @@ public class DataColumnSidecarArchiveReconstructorImpl
    * prune finds it unrequested for {@code retentionMillis}, or it is evicted to keep within the
    * retained results limit. A reconstruction that completed without producing sidecars (failed,
    * hung past RECONSTRUCTION_HUNG_TIMEOUT, rejected by a full queue, or skipped after waiting in
-   * the queue unrequested for {@code retentionMillis}) is replaced by the next request, so it
-   * retries.
+   * the queue unrequested for {@code retentionMillis}) is reused as an empty result until the next
+   * per-slot prune, after which the next request retries it.
    */
   private static final class ReconstructionCacheEntry {
     private final long retentionMillis;
