@@ -74,6 +74,21 @@ public class BuilderBidValidatorImpl implements BuilderBidValidator {
           "Invalid proposed payload with respect to consensus.", e);
     }
 
+    signedBuilderBid
+        .getMessage()
+        .getOptionalBlobKzgCommitments()
+        .ifPresent(
+            commitments -> {
+              final int maxBlobsPerBlock =
+                  spec.getMaxBlobsPerBlockAtSlot(state.getSlot()).orElseThrow();
+              if (commitments.size() > maxBlobsPerBlock) {
+                throw new BuilderBidValidationException(
+                    String.format(
+                        "Number of kzg commitments in builder bid (%s) exceeds max blobs per block (%s)",
+                        commitments.size(), maxBlobsPerBlock));
+              }
+            });
+
     // validating the withdrawals root
     localExecutionPayload
         .flatMap(ExecutionPayload::getOptionalWithdrawalsRoot)
