@@ -106,6 +106,13 @@ public class FastConfirmationTracker {
       new AtomicReference<>();
 
   /**
+   * {@code get_restart_resilient_confirmed_root(fcr_store)}: the confirmed root reported to
+   * consumers. Kept apart from {@code fcr_store.confirmed_root}, as the spec never assigns it back,
+   * so the rule still warms up from its own state. {@code null} until initialized.
+   */
+  private final AtomicReference<Bytes32> restartResilientConfirmedRoot = new AtomicReference<>();
+
+  /**
    * Slot of the most recently applied update. {@code update_fast_confirmation_variables} MUST run
    * exactly once per slot and slot heads rotate in slot order, so an update is applied only when
    * its slot is strictly greater than this value. Slots are chained and each commits before the
@@ -239,7 +246,9 @@ public class FastConfirmationTracker {
     lastConfirmationOutcome.set(ConfirmationOutcome.fallback());
     previousSlotWasReorg.set(false);
     rootConfirmedBeforeRestart.set(store.getFastConfirmedRootBeforeRestart());
-    fastConfirmationStore.set(FastConfirmationStore.create(store));
+    final FastConfirmationStore initialStore = FastConfirmationStore.create(store);
+    restartResilientConfirmedRoot.set(initialStore.confirmedRoot());
+    fastConfirmationStore.set(initialStore);
   }
 
   public void onSyncingStatusChanged(final boolean inSync) {
@@ -486,58 +495,76 @@ public class FastConfirmationTracker {
   }
 
   /**
-   * Folds the computed confirmed root onto this slot's already-committed rotated store and records
-   * the derived metrics and the {@code fast_confirmation} event. Serialized by the per-slot chain,
-   * so it is the sole writer and {@code rotatedStore} is still the current store.
+   * Folds the computed confirmed root onto this slot's already-committed rotated store, derives the
+   * restart-resilient confirmed root reported for it, and records the metrics and the {@code
+   * fast_confirmation} event from the latter. Serialized by the per-slot chain, so it is the sole
+   * writer and {@code rotatedStore} is still the current store.
    */
   private void applyConfirmedRoot(
       final FastConfirmationInput input,
       final FastConfirmationStore rotatedStore,
-      final Bytes32 computedConfirmedRoot) {
-    final ReadOnlyForkChoiceStrategy forkChoiceStrategy =
-        rotatedStore.store().getForkChoiceStrategy();
-    final Bytes32 confirmedRoot =
-        restoreConfirmedRootAfterRestart(input, forkChoiceStrategy, computedConfirmedRoot);
+      final Bytes32 confirmedRoot) {
+    // on_fast_confirmation: fcr_store.confirmed_root = get_latest_confirmed(fcr_store)
     fastConfirmationStore.set(rotatedStore.withConfirmedRoot(confirmedRoot));
 
-    final UInt64 confirmedSlot = forkChoiceStrategy.blockSlot(confirmedRoot).orElse(UInt64.ZERO);
-    latestConfirmedSlot.set(confirmedSlot.intValue());
-    recordReorgOutcome(
-        input.slot(), forkChoiceStrategy, rotatedStore.confirmedRoot(), confirmedRoot);
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy =
+        rotatedStore.store().getForkChoiceStrategy();
+    final Bytes32 reportedRoot =
+        restoreConfirmedRootAfterRestart(input, forkChoiceStrategy, confirmedRoot);
+    final Bytes32 previousReportedRoot = restartResilientConfirmedRoot.getAndSet(reportedRoot);
 
+    final UInt64 reportedSlot = forkChoiceStrategy.blockSlot(reportedRoot).orElse(UInt64.ZERO);
+    latestConfirmedSlot.set(reportedSlot.intValue());
+    recordReorgOutcome(input.slot(), forkChoiceStrategy, previousReportedRoot, reportedRoot);
+
+    logConfirmedRoot(input, confirmedRoot, reportedRoot, reportedSlot);
+
+    // The fast_confirmation event is emitted every time the algorithm runs, regardless of whether
+    // the confirmed block changed (per the Beacon API event stream spec).
+    fastConfirmationEventChannel.onFastConfirmation(reportedRoot, reportedSlot, input.slot());
+  }
+
+  /** Logs the per-slot update with the reported root, marking a warm-up or a restored root. */
+  private void logConfirmedRoot(
+      final FastConfirmationInput input,
+      final Bytes32 confirmedRoot,
+      final Bytes32 reportedRoot,
+      final UInt64 reportedSlot) {
+    final String logSuffix =
+        reportedRoot.equals(confirmedRoot) ? warmupLogSuffix() : " (restored from before restart)";
     LOG.info(
         "Fast confirmation update for slot {}: head={}, confirmed_root={}, confirmed_slot={}{}",
         input.slot(),
         input.headRoot(),
-        confirmedRoot,
-        confirmedSlot,
-        confirmedRoot.equals(computedConfirmedRoot)
-            ? (warmedUp.get() ? "" : " (warmup stage)")
-            : " (restored from before restart)");
+        reportedRoot,
+        reportedSlot,
+        logSuffix);
+  }
 
-    // The fast_confirmation event is emitted every time the algorithm runs, regardless of whether
-    // the confirmed block changed (per the Beacon API event stream spec).
-    fastConfirmationEventChannel.onFastConfirmation(confirmedRoot, confirmedSlot, input.slot());
+  /** Marks the per-slot log line while the rule is still warming up. */
+  private String warmupLogSuffix() {
+    return warmedUp.get() ? "" : " (warmup stage)";
   }
 
   /**
-   * Restores the confirmed root from before a restart: while the node is in sync, every update sets
-   * {@code fcr_store.confirmed_root} to {@code get_restart_resilient_confirmed_root(fcr_store)}
-   * once {@code on_fast_confirmation} has produced {@code computedConfirmedRoot}.
+   * Returns the confirmed root to report for this update: while the node is in sync, {@code
+   * get_restart_resilient_confirmed_root(fcr_store)} once {@code on_fast_confirmation} has produced
+   * {@code confirmedRoot} ({@code fcr_store.confirmed_root}); otherwise {@code confirmedRoot}
+   * itself. {@code fcr_store.confirmed_root} is left as the rule computed it (see {@link
+   * #restartResilientConfirmedRoot}).
    *
-   * <p>Applied on every update rather than once, as the rule, still warming up from the finalized
-   * checkpoint, would otherwise drop the restored root again (on the next update when its source
-   * states cannot be loaded yet, at the latest at the next epoch start). This keeps it until {@code
-   * confirmed_root} catches up with it, it leaves the canonical chain, or it is old enough to have
-   * been finalized. From then on this is a couple of fork choice lookups, down to one once
-   * finalization prunes it from fork choice.
+   * <p>Evaluated on every update, as the spec does. A restored root is therefore reported until the
+   * rule's own {@code confirmed_root} reaches its slot, it leaves the canonical chain, or it is old
+   * enough to have been finalized, which after a restart covers the rule's warm-up and any fallback
+   * at the following epoch starts. From then on this is a couple of fork choice lookups, down to
+   * one once finalization prunes the restored root from fork choice.
    */
   private Bytes32 restoreConfirmedRootAfterRestart(
       final FastConfirmationInput input,
       final ReadOnlyForkChoiceStrategy forkChoiceStrategy,
-      final Bytes32 computedConfirmedRoot) {
+      final Bytes32 confirmedRoot) {
     if (!inSync.get()) {
-      return computedConfirmedRoot;
+      return confirmedRoot;
     }
     return rootConfirmedBeforeRestart
         .get()
@@ -547,9 +574,9 @@ public class FastConfirmationTracker {
                     input.slot(),
                     input.headRoot(),
                     forkChoiceStrategy,
-                    computedConfirmedRoot,
+                    confirmedRoot,
                     rootBeforeRestart))
-        .orElse(computedConfirmedRoot);
+        .orElse(confirmedRoot);
   }
 
   /**
@@ -770,6 +797,16 @@ public class FastConfirmationTracker {
 
   public Optional<FastConfirmationStore> getFastConfirmationStore() {
     return Optional.ofNullable(fastConfirmationStore.get());
+  }
+
+  /**
+   * The confirmed root to expose: {@code fcr_store.confirmed_root}, or the root confirmed before a
+   * restart while it is being restored (see {@link #restartResilientConfirmedRoot}). Consumers
+   * should read this rather than {@link FastConfirmationStore#confirmedRoot()}, which is the rule's
+   * internal state. Empty when disabled or not yet initialized.
+   */
+  public Optional<Bytes32> getConfirmedRoot() {
+    return Optional.ofNullable(restartResilientConfirmedRoot.get());
   }
 
   private enum ConfirmationOutcomeKind {

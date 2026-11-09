@@ -133,7 +133,6 @@ import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBodySch
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.capella.BeaconBlockBodySchemaCapella;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadHeader;
-import tech.pegasys.teku.spec.datastructures.forkchoice.FastConfirmationStore;
 import tech.pegasys.teku.spec.datastructures.interop.GenesisStateBuilder;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.BlobIdentifier;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
@@ -2609,16 +2608,11 @@ public class BeaconChainController extends Service implements BeaconChainControl
   protected void initForkChoiceStateProvider() {
     LOG.debug("BeaconChainController.initForkChoiceStateProvider()");
     // When fast confirmation is enabled, the FCU safe_block_hash is derived from the confirmed
-    // root (get_safe_execution_block_hash); otherwise the supplier is empty and the safe hash
-    // defaults to the justified block, as before.
+    // root (get_safe_execution_block_hash), including one restored from before a restart; otherwise
+    // the supplier is empty and the safe hash defaults to the justified block, as before.
     forkChoiceStateProvider =
         new ForkChoiceStateProvider(
-            forkChoiceExecutor,
-            recentChainData,
-            () ->
-                fastConfirmationTracker
-                    .getFastConfirmationStore()
-                    .map(FastConfirmationStore::confirmedRoot));
+            forkChoiceExecutor, recentChainData, fastConfirmationTracker::getConfirmedRoot);
   }
 
   protected void initForkChoiceNotifier() {
