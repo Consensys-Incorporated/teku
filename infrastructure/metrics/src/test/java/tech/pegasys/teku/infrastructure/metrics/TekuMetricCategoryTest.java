@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -50,5 +50,18 @@ class TekuMetricCategoryTest {
             VALIDATOR_DUTY);
 
     assertThat(TekuMetricCategory.defaultCategories()).containsAll(expectedDefaultCategories);
+  }
+
+  @Test
+  public void shouldNotEnableExperimentalGossipMetricsByDefault() {
+    assertThat(TekuMetricCategory.defaultCategories())
+        .doesNotContain(TekuMetricCategory.LIBP2P_GOSSIP);
+  }
+
+  @Test
+  public void experimentalGossipCategoryShouldNotShareANameWithLibp2p() {
+    // Besu matches categories by name, so a shared name would make LIBP2P enable this one too.
+    assertThat(TekuMetricCategory.LIBP2P_GOSSIP.getName())
+        .isNotEqualTo(TekuMetricCategory.LIBP2P.getName());
   }
 }

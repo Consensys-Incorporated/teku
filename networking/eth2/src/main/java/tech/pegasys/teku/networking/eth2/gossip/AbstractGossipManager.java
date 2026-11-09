@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -28,7 +28,9 @@ import tech.pegasys.teku.networking.eth2.gossip.encoding.GossipEncoding;
 import tech.pegasys.teku.networking.eth2.gossip.topics.GossipTopicName;
 import tech.pegasys.teku.networking.eth2.gossip.topics.OperationMilestoneValidator;
 import tech.pegasys.teku.networking.eth2.gossip.topics.OperationProcessor;
+import tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers.DecodedPrefixFilter;
 import tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers.Eth2TopicHandler;
+import tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers.GossipInFlightLimiter;
 import tech.pegasys.teku.networking.p2p.gossip.GossipNetwork;
 import tech.pegasys.teku.networking.p2p.gossip.TopicChannel;
 import tech.pegasys.teku.spec.config.NetworkingSpecConfig;
@@ -63,6 +65,42 @@ public abstract class AbstractGossipManager<T extends SszData> implements Gossip
       final NetworkingSpecConfig networkingConfig,
       final GossipFailureLogger gossipFailureLogger,
       final DebugDataDumper debugDataDumper) {
+    this(
+        recentChainData,
+        topicName,
+        asyncRunner,
+        gossipNetwork,
+        gossipEncoding,
+        forkInfo,
+        forkDigest,
+        processor,
+        gossipType,
+        getSlotForMessage,
+        getEpochForMessage,
+        networkingConfig,
+        gossipFailureLogger,
+        debugDataDumper,
+        DecodedPrefixFilter.ACCEPT_ALL,
+        GossipInFlightLimiter.UNLIMITED);
+  }
+
+  protected AbstractGossipManager(
+      final RecentChainData recentChainData,
+      final GossipTopicName topicName,
+      final AsyncRunner asyncRunner,
+      final GossipNetwork gossipNetwork,
+      final GossipEncoding gossipEncoding,
+      final ForkInfo forkInfo,
+      final Bytes4 forkDigest,
+      final OperationProcessor<T> processor,
+      final SszSchema<T> gossipType,
+      final Function<T, Optional<UInt64>> getSlotForMessage,
+      final Function<T, UInt64> getEpochForMessage,
+      final NetworkingSpecConfig networkingConfig,
+      final GossipFailureLogger gossipFailureLogger,
+      final DebugDataDumper debugDataDumper,
+      final DecodedPrefixFilter decodedPrefixFilter,
+      final GossipInFlightLimiter inFlightLimiter) {
     this.gossipNetwork = gossipNetwork;
     this.topicHandler =
         new Eth2TopicHandler<>(
@@ -71,12 +109,14 @@ public abstract class AbstractGossipManager<T extends SszData> implements Gossip
             processor,
             gossipEncoding,
             forkDigest,
-            topicName,
+            topicName.toString(),
             new OperationMilestoneValidator<>(
                 recentChainData.getSpec(), forkInfo.getFork(), getEpochForMessage),
             gossipType,
             networkingConfig,
-            debugDataDumper);
+            debugDataDumper,
+            decodedPrefixFilter,
+            inFlightLimiter);
     this.gossipEncoding = gossipEncoding;
     this.gossipFailureLogger = gossipFailureLogger;
     this.getSlotForMessage = getSlotForMessage;

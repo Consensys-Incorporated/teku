@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import org.opentest4j.TestAbortedException;
+import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.reference.BlsSetting;
@@ -38,6 +39,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestat
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessageSchema;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
+import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.statetransition.payloadattestation.PayloadAttestationMessageGossipValidator;
 import tech.pegasys.teku.statetransition.payloadattestation.ValidatablePayloadAttestationMessage;
@@ -120,7 +122,7 @@ public class GossipPayloadAttestationMessageTestExecutor implements TestExecutor
     // even when that time is earlier than the store's time (which only moves forward). This is
     // necessary for disparity-boundary tests where blocks must be imported after their slot starts
     // but messages are validated at a time before the slot starts.
-    final UInt64[] validationTimeMs = {UInt64.valueOf(metaData.getCurrentTimeMs())};
+    final UInt64[] validationTimeMs = {UInt64.ZERO};
     final GossipValidationHelper gossipValidationHelper =
         new GossipValidationHelper(spec, ctx.recentChainData, ctx.metricsSystem) {
           @Override
@@ -138,7 +140,13 @@ public class GossipPayloadAttestationMessageTestExecutor implements TestExecutor
             .getPayloadAttestationMessageSchema();
     final PayloadAttestationMessageGossipValidator validator =
         new PayloadAttestationMessageGossipValidator(
-            spec, gossipValidationHelper, invalidBlockRoots);
+            spec,
+            gossipValidationHelper,
+            AsyncBLSSignatureVerifier.wrap(
+                signatureVerificationDisabled
+                    ? BLSSignatureVerifier.NOOP
+                    : BLSSignatureVerifier.SIMPLE),
+            invalidBlockRoots);
 
     for (final GossipPayloadAttestationMessageMetaData.Message message : metaData.getMessages()) {
       validationTimeMs[0] = UInt64.valueOf(message.getCurrentTimeMs());
@@ -166,9 +174,6 @@ public class GossipPayloadAttestationMessageTestExecutor implements TestExecutor
     @JsonProperty(value = "messages", required = true)
     private List<Message> messages;
 
-    @JsonProperty(value = "current_time_ms", required = true)
-    private long currentTimeMs;
-
     @JsonProperty(value = "bls_setting", defaultValue = "0")
     private int blsSetting;
 
@@ -178,10 +183,6 @@ public class GossipPayloadAttestationMessageTestExecutor implements TestExecutor
 
     public List<Message> getMessages() {
       return messages;
-    }
-
-    public long getCurrentTimeMs() {
-      return currentTimeMs;
     }
 
     public BlsSetting getBlsSetting() {

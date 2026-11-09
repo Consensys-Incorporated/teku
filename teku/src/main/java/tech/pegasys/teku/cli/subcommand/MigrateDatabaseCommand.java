@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -194,7 +194,7 @@ public class MigrateDatabaseCommand implements Runnable {
 
   private boolean confirmYes(final String question) {
     SUB_COMMAND_LOG.display(question);
-    Scanner scanner = new Scanner(System.in, Charset.defaultCharset().name());
+    final Scanner scanner = new Scanner(System.in, Charset.defaultCharset());
     final String confirmation = scanner.next();
     return confirmation.equalsIgnoreCase("yes");
   }

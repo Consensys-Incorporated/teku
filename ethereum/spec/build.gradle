@@ -7,6 +7,7 @@ dependencies {
 	api project(':infrastructure:ssz')
 	api project(':infrastructure:kzg')
 
+	implementation 'com.google.errorprone:error_prone_annotations'
 	implementation 'com.fasterxml.jackson.core:jackson-databind'
 	implementation 'org.yaml:snakeyaml'
 	implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml'
@@ -43,6 +44,7 @@ dependencies {
 	testFixturesImplementation 'org.apache.logging.log4j:log4j-api'
 	testFixturesImplementation 'io.consensys.tuweni:tuweni-units'
 	testFixturesImplementation 'io.consensys.tuweni:tuweni-ssz'
+	testFixturesImplementation 'io.consensys.protocols:jc-kzg-4844'
 	testFixturesImplementation 'org.hyperledger.besu.internal:besu-ethereum-core'
 	testFixturesImplementation 'org.hyperledger.besu.internal:besu-ethereum-rlp'
 	testFixturesImplementation 'org.hyperledger.besu.internal:besu-config'
@@ -66,6 +68,7 @@ dependencies {
 	testFixturesImplementation testFixtures(project(':infrastructure:kzg'))
 	testFixturesImplementation testFixtures(project(':infrastructure:metrics'))
 
+	testImplementation 'io.consensys.protocols:jc-kzg-4844'
 	testImplementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml'
 	testImplementation 'commons-io:commons-io'
 	testImplementation 'org.assertj:assertj-core'

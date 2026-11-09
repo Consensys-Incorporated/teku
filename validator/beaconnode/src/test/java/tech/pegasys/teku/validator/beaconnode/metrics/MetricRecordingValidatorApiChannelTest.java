@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -22,6 +22,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
@@ -311,6 +312,11 @@ class MetricRecordingValidatorApiChannelTest {
             ValidatorApiChannel::getGenesisData,
             BeaconNodeRequestLabels.GET_GENESIS_METHOD,
             new GenesisData(dataStructureUtil.randomUInt64(), Bytes32.random())),
+        requestDataTest(
+            "getValidatorIndices",
+            channel -> channel.getValidatorIndices(List.of()),
+            BeaconNodeRequestLabels.GET_VALIDATOR_INDICES_METHOD,
+            Map.of()),
         requestDataTest(
             "createUnsignedBlock",
             channel ->

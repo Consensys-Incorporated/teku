@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -15,9 +15,9 @@ package tech.pegasys.teku.beacon.sync.forward.multipeer;
 
 import static com.google.common.base.Preconditions.checkState;
 import static java.util.stream.Collectors.joining;
-import static tech.pegasys.teku.beacon.sync.forward.multipeer.batches.SyncSourceBatch.isParentBlockFull;
 import static tech.pegasys.teku.infrastructure.async.ExceptionHandlers.exceptionHandlingConsumer;
 import static tech.pegasys.teku.infrastructure.async.ExceptionHandlers.exceptionHandlingRunnable;
+import static tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas.isParentBlockFull;
 
 import com.google.common.annotations.VisibleForTesting;
 import java.time.Duration;
@@ -547,6 +547,16 @@ public class BatchSync implements Sync {
     return lastBlock.getRoot().equals(firstBlock.getParentRoot());
   }
 
+  /**
+   * Resolves the execution payload of the last block of {@code firstBatch} against the first block
+   * of {@code secondBatch}, which a batch cannot do on its own. When that block built on the
+   * payload, the envelope is required; it may have been kept aside when an earlier first block of
+   * {@code secondBatch} did not build on it, as happens when the batch is re-downloaded on another
+   * fork, so it is restored rather than reported missing. When that block did not build on the
+   * payload, the envelope is kept aside so it is neither imported nor served on to other peers.
+   *
+   * @return whether a required envelope is missing
+   */
   private boolean isRequiredBoundaryExecutionPayloadMissing(
       final Batch firstBatch, final Batch secondBatch) {
     return firstBatch
@@ -555,13 +565,15 @@ public class BatchSync implements Sync {
             lastBlock ->
                 secondBatch
                     .getFirstBlock()
-                    .filter(
-                        firstBlock ->
-                            isParentBlockFull(lastBlock, firstBlock)
-                                && !firstBatch
-                                    .getExecutionPayloadsByBlockRoot()
-                                    .containsKey(lastBlock.getRoot())))
-        .isPresent();
+                    .map(
+                        firstBlock -> {
+                          if (isParentBlockFull(lastBlock, firstBlock)) {
+                            return !firstBatch.restoreExecutionPayload(lastBlock.getRoot());
+                          }
+                          firstBatch.dropExecutionPayload(lastBlock.getRoot());
+                          return false;
+                        }))
+        .orElse(false);
   }
 
   private void progressSync() {

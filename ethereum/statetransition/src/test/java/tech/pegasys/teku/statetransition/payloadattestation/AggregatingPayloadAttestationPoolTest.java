@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -26,6 +26,11 @@ import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.bls.BLS;
+import tech.pegasys.teku.bls.BLSKeyPair;
+import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.bls.BLSTestUtil;
+import tech.pegasys.teku.bls.BLSTestUtil.NegatedKeyPairs;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.SafeFutureAssert;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
@@ -48,6 +53,8 @@ import tech.pegasys.teku.statetransition.util.PoolFactory;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 
 class AggregatingPayloadAttestationPoolTest {
+
+  private static final NegatedKeyPairs KEYS = BLSTestUtil.negatedKeyPairs(1);
 
   private final Spec spec = TestSpecFactory.createMainnetGloas();
 
@@ -282,6 +289,60 @@ class AggregatingPayloadAttestationPoolTest {
     assertThat(getPoolSizeFromMetric()).isZero();
   }
 
+  @Test
+  public void doesNotIncludePayloadAttestationWithInfinitySignatureInBlock() {
+    final UInt64 blockSlot = dataStructureUtil.randomSlot();
+    final BeaconState state =
+        dataStructureUtil.randomBeaconStateWithActiveValidatorsAndInitialisedPtcWindow(
+            8192, blockSlot);
+    final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
+    final UInt64 slot = blockSlot.minusMinZero(1);
+    final List<Integer> voters = selectPtcMembersAppearingOnce(spec.getPtc(state, slot), 3);
+
+    final PayloadAttestationData payloadPresentData =
+        createPayloadAttestationData(parentRoot, slot, true);
+    final PayloadAttestationData payloadAbsentData =
+        createPayloadAttestationData(parentRoot, slot, false);
+
+    // the larger group aggregates to the point at infinity
+    addSignedPayloadAttestationMessage(voters.get(0), payloadPresentData, KEYS.p());
+    addSignedPayloadAttestationMessage(voters.get(1), payloadPresentData, KEYS.minusP());
+    // the smaller group is still valid
+    addSignedPayloadAttestationMessage(voters.get(2), payloadAbsentData, KEYS.q());
+
+    final SszList<PayloadAttestation> payloadAttestations =
+        payloadAttestationPool.getPayloadAttestationsForBlock(state, parentRoot);
+
+    assertThat(payloadAttestations).hasSize(1);
+    assertThat(payloadAttestations.get(0).getData()).isEqualTo(payloadAbsentData);
+    assertThat(payloadAttestationPool.getPayloadAttestations(state))
+        .extracting(PayloadAttestation::getData)
+        .containsExactly(payloadAbsentData);
+  }
+
+  private List<Integer> selectPtcMembersAppearingOnce(final IntList ptc, final int count) {
+    // a validator appearing multiple times in the PTC has its signature aggregated multiple times
+    final List<Integer> members =
+        ptc.intStream()
+            .filter(
+                validatorIndex -> ptc.indexOf(validatorIndex) == ptc.lastIndexOf(validatorIndex))
+            .limit(count)
+            .boxed()
+            .toList();
+    assertThat(members).hasSize(count);
+    return members;
+  }
+
+  private void addSignedPayloadAttestationMessage(
+      final int validatorIndex, final PayloadAttestationData data, final BLSKeyPair keyPair) {
+    // the pool never verifies signatures; any message shared by all participants will do
+    final BLSSignature signature = BLS.sign(keyPair.getSecretKey(), data.hashTreeRoot());
+    SafeFutureAssert.safeJoin(
+        payloadAttestationPool.addRemote(
+            createPayloadAttestationMessage(UInt64.valueOf(validatorIndex), data, signature),
+            Optional.empty()));
+  }
+
   private int getPoolSizeFromMetric() {
     return (int)
         metricsSystem
@@ -298,8 +359,16 @@ class AggregatingPayloadAttestationPoolTest {
 
   private PayloadAttestationMessage createPayloadAttestationMessage(
       final UInt64 validatorIndex, final PayloadAttestationData data) {
+    return createPayloadAttestationMessage(
+        validatorIndex, data, dataStructureUtil.randomSignature());
+  }
+
+  private PayloadAttestationMessage createPayloadAttestationMessage(
+      final UInt64 validatorIndex,
+      final PayloadAttestationData data,
+      final BLSSignature signature) {
     return schemaDefinitionsGloas
         .getPayloadAttestationMessageSchema()
-        .create(validatorIndex, data, dataStructureUtil.randomSignature());
+        .create(validatorIndex, data, signature);
   }
 }

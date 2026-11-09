@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -13,8 +13,10 @@
 
 package tech.pegasys.teku.bls.impl.blst;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.List;
 import org.apache.tuweni.bytes.Bytes48;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -60,5 +62,49 @@ public class BlstPublicKeyTest extends AbstractPublicKeyTest {
               publicKey.forceValidation();
             })
         .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void aggregateOfSingleValidKeyReturnsTheKeyItself() {
+    final BlstPublicKey publicKey = (BlstPublicKey) bls.generateKeyPair(42).getPublicKey();
+
+    assertThat(BlstPublicKey.aggregate(List.of(publicKey))).isSameAs(publicKey);
+  }
+
+  @Test
+  void aggregateOfSingleInfinityKeyIsInfinity() {
+    final BlstPublicKey infinity =
+        BlstPublicKey.fromBytes(
+            Bytes48.fromHexString(
+                "0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"));
+
+    final BlstPublicKey aggregate = BlstPublicKey.aggregate(List.of(infinity));
+
+    assertThat(aggregate.isInfinity()).isTrue();
+    assertThat(aggregate.isValid()).isFalse();
+  }
+
+  @Test
+  void aggregateOfSingleNotInGroupKeyIsInfinity() {
+    final BlstPublicKey notInGroup =
+        BlstPublicKey.fromBytes(
+            Bytes48.fromHexString(
+                "0x9378a6e3984e96d2cd50450c76ca14732f1300efa04aecdb805b22e6d6926a85ef409e8f3acf494a1481090bf32ce3bd"));
+
+    final BlstPublicKey aggregate = BlstPublicKey.aggregate(List.of(notInGroup));
+
+    assertThat(aggregate.isInfinity()).isTrue();
+    assertThat(aggregate.isValid()).isFalse();
+  }
+
+  @Test
+  void aggregateOfTwoKeysMatchesAddingThem() {
+    final BlstPublicKey key1 = (BlstPublicKey) bls.generateKeyPair(1).getPublicKey();
+    final BlstPublicKey key2 = (BlstPublicKey) bls.generateKeyPair(2).getPublicKey();
+
+    final BlstPublicKey aggregate = BlstPublicKey.aggregate(List.of(key1, key2));
+
+    assertThat(aggregate).isNotSameAs(key1).isNotSameAs(key2);
+    assertThat(aggregate).isEqualTo(bls.aggregatePublicKeys(List.of(key2, key1)));
   }
 }

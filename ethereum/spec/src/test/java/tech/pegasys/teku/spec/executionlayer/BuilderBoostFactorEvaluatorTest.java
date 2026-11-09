@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -51,6 +51,21 @@ class BuilderBoostFactorEvaluatorTest {
         Arguments.of(UInt256.MAX_VALUE, UInt256.ZERO, BUILDER_BOOST_FACTOR_PREFER_BUILDER, false),
         Arguments.of(
             UInt256.valueOf(100), UInt256.valueOf(100), BUILDER_BOOST_FACTOR_MAX_PROFIT, true));
+  }
+
+  @Test
+  void computesBoostedValue() {
+    final BigInteger value = BigInteger.valueOf(1000);
+    assertThat(BuilderBoostFactorEvaluator.computeBoostedValue(value, UInt64.valueOf(90)))
+        .isEqualTo(BigInteger.valueOf(90_000));
+    assertThat(
+            BuilderBoostFactorEvaluator.computeBoostedValue(
+                value, BUILDER_BOOST_FACTOR_PREFER_EXECUTION))
+        .isZero();
+    assertThat(
+            BuilderBoostFactorEvaluator.computeBoostedValue(
+                value, BUILDER_BOOST_FACTOR_PREFER_BUILDER))
+        .isEqualTo(value.multiply(BUILDER_BOOST_FACTOR_PREFER_BUILDER.bigIntegerValue()));
   }
 
   @Test

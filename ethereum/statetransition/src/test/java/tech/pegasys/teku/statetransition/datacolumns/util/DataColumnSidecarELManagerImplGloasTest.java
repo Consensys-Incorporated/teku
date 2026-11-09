@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -36,6 +36,7 @@ import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.execution.BlobAndCellProofs;
+import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.blobs.RemoteOrigin;
 
 public class DataColumnSidecarELManagerImplGloasTest
@@ -102,6 +103,24 @@ public class DataColumnSidecarELManagerImplGloasTest
     // the short circuit in fetchMissingBlobsFromLocalEL should fire: no EL call needed
     asyncRunner.executeQueuedActions();
     verifyNoInteractions(executionLayer);
+  }
+
+  @Test
+  public void onNewDataColumnSidecar_ignoresCommitmentsCarriedBySidecar() {
+    final DataColumnSidecar fuluSchemaSidecar =
+        new DataStructureUtil(TestSpecFactory.createMinimalFulu())
+            .randomDataColumnSidecar(
+                block.asHeader(),
+                custodyGroupCountManager.getSamplingColumnIndices().iterator().next());
+
+    dataColumnSidecarELManager.onSlot(currentSlot);
+    dataColumnSidecarELManager.onNewDataColumnSidecar(fuluSchemaSidecar, RemoteOrigin.GOSSIP);
+
+    final DataColumnSidecarELManagerImpl.RecoveryTask recoveryTask =
+        ((DataColumnSidecarELManagerImpl) dataColumnSidecarELManager)
+            .getRecoveryTask(fuluSchemaSidecar.getSlotAndBlockRoot());
+    assertThat(recoveryTask).isNotNull();
+    assertThat(recoveryTask.sszKzgCommitmentsFuture()).isNotDone();
   }
 
   @Test

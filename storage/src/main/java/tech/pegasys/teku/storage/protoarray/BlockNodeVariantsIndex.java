@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -89,7 +89,8 @@ public class BlockNodeVariantsIndex {
 
   void putBaseNode(
       final Bytes32 blockRoot, final UInt64 slot, final ForkChoiceNode baseNodeIdentity) {
-    variantsByRoot.put(
+    // Duplicate block imports must preserve any already registered payload variants.
+    variantsByRoot.putIfAbsent(
         blockRoot,
         new BlockNodeVariants(slot, baseNodeIdentity, Optional.empty(), Optional.empty()));
   }

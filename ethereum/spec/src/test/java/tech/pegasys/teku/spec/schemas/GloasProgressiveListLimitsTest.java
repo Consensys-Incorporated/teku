@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -22,15 +22,19 @@ import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszContainerSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszFieldName;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszProgressiveListSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszByteListSchema;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszMaxLengthExceededException;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecarSchema;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.common.BlockBodyFields;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadFields;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadSchema;
 import tech.pegasys.teku.spec.datastructures.execution.Transaction;
+import tech.pegasys.teku.spec.datastructures.operations.Deposit;
+import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 /**
  * Every progressive list that appears in a network message declares the limit the spec assigns to
@@ -113,6 +117,29 @@ class GloasProgressiveListLimitsTest {
     final ExecutionPayloadSchema<?> payload = schemaDefinitions.getExecutionPayloadSchema();
     return (SszListSchema<Transaction, ?>)
         payload.getChildSchema(payload.getFieldIndex(ExecutionPayloadFields.TRANSACTIONS));
+  }
+
+  @Test
+  void blockBodyDepositsAreRejectedOnDeserialization() {
+    // a gossiped block carrying deposits must be rejected before any deposit is materialized
+    final SszListSchema<?, ?> deposits =
+        (SszListSchema<?, ?>)
+            schemaDefinitions
+                .getBeaconBlockBodySchema()
+                .getChildSchema(
+                    schemaDefinitions
+                        .getBeaconBlockBodySchema()
+                        .getFieldIndex(BlockBodyFields.DEPOSITS));
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
+    final Bytes oneDeposit =
+        SszProgressiveListSchema.create(Deposit.SSZ_SCHEMA)
+            .createFromElements(List.of(dataStructureUtil.randomDeposit()))
+            .sszSerialize();
+
+    assertThatThrownBy(() -> deposits.sszDeserialize(oneDeposit))
+        .isInstanceOf(SszMaxLengthExceededException.class)
+        .hasMessage("List length 1 exceeds max length 0");
+    assertThat(deposits.sszDeserialize(Bytes.EMPTY).size()).isZero();
   }
 
   @Test

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -22,13 +22,21 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.bls.BLS;
+import tech.pegasys.teku.bls.BLSKeyPair;
 import tech.pegasys.teku.bls.BLSPublicKey;
+import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.bls.BLSTestUtil;
+import tech.pegasys.teku.bls.BLSTestUtil.NegatedKeyPairs;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.config.SpecConfigAltair;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.altair.SyncAggregate;
+import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeContribution;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.altair.BeaconStateAltair;
@@ -54,6 +62,58 @@ class SyncCommitteeUtilTest {
 
   private final SyncCommitteeUtil syncCommitteeUtil =
       spec.getSyncCommitteeUtilRequired(UInt64.ZERO);
+
+  private static final NegatedKeyPairs KEYS = BLSTestUtil.negatedKeyPairs(1);
+
+  private final UInt64 contributionSlot = UInt64.valueOf(9);
+  private final Bytes32 contributionBlockRoot = dataStructureUtil.randomBytes32();
+
+  @Test
+  void createSyncAggregate_shouldCreateEmptyAggregateWhenNoContributions() {
+    final SyncAggregate syncAggregate = syncCommitteeUtil.createSyncAggregate(List.of());
+
+    assertThat(syncAggregate).isEqualTo(dataStructureUtil.emptySyncAggregate());
+  }
+
+  @Test
+  void createSyncAggregate_shouldCreateEmptyAggregateWhenSignatureIsInfinity() {
+    final List<SyncCommitteeContribution> contributions =
+        List.of(createContribution(0, 1, KEYS.p()), createContribution(1, 2, KEYS.minusP()));
+
+    assertThat(syncCommitteeUtil.createSyncAggregate(contributions))
+        .isEqualTo(dataStructureUtil.emptySyncAggregate());
+  }
+
+  @Test
+  void createSyncAggregate_shouldAggregateWhenSignatureIsNotInfinity() {
+    final List<SyncCommitteeContribution> contributions =
+        List.of(
+            createContribution(0, 1, KEYS.p()),
+            createContribution(1, 2, KEYS.minusP()),
+            createContribution(2, 3, KEYS.q()));
+
+    final SyncAggregate syncAggregate = syncCommitteeUtil.createSyncAggregate(contributions);
+
+    assertThat(syncAggregate.getSyncCommitteeBits().getAllSetBits().toIntArray())
+        .containsExactly(1, subcommitteeSize + 2, 2 * subcommitteeSize + 3);
+    // P + (-P) + Q == Q
+    assertThat(syncAggregate.getSyncCommitteeSignature().getSignature()).isEqualTo(sign(KEYS.q()));
+  }
+
+  private SyncCommitteeContribution createContribution(
+      final int subcommitteeIndex, final int participationBit, final BLSKeyPair keyPair) {
+    return syncCommitteeUtil.createSyncCommitteeContribution(
+        contributionSlot,
+        contributionBlockRoot,
+        UInt64.valueOf(subcommitteeIndex),
+        IntSet.of(participationBit),
+        sign(keyPair));
+  }
+
+  private BLSSignature sign(final BLSKeyPair keyPair) {
+    // signatures are never verified; any message shared by all participants will do
+    return BLS.sign(keyPair.getSecretKey(), contributionBlockRoot);
+  }
 
   @Test
   void getSyncSubCommittees_shouldCalculateSubcommitteeAssignments() {

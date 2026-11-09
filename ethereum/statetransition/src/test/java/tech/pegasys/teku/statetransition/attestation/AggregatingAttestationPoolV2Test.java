@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -29,6 +29,11 @@ import java.util.Optional;
 import java.util.function.LongSupplier;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.junit.jupiter.api.TestTemplate;
+import tech.pegasys.teku.bls.BLS;
+import tech.pegasys.teku.bls.BLSKeyPair;
+import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.bls.BLSTestUtil;
+import tech.pegasys.teku.bls.BLSTestUtil.NegatedKeyPairs;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecContext;
@@ -43,6 +48,8 @@ import tech.pegasys.teku.storage.client.RecentChainData;
 
 @TestSpecContext(milestone = {PHASE0, ELECTRA})
 public class AggregatingAttestationPoolV2Test extends AggregatingAttestationPoolTest {
+
+  private static final NegatedKeyPairs KEYS = BLSTestUtil.negatedKeyPairs(1);
 
   @Override
   AggregatingAttestationPool instantiatePool(
@@ -292,6 +299,47 @@ public class AggregatingAttestationPoolV2Test extends AggregatingAttestationPool
     final BeaconState stateAtBlockSlot = dataStructureUtil.randomBeaconState();
 
     assertThat(aggregatingPool.getAttestationsForBlock(stateAtBlockSlot, forkChecker)).isEmpty();
+  }
+
+  @TestTemplate
+  public void getAttestationsForBlock_shouldNotIncludeAggregateWithInfinitySignature() {
+    final AttestationData attestationData = createAttestationData(ZERO);
+    addAttestationFromValidators(attestationData, sign(KEYS.p(), attestationData), 1, 2);
+    addAttestationFromValidators(attestationData, sign(KEYS.minusP(), attestationData), 3, 4);
+
+    final BeaconState stateAtBlockSlot = dataStructureUtil.randomBeaconState();
+
+    assertThat(aggregatingPool.getAttestationsForBlock(stateAtBlockSlot, forkChecker)).isEmpty();
+  }
+
+  @TestTemplate
+  public void getAttestationsForBlock_shouldNotFillUpWithSingleAttestationsWithInfinitySignature() {
+    assumeThat(specMilestone).isGreaterThanOrEqualTo(ELECTRA);
+    final AttestationData attestationData = createAttestationData(ZERO);
+    final Attestation attestationP =
+        addAttestationFromValidators(attestationData, sign(KEYS.p(), attestationData), 1, 2);
+    addAttestationFromValidators(attestationData, sign(KEYS.minusP(), attestationData), 3);
+
+    final BeaconState stateAtBlockSlot = dataStructureUtil.randomBeaconState();
+
+    assertThat(aggregatingPool.getAttestationsForBlock(stateAtBlockSlot, forkChecker))
+        .containsExactly(attestationP);
+  }
+
+  @TestTemplate
+  public void createAggregateFor_shouldNotCreateAggregateWithInfinitySignature() {
+    assumeThat(specMilestone).isGreaterThanOrEqualTo(ELECTRA);
+    final AttestationData attestationData = createAttestationData();
+    addAttestationFromValidators(attestationData, sign(KEYS.p(), attestationData), 1);
+    addAttestationFromValidators(attestationData, sign(KEYS.minusP(), attestationData), 2);
+
+    assertThat(aggregatingPool.createAggregateFor(attestationData.hashTreeRoot(), committeeIndex))
+        .isEmpty();
+  }
+
+  private BLSSignature sign(final BLSKeyPair keyPair, final AttestationData data) {
+    // the pool never verifies signatures; any message shared by all participants will do
+    return BLS.sign(keyPair.getSecretKey(), data.hashTreeRoot());
   }
 
   private PooledAttestationWithRewardInfo convertToPooledAttestationWithRewardInfo(

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -444,8 +444,9 @@ public class ExecutionBuilderModule {
     return latestBuilderAvailability.get();
   }
 
-  void updateBuilderAvailability() {
-    if (builderClient.isEmpty()) {
+  void updateBuilderAvailability(final UInt64 slot) {
+    if (builderClient.isEmpty()
+        || spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS)) {
       return;
     }
     builderClient

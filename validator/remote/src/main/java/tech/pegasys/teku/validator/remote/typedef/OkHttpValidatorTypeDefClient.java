@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -352,14 +352,14 @@ public class OkHttpValidatorTypeDefClient extends OkHttpValidatorMinimalTypeDefC
   public List<SubmitDataError> sendPayloadAttestationMessages(
       final List<PayloadAttestationMessage> payloadAttestationMessages) {
     final SendPayloadAttestationMessagesRequest sendPayloadAttestationMessagesRequest =
-        new SendPayloadAttestationMessagesRequest(getBaseEndpoint(), getOkHttpClient());
+        new SendPayloadAttestationMessagesRequest(spec, getBaseEndpoint(), getOkHttpClient());
     return sendPayloadAttestationMessagesRequest.submit(payloadAttestationMessages);
   }
 
   public List<SubmitDataError> sendSignedProposerPreferences(
       final List<SignedProposerPreferences> signedProposerPreferences) {
     final SendSignedProposerPreferencesRequest sendSignedProposerPreferencesRequest =
-        new SendSignedProposerPreferencesRequest(getBaseEndpoint(), getOkHttpClient());
+        new SendSignedProposerPreferencesRequest(spec, getBaseEndpoint(), getOkHttpClient());
     return sendSignedProposerPreferencesRequest.submit(signedProposerPreferences);
   }
 

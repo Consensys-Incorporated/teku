@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -197,6 +197,63 @@ class ForkChoiceUtilTest {
   }
 
   @Test
+  void getAncestorNodes_shouldGetSequenceOfNodesOnChain() {
+    chainBuilder.generateBlocksUpToSlot(10);
+
+    final NavigableMap<UInt64, ForkChoiceNode> nodesBySlot =
+        forkChoiceUtil.getAncestorNodes(
+            forkChoiceStrategy,
+            ForkChoiceNode.createBase(chainBuilder.getChainHead().orElseThrow().getRoot()),
+            UInt64.ONE,
+            UInt64.valueOf(8));
+
+    assertThat(nodesBySlot).containsExactlyEntriesOf(getBaseNodesForBlocks(1, 2, 3, 4, 5, 6, 7, 8));
+  }
+
+  @Test
+  void getAncestorNodes_shouldNotIncludeEntryForEmptySlots() {
+    chainBuilder.generateBlockAtSlot(3);
+    chainBuilder.generateBlockAtSlot(5);
+
+    final NavigableMap<UInt64, ForkChoiceNode> nodesBySlot =
+        forkChoiceUtil.getAncestorNodes(
+            forkChoiceStrategy,
+            ForkChoiceNode.createBase(chainBuilder.getChainHead().orElseThrow().getRoot()),
+            UInt64.ZERO,
+            UInt64.valueOf(10));
+
+    assertThat(nodesBySlot).containsExactlyEntriesOf(getBaseNodesForBlocks(0, 3, 5));
+  }
+
+  @Test
+  void getAncestorNodes_shouldReturnEmptyWhenCountIsZero() {
+    chainBuilder.generateBlocksUpToSlot(5);
+
+    final NavigableMap<UInt64, ForkChoiceNode> nodesBySlot =
+        forkChoiceUtil.getAncestorNodes(
+            forkChoiceStrategy,
+            ForkChoiceNode.createBase(chainBuilder.getChainHead().orElseThrow().getRoot()),
+            UInt64.ZERO,
+            UInt64.ZERO);
+
+    assertThat(nodesBySlot).isEmpty();
+  }
+
+  @Test
+  void getAncestorNodes_shouldReturnEmptyWhenStartNodeIsUnknown() {
+    chainBuilder.generateBlocksUpToSlot(5);
+
+    final NavigableMap<UInt64, ForkChoiceNode> nodesBySlot =
+        forkChoiceUtil.getAncestorNodes(
+            forkChoiceStrategy,
+            ForkChoiceNode.createBase(dataStructureUtil.randomBytes32()),
+            UInt64.ONE,
+            UInt64.valueOf(5));
+
+    assertThat(nodesBySlot).isEmpty();
+  }
+
+  @Test
   void getAncestorsOnFork_shouldIncludeHeadBlockAndExcludeStartSlot() {
     chainBuilder.generateBlocksUpToSlot(10);
 
@@ -379,9 +436,9 @@ class ForkChoiceUtilTest {
     final AvailabilityCheckerFactory<UInt64> dataColumnSidecarAvailabilityCheckerFactory =
         mock(AvailabilityCheckerFactory.class);
 
-    final SignedBeaconBlock block = mock(SignedBeaconBlock.class);
     final SignedExecutionPayloadEnvelope signedEnvelope =
         mock(SignedExecutionPayloadEnvelope.class);
+    final BeaconState state = mock(BeaconState.class);
 
     spec.reinitializeForTesting(
         blobSidecarAvailabilityCheckerFactory,
@@ -389,14 +446,14 @@ class ForkChoiceUtilTest {
         KZG.DISABLED);
 
     final AvailabilityChecker<?> availabilityChecker =
-        util.createAvailabilityCheckerOnExecutionPayloadEnvelope(block, signedEnvelope);
+        util.createAvailabilityCheckerOnExecutionPayloadEnvelope(state, signedEnvelope);
 
     switch (milestone) {
       case PHASE0, ALTAIR, BELLATRIX, CAPELLA, DENEB, ELECTRA, FULU ->
           assertThat(availabilityChecker).isSameAs(AvailabilityChecker.NOOP);
       case GLOAS, HEZE ->
           verify(dataColumnSidecarAvailabilityCheckerFactory)
-              .createAvailabilityChecker(block, signedEnvelope);
+              .createAvailabilityChecker(state, signedEnvelope);
       default -> throw new IllegalStateException("Unexpected milestone " + milestone);
     }
   }
@@ -755,5 +812,14 @@ class ForkChoiceUtilTest {
         .mapToObj(chainBuilder::getBlock)
         .flatMap(Optional::stream)
         .collect(Collectors.toMap(SignedBeaconBlock::getSlot, SignedBeaconBlock::getRoot));
+  }
+
+  private Map<UInt64, ForkChoiceNode> getBaseNodesForBlocks(final int... blockNumbers) {
+    return IntStream.of(blockNumbers)
+        .mapToObj(chainBuilder::getBlock)
+        .flatMap(Optional::stream)
+        .collect(
+            Collectors.toMap(
+                SignedBeaconBlock::getSlot, block -> ForkChoiceNode.createBase(block.getRoot())));
   }
 }

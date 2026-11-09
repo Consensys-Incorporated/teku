@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -143,6 +143,7 @@ class DefaultEth2Peer extends DelegatingPeer implements Eth2Peer {
       final RateTracker blobSidecarsRequestTracker,
       final RateTracker dataColumnSidecarsRequestTracker,
       final RateTracker executionPayloadEnvelopesRequestTracker,
+      final RateTracker lightClientUpdatesRequestTracker,
       final RateTracker requestTracker,
       final MetricsSystem metricsSystem,
       final TimeProvider timeProvider,
@@ -162,6 +163,7 @@ class DefaultEth2Peer extends DelegatingPeer implements Eth2Peer {
     requestObjectsTrackers.put(RequestObject.DATA_COLUMN_SIDECAR, dataColumnSidecarsRequestTracker);
     requestObjectsTrackers.put(
         RequestObject.EXECUTION_PAYLOAD_ENVELOPE, executionPayloadEnvelopesRequestTracker);
+    requestObjectsTrackers.put(RequestObject.LIGHT_CLIENT_UPDATE, lightClientUpdatesRequestTracker);
     checkState(
         requestObjectsTrackers.size() == RequestObject.values().length,
         "NOT all request objects trackers have been configured");

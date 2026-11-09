@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -70,7 +70,7 @@ class VoluntaryExitDataProviderTest {
 
     when(genesisDataProvider.getGenesisData()).thenReturn(SafeFuture.completedFuture(genesisData));
     when(validatorApiChannel.getValidatorIndices(any()))
-        .thenReturn(SafeFuture.completedFuture(validatorIndices));
+        .thenReturn(SafeFuture.completedFuture(Optional.of(validatorIndices)));
     when(keyManager.getValidatorByPublicKey(validator.getPublicKey()))
         .thenReturn(Optional.of(validator));
     when(signer.signVoluntaryExit(any(), any()))
@@ -148,6 +148,19 @@ class VoluntaryExitDataProviderTest {
     assertThatSafeFuture(result)
         .isCompletedExceptionallyWith(BadRequestException.class)
         .hasMessageMatching("Validator (.*) is not in the list of keys managed by this service.");
+  }
+
+  @Test
+  void getSignedVoluntaryExit_exceptionWhenValidatorIndexDataIsUnavailable() {
+    when(validatorApiChannel.getValidatorIndices(any()))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+
+    final SafeFuture<SignedVoluntaryExit> result =
+        provider.getSignedVoluntaryExit(publicKey1, Optional.of(UInt64.valueOf(1234)));
+
+    assertThatSafeFuture(result)
+        .isCompletedExceptionallyWith(NodeDataUnavailableException.class)
+        .hasMessage("Beacon node returned no validator index data");
   }
 
   @Test

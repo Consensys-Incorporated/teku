@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -124,9 +124,24 @@ public class ChainDataProviderTestPhase0 extends AbstractChainDataProviderTest {
     assertThat(forkChoiceData.getNodes()).isNotEmpty();
     assertThat(forkChoiceData.getNodes())
         .allSatisfy(
+            node -> {
+              assertThat(node.getPayloadStatus())
+                  .isEqualTo(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+              // pre-Gloas nodes point at the beacon block's parent, reported as a FULL node
+              assertThat(node.getParentRoot()).isEqualTo(node.getNode().getParentRoot());
+            });
+    // every node except the anchor has a retained parent
+    assertThat(
+            forkChoiceData.getNodes().stream()
+                .filter(node -> node.getParentPayloadStatus().isEmpty())
+                .count())
+        .isEqualTo(1);
+    assertThat(forkChoiceData.getNodes())
+        .filteredOn(node -> node.getParentPayloadStatus().isPresent())
+        .allSatisfy(
             node ->
-                assertThat(node.getPayloadStatus())
-                    .isEqualTo(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL));
+                assertThat(node.getParentPayloadStatus())
+                    .contains(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL));
   }
 
   @Test

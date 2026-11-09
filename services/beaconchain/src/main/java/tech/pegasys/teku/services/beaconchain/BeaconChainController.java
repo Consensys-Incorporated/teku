@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -30,6 +30,7 @@ import static tech.pegasys.teku.statetransition.util.RPCFetchDelayProvider.DEFAU
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Throwables;
+import it.unimi.dsi.fastutil.ints.IntSet;
 import java.io.IOException;
 import java.net.BindException;
 import java.nio.file.Path;
@@ -38,8 +39,8 @@ import java.util.Comparator;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.stream.Collectors;
@@ -173,6 +174,7 @@ import tech.pegasys.teku.statetransition.block.BlockImportMetrics;
 import tech.pegasys.teku.statetransition.block.BlockImporter;
 import tech.pegasys.teku.statetransition.block.BlockManager;
 import tech.pegasys.teku.statetransition.block.FailedExecutionPool;
+import tech.pegasys.teku.statetransition.block.FutureBlockPool;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
 import tech.pegasys.teku.statetransition.datacolumns.BlobKzgCommitmentsProvider;
 import tech.pegasys.teku.statetransition.datacolumns.CanonicalBlockResolver;
@@ -273,6 +275,8 @@ import tech.pegasys.teku.statetransition.validation.ProposerPreferencesGossipVal
 import tech.pegasys.teku.statetransition.validation.ProposerSlashingValidator;
 import tech.pegasys.teku.statetransition.validation.SignedBlsToExecutionChangeValidator;
 import tech.pegasys.teku.statetransition.validation.VoluntaryExitValidator;
+import tech.pegasys.teku.statetransition.validation.lightclient.LightClientFinalityUpdateGossipValidator;
+import tech.pegasys.teku.statetransition.validation.lightclient.LightClientOptimisticUpdateGossipValidator;
 import tech.pegasys.teku.statetransition.validation.signatures.AggregatingSignatureVerificationService;
 import tech.pegasys.teku.statetransition.validation.signatures.SignatureVerificationService;
 import tech.pegasys.teku.statetransition.validatorcache.ActiveValidatorCache;
@@ -413,6 +417,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
   protected volatile DasReqRespLogger dasReqRespLogger;
   protected volatile LightClientUpdateStore lightClientUpdateStore;
   protected volatile LightClientServerService lightClientServerService;
+  protected volatile SyncCommitteeSubscriptionManager syncCommitteeSubscriptionManager;
   protected volatile KZG kzg;
   protected volatile BlobSidecarManager blobSidecarManager;
   protected volatile BlobSidecarGossipValidator blobSidecarValidator;
@@ -708,6 +713,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
                 if (isUsingCustomInitialState()) {
                   STATUS_LOG.warnInitialStateIgnored();
                 }
+                wsInitializer.validateGloasGenesisAnchor(client.getStore().getLatestFinalized());
                 if (!isAllowSyncOutsideWeakSubjectivityPeriod()) {
                   validateWeakSubjectivityPeriod(client);
                 }
@@ -1049,7 +1055,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
               poolFactory.createPendingPoolForExecutionPayloadBids(spec),
               builderBidFetcher,
               executionPayloadBidSelector,
-              recentChainData::getForkChoiceStrategy);
+              recentChainData::getForkChoiceStrategy,
+              beaconConfig.executionLayerConfig().getConsiderP2PBidsDuringBlockProduction());
       proposerPreferencesManager.subscribeOperationAdded(defaultExecutionPayloadBidManager);
       eventChannels.subscribe(SlotEventsChannel.class, defaultExecutionPayloadBidManager);
       eventChannels.subscribe(ReceivedBlockEventsChannel.class, defaultExecutionPayloadBidManager);
@@ -1586,7 +1593,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
     if (spec.isMilestoneSupported(SpecMilestone.GLOAS)) {
       final PayloadAttestationMessageGossipValidator validator =
           new PayloadAttestationMessageGossipValidator(
-              spec, gossipValidationHelper, invalidBlockRoots);
+              spec, gossipValidationHelper, signatureVerificationService, invalidBlockRoots);
       pendingPayloadAttestations =
           poolFactory.createPendingPoolForPayloadAttestations(
               spec, beaconConfig.eth2NetworkConfig().getPendingPayloadAttestationsMaxQueue());
@@ -1713,6 +1720,23 @@ public class BeaconChainController extends Service implements BeaconChainControl
             updates -> {
               lightClientServerService.loadUpdates(updates);
               LOG.debug("Loaded {} light client updates from storage", updates.size());
+              recentChainData
+                  .getFinalizedCheckpoint()
+                  .ifPresent(
+                      checkpoint ->
+                          lightClientServerService.onNewFinalizedCheckpoint(checkpoint, false));
+              combinedChainDataClient
+                  .getChainHead()
+                  .ifPresent(
+                      head ->
+                          head.getBlock()
+                              .thenAccept(
+                                  maybeBlock ->
+                                      maybeBlock.ifPresent(
+                                          block ->
+                                              lightClientServerService.onBlockImported(
+                                                  block, head.isOptimistic())))
+                              .finishError(LOG));
             })
         .exceptionally(
             error -> {
@@ -1728,7 +1752,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
     }
     LOG.debug("BeaconChainController.initLightClientServerService()");
     lightClientServerService =
-        new LightClientServerService(spec, lightClientUpdateStore, combinedChainDataClient);
+        new LightClientServerService(
+            spec, lightClientUpdateStore, combinedChainDataClient, beaconAsyncRunner, timeProvider);
     eventChannels
         .subscribe(ReceivedBlockEventsChannel.class, lightClientServerService)
         .subscribe(FinalizedCheckpointChannel.class, lightClientServerService)
@@ -1768,15 +1793,6 @@ public class BeaconChainController extends Service implements BeaconChainControl
             forkChoice,
             beaconConfig.eth2NetworkConfig().getAttestationWaitLimitMillis(),
             timeProvider);
-    // Only required for Gloas genesis, so skip it fast in all other cases
-    if (spec.getGenesisSpecConfig().getMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS)) {
-      try {
-        forkChoice.applyGenesisExecutionPayloadForGloas().get(1, TimeUnit.MINUTES);
-      } catch (Exception e) {
-        throw new InvalidConfigurationException(
-            "Failed to apply genesis execution payload for Gloas", e);
-      }
-    }
   }
 
   public void initMetrics() {
@@ -1910,7 +1926,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
                 executionPayloadManager,
                 metricsSystem,
                 timeProvider));
-    SyncCommitteeSubscriptionManager syncCommitteeSubscriptionManager =
+    syncCommitteeSubscriptionManager =
         beaconConfig.p2pConfig().isSubscribeAllSubnetsEnabled()
             ? new AllSyncCommitteeSubscriptions(p2pNetwork, spec)
             : new SyncCommitteeSubscriptionManager(p2pNetwork);
@@ -2028,12 +2044,10 @@ public class BeaconChainController extends Service implements BeaconChainControl
             validatorApiHandler,
             beaconConfig.beaconRestApiConfig().getValidatorThreads());
 
-    // if subscribeAllSubnets is set, the slot events in these handlers are empty,
-    // so don't subscribe.
+    eventChannels.subscribe(SlotEventsChannel.class, syncCommitteeSubscriptionManager);
+
     if (!beaconConfig.p2pConfig().isSubscribeAllSubnetsEnabled()) {
-      eventChannels
-          .subscribe(SlotEventsChannel.class, attestationTopicSubscriber)
-          .subscribe(SlotEventsChannel.class, syncCommitteeSubscriptionManager);
+      eventChannels.subscribe(SlotEventsChannel.class, attestationTopicSubscriber);
     }
   }
 
@@ -2058,7 +2072,9 @@ public class BeaconChainController extends Service implements BeaconChainControl
             p2PConfig.getBatchVerifyMaxThreads(),
             p2PConfig.getBatchVerifyQueueCapacity(),
             p2PConfig.getBatchVerifyMaxBatchSize(),
-            p2PConfig.isBatchVerifyStrictThreadLimitEnabled());
+            p2PConfig.isBatchVerifyStrictThreadLimitEnabled(),
+            p2PConfig.getBatchVerifyMode(),
+            p2PConfig.getBatchVerifyGatherTimeout());
   }
 
   protected void initAttestationManager() {
@@ -2176,19 +2192,21 @@ public class BeaconChainController extends Service implements BeaconChainControl
           new DataColumnSidecarArchiveReconstructorImpl(
               throttlingCombinedChainDataClient.orElse(combinedChainDataClient),
               asyncRunnerFactory.create("data_column_sidecar_archive_reconstruction", 2),
+              asyncRunnerFactory.create("data_column_sidecar_archive_reconstruction_timeout", 1),
               isSuperNodeSupplier,
               spec,
               beaconConfig.eth2NetworkConfig().getDataColumnSidecarExtensionRetentionEpochs(),
               eventChannels.getPublisher(SidecarArchivePrunableChannel.class),
               metricsSystem,
               timeProvider);
-      eventChannels.subscribe(
-          FinalizedCheckpointChannel.class, dataColumnSidecarArchiveReconstructor);
+      eventChannels
+          .subscribe(FinalizedCheckpointChannel.class, dataColumnSidecarArchiveReconstructor)
+          .subscribe(SlotEventsChannel.class, dataColumnSidecarArchiveReconstructor);
     } else {
       dataColumnSidecarArchiveReconstructor = DataColumnSidecarArchiveReconstructor.NOOP;
     }
 
-    this.p2pNetwork =
+    final Eth2P2PNetworkBuilder p2pNetworkBuilder =
         createEth2P2PNetworkBuilder()
             .config(beaconConfig.p2pConfig())
             .eventChannels(eventChannels)
@@ -2232,8 +2250,36 @@ public class BeaconChainController extends Service implements BeaconChainControl
             .requiredCheckpoint(weakSubjectivityValidator.getWSCheckpoint())
             .specProvider(spec)
             .recordMessageArrival(true)
-            .p2pDebugDataDumper(debugDataDumper)
-            .build();
+            .p2pDebugDataDumper(debugDataDumper);
+
+    if (lightClientServerService != null) {
+      final LightClientFinalityUpdateGossipValidator finalityValidator =
+          new LightClientFinalityUpdateGossipValidator(
+              spec, recentChainData, lightClientUpdateStore, timeProvider);
+      final LightClientOptimisticUpdateGossipValidator optimisticValidator =
+          new LightClientOptimisticUpdateGossipValidator(
+              spec, recentChainData, lightClientUpdateStore, timeProvider);
+      p2pNetworkBuilder
+          .lightClientUpdateStore(lightClientUpdateStore)
+          .gossipedLightClientFinalityUpdateProcessor(
+              (update, arrivalTimestamp) -> finalityValidator.validate(update))
+          .gossipedLightClientOptimisticUpdateProcessor(
+              (update, arrivalTimestamp) -> optimisticValidator.validate(update));
+      lightClientServerService.subscribeToFinalityUpdatesToPublish(
+          update ->
+              publishLightClientUpdate(
+                  update.getSignatureSlot().get(),
+                  () -> finalityValidator.markForwarded(update),
+                  () -> p2pNetwork.publishLightClientFinalityUpdate(update)));
+      lightClientServerService.subscribeToOptimisticUpdatesToPublish(
+          update ->
+              publishLightClientUpdate(
+                  update.getSignatureSlot().get(),
+                  () -> optimisticValidator.markForwarded(update),
+                  () -> p2pNetwork.publishLightClientOptimisticUpdate(update)));
+    }
+
+    this.p2pNetwork = p2pNetworkBuilder.build();
 
     syncCommitteeMessagePool.subscribeOperationAdded(
         new LocalOperationAcceptedFilter<>(p2pNetwork::publishSyncCommitteeMessage));
@@ -2253,7 +2299,6 @@ public class BeaconChainController extends Service implements BeaconChainControl
         new LocalOperationAcceptedFilter<>(p2pNetwork::publishProposerPreferences));
     executionPayloadBidManager.subscribeOperationAdded(
         new LocalOperationAcceptedFilter<>(p2pNetwork::publishExecutionPayloadBid));
-
     eventChannels.subscribe(
         CustodyGroupCountChannel.class,
         CustodyGroupCountChannel.createCustodyGroupCountSubscriber(
@@ -2270,6 +2315,47 @@ public class BeaconChainController extends Service implements BeaconChainControl
                 () ->
                     new InvalidConfigurationException(
                         "Failed to get NodeId from Discovery System"));
+  }
+
+  private void publishLightClientUpdate(
+      final UInt64 signatureSlot, final BooleanSupplier markForwarded, final Runnable publish) {
+    hasLocalSyncCommitteeDutyAt(signatureSlot)
+        .thenAccept(
+            hasDuty -> {
+              if (hasDuty && markForwarded.getAsBoolean()) {
+                publish.run();
+              }
+            })
+        .finish(error -> LOG.error("Failed to publish light client update", error));
+  }
+
+  private SafeFuture<Boolean> hasLocalSyncCommitteeDutyAt(final UInt64 slot) {
+    final SyncCommitteeSubscriptionManager subscriptionManager = syncCommitteeSubscriptionManager;
+    if (subscriptionManager == null) {
+      return SafeFuture.completedFuture(false);
+    }
+    final IntSet validators = subscriptionManager.getValidatorsWithDuty();
+    if (validators.isEmpty()) {
+      return SafeFuture.completedFuture(false);
+    }
+    return recentChainData
+        .getBestState()
+        .map(state -> state.thenApply(s -> isInSyncCommitteeAt(s, slot, validators)))
+        .orElse(SafeFuture.completedFuture(false));
+  }
+
+  private boolean isInSyncCommitteeAt(
+      final BeaconState state, final UInt64 slot, final IntSet validators) {
+    final UInt64 epoch = spec.computeEpochAtSlot(slot);
+    return spec.getSyncCommitteeUtil(slot)
+        .filter(util -> util.isStateUsableForCommitteeCalculationAtEpoch(state, epoch))
+        .map(util -> util.getSyncSubcommittees(state, epoch))
+        .map(
+            assignments ->
+                validators
+                    .intStream()
+                    .anyMatch(index -> assignments.containsKey(UInt64.valueOf(index))))
+        .orElse(false);
   }
 
   protected Eth2P2PNetworkBuilder createEth2P2PNetworkBuilder() {
@@ -2378,8 +2464,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
 
   public void initBlockManager() {
     LOG.debug("BeaconChainController.initBlockManager()");
-    final FutureItems<SignedBeaconBlock> futureBlocks =
-        FutureItems.create(SignedBeaconBlock::getSlot, futureItemsMetric, "blocks");
+    final FutureBlockPool futureBlocks = poolFactory.createFutureBlockPool(spec, futureItemsMetric);
     blockGossipValidator =
         new BlockGossipValidator(spec, gossipValidationHelper, receivedBlockEventsChannelPublisher);
     final BlockValidator blockValidator = new BlockValidator(blockGossipValidator);
@@ -2536,6 +2621,10 @@ public class BeaconChainController extends Service implements BeaconChainControl
             beaconConfig.eth2NetworkConfig().isForkChoiceUpdatedAlwaysSendPayloadAttributes(),
             proposerPreferencesManager);
     eventChannels.subscribe(SlotEventsChannel.class, proposersDataManager);
+    // the fee recipient is only cached once our own proposer preferences have been accepted
+    proposerPreferencesManager.subscribeOperationAdded(
+        new LocalOperationAcceptedFilter<>(
+            proposersDataManager::updatePreparedProposerFromAcceptedProposerPreferences));
     forkChoiceNotifier =
         new ForkChoiceNotifierImpl(
             eventThread,

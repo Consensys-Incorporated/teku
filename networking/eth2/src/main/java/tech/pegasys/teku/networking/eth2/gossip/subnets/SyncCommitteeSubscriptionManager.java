@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -15,6 +15,8 @@ package tech.pegasys.teku.networking.eth2.gossip.subnets;
 
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import it.unimi.dsi.fastutil.ints.IntSet;
 import it.unimi.dsi.fastutil.objects.ObjectIterator;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -27,12 +29,15 @@ public class SyncCommitteeSubscriptionManager implements SlotEventsChannel {
   private final Int2ObjectMap<UInt64> subcommitteeToUnsubscribeSlot = new Int2ObjectOpenHashMap<>();
   final Eth2P2PNetwork p2PNetwork;
 
+  private final Int2ObjectMap<UInt64> validatorToDutyEndSlot = new Int2ObjectOpenHashMap<>();
+
   public SyncCommitteeSubscriptionManager(final Eth2P2PNetwork p2PNetwork) {
     this.p2PNetwork = p2PNetwork;
   }
 
   @Override
   public synchronized void onSlot(final UInt64 slot) {
+    pruneDuties(slot);
     final ObjectIterator<Int2ObjectMap.Entry<UInt64>> iterator =
         subcommitteeToUnsubscribeSlot.int2ObjectEntrySet().iterator();
     while (iterator.hasNext()) {
@@ -62,5 +67,17 @@ public class SyncCommitteeSubscriptionManager implements SlotEventsChannel {
           unsubscribeSlot.toString());
       subcommitteeToUnsubscribeSlot.put(committeeSubnet, unsubscribeSlot);
     }
+  }
+
+  public synchronized void recordDuty(final int validatorIndex, final UInt64 endSlot) {
+    validatorToDutyEndSlot.merge(validatorIndex, endSlot, UInt64::max);
+  }
+
+  public synchronized IntSet getValidatorsWithDuty() {
+    return new IntOpenHashSet(validatorToDutyEndSlot.keySet());
+  }
+
+  protected synchronized void pruneDuties(final UInt64 slot) {
+    validatorToDutyEndSlot.values().removeIf(endSlot -> endSlot.isLessThanOrEqualTo(slot));
   }
 }

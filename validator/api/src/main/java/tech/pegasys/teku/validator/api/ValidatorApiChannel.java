@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -68,9 +68,9 @@ public interface ValidatorApiChannel extends BuilderApiChannel, ChannelInterface
         }
 
         @Override
-        public SafeFuture<Map<BLSPublicKey, Integer>> getValidatorIndices(
+        public SafeFuture<Optional<Map<BLSPublicKey, Integer>>> getValidatorIndices(
             final Collection<BLSPublicKey> publicKeys) {
-          return SafeFuture.completedFuture(Map.of());
+          return SafeFuture.completedFuture(Optional.empty());
         }
 
         @Override
@@ -278,7 +278,16 @@ public interface ValidatorApiChannel extends BuilderApiChannel, ChannelInterface
 
   SafeFuture<Optional<GenesisData>> getGenesisData();
 
-  SafeFuture<Map<BLSPublicKey, Integer>> getValidatorIndices(Collection<BLSPublicKey> publicKeys);
+  /**
+   * Looks up validator indices for the supplied public keys.
+   *
+   * @param publicKeys public keys to look up
+   * @return a future containing a map of known public keys to indices. An empty map means the
+   *     lookup succeeded but found no matching validators. {@link Optional#empty()} means the
+   *     beacon node could not provide index data
+   */
+  SafeFuture<Optional<Map<BLSPublicKey, Integer>>> getValidatorIndices(
+      Collection<BLSPublicKey> publicKeys);
 
   SafeFuture<Optional<Map<BLSPublicKey, StateValidatorData>>> getValidatorStatuses(
       Collection<BLSPublicKey> validatorIdentifiers);

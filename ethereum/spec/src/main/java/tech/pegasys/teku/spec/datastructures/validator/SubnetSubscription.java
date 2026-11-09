@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -44,7 +44,7 @@ public record SubnetSubscription(int subnetId, UInt64 unsubscriptionSlot)
   @Override
   public int compareTo(@NotNull final SubnetSubscription o) {
     return Comparator.comparing(SubnetSubscription::unsubscriptionSlot)
-        .thenComparing(SubnetSubscription::subnetId)
+        .thenComparingInt(SubnetSubscription::subnetId)
         .compare(this, o);
   }
 

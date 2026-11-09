@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -108,6 +108,8 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionProof;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
@@ -126,6 +128,7 @@ import tech.pegasys.teku.statetransition.datacolumns.CustodyGroupCountManager;
 import tech.pegasys.teku.statetransition.datacolumns.DataColumnSidecarArchiveReconstructor;
 import tech.pegasys.teku.statetransition.datacolumns.log.gossip.DasGossipLogger;
 import tech.pegasys.teku.statetransition.datacolumns.log.rpc.DasReqRespLogger;
+import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
 import tech.pegasys.teku.statetransition.util.DebugDataDumper;
 import tech.pegasys.teku.storage.api.StorageQueryChannel;
 import tech.pegasys.teku.storage.api.StubStorageQueryChannel;
@@ -172,6 +175,11 @@ public class Eth2P2PNetworkFactory {
     protected OperationProcessor<SignedVoluntaryExit> voluntaryExitProcessor;
     protected OperationProcessor<SignedContributionAndProof> signedContributionAndProofProcessor;
     protected OperationProcessor<ValidatableSyncCommitteeMessage> syncCommitteeMessageProcessor;
+    protected Optional<OperationProcessor<LightClientFinalityUpdate>>
+        lightClientFinalityUpdateProcessor = Optional.empty();
+    protected Optional<OperationProcessor<LightClientOptimisticUpdate>>
+        lightClientOptimisticUpdateProcessor = Optional.empty();
+    protected Optional<LightClientUpdateStore> lightClientUpdateStore = Optional.empty();
     protected OperationProcessor<SignedBlsToExecutionChange> signedBlsToExecutionChangeProcessor;
     protected OperationProcessor<DataColumnSidecar> dataColumnSidecarOperationProcessor;
     protected OperationProcessor<ExecutionProof> executionProofOperationProcessor;
@@ -345,7 +353,8 @@ public class Eth2P2PNetworkFactory {
                 spec,
                 __ -> Optional.of(discoveryNodeId),
                 DataColumnSidecarArchiveReconstructor.NOOP,
-                DasReqRespLogger.NOOP);
+                DasReqRespLogger.NOOP,
+                lightClientUpdateStore);
 
         List<RpcMethod<?, ?, ?>> rpcMethods =
             eth2PeerManager.getBeaconChainMethods().all().stream()
@@ -512,6 +521,8 @@ public class Eth2P2PNetworkFactory {
                 voluntaryExitProcessor,
                 signedContributionAndProofProcessor,
                 syncCommitteeMessageProcessor,
+                lightClientFinalityUpdateProcessor,
+                lightClientOptimisticUpdateProcessor,
                 debugDataDumper);
         case BELLATRIX ->
             new GossipForkSubscriptionsBellatrix(
@@ -530,6 +541,8 @@ public class Eth2P2PNetworkFactory {
                 voluntaryExitProcessor,
                 signedContributionAndProofProcessor,
                 syncCommitteeMessageProcessor,
+                lightClientFinalityUpdateProcessor,
+                lightClientOptimisticUpdateProcessor,
                 debugDataDumper);
         case CAPELLA ->
             new GossipForkSubscriptionsCapella(
@@ -548,6 +561,8 @@ public class Eth2P2PNetworkFactory {
                 voluntaryExitProcessor,
                 signedContributionAndProofProcessor,
                 syncCommitteeMessageProcessor,
+                lightClientFinalityUpdateProcessor,
+                lightClientOptimisticUpdateProcessor,
                 signedBlsToExecutionChangeProcessor,
                 debugDataDumper);
         case DENEB ->
@@ -568,6 +583,8 @@ public class Eth2P2PNetworkFactory {
                 voluntaryExitProcessor,
                 signedContributionAndProofProcessor,
                 syncCommitteeMessageProcessor,
+                lightClientFinalityUpdateProcessor,
+                lightClientOptimisticUpdateProcessor,
                 signedBlsToExecutionChangeProcessor,
                 debugDataDumper);
         case ELECTRA ->
@@ -588,6 +605,8 @@ public class Eth2P2PNetworkFactory {
                 voluntaryExitProcessor,
                 signedContributionAndProofProcessor,
                 syncCommitteeMessageProcessor,
+                lightClientFinalityUpdateProcessor,
+                lightClientOptimisticUpdateProcessor,
                 signedBlsToExecutionChangeProcessor,
                 debugDataDumper,
                 executionProofOperationProcessor,
@@ -610,6 +629,8 @@ public class Eth2P2PNetworkFactory {
                 voluntaryExitProcessor,
                 signedContributionAndProofProcessor,
                 syncCommitteeMessageProcessor,
+                lightClientFinalityUpdateProcessor,
+                lightClientOptimisticUpdateProcessor,
                 signedBlsToExecutionChangeProcessor,
                 dataColumnSidecarOperationProcessor,
                 debugDataDumper,
@@ -635,6 +656,8 @@ public class Eth2P2PNetworkFactory {
                 voluntaryExitProcessor,
                 signedContributionAndProofProcessor,
                 syncCommitteeMessageProcessor,
+                lightClientFinalityUpdateProcessor,
+                lightClientOptimisticUpdateProcessor,
                 signedBlsToExecutionChangeProcessor,
                 dataColumnSidecarOperationProcessor,
                 executionPayloadProcessor,
@@ -877,6 +900,27 @@ public class Eth2P2PNetworkFactory {
         final OperationProcessor<ValidatableSyncCommitteeMessage> gossipedSyncCommitteeProcessor) {
       checkNotNull(gossipedSyncCommitteeProcessor);
       this.syncCommitteeMessageProcessor = gossipedSyncCommitteeProcessor;
+      return this;
+    }
+
+    public Eth2P2PNetworkBuilder gossipedLightClientFinalityUpdateProcessor(
+        final OperationProcessor<LightClientFinalityUpdate> processor) {
+      checkNotNull(processor);
+      this.lightClientFinalityUpdateProcessor = Optional.of(processor);
+      return this;
+    }
+
+    public Eth2P2PNetworkBuilder gossipedLightClientOptimisticUpdateProcessor(
+        final OperationProcessor<LightClientOptimisticUpdate> processor) {
+      checkNotNull(processor);
+      this.lightClientOptimisticUpdateProcessor = Optional.of(processor);
+      return this;
+    }
+
+    public Eth2P2PNetworkBuilder lightClientUpdateStore(
+        final LightClientUpdateStore lightClientUpdateStore) {
+      checkNotNull(lightClientUpdateStore);
+      this.lightClientUpdateStore = Optional.of(lightClientUpdateStore);
       return this;
     }
 

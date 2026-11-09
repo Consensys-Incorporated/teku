@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -81,6 +81,12 @@ public class RpcException extends Exception {
               + context
               + ". Must request blocks with compatible fork.",
           true);
+    }
+  }
+
+  public static class ContextPayloadMismatchException extends MalformedDataException {
+    public ContextPayloadMismatchException(final String details) {
+      super("Response payload does not match its context bytes: " + details, true);
     }
   }
 
@@ -175,6 +181,7 @@ public class RpcException extends Exception {
   }
 
   @Override
+  @SuppressWarnings("ThrowableEqualsHashCode")
   public boolean equals(final Object o) {
     if (this == o) {
       return true;
@@ -187,6 +194,7 @@ public class RpcException extends Exception {
   }
 
   @Override
+  @SuppressWarnings("ThrowableEqualsHashCode")
   public int hashCode() {
     return Objects.hash(responseCode, errorMessage);
   }

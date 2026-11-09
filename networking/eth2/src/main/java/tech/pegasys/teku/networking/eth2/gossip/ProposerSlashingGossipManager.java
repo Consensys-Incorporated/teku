@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -49,10 +49,10 @@ public class ProposerSlashingGossipManager extends AbstractGossipManager<Propose
         processor,
         ProposerSlashing.SSZ_SCHEMA,
         message -> Optional.of(message.getHeader1().getMessage().getSlot()),
-        message ->
-            recentChainData
-                .getSpec()
-                .computeEpochAtSlot(message.getHeader1().getMessage().getSlot()),
+        // A validator stays slashable however old the offence is, so slashings are always
+        // considered to match the fork of the topic they arrived on (ie disable fork checking at
+        // this level)
+        message -> forkInfo.getFork().getEpoch(),
         networkingConfig,
         GossipFailureLogger.createNonSuppressing(GossipTopicName.PROPOSER_SLASHING.toString()),
         debugDataDumper);

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -23,6 +23,11 @@ public enum TekuMetricCategory implements MetricCategory {
   EVENTBUS("eventbus"),
   EXECUTOR("executor"),
   LIBP2P("libp2p"),
+  /**
+   * Experimental gossipsub router internals. Deliberately absent from {@link #defaultCategories()}.
+   * Eventually will be promoted to "regular" LIBP2P.
+   */
+  LIBP2P_GOSSIP("libp2p_gossip"),
   NETWORK("network"),
   STORAGE("storage"),
   STORAGE_HOT_DB("storage_hot"),

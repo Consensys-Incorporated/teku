@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -151,5 +151,18 @@ public class ExecutionLayerOptionsTest extends AbstractBeaconNodeCommandTest {
     final String[] args = {"--ee-jwt-claim-id", "foobar"};
     final TekuConfiguration config = getTekuConfigurationFromArguments(args);
     assertThat(config.executionLayer().getEngineJwtClaimId()).hasValue("foobar");
+  }
+
+  @Test
+  void shouldConsiderP2PBidsDuringBlockProductionByDefault() {
+    final TekuConfiguration config = getTekuConfigurationFromArguments();
+    assertThat(config.executionLayer().getConsiderP2PBidsDuringBlockProduction()).isTrue();
+  }
+
+  @Test
+  void shouldNotConsiderP2PBidsDuringBlockProductionIfConfiguredToFalse() {
+    final String[] args = {"--Xconsider-p2p-bids-during-block-production=false"};
+    final TekuConfiguration config = getTekuConfigurationFromArguments(args);
+    assertThat(config.executionLayer().getConsiderP2PBidsDuringBlockProduction()).isFalse();
   }
 }

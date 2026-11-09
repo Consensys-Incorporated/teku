@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -21,10 +21,11 @@ import static tech.pegasys.teku.networking.p2p.connection.PeerConnectionType.SCO
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Function;
+import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -38,6 +39,7 @@ import tech.pegasys.teku.networking.p2p.connection.TargetPeerRange;
 import tech.pegasys.teku.networking.p2p.discovery.DiscoveryPeer;
 import tech.pegasys.teku.networking.p2p.network.P2PNetwork;
 import tech.pegasys.teku.networking.p2p.network.PeerAddress;
+import tech.pegasys.teku.networking.p2p.peer.NodeId;
 import tech.pegasys.teku.networking.p2p.peer.Peer;
 import tech.pegasys.teku.networking.p2p.reputation.ReputationManager;
 
@@ -84,17 +86,26 @@ public class Eth2PeerSelectionStrategy implements PeerSelectionStrategy {
 
     final List<DiscoveryPeer> allCandidatePeers = new ArrayList<>(candidates.get());
     final List<PeerAddress> selectedPeers = new ArrayList<>();
+    // Candidates are records, not peers: the search results and the known-peer stream can both
+    // carry a record for the same identity. Each peer ID gets at most one slot across both stages;
+    // the set records every selection and both stages filter on Set.add, which relies on the
+    // streams staying sequential.
+    final Set<NodeId> selectedPeerIds = new HashSet<>();
 
     if (randomlySelectedPeersToAdd > 0) {
       selectedPeers.addAll(
           selectAndRemoveRandomPeers(
-              network, peerPools, randomlySelectedPeersToAdd, allCandidatePeers));
+              network, peerPools, randomlySelectedPeersToAdd, allCandidatePeers, selectedPeerIds));
     }
 
     if (scoreBasedPeersToAdd > 0) {
       selectedPeers.addAll(
           selectPeersByScore(
-              network, peerSubnetSubscriptions, scoreBasedPeersToAdd, allCandidatePeers));
+              network,
+              peerSubnetSubscriptions,
+              scoreBasedPeersToAdd,
+              allCandidatePeers,
+              selectedPeerIds));
     }
     return unmodifiableList(selectedPeers); // Unmodifiable to make errorprone happy
   }
@@ -103,12 +114,14 @@ public class Eth2PeerSelectionStrategy implements PeerSelectionStrategy {
       final P2PNetwork<?> network,
       final PeerPools peerPools,
       final int randomlySelectedPeersToAdd,
-      final List<DiscoveryPeer> allCandidatePeers) {
+      final List<DiscoveryPeer> allCandidatePeers,
+      final Set<NodeId> selectedPeerIds) {
     final List<PeerAddress> selectedPeers = new ArrayList<>();
     shuffler.shuffle(allCandidatePeers);
     while (!allCandidatePeers.isEmpty() && selectedPeers.size() < randomlySelectedPeersToAdd) {
       final DiscoveryPeer candidate = allCandidatePeers.removeFirst();
       checkCandidate(candidate, network)
+          .filter(peerAddress -> selectedPeerIds.add(peerAddress.getId()))
           .ifPresent(
               peerAddress -> {
                 peerPools.addPeerToPool(peerAddress.getId(), RANDOMLY_SELECTED);
@@ -122,13 +135,13 @@ public class Eth2PeerSelectionStrategy implements PeerSelectionStrategy {
       final P2PNetwork<?> network,
       final PeerSubnetSubscriptions peerSubnetSubscriptions,
       final int scoreBasedPeersToAdd,
-      final List<DiscoveryPeer> allCandidatePeers) {
+      final List<DiscoveryPeer> allCandidatePeers,
+      final Set<NodeId> selectedPeerIds) {
     final PeerScorer peerScorer = peerSubnetSubscriptions.createScorer();
     return allCandidatePeers.stream()
-        .sorted(
-            Comparator.comparing((Function<DiscoveryPeer, Integer>) peerScorer::scoreCandidatePeer)
-                .reversed())
+        .sorted(Comparator.<DiscoveryPeer>comparingInt(peerScorer::scoreCandidatePeer).reversed())
         .flatMap(candidate -> checkCandidate(candidate, network).stream())
+        .filter(peerAddress -> selectedPeerIds.add(peerAddress.getId()))
         .limit(scoreBasedPeersToAdd)
         .toList();
   }
@@ -145,7 +158,8 @@ public class Eth2PeerSelectionStrategy implements PeerSelectionStrategy {
 
   private Optional<PeerAddress> checkCandidate(
       final DiscoveryPeer candidate, final P2PNetwork<?> network) {
-    return Optional.of(network.createPeerAddress(candidate))
+    return network
+        .createPeerAddress(candidate)
         .filter(reputationManager::isConnectionInitiationAllowed)
         .filter(peerAddress -> !network.isConnected(peerAddress));
   }
@@ -212,7 +226,7 @@ public class Eth2PeerSelectionStrategy implements PeerSelectionStrategy {
             Stream.concat(
                 remotelyInitiatedRandomlySelectedPeers.stream(), scoreBasedPeers.stream()))
         .filter(peer -> !peersBeingDropped.contains(peer))
-        .sorted(Comparator.comparing(peerScorer::scoreExistingPeer))
+        .sorted(Comparator.comparingInt(peerScorer::scoreExistingPeer))
         .limit(additionalPeersToDrop)
         .forEach(peersBeingDropped::add);
     LOG.trace(
@@ -245,7 +259,7 @@ public class Eth2PeerSelectionStrategy implements PeerSelectionStrategy {
     return Stream.concat(
             remotelyInitiatedRandomlySelectedPeers.stream(),
             scoreBasedPeers.stream().filter(Peer::connectionInitiatedRemotely))
-        .sorted(Comparator.comparing(peerScorer::scoreExistingPeer))
+        .sorted(Comparator.comparingInt(peerScorer::scoreExistingPeer))
         .limit(remotelyInitiatedPeersToDropCount)
         .toList();
   }

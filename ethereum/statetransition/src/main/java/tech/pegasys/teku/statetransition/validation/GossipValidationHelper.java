@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -37,6 +37,8 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
+import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
+import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateAccessors;
 import tech.pegasys.teku.spec.logic.common.util.AttestationUtil;
@@ -77,10 +79,13 @@ public class GossipValidationHelper {
   }
 
   public boolean isSlotFromFuture(final UInt64 slot) {
+    return slot.isGreaterThan(getMaxCurrentSlot());
+  }
+
+  /** Returns the current slot with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance. */
+  public UInt64 getMaxCurrentSlot() {
     final UInt64 maxTime = getCurrentTimeMillis().plus(maxOffsetTimeInMillis);
-    final UInt64 maxCurrSlot =
-        spec.getCurrentSlotFromTimeMillis(maxTime, recentChainData.getGenesisTimeMillis());
-    return slot.isGreaterThan(maxCurrSlot);
+    return spec.getCurrentSlotFromTimeMillis(maxTime, recentChainData.getGenesisTimeMillis());
   }
 
   /**
@@ -105,10 +110,7 @@ public class GossipValidationHelper {
   }
 
   public boolean isEpochFromFuture(final UInt64 epoch) {
-    final UInt64 maxTime = getCurrentTimeMillis().plus(maxOffsetTimeInMillis);
-    final UInt64 maxCurrentSlot =
-        spec.getCurrentSlotFromTimeMillis(maxTime, recentChainData.getGenesisTimeMillis());
-    return epoch.isGreaterThan(spec.computeEpochAtSlot(maxCurrentSlot));
+    return epoch.isGreaterThan(spec.computeEpochAtSlot(getMaxCurrentSlot()));
   }
 
   public boolean hasSlotStarted(final UInt64 slot) {
@@ -290,6 +292,22 @@ public class GossipValidationHelper {
     return recentChainData.containsBlock(blockRoot);
   }
 
+  public BeaconState getLatestFinalizedState() {
+    return recentChainData.getStore().getLatestFinalized().getState();
+  }
+
+  public SafeFuture<Optional<BeaconState>> getHeadState() {
+    return recentChainData
+        .getBestState()
+        .map(headState -> headState.thenApply(Optional::of))
+        .orElseGet(() -> SafeFuture.completedFuture(Optional.empty()));
+  }
+
+  /** Returns the fork info for an epoch from the fork schedule, independent of any state. */
+  public Optional<ForkInfo> getForkInfo(final UInt64 epoch) {
+    return recentChainData.getForkInfo(epoch);
+  }
+
   int getMaxOffsetTimeInMillis() {
     return maxOffsetTimeInMillis;
   }
@@ -297,6 +315,23 @@ public class GossipValidationHelper {
   public SafeFuture<Optional<BeaconState>> getStateForAttestationValidation(
       final AttestationData attestationData) {
     return attestationStateSelector.getStateToValidate(attestationData);
+  }
+
+  /**
+   * Returns the checkpoint state only if it's already available, never regenerating it, so that a
+   * checkpoint chosen by a gossip sender can't make us do expensive state work. The canonical
+   * checkpoint states are normally cached, as the epoch transition of the head is precomputed.
+   */
+  public Optional<BeaconState> getCheckpointStateIfAvailable(final Checkpoint checkpoint) {
+    final ReadOnlyStore store = recentChainData.getStore();
+    return store
+        .getCheckpointStateIfAvailable(checkpoint)
+        // The state of a block from the start of the epoch is also the checkpoint state
+        .or(
+            () ->
+                store
+                    .getBlockStateIfAvailable(checkpoint.getRoot())
+                    .filter(state -> state.getSlot().equals(checkpoint.getEpochStartSlot(spec))));
   }
 
   public UInt64 getGenesisTime() {

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -18,6 +18,7 @@ import static org.hyperledger.besu.metrics.StandardMetricCategory.JVM;
 import static org.hyperledger.besu.metrics.StandardMetricCategory.PROCESS;
 import static tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory.EVENTBUS;
 import static tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory.LIBP2P;
+import static tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory.LIBP2P_GOSSIP;
 import static tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory.NETWORK;
 
 import java.util.Set;
@@ -82,6 +83,29 @@ public class MetricsOptionsTest extends AbstractBeaconNodeCommandTest {
         getTekuConfigurationFromArguments("--metrics-categories", "LibP2P,network,EventBUS,PROCESS")
             .metricsConfig();
     assertThat(config.getMetricsCategories()).isEqualTo(Set.of(LIBP2P, NETWORK, EVENTBUS, PROCESS));
+  }
+
+  @Test
+  public void metricsAdditionalCategories_shouldAddToDefaultCategories() {
+    final MetricsConfig config =
+        getTekuConfigurationFromArguments("--Xmetrics-additional-categories", "LIBP2P_GOSSIP")
+            .metricsConfig();
+    assertThat(config.getMetricsCategories())
+        .containsAll(MetricsConfig.DEFAULT_METRICS_CATEGORIES)
+        .contains(LIBP2P_GOSSIP)
+        .hasSize(MetricsConfig.DEFAULT_METRICS_CATEGORIES.size() + 1);
+  }
+
+  @Test
+  public void metricsAdditionalCategories_shouldAddToExplicitCategories() {
+    final MetricsConfig config =
+        getTekuConfigurationFromArguments(
+                "--metrics-categories",
+                "LIBP2P,PROCESS",
+                "--Xmetrics-additional-categories",
+                "libp2p_gossip")
+            .metricsConfig();
+    assertThat(config.getMetricsCategories()).isEqualTo(Set.of(LIBP2P, PROCESS, LIBP2P_GOSSIP));
   }
 
   @Test

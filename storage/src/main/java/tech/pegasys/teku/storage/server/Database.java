@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -34,6 +34,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
@@ -328,6 +329,10 @@ public interface Database extends AutoCloseable {
 
   void pruneBestLightClientUpdatesBefore(UInt64 period);
 
+  void storeLightClientBootstrap(LightClientBootstrap bootstrap);
+
+  Optional<LightClientBootstrap> getLightClientBootstrap(UInt64 slot);
+
   void setEarliestAvailableDataColumnSlot(UInt64 slot);
 
   void setFirstCustodyIncompleteSlot(UInt64 slot);
@@ -344,4 +349,17 @@ public interface Database extends AutoCloseable {
   // Triggers a full, blocking compaction of the underlying storage to physically reclaim the disk
   // space left behind by pruning. Expensive and I/O-heavy; intended for offline/CLI use.
   void compactStorage();
+
+  /**
+   * Archives the reconstructable extension data column sidecars (column indices >=
+   * NUMBER_OF_COLUMNS / 2) in [startSlot, tillSlotInclusive]: for each fully populated slot it
+   * persists their KZG proofs and drops the sidecars themselves, retaining only enough data to
+   * reconstruct them on demand.
+   *
+   * <p><b>Callers must submit small ranges.</b> There is no internal limit: the entire range is
+   * scanned in a single pass and archived in a single write batch, so batching is up to the caller.
+   * Incomplete slots are skipped and may be completed later (e.g. by backfill), so a caller must
+   * not resume strictly after the last archived slot.
+   */
+  void archiveSidecarsProofs(UInt64 startSlot, UInt64 tillSlotInclusive);
 }

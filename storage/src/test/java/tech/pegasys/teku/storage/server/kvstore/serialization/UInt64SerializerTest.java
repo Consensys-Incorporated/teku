@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -14,13 +14,23 @@
 package tech.pegasys.teku.storage.server.kvstore.serialization;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 
 public class UInt64SerializerTest {
 
   private final UInt64Serializer serializer = new UInt64Serializer();
+
+  @ParameterizedTest
+  @ValueSource(ints = {0, 7, 9})
+  void rejectsMalformedStoredValue(final int length) {
+    assertThatThrownBy(() -> serializer.deserialize(new byte[length]))
+        .isInstanceOf(KvStoreDeserializationException.class);
+  }
 
   @Test
   public void roundTrip_maxValue() {

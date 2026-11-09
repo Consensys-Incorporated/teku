@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@
 package tech.pegasys.teku.services.beaconchain;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -27,15 +28,20 @@ import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.EpochProcessingException;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.SlotProcessingException;
@@ -194,6 +200,62 @@ public class WeakSubjectivityInitializerTest {
 
     // Should not throw
     initializer.validateInitialAnchor(anchor, UInt64.valueOf(10), spec, Optional.empty());
+  }
+
+  @Test
+  public void validateInitialAnchor_shouldRejectGloasGenesisCommittingToItsOwnPayload() {
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    // The layout of Gloas genesis states written by earlier Teku versions: the genesis block is
+    // FULL and used to rely on a synthetic genesis payload that no longer exists
+    final AnchorPoint anchor = gloasAnchor(gloasSpec, UInt64.ZERO, true);
+
+    assertThatThrownBy(
+            () ->
+                initializer.validateInitialAnchor(anchor, UInt64.ZERO, gloasSpec, Optional.empty()))
+        .isInstanceOf(InvalidConfigurationException.class)
+        .hasMessageContaining("Regenerate the genesis state");
+  }
+
+  @Test
+  public void validateGloasGenesisAnchor_shouldAcceptEmptyGenesis() {
+    final AnchorPoint anchor =
+        gloasAnchor(TestSpecFactory.createMinimalGloas(), UInt64.ZERO, false);
+
+    assertThatCode(() -> initializer.validateGloasGenesisAnchor(anchor)).doesNotThrowAnyException();
+  }
+
+  @Test
+  public void validateGloasGenesisAnchor_shouldIgnoreAnchorsAfterGenesis() {
+    // A checkpoint or finalized anchor whose block is FULL is the normal case
+    final AnchorPoint anchor = gloasAnchor(TestSpecFactory.createMinimalGloas(), UInt64.ONE, true);
+
+    assertThatCode(() -> initializer.validateGloasGenesisAnchor(anchor)).doesNotThrowAnyException();
+  }
+
+  @Test
+  public void validateGloasGenesisAnchor_shouldIgnorePreGloasGenesis() {
+    final AnchorPoint anchor =
+        new DataStructureUtil(spec).randomAnchorPoint(UInt64.ZERO, spec.fork(UInt64.ZERO));
+
+    assertThatCode(() -> initializer.validateGloasGenesisAnchor(anchor)).doesNotThrowAnyException();
+  }
+
+  private AnchorPoint gloasAnchor(
+      final Spec gloasSpec, final UInt64 epoch, final boolean blockCommitsToItsOwnPayload) {
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(gloasSpec);
+    final AnchorPoint anchor = dataStructureUtil.randomAnchorPoint(epoch, gloasSpec.fork(epoch));
+    final BeaconStateGloas state = BeaconStateGloas.required(anchor.getState());
+    final Bytes32 latestBlockHash =
+        blockCommitsToItsOwnPayload
+            ? state.getLatestExecutionPayloadBid().getBlockHash()
+            : dataStructureUtil.randomBytes32();
+    // latest_block_hash is not part of the block header, so the anchor stays consistent
+    final BeaconState anchorState =
+        state.updated(
+            mutable ->
+                MutableBeaconStateGloas.required(mutable).setLatestBlockHash(latestBlockHash));
+    return AnchorPoint.create(
+        gloasSpec, anchor.getCheckpoint(), anchorState, anchor.getSignedBeaconBlock());
   }
 
   @Test

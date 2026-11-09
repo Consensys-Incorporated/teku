@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -40,6 +40,18 @@ public class InternalValidationResultWithState {
 
   public static InternalValidationResultWithState saveForFuture() {
     return SAVE_FOR_FUTURE_WITH_NO_STATE;
+  }
+
+  /**
+   * A deferral that carries the state the attestation was validated against, so that the caller can
+   * immediately run follow-up checks against it (e.g. the aggregate checks for a deferred
+   * aggregate). The result is short-lived: the caller reads the state synchronously and drops this
+   * result before awaiting anything (such as batch signature verification). It must not be retained
+   * beyond that -- what is deferred is the attestation itself, which doesn't reference the state.
+   */
+  public static InternalValidationResultWithState saveForFuture(final BeaconState state) {
+    return new InternalValidationResultWithState(
+        InternalValidationResult.SAVE_FOR_FUTURE, Optional.of(state));
   }
 
   public static InternalValidationResultWithState ignore() {

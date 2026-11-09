@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -19,7 +19,6 @@ import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.ethereum.events.SlotEventsChannel;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
-import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
@@ -46,7 +45,8 @@ public interface DasSamplerBasic extends DataAvailabilitySampler, SlotEventsChan
         }
 
         @Override
-        public SamplingEligibilityStatus checkSamplingEligibility(final BeaconBlock block) {
+        public SamplingEligibilityStatus checkSamplingEligibility(
+            final UInt64 slot, final boolean hasBlobs) {
           return SamplingEligibilityStatus.NOT_REQUIRED_NO_BLOBS;
         }
 

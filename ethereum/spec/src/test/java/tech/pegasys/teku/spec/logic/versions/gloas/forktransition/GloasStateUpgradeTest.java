@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -22,6 +22,8 @@ import java.util.List;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.bls.BLS;
+import tech.pegasys.teku.bls.BLSKeyPair;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
@@ -48,7 +50,9 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.fulu.BeaconStateFulu;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDeposit;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.datastructures.type.SszPublicKey;
+import tech.pegasys.teku.spec.datastructures.type.SszSignature;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.BeaconStateAccessorsGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.BeaconStateMutatorsGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas;
@@ -60,6 +64,7 @@ import tech.pegasys.teku.spec.util.DataStructureUtil;
 class GloasStateUpgradeTest {
 
   private static final UInt64 GLOAS_EPOCH = UInt64.valueOf(2);
+  private static final UInt64 DEPOSIT_AMOUNT = UInt64.valueOf(32_000_000_000L);
 
   private final Spec spec = TestSpecFactory.createMinimalWithGloasForkEpoch(GLOAS_EPOCH);
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
@@ -176,23 +181,9 @@ class GloasStateUpgradeTest {
       pendingDeposits.add(builderPendingDepositWithInvalidSignature(repeatedPubkey));
     }
 
-    final BeaconStateFulu baseState =
-        BeaconStateFulu.required(
-            dataStructureUtil
-                .stateBuilder(SpecMilestone.FULU, 64, 0)
-                .setSlotToStartOfEpoch(GLOAS_EPOCH)
-                .build()
-                .updated(this::activateAllValidators));
-    final SszList<PendingDeposit> pendingDepositsList =
-        baseState.getPendingDeposits().getSchema().createFromElements(pendingDeposits);
-    final BeaconStateFulu preState =
-        BeaconStateFulu.required(
-            baseState.updated(
-                state ->
-                    ((MutableBeaconStateElectra) state).setPendingDeposits(pendingDepositsList)));
+    final BeaconStateFulu preState = createPreStateWithPendingDeposits(pendingDeposits);
 
-    final CountingInvalidSignatureMiscHelpers miscHelpers =
-        createCountingInvalidSignatureMiscHelpers();
+    final CountingSignatureMiscHelpers miscHelpers = createCountingSignatureMiscHelpers(false);
     final BeaconStateGloas postState =
         BeaconStateGloas.required(createStateUpgrade(miscHelpers).upgrade(preState));
 
@@ -202,29 +193,181 @@ class GloasStateUpgradeTest {
         .isLessThanOrEqualTo(samePubkeyEth1DepositCount + repeatedBuilderDepositCount);
   }
 
+  @Test
+  void shouldNotVerifyValidatorDepositsForPubkeysWithoutBuilderDeposits() {
+    final int validatorDepositCount = 16;
+    final List<PendingDeposit> validatorDeposits = new ArrayList<>();
+    for (int i = 0; i < validatorDepositCount; i++) {
+      validatorDeposits.add(
+          signedPendingDeposit(
+              dataStructureUtil.randomKeyPair(),
+              dataStructureUtil.randomEth1WithdrawalCredentials()));
+    }
+    final List<PendingDeposit> pendingDeposits = new ArrayList<>(validatorDeposits);
+    final BLSKeyPair builderKeyPair = dataStructureUtil.randomKeyPair();
+    pendingDeposits.add(signedPendingDeposit(builderKeyPair, randomBuilderWithdrawalCredentials()));
+
+    final CountingSignatureMiscHelpers miscHelpers = createCountingSignatureMiscHelpers(true);
+    final BeaconStateGloas postState =
+        BeaconStateGloas.required(
+            createStateUpgrade(miscHelpers)
+                .upgrade(createPreStateWithPendingDeposits(pendingDeposits)));
+
+    assertThat(postState.getBuilders().asList())
+        .extracting(Builder::getPublicKey)
+        .containsExactly(builderKeyPair.getPublicKey());
+    assertThat(postState.getPendingDeposits().asList()).isEqualTo(validatorDeposits);
+    // Only the builder deposit's own signature is checked
+    assertThat(miscHelpers.getSignatureVerificationCount()).isEqualTo(1);
+  }
+
+  @Test
+  void shouldKeepBuilderDepositsQueuedForPendingValidatorVerifyingEachDepositOnce() {
+    final BLSKeyPair keyPair = dataStructureUtil.randomKeyPair();
+    final List<PendingDeposit> pendingDeposits = new ArrayList<>();
+    pendingDeposits.add(
+        pendingDepositWithEmptySignature(
+            keyPair.getPublicKey(), dataStructureUtil.randomEth1WithdrawalCredentials()));
+    pendingDeposits.add(
+        signedPendingDeposit(keyPair, dataStructureUtil.randomEth1WithdrawalCredentials()));
+    for (int i = 0; i < 3; i++) {
+      pendingDeposits.add(
+          pendingDepositWithEmptySignature(
+              keyPair.getPublicKey(), randomBuilderWithdrawalCredentials()));
+    }
+
+    final CountingSignatureMiscHelpers miscHelpers = createCountingSignatureMiscHelpers(true);
+    final BeaconStateGloas postState =
+        BeaconStateGloas.required(
+            createStateUpgrade(miscHelpers)
+                .upgrade(createPreStateWithPendingDeposits(pendingDeposits)));
+
+    assertThat(postState.getBuilders().asList()).isEmpty();
+    // The pending validator claims the pubkey, so its builder deposits stay queued unverified
+    assertThat(postState.getPendingDeposits().asList()).isEqualTo(pendingDeposits);
+    // Both validator deposits are verified once, on the first builder deposit
+    assertThat(miscHelpers.getSignatureVerificationCount()).isEqualTo(2);
+  }
+
+  @Test
+  void shouldOnlyConsiderValidatorDepositsQueuedBeforeBuilderDeposit() {
+    final BLSKeyPair keyPair = dataStructureUtil.randomKeyPair();
+    final PendingDeposit invalidValidatorDeposit =
+        pendingDepositWithEmptySignature(
+            keyPair.getPublicKey(), dataStructureUtil.randomEth1WithdrawalCredentials());
+    final PendingDeposit droppedBuilderDeposit =
+        pendingDepositWithEmptySignature(
+            keyPair.getPublicKey(), randomBuilderWithdrawalCredentials());
+    final PendingDeposit validValidatorDeposit =
+        signedPendingDeposit(keyPair, dataStructureUtil.randomEth1WithdrawalCredentials());
+    final PendingDeposit retainedBuilderDeposit1 =
+        pendingDepositWithEmptySignature(
+            keyPair.getPublicKey(), randomBuilderWithdrawalCredentials());
+    final PendingDeposit retainedBuilderDeposit2 =
+        pendingDepositWithEmptySignature(
+            keyPair.getPublicKey(), randomBuilderWithdrawalCredentials());
+    final PendingDeposit laterValidatorDeposit =
+        pendingDepositWithEmptySignature(
+            keyPair.getPublicKey(), dataStructureUtil.randomEth1WithdrawalCredentials());
+
+    final CountingSignatureMiscHelpers miscHelpers = createCountingSignatureMiscHelpers(true);
+    final BeaconStateGloas postState =
+        BeaconStateGloas.required(
+            createStateUpgrade(miscHelpers)
+                .upgrade(
+                    createPreStateWithPendingDeposits(
+                        List.of(
+                            invalidValidatorDeposit,
+                            droppedBuilderDeposit,
+                            validValidatorDeposit,
+                            retainedBuilderDeposit1,
+                            retainedBuilderDeposit2,
+                            laterValidatorDeposit))));
+
+    assertThat(postState.getBuilders().asList()).isEmpty();
+    assertThat(postState.getPendingDeposits().asList())
+        .containsExactly(
+            invalidValidatorDeposit,
+            validValidatorDeposit,
+            retainedBuilderDeposit1,
+            retainedBuilderDeposit2,
+            laterValidatorDeposit);
+    // Invalid validator deposit and the dropped builder deposit on the first builder deposit, then
+    // only the valid validator deposit on the next; the invalid one is not re-verified, and the
+    // later validator deposit for the already pending pubkey is never verified
+    assertThat(miscHelpers.getSignatureVerificationCount()).isEqualTo(3);
+  }
+
+  private BeaconStateFulu createPreStateWithPendingDeposits(
+      final List<PendingDeposit> pendingDeposits) {
+    final BeaconStateFulu baseState =
+        BeaconStateFulu.required(
+            dataStructureUtil
+                .stateBuilder(SpecMilestone.FULU, 64, 0)
+                .setSlotToStartOfEpoch(GLOAS_EPOCH)
+                .build()
+                .updated(this::activateAllValidators));
+    final SszList<PendingDeposit> pendingDepositsList =
+        baseState.getPendingDeposits().getSchema().createFromElements(pendingDeposits);
+    return BeaconStateFulu.required(
+        baseState.updated(
+            state -> ((MutableBeaconStateElectra) state).setPendingDeposits(pendingDepositsList)));
+  }
+
   private PendingDeposit eth1PendingDepositWithInvalidSignature(final BLSPublicKey pubkey) {
     return pendingDepositWithInvalidSignature(
         pubkey, dataStructureUtil.randomEth1WithdrawalCredentials());
   }
 
   private PendingDeposit builderPendingDepositWithInvalidSignature(final BLSPublicKey pubkey) {
-    final Bytes32 builderCredentials =
-        Bytes32.wrap(
-            Bytes.concatenate(
-                Bytes.of(WithdrawalPrefixes.BUILDER_WITHDRAWAL_BYTE),
-                dataStructureUtil.randomBytes32().slice(1)));
-    return pendingDepositWithInvalidSignature(pubkey, builderCredentials);
+    return pendingDepositWithInvalidSignature(pubkey, randomBuilderWithdrawalCredentials());
+  }
+
+  private Bytes32 randomBuilderWithdrawalCredentials() {
+    return Bytes32.wrap(
+        Bytes.concatenate(
+            Bytes.of(WithdrawalPrefixes.BUILDER_WITHDRAWAL_BYTE),
+            dataStructureUtil.randomBytes32().slice(1)));
   }
 
   private PendingDeposit pendingDepositWithInvalidSignature(
       final BLSPublicKey pubkey, final Bytes32 withdrawalCredentials) {
+    return pendingDeposit(
+        pubkey,
+        withdrawalCredentials,
+        dataStructureUtil.randomUInt64(),
+        dataStructureUtil.randomSignature());
+  }
+
+  private PendingDeposit pendingDepositWithEmptySignature(
+      final BLSPublicKey pubkey, final Bytes32 withdrawalCredentials) {
+    return pendingDeposit(pubkey, withdrawalCredentials, DEPOSIT_AMOUNT, BLSSignature.empty());
+  }
+
+  private PendingDeposit signedPendingDeposit(
+      final BLSKeyPair keyPair, final Bytes32 withdrawalCredentials) {
+    final BLSPublicKey pubkey = keyPair.getPublicKey();
+    final MiscHelpersGloas miscHelpers =
+        MiscHelpersGloas.required(spec.atEpoch(GLOAS_EPOCH).miscHelpers());
+    final BLSSignature signature =
+        BLS.sign(
+            keyPair.getSecretKey(),
+            miscHelpers.computeDepositSigningRoot(pubkey, withdrawalCredentials, DEPOSIT_AMOUNT));
+    return pendingDeposit(pubkey, withdrawalCredentials, DEPOSIT_AMOUNT, signature);
+  }
+
+  private PendingDeposit pendingDeposit(
+      final BLSPublicKey pubkey,
+      final Bytes32 withdrawalCredentials,
+      final UInt64 amount,
+      final BLSSignature signature) {
     return SchemaDefinitionsElectra.required(spec.atEpoch(GLOAS_EPOCH).getSchemaDefinitions())
         .getPendingDepositSchema()
         .create(
             new SszPublicKey(pubkey),
             SszBytes32.of(withdrawalCredentials),
-            SszUInt64.of(dataStructureUtil.randomUInt64()),
-            dataStructureUtil.randomSszSignature(),
+            SszUInt64.of(amount),
+            new SszSignature(signature),
             SszUInt64.of(UInt64.ZERO));
   }
 
@@ -245,12 +388,14 @@ class GloasStateUpgradeTest {
         gloasSpecVersion.getValidatorsUtil());
   }
 
-  private CountingInvalidSignatureMiscHelpers createCountingInvalidSignatureMiscHelpers() {
+  private CountingSignatureMiscHelpers createCountingSignatureMiscHelpers(
+      final boolean verifySignatures) {
     final SpecVersion gloasSpecVersion = spec.atEpoch(GLOAS_EPOCH);
-    return new CountingInvalidSignatureMiscHelpers(
+    return new CountingSignatureMiscHelpers(
         SpecConfigGloas.required(gloasSpecVersion.getConfig()),
         PredicatesGloas.required(gloasSpecVersion.predicates()),
-        SchemaDefinitionsGloas.required(gloasSpecVersion.getSchemaDefinitions()));
+        SchemaDefinitionsGloas.required(gloasSpecVersion.getSchemaDefinitions()),
+        verifySignatures);
   }
 
   private void activateAllValidators(final MutableBeaconState state) {
@@ -267,14 +412,21 @@ class GloasStateUpgradeTest {
     }
   }
 
-  private static class CountingInvalidSignatureMiscHelpers extends MiscHelpersGloas {
+  /**
+   * Counts deposit signature verifications, either rejecting every signature or delegating to the
+   * real check.
+   */
+  private static class CountingSignatureMiscHelpers extends MiscHelpersGloas {
+    private final boolean verifySignatures;
     private int signatureVerificationCount = 0;
 
-    private CountingInvalidSignatureMiscHelpers(
+    private CountingSignatureMiscHelpers(
         final SpecConfigGloas specConfig,
         final PredicatesGloas predicates,
-        final SchemaDefinitionsGloas schemaDefinitions) {
+        final SchemaDefinitionsGloas schemaDefinitions,
+        final boolean verifySignatures) {
       super(specConfig, predicates, schemaDefinitions);
+      this.verifySignatures = verifySignatures;
     }
 
     @Override
@@ -284,7 +436,8 @@ class GloasStateUpgradeTest {
         final UInt64 amount,
         final BLSSignature signature) {
       signatureVerificationCount++;
-      return false;
+      return verifySignatures
+          && super.isValidDepositSignature(pubkey, withdrawalCredentials, amount, signature);
     }
 
     private int getSignatureVerificationCount() {

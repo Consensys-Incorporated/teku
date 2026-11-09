@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -28,6 +28,11 @@ interface DataColumnSidecarCoreDB {
   SafeFuture<Optional<DataColumnSidecar>> getSidecar(DataColumnSlotAndIdentifier identifier);
 
   SafeFuture<List<DataColumnSlotAndIdentifier>> getColumnIdentifiers(UInt64 slot);
+
+  default SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyColumnIdentifiers(
+      final UInt64 slot) {
+    return getColumnIdentifiers(slot);
+  }
 
   default SafeFuture<List<DataColumnSlotAndIdentifier>> getColumnIdentifiers(
       final SlotAndBlockRoot blockId) {

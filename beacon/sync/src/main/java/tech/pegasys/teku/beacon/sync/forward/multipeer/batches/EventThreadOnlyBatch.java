@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -81,6 +81,18 @@ public class EventThreadOnlyBatch implements Batch {
   public Map<Bytes32, SignedExecutionPayloadEnvelope> getExecutionPayloadsByBlockRoot() {
     eventThread.checkOnEventThread();
     return delegate.getExecutionPayloadsByBlockRoot();
+  }
+
+  @Override
+  public void dropExecutionPayload(final Bytes32 blockRoot) {
+    eventThread.checkOnEventThread();
+    delegate.dropExecutionPayload(blockRoot);
+  }
+
+  @Override
+  public boolean restoreExecutionPayload(final Bytes32 blockRoot) {
+    eventThread.checkOnEventThread();
+    return delegate.restoreExecutionPayload(blockRoot);
   }
 
   @Override

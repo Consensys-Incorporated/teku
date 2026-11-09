@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -46,6 +46,17 @@ public class ValidatorLogger {
         ColorConsolePrinter.print(
             String.format("%sSuccessfully connected to beacon node event stream", PREFIX),
             Color.GREEN));
+  }
+
+  public void noHeadEventsReceivedFromBeaconNodeEventStream(final String beaconNodeEndpoint) {
+    log.warn(
+        ColorConsolePrinter.print(
+            String.format(
+                "%sNo head events were received from the beacon node event stream before it failed: %s. "
+                    + "The beacon node is likely outdated, please upgrade it to the latest version. "
+                    + "Duties will be driven by the slot timer alone until head events are received",
+                PREFIX, beaconNodeEndpoint),
+            Color.YELLOW));
   }
 
   public void beaconNodeEventStreamConnectionError() {

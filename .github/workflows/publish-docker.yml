@@ -26,38 +26,57 @@ jobs:
     permissions:
       actions: read
       contents: read
+      id-token: write
     environment: publish
     outputs:
       image_digest: ${{ steps.dockerBuildPush.outputs.digest }}
     steps:
+      # Only the Dockerfile is needed from the checkout. Nothing in this job runs Gradle: every
+      # step here can mint an OIDC token for the publish environment (id-token: write), so the
+      # build dependency tree is kept out of it and the distribution comes from assemble.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          submodules: 'recursive'
-      - name: Prepare
-        uses: ./.github/actions/prepare
-      # v4.0.0
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd 
-      - name: Download assemble-output
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # Pull base images through the GCR mirror but fall back to docker.io when the mirror
+          # is missing a blob. BASE_IMAGE_PREFIX below points the Dockerfiles at docker.io so
+          # the fallback can kick in; everywhere else they default to the mirror.
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
+      - name: Download distribution tar
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ inputs.assemble_run_id }}
-          name: assemble-output
-          merge-multiple: true
-          path: ${{ github.workspace }}
+          name: distribution-tar
+          path: ${{ runner.temp }}
       - name: get workflow_details
         id: jdkDetails
         shell: bash
+        # Inputs go through env rather than ${{ }} in the script so a crafted ref name or dispatch
+        # input cannot inject shell into a job that can push to Docker Hub.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          JDK_VERSION: ${{ inputs.jdk_version }}
+          INCLUDE_HASH_IN_DOCKER: ${{ inputs.include_hash_in_docker }}
         run: |
           # on a release tag also add `latest` and `maj.min` version tags if it's not an `rc`
-          if [ "${{ github.event_name }}" == "push" ] && [ "${{ github.ref_type }}" == "tag" ]; then
-            echo "buildVersion=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-            dockertags="consensys/teku:${{ github.ref_name }},consensys/teku:${{ github.ref_name }}-${{ inputs.jdk_version }}"
-            
-            semver=${{ github.ref_name }}
+          if [ "$EVENT_NAME" == "push" ] && [ "$REF_TYPE" == "tag" ]; then
+            echo "buildVersion=$REF_NAME" >> "$GITHUB_OUTPUT"
+            dockertags="consensys/teku:$REF_NAME-$JDK_VERSION"
+            # Only the default jdk25 image gets the bare tags (as with `develop` below); otherwise
+            # each variant job pushes them and whichever finishes last wins.
+            if [ "$JDK_VERSION" = "jdk25" ]; then
+              dockertags="$dockertags,consensys/teku:$REF_NAME"
+            fi
+
+            semver="$REF_NAME"
             if [[ ${semver,,} != *"-rc"* ]]; then
               echo "It's not an rc version, proceeding with extra tags..."
               # Extract major.minor 
@@ -67,40 +86,50 @@ jobs:
               else
                 echo "Invalid semver string"
               fi              
-              dockertags="${dockertags},consensys/teku:${major_minor},consensys/teku:${major_minor}-${{ inputs.jdk_version }}"
-              dockertags="${dockertags},consensys/teku:latest,consensys/teku:latest-${{ inputs.jdk_version }}"
+              dockertags="${dockertags},consensys/teku:${major_minor}-${JDK_VERSION},consensys/teku:latest-${JDK_VERSION}"
+              if [ "$JDK_VERSION" = "jdk25" ]; then
+                dockertags="${dockertags},consensys/teku:${major_minor},consensys/teku:latest"
+              fi
             fi
-            echo "dockertags=${dockertags}" >> $GITHUB_OUTPUT
+            echo "dockertags=${dockertags}" >> "$GITHUB_OUTPUT"
 
           else
-            echo "buildVersion=develop" >> $GITHUB_OUTPUT
-            dockertags="consensys/teku:develop-${{ inputs.jdk_version }}"
-            if [ "${{ inputs.jdk_version }}" = "jdk25" ]; then
+            echo "buildVersion=develop" >> "$GITHUB_OUTPUT"
+            dockertags="consensys/teku:develop-$JDK_VERSION"
+            if [ "$JDK_VERSION" = "jdk25" ]; then
               dockertags="$dockertags,consensys/teku:develop"
             fi
-            if [ "${{ inputs.include_hash_in_docker }}" = "true" ]; then
-              dockertags="$dockertags,consensys/teku:${{ github.sha }}"
+            if [ "$INCLUDE_HASH_IN_DOCKER" = "true" ]; then
+              dockertags="$dockertags,consensys/teku:$SHA"
             fi
-            echo "dockertags=${dockertags}" >> $GITHUB_OUTPUT
+            echo "dockertags=${dockertags}" >> "$GITHUB_OUTPUT"
           fi
+      # Same layout as the dockerDistUntar Gradle task: build/docker-teku/teku/ plus the Dockerfile.
       - name: Get the artifacts in one place
+        shell: bash
+        env:
+          JDK_VERSION: ${{ inputs.jdk_version }}
+          BUILD_VERSION: ${{ steps.jdkDetails.outputs.buildVersion }}
+          DOCKER_TAGS: ${{ steps.jdkDetails.outputs.dockertags }}
         run: |
           mkdir -p build/docker-teku/
-          ./gradlew dockerDistUntar
-          cp docker/${{ inputs.jdk_version }}/Dockerfile build/docker-teku/
-          echo "Creating buildVersion: ${{ steps.jdkDetails.outputs.buildVersion }}"
-          echo "Creating dockertags: ${{ steps.jdkDetails.outputs.dockertags }}"
-          # tree build/docker-teku/
-      # v4.0.0
+          tar -xzf "$RUNNER_TEMP"/teku-*.tar.gz -C build/docker-teku/
+          mv build/docker-teku/teku-* build/docker-teku/teku
+          cp "docker/$JDK_VERSION/Dockerfile" build/docker-teku/
+          echo "Creating buildVersion: $BUILD_VERSION"
+          echo "Creating dockertags: $DOCKER_TAGS"
+      # Docker Hub OIDC: short-lived push token issued to the publish environment, no stored password.
       - name: Login to Docker Hub
-        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        env:
+          DOCKERHUB_OIDC_CONNECTIONID: ${{ vars.DOCKERHUB_OIDC_CONNECTIONID }}
+          # Login to push takes ~3m10s; default token lifetime is 5 min.
+          DOCKERHUB_OIDC_EXPIREIN: 600
         with:
-          username: ${{ secrets.DOCKER_USER_RW }}
-          password: ${{ secrets.DOCKER_PASSWORD_RW }}
+          username: consensys
       
-      # v7.0.0
       - name: build and push the combined manifest
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         id: dockerBuildPush
         env:
           DOCKER_BUILD_SUMMARY: false
@@ -111,6 +140,7 @@ jobs:
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache          
           build-args: |
+            BASE_IMAGE_PREFIX=docker.io/library/
             VERSION=${{ steps.jdkDetails.outputs.buildVersion }}
             VCS_REF=${{ github.sha }}
             BUILD_DATE=${{ steps.jdkDetails.outputs.build_date }}
@@ -124,16 +154,15 @@ jobs:
       id-token: write
     environment: publish
     steps:
-      # v4.0.0
       - name: Login to Docker Hub
-        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        env:
+          DOCKERHUB_OIDC_CONNECTIONID: ${{ vars.DOCKERHUB_OIDC_CONNECTIONID }}
         with:
-          username: ${{ secrets.DOCKER_USER_RW }}
-          password: ${{ secrets.DOCKER_PASSWORD_RW }}
+          username: consensys
 
-      # v4
       - name: Install cosign
-        uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Sign image with keyless cosign
         env:
           IMAGE_DIGEST: ${{ needs.publishDocker.outputs.image_digest }}

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -226,7 +226,7 @@ public class ProgressiveTreeUtil {
     final TreeNode newRight =
         updateLevel(right, level + 1, maxLevel, updatesByLevel, levelDefaults);
 
-    @SuppressWarnings("ReferenceComparison")
+    @SuppressWarnings({"ReferenceComparison", "ReferenceEquality"})
     boolean unchanged = left == originalLeft && newRight == right;
     if (unchanged) {
       return node; // structural sharing

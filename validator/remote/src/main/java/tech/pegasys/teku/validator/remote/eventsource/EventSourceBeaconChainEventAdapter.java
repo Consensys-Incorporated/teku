@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -37,8 +37,10 @@ import org.apache.logging.log4j.Logger;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.api.response.EventType;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.http.UrlSanitizer;
 import tech.pegasys.teku.infrastructure.logging.ValidatorLogger;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
 import tech.pegasys.teku.validator.beaconnode.BeaconChainEventAdapter;
 import tech.pegasys.teku.validator.remote.BeaconNodeReadinessChannel;
@@ -64,7 +66,10 @@ public class EventSourceBeaconChainEventAdapter
   private final OkHttpClient okHttpClient;
   private final ValidatorLogger validatorLogger;
   private final BeaconChainEventAdapter timeBasedEventAdapter;
-  private final EventSourceHandler eventSourceHandler;
+  private final boolean generateEarlyAttestations;
+  private final ValidatorTimingChannel validatorTimingChannel;
+  private final MetricsSystem metricsSystem;
+  private final Spec spec;
 
   private final boolean shutdownWhenValidatorSlashedEnabled;
 
@@ -86,10 +91,11 @@ public class EventSourceBeaconChainEventAdapter
     this.okHttpClient = okHttpClient;
     this.validatorLogger = validatorLogger;
     this.timeBasedEventAdapter = timeBasedEventAdapter;
-    this.eventSourceHandler =
-        new EventSourceHandler(
-            validatorTimingChannel, metricsSystem, generateEarlyAttestations, spec);
+    this.validatorTimingChannel = validatorTimingChannel;
+    this.metricsSystem = metricsSystem;
+    this.generateEarlyAttestations = generateEarlyAttestations;
     this.shutdownWhenValidatorSlashedEnabled = shutdownWhenValidatorSlashedEnabled;
+    this.spec = spec;
   }
 
   @Override
@@ -144,7 +150,14 @@ public class EventSourceBeaconChainEventAdapter
   BackgroundEventSource createEventSource(final RemoteValidatorApiChannel beaconNodeApi) {
 
     final List<EventType> eventTypes = new ArrayList<>();
-    eventTypes.add(EventType.head);
+    if (spec.isMilestoneSupported(SpecMilestone.GLOAS)) {
+      eventTypes.add(EventType.head_v2);
+      // lets payload timeliness attestations be sent as soon as the payload is available rather
+      // than at the deadline
+      eventTypes.add(EventType.execution_payload_available);
+    } else {
+      eventTypes.add(EventType.head);
+    }
     if (shutdownWhenValidatorSlashedEnabled) {
       eventTypes.add(EventType.attester_slashing);
       eventTypes.add(EventType.proposer_slashing);
@@ -157,13 +170,29 @@ public class EventSourceBeaconChainEventAdapter
             .retryDelayStrategy(
                 RetryDelayStrategy.defaultStrategy()
                     .maxDelay(MAX_RECONNECT_TIME.toMillis(), TimeUnit.MILLISECONDS));
-    return new BackgroundEventSource.Builder(eventSourceHandler, eventSourceBuilder)
+    return new BackgroundEventSource.Builder(
+            createEventSourceHandler(beaconNodeApi), eventSourceBuilder)
         .connectionErrorHandler(
             __ -> {
               switchToFailoverEventStreamIfAvailable();
               return Action.PROCEED;
             })
         .build();
+  }
+
+  /**
+   * A handler per beacon node, so that a node which stops delivering events is reported on its own
+   * rather than being masked by another node which is working.
+   */
+  @VisibleForTesting
+  EventSourceHandler createEventSourceHandler(final RemoteValidatorApiChannel beaconNodeApi) {
+    return new EventSourceHandler(
+        validatorTimingChannel,
+        metricsSystem,
+        generateEarlyAttestations,
+        spec,
+        validatorLogger,
+        UrlSanitizer.sanitizePotentialUrl(beaconNodeApi.getEndpoint().toString()));
   }
 
   private HttpUrl createEventStreamSourceUrl(
@@ -193,7 +222,7 @@ public class EventSourceBeaconChainEventAdapter
         failoverBeaconNodeApis.stream()
             .filter(beaconNodeReadinessManager::isReady)
             .filter(failover -> !currentEventStreamHasSameEndpoint(failover))
-            .max(Comparator.comparing(beaconNodeReadinessManager::getReadinessStatusWeight));
+            .max(Comparator.comparingInt(beaconNodeReadinessManager::getReadinessStatusWeight));
     if (readyFailover.isPresent()) {
       switchToFailoverEventStream(readyFailover.get());
       return true;

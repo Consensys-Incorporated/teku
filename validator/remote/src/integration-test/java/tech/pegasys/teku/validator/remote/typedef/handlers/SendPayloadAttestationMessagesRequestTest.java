@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -27,6 +27,7 @@ import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import tech.pegasys.teku.api.exceptions.RemoteServiceNotAvailableException;
+import tech.pegasys.teku.infrastructure.http.RestApiConstants;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
 import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -45,7 +46,7 @@ public class SendPayloadAttestationMessagesRequestTest extends AbstractTypeDefRe
 
   @BeforeEach
   public void setup() {
-    request = new SendPayloadAttestationMessagesRequest(mockWebServer.url("/"), okHttpClient);
+    request = new SendPayloadAttestationMessagesRequest(spec, mockWebServer.url("/"), okHttpClient);
     payloadAttestationMessages = List.of(dataStructureUtil.randomPayloadAttestationMessage());
   }
 
@@ -64,6 +65,8 @@ public class SendPayloadAttestationMessagesRequestTest extends AbstractTypeDefRe
     assertThat(recordedRequest.getMethod()).isEqualTo("POST");
     assertThat(recordedRequest.getPath())
         .contains(ValidatorApiMethod.SEND_PAYLOAD_ATTESTATION_MESSAGES.getPath(emptyMap()));
+    assertThat(recordedRequest.getHeader(RestApiConstants.HEADER_CONSENSUS_VERSION))
+        .isEqualTo(specMilestone.lowerCaseName());
   }
 
   @TestTemplate

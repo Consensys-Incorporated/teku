@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -111,12 +111,14 @@ public final class RpcResponseDecoder<T extends SszData, TContext> {
       }
       Optional<T> ret = payloadDecoder.get().decodeOneMessage(data);
       if (ret.isPresent()) {
+        final TContext payloadContext = context.get();
         respCodeMaybe = Optional.empty();
         contextDecoder.ifPresent(ByteBufDecoder::close);
         contextDecoder = Optional.empty();
         context = Optional.empty();
         payloadDecoder.ifPresent(ByteBufDecoder::close);
         payloadDecoder = Optional.empty();
+        contextCodec.verifyPayloadMatchesContext(payloadContext, ret.get());
       }
       return ret;
     } else {

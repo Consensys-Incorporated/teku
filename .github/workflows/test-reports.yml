@@ -1,0 +1,52 @@
+name: test-reports
+
+# Publishes one GitHub Check Run per test suite from the JUnit XML uploaded by ci.yml.
+#
+# Runs on workflow_run instead of inside ci.yml because most PRs come from forks: a
+# pull_request job on a fork PR gets a read-only token and cannot create check runs.
+# workflow_run jobs run in the base repository with a writable token, and dorny resolves
+# the triggering run's PR head SHA so the check run shows up on the PR itself.
+#
+# NOTE: workflow_run always executes the version of this file on the default branch, so
+# changes here only take effect after they are merged to master.
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+
+permissions: read-all
+
+jobs:
+  report:
+    name: ${{ matrix.suite }}
+    runs-on: ubuntu-24.04
+    # Skip docs-only runs and cancelled runs: no test artifacts to report.
+    if: github.event.workflow_run.conclusion != 'cancelled'
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [unit, integration, property, acceptance, reference]
+    steps:
+      - name: ${{ matrix.suite }} tests report
+        uses: dorny/test-reporter@3d76b34a4535afbd0600d347b09a6ee5deb3ed7f
+        env:
+          NODE_OPTIONS: "--max_old_space_size=4096"
+        with:
+          # All shard artifacts for this suite, uploaded by matrix-tests-template.yml / referenceTests
+          artifact: /^${{ matrix.suite }}-reports-.*$/
+          name: ${{ matrix.suite }} tests
+          path: "**/TEST-*.xml"
+          reporter: java-junit
+          # Check run output is capped at 65535 bytes: list only what failed
+          list-suites: failed
+          list-tests: failed
+          max-annotations: 50
+          # Check run instead of job summary, so results are visible from the PR
+          use-actions-summary: false
+          # Docs-only runs upload no artifacts
+          fail-on-empty: false

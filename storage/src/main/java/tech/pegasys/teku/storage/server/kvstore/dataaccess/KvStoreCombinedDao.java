@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -210,6 +210,16 @@ public interface KvStoreCombinedDao extends AutoCloseable {
 
   Optional<Bytes32> getBestLightClientUpdateSignatureBlockRoot(UInt64 period);
 
+  Optional<Bytes> getLightClientBootstrap(UInt64 slot);
+
+  Optional<Bytes> getLightClientSyncCommittee(UInt64 period);
+
+  @MustBeClosed
+  Stream<UInt64> streamLightClientBootstrapSlots();
+
+  @MustBeClosed
+  Stream<UInt64> streamLightClientSyncCommitteePeriods();
+
   /** Triggers a full, blocking compaction of the underlying storage to reclaim freed space. */
   void compact();
 
@@ -244,6 +254,12 @@ public interface KvStoreCombinedDao extends AutoCloseable {
         UInt64 period, LightClientUpdate update, Bytes32 signatureBlockRoot);
 
     void removeBestLightClientUpdate(UInt64 period);
+
+    void addLightClientBootstrap(UInt64 slot, Bytes bootstrap, UInt64 period, Bytes syncCommittee);
+
+    void removeLightClientBootstrap(UInt64 slot);
+
+    void removeLightClientSyncCommittee(UInt64 period);
 
     void setWeakSubjectivityCheckpoint(Checkpoint checkpoint);
 

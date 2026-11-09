@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -110,6 +110,9 @@ public interface DataColumnSidecarUtil {
 
   Optional<SszBytes32Vector> getMaybeKzgCommitmentsInclusionProof(
       DataColumnSidecar dataColumnSidecar);
+
+  /** The sidecar's own commitments, where the fork binds them to the block; empty otherwise. */
+  Optional<SszList<SszKZGCommitment>> getMaybeKzgCommitments(DataColumnSidecar dataColumnSidecar);
 
   List<DataColumnSidecar> reconstructAllDataColumnSidecars(
       List<DataColumnSidecar> dataColumnSidecars);

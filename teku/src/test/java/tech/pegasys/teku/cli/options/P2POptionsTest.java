@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -36,6 +36,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -61,6 +62,7 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.config.SpecConfigFulu;
+import tech.pegasys.teku.statetransition.validation.signatures.SignatureVerificationMode;
 
 public class P2POptionsTest extends AbstractBeaconNodeCommandTest {
 
@@ -940,5 +942,70 @@ public class P2POptionsTest extends AbstractBeaconNodeCommandTest {
     final TekuConfiguration tekuConfiguration =
         getTekuConfigurationFromArguments("--Xmin-bid-increment-percentage=3");
     assertThat(tekuConfiguration.p2p().getMinBidIncrementPercentage()).isEqualTo(3);
+  }
+
+  @Test
+  public void shouldUseDefaultBatchVerifyGatherOptions() {
+    final P2PConfig config = getTekuConfigurationFromArguments().p2p();
+    assertThat(config.getBatchVerifyGatherTimeout()).isEqualTo(Duration.ofMillis(10));
+  }
+
+  @Test
+  public void shouldSetBatchVerifyGatherOptions() {
+    final P2PConfig config =
+        getTekuConfigurationFromArguments("--Xp2p-batch-verify-signatures-gather-timeout-ms", "5")
+            .p2p();
+    assertThat(config.getBatchVerifyGatherTimeout()).isEqualTo(Duration.ofMillis(5));
+  }
+
+  @Test
+  public void batchVerifyGatherTimeout_shouldAcceptTheMaximum() {
+    final P2PConfig config =
+        getTekuConfigurationFromArguments("--Xp2p-batch-verify-signatures-gather-timeout-ms", "100")
+            .p2p();
+    assertThat(config.getBatchVerifyGatherTimeout()).isEqualTo(Duration.ofMillis(100));
+  }
+
+  @Test
+  public void batchVerifyGatherTimeout_shouldRejectValuesAboveTheMaximum() {
+    assertThatThrownBy(
+            () ->
+                getTekuConfigurationFromArguments(
+                    "--Xp2p-batch-verify-signatures-gather-timeout-ms", "101"))
+        .isInstanceOf(AssertionError.class)
+        .hasMessageContaining("Invalid batchVerifyGatherTimeoutMillis: 101 exceeds maximum: 100");
+  }
+
+  @Test
+  public void batchVerifyGatherTimeout_shouldRejectNegativeValues() {
+    assertThatThrownBy(
+            () ->
+                getTekuConfigurationFromArguments(
+                    "--Xp2p-batch-verify-signatures-gather-timeout-ms", "-1"))
+        .isInstanceOf(AssertionError.class)
+        .hasMessageContaining("Invalid batchVerifyGatherTimeoutMillis: -1");
+  }
+
+  @Test
+  public void shouldDefaultBatchVerifyModeToGatherAndGroup() {
+    final P2PConfig config = getTekuConfigurationFromArguments().p2p();
+    assertThat(config.getBatchVerifyMode()).isEqualTo(SignatureVerificationMode.GATHER_AND_GROUP);
+  }
+
+  @Test
+  public void shouldSetBatchVerifyModeToLegacy() {
+    final P2PConfig config =
+        getTekuConfigurationFromArguments("--Xp2p-batch-verify-signatures-mode", "LEGACY").p2p();
+    assertThat(config.getBatchVerifyMode()).isEqualTo(SignatureVerificationMode.LEGACY);
+  }
+
+  @Test
+  public void shouldRejectNegativeBatchVerifyGatherTimeout() {
+    assertThatThrownBy(
+            () ->
+                getTekuConfigurationFromArguments(
+                    "--Xp2p-batch-verify-signatures-gather-timeout-ms", "-1"))
+        .isInstanceOf(AssertionError.class)
+        .hasMessageContaining("Invalid batchVerifyGatherTimeoutMillis");
   }
 }

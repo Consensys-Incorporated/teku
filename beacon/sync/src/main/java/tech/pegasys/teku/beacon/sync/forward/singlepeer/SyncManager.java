@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -262,7 +262,7 @@ public class SyncManager extends Service {
         .max(
             Comparator.comparing(Eth2Peer::finalizedEpoch)
                 .thenComparing(peer -> peer.getStatus().getHeadSlot())
-                .thenComparing(p -> Math.random()));
+                .thenComparingDouble(p -> Math.random()));
   }
 
   private void onNewPeer(final Eth2Peer peer) {

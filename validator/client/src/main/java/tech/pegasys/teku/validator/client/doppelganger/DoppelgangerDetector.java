@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -18,12 +18,12 @@ import static tech.pegasys.teku.infrastructure.logging.StatusLogger.STATUS_LOG;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.commons.lang3.tuple.Pair;
@@ -41,6 +41,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 import tech.pegasys.teku.validator.beaconnode.GenesisDataProvider;
+import tech.pegasys.teku.validator.client.NodeDataUnavailableException;
 
 public class DoppelgangerDetector {
 
@@ -48,7 +49,6 @@ public class DoppelgangerDetector {
   private final StatusLogger statusLog;
   private final Duration checkDelay;
   private final int maxEpochs;
-  private final Duration timeout;
   private final AsyncRunner asyncRunner;
   private final ValidatorApiChannel validatorApiChannel;
   private final Spec spec;
@@ -62,7 +62,6 @@ public class DoppelgangerDetector {
       final TimeProvider timeProvider,
       final GenesisDataProvider genesisDataProvider,
       final Duration checkDelay,
-      final Duration timeout,
       final int maxEpochs) {
     this(
         STATUS_LOG,
@@ -72,7 +71,6 @@ public class DoppelgangerDetector {
         timeProvider,
         genesisDataProvider,
         checkDelay,
-        timeout,
         maxEpochs);
   }
 
@@ -84,7 +82,6 @@ public class DoppelgangerDetector {
       final TimeProvider timeProvider,
       final GenesisDataProvider genesisDataProvider,
       final Duration checkDelay,
-      final Duration timeout,
       final int maxEpochs) {
     this.statusLog = statusLog;
     this.asyncRunner = asyncRunner;
@@ -93,7 +90,6 @@ public class DoppelgangerDetector {
     this.timeProvider = timeProvider;
     this.genesisDataProvider = genesisDataProvider;
     this.checkDelay = checkDelay;
-    this.timeout = timeout;
     this.maxEpochs = maxEpochs;
   }
 
@@ -103,33 +99,28 @@ public class DoppelgangerDetector {
       LOG.info("Skipping doppelganger detection: No public keys provided to check");
       return SafeFuture.completedFuture(new HashMap<>());
     }
-    DoppelgangerDetectionTask doppelgangerDetectionTask =
-        new DoppelgangerDetectionTask(timeProvider.getTimeInSeconds(), pubKeys);
+    final DoppelgangerDetectionTask doppelgangerDetectionTask =
+        new DoppelgangerDetectionTask(pubKeys);
     return doppelgangerDetectionTask.performDoppelgangerDetectionTask();
   }
 
   private class DoppelgangerDetectionTask {
 
     private volatile Cancellable doppelgangerDetectionTask;
-    private Optional<SafeFuture<Map<UInt64, BLSPublicKey>>> doppelgangerCheckFinished =
-        Optional.empty();
-    private final UInt64 startTime;
+    private final SafeFuture<Map<UInt64, BLSPublicKey>> doppelgangerCheckFinished =
+        new SafeFuture<>();
     private final Set<BLSPublicKey> pubKeys;
     private Optional<UInt64> epochAtStart = Optional.empty();
     private final Map<UInt64, BLSPublicKey> detectedDoppelgangers = new HashMap<>();
-    private final AtomicBoolean firstCheck = new AtomicBoolean(true);
+    private boolean wasUnavailable;
 
-    public DoppelgangerDetectionTask(final UInt64 startTime, final Set<BLSPublicKey> pubKeys) {
-      this.startTime = startTime;
+    private DoppelgangerDetectionTask(final Set<BLSPublicKey> pubKeys) {
       this.pubKeys = pubKeys;
     }
 
-    protected synchronized SafeFuture<Map<UInt64, BLSPublicKey>>
-        performDoppelgangerDetectionTask() {
+    private synchronized SafeFuture<Map<UInt64, BLSPublicKey>> performDoppelgangerDetectionTask() {
       statusLog.doppelgangerDetectionStart(
           mapToAbbreviatedKeys(pubKeys).collect(Collectors.toSet()));
-      doppelgangerCheckFinished = Optional.of(new SafeFuture<>());
-      epochAtStart = Optional.empty();
       doppelgangerDetectionTask =
           asyncRunner.runWithFixedDelay(
               this::performDoppelgangerCheck,
@@ -140,77 +131,106 @@ public class DoppelgangerDetector {
                       "Error while checking validators doppelgangers for keys {}. The check could not be performed correctly.",
                       mapToAbbreviatedKeys(pubKeys).collect(Collectors.joining(", ")),
                       throwable));
-      return doppelgangerCheckFinished.get();
+      return doppelgangerCheckFinished;
     }
 
-    private synchronized SafeFuture<Void> stopDoppelgangerDetectorTask(
-        final Map<UInt64, BLSPublicKey> detectedDoppelgangers) {
-      if (doppelgangerCheckFinished.isEmpty()) {
-        throw new RuntimeException("Doppelganger Detection is already stopped");
+    private SafeFuture<Void> performDoppelgangerCheck() {
+      return getCurrentEpoch()
+          .exceptionallyCompose(
+              throwable ->
+                  unavailable(
+                      "Unable to get genesis time to calculate the current epoch: "
+                          + extractErrorMessage(throwable)))
+          .thenCompose(
+              currentEpoch -> checkRequiredEpochs(currentEpoch).thenApply(ignored -> currentEpoch))
+          .handleComposed(
+              (currentEpoch, throwable) ->
+                  throwable == null
+                      ? handleSuccessfulCheck(currentEpoch)
+                      : handleUnavailableCheck(extractErrorMessage(throwable)));
+    }
+
+    private SafeFuture<UInt64> getCurrentEpoch() {
+      return genesisDataProvider
+          .getGenesisTime()
+          .orTimeout(asyncRunner, checkDelay)
+          .thenApply(
+              genesisTime ->
+                  spec.computeEpochAtSlot(
+                      spec.getCurrentSlot(timeProvider.getTimeInSeconds(), genesisTime)));
+    }
+
+    private SafeFuture<Void> checkRequiredEpochs(final UInt64 currentEpoch) {
+      if (epochAtStart.isEmpty()) {
+        epochAtStart = Optional.of(currentEpoch);
+        return checkPreviousAndCurrentEpochs(currentEpoch);
+      }
+      if (!maxEpochsReached(currentEpoch)) {
+        return checkDoppelgangersAtEpoch(currentEpoch);
+      }
+      return checkPreviousAndCurrentEpochs(currentEpoch);
+    }
+
+    private SafeFuture<Void> checkPreviousAndCurrentEpochs(final UInt64 currentEpoch) {
+      if (currentEpoch.isZero()) {
+        return checkDoppelgangersAtEpoch(currentEpoch);
+      }
+      return checkDoppelgangersAtEpoch(currentEpoch.minus(UInt64.ONE))
+          .thenCompose(
+              ignored ->
+                  allKeysAreActive()
+                      ? SafeFuture.COMPLETE
+                      : checkDoppelgangersAtEpoch(currentEpoch));
+    }
+
+    private SafeFuture<Void> handleSuccessfulCheck(final UInt64 currentEpoch) {
+      markAvailable();
+      if (!allKeysAreActive() && !maxEpochsReached(currentEpoch)) {
+        return SafeFuture.COMPLETE;
+      }
+      statusLog.doppelgangerDetectionEnd(
+          mapToAbbreviatedKeys(pubKeys).collect(Collectors.toSet()),
+          detectedDoppelgangers.entrySet().stream()
+              .collect(Collectors.toMap(Map.Entry::getKey, entry -> entry.getValue().toString())));
+      return completeDoppelgangerDetection();
+    }
+
+    private SafeFuture<Void> handleUnavailableCheck(final String reason) {
+      markUnavailable(reason);
+      return SafeFuture.COMPLETE;
+    }
+
+    private void markAvailable() {
+      if (wasUnavailable) {
+        statusLog.doppelgangerDetectionResumed(
+            mapToAbbreviatedKeys(pubKeys).collect(Collectors.toSet()));
+      }
+      wasUnavailable = false;
+    }
+
+    private void markUnavailable(final String reason) {
+      if (!wasUnavailable) {
+        statusLog.doppelgangerDetectionUnavailable(
+            mapToAbbreviatedKeys(pubKeys).collect(Collectors.toSet()), reason);
       }
       epochAtStart = Optional.empty();
-      doppelgangerCheckFinished.get().complete(detectedDoppelgangers);
-      doppelgangerCheckFinished = Optional.empty();
+      wasUnavailable = true;
+    }
+
+    private synchronized SafeFuture<Void> completeDoppelgangerDetection() {
+      if (!doppelgangerCheckFinished.complete(detectedDoppelgangers)) {
+        throw new IllegalStateException("Doppelganger detection is already stopped");
+      }
+      return cancelScheduledTask();
+    }
+
+    private SafeFuture<Void> cancelScheduledTask() {
       return SafeFuture.fromRunnable(
           () -> Optional.ofNullable(doppelgangerDetectionTask).ifPresent(Cancellable::cancel));
     }
 
-    private SafeFuture<Void> performDoppelgangerCheck() {
-      if (timeProvider
-          .getTimeInSeconds()
-          .minus(startTime)
-          .isGreaterThanOrEqualTo(timeout.toSeconds())) {
-        statusLog.doppelgangerDetectionTimeout(
-            mapToAbbreviatedKeys(pubKeys).collect(Collectors.toSet()));
-        return stopDoppelgangerDetectorTask(detectedDoppelgangers);
-      }
-
-      return genesisDataProvider
-          .getGenesisTime()
-          .thenCompose(
-              genesisTime -> {
-                final UInt64 currentSlot =
-                    spec.getCurrentSlot(timeProvider.getTimeInSeconds(), genesisTime);
-                final UInt64 currentEpoch = spec.computeEpochAtSlot(currentSlot);
-
-                captureEpochAtStart(currentEpoch);
-
-                if (maxEpochsReached(currentEpoch) || allKeysAreActive()) {
-                  statusLog.doppelgangerDetectionEnd(
-                      mapToAbbreviatedKeys(pubKeys).collect(Collectors.toSet()),
-                      detectedDoppelgangers.entrySet().stream()
-                          .collect(
-                              Collectors.toMap(Map.Entry::getKey, e -> e.getValue().toString())));
-                  return stopDoppelgangerDetectorTask(detectedDoppelgangers);
-                } else {
-                  if (firstCheck.compareAndSet(true, false)
-                      && currentEpoch.isGreaterThan(UInt64.ZERO)) {
-                    return checkDoppelgangersAtEpoch(currentEpoch.minus(UInt64.ONE))
-                        .thenCompose(
-                            __ -> {
-                              if (!allKeysAreActive()) {
-                                return checkDoppelgangersAtEpoch(currentEpoch);
-                              }
-                              return SafeFuture.COMPLETE;
-                            });
-                  } else {
-                    return checkDoppelgangersAtEpoch(currentEpoch);
-                  }
-                }
-              })
-          .orTimeout(checkDelay)
-          .exceptionally(
-              throwable -> {
-                LOG.error(
-                    "Unable to check validators doppelgangers for keys {}. Unable to get genesis time to calculate the current epoch: {}",
-                    mapToAbbreviatedKeys(pubKeys).collect(Collectors.joining(", ")),
-                    extractErrorMessage(throwable));
-                return null;
-              });
-    }
-
     private SafeFuture<Void> checkDoppelgangersAtEpoch(final UInt64 epoch) {
-      Set<BLSPublicKey> inactivePubKeys =
+      final Set<BLSPublicKey> inactivePubKeys =
           pubKeys.stream()
               .filter(pubKey -> !detectedDoppelgangers.containsValue(pubKey))
               .collect(Collectors.toSet());
@@ -219,46 +239,31 @@ public class DoppelgangerDetector {
 
       return validatorApiChannel
           .getValidatorIndices(inactivePubKeys)
+          .orTimeout(asyncRunner, checkDelay)
+          .exceptionallyCompose(
+              throwable ->
+                  unavailable("Unable to get validator indices: " + extractErrorMessage(throwable)))
           .thenCompose(
-              validatorIndicesByPubKeys ->
-                  checkValidatorsLivenessAtEpoch(
-                      epoch,
-                      inactivePubKeys,
-                      validatorIndicesByPubKeys.entrySet().stream()
-                          .collect(
-                              Collectors.toMap(
-                                  Map.Entry::getKey, e -> UInt64.valueOf(e.getValue())))))
-          .orTimeout(checkDelay)
-          .exceptionally(
-              throwable -> {
-                LOG.error(
-                    "Unable to check validators doppelgangers for keys {}. Unable to get validators indices: {}",
-                    mapToAbbreviatedKeys(inactivePubKeys).collect(Collectors.joining(", ")),
-                    extractErrorMessage(throwable));
-                return null;
-              })
-          .toVoid();
-    }
-
-    private void captureEpochAtStart(final UInt64 epoch) {
-      if (epochAtStart.isEmpty()) {
-        epochAtStart = Optional.of(epoch);
-      }
-    }
-
-    private boolean maxEpochsReached(final UInt64 epoch) {
-      return epoch.minus(epochAtStart.get()).isGreaterThanOrEqualTo(maxEpochs);
-    }
-
-    private boolean allKeysAreActive() {
-      return detectedDoppelgangers.values().containsAll(pubKeys);
+              maybeValidatorIndices ->
+                  maybeValidatorIndices
+                      .map(
+                          validatorIndices ->
+                              checkValidatorsLivenessAtEpoch(
+                                  epoch,
+                                  inactivePubKeys,
+                                  validatorIndices.entrySet().stream()
+                                      .collect(
+                                          Collectors.toMap(
+                                              Map.Entry::getKey,
+                                              entry -> UInt64.valueOf(entry.getValue())))))
+                      .orElseGet(
+                          () -> unavailable("Beacon node returned no validator index data")));
     }
 
     private SafeFuture<Void> checkValidatorsLivenessAtEpoch(
         final UInt64 epoch,
         final Set<BLSPublicKey> pubKeys,
         final Map<BLSPublicKey, UInt64> validatorIndicesByPubKey) {
-
       if (validatorIndicesByPubKey.isEmpty()) {
         LOG.info(
             "Skipping validators doppelgangers check for public keys {}. No associated indices found. Public keys are inactive",
@@ -267,27 +272,51 @@ public class DoppelgangerDetector {
       }
 
       logMissingIndices(pubKeys, validatorIndicesByPubKey);
-
       return validatorApiChannel
           .getValidatorsLiveness(new ArrayList<>(validatorIndicesByPubKey.values()), epoch)
-          .thenAccept(
-              validatorLivenessAtEpoches ->
-                  checkValidatorDoppelgangers(validatorLivenessAtEpoches, validatorIndicesByPubKey))
-          .orTimeout(checkDelay)
-          .exceptionally(
-              throwable -> {
-                LOG.error(
-                    "Unable to check validators doppelgangers for keys {}. Unable to get validators liveness: {}",
-                    mapToAbbreviatedKeys(pubKeys).collect(Collectors.joining(", ")),
-                    extractErrorMessage(throwable));
+          .orTimeout(asyncRunner, checkDelay)
+          .exceptionallyCompose(
+              throwable ->
+                  unavailable(
+                      "Unable to get validator liveness: " + extractErrorMessage(throwable)))
+          .thenApply(
+              maybeValidatorLiveness -> {
+                final List<ValidatorLivenessAtEpoch> validatorLiveness =
+                    maybeValidatorLiveness.orElseThrow(
+                        () ->
+                            new NodeDataUnavailableException(
+                                "Beacon node returned no validator liveness data"));
+                checkValidatorDoppelgangers(validatorLiveness, validatorIndicesByPubKey);
+                final Set<UInt64> missingValidatorIndices =
+                    new HashSet<>(validatorIndicesByPubKey.values());
+                validatorLiveness.forEach(
+                    liveness -> missingValidatorIndices.remove(liveness.index()));
+                if (!missingValidatorIndices.isEmpty()) {
+                  throw new NodeDataUnavailableException(
+                      "Beacon node liveness response omitted validator indices "
+                          + missingValidatorIndices);
+                }
                 return null;
-              })
-          .thenApply(doppelgangerDetected -> null);
+              });
+    }
+
+    private <T> SafeFuture<T> unavailable(final String reason) {
+      return SafeFuture.failedFuture(new NodeDataUnavailableException(reason));
+    }
+
+    private boolean maxEpochsReached(final UInt64 epoch) {
+      return epochAtStart
+          .map(startEpoch -> epoch.minus(startEpoch).isGreaterThanOrEqualTo(maxEpochs))
+          .orElse(false);
+    }
+
+    private boolean allKeysAreActive() {
+      return detectedDoppelgangers.values().containsAll(pubKeys);
     }
 
     private void logMissingIndices(
         final Set<BLSPublicKey> pubKeys, final Map<BLSPublicKey, UInt64> validatorIndicesByPubKey) {
-      Set<BLSPublicKey> publicKeysWithoutIndices =
+      final Set<BLSPublicKey> publicKeysWithoutIndices =
           pubKeys.stream()
               .filter(publicKey -> !validatorIndicesByPubKey.containsKey(publicKey))
               .collect(Collectors.toSet());
@@ -302,32 +331,28 @@ public class DoppelgangerDetector {
     }
 
     private void checkValidatorDoppelgangers(
-        final Optional<List<ValidatorLivenessAtEpoch>> validatorLivenessAtEpoches,
+        final List<ValidatorLivenessAtEpoch> validatorLiveness,
         final Map<BLSPublicKey, UInt64> validatorsIndicesByPubKey) {
       final List<Pair<BLSPublicKey, ValidatorLivenessAtEpoch>> doppelgangers =
-          filterLiveValidators(validatorLivenessAtEpoches, validatorsIndicesByPubKey);
-      if (!doppelgangers.isEmpty()) {
-        LOG.fatal("Validator doppelganger detected...");
-        statusLog.validatorsDoppelgangersDetected(
-            mapLivenessAtEpochToIndicesByPubKeyStrings(doppelgangers));
-        doppelgangers.forEach(
-            doppelganger ->
-                detectedDoppelgangers.putIfAbsent(
-                    doppelganger.getRight().index(), doppelganger.getLeft()));
-        if (allKeysAreActive()) {
-          statusLog.doppelgangerDetectionEnd(
-              mapToAbbreviatedKeys(pubKeys).collect(Collectors.toSet()),
-              detectedDoppelgangers.entrySet().stream()
-                  .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().toString())));
-          stopDoppelgangerDetectorTask(detectedDoppelgangers).finishError(LOG);
-        }
+          filterLiveValidators(validatorLiveness, validatorsIndicesByPubKey);
+      if (doppelgangers.isEmpty()) {
+        return;
       }
+      LOG.fatal("Validator doppelganger detected...");
+      statusLog.validatorsDoppelgangersDetected(
+          mapLivenessAtEpochToIndicesByPubKeyStrings(doppelgangers));
+      doppelgangers.forEach(
+          doppelganger ->
+              detectedDoppelgangers.putIfAbsent(
+                  doppelganger.getRight().index(), doppelganger.getLeft()));
     }
 
     private Map<UInt64, String> mapLivenessAtEpochToIndicesByPubKeyStrings(
         final List<Pair<BLSPublicKey, ValidatorLivenessAtEpoch>> doppelgangers) {
       return doppelgangers.stream()
-          .collect(Collectors.toMap(e -> e.getRight().index(), e -> e.getLeft().toString()));
+          .collect(
+              Collectors.toMap(
+                  entry -> entry.getRight().index(), entry -> entry.getLeft().toString()));
     }
 
     private Stream<String> mapToAbbreviatedKeys(final Set<BLSPublicKey> pubKeys) {
@@ -335,36 +360,30 @@ public class DoppelgangerDetector {
     }
 
     private List<Pair<BLSPublicKey, ValidatorLivenessAtEpoch>> filterLiveValidators(
-        final Optional<List<ValidatorLivenessAtEpoch>> validatorLivenessAtEpoches,
+        final List<ValidatorLivenessAtEpoch> validatorLiveness,
         final Map<BLSPublicKey, UInt64> validatorPubKeysByIndices) {
-      return validatorLivenessAtEpoches
+      return validatorLiveness.stream()
+          .filter(
+              validatorLivenessAtEpoch ->
+                  validatorPubKeysByIndices.containsValue(validatorLivenessAtEpoch.index())
+                      && validatorLivenessAtEpoch.isLive())
           .map(
-              validatorLiveness ->
-                  validatorLiveness.stream()
-                      .filter(
-                          validatorLivenessAtEpoch ->
-                              validatorPubKeysByIndices.containsValue(
-                                      validatorLivenessAtEpoch.index())
-                                  && validatorLivenessAtEpoch.isLive())
-                      .map(
-                          validatorLivenessAtEpoch ->
-                              Pair.of(
-                                  validatorPubKeysByIndices.entrySet().stream()
-                                      .filter(
-                                          e ->
-                                              e.getValue().equals(validatorLivenessAtEpoch.index()))
-                                      .findFirst()
-                                      .get()
-                                      .getKey(),
-                                  validatorLivenessAtEpoch))
-                      .toList())
-          .orElse(new ArrayList<>());
+              validatorLivenessAtEpoch ->
+                  Pair.of(
+                      validatorPubKeysByIndices.entrySet().stream()
+                          .filter(
+                              entry -> entry.getValue().equals(validatorLivenessAtEpoch.index()))
+                          .findFirst()
+                          .orElseThrow()
+                          .getKey(),
+                      validatorLivenessAtEpoch))
+          .toList();
     }
 
     private String extractErrorMessage(final Throwable throwable) {
       return ExceptionUtil.hasCause(throwable, TimeoutException.class)
           ? "Request timeout"
-          : throwable.getMessage();
+          : ExceptionUtil.getRootCauseMessage(throwable);
     }
   }
 }

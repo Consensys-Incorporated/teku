@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -20,6 +20,9 @@ class UInt64Serializer implements KvStoreSerializer<UInt64> {
 
   @Override
   public UInt64 deserialize(final byte[] data) {
+    if (data.length != Long.BYTES) {
+      throw new KvStoreDeserializationException("Expected 8 bytes for UInt64, got " + data.length);
+    }
     return UInt64.fromLongBits(Longs.fromByteArray(data));
   }
 

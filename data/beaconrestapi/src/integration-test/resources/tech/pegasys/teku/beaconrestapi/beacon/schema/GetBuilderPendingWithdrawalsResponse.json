@@ -1,0 +1,23 @@
+{
+  "title" : "GetBuilderPendingWithdrawalsResponse",
+  "type" : "object",
+  "required" : [ "version", "execution_optimistic", "finalized", "data" ],
+  "properties" : {
+    "version" : {
+      "type" : "string",
+      "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze" ]
+    },
+    "execution_optimistic" : {
+      "type" : "boolean"
+    },
+    "finalized" : {
+      "type" : "boolean"
+    },
+    "data" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/BuilderPendingWithdrawal"
+      }
+    }
+  }
+}

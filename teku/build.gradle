@@ -1,4 +1,5 @@
 dependencies {
+	implementation 'com.google.errorprone:error_prone_annotations'
 	implementation project(':beacon:pow')
 	implementation project(':beacon:validator')
 	implementation project(':data:publisher')

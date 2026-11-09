@@ -2,8 +2,8 @@
   "get" : {
     "tags" : [ "Debug" ],
     "operationId" : "getDebugForkChoiceV2",
-    "summary" : "Get fork choice array (V2)",
-    "description" : "Retrieves all current fork choice context.",
+    "summary" : "Get fork choice array",
+    "description" : "Retrieves all current fork choice context, with one node per `(block_root, payload_status)` pair. Each pre-Gloas block has a single `full` node.\n\nPayload Timeliness Committee (PTC) counts are per committee position, including repeated validator indices, and are the same for all nodes of a block. They are zero for pre-Gloas blocks.",
     "responses" : {
       "200" : {
         "description" : "Request successful",

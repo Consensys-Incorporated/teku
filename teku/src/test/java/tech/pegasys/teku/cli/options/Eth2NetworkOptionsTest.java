@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -40,6 +40,24 @@ class Eth2NetworkOptionsTest extends AbstractBeaconNodeCommandTest {
     final TekuConfiguration config = getTekuConfigurationFromArguments();
     final Spec spec = config.eth2NetworkConfiguration().getSpec();
     assertThat(spec.getForkSchedule().getHighestSupportedMilestone()).isEqualTo(SpecMilestone.FULU);
+  }
+
+  @Test
+  void shouldDisableDataColumnSidecarExtensionArchivingByDefault() {
+    final TekuConfiguration config = getTekuConfigurationFromArguments();
+    // Integer.MAX_VALUE means all extension columns are retained, so supernode archiving is off
+    // unless explicitly configured.
+    assertThat(config.eth2NetworkConfiguration().getDataColumnSidecarExtensionRetentionEpochs())
+        .isEqualTo(Integer.MAX_VALUE);
+  }
+
+  @Test
+  void shouldUseDataColumnSidecarExtensionRetentionEpochsIfSpecified() {
+    final TekuConfiguration config =
+        getTekuConfigurationFromArguments(
+            "--Xdata-column-sidecar-extension-retention-epochs", "42");
+    assertThat(config.eth2NetworkConfiguration().getDataColumnSidecarExtensionRetentionEpochs())
+        .isEqualTo(42);
   }
 
   @Test

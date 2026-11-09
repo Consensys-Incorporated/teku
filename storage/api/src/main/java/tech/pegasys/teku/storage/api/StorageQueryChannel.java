@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -30,6 +30,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
@@ -137,6 +138,15 @@ public interface StorageQueryChannel extends ChannelInterface {
 
   SafeFuture<List<DataColumnSlotAndIdentifier>> getDataColumnIdentifiers(UInt64 slot);
 
+  /** Identifiers available for custody, including reconstructable archived columns. */
+  SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyDataColumnIdentifiers(UInt64 slot);
+
+  /**
+   * Custody identifiers in the inclusive slot range, including reconstructable archived columns.
+   */
+  SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyDataColumnIdentifiers(
+      UInt64 startSlot, UInt64 endSlot);
+
   SafeFuture<List<DataColumnSlotAndIdentifier>> getNonCanonicalDataColumnIdentifiers(UInt64 slot);
 
   SafeFuture<List<DataColumnSlotAndIdentifier>> getDataColumnIdentifiers(
@@ -147,4 +157,6 @@ public interface StorageQueryChannel extends ChannelInterface {
   SafeFuture<Optional<List<List<KZGProof>>>> getDataColumnSidecarsProofs(UInt64 slot);
 
   SafeFuture<List<StoredLightClientUpdate>> getBestLightClientUpdates();
+
+  SafeFuture<Optional<LightClientBootstrap>> getLightClientBootstrap(UInt64 slot);
 }

@@ -3,7 +3,8 @@
     "tags" : [ "Debug" ],
     "operationId" : "getDebugForkChoice",
     "summary" : "Get fork choice array",
-    "description" : "Retrieves all current fork choice context.",
+    "description" : "Retrieves all current fork choice context. Use `GET /eth/v2/debug/fork_choice` for Gloas and later forks.",
+    "deprecated" : true,
     "responses" : {
       "200" : {
         "description" : "Request successful",

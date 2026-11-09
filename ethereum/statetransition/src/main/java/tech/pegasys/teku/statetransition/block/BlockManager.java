@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -19,17 +19,21 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.RejectedExecutionException;
+import java.util.TreeMap;
 import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.bls.impl.BlsException;
 import tech.pegasys.teku.ethereum.events.SlotEventsChannel;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.exceptions.ExceptionUtil;
 import tech.pegasys.teku.infrastructure.logging.EventLogger;
+import tech.pegasys.teku.infrastructure.ssz.InvalidValueSchemaException;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
 import tech.pegasys.teku.infrastructure.subscribers.Subscribers;
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -39,13 +43,14 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloa
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadSummary;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
+import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.BlockProcessingException;
+import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.StateTransitionException;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult.FailureReason;
 import tech.pegasys.teku.statetransition.blobs.BlockEventsListener;
 import tech.pegasys.teku.statetransition.blobs.RemoteOrigin;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadEventsListener;
 import tech.pegasys.teku.statetransition.execution.ReceivedExecutionPayloadEventsChannel;
-import tech.pegasys.teku.statetransition.util.FutureItems;
 import tech.pegasys.teku.statetransition.util.PendingBlockPool;
 import tech.pegasys.teku.statetransition.validation.BlockBroadcastValidator;
 import tech.pegasys.teku.statetransition.validation.BlockValidator;
@@ -58,6 +63,28 @@ public class BlockManager extends Service
         ReceivedBlockEventsChannel,
         ReceivedExecutionPayloadEventsChannel {
   private static final Logger LOG = LogManager.getLogger();
+
+  /**
+   * An internal error is, by default, not a proof that a block is invalid: it is most likely caused
+   * by a local failure (resource exhaustion, a transient infrastructure issue or a bug). Marking
+   * the block as invalid in those cases makes us reject the canonical chain, along with all its
+   * descendants, until the entry is evicted from the invalid blocks cache.
+   *
+   * <p>So only errors which can exclusively be attributed to the content of the block itself are
+   * considered as a proof of invalidity.
+   */
+  private static final List<Class<? extends Throwable>> INVALID_BLOCK_INTERNAL_ERRORS =
+      List.of(
+          // the state transition rejected the block
+          StateTransitionException.class,
+          BlockProcessingException.class,
+          // the block contains malformed SSZ data or makes the post state violate its schema
+          SszDeserializeException.class,
+          InvalidValueSchemaException.class,
+          // the block contains a malformed BLS public key or signature
+          BlsException.class,
+          // a value in the block caused an overflow or underflow while processing it
+          ArithmeticException.class);
 
   private final RecentChainData recentChainData;
   private final BlockImporter blockImporter;
@@ -88,7 +115,7 @@ public class BlockManager extends Service
       final BlockEventsListener blockEventsListener,
       final Supplier<ExecutionPayloadEventsListener> executionPayloadEventsListenerSupplier,
       final PendingBlockPool pendingBlockPool,
-      final FutureItems<SignedBeaconBlock> futureBlocks,
+      final FutureBlockPool futureBlocks,
       final Map<Bytes32, BlockImportResult> invalidBlockRoots,
       final BlockValidator blockValidator,
       final TimeProvider timeProvider,
@@ -422,7 +449,7 @@ public class BlockManager extends Service
                     logFailedBlockImport(block, result.getFailureReason());
                     if (result
                         .getFailureCause()
-                        .map(this::internalErrorToBeConsiderAsInvalidBlock)
+                        .map(BlockManager::internalErrorToBeConsiderAsInvalidBlock)
                         .orElse(false)) {
                       dropInvalidBlock(block, result);
                     }
@@ -489,12 +516,10 @@ public class BlockManager extends Service
     return pendingBlockPool.removeBlocksWaitingForParentExecutionPayload(parentRoot);
   }
 
-  private boolean internalErrorToBeConsiderAsInvalidBlock(final Throwable internalError) {
-    if (internalError instanceof RejectedExecutionException
-        || ExceptionUtil.hasCause(internalError, RejectedExecutionException.class)) {
-      return false;
-    }
-    return true;
+  private static boolean internalErrorToBeConsiderAsInvalidBlock(final Throwable internalError) {
+    // hasCause also checks the exception itself
+    return INVALID_BLOCK_INTERNAL_ERRORS.stream()
+        .anyMatch(errorType -> ExceptionUtil.hasCause(internalError, errorType));
   }
 
   private void logFailedBlockImport(
@@ -559,26 +584,34 @@ public class BlockManager extends Service
   }
 
   private static final class FutureBlockTracker {
-    private final FutureItems<SignedBeaconBlock> futureBlocks;
-    private final Set<Bytes32> gossipRetryRoots = new HashSet<>();
+    private final FutureBlockPool futureBlocks;
+    // keyed by slot so that roots of blocks evicted from FutureBlockPool are still pruned
+    private final NavigableMap<UInt64, Set<Bytes32>> gossipRetryRootsBySlot = new TreeMap<>();
 
-    private FutureBlockTracker(final FutureItems<SignedBeaconBlock> futureBlocks) {
+    private FutureBlockTracker(final FutureBlockPool futureBlocks) {
       this.futureBlocks = futureBlocks;
     }
 
     synchronized void add(
         final SignedBeaconBlock block, final boolean needsGossipValidationOnRetry) {
-      // FutureItems drops blocks that are beyond the future-slot tolerance, so only remember the
-      // retry mode when the block actually made it into the queue.
+      // FutureBlockPool drops blocks that are beyond the future-slot tolerance or its capacity, so
+      // only
+      // remember the retry mode when the block actually made it into the queue.
       if (futureBlocks.add(block) && needsGossipValidationOnRetry) {
-        gossipRetryRoots.add(block.getRoot());
+        gossipRetryRootsBySlot
+            .computeIfAbsent(block.getSlot(), __ -> new HashSet<>())
+            .add(block.getRoot());
       }
     }
 
     synchronized List<QueuedFutureBlock> prune(final UInt64 slot) {
       futureBlocks.onSlot(slot);
+      final Set<Bytes32> gossipRetryRoots = new HashSet<>();
+      final Map<UInt64, Set<Bytes32>> prunedRetryRoots = gossipRetryRootsBySlot.headMap(slot, true);
+      prunedRetryRoots.values().forEach(gossipRetryRoots::addAll);
+      prunedRetryRoots.clear();
       return futureBlocks.prune(slot).stream()
-          .map(block -> new QueuedFutureBlock(block, gossipRetryRoots.remove(block.getRoot())))
+          .map(block -> new QueuedFutureBlock(block, gossipRetryRoots.contains(block.getRoot())))
           .toList();
     }
 

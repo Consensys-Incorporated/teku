@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -14,22 +14,23 @@
 package tech.pegasys.teku.spec.logic.versions.gloas.util;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY;
 import static tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL;
 import static tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING;
 
+import com.google.common.base.Suppliers;
 import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.Optional;
+import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
-import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodyGloas;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
 import tech.pegasys.teku.spec.datastructures.execution.versions.capella.Withdrawal;
@@ -63,6 +64,8 @@ public class ForkChoiceUtilGloas extends ForkChoiceUtilFulu {
   private final BeaconStateMutatorsGloas beaconStateMutatorsGloas;
   private final WithdrawalsHelpersGloas withdrawalsHelpers;
   private final BlockProcessorGloas blockProcessor;
+  private final MiscHelpersGloas miscHelpersGloas;
+  private final Supplier<UInt64> firstGloasSlot;
 
   public ForkChoiceUtilGloas(
       final SpecConfigGloas specConfig,
@@ -77,6 +80,12 @@ public class ForkChoiceUtilGloas extends ForkChoiceUtilFulu {
     this.beaconStateMutatorsGloas = beaconStateMutators;
     this.withdrawalsHelpers = withdrawalsHelpers;
     this.blockProcessor = blockProcessor;
+    this.miscHelpersGloas = miscHelpers;
+    // memoized: the fork epoch may be FAR_FUTURE_EPOCH, whose start slot overflows, and this
+    // util is only asked about a block's parent once Gloas is scheduled
+    this.firstGloasSlot =
+        Suppliers.memoize(
+            () -> miscHelpers.computeStartSlotAtEpoch(specConfig.getGloasForkEpoch()));
   }
 
   @Override
@@ -164,14 +173,14 @@ public class ForkChoiceUtilGloas extends ForkChoiceUtilFulu {
 
   @Override
   public AvailabilityChecker<?> createAvailabilityCheckerOnExecutionPayloadEnvelope(
-      final SignedBeaconBlock block, final SignedExecutionPayloadEnvelope signedEnvelope) {
+      final BeaconState state, final SignedExecutionPayloadEnvelope signedEnvelope) {
     final AvailabilityCheckerFactory<UInt64> factory =
         this.dataColumnSidecarAvailabilityCheckerFactory;
     if (factory == null) {
       throw new IllegalStateException(
           "DataColumnSidecarAvailabilityCheckerFactory not initialized");
     }
-    return factory.createAvailabilityChecker(block, signedEnvelope);
+    return factory.createAvailabilityChecker(state, signedEnvelope);
   }
 
   @Override
@@ -191,11 +200,23 @@ public class ForkChoiceUtilGloas extends ForkChoiceUtilFulu {
       final UInt64 slot,
       final BeaconBlock block,
       final int committeeIndex,
-      final ReadOnlyStore store) {
+      final Optional<ForkChoiceNode> selectedNode) {
     if (slot.equals(block.getSlot())) {
       return 0;
     }
-    return isPayloadVerified(store, block.getRoot()) ? 1 : 0;
+    final ForkChoiceNode node =
+        selectedNode.orElseThrow(
+            () -> new IllegalArgumentException("Canonical payload status is unavailable"));
+    if (node.payloadStatus() == PAYLOAD_STATUS_PENDING
+        && block.getBody().toVersionGloas().isPresent()) {
+      // get_head never returns PENDING for a Gloas block. A pre-Gloas block at the fork boundary
+      // has no payload status and signals 0; anything else is unexpected, so fall back to EMPTY.
+      LOG.warn(
+          "Fork choice head {} has pending payload status when attesting at slot {}, using 0",
+          block.getRoot(),
+          slot);
+    }
+    return node.payloadStatus() == PAYLOAD_STATUS_FULL ? 1 : 0;
   }
 
   @Override
@@ -204,58 +225,86 @@ public class ForkChoiceUtilGloas extends ForkChoiceUtilFulu {
   }
 
   @Override
-  public BlockImportResult checkOnBlockConditions(
+  protected Optional<BlockImportResult> checkParentPayloadVerified(
       final SignedBeaconBlock block, final BeaconState blockSlotState, final ReadOnlyStore store) {
-    final BlockImportResult result = super.checkOnBlockConditions(block, blockSlotState, store);
-    if (!result.isSuccessful()) {
-      return result;
+    // The finality check walks from FULL(parent) for a block building on the parent's payload and
+    // rejects the block when that node is not tracked, so a payload that has merely not arrived
+    // yet must be reported here first. Fork choice remembers a payload it has imported for as long
+    // as the parent is tracked, so an imported payload that the execution layer has since
+    // invalidated, as well as a parent that is no longer tracked at all, are left to the finality
+    // check. This is deliberately not read from the store's bounded payload cache, which
+    // BlockManager does not consult either when deciding to retry the block.
+    if (getParentNode(block, blockSlotState).payloadStatus() == PAYLOAD_STATUS_FULL
+        && store.getForkChoiceStrategy().isAwaitingExecutionPayload(block.getParentRoot())) {
+      return Optional.of(BlockImportResult.FAILED_UNKNOWN_PARENT_EXECUTION_PAYLOAD);
     }
-    if (isParentFullPayloadRequired(block, store)
-        && !isRequiredParentFullPayloadAvailable(block, store)) {
-      return BlockImportResult.FAILED_UNKNOWN_PARENT_EXECUTION_PAYLOAD;
+    return Optional.empty();
+  }
+
+  /**
+   * Spec mapping: the finalized-descent check of {@code on_block}, via {@code get_checkpoint_block}
+   * and the modified {@code get_ancestor}.
+   *
+   * <p>The walk starts from the node the block builds on (see {@link #getParentNode}) rather than
+   * from the parent's PENDING node as in {@code get_checkpoint_block}. For a tracked parent node
+   * both walks reach the same ancestor. They differ once the execution layer has invalidated the
+   * parent's payload: only the parent's FULL node leaves fork choice while its BASE and EMPTY
+   * variants stay valid, so a block building on that payload is rejected here, as optimistic sync
+   * requires for descendants of an INVALIDATED payload, instead of passing the PENDING walk. A
+   * parent payload that has not been received yet is reported as {@code
+   * UNKNOWN_PARENT_EXECUTION_PAYLOAD} before this check runs.
+   */
+  @Override
+  public boolean blockDescendsFromLatestFinalizedBlock(
+      final SignedBeaconBlock block,
+      final BeaconState blockSlotState,
+      final ReadOnlyStore store,
+      final ReadOnlyForkChoiceStrategy forkChoiceStrategy) {
+    return blockDescendsFromLatestFinalizedBlock(
+        block.getSlot(), getParentNode(block, blockSlotState), store, forkChoiceStrategy);
+  }
+
+  /**
+   * The fork choice node the block builds on, see {@code get_parent_payload_status}: FULL(parent)
+   * when the bid names the parent's payload, EMPTY(parent) otherwise. The parent's bid is read from
+   * the pre-state, whose {@code latest_execution_payload_bid} it is, rather than from the store's
+   * bounded block cache, which may have evicted the parent block.
+   *
+   * <p>A pre-Gloas parent has no payload variants, so the walk starts from its base node. It is
+   * recognised by the pre-state's latest block header, since the fork upgrade seeds {@code
+   * latest_execution_payload_bid} with the pre-fork block hash, which the first Gloas block's bid
+   * names and which would otherwise look like FULL.
+   */
+  private ForkChoiceNode getParentNode(
+      final SignedBeaconBlock block, final BeaconState blockSlotState) {
+    final Bytes32 parentRoot = block.getParentRoot();
+    if (blockSlotState.getLatestBlockHeader().getSlot().isLessThan(firstGloasSlot.get())) {
+      return ForkChoiceNode.createBase(parentRoot);
     }
-    return result;
+    final ExecutionPayloadBid bid =
+        BeaconBlockBodyGloas.required(block.getMessage().getBody())
+            .getSignedExecutionPayloadBid()
+            .getMessage();
+    return miscHelpersGloas.isBidBuildingOnFullParent(
+            BeaconStateGloas.required(blockSlotState), bid)
+        ? ForkChoiceNode.createFull(parentRoot)
+        : ForkChoiceNode.createEmpty(parentRoot);
   }
 
   /**
    * Return whether the execution payload envelope for the beacon block with root ``root`` has been
    * locally delivered and verified via ``on_execution_payload_envelope``.
+   *
+   * <p>Kept as the {@code is_payload_verified} spec mapping; fork choice uses its own check in
+   * {@code ForkChoiceModelGloas}.
+   *
+   * <p>Fork choice tracks a FULL node, optimistic or valid, for every payload imported that way and
+   * drops it once the execution layer invalidates the payload, so the node is the authoritative
+   * signal. The store's payload map is only a bounded cache and may still hold an invalidated
+   * envelope, or have evicted a verified one.
    */
   public boolean isPayloadVerified(final ReadOnlyStore store, final Bytes32 root) {
-    return store.getExecutionPayloadIfAvailable(root).isPresent();
-  }
-
-  private boolean isParentFullPayloadRequired(
-      final SignedBeaconBlock block, final ReadOnlyStore store) {
-    return getParentPayloadStatusIfAvailable(store, block.getMessage().getBlock())
-        .map(PAYLOAD_STATUS_FULL::equals)
-        .orElse(false);
-  }
-
-  private boolean isRequiredParentFullPayloadAvailable(
-      final SignedBeaconBlock block, final ReadOnlyStore store) {
-    return block
-        .getMessage()
-        .getBody()
-        .toVersionGloas()
-        .flatMap(
-            beaconBlockBodyGloas -> {
-              final Bytes32 requiredParentBlockHash =
-                  beaconBlockBodyGloas
-                      .getSignedExecutionPayloadBid()
-                      .getMessage()
-                      .getParentBlockHash();
-              return store
-                  .getExecutionPayloadIfAvailable(block.getParentRoot())
-                  .map(
-                      executionPayload ->
-                          executionPayload
-                              .getMessage()
-                              .getPayload()
-                              .getBlockHash()
-                              .equals(requiredParentBlockHash));
-            })
-        .orElse(false);
+    return store.getForkChoiceStrategy().contains(ForkChoiceNode.createFull(root));
   }
 
   @Override
@@ -561,73 +610,5 @@ public class ForkChoiceUtilGloas extends ForkChoiceUtilFulu {
     final UInt64 attestationScore =
         getNodeAttestationWeight(store, parentRoot, PAYLOAD_STATUS_PENDING, justifiedState);
     return attestationScore.isGreaterThan(parentThreshold);
-  }
-
-  /**
-   * Determines the payload status of the parent block.
-   *
-   * <p>Spec reference:
-   * https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/fork-choice.md#new-get_parent_payload_status
-   *
-   * @param store the fork choice store
-   * @param block the current block
-   * @return PAYLOAD_STATUS_FULL if parent has full payload, PAYLOAD_STATUS_EMPTY otherwise
-   */
-  // get_parent_payload_status
-  public SafeFuture<ForkChoicePayloadStatus> getParentPayloadStatus(
-      final ReadOnlyStore store, final BeaconBlock block) {
-    return store
-        .retrieveBlock(block.getParentRoot())
-        .thenApply(
-            parentBlock -> {
-              if (parentBlock.isEmpty()) {
-                throw new IllegalStateException("Parent block not found: " + block.getParentRoot());
-              }
-              return getParentPayloadStatus(block, parentBlock.get());
-            });
-  }
-
-  private Optional<ForkChoicePayloadStatus> getParentPayloadStatusIfAvailable(
-      final ReadOnlyStore store, final BeaconBlock block) {
-    return store
-        .getBlockIfAvailable(block.getParentRoot())
-        .map(parentBlock -> getParentPayloadStatus(block, parentBlock.getMessage().getBlock()));
-  }
-
-  private ForkChoicePayloadStatus getParentPayloadStatus(
-      final BeaconBlock block, final BeaconBlock parentBlock) {
-    final Optional<Bytes32> messageBlockHash =
-        parentBlock
-            .getBody()
-            .toVersionGloas()
-            .map(bodyGloas -> bodyGloas.getSignedExecutionPayloadBid().getMessage().getBlockHash());
-    // If the parent is pre-Gloas there is no execution-state branch, so the child builds on EMPTY.
-    if (messageBlockHash.isEmpty()) {
-      return PAYLOAD_STATUS_EMPTY;
-    }
-    final Bytes32 parentBlockHash =
-        BeaconBlockBodyGloas.required(block.getBody())
-            .getSignedExecutionPayloadBid()
-            .getMessage()
-            .getParentBlockHash();
-    return parentBlockHash.equals(messageBlockHash.get())
-        ? PAYLOAD_STATUS_FULL
-        : PAYLOAD_STATUS_EMPTY;
-  }
-
-  /**
-   * Checks if the parent node has a full payload.
-   *
-   * <p>Spec reference:
-   * https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/fork-choice.md#new-is_parent_node_full
-   *
-   * @param store the fork choice store
-   * @param block the current block
-   * @return true if parent has full payload status
-   */
-  // is_parent_node_full
-  SafeFuture<Boolean> isParentNodeFull(final ReadOnlyStore store, final BeaconBlock block) {
-    return getParentPayloadStatus(store, block)
-        .thenApply(parentPayloadStatus -> parentPayloadStatus == PAYLOAD_STATUS_FULL);
   }
 }

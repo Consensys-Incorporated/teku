@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -35,6 +35,11 @@ import java.util.function.Supplier;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
+import tech.pegasys.teku.bls.BLS;
+import tech.pegasys.teku.bls.BLSKeyPair;
+import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.bls.BLSTestUtil;
+import tech.pegasys.teku.bls.BLSTestUtil.NegatedKeyPairs;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBitlist;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -51,6 +56,8 @@ import tech.pegasys.teku.statetransition.attestation.utils.AttestationBits;
 @TestSpecContext(milestone = {PHASE0, ELECTRA})
 class MatchingDataAttestationGroupV2Test {
   private static final UInt64 SLOT = UInt64.valueOf(1234);
+
+  private static final NegatedKeyPairs KEYS = BLSTestUtil.negatedKeyPairs(1);
 
   private final LongSupplier nanoSupplier = mock(LongSupplier.class);
 
@@ -647,6 +654,144 @@ class MatchingDataAttestationGroupV2Test {
     assertThat(group.size()).isEqualTo(1);
   }
 
+  // --- Tests for aggregates whose signature is the point at infinity ---
+
+  @TestTemplate
+  void streamAggregatesForBlockProduction_shouldDropAggregateWithInfinitySignature() {
+    addPooledAttestation(Optional.empty(), sign(KEYS.p()), 1, 2);
+    addPooledAttestation(Optional.empty(), sign(KEYS.minusP()), 3, 4);
+
+    verifyStreamAggregatesForBlockProductionContainsExactly(); // empty
+  }
+
+  @TestTemplate
+  void streamAggregatesForBlockProduction_shouldKeepAggregateWhenSignatureIsNotInfinity() {
+    final PooledAttestation att1 = addPooledAttestation(Optional.empty(), sign(KEYS.p()), 1, 2);
+    final PooledAttestation att2 =
+        addPooledAttestation(Optional.empty(), sign(KEYS.minusP()), 3, 4);
+    final PooledAttestation att3 = addPooledAttestation(Optional.empty(), sign(KEYS.q()), 5, 6);
+
+    final Attestation expected =
+        aggregateAttestations(
+            committeeSizes, toAttestation(att1), toAttestation(att2), toAttestation(att3));
+    // P + (-P) + Q == Q
+    assertThat(expected.getAggregateSignature()).isEqualTo(sign(KEYS.q()));
+    verifyStreamAggregatesForBlockProductionContainsExactly(toPooledAttestationWithData(expected));
+  }
+
+  @TestTemplate
+  void streamSingleAttestationsForBlockProduction_shouldDropAggregateWithInfinitySignature(
+      final SpecContext specContext) {
+    specContext.assumeElectraActive();
+    addPooledAttestation(Optional.of(0), sign(KEYS.p()), 1);
+    addPooledAttestation(Optional.of(1), sign(KEYS.minusP()), 2);
+
+    verifyStreamSingleAttestationsForBlockProductionContainsExactly(); // empty
+  }
+
+  @TestTemplate
+  void streamSingleAttestationsForBlockProduction_shouldKeepAggregateWhenSignatureIsNotInfinity(
+      final SpecContext specContext) {
+    specContext.assumeElectraActive();
+    final PooledAttestation single1 = addPooledAttestation(Optional.of(0), sign(KEYS.p()), 1);
+    final PooledAttestation single2 = addPooledAttestation(Optional.of(0), sign(KEYS.minusP()), 2);
+    final PooledAttestation single3 = addPooledAttestation(Optional.of(1), sign(KEYS.q()), 3);
+
+    final Attestation expected =
+        aggregateAttestations(
+            committeeSizes, toAttestation(single1), toAttestation(single2), toAttestation(single3));
+    verifyStreamSingleAttestationsForBlockProductionContainsExactly(
+        toPooledAttestationWithData(expected));
+  }
+
+  @TestTemplate
+  void streamForAggregationProduction_electra_shouldNotProduceAggregateWithInfinitySignature(
+      final SpecContext specContext) {
+    specContext.assumeElectraActive();
+    addPooledAttestation(Optional.of(0), sign(KEYS.p()), 1);
+    addPooledAttestation(Optional.of(0), sign(KEYS.minusP()), 2);
+
+    verifyStreamForAggregationProductionContainsExactly(UInt64.ZERO); // empty
+  }
+
+  @TestTemplate
+  void streamForAggregationProduction_electra_shouldProduceAggregateWhenSignatureIsNotInfinity(
+      final SpecContext specContext) {
+    specContext.assumeElectraActive();
+    final PooledAttestation single1 = addPooledAttestation(Optional.of(0), sign(KEYS.p()), 1);
+    final PooledAttestation single2 = addPooledAttestation(Optional.of(0), sign(KEYS.minusP()), 2);
+    final PooledAttestation single3 = addPooledAttestation(Optional.of(0), sign(KEYS.q()), 3);
+
+    final Attestation expected =
+        aggregateAttestations(
+            committeeSizes, toAttestation(single1), toAttestation(single2), toAttestation(single3));
+    verifyStreamForAggregationProductionContainsExactly(
+        UInt64.ZERO, toPooledAttestationWithData(expected));
+  }
+
+  @TestTemplate
+  void streamForAggregationProduction_phase0_shouldSkipAggregateWithInfinitySignature(
+      final SpecContext specContext) {
+    specContext.assumeIsNotOneOf(ELECTRA);
+    // the largest candidates are aggregated first and give the infinity signature
+    addPooledAttestation(Optional.empty(), sign(KEYS.p()), 1, 2, 3);
+    addPooledAttestation(Optional.empty(), sign(KEYS.minusP()), 4, 5, 6);
+    // overlaps the first candidate so ends up in the next aggregate
+    final PooledAttestation nextCandidate =
+        addPooledAttestation(Optional.empty(), sign(KEYS.q()), 1, 7);
+
+    verifyStreamForAggregationProductionPhase0ContainsExactly(
+        toPooledAttestationWithData(nextCandidate));
+  }
+
+  @TestTemplate
+  void streamForApiRequest_shouldDropAggregateWithInfinitySignature(final SpecContext specContext) {
+    addPooledAttestation(Optional.empty(), sign(KEYS.p()), 1, 2);
+    addPooledAttestation(Optional.empty(), sign(KEYS.minusP()), 3, 4);
+
+    verifyStreamForApiRequest(Optional.empty(), isElectra(specContext)); // empty
+  }
+
+  @TestTemplate
+  void fillUp_shouldReturnOriginalWhenFillUpWouldGiveInfinitySignature(
+      final SpecContext specContext) {
+    specContext.assumeElectraActive();
+    addPooledAttestation(Optional.of(1), sign(KEYS.minusP()), 3);
+
+    final PooledAttestation initialAgg = addPooledAttestation(Optional.of(0), sign(KEYS.p()), 1, 2);
+    final PooledAttestationWithData initial = toPooledAttestationWithData(initialAgg);
+
+    final PooledAttestationWithData result = group.fillUpAggregation(initial, Long.MAX_VALUE);
+
+    assertThat(result).isEqualTo(initial);
+  }
+
+  @TestTemplate
+  void fillUp_shouldFillUpWhenSignatureIsNotInfinity(final SpecContext specContext) {
+    specContext.assumeElectraActive();
+    final PooledAttestation single1 = addPooledAttestation(Optional.of(1), sign(KEYS.minusP()), 3);
+    final PooledAttestation single2 = addPooledAttestation(Optional.of(1), sign(KEYS.q()), 4);
+
+    final PooledAttestation initialAgg = addPooledAttestation(Optional.of(0), sign(KEYS.p()), 1, 2);
+    final PooledAttestationWithData initial = toPooledAttestationWithData(initialAgg);
+
+    final PooledAttestationWithData result = group.fillUpAggregation(initial, Long.MAX_VALUE);
+
+    final Attestation expected =
+        aggregateAttestations(
+            committeeSizes,
+            toAttestation(initialAgg),
+            toAttestation(single1),
+            toAttestation(single2));
+    assertThat(toPooledAttestationWithDataWithSortedValidatorIndices(result))
+        .isEqualTo(toPooledAttestationWithData(expected));
+  }
+
+  private BLSSignature sign(final BLSKeyPair keyPair) {
+    // the group never verifies signatures; any message shared by all participants will do
+    return BLS.sign(keyPair.getSecretKey(), attestationData.hashTreeRoot());
+  }
+
   void verifyGroupContainsExactly(final PooledAttestationWithData... expectedAttestations) {
     // streamForApiRequest with no committee index is the only stream that gives us all attestations
     verifyStreamForApiRequest(
@@ -722,7 +867,15 @@ class MatchingDataAttestationGroupV2Test {
 
   private PooledAttestation addPooledAttestation(
       final Optional<Integer> committeeIndex, final int... validators) {
-    final PooledAttestation attestation = createPooledAttestation(committeeIndex, validators);
+    return addPooledAttestation(committeeIndex, dataStructureUtil.randomSignature(), validators);
+  }
+
+  private PooledAttestation addPooledAttestation(
+      final Optional<Integer> committeeIndex,
+      final BLSSignature signature,
+      final int... validators) {
+    final PooledAttestation attestation =
+        createPooledAttestation(committeeIndex, signature, validators);
     final boolean added = group.add(attestation, Optional.empty());
     assertThat(added).isTrue();
     return attestation;
@@ -734,6 +887,13 @@ class MatchingDataAttestationGroupV2Test {
 
   private PooledAttestation createPooledAttestation(
       final Optional<Integer> committeeIndex, final int... validators) {
+    return createPooledAttestation(committeeIndex, dataStructureUtil.randomSignature(), validators);
+  }
+
+  private PooledAttestation createPooledAttestation(
+      final Optional<Integer> committeeIndex,
+      final BLSSignature signature,
+      final int... validators) {
     final SszBitlist aggregationBits =
         attestationSchema.getAggregationBitsSchema().ofBits(10, validators);
     final boolean isElectra = spec.atSlot(SLOT).getMilestone().isGreaterThanOrEqualTo(ELECTRA);
@@ -752,7 +912,7 @@ class MatchingDataAttestationGroupV2Test {
                       UInt64.valueOf(resolvedCommitteeIndex),
                       UInt64.valueOf(validators[0]),
                       attestationData,
-                      dataStructureUtil.randomSignature()));
+                      signature));
     } else {
       singleAttestation = Optional.empty();
     }
@@ -769,8 +929,7 @@ class MatchingDataAttestationGroupV2Test {
     }
 
     final Attestation attestation =
-        attestationSchema.create(
-            aggregationBits, attestationData, dataStructureUtil.randomSignature(), committeeBits);
+        attestationSchema.create(aggregationBits, attestationData, signature, committeeBits);
 
     final ValidatableAttestation validatableAttestation =
         ValidatableAttestation.from(spec, singleAttestation.orElse(attestation), committeeSizes);

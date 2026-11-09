@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -191,5 +191,9 @@ public class SlashingProtectedSigner implements Signer {
   @Override
   public void delete() {
     delegate.delete();
+    // A later re-import of this key may bring in slashing protection history that is written to
+    // storage, so the cached record must not outlive the signer. Evicting is only safe because
+    // DeletableSigner calls this with in-flight signing drained and further signing blocked.
+    slashingProtector.evictSigningRecord(validatorPublicKey);
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -28,6 +28,7 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.Be
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingWithdrawal;
+import tech.pegasys.teku.spec.logic.common.withdrawals.WithdrawalsHelpers;
 import tech.pegasys.teku.spec.logic.versions.electra.helpers.BeaconStateMutatorsElectra;
 import tech.pegasys.teku.spec.logic.versions.electra.withdrawals.WithdrawalsHelpersElectra;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas;
@@ -56,11 +57,8 @@ public class WithdrawalsHelpersGloas extends WithdrawalsHelpersElectra {
 
   @Override
   public void processWithdrawals(final MutableBeaconState state) {
-    final MutableBeaconStateGloas stateGloas = MutableBeaconStateGloas.required(state);
     // Return early if the parent block is empty
-    if (!stateGloas
-        .getLatestBlockHash()
-        .equals(stateGloas.getLatestExecutionPayloadBid().getBlockHash())) {
+    if (!MiscHelpersGloas.isParentBlockFull(MutableBeaconStateGloas.required(state))) {
       return;
     }
     super.processWithdrawals(state);
@@ -124,14 +122,16 @@ public class WithdrawalsHelpersGloas extends WithdrawalsHelpersElectra {
         break;
       }
       final Builder builder = builders.get(builderIndex.intValue());
+      final UInt64 balance =
+          getBuilderBalanceAfterWithdrawals(stateGloas, builderIndex, withdrawals);
       if (builder.getWithdrawableEpoch().isLessThanOrEqualTo(epoch)
-          && builder.getBalance().isGreaterThan(UInt64.ZERO)) {
+          && balance.isGreaterThan(UInt64.ZERO)) {
         withdrawals.add(
             withdrawalSchema.create(
                 withdrawalIndex,
                 miscHelpersGloas.convertBuilderIndexToValidatorIndex(builderIndex),
                 builder.getExecutionAddress(),
-                builder.getBalance()));
+                balance));
         withdrawalIndex = withdrawalIndex.increment();
       }
 
@@ -140,6 +140,15 @@ public class WithdrawalsHelpersGloas extends WithdrawalsHelpersElectra {
     }
 
     return processedBuildersSweepCount;
+  }
+
+  // get_builder_balance_after_withdrawals
+  private UInt64 getBuilderBalanceAfterWithdrawals(
+      final BeaconStateGloas state, final UInt64 builderIndex, final List<Withdrawal> withdrawals) {
+    final UInt64 validatorIndex =
+        miscHelpersGloas.convertBuilderIndexToValidatorIndex(builderIndex);
+    final UInt64 withdrawn = WithdrawalsHelpers.getTotalWithdrawn(withdrawals, validatorIndex);
+    return state.getBuilders().get(builderIndex.intValue()).getBalance().minusMinZero(withdrawn);
   }
 
   @Override

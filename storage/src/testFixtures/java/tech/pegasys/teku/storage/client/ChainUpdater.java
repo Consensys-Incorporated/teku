@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -20,6 +20,7 @@ import static tech.pegasys.teku.infrastructure.time.TimeUtilities.secondsToMilli
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -29,6 +30,8 @@ import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadHeader;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.executionlayer.PayloadStatus;
@@ -232,7 +235,18 @@ public class ChainUpdater {
       saveBlock(bestBlock);
     }
 
-    recentChainData.updateHead(bestBlock.getRoot(), bestBlock.getSlot());
+    // Gloas fork choice heads are EMPTY or FULL, never PENDING. Prefer FULL when the payload was
+    // imported, matching a timely payload.
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy =
+        recentChainData.getStore().getForkChoiceStrategy();
+    Stream.of(
+            ForkChoiceNode.createFull(bestBlock.getRoot()),
+            ForkChoiceNode.createEmpty(bestBlock.getRoot()))
+        .filter(node -> forkChoiceStrategy.getNodeData(node).isPresent())
+        .findFirst()
+        .ifPresentOrElse(
+            node -> recentChainData.updateHead(node, bestBlock.getSlot()),
+            () -> recentChainData.updateHead(bestBlock.getRoot(), bestBlock.getSlot()));
     final StoreTransaction tx = recentChainData.startStoreTransaction();
     final Checkpoint justifiedCheckpoint = bestBlock.getState().getCurrentJustifiedCheckpoint();
     if (justifiedCheckpoint

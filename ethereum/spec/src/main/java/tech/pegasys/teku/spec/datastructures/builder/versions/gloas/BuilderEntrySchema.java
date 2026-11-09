@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -37,17 +37,17 @@ public class BuilderEntrySchema
         SszUInt64,
         SszUInt64> {
 
-  private static final long MAX_BUILDER_PUBKEYS = 64;
-
   public BuilderEntrySchema(
-      final long maxBuilderUrlSize, final SignedBuilderRequestAuthSchema authSchema) {
+      final long maxBuilderUrlSize,
+      final long maxBuilderPubkeys,
+      final SignedBuilderRequestAuthSchema authSchema) {
     super(
         "BuilderEntry",
         namedSchema("url", new UrlSchema(maxBuilderUrlSize)),
         namedSchema("auth", authSchema),
         namedSchema(
             "builder_pubkeys",
-            SszListSchema.create(SszPublicKeySchema.INSTANCE, MAX_BUILDER_PUBKEYS)),
+            SszListSchema.create(SszPublicKeySchema.INSTANCE, maxBuilderPubkeys)),
         namedSchema("max_execution_payment", SszPrimitiveSchemas.UINT64_SCHEMA),
         namedSchema("min_bid", SszPrimitiveSchemas.UINT64_SCHEMA),
         namedSchema("builder_boost_factor", SszPrimitiveSchemas.UINT64_SCHEMA));

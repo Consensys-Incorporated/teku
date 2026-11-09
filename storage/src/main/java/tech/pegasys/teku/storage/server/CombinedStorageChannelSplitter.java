@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -31,6 +31,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
@@ -316,6 +317,19 @@ public class CombinedStorageChannelSplitter implements CombinedStorageChannel {
   }
 
   @Override
+  public SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyDataColumnIdentifiers(
+      final UInt64 slot) {
+    return asyncRunner.runAsync(() -> queryDelegate.getCustodyDataColumnIdentifiers(slot));
+  }
+
+  @Override
+  public SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyDataColumnIdentifiers(
+      final UInt64 startSlot, final UInt64 endSlot) {
+    return asyncRunner.runAsync(
+        () -> queryDelegate.getCustodyDataColumnIdentifiers(startSlot, endSlot));
+  }
+
+  @Override
   public SafeFuture<List<DataColumnSlotAndIdentifier>> getNonCanonicalDataColumnIdentifiers(
       final UInt64 slot) {
     return asyncRunner.runAsync(() -> queryDelegate.getNonCanonicalDataColumnIdentifiers(slot));
@@ -341,5 +355,10 @@ public class CombinedStorageChannelSplitter implements CombinedStorageChannel {
   @Override
   public SafeFuture<List<StoredLightClientUpdate>> getBestLightClientUpdates() {
     return asyncRunner.runAsync(queryDelegate::getBestLightClientUpdates);
+  }
+
+  @Override
+  public SafeFuture<Optional<LightClientBootstrap>> getLightClientBootstrap(final UInt64 slot) {
+    return asyncRunner.runAsync(() -> queryDelegate.getLightClientBootstrap(slot));
   }
 }

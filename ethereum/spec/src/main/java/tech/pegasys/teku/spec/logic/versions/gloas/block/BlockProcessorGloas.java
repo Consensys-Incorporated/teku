@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -17,7 +17,6 @@ import static tech.pegasys.teku.spec.config.SpecConfigGloas.BUILDER_INDEX_SELF_B
 import static tech.pegasys.teku.spec.config.SpecConfigGloas.PAYLOAD_BUILDER_VERSION;
 
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -39,7 +38,6 @@ import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequestsDataCode
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsGloas;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.IndexedPayloadAttestationLight;
-import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
@@ -172,27 +170,8 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
     final UInt64 parentSlot = state.getLatestBlockHeader().getSlot();
     final UInt64 parentEpoch = miscHelpers.computeEpochAtSlot(parentSlot);
 
-    // Process execution requests from parent's payload. The execution requests are processed at
-    // state.slot (child's slot), not the parent's slot.
-    final long startTimeMillis = System.currentTimeMillis();
-    LOG.debug("Starting processing {} deposit requests", requests.getDeposits().size());
-    executionRequestsProcessorGloas.processDepositRequests(state, requests.getDeposits());
-    LOG.debug(
-        "Finished processing {} deposit requests. Pending deposits: {}, builders: {}. Took {} ms.",
-        requests.getDeposits().size(),
-        state.getPendingDeposits().size(),
-        state.getBuilders().size(),
-        System.currentTimeMillis() - startTimeMillis);
-    executionRequestsProcessorGloas.processWithdrawalRequests(
-        state, requests.getWithdrawals(), validatorExitContextSupplier);
-    executionRequestsProcessorGloas.processConsolidationRequests(
-        state, requests.getConsolidations());
-    executionRequestsProcessorGloas.processBuilderDepositRequests(
-        state, requestsGloas.getBuilderDeposits());
-    executionRequestsProcessorGloas.processBuilderExitRequests(
-        state, requestsGloas.getBuilderExits());
-
-    // Settle the builder payment
+    // Settle the builder payment before the requests so that a builder exit request is rejected
+    // while the payment is pending
     if (parentEpoch.equals(beaconStateAccessorsGloas.getCurrentEpoch(state))) {
       final UInt64 paymentIndex =
           parentSlot.mod(specConfig.getSlotsPerEpoch()).plus(specConfig.getSlotsPerEpoch());
@@ -213,6 +192,26 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
                       parentBid.getValue(),
                       parentBid.getBuilderIndex()));
     }
+
+    // Process execution requests from parent's payload. The execution requests are processed at
+    // state.slot (child's slot), not the parent's slot.
+    final long startTimeMillis = System.currentTimeMillis();
+    LOG.debug("Starting processing {} deposit requests", requests.getDeposits().size());
+    executionRequestsProcessorGloas.processDepositRequests(state, requests.getDeposits());
+    LOG.debug(
+        "Finished processing {} deposit requests. Pending deposits: {}, builders: {}. Took {} ms.",
+        requests.getDeposits().size(),
+        state.getPendingDeposits().size(),
+        state.getBuilders().size(),
+        System.currentTimeMillis() - startTimeMillis);
+    executionRequestsProcessorGloas.processWithdrawalRequests(
+        state, requests.getWithdrawals(), validatorExitContextSupplier);
+    executionRequestsProcessorGloas.processConsolidationRequests(
+        state, requests.getConsolidations());
+    executionRequestsProcessorGloas.processBuilderDepositRequests(
+        state, requestsGloas.getBuilderDeposits());
+    executionRequestsProcessorGloas.processBuilderExitRequests(
+        state, requestsGloas.getBuilderExits());
 
     // Update parent payload availability and latest block hash
     state.setExecutionPayloadAvailability(
@@ -339,35 +338,6 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
       final BeaconBlockBody beaconBlockBody,
       final Optional<? extends OptimisticExecutionPayloadExecutor> payloadExecutor) {
     throw new UnsupportedOperationException("process_execution_payload has been removed in Gloas");
-  }
-
-  // Remove the BuilderPendingPayment corresponding to this proposal if it is still in the 2-epoch
-  // window. Only clear it when the slashed validator is the proposer associated with the payment;
-  // otherwise an unrelated same-slot equivocation could grief an honest proposer's payment.
-  @Override
-  protected void removeBuilderPendingPayment(
-      final ProposerSlashing proposerSlashing, final MutableBeaconState state) {
-    final UInt64 slot = proposerSlashing.getHeader1().getMessage().getSlot();
-    final UInt64 proposerIndex = proposerSlashing.getHeader1().getMessage().getProposerIndex();
-    final UInt64 proposalEpoch = miscHelpers.computeEpochAtSlot(slot);
-    OptionalInt paymentIndex = OptionalInt.empty();
-    if (proposalEpoch.equals(beaconStateAccessors.getCurrentEpoch(state))) {
-      paymentIndex =
-          OptionalInt.of(
-              specConfig.getSlotsPerEpoch() + slot.mod(specConfig.getSlotsPerEpoch()).intValue());
-    } else if (proposalEpoch.equals(beaconStateAccessors.getPreviousEpoch(state))) {
-      paymentIndex = OptionalInt.of(slot.mod(specConfig.getSlotsPerEpoch()).intValue());
-    }
-    paymentIndex.ifPresent(
-        index -> {
-          final MutableBeaconStateGloas stateGloas = MutableBeaconStateGloas.required(state);
-          final BuilderPendingPayment payment = stateGloas.getBuilderPendingPayments().get(index);
-          if (payment.getProposerIndex().equals(proposerIndex)) {
-            stateGloas
-                .getBuilderPendingPayments()
-                .set(index, schemaDefinitionsGloas.getBuilderPendingPaymentSchema().getDefault());
-          }
-        });
   }
 
   @Override

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -733,7 +733,7 @@ class FailoverValidatorApiHandlerTest {
             "getValidatorIndices",
             apiChannel -> apiChannel.getValidatorIndices(List.of(publicKey)),
             BeaconNodeRequestLabels.GET_VALIDATOR_INDICES_METHOD,
-            Map.of(publicKey, 0)),
+            Optional.of(Map.of(publicKey, 0))),
         getArguments(
             "getValidatorStatuses",
             apiChannel -> apiChannel.getValidatorStatuses(List.of(publicKey)),

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -35,9 +35,37 @@ public interface PreparedGossipMessage {
    */
   DecodedMessageResult getDecodedMessage();
 
+  /**
+   * Returns the size and leading bytes of the decoded message, so that cheap checks can run before
+   * the whole message is decoded. Implementations that don't keep the decoded message should keep
+   * this when they compute the message id, rather than decoding the message again.
+   *
+   * @return the decoded message prefix, or empty if the message can't be decoded
+   */
+  default Optional<DecodedMessagePrefix> getDecodedMessagePrefix() {
+    return getDecodedMessage().getDecodedMessage().map(DecodedMessagePrefix::of);
+  }
+
   Bytes getOriginalMessage();
 
   Optional<UInt64> getArrivalTimestamp();
+
+  /**
+   * The first {@link #MAX_LENGTH} bytes of a decoded message and the size of the whole decoded
+   * message.
+   */
+  record DecodedMessagePrefix(Bytes prefix, int decodedSize) {
+    /** Enough for the fixed-size fields at the start of a gossip message, such as a block's slot */
+    public static final int MAX_LENGTH = 128;
+
+    public static DecodedMessagePrefix of(final Bytes decodedMessage) {
+      // copy so the prefix doesn't keep the whole decoded message reachable
+      return new DecodedMessagePrefix(
+          Bytes.wrap(
+              decodedMessage.slice(0, Math.min(decodedMessage.size(), MAX_LENGTH)).toArray()),
+          decodedMessage.size());
+    }
+  }
 
   class DecodedMessageResult {
     private final Optional<Bytes> decodedMessage;

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -126,9 +126,16 @@ public class LogCaptor implements AutoCloseable {
   }
 
   public static LogCaptor forClass(final Class<?> clazz, final Level level) {
-    final LoggerContext context = LoggerContext.getContext(false);
-    final ExtendedLogger logger = context.getLogger(clazz);
+    return forLogger(LoggerContext.getContext(false).getLogger(clazz), level);
+  }
 
+  /** Captures a logger addressed by name rather than by class, e.g. the event or status log. */
+  public static LogCaptor forLoggerName(final String loggerName, final Level level) {
+    return forLogger(LoggerContext.getContext(false).getLogger(loggerName), level);
+  }
+
+  private static LogCaptor forLogger(final ExtendedLogger logger, final Level level) {
+    final LoggerContext context = LoggerContext.getContext(false);
     final CapturingAppender appender =
         new CapturingAppender("LogCaptorAppender" + UNIQUEIFIER.incrementAndGet());
     final LoggerConfig loggerConfig = context.getConfiguration().getLoggerConfig(logger.getName());
@@ -148,7 +155,7 @@ public class LogCaptor implements AutoCloseable {
 
   private static class CapturingAppender implements Appender {
     private static final PatternLayout LAYOUT =
-        PatternLayout.newBuilder().withPattern("%msg").build();
+        PatternLayout.newBuilder().setPattern("%msg").build();
     private final List<LogEvent> logs = new ArrayList<>();
     private final String name;
 

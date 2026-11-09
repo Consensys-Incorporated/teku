@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -23,9 +23,12 @@ import java.util.function.BiPredicate;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
+import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.config.SpecConfigAltair;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
@@ -39,6 +42,8 @@ class LightClientUpdatePersistenceTest {
   private static final BiPredicate<UInt64, Bytes32> CANONICAL = (slot, root) -> true;
   private static final BiPredicate<UInt64, Bytes32> ORPHANED = (slot, root) -> false;
 
+  private final StubTimeProvider timeProvider = StubTimeProvider.withTimeInMillis(0);
+  private final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
   private final Spec spec = TestSpecFactory.createMinimalAltair();
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
   private final StorageSystem storageSystem = InMemoryStorageSystemBuilder.buildDefault(spec);
@@ -72,8 +77,7 @@ class LightClientUpdatePersistenceTest {
 
   @Test
   void finalization_shouldPruneStorageBeyondTheRetentionWindow() {
-    final UInt64 finalizedPeriod =
-        UInt64.valueOf(LightClientServerService.MAX_RETAINED_PERIODS + 2);
+    final UInt64 finalizedPeriod = UInt64.valueOf(retainedPeriodsBehindFinalized() + 2);
     final UInt64 retainedPeriod = finalizedPeriod.minus(1);
     store.addUpdate(updateAtPeriod(1), dataStructureUtil.randomBytes32(), CANONICAL);
     store.addUpdate(
@@ -145,7 +149,9 @@ class LightClientUpdatePersistenceTest {
         store,
         root -> completedFuture(Optional.empty()),
         root -> completedFuture(Optional.empty()),
-        isCanonical);
+        isCanonical,
+        asyncRunner,
+        timeProvider);
   }
 
   private List<UInt64> storedPeriods() {
@@ -159,6 +165,13 @@ class LightClientUpdatePersistenceTest {
     return dataStructureUtil
         .createRandomLightClientUpdateBuilder(periodOneStartSlot().times(period))
         .build();
+  }
+
+  private int retainedPeriodsBehindFinalized() {
+    final int epochsPerPeriod =
+        SpecConfigAltair.required(spec.getGenesisSpecConfig()).getEpochsPerSyncCommitteePeriod();
+    return (spec.getNetworkingConfig().getMinEpochsForBlockRequests() + epochsPerPeriod - 1)
+        / epochsPerPeriod;
   }
 
   private UInt64 epochOfPeriod(final UInt64 period) {

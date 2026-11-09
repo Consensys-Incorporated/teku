@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -18,6 +18,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import it.unimi.dsi.fastutil.ints.IntList;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.bls.BLS;
+import tech.pegasys.teku.bls.BLSKeyPair;
+import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.bls.BLSTestUtil;
+import tech.pegasys.teku.bls.BLSTestUtil.NegatedKeyPairs;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -29,6 +34,8 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 class MatchingDataPayloadAttestationGroupTest {
+
+  private static final NegatedKeyPairs KEYS = BLSTestUtil.negatedKeyPairs(1);
 
   private final Spec spec = TestSpecFactory.createMainnetGloas();
 
@@ -88,7 +95,7 @@ class MatchingDataPayloadAttestationGroupTest {
     payloadAttestationGroup.add(message3);
 
     final PayloadAttestation aggregatedPayloadAttestation =
-        payloadAttestationGroup.createAggregatedPayloadAttestation(ptc);
+        payloadAttestationGroup.createAggregatedPayloadAttestation(ptc).orElseThrow();
 
     // assert that aggregation bits are set correctly relative to the PTC position
     assertThat(aggregatedPayloadAttestation.getAggregationBits().streamAllSetBits())
@@ -111,9 +118,47 @@ class MatchingDataPayloadAttestationGroupTest {
     payloadAttestationGroup.add(message2);
 
     final PayloadAttestation aggregatedPayloadAttestation =
-        payloadAttestationGroup.createAggregatedPayloadAttestation(ptc);
+        payloadAttestationGroup.createAggregatedPayloadAttestation(ptc).orElseThrow();
 
     assertThat(aggregatedPayloadAttestation.getAggregationBits().streamAllSetBits())
         .containsExactly(0, 2, 3, 4);
+  }
+
+  @Test
+  public void doesNotCreateAggregatedPayloadAttestationWithInfinitySignature() {
+    final IntList ptc = IntList.of(1, 2, 3);
+
+    payloadAttestationGroup.add(createSignedMessage(1, KEYS.p()));
+    payloadAttestationGroup.add(createSignedMessage(2, KEYS.minusP()));
+
+    assertThat(payloadAttestationGroup.createAggregatedPayloadAttestation(ptc)).isEmpty();
+  }
+
+  @Test
+  public void createsAggregatedPayloadAttestationWhenSignatureIsNotInfinity() {
+    final IntList ptc = IntList.of(1, 2, 3);
+
+    payloadAttestationGroup.add(createSignedMessage(1, KEYS.p()));
+    payloadAttestationGroup.add(createSignedMessage(2, KEYS.minusP()));
+    payloadAttestationGroup.add(createSignedMessage(3, KEYS.q()));
+
+    final PayloadAttestation aggregatedPayloadAttestation =
+        payloadAttestationGroup.createAggregatedPayloadAttestation(ptc).orElseThrow();
+
+    assertThat(aggregatedPayloadAttestation.getAggregationBits().streamAllSetBits())
+        .containsExactly(0, 1, 2);
+    // P + (-P) + Q == Q
+    assertThat(aggregatedPayloadAttestation.getSignature()).isEqualTo(sign(KEYS.q()));
+  }
+
+  private PayloadAttestationMessage createSignedMessage(
+      final int validatorIndex, final BLSKeyPair keyPair) {
+    return payloadAttestationMessageSchema.create(
+        UInt64.valueOf(validatorIndex), data, sign(keyPair));
+  }
+
+  private BLSSignature sign(final BLSKeyPair keyPair) {
+    // the group never verifies signatures; any message shared by all participants will do
+    return BLS.sign(keyPair.getSecretKey(), data.hashTreeRoot());
   }
 }

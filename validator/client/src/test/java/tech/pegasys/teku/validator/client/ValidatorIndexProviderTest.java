@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -59,7 +59,7 @@ class ValidatorIndexProviderTest {
         new ValidatorIndexProvider(validators, validatorApiChannel, asyncRunner);
 
     when(validatorApiChannel.getValidatorIndices(validators.getPublicKeys()))
-        .thenReturn(SafeFuture.completedFuture(Map.of(key1, 1, key2, 20, key3, 300)));
+        .thenReturn(SafeFuture.completedFuture(Optional.of(Map.of(key1, 1, key2, 20, key3, 300))));
     provider.lookupValidators();
     final IntCollection actual = provider.getValidatorIndices().getImmediately();
     assertThat(actual).containsExactlyInAnyOrderElementsOf(IntArrayList.of(1, 20, 300));
@@ -73,7 +73,25 @@ class ValidatorIndexProviderTest {
 
     when(validatorApiChannel.getValidatorIndices(validators.getPublicKeys()))
         .thenReturn(SafeFuture.failedFuture(new IOException("Server not available")))
-        .thenReturn(SafeFuture.completedFuture(Map.of(key1, 1)));
+        .thenReturn(SafeFuture.completedFuture(Optional.of(Map.of(key1, 1))));
+    provider.lookupValidators();
+    final SafeFuture<IntCollection> future = provider.getValidatorIndices();
+    assertThat(future).isNotCompleted();
+
+    assertThat(asyncRunner.hasDelayedActions()).isTrue();
+    asyncRunner.executeQueuedActions();
+    assertThat(provider.getValidatorIndices()).isCompletedWithValue(IntArrayList.of(1));
+  }
+
+  @Test
+  void shouldRetryWhenValidatorIndexDataIsUnavailable() {
+    final OwnedValidators validators = ownedValidatorsWithKeys(key1);
+    final ValidatorIndexProvider provider =
+        new ValidatorIndexProvider(validators, validatorApiChannel, asyncRunner);
+
+    when(validatorApiChannel.getValidatorIndices(validators.getPublicKeys()))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(Map.of(key1, 1))));
     provider.lookupValidators();
     final SafeFuture<IntCollection> future = provider.getValidatorIndices();
     assertThat(future).isNotCompleted();
@@ -92,13 +110,13 @@ class ValidatorIndexProviderTest {
         new ValidatorIndexProvider(ownedValidators, validatorApiChannel, asyncRunner);
 
     when(validatorApiChannel.getValidatorIndices(ownedValidators.getPublicKeys()))
-        .thenReturn(SafeFuture.completedFuture(Map.of(key2, 20)));
+        .thenReturn(SafeFuture.completedFuture(Optional.of(Map.of(key2, 20))));
     provider.lookupValidators();
 
     assertThat(provider.getValidatorIndices()).isCompletedWithValue(IntArrayList.of(20));
 
     when(validatorApiChannel.getValidatorIndices(Set.of(key1, key3)))
-        .thenReturn(SafeFuture.completedFuture(Map.of(key1, 1, key3, 300)));
+        .thenReturn(SafeFuture.completedFuture(Optional.of(Map.of(key1, 1, key3, 300))));
     provider.lookupValidators();
     final IntCollection actual = provider.getValidatorIndices().getImmediately();
     assertThat(actual).containsExactlyInAnyOrderElementsOf(IntArrayList.of(1, 20, 300));
@@ -106,7 +124,7 @@ class ValidatorIndexProviderTest {
 
   @Test
   void shouldNotMakeConcurrentRequests() {
-    final SafeFuture<Map<BLSPublicKey, Integer>> result = new SafeFuture<>();
+    final SafeFuture<Optional<Map<BLSPublicKey, Integer>>> result = new SafeFuture<>();
     when(validatorApiChannel.getValidatorIndices(Set.of(key1))).thenReturn(result);
 
     final ValidatorIndexProvider provider =
@@ -119,7 +137,7 @@ class ValidatorIndexProviderTest {
     verifyNoMoreInteractions(validatorApiChannel);
 
     // Can request again once the request completes.
-    result.complete(Collections.emptyMap());
+    result.complete(Optional.of(Collections.emptyMap()));
     provider.lookupValidators();
     verify(validatorApiChannel, times(2)).getValidatorIndices(Set.of(key1));
   }
@@ -130,7 +148,7 @@ class ValidatorIndexProviderTest {
         new ValidatorIndexProvider(ownedValidatorsWithKeys(key1), validatorApiChannel, asyncRunner);
 
     when(validatorApiChannel.getValidatorIndices(Set.of(key1)))
-        .thenReturn(SafeFuture.completedFuture(Map.of(key1, 1)));
+        .thenReturn(SafeFuture.completedFuture(Optional.of(Map.of(key1, 1))));
     provider.lookupValidators();
 
     verify(validatorApiChannel).getValidatorIndices(any());
@@ -145,7 +163,7 @@ class ValidatorIndexProviderTest {
     final ValidatorIndexProvider provider =
         new ValidatorIndexProvider(ownedValidatorsWithKeys(key1), validatorApiChannel, asyncRunner);
 
-    final SafeFuture<Map<BLSPublicKey, Integer>> requestResult = new SafeFuture<>();
+    final SafeFuture<Optional<Map<BLSPublicKey, Integer>>> requestResult = new SafeFuture<>();
     when(validatorApiChannel.getValidatorIndices(Set.of(key1))).thenReturn(requestResult);
 
     final SafeFuture<IntCollection> result = provider.getValidatorIndices();
@@ -154,7 +172,7 @@ class ValidatorIndexProviderTest {
     provider.lookupValidators();
     assertThat(result).isNotDone();
 
-    requestResult.complete(Map.of(key1, 1));
+    requestResult.complete(Optional.of(Map.of(key1, 1)));
     assertThat(result).isCompletedWithValue(IntList.of(1));
   }
 
@@ -167,7 +185,7 @@ class ValidatorIndexProviderTest {
         new ValidatorIndexProvider(validators, validatorApiChannel, asyncRunner);
 
     when(validatorApiChannel.getValidatorIndices(validators.getPublicKeys()))
-        .thenReturn(SafeFuture.completedFuture(Map.of(key1, 1, key2, 20, key3, 300)));
+        .thenReturn(SafeFuture.completedFuture(Optional.of(Map.of(key1, 1, key2, 20, key3, 300))));
     provider.lookupValidators();
     assertThat(provider.getPublicKey(1)).contains(key1);
     assertThat(provider.getPublicKey(20)).contains(key2);

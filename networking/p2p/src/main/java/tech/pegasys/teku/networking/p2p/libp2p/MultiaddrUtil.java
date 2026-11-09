@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -21,26 +21,40 @@ import io.libp2p.core.multiformats.Multiaddr;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.networking.p2p.discovery.DiscoveryPeer;
 import tech.pegasys.teku.networking.p2p.peer.NodeId;
 
 public class MultiaddrUtil {
 
-  public static Multiaddr fromDiscoveryPeer(
-      final DiscoveryPeer peer, final boolean localNodeQuicEnabled) {
-    final NodeId nodeId = getNodeId(peer);
-    // Only dial a peer over QUIC if this node has the QUIC transport enabled, otherwise we have no
-    // QuicTransport to perform the dial and would fail even though the peer also advertises TCP.
-    if (localNodeQuicEnabled) {
-      return peer.getQuicAddress()
-          .map(quicAddr -> fromInetSocketAddressAsQuic(quicAddr, nodeId))
-          .orElseGet(() -> fromInetSocketAddress(peer.getNodeAddress(), nodeId));
-    }
-    return fromInetSocketAddress(peer.getNodeAddress(), nodeId);
+  /**
+   * Resolves the address this node would dial a discovered peer on, given the transports enabled
+   * locally: QUIC when both sides have it, otherwise TCP when both sides have it, otherwise
+   * nothing. Dialing an address for a transport this node has not started fails immediately, so
+   * such addresses are never produced.
+   */
+  public static Optional<Multiaddr> fromDiscoveryPeer(
+      final DiscoveryPeer peer,
+      final boolean localNodeTcpEnabled,
+      final boolean localNodeQuicEnabled) {
+    final Optional<Multiaddr> quicMultiaddr =
+        localNodeQuicEnabled
+            ? peer.getQuicAddress()
+                .map(quicAddr -> fromInetSocketAddressAsQuic(quicAddr, getNodeId(peer)))
+            : Optional.empty();
+    return quicMultiaddr.or(
+        () -> localNodeTcpEnabled ? fromDiscoveryPeerAsTcp(peer) : Optional.empty());
   }
 
-  public static Multiaddr fromDiscoveryPeerAsUdp(final DiscoveryPeer peer) {
-    return addPeerId(fromInetSocketAddress(peer.getNodeAddress(), "udp"), getNodeId(peer));
+  public static Optional<Multiaddr> fromDiscoveryPeerAsTcp(final DiscoveryPeer peer) {
+    return peer.getTcpAddress()
+        .map(tcpAddress -> fromInetSocketAddress(tcpAddress, getNodeId(peer)));
+  }
+
+  public static Multiaddr fromUdpAddress(
+      final InetSocketAddress udpAddress, final Bytes publicKey) {
+    return addPeerId(fromInetSocketAddress(udpAddress, "udp"), getNodeId(publicKey));
   }
 
   static Multiaddr fromInetSocketAddress(final InetSocketAddress address) {
@@ -83,7 +97,11 @@ public class MultiaddrUtil {
   }
 
   private static NodeId getNodeId(final DiscoveryPeer peer) {
-    final PubKey pubKey = unmarshalSecp256k1PublicKey(peer.getPublicKey().toArrayUnsafe());
+    return getNodeId(peer.getPublicKey());
+  }
+
+  private static NodeId getNodeId(final Bytes publicKey) {
+    final PubKey pubKey = unmarshalSecp256k1PublicKey(publicKey.toArrayUnsafe());
     return new LibP2PNodeId(PeerId.fromPubKey(pubKey));
   }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -21,6 +21,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -37,6 +38,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.gossip.encoding.GossipEncoding.ForkDigestToMilestone;
 import tech.pegasys.teku.networking.eth2.gossip.encoding.SnappyPreparedGossipMessage.Uncompressor;
 import tech.pegasys.teku.networking.eth2.gossip.topics.GossipTopics;
+import tech.pegasys.teku.networking.p2p.gossip.PreparedGossipMessage.DecodedMessagePrefix;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -180,6 +182,62 @@ public class SnappyPreparedGossipMessageTest {
 
     verify(uncompressor)
         .uncompress(eq(messageBytes), eq(schema.getNetworkSszLengthBounds()), eq(gossipMaxSize));
+  }
+
+  @Test
+  public void getMessageId_shouldNotKeepUncompressedPayload() throws DecodingException {
+    final Uncompressor uncompressor = mock(Uncompressor.class);
+    when(uncompressor.uncompress(any(), any(), anyLong()))
+        .thenAnswer(__ -> Bytes.wrap(new byte[1000]));
+
+    final String altairTopic = GossipTopics.getTopic(altairForkDigest, "test", gossipEncoding);
+    final SnappyPreparedGossipMessage message =
+        getAltairMessage(messageBytes, altairTopic, uncompressor);
+
+    // the message id and prefix share one uncompression
+    message.getMessageId();
+    message.getMessageId();
+    message.getDecodedMessagePrefix();
+    verify(uncompressor, times(1)).uncompress(any(), any(), anyLong());
+
+    // the uncompressed payload was dropped, so decoding uncompresses again
+    final Bytes first = message.getDecodedMessage().getDecodedMessageOrElseThrow();
+    final Bytes second = message.getDecodedMessage().getDecodedMessageOrElseThrow();
+    verify(uncompressor, times(3)).uncompress(any(), any(), anyLong());
+    assertThat(first).isNotSameAs(second);
+  }
+
+  @Test
+  public void getDecodedMessagePrefix_shouldReturnLeadingBytesAndDecodedSize() {
+    final Bytes uncompressed = Bytes.random(1000);
+    final String altairTopic = GossipTopics.getTopic(altairForkDigest, "test", gossipEncoding);
+    final SnappyPreparedGossipMessage message =
+        getAltairMessage(messageBytes, altairTopic, (bytes, bounds, maxLength) -> uncompressed);
+
+    final DecodedMessagePrefix prefix = message.getDecodedMessagePrefix().orElseThrow();
+
+    assertThat(prefix.prefix()).isEqualTo(uncompressed.slice(0, DecodedMessagePrefix.MAX_LENGTH));
+    assertThat(prefix.decodedSize()).isEqualTo(1000);
+  }
+
+  @Test
+  public void getDecodedMessagePrefix_shouldReturnWholeMessageWhenShorterThanPrefix() {
+    final Bytes uncompressed = Bytes.random(10);
+    final String altairTopic = GossipTopics.getTopic(altairForkDigest, "test", gossipEncoding);
+    final SnappyPreparedGossipMessage message =
+        getAltairMessage(messageBytes, altairTopic, (bytes, bounds, maxLength) -> uncompressed);
+
+    assertThat(message.getDecodedMessagePrefix())
+        .contains(new DecodedMessagePrefix(uncompressed, 10));
+  }
+
+  @Test
+  public void getDecodedMessagePrefix_shouldBeEmptyWhenUncompressingFails() {
+    final String altairTopic = GossipTopics.getTopic(altairForkDigest, "test", gossipEncoding);
+    final SnappyPreparedGossipMessage message =
+        getAltairMessage(messageBytes, altairTopic, invalidUncompressor);
+
+    assertThat(message.getDecodedMessagePrefix()).isEmpty();
   }
 
   @Test

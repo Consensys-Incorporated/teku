@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -16,8 +16,11 @@ package tech.pegasys.teku.storage.server.kvstore;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toMap;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
@@ -33,6 +36,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -49,6 +53,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.junit.jupiter.api.AfterEach;
@@ -63,12 +68,14 @@ import tech.pegasys.teku.dataproviders.lookup.StateAndBlockSummaryProvider;
 import tech.pegasys.teku.ethereum.pow.api.DepositTreeSnapshot;
 import tech.pegasys.teku.ethereum.pow.api.MinGenesisTimeBlockEvent;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
+import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
+import tech.pegasys.teku.infrastructure.metrics.SettableLabelledGauge;
+import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
+import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
-import tech.pegasys.teku.kzg.KZGCommitment;
 import tech.pegasys.teku.kzg.KZGProof;
 import tech.pegasys.teku.spec.Spec;
-import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
@@ -84,6 +91,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
 import tech.pegasys.teku.spec.datastructures.execution.SlotAndExecutionPayloadSummary;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
@@ -96,7 +104,6 @@ import tech.pegasys.teku.spec.executionlayer.PayloadStatus;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.generator.ChainBuilder.BlockOptions;
 import tech.pegasys.teku.spec.generator.ChainProperties;
-import tech.pegasys.teku.spec.schemas.SchemaDefinitionsFulu;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.storage.api.FinalizedChainData;
 import tech.pegasys.teku.storage.api.GloasForkChoiceRebuildData;
@@ -105,8 +112,11 @@ import tech.pegasys.teku.storage.api.StorageUpdate;
 import tech.pegasys.teku.storage.api.StoredBlockMetadata;
 import tech.pegasys.teku.storage.api.StoredLightClientUpdate;
 import tech.pegasys.teku.storage.api.WeakSubjectivityUpdate;
+import tech.pegasys.teku.storage.archive.BlobSidecarsArchiver;
 import tech.pegasys.teku.storage.archive.filesystem.FileSystemBlobSidecarsArchiver;
+import tech.pegasys.teku.storage.client.ChainUpdater;
 import tech.pegasys.teku.storage.client.RecentChainData;
+import tech.pegasys.teku.storage.server.ChainStorage;
 import tech.pegasys.teku.storage.server.Database;
 import tech.pegasys.teku.storage.server.DatabaseContext;
 import tech.pegasys.teku.storage.server.ShuttingDownException;
@@ -114,6 +124,7 @@ import tech.pegasys.teku.storage.server.StateStorageMode;
 import tech.pegasys.teku.storage.server.TestDatabaseContext;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.FinalizedUpdater;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.HotUpdater;
+import tech.pegasys.teku.storage.server.pruner.DataColumnSidecarPruner;
 import tech.pegasys.teku.storage.storageSystem.StorageSystem;
 import tech.pegasys.teku.storage.store.StoreAssertions;
 import tech.pegasys.teku.storage.store.StoreBuilder;
@@ -779,6 +790,224 @@ public class DatabaseTest {
     // Envelope should still be present — canonical finalized blocks are not pruned
     assertThat(database.getBlindedExecutionPayloadEnvelope(blockAndState.getRoot()))
         .contains(signedBlindedExecutionPayloadEnvelope);
+  }
+
+  @TestTemplate
+  public void shouldDeleteBlindedExecutionPayloadEnvelopeOfFinalizedBlockWhosePayloadWasNotBuiltOn(
+      final DatabaseContext context) throws IOException {
+    assertBlindedExecutionPayloadEnvelopeOfFinalizedBlockWhosePayloadWasNotBuiltOnIsDeleted(
+        context, StateStorageMode.PRUNE);
+  }
+
+  @TestTemplate
+  public void
+      shouldDeleteBlindedExecutionPayloadEnvelopeOfFinalizedBlockWhosePayloadWasNotBuiltOnInArchiveMode(
+          final DatabaseContext context) throws IOException {
+    assertBlindedExecutionPayloadEnvelopeOfFinalizedBlockWhosePayloadWasNotBuiltOnIsDeleted(
+        context, StateStorageMode.ARCHIVE);
+  }
+
+  private void
+      assertBlindedExecutionPayloadEnvelopeOfFinalizedBlockWhosePayloadWasNotBuiltOnIsDeleted(
+          final DatabaseContext context, final StateStorageMode storageMode) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalGloas(), BLSKeyGenerator.generateKeyPairs(8));
+    // A block cache of a single block makes finalized block bodies come from the database, as on a
+    // live network where finalization lags block import by far more than the cache size
+    createStorageSystem(
+        context, storageMode, StoreConfig.builder().blockCacheSize(1).build(), false);
+    // Use the storage system's own chain builder, whose keys match the mock-start validators
+    final ChainBuilder gloasChainBuilder = storageSystem.chainBuilder();
+    recentChainData.initializeFromGenesis(gloasChainBuilder.generateGenesis().getState(), ZERO);
+    final ChainUpdater chainUpdater = storageSystem.chainUpdater();
+
+    // The block at slot 4 builds on the EMPTY variant of the block at slot 3, so the payload of
+    // slot 3 is not part of the chain even though its envelope was stored
+    final UInt64 emptyPayloadSlot = UInt64.valueOf(3);
+    final UInt64 epoch1Slot = spec.computeStartSlotAtEpoch(ONE);
+    advanceGloasChain(chainUpdater, ONE, epoch1Slot, emptyPayloadSlot.increment());
+    final Bytes32 emptyPayloadBlockRoot =
+        gloasChainBuilder.getBlockAtSlot(emptyPayloadSlot).getRoot();
+    assertThat(database.getBlindedExecutionPayloadEnvelope(emptyPayloadBlockRoot)).isPresent();
+
+    chainUpdater.finalizeEpoch(ONE);
+
+    assertThat(database.getBlindedExecutionPayloadEnvelope(emptyPayloadBlockRoot)).isEmpty();
+    // The block itself is retained, as are the envelopes of payloads the chain built on
+    assertThat(database.getSignedBlock(emptyPayloadBlockRoot)).isPresent();
+    gloasChainBuilder
+        .streamBlocksAndStates(1, epoch1Slot.longValue())
+        .filter(blockAndState -> !blockAndState.getSlot().equals(emptyPayloadSlot))
+        .forEach(
+            blockAndState ->
+                assertThat(database.getBlindedExecutionPayloadEnvelope(blockAndState.getRoot()))
+                    .describedAs("Envelope for slot %s", blockAndState.getSlot())
+                    .isPresent());
+  }
+
+  @TestTemplate
+  public void
+      shouldDeleteBlindedExecutionPayloadEnvelopeOfPreviouslyFinalizedBlockWhenItsChildIsFinalized(
+          final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalGloas(), BLSKeyGenerator.generateKeyPairs(8));
+    createStorageSystem(
+        context, StateStorageMode.PRUNE, StoreConfig.builder().blockCacheSize(1).build(), false);
+    // Use the storage system's own chain builder, whose keys match the mock-start validators
+    final ChainBuilder gloasChainBuilder = storageSystem.chainBuilder();
+    recentChainData.initializeFromGenesis(gloasChainBuilder.generateGenesis().getState(), ZERO);
+    final ChainUpdater chainUpdater = storageSystem.chainUpdater();
+
+    // The block finalized first is at the start of epoch 1 and its child builds on its EMPTY
+    // variant
+    final UInt64 epoch1Slot = spec.computeStartSlotAtEpoch(ONE);
+    final UInt64 epoch2Slot = spec.computeStartSlotAtEpoch(UInt64.valueOf(2));
+    advanceGloasChain(chainUpdater, ONE, epoch2Slot, epoch1Slot.increment());
+    final Bytes32 firstFinalizedBlockRoot = gloasChainBuilder.getBlockAtSlot(epoch1Slot).getRoot();
+
+    // The finalized block has no finalized child yet, so its payload status is not resolved
+    chainUpdater.finalizeEpoch(ONE);
+    assertThat(database.getBlindedExecutionPayloadEnvelope(firstFinalizedBlockRoot)).isPresent();
+
+    // Finalizing its child resolves it, with the block already in the finalized database
+    chainUpdater.finalizeEpoch(UInt64.valueOf(2));
+    assertThat(database.getBlindedExecutionPayloadEnvelope(firstFinalizedBlockRoot)).isEmpty();
+    assertThat(database.getSignedBlock(firstFinalizedBlockRoot)).isPresent();
+    assertThat(
+            database.getBlindedExecutionPayloadEnvelope(
+                gloasChainBuilder.getBlockAtSlot(epoch1Slot.increment()).getRoot()))
+        .isPresent();
+  }
+
+  @TestTemplate
+  public void shouldDeleteBlindedExecutionPayloadEnvelopeOfParentOnlyPresentInFinalizedStorage(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalGloas(), BLSKeyGenerator.generateKeyPairs(8));
+    // Prune mode finalizes exactly the supplied roots, so the parent block is not part of the
+    // second update
+    initialize(context, StateStorageMode.PRUNE);
+    // The block at slot 1 is finalized together with its envelope, without ever being a hot block,
+    // so it can only be read from finalized storage
+    final SignedBlockAndState parent = chainBuilder.generateNextBlock();
+    final SignedBlindedExecutionPayloadEnvelope parentEnvelope =
+        getSignedBlindedExecutionPayloadEnvelope(parent);
+    database.update(
+        storageUpdateWithBlindedExecutionPayloads(
+            Optional.of(
+                FinalizedChainData.builder()
+                    .latestFinalized(AnchorPoint.fromInitialBlockAndState(spec, parent))
+                    .build()),
+            Map.of(parent.getRoot(), parentEnvelope)));
+    assertThat(database.getHotBlock(parent.getRoot())).isEmpty();
+    assertThat(database.getBlindedExecutionPayloadEnvelope(parent.getRoot()))
+        .contains(parentEnvelope);
+
+    // The block at slot 2 builds on the EMPTY variant of its parent and is finalized next
+    final SignedBlockAndState child =
+        chainBuilder.generateBlockAtSlot(
+            2, chainBuilder.createBlockOptionsBuildingOnEmptyParent(UInt64.valueOf(2)));
+    database.update(
+        storageUpdateWithBlindedExecutionPayloads(
+            Optional.of(
+                FinalizedChainData.builder()
+                    .latestFinalized(AnchorPoint.fromInitialBlockAndState(spec, child))
+                    .build()),
+            Map.of()));
+
+    assertThat(database.getBlindedExecutionPayloadEnvelope(parent.getRoot())).isEmpty();
+    assertThat(database.getSignedBlock(parent.getRoot())).contains(parent.getBlock());
+  }
+
+  @TestTemplate
+  public void
+      shouldNotStoreBlindedExecutionPayloadEnvelopeArrivingWithTheFinalizationOfItsOrphanedBlock(
+          final DatabaseContext context) throws IOException {
+    assertEnvelopeArrivingWithFinalizationIsStoredOnlyIfChainBuiltOnIt(
+        context, StateStorageMode.PRUNE);
+  }
+
+  @TestTemplate
+  public void
+      shouldNotStoreBlindedExecutionPayloadEnvelopeArrivingWithTheFinalizationOfItsOrphanedBlockInArchiveMode(
+          final DatabaseContext context) throws IOException {
+    assertEnvelopeArrivingWithFinalizationIsStoredOnlyIfChainBuiltOnIt(
+        context, StateStorageMode.ARCHIVE);
+  }
+
+  private void assertEnvelopeArrivingWithFinalizationIsStoredOnlyIfChainBuiltOnIt(
+      final DatabaseContext context, final StateStorageMode storageMode) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalGloas(), BLSKeyGenerator.generateKeyPairs(8));
+    initialize(context, storageMode);
+    final SignedBlockAndState parent = chainBuilder.generateNextBlock();
+    final SignedBlockAndState child =
+        chainBuilder.generateBlockAtSlot(
+            2, chainBuilder.createBlockOptionsBuildingOnEmptyParent(UInt64.valueOf(2)));
+    final SignedBlindedExecutionPayloadEnvelope childEnvelope =
+        getSignedBlindedExecutionPayloadEnvelope(child);
+
+    // Both envelopes arrive with the finalization of their blocks. The child built on the EMPTY
+    // variant of the parent, so the parent's envelope must not survive; the child's is retained.
+    database.update(
+        storageUpdateWithBlindedExecutionPayloads(
+            Optional.of(
+                FinalizedChainData.builder()
+                    .latestFinalized(AnchorPoint.fromInitialBlockAndState(spec, child))
+                    .finalizedChildAndParent(parent.getRoot(), parent.getParentRoot())
+                    .finalizedChildAndParent(
+                        genesisBlockAndState.getRoot(), genesisBlockAndState.getParentRoot())
+                    .finalizedBlock(parent.getBlock())
+                    .build()),
+            Map.of(
+                parent.getRoot(),
+                getSignedBlindedExecutionPayloadEnvelope(parent),
+                child.getRoot(),
+                childEnvelope)));
+
+    assertThat(database.getBlindedExecutionPayloadEnvelope(parent.getRoot())).isEmpty();
+    assertThat(database.getSignedBlock(parent.getRoot())).contains(parent.getBlock());
+    assertThat(database.getBlindedExecutionPayloadEnvelope(child.getRoot()))
+        .contains(childEnvelope);
+  }
+
+  private StorageUpdate storageUpdateWithBlindedExecutionPayloads(
+      final Optional<FinalizedChainData> finalizedChainData,
+      final Map<Bytes32, SignedBlindedExecutionPayloadEnvelope> blindedExecutionPayloads) {
+    return new StorageUpdate(
+        Optional.empty(),
+        finalizedChainData,
+        Optional.empty(),
+        Optional.empty(),
+        Map.of(),
+        Map.of(),
+        blindedExecutionPayloads,
+        Map.of(),
+        Optional.empty(),
+        Map.of(),
+        Map.of(),
+        false,
+        Optional.empty(),
+        Optional.empty(),
+        Optional.empty(),
+        true,
+        false,
+        true);
+  }
+
+  /**
+   * Imports one block and its execution payload envelope per transaction up to {@code toSlot}. The
+   * block at {@code slotBuildingOnEmptyParent} builds on the EMPTY variant of its parent.
+   */
+  private void advanceGloasChain(
+      final ChainUpdater chainUpdater,
+      final UInt64 fromSlot,
+      final UInt64 toSlot,
+      final UInt64 slotBuildingOnEmptyParent) {
+    for (UInt64 slot = fromSlot; slot.isLessThanOrEqualTo(toSlot); slot = slot.increment()) {
+      if (slot.equals(slotBuildingOnEmptyParent)) {
+        chainUpdater.advanceChain(
+            slot, storageSystem.chainBuilder().createBlockOptionsBuildingOnEmptyParent(slot));
+      } else {
+        chainUpdater.advanceChain(slot);
+      }
+    }
   }
 
   @TestTemplate
@@ -3027,12 +3256,8 @@ public class DatabaseTest {
 
     final SignedBeaconBlockHeader header = dataStructureUtil.randomSignedBeaconBlockHeader();
     // we need to build sidecars with the same number of cells in each
-    final List<KZGCommitment> kzgCommitments = dataStructureUtil.randomKZGCommitments(14);
     final SszList<SszKZGCommitment> sszKZGCommitments =
-        SchemaDefinitionsFulu.required(spec.forMilestone(SpecMilestone.FULU).getSchemaDefinitions())
-            .getDataColumnSidecarSchema()
-            .getKzgCommitmentsSchema()
-            .createFromElements(kzgCommitments.stream().map(SszKZGCommitment::new).toList());
+        dataStructureUtil.randomBlobKzgCommitments(14);
     final List<DataColumnSidecar> dataColumnSidecarsExtension =
         Stream.iterate(UInt64.valueOf(64), UInt64::increment)
             .limit(64)
@@ -3072,6 +3297,543 @@ public class DatabaseTest {
 
     assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
     assertThat(database.getDataColumnSidecarsProofs(header.getMessage().getSlot())).isEmpty();
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_dropsExtensionColumnsAndRetainsProofs(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final int halfColumns = numberOfColumns / 2;
+    final UInt64 slot = UInt64.valueOf(3);
+
+    final List<List<KZGProof>> expectedExtensionProofs = storeFullColumnSet(slot, numberOfColumns);
+
+    database.archiveSidecarsProofs(ZERO, slot);
+
+    // only the reconstructable first half of the columns is retained
+    assertThat(getStoredColumnIndices(slot))
+        .containsExactlyElementsOf(
+            Stream.iterate(ZERO, UInt64::increment).limit(halfColumns).toList());
+    // the proofs of the dropped extension columns are archived for reconstruction
+    assertThat(database.getDataColumnSidecarsProofs(slot)).contains(expectedExtensionProofs);
+    assertThat(database.getLastDataColumnSidecarsProofsSlot()).contains(slot);
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_skipsSlotWithIncompleteExtensionColumns(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final UInt64 slot = UInt64.valueOf(3);
+
+    // store every column except the last extension one, so the extension half is incomplete
+    storeColumns(storeFinalizedBlockForArchive(slot), 0, numberOfColumns - 1);
+
+    database.archiveSidecarsProofs(ZERO, slot);
+
+    // nothing archived and no column dropped: reconstruction from a partial half is impossible
+    assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
+    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    assertThat(getStoredColumnIndices(slot)).hasSize(numberOfColumns - 1);
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_skipsSlotWithMissingFirstHalfColumns(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final UInt64 slot = UInt64.valueOf(3);
+
+    // store all columns except index 0 (one first-half gap) — a single gap must prevent archiving
+    storeColumns(storeFinalizedBlockForArchive(slot), 1, numberOfColumns);
+
+    database.archiveSidecarsProofs(ZERO, slot);
+
+    // archiving must be skipped: a missing first-half column makes extension data irrecoverable
+    assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
+    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    assertThat(getStoredColumnIndices(slot)).hasSize(numberOfColumns - 1);
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_archivesOnlyCompleteBlockColumns(final DatabaseContext context)
+      throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final int halfColumns = numberOfColumns / 2;
+    final UInt64 slot = UInt64.valueOf(3);
+
+    final SignedBeaconBlockHeader completeHeader = storeFinalizedBlockForArchive(slot);
+    final List<List<KZGProof>> expectedExtensionProofs =
+        storeFullColumnSet(completeHeader, numberOfColumns);
+    // leftover extension columns of a never-imported block at the same slot
+    final SignedBeaconBlockHeader strayHeader =
+        dataStructureUtil.randomSignedBeaconBlockHeader(slot);
+    storeColumns(strayHeader, halfColumns, halfColumns + halfColumns / 2);
+
+    database.archiveSidecarsProofs(ZERO, slot);
+
+    // the complete block is archived with its own proofs only
+    assertThat(database.getDataColumnSidecarsProofs(slot)).contains(expectedExtensionProofs);
+    assertThat(getStoredColumnIndices(slot, completeHeader.getMessage().getRoot()))
+        .containsExactlyElementsOf(
+            Stream.iterate(ZERO, UInt64::increment).limit(halfColumns).toList());
+    // the stray block's columns are left untouched
+    assertThat(getStoredColumnIndices(slot, strayHeader.getMessage().getRoot()))
+        .hasSize(halfColumns / 2);
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_doesNotMixExtensionColumnsOfDifferentRoots(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final int halfColumns = numberOfColumns / 2;
+    final int splitIndex = halfColumns + halfColumns / 2;
+    final UInt64 slot = UInt64.valueOf(3);
+
+    // one block has the first half and part of the extension half, another block the remaining
+    // extension columns: together they would look like a complete slot
+    storeColumns(storeFinalizedBlockForArchive(slot), 0, splitIndex);
+    storeColumns(
+        dataStructureUtil.randomSignedBeaconBlockHeader(slot), splitIndex, numberOfColumns);
+
+    database.archiveSidecarsProofs(ZERO, slot);
+
+    assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
+    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    assertThat(getStoredColumnIndices(slot)).hasSize(numberOfColumns);
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_skipsSlotWithMultipleCompleteBlocks(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final UInt64 slot = UInt64.valueOf(3);
+
+    // proofs are stored per slot, so only one block's proofs could be retained
+    storeFullColumnSet(storeFinalizedBlockForArchive(slot), numberOfColumns);
+    storeFullColumnSet(dataStructureUtil.randomSignedBeaconBlockHeader(slot), numberOfColumns);
+
+    database.archiveSidecarsProofs(ZERO, slot);
+
+    assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
+    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    assertThat(getStoredColumnIndices(slot)).hasSize(2 * numberOfColumns);
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_isNoOpWithoutFuluConfig(final DatabaseContext context)
+      throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalDeneb());
+    initialize(context);
+
+    assertThatCode(() -> database.archiveSidecarsProofs(ZERO, UInt64.valueOf(3)))
+        .doesNotThrowAnyException();
+    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_leavesMalformedSidecarUntouched(final DatabaseContext context)
+      throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+    final int columns = spec.getNumberOfDataColumns().orElseThrow();
+    storeColumnsWithMalformedSidecar(ONE, columns);
+
+    database.archiveSidecarsProofs(ONE, ONE);
+
+    assertThat(database.getDataColumnSidecarsProofs(ONE)).isEmpty();
+    assertThat(getStoredColumnIndices(ONE)).hasSize(columns);
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_archivesHealthySlotDespiteMalformedSidecar(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+    final int columns = spec.getNumberOfDataColumns().orElseThrow();
+    final UInt64 healthySlot = UInt64.valueOf(2);
+    storeColumnsWithMalformedSidecar(ONE, columns);
+    final List<DataColumnSidecar> healthySidecars =
+        storeColumns(storeFinalizedBlockForArchive(healthySlot), 0, columns);
+
+    database.archiveSidecarsProofs(ONE, healthySlot);
+
+    assertArchivedColumns(healthySlot, healthySidecars);
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_retriesBackfillWhileSkippingMalformedSidecar(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int columns = spec.getNumberOfDataColumns().orElseThrow();
+    final UInt64 incompleteSlot = UInt64.valueOf(2);
+    storeColumnsWithMalformedSidecar(ONE, columns);
+    final List<DataColumnSidecar> sidecars =
+        storeColumns(storeFinalizedBlockForArchive(incompleteSlot), 0, columns);
+    final DataColumnSidecar missing = sidecars.getLast();
+    try (final FinalizedUpdater updater = finalizedUpdater()) {
+      updater.removeSidecar(DataColumnSlotAndIdentifier.fromDataColumn(missing));
+      updater.commit();
+    }
+
+    try (final SidecarArchiveTestContext archive = startSidecarArchiver(incompleteSlot)) {
+      archive.runner().executeDueActions();
+      assertThat(database.getDataColumnSidecarsProofs(incompleteSlot)).isEmpty();
+
+      assertThat(archive.storage().onNewSidecar(missing)).isCompleted();
+      archive.runner().executeQueuedActions();
+
+      assertArchivedColumns(incompleteSlot, sidecars);
+    }
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_retriesRepairedSidecar(final DatabaseContext context)
+      throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int columns = spec.getNumberOfDataColumns().orElseThrow();
+    final UInt64 slot = UInt64.valueOf(2);
+    final List<DataColumnSidecar> sidecars = storeColumnsWithMalformedSidecar(slot, columns);
+
+    try (final SidecarArchiveTestContext archive = startSidecarArchiver(slot)) {
+      archive.runner().executeDueActions();
+      assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
+
+      assertThat(archive.storage().onNewSidecar(sidecars.getLast())).isCompleted();
+      archive.runner().executeQueuedActions();
+
+      assertArchivedColumns(slot, sidecars);
+    }
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_archivesCompleteSlotsAroundIncompleteOne(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final int halfColumns = numberOfColumns / 2;
+    final UInt64 firstSlot = UInt64.valueOf(1);
+    final UInt64 incompleteSlot = UInt64.valueOf(2);
+    final UInt64 lastSlot = UInt64.valueOf(3);
+
+    final List<List<KZGProof>> firstProofs = storeFullColumnSet(firstSlot, numberOfColumns);
+    storeColumns(storeFinalizedBlockForArchive(incompleteSlot), 0, numberOfColumns - 1);
+    final List<List<KZGProof>> lastProofs = storeFullColumnSet(lastSlot, numberOfColumns);
+
+    database.archiveSidecarsProofs(ZERO, lastSlot);
+
+    assertThat(database.getDataColumnSidecarsProofs(firstSlot)).contains(firstProofs);
+    assertThat(getStoredColumnIndices(firstSlot)).hasSize(halfColumns);
+    // the incomplete slot is skipped without stopping the run
+    assertThat(database.getDataColumnSidecarsProofs(incompleteSlot)).isEmpty();
+    assertThat(getStoredColumnIndices(incompleteSlot)).hasSize(numberOfColumns - 1);
+    assertThat(database.getDataColumnSidecarsProofs(lastSlot)).contains(lastProofs);
+    assertThat(getStoredColumnIndices(lastSlot)).hasSize(halfColumns);
+    assertThat(database.getLastDataColumnSidecarsProofsSlot()).contains(lastSlot);
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_isNoOpForAlreadyArchivedSlot(final DatabaseContext context)
+      throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final int halfColumns = numberOfColumns / 2;
+    final UInt64 slot = UInt64.valueOf(3);
+
+    final List<List<KZGProof>> expectedExtensionProofs = storeFullColumnSet(slot, numberOfColumns);
+    database.archiveSidecarsProofs(ZERO, slot);
+    database.archiveSidecarsProofs(ZERO, slot);
+
+    assertThat(database.getDataColumnSidecarsProofs(slot)).contains(expectedExtensionProofs);
+    assertThat(getStoredColumnIndices(slot))
+        .containsExactlyElementsOf(
+            Stream.iterate(ZERO, UInt64::increment).limit(halfColumns).toList());
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_leavesNonCanonicalSidecarsUntouched(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final UInt64 slot = UInt64.valueOf(3);
+
+    storeFullColumnSet(slot, numberOfColumns);
+    final SignedBeaconBlockHeader nonCanonicalHeader =
+        dataStructureUtil.randomSignedBeaconBlockHeader(slot);
+    final SszList<SszKZGCommitment> kzgCommitments = dataStructureUtil.randomBlobKzgCommitments(14);
+    try (final FinalizedUpdater updater = finalizedUpdater()) {
+      Stream.iterate(ZERO, UInt64::increment)
+          .limit(numberOfColumns)
+          .map(
+              index ->
+                  dataStructureUtil.randomDataColumnSidecar(
+                      nonCanonicalHeader, kzgCommitments, index))
+          .forEach(updater::addNonCanonicalSidecar);
+      updater.commit();
+    }
+
+    database.archiveSidecarsProofs(ZERO, slot);
+
+    assertThat(database.getDataColumnSidecarsProofs(slot)).isPresent();
+    try (final Stream<DataColumnSlotAndIdentifier> nonCanonical =
+        database.streamNonCanonicalDataColumnIdentifiers(slot, slot)) {
+      assertThat(nonCanonical).hasSize(numberOfColumns);
+    }
+  }
+
+  @TestTemplate
+  public void pruneAllSidecars_alsoRemovesArchivedProofs(final DatabaseContext context)
+      throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final UInt64 slot = UInt64.valueOf(3);
+
+    // archive the extension columns down to proofs: slot now holds first-half sidecars + proofs
+    storeFullColumnSet(slot, numberOfColumns);
+    database.archiveSidecarsProofs(ZERO, slot);
+    assertThat(database.getDataColumnSidecarsProofs(slot)).isPresent();
+    assertThat(database.getLastDataColumnSidecarsProofsSlot()).contains(slot);
+
+    // pruning the slot must drop the retained proofs alongside the sidecars
+    database.pruneAllSidecars(slot, 10);
+
+    assertThat(getStoredColumnIndices(slot)).isEmpty();
+    assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
+    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+  }
+
+  private List<List<KZGProof>> storeFullColumnSet(final UInt64 slot, final int numberOfColumns) {
+    return storeFullColumnSet(storeFinalizedBlockForArchive(slot), numberOfColumns);
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_removesLateBackfillWrites(final DatabaseContext context)
+      throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+    final UInt64 slot = UInt64.valueOf(3);
+    final int columns = spec.getNumberOfDataColumns().orElseThrow();
+    final SignedBeaconBlockHeader header = storeFinalizedBlockForArchive(slot);
+    final List<DataColumnSidecar> sidecars = storeColumns(header, 0, columns);
+    database.archiveSidecarsProofs(slot, slot);
+    final Optional<List<List<KZGProof>>> proofs = database.getDataColumnSidecarsProofs(slot);
+
+    database.addSidecar(sidecars.getLast());
+    assertThat(getStoredColumnIndices(slot)).hasSize(columns / 2 + 1);
+    database.archiveSidecarsProofs(slot, slot);
+
+    assertThat(getStoredColumnIndices(slot)).hasSize(columns / 2);
+    assertThat(database.getDataColumnSidecarsProofs(slot)).isEqualTo(proofs);
+  }
+
+  private SignedBeaconBlockHeader storeFinalizedBlockForArchive(final UInt64 slot) {
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(slot);
+    try (final FinalizedUpdater updater = finalizedUpdater()) {
+      updater.addFinalizedBlock(block);
+      updater.commit();
+    }
+    try (final HotUpdater updater = hotUpdater()) {
+      updater.setFinalizedCheckpoint(
+          new Checkpoint(spec.computeEpochAtSlot(slot).increment(), block.getRoot()));
+      updater.commit();
+    }
+    return block.asHeader();
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_retriesBackfillAndPreservesCustody(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+    final Checkpoint originalCheckpoint = database.getFinalizedCheckpoint().orElseThrow();
+    final UInt64 slot = UInt64.valueOf(3);
+    final int columns = spec.getNumberOfDataColumns().orElseThrow();
+    final SignedBeaconBlockHeader header = storeFinalizedBlockForArchive(slot);
+    final List<DataColumnSidecar> sidecars = storeColumns(header, 0, columns);
+    final DataColumnSidecar missing = sidecars.getLast();
+    try (final FinalizedUpdater updater = finalizedUpdater()) {
+      updater.removeSidecar(DataColumnSlotAndIdentifier.fromDataColumn(missing));
+      updater.commit();
+    }
+    final StubTimeProvider time = StubTimeProvider.withTimeInSeconds(0);
+    final StubAsyncRunner runner = new StubAsyncRunner(time);
+    final DataColumnSidecarPruner pruner = createArchivePruner(runner, time);
+    final ChainStorage storage =
+        ChainStorage.create(
+            database,
+            spec,
+            StateStorageMode.PRUNE,
+            10,
+            BlobSidecarsArchiver.NOOP,
+            pruner::onSidecarStored);
+    assertThat(pruner.start()).isCompleted();
+    pruner.onSidecarArchivePrunableSlot(slot);
+    runner.executeDueActions();
+    assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
+
+    assertThat(storage.onNewSidecar(missing)).isCompleted();
+    runner.executeQueuedActions();
+
+    assertThat(getStoredColumnIndices(slot)).hasSize(columns / 2);
+    assertThat(storage.getCustodyDataColumnIdentifiers(slot))
+        .isCompletedWithValueMatching(ids -> ids.size() == columns);
+    final List<DataColumnSlotAndIdentifier> expectedCustody =
+        sidecars.stream().map(DataColumnSlotAndIdentifier::fromDataColumn).sorted().toList();
+    assertThat(storage.getCustodyDataColumnIdentifiers(UInt64.ZERO, slot.plus(100)))
+        .isCompletedWithValue(expectedCustody);
+    assertThat(pruner.stop()).isCompleted();
+    // The archive fixture inserts finalized blocks directly, without their corresponding states.
+    // Restore the state-backed checkpoint before restarting the full storage system.
+    try (final HotUpdater updater = hotUpdater()) {
+      updater.setFinalizedCheckpoint(originalCheckpoint);
+      updater.commit();
+    }
+    restartStorage();
+    final ChainStorage restarted =
+        ChainStorage.create(
+            database, spec, StateStorageMode.PRUNE, 10, BlobSidecarsArchiver.NOOP, __ -> {});
+    assertThat(restarted.getCustodyDataColumnIdentifiers(slot))
+        .isCompletedWithValueMatching(ids -> ids.size() == columns);
+    assertThat(restarted.getCustodyDataColumnIdentifiers(UInt64.ZERO, slot.plus(100)))
+        .isCompletedWithValue(expectedCustody);
+  }
+
+  private List<List<KZGProof>> storeFullColumnSet(
+      final SignedBeaconBlockHeader header, final int numberOfColumns) {
+    return storeColumns(header, 0, numberOfColumns).stream()
+        .skip(numberOfColumns / 2)
+        .map(sidecar -> sidecar.getKzgProofs().stream().map(SszKZGProof::getKZGProof).toList())
+        .toList();
+  }
+
+  private DataColumnSidecarPruner createArchivePruner(
+      final StubAsyncRunner runner, final StubTimeProvider time) {
+    return new DataColumnSidecarPruner(
+        spec,
+        database,
+        new StubMetricsSystem(),
+        runner,
+        runner,
+        time,
+        Duration.ofSeconds(1),
+        10,
+        false,
+        "test",
+        mock(SettableLabelledGauge.class),
+        mock(SettableLabelledGauge.class),
+        Duration.ofMinutes(1));
+  }
+
+  private List<DataColumnSidecar> storeColumnsWithMalformedSidecar(
+      final UInt64 slot, final int columns) {
+    final List<DataColumnSidecar> sidecars =
+        storeColumns(storeFinalizedBlockForArchive(slot), 0, columns);
+    final DataColumnSidecar malformed = spy(sidecars.getLast());
+    doReturn(Bytes.of(0)).when(malformed).sszSerialize();
+    database.addSidecar(malformed);
+    return sidecars;
+  }
+
+  private void assertArchivedColumns(final UInt64 slot, final List<DataColumnSidecar> sidecars) {
+    final int halfColumns = sidecars.size() / 2;
+    assertThat(getStoredColumnIndices(slot))
+        .containsExactlyElementsOf(
+            sidecars.stream().limit(halfColumns).map(DataColumnSidecar::getIndex).toList());
+    assertThat(database.getDataColumnSidecarsProofs(slot))
+        .contains(
+            sidecars.stream()
+                .skip(halfColumns)
+                .map(
+                    sidecar ->
+                        sidecar.getKzgProofs().stream().map(SszKZGProof::getKZGProof).toList())
+                .toList());
+  }
+
+  private SidecarArchiveTestContext startSidecarArchiver(final UInt64 tillSlot) {
+    final StubTimeProvider time = StubTimeProvider.withTimeInSeconds(0);
+    final StubAsyncRunner runner = new StubAsyncRunner(time);
+    final DataColumnSidecarPruner pruner = createArchivePruner(runner, time);
+    final ChainStorage storage =
+        ChainStorage.create(
+            database,
+            spec,
+            StateStorageMode.PRUNE,
+            10,
+            BlobSidecarsArchiver.NOOP,
+            pruner::onSidecarStored);
+    assertThat(pruner.start()).isCompleted();
+    pruner.onSidecarArchivePrunableSlot(tillSlot);
+    return new SidecarArchiveTestContext(runner, storage, pruner);
+  }
+
+  private record SidecarArchiveTestContext(
+      StubAsyncRunner runner, ChainStorage storage, DataColumnSidecarPruner pruner)
+      implements AutoCloseable {
+    @Override
+    public void close() {
+      assertThat(pruner.stop()).isCompleted();
+    }
+  }
+
+  private List<DataColumnSidecar> storeColumns(
+      final SignedBeaconBlockHeader header, final int fromIndex, final int toIndexExclusive) {
+    final SszList<SszKZGCommitment> kzgCommitments = dataStructureUtil.randomBlobKzgCommitments(14);
+    final List<DataColumnSidecar> sidecars =
+        Stream.iterate(UInt64.valueOf(fromIndex), UInt64::increment)
+            .limit(toIndexExclusive - fromIndex)
+            .map(index -> dataStructureUtil.randomDataColumnSidecar(header, kzgCommitments, index))
+            .toList();
+    try (final FinalizedUpdater updater = finalizedUpdater()) {
+      sidecars.forEach(updater::addSidecar);
+      updater.commit();
+    }
+    return sidecars;
+  }
+
+  private List<UInt64> getStoredColumnIndices(final UInt64 slot, final Bytes32 blockRoot) {
+    try (final Stream<DataColumnSlotAndIdentifier> identifiers =
+        database.streamDataColumnIdentifiers(slot, slot)) {
+      return identifiers
+          .filter(id -> id.blockRoot().equals(blockRoot))
+          .map(DataColumnSlotAndIdentifier::columnIndex)
+          .sorted()
+          .toList();
+    }
+  }
+
+  private List<UInt64> getStoredColumnIndices(final UInt64 slot) {
+    try (final Stream<DataColumnSlotAndIdentifier> identifiers =
+        database.streamDataColumnIdentifiers(slot, slot)) {
+      return identifiers.map(DataColumnSlotAndIdentifier::columnIndex).sorted().toList();
+    }
   }
 
   private List<Map.Entry<Bytes32, UInt64>> getFinalizedStateRootsList() {
@@ -3577,6 +4339,44 @@ public class DatabaseTest {
 
     assertThat(getBestLightClientUpdates()).containsOnlyKeys(ZERO, UInt64.valueOf(2));
     assertThat(database.getBestLightClientUpdateSignatureBlockRoot(ONE)).isEmpty();
+  }
+
+  @TestTemplate
+  public void lightClientBootstraps_shouldSurviveRestart(final DatabaseContext context)
+      throws IOException {
+    initialize(context);
+    final LightClientBootstrap periodZero =
+        dataStructureUtil.randomLightClientBoostrapWithHeaderSlot(UInt64.valueOf(8));
+    final LightClientBootstrap periodOne =
+        dataStructureUtil.randomLightClientBoostrapWithHeaderSlot(UInt64.valueOf(70));
+    database.storeLightClientBootstrap(periodZero);
+    database.storeLightClientBootstrap(periodOne);
+
+    restartStorage();
+
+    assertThat(database.getLightClientBootstrap(UInt64.valueOf(8))).contains(periodZero);
+    assertThat(database.getLightClientBootstrap(UInt64.valueOf(70))).contains(periodOne);
+    assertThat(database.getLightClientBootstrap(UInt64.valueOf(9))).isEmpty();
+  }
+
+  @TestTemplate
+  public void pruneBestLightClientUpdatesBefore_shouldDeleteBootstrapsBelowGivenPeriod(
+      final DatabaseContext context) throws IOException {
+    initialize(context);
+    final LightClientBootstrap periodTwo =
+        dataStructureUtil.randomLightClientBoostrapWithHeaderSlot(UInt64.valueOf(140));
+    database.storeLightClientBootstrap(
+        dataStructureUtil.randomLightClientBoostrapWithHeaderSlot(UInt64.valueOf(8)));
+    database.storeLightClientBootstrap(
+        dataStructureUtil.randomLightClientBoostrapWithHeaderSlot(UInt64.valueOf(70)));
+    database.storeLightClientBootstrap(periodTwo);
+
+    database.pruneBestLightClientUpdatesBefore(UInt64.valueOf(2));
+    restartStorage();
+
+    assertThat(database.getLightClientBootstrap(UInt64.valueOf(8))).isEmpty();
+    assertThat(database.getLightClientBootstrap(UInt64.valueOf(70))).isEmpty();
+    assertThat(database.getLightClientBootstrap(UInt64.valueOf(140))).contains(periodTwo);
   }
 
   private void storeBestLightClientUpdates(final long... periods) {

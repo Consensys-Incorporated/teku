@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -264,6 +264,18 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
 
     LOG.debug("internalForkChoiceUpdated forkChoiceState {}", forkChoiceState);
 
+    if (requestedBlockProductionSlot.isPresent()
+        && pinnedBlockProductionPreparation
+            .filter(
+                preparation ->
+                    requestedBlockProductionSlot.orElseThrow().isLessThan(preparation.slot()))
+            .isPresent()) {
+      LOG.warn(
+          "Ignoring block production request for slot {} because a newer slot is pinned",
+          requestedBlockProductionSlot.orElseThrow());
+      return;
+    }
+
     clearPinnedBlockProductionIfHeadAdvanced(forkChoiceState);
 
     if (requestedBlockProductionSlot.isPresent()) {
@@ -374,13 +386,64 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
 
     if (hasPayloadAttributesForPinnedBlockProduction(
         productionForkChoiceUpdateData, forkChoiceState, requestedBlockProductionSlot)) {
+      // Reuse the payloadId requested by the ordinary fcU. If the EL answered that fcU without a
+      // payloadId (e.g. SYNCING), the reused result is unusable, so request a fresh one instead of
+      // failing block production with it.
       productionForkChoiceUpdateData
           .getExecutionPayloadContext()
+          // a failed fcU is as unusable as one without a payloadId: let the retry below handle it
+          .exceptionally(
+              error -> {
+                LOG.warn(
+                    "Reused forkChoiceUpdated for block production at slot {} failed",
+                    requestedBlockProductionSlot,
+                    error);
+                return Optional.empty();
+              })
+          .thenComposeAsync(
+              maybeExecutionPayloadContext ->
+                  retryPinnedBlockProductionIfPayloadIdIsMissing(
+                      preparation, maybeExecutionPayloadContext),
+              eventThread)
           .propagateTo(preparation.executionPayloadContext());
-      sendForkChoiceUpdated(productionForkChoiceUpdateData);
+      // A result already known can only be resent as a duplicate whose outcome is dropped: either
+      // it is usable as is, or the retry above has already sent a fresh fcU.
+      if (!productionForkChoiceUpdateData.getExecutionPayloadContext().isDone()) {
+        sendForkChoiceUpdated(productionForkChoiceUpdateData);
+      }
     } else {
       updatePayloadAttributesForPinnedBlockProduction(preparation);
     }
+  }
+
+  private SafeFuture<Optional<ExecutionPayloadContext>>
+      retryPinnedBlockProductionIfPayloadIdIsMissing(
+          final PinnedBlockProductionPreparation preparation,
+          final Optional<ExecutionPayloadContext> maybeExecutionPayloadContext) {
+    eventThread.checkOnEventThread();
+    if (maybeExecutionPayloadContext.isPresent() || !isCurrentPinnedBlockProduction(preparation)) {
+      return SafeFuture.completedFuture(maybeExecutionPayloadContext);
+    }
+    LOG.warn(
+        "Reused forkChoiceUpdated result for block production at slot {} has no payloadId, requesting a new one from the execution layer",
+        preparation.slot());
+    // The attributes are unchanged (same head and slot), so resend them as they are rather than
+    // recalculating.
+    final ForkChoiceUpdateData retryForkChoiceUpdateData =
+        preparation.forkChoiceUpdateData().forResend();
+    final PinnedBlockProductionPreparation retryPreparation =
+        new PinnedBlockProductionPreparation(
+            preparation.slot(),
+            preparation.parentBeaconBlock(),
+            retryForkChoiceUpdateData,
+            new SafeFuture<>());
+    forkChoiceUpdateData = retryForkChoiceUpdateData;
+    pinnedBlockProductionPreparation = Optional.of(retryPreparation);
+    retryForkChoiceUpdateData
+        .getExecutionPayloadContext()
+        .propagateTo(retryPreparation.executionPayloadContext());
+    sendForkChoiceUpdated(retryForkChoiceUpdateData);
+    return retryPreparation.executionPayloadContext();
   }
 
   private ForkChoiceUpdateData getForkChoiceUpdateDataForPinnedBlockProduction(
@@ -560,7 +623,7 @@ public class ForkChoiceNotifierImpl implements ForkChoiceNotifier {
                 LOG.error("Failed to calculate payload attributes for slot {}", blockSlot, error));
   }
 
-  @SuppressWarnings("ReferenceComparison")
+  @SuppressWarnings({"ReferenceComparison", "ReferenceEquality"})
   private boolean isStaleForkChoiceUpdateData(
       final ForkChoiceUpdateData localForkChoiceUpdateData) {
     return forkChoiceUpdateData != localForkChoiceUpdateData;

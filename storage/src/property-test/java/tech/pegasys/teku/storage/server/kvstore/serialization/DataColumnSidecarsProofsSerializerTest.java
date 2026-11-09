@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -14,10 +14,14 @@
 package tech.pegasys.teku.storage.server.kvstore.serialization;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
 import java.util.stream.Stream;
+import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.kzg.KZGCommitment;
@@ -38,6 +42,22 @@ public class DataColumnSidecarsProofsSerializerTest {
   final SchemaDefinitionsFulu schemaDefinitionsFulu =
       SchemaDefinitionsFulu.required(spec.forMilestone(SpecMilestone.FULU).getSchemaDefinitions());
   final DataColumnSidecarsProofsSerializer serializer = new DataColumnSidecarsProofsSerializer();
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {"0x", "0x000000", "0xffffffff", "0x01000000", "0x0000000000", "0x0100000000"})
+  void rejectsMalformedStoredProofs(final String hex) {
+    assertThatThrownBy(() -> serializer.deserialize(Bytes.fromHexString(hex).toArrayUnsafe()))
+        .isInstanceOf(KvStoreDeserializationException.class);
+  }
+
+  @Test
+  void rejectsIncompleteColumn() {
+    final byte[] bytes = serializer.serialize(List.of(List.of(dataStructureUtil.randomKZGProof())));
+    bytes[0] = 2;
+    assertThatThrownBy(() -> serializer.deserialize(bytes))
+        .isInstanceOf(KvStoreDeserializationException.class);
+  }
 
   @Test
   final void testEmpty() {
@@ -72,5 +92,30 @@ public class DataColumnSidecarsProofsSerializerTest {
             .toList();
     final byte[] serialize = serializer.serialize(expectedProofs);
     assertThat(serializer.deserialize(serialize)).isEqualTo(expectedProofs);
+  }
+
+  @Test
+  final void testSingleColumnSingleProofRoundTrip() {
+    final List<List<KZGProof>> proofs = List.of(List.of(dataStructureUtil.randomKZGProof()));
+    final byte[] serialize = serializer.serialize(proofs);
+    assertThat(serializer.deserialize(serialize)).isEqualTo(proofs);
+  }
+
+  @Test
+  final void testRaggedColumnsFailToSerialize() {
+    // the header stores only the first column's length: [[a], [b, c]] would otherwise round-trip
+    // silently as [[a], [b], [c]]
+    final List<List<KZGProof>> shorterFirst =
+        List.of(
+            List.of(dataStructureUtil.randomKZGProof()),
+            List.of(dataStructureUtil.randomKZGProof(), dataStructureUtil.randomKZGProof()));
+    final List<List<KZGProof>> longerFirst =
+        List.of(
+            List.of(dataStructureUtil.randomKZGProof(), dataStructureUtil.randomKZGProof()),
+            List.of(dataStructureUtil.randomKZGProof()));
+    assertThatThrownBy(() -> serializer.serialize(shorterFirst))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> serializer.serialize(longerFirst))
+        .isInstanceOf(IllegalArgumentException.class);
   }
 }

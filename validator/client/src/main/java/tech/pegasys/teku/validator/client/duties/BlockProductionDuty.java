@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -101,7 +101,7 @@ public class BlockProductionDuty implements Duty {
     return createRandaoReveal(forkInfo)
         // create unsigned block
         .thenComposeCombined(
-            builderConfigProvider.getBuilderConfig(validator, slot),
+            createBuilderConfig(validator, slot),
             (randaoReveal, builderConfig) ->
                 validatorDutyMetrics.record(
                     () -> createUnsignedBlock(randaoReveal, builderConfig),
@@ -142,6 +142,21 @@ public class BlockProductionDuty implements Duty {
 
   private SafeFuture<BLSSignature> createRandaoReveal(final ForkInfo forkInfo) {
     return validator.getSigner().createRandaoReveal(spec.computeEpochAtSlot(slot), forkInfo);
+  }
+
+  private SafeFuture<Optional<BuilderConfig>> createBuilderConfig(
+      final Validator validator, final UInt64 slot) {
+    return SafeFuture.of(() -> builderConfigProvider.getBuilderConfig(validator, slot))
+        // This should never happen realistically, but would rather proceed with a non-biased
+        // builder config than fail block production
+        .exceptionally(
+            ex -> {
+              LOG.error(
+                  "Couldn't get a builder config for slot {}. Will proceed with a non-biased one.",
+                  slot,
+                  ex);
+              return Optional.of(BuilderConfig.NO_OP);
+            });
   }
 
   private SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlock(

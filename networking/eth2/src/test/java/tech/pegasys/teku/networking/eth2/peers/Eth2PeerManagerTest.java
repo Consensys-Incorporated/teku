@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -86,7 +86,8 @@ public class Eth2PeerManagerTest {
           Eth2P2PNetworkBuilder.DEFAULT_ETH2_RPC_OUTSTANDING_PING_THRESHOLD,
           Eth2P2PNetworkBuilder.DEFAULT_ETH2_STATUS_UPDATE_INTERVAL,
           DataColumnSidecarArchiveReconstructor.NOOP,
-          DasReqRespLogger.NOOP);
+          DasReqRespLogger.NOOP,
+          Optional.empty());
 
   @BeforeEach
   public void setUp() {

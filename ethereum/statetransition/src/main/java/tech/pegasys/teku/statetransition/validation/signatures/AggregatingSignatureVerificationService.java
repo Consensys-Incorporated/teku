@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -17,11 +17,13 @@ import static java.util.Collections.singletonList;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
@@ -30,7 +32,7 @@ import org.hyperledger.besu.plugin.services.metrics.Counter;
 import tech.pegasys.teku.bls.BLS;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSignature;
-import tech.pegasys.teku.bls.BLSSignatureVerifier;
+import tech.pegasys.teku.bls.SameMessageBatchVerifier;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.AsyncRunnerFactory;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -43,17 +45,29 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
 
   static final int DEFAULT_MIN_BATCH_SIZE_TO_SPLIT = 25;
 
+  private static final Duration IDLE_POLL_TIMEOUT = Duration.ofSeconds(30);
+  private static final Duration GATHER_LOCK_TIMEOUT = Duration.ofSeconds(1);
+  private static final int BATCH_GATHER_TARGET_SIZE = 64;
+
   private final AsyncRunner completionRunner;
   private final int numThreads;
   private final int maxBatchSize;
   private final int minBatchSizeToSplit;
   private final boolean strictThreadLimitEnabled;
+  private final SignatureVerificationMode mode;
+  private final long batchGatherTimeoutNanos;
+  private final int batchGatherTargetSize;
 
   @VisibleForTesting final BlockingQueue<SignatureTask> batchSignatureTasks;
+  // GATHER_AND_GROUP only: one worker gathers a batch at a time, otherwise tasks arriving during
+  // the gather window would be spread one-by-one across all idle workers instead of forming a
+  // single batch
+  private final ReentrantLock gatherLock = new ReentrantLock();
   private final AsyncRunner asyncRunner;
   private final Counter batchCounter;
   private final Counter taskCounter;
   private final MetricsQuantileHistogram batchSizeHistogram;
+  private final MetricsQuantileHistogram batchGatherTimeHistogram;
 
   @VisibleForTesting
   AggregatingSignatureVerificationService(
@@ -64,7 +78,9 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
       final int queueCapacity,
       final int maxBatchSize,
       final int minBatchSizeToSplit,
-      final boolean strictThreadLimitEnabled) {
+      final boolean strictThreadLimitEnabled,
+      final SignatureVerificationMode mode,
+      final Duration batchGatherTimeout) {
     this.numThreads = Math.min(numThreads, Runtime.getRuntime().availableProcessors());
     this.asyncRunner = asyncRunnerFactory.create(this.getClass().getSimpleName(), this.numThreads);
     this.completionRunner = completionRunner;
@@ -73,6 +89,9 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
     this.batchSignatureTasks = new ArrayBlockingQueue<>(queueCapacity);
     this.minBatchSizeToSplit = minBatchSizeToSplit;
     this.strictThreadLimitEnabled = strictThreadLimitEnabled;
+    this.mode = mode;
+    this.batchGatherTimeoutNanos = batchGatherTimeout.toNanos();
+    this.batchGatherTargetSize = Math.min(BATCH_GATHER_TARGET_SIZE, maxBatchSize);
     metricsSystem.createGauge(
         TekuMetricCategory.EXECUTOR,
         "signature_verifications_queue_size",
@@ -96,6 +115,15 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
             "Histogram of signature verification batch sizes",
             3,
             List.of());
+    batchGatherTimeHistogram =
+        MetricsQuantileHistogram.create(
+            TekuMetricCategory.EXECUTOR,
+            metricsSystem,
+            "signature_verifications_batch_gather_time_micros",
+            "Histogram of the time spent gathering a batch after its first task was taken, in"
+                + " microseconds",
+            3,
+            List.of());
   }
 
   public AggregatingSignatureVerificationService(
@@ -105,7 +133,9 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
       final int maxThreads,
       final int queueCapacity,
       final int maxBatchSize,
-      final boolean strictThreadLimitEnabled) {
+      final boolean strictThreadLimitEnabled,
+      final SignatureVerificationMode mode,
+      final Duration batchGatherTimeout) {
     this(
         metricsSystem,
         asyncRunnerFactory,
@@ -114,7 +144,9 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
         queueCapacity,
         maxBatchSize,
         DEFAULT_MIN_BATCH_SIZE_TO_SPLIT,
-        strictThreadLimitEnabled);
+        strictThreadLimitEnabled,
+        mode,
+        batchGatherTimeout);
   }
 
   @Override
@@ -159,7 +191,8 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
     return task.result;
   }
 
-  private void run() {
+  @VisibleForTesting
+  void run() {
     while (isRunning()) {
       final List<SignatureTask> tasks = waitForBatch();
       if (!tasks.isEmpty()) {
@@ -173,6 +206,15 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
           verifyTasksIndividually(tasks);
         }
       }
+      if (Thread.currentThread().isInterrupted()) {
+        // waitForBatch re-sets the interrupt flag after an InterruptedException. Polling the queue
+        // again would throw immediately and spin, so let the worker exit: its executor is
+        // shutting down.
+        if (isRunning()) {
+          LOG.warn("Signature verification worker interrupted while the service is running");
+        }
+        return;
+      }
     }
   }
 
@@ -185,9 +227,7 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
         continue;
       }
       try {
-        final boolean taskIsValid =
-            BLSSignatureVerifier.SIMPLE.verify(task.publicKeys, task.messages, task.signatures);
-        task.completeAsync(taskIsValid);
+        task.completeAsync(batchVerify(task.publicKeys, task.messages, task.signatures));
       } catch (final RuntimeException ex) {
         // Isolate the failure to this task so the rest of the batch still completes.
         task.completeExceptionallyAsync(ex);
@@ -195,16 +235,86 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
     }
   }
 
-  private List<SignatureTask> waitForBatch() {
+  /** Batch-verifies signatures with the configured mode and thread policy. */
+  private boolean batchVerify(
+      final List<List<BLSPublicKey>> publicKeys,
+      final List<Bytes> messages,
+      final List<BLSSignature> signatures) {
+    return switch (mode) {
+      case LEGACY ->
+          strictThreadLimitEnabled
+              ? BLS.batchVerify(publicKeys, messages, signatures, publicKeys.size() > 1, false)
+              : BLS.batchVerify(publicKeys, messages, signatures);
+      case GATHER_AND_GROUP ->
+          SameMessageBatchVerifier.batchVerify(
+              publicKeys, messages, signatures, !strictThreadLimitEnabled);
+    };
+  }
+
+  @VisibleForTesting
+  List<SignatureTask> waitForBatch() {
+    return mode == SignatureVerificationMode.LEGACY ? legacyWaitForBatch() : gatherBatch();
+  }
+
+  /** Takes the first queued task, waiting for one if needed, plus whatever else is queued. */
+  private List<SignatureTask> legacyWaitForBatch() {
     final List<SignatureTask> tasks = new ArrayList<>();
     try {
       int batchSize = maxBatchSize;
-      final SignatureTask firstTask = batchSignatureTasks.poll(30, TimeUnit.SECONDS);
+      final SignatureTask firstTask =
+          batchSignatureTasks.poll(IDLE_POLL_TIMEOUT.toNanos(), TimeUnit.NANOSECONDS);
       if (firstTask != null) {
         tasks.add(firstTask);
         batchSize -= 1;
       }
       batchSignatureTasks.drainTo(tasks, batchSize);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+    return tasks;
+  }
+
+  /**
+   * Takes the first queued task, then keeps gathering until the batch reaches the gather target or
+   * the gather timeout expires. Only one worker gathers at a time.
+   */
+  private List<SignatureTask> gatherBatch() {
+    final List<SignatureTask> tasks = new ArrayList<>();
+    try {
+      if (!gatherLock.tryLock(GATHER_LOCK_TIMEOUT.toNanos(), TimeUnit.NANOSECONDS)) {
+        // Let the caller re-check whether the service is still running
+        return tasks;
+      }
+      try {
+        final SignatureTask firstTask =
+            batchSignatureTasks.poll(IDLE_POLL_TIMEOUT.toNanos(), TimeUnit.NANOSECONDS);
+        if (firstTask == null) {
+          return tasks;
+        }
+        final long gatherStart = System.nanoTime();
+        tasks.add(firstTask);
+        batchSignatureTasks.drainTo(tasks, maxBatchSize - tasks.size());
+
+        // Keep gathering for a short while so that a steady trickle of tasks forms a real batch
+        final long deadline = gatherStart + batchGatherTimeoutNanos;
+        while (tasks.size() < batchGatherTargetSize) {
+          final long remainingNanos = deadline - System.nanoTime();
+          if (remainingNanos <= 0) {
+            break;
+          }
+          final SignatureTask nextTask =
+              batchSignatureTasks.poll(remainingNanos, TimeUnit.NANOSECONDS);
+          if (nextTask == null) {
+            break;
+          }
+          tasks.add(nextTask);
+          batchSignatureTasks.drainTo(tasks, maxBatchSize - tasks.size());
+        }
+        batchGatherTimeHistogram.recordValue(
+            TimeUnit.NANOSECONDS.toMicros(System.nanoTime() - gatherStart));
+      } finally {
+        gatherLock.unlock();
+      }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     }
@@ -226,10 +336,7 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
       allSignatures.addAll(task.signatures);
     }
 
-    final boolean batchIsValid =
-        strictThreadLimitEnabled
-            ? BLS.batchVerify(allKeys, allMessages, allSignatures, allKeys.size() > 1, false)
-            : BLS.batchVerify(allKeys, allMessages, allSignatures);
+    final boolean batchIsValid = batchVerify(allKeys, allMessages, allSignatures);
     if (batchIsValid) {
       for (SignatureTask task : tasks) {
         task.completeAsync(true);
@@ -245,11 +352,7 @@ public class AggregatingSignatureVerificationService extends SignatureVerificati
       }
     } else {
       // Validate each signature individually
-      for (SignatureTask task : tasks) {
-        final boolean taskIsValid =
-            BLSSignatureVerifier.SIMPLE.verify(task.publicKeys, task.messages, task.signatures);
-        task.completeAsync(taskIsValid);
-      }
+      verifyTasksIndividually(tasks);
     }
   }
 

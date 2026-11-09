@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -333,11 +333,11 @@ public class LoggingConfigurator {
     final Pattern logReplacement =
         Pattern.compile(isColorEnabled() ? COLOR_LOG_REGEX : NO_COLOR_LOG_REGEX);
     return PatternLayout.newBuilder()
-        .withRegexReplacement(RegexReplacement.createRegexReplacement(logReplacement, ""))
-        .withAlwaysWriteExceptions(!omitStackTraces)
-        .withNoConsoleNoAnsi(true)
-        .withConfiguration(configuration)
-        .withPatternSelector(
+        .setRegexReplacement(RegexReplacement.createRegexReplacement(logReplacement, ""))
+        .setAlwaysWriteExceptions(!omitStackTraces)
+        .setNoConsoleNoAnsi(true)
+        .setConfiguration(configuration)
+        .setPatternSelector(
             new ConsolePatternSelector(
                 configuration, omitStackTraces, LoggingDestination.CONSOLE.equals(destination)))
         .build();
@@ -361,9 +361,9 @@ public class LoggingConfigurator {
     final Pattern logReplacement =
         Pattern.compile(isColorEnabled() ? COLOR_LOG_REGEX : NO_COLOR_LOG_REGEX);
     return PatternLayout.newBuilder()
-        .withRegexReplacement(RegexReplacement.createRegexReplacement(logReplacement, ""))
-        .withPattern(FILE_MESSAGE_FORMAT)
-        .withConfiguration(configuration)
+        .setRegexReplacement(RegexReplacement.createRegexReplacement(logReplacement, ""))
+        .setPattern(FILE_MESSAGE_FORMAT)
+        .setConfiguration(configuration)
         .build();
   }
 
@@ -374,15 +374,15 @@ public class LoggingConfigurator {
     final Appender fileAppender =
         RollingFileAppender.newBuilder()
             .setName(FILE_APPENDER_NAME)
-            .withAppend(true)
+            .setAppend(true)
             .setLayout(layout)
-            .withFileName(file)
-            .withFilePattern(filePattern)
-            .withPolicy(
+            .setFileName(file)
+            .setFilePattern(filePattern)
+            .setPolicy(
                 CompositeTriggeringPolicy.createPolicy(
                     TimeBasedTriggeringPolicy.newBuilder()
-                        .withInterval(1)
-                        .withModulate(true)
+                        .setInterval(1)
+                        .setModulate(true)
                         .build()))
             .build();
     fileAppender.start();

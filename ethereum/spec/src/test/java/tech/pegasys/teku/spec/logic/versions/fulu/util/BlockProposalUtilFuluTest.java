@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -113,13 +113,13 @@ class BlockProposalUtilFuluTest {
                           dutiesEpoch))
           .hasMessageContaining("Attempting to calculate dependent root");
     } else {
-      Bytes32 expected = Bytes32.ZERO;
-      switch (expectedResult) {
-        case PREVIOUS -> expected = previousTargetRoot;
-        case CURRENT -> expected = currentTargetRoot;
-        case HEAD -> expected = headBlockRoot;
-        case FAILURE -> expected = Bytes32.ZERO;
-      }
+      final Bytes32 expected =
+          switch (expectedResult) {
+            case PREVIOUS -> previousTargetRoot;
+            case CURRENT -> currentTargetRoot;
+            case HEAD -> headBlockRoot;
+            case FAILURE -> Bytes32.ZERO;
+          };
       LOG.debug("Expected: {}", expected);
       assertThat(
               spec.getGenesisSpec()

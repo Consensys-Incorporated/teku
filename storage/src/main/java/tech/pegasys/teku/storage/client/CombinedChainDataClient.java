@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -42,9 +42,12 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockAndMetaData;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
@@ -213,6 +216,23 @@ public class CombinedChainDataClient {
                 maybeBlock
                     .map(this::getStateForBlock)
                     .orElseGet(() -> SafeFuture.completedFuture(Optional.empty())));
+  }
+
+  /**
+   * Returns the fork choice node on the canonical chain that is in effect at {@code slot},
+   * including its Gloas payload variant (FULL or EMPTY) and optimistic status. See {@link
+   * RecentChainData#getForkChoiceNodeInEffectBySlot(UInt64)}.
+   *
+   * <p>Unlike {@link #getSignedBlockAndStateInEffectAtSlot(UInt64)}, this only covers slots tracked
+   * by fork choice and never falls back to finalized storage: the payload variant of a block is
+   * only known to fork choice. Callers that must serve historical slots need their own fallback.
+   *
+   * @return the node in effect at {@code slot}, or empty if there is no chain head yet, {@code
+   *     slot} is before the fork choice anchor, or the head node is no longer tracked by fork
+   *     choice (e.g. its payload was just found INVALID and the head has not been re-selected yet)
+   */
+  public Optional<ProtoNodeData> getForkChoiceNodeInEffectAtSlot(final UInt64 slot) {
+    return recentChainData.getForkChoiceNodeInEffectBySlot(slot);
   }
 
   /**
@@ -570,6 +590,15 @@ public class CombinedChainDataClient {
   }
 
   /**
+   * Returns the fork choice node on the head chain for every slot in the range with a block, so
+   * that the payload status of each block on that chain is known.
+   */
+  public NavigableMap<UInt64, ForkChoiceNode> getAncestorNodes(
+      final UInt64 startSlot, final UInt64 count) {
+    return recentChainData.getAncestorNodesOnHeadChain(startSlot, count);
+  }
+
+  /**
    * @return The earliest available block's slot
    */
   public SafeFuture<Optional<UInt64>> getEarliestAvailableBlockSlot() {
@@ -657,6 +686,64 @@ public class CombinedChainDataClient {
 
   public SafeFuture<List<StoredLightClientUpdate>> getBestLightClientUpdates() {
     return historicalChainData.getBestLightClientUpdates();
+  }
+
+  public SafeFuture<Optional<LightClientBootstrap>> getLightClientBootstrap(
+      final Bytes32 blockRoot) {
+    final UpdatableStore store = getStore();
+    if (store == null) {
+      return SafeFuture.completedFuture(Optional.empty());
+    }
+    final Optional<BeaconState> maybeState =
+        store
+            .getBlockStateIfAvailable(blockRoot)
+            .or(() -> store.getLatestFinalized().getBlockPostState(blockRoot))
+            .filter(this::isBlockPostState);
+    if (maybeState.isPresent()) {
+      return createLightClientBootstrap(blockRoot, maybeState.get());
+    }
+    return getSlotByBlockRoot(blockRoot)
+        .thenCompose(
+            maybeSlot ->
+                maybeSlot
+                    .map(historicalChainData::getLightClientBootstrap)
+                    .orElse(SafeFuture.completedFuture(Optional.empty())))
+        .thenCompose(
+            maybeBootstrap -> {
+              final Optional<LightClientBootstrap> maybeStoredBootstrap =
+                  maybeBootstrap.filter(
+                      bootstrap ->
+                          bootstrap
+                              .getLightClientHeader()
+                              .getBeacon()
+                              .hashTreeRoot()
+                              .equals(blockRoot));
+              if (maybeStoredBootstrap.isPresent()) {
+                return SafeFuture.completedFuture(maybeStoredBootstrap);
+              }
+              return getStateByBlockRoot(blockRoot)
+                  .thenCompose(
+                      maybeRetrievedState ->
+                          maybeRetrievedState
+                              .filter(this::isBlockPostState)
+                              .map(state -> createLightClientBootstrap(blockRoot, state))
+                              .orElse(SafeFuture.completedFuture(Optional.empty())));
+            });
+  }
+
+  private boolean isBlockPostState(final BeaconState state) {
+    return state.getSlot().equals(state.getLatestBlockHeader().getSlot());
+  }
+
+  private SafeFuture<Optional<LightClientBootstrap>> createLightClientBootstrap(
+      final Bytes32 blockRoot, final BeaconState state) {
+    return getBlockByBlockRoot(blockRoot)
+        .thenApply(
+            maybeBlock ->
+                maybeBlock.flatMap(
+                    block ->
+                        spec.getLightClientUtil(block.getSlot())
+                            .map(util -> util.createLightClientBootstrap(state, block))));
   }
 
   /**
@@ -911,6 +998,16 @@ public class CombinedChainDataClient {
 
   public SafeFuture<List<DataColumnSlotAndIdentifier>> getDataColumnIdentifiers(final UInt64 slot) {
     return historicalChainData.getDataColumnIdentifiers(slot);
+  }
+
+  public SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyDataColumnIdentifiers(
+      final UInt64 slot) {
+    return historicalChainData.getCustodyDataColumnIdentifiers(slot);
+  }
+
+  public SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyDataColumnIdentifiers(
+      final UInt64 fromSlot, final UInt64 toSlot) {
+    return historicalChainData.getCustodyDataColumnIdentifiers(fromSlot, toSlot);
   }
 
   public SafeFuture<List<DataColumnSlotAndIdentifier>> getDataColumnIdentifiers(

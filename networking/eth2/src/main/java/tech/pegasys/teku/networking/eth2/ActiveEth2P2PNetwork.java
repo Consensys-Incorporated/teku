@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -49,6 +49,8 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.metadata.MetadataMessage;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
@@ -434,6 +436,23 @@ public class ActiveEth2P2PNetwork extends DelegatingP2PNetwork<Eth2Peer> impleme
   public void publishProposerPreferences(
       final SignedProposerPreferences signedProposerPreferences) {
     gossipForkManager.publishProposerPreferences(signedProposerPreferences);
+  }
+
+  @Override
+  public void publishLightClientFinalityUpdate(final LightClientFinalityUpdate finalityUpdate) {
+    if (!gossipStarted.get()) {
+      return;
+    }
+    gossipForkManager.publishLightClientFinalityUpdate(finalityUpdate);
+  }
+
+  @Override
+  public void publishLightClientOptimisticUpdate(
+      final LightClientOptimisticUpdate optimisticUpdate) {
+    if (!gossipStarted.get()) {
+      return;
+    }
+    gossipForkManager.publishLightClientOptimisticUpdate(optimisticUpdate);
   }
 
   @VisibleForTesting

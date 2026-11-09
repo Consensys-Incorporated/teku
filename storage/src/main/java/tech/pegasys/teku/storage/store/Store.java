@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -783,7 +783,27 @@ class Store extends CacheableStore {
   public SafeFuture<Optional<BeaconState>> retrieveBlockState(
       final SlotAndBlockRoot slotAndBlockRoot) {
     return checkpointStates.perform(
-        new StateAtSlotTask(spec, slotAndBlockRoot, this::retrieveBlockState));
+        new StateAtSlotTask(
+            spec,
+            slotAndBlockRoot,
+            blockRoot ->
+                getOrRegenerateBlockAndState(blockRoot)
+                    .thenApply(
+                        result ->
+                            result
+                                .map(StateAndBlockSummary::getState)
+                                .filter(
+                                    state -> {
+                                      final UInt64 requestedSlot = slotAndBlockRoot.getSlot();
+                                      // An advanced checkpoint cannot supply an earlier state.
+                                      // Requests before the block's own slot must still fail task
+                                      // validation.
+                                      return !state.getSlot().isGreaterThan(requestedSlot)
+                                          || state
+                                              .getLatestBlockHeader()
+                                              .getSlot()
+                                              .isGreaterThan(requestedSlot);
+                                    }))));
   }
 
   @Override
@@ -806,8 +826,7 @@ class Store extends CacheableStore {
 
   @Override
   public SafeFuture<Optional<BeaconState>> retrieveCheckpointState(final Checkpoint checkpoint) {
-    return checkpointStates.perform(
-        new StateAtSlotTask(spec, checkpoint.toSlotAndBlockRoot(spec), this::retrieveBlockState));
+    return retrieveBlockState(checkpoint.toSlotAndBlockRoot(spec));
   }
 
   @Override

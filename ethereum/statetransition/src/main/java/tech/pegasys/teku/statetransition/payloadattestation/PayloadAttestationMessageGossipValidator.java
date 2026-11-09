@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -29,6 +29,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.collections.LimitedSet;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -37,6 +38,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestat
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
+import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
 import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
@@ -47,6 +49,7 @@ public class PayloadAttestationMessageGossipValidator {
 
   private final Spec spec;
   private final GossipValidationHelper gossipValidationHelper;
+  private final AsyncBLSSignatureVerifier signatureVerifier;
   private final Map<Bytes32, BlockImportResult> invalidBlockRoots;
   private final SigningRootUtil signingRootUtil;
 
@@ -56,9 +59,11 @@ public class PayloadAttestationMessageGossipValidator {
   public PayloadAttestationMessageGossipValidator(
       final Spec spec,
       final GossipValidationHelper gossipValidationHelper,
+      final AsyncBLSSignatureVerifier signatureVerifier,
       final Map<Bytes32, BlockImportResult> invalidBlockRoots) {
     this.spec = spec;
     this.gossipValidationHelper = gossipValidationHelper;
+    this.signatureVerifier = signatureVerifier;
     this.invalidBlockRoots = invalidBlockRoots;
     signingRootUtil = new SigningRootUtil(spec);
   }
@@ -153,14 +158,15 @@ public class PayloadAttestationMessageGossipValidator {
     // lock every message of the payload committee would otherwise contend for.
     return gossipValidationHelper
         .getStateAtBlockRoot(data.getBeaconBlockRoot())
-        .thenApply(
+        .thenCompose(
             maybeState -> {
               if (maybeState.isEmpty()) {
-                return savePayloadAttestationForFuture(
-                    payloadAttestationMessage,
-                    "State for block root %s and slot %s is unavailable",
-                    data.getBeaconBlockRoot(),
-                    data.getSlot());
+                return completedFuture(
+                    savePayloadAttestationForFuture(
+                        payloadAttestationMessage,
+                        "State for block root %s and slot %s is unavailable",
+                        data.getBeaconBlockRoot(),
+                        data.getSlot()));
               }
               final BeaconState state = maybeState.get();
               final UInt64 validatorIndex = payloadAttestationMessage.getValidatorIndex();
@@ -169,11 +175,12 @@ public class PayloadAttestationMessageGossipValidator {
                * [REJECT] The validator index is valid
                */
               if (validatorIndex.isGreaterThanOrEqualTo(state.getValidators().size())) {
-                return rejectPayloadAttestation(
-                    payloadAttestationMessage,
-                    "Payload attestation's validator index %s is out of range for the %s validators in the state",
-                    validatorIndex,
-                    state.getValidators().size());
+                return completedFuture(
+                    rejectPayloadAttestation(
+                        payloadAttestationMessage,
+                        "Payload attestation's validator index %s is out of range for the %s validators in the state",
+                        validatorIndex,
+                        state.getValidators().size()));
               }
 
               /*
@@ -183,26 +190,29 @@ public class PayloadAttestationMessageGossipValidator {
                   validatablePayloadAttestationMessage.calculatePayloadTimelinessCommitteePositions(
                       spec, state);
               if (payloadTimelinessCommitteePositions.isEmpty()) {
-                return rejectPayloadAttestation(
-                    payloadAttestationMessage,
-                    "Payload attestation's validator index %s is not in the payload committee",
-                    validatorIndex);
+                return completedFuture(
+                    rejectPayloadAttestation(
+                        payloadAttestationMessage,
+                        "Payload attestation's validator index %s is not in the payload committee",
+                        validatorIndex));
               }
 
               /*
                * [REJECT] The signature is valid
                */
-              if (!isSignatureValid(payloadAttestationMessage, state)) {
-                return rejectPayloadAttestation(
-                    payloadAttestationMessage, "Invalid payload attestation signature");
-              }
-
-              if (!seenPayloadAttestations.add(key)) {
-                return ignorePayloadAttestationAlreadySeenValidationResult(
-                    payloadAttestationMessage);
-              } else {
-                return acceptPayloadAttestation(payloadAttestationMessage);
-              }
+              return isSignatureValid(payloadAttestationMessage, state)
+                  .thenApply(
+                      signatureValid -> {
+                        if (!signatureValid) {
+                          return rejectPayloadAttestation(
+                              payloadAttestationMessage, "Invalid payload attestation signature");
+                        }
+                        if (!seenPayloadAttestations.add(key)) {
+                          return ignorePayloadAttestationAlreadySeenValidationResult(
+                              payloadAttestationMessage);
+                        }
+                        return acceptPayloadAttestation(payloadAttestationMessage);
+                      });
             });
   }
 
@@ -271,16 +281,23 @@ public class PayloadAttestationMessageGossipValidator {
         payloadAttestationMessage.getData().getBeaconBlockRoot());
   }
 
-  private boolean isSignatureValid(
+  /**
+   * Verifies the signature through the {@link AsyncBLSSignatureVerifier}, which in production is
+   * the gossip signature verification service: payload attestation messages are then verified in
+   * batches with the other gossip signatures, off the calling thread, instead of one by one.
+   */
+  private SafeFuture<Boolean> isSignatureValid(
       final PayloadAttestationMessage payloadAttestationMessage, final BeaconState state) {
+    final Optional<BLSPublicKey> maybePublicKey =
+        spec.getValidatorPubKey(state, payloadAttestationMessage.getValidatorIndex());
+    if (maybePublicKey.isEmpty()) {
+      return completedFuture(false);
+    }
     final Bytes signingRoot =
         signingRootUtil.signingRootForSignPayloadAttestationData(
             payloadAttestationMessage.getData(), state.getForkInfo());
-    return gossipValidationHelper.isSignatureValidWithRespectToProposerIndex(
-        signingRoot,
-        payloadAttestationMessage.getValidatorIndex(),
-        payloadAttestationMessage.getSignature(),
-        state);
+    return signatureVerifier.verify(
+        maybePublicKey.get(), signingRoot, payloadAttestationMessage.getSignature());
   }
 
   record ValidatorIndexAndSlot(UInt64 validatorIndex, UInt64 slot) {}

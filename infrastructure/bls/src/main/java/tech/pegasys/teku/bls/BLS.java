@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -126,18 +126,18 @@ public class BLS {
   }
 
   /**
-   * Verifies an aggregate BLS signature against a list of distinct messages using the list of
-   * public keys.
+   * Verifies an aggregate BLS signature against a list of messages using the list of public keys.
    *
    * <p>https://tools.ietf.org/html/draft-irtf-cfrg-bls-signature-02#section-3.1.1
    *
    * <p>The standard says to return INVALID, that is, false, if the list of public keys is empty.
    * See also discussion at https://github.com/ethereum/consensus-specs/issues/1713
    *
-   * <p>We also return false if any of the messages are duplicates.
+   * <p>Messages need not be distinct: this is the proof-of-possession scheme's CoreAggregateVerify,
+   * which validates each public key individually and not their sum.
    *
    * @param publicKeys The list of public keys, not null
-   * @param messages The list of messages to verify, all distinct, not null
+   * @param messages The list of messages to verify, not null
    * @param signature The aggregate signature, not null
    * @return True if the verification is successful, false otherwise
    */

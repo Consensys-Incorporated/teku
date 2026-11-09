@@ -24,6 +24,6 @@
     "start": "node publish.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "Consensys Software",
+  "author": "Consensys Incorporated",
   "license": "Apache-2.0"
 }

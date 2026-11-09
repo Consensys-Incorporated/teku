@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -146,8 +146,11 @@ public class GetForkChoice extends RestApiEndpoint {
         EndpointMetadata.get(ROUTE)
             .operationId("getDebugForkChoice")
             .summary("Get fork choice array")
-            .description("Retrieves all current fork choice context.")
+            .description(
+                "Retrieves all current fork choice context. Use `GET /eth/v2/debug/fork_choice` for "
+                    + "Gloas and later forks.")
             .tags(TAG_DEBUG)
+            .deprecated(true)
             .response(SC_OK, "Request successful", RESPONSE_TYPE)
             .response(
                 SC_NO_CONTENT, "Data is unavailable because the chain has not yet reached genesis")

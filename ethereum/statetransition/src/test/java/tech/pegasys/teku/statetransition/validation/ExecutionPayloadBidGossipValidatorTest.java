@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -205,7 +205,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
             pool,
             null,
             null,
-            () -> Optional.of(forkChoiceStrategy));
+            () -> Optional.of(forkChoiceStrategy),
+            true);
     manager.onSlot(slot);
     when(proposerPreferencesManager.getProposerPreferences(slot, dependentRoot))
         .thenReturn(Optional.empty());
@@ -271,7 +272,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
             pool,
             null,
             null,
-            () -> Optional.of(forkChoiceStrategy));
+            () -> Optional.of(forkChoiceStrategy),
+            true);
     manager.onSlot(slot);
     when(gossipValidationHelper.getSlotForBlockRoot(parentBlockRoot)).thenReturn(Optional.empty());
     when(forkChoiceStrategy.getAncestor(eq(parentBlockRoot), any())).thenReturn(Optional.empty());
@@ -346,7 +348,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
             pool,
             null,
             null,
-            () -> Optional.of(forkChoiceStrategy));
+            () -> Optional.of(forkChoiceStrategy),
+            true);
     manager.onSlot(slot);
     when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
@@ -395,7 +398,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
             pool,
             null,
             null,
-            () -> Optional.of(forkChoiceStrategy));
+            () -> Optional.of(forkChoiceStrategy),
+            true);
     manager.onSlot(slot);
     when(proposerPreferencesManager.getProposerPreferences(slot, dependentRoot))
         .thenReturn(Optional.empty());
@@ -438,7 +442,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
             pool,
             null,
             null,
-            () -> Optional.of(forkChoiceStrategy));
+            () -> Optional.of(forkChoiceStrategy),
+            true);
     manager.onSlot(slot);
     when(gossipValidationHelper.getGasLimitForExecutionPayload(parentBlockRoot, parentBlockHash))
         .thenReturn(Optional.empty());

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -20,7 +20,9 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tech.pegasys.teku.bls.BLSPublicKey;
@@ -29,6 +31,8 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.validator.client.restapi.apis.schema.BuilderConfig;
+import tech.pegasys.teku.validator.client.restapi.apis.schema.BuilderEntry;
 
 class RuntimeProposerConfigTest {
   private final Spec spec = TestSpecFactory.createMinimalBellatrix();
@@ -113,6 +117,60 @@ class RuntimeProposerConfigTest {
     proposerConfig.deleteGasLimit(pubkey);
     final String data = Files.readString(testData);
     assertThat(data).isEqualTo("{}");
+  }
+
+  @Test
+  void shouldRejectBuilderConfigWithDuplicateUrls() {
+    final BuilderEntry builder =
+        new BuilderEntry(
+            "https://builder.example.com",
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty());
+    final BuilderConfig builderConfig =
+        new BuilderConfig(
+            Optional.empty(), Optional.empty(), Optional.of(List.of(builder, builder)));
+
+    assertThatThrownBy(
+            () ->
+                new RuntimeProposerConfig.RuntimeConfigBuilder()
+                    .builderConfig(Optional.of(builderConfig))
+                    .build())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(
+            "\"builders\" contain duplicate url https://builder.example.com with the same auth_data");
+  }
+
+  @Test
+  void shouldAcceptBuildersSharingUrlWithDifferentAuthData() {
+    final BuilderConfig builderConfig =
+        new BuilderConfig(
+            Optional.empty(),
+            Optional.empty(),
+            Optional.of(
+                List.of(
+                    builderWithAuthData(Bytes.fromHexString("0x01")),
+                    builderWithAuthData(Bytes.fromHexString("0x02")))));
+
+    final RuntimeProposerConfig.RuntimeConfig runtimeConfig =
+        new RuntimeProposerConfig.RuntimeConfigBuilder()
+            .builderConfig(Optional.of(builderConfig))
+            .build();
+
+    assertThat(runtimeConfig.getBuilder().flatMap(ProposerConfig.BuilderConfig::getBuilders))
+        .hasValueSatisfying(builders -> assertThat(builders).hasSize(2));
+  }
+
+  private static BuilderEntry builderWithAuthData(final Bytes authData) {
+    return new BuilderEntry(
+        "https://builder.example.com",
+        Optional.of(authData),
+        Optional.empty(),
+        Optional.empty(),
+        Optional.empty(),
+        Optional.empty());
   }
 
   @Test

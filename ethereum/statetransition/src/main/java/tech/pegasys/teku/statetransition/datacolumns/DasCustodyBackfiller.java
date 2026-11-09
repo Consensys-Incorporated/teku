@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -379,7 +379,7 @@ public class DasCustodyBackfiller extends Service
       final UInt64 minCustodyPeriodSlot,
       final boolean isHeadsCustodyCheckBatch) {
     return combinedChainDataClient
-        .getDataColumnIdentifiers(fromSlot, toSlot, UInt64.valueOf(Integer.MAX_VALUE))
+        .getCustodyDataColumnIdentifiers(fromSlot, toSlot)
         .thenCombine(
             retrieveBlocksWithBlobsInRange(fromSlot, toSlot),
             (dataColumnSlotAndIdentifiers, slotAndBlockRootWithBlobsPresences) ->
@@ -529,7 +529,7 @@ public class DasCustodyBackfiller extends Service
 
   private SafeFuture<Integer> getSyncedCustodyGroupCountForSlot(final UInt64 slot) {
     return combinedChainDataClient
-        .getDataColumnIdentifiers(slot)
+        .getCustodyDataColumnIdentifiers(slot)
         .thenApply(
             identifiers -> {
               final Set<UInt64> availableIndices =

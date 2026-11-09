@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -14,41 +14,280 @@
 package tech.pegasys.teku.storage.server.kvstore;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.InOrder;
 import org.mockito.invocation.InvocationOnMock;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
+import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
+import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
+import tech.pegasys.teku.spec.datastructures.type.SszKZGProof;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
+import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.storage.api.FinalizedChainData;
+import tech.pegasys.teku.storage.api.StorageUpdate;
 import tech.pegasys.teku.storage.server.Database;
 import tech.pegasys.teku.storage.server.StateStorageMode;
 import tech.pegasys.teku.storage.server.kvstore.KvStoreAccessor.KvStoreTransaction;
 import tech.pegasys.teku.storage.server.kvstore.KvStoreDatabase.DataColumnSidecarType;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.FinalizedUpdater;
+import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.HotUpdater;
 import tech.pegasys.teku.storage.server.kvstore.schema.KvStoreColumn;
 import tech.pegasys.teku.storage.server.kvstore.schema.V6SchemaCombinedSnapshot;
+import tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreDeserializationException;
 
 class KvStoreDatabaseTest {
+
+  @Test
+  void archiveSidecarsProofs_skipsRootLookupWithoutExtensionColumns() {
+    final Spec spec = TestSpecFactory.createMinimalFulu();
+    final UInt64 slot = UInt64.valueOf(3);
+    final int halfColumns = spec.getNumberOfDataColumns().orElseThrow() / 2;
+    final KvStoreCombinedDao dao = mock(KvStoreCombinedDao.class);
+    final FinalizedUpdater updater = mock(FinalizedUpdater.class);
+    final KvStoreDatabase database = new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec);
+    when(dao.streamDataColumnIdentifiers(slot, slot))
+        .thenReturn(
+            IntStream.range(0, halfColumns)
+                .mapToObj(
+                    index ->
+                        new DataColumnSlotAndIdentifier(
+                            slot, Bytes32.ZERO, UInt64.valueOf(index))));
+    when(dao.finalizedUpdater()).thenReturn(updater);
+
+    database.archiveSidecarsProofs(slot, slot);
+
+    verify(dao, never()).getFinalizedBlockAtSlot(any());
+    verify(dao, never()).getSlotForFinalizedBlockRoot(any());
+    verify(dao, never()).getDataColumnSidecarsProofs(any());
+    verify(dao, never()).getSidecar(any());
+    verify(updater, never()).removeSidecar(any());
+  }
+
+  @Test
+  void archiveSidecarsProofs_requiresExactFinalizedSlot() {
+    final Spec spec = TestSpecFactory.createMinimalFulu();
+    final UInt64 slot = UInt64.valueOf(3);
+    final int columns = spec.getNumberOfDataColumns().orElseThrow();
+    final KvStoreCombinedDao dao = mock(KvStoreCombinedDao.class);
+    final FinalizedUpdater updater = mock(FinalizedUpdater.class);
+    final KvStoreDatabase database = new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec);
+    when(dao.streamDataColumnIdentifiers(slot, slot))
+        .thenReturn(
+            IntStream.range(0, columns)
+                .mapToObj(
+                    index ->
+                        new DataColumnSlotAndIdentifier(
+                            slot, Bytes32.ZERO, UInt64.valueOf(index))));
+    when(dao.getSlotForFinalizedBlockRoot(Bytes32.ZERO)).thenReturn(Optional.of(slot.increment()));
+    when(dao.finalizedUpdater()).thenReturn(updater);
+
+    database.archiveSidecarsProofs(slot, slot);
+
+    verify(dao).getSlotForFinalizedBlockRoot(Bytes32.ZERO);
+    verify(dao, never()).getFinalizedBlockAtSlot(any());
+    verify(dao, never()).getSidecar(any());
+    verify(updater, never()).removeSidecar(any());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"index", "proofs", "sidecar", "commit"})
+  void archiveSidecarsProofs_propagatesStorageFailures(final String failureLocation) {
+    final Spec spec = TestSpecFactory.createMinimalFulu();
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
+    final UInt64 slot = UInt64.valueOf(3);
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(slot);
+    final int columns = spec.getNumberOfDataColumns().orElseThrow();
+    final List<DataColumnSidecar> sidecars =
+        IntStream.range(0, columns)
+            .mapToObj(
+                index -> dataStructureUtil.randomDataColumnSidecar(block, UInt64.valueOf(index)))
+            .toList();
+    final KvStoreCombinedDao dao = mock(KvStoreCombinedDao.class);
+    final FinalizedUpdater updater = mock(FinalizedUpdater.class);
+    final KvStoreDatabase database = new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec);
+    when(dao.streamDataColumnIdentifiers(slot, slot))
+        .thenAnswer(__ -> sidecars.stream().map(DataColumnSlotAndIdentifier::fromDataColumn));
+    when(dao.getSlotForFinalizedBlockRoot(block.getRoot())).thenReturn(Optional.of(slot));
+    when(dao.finalizedUpdater()).thenReturn(updater);
+    final IllegalStateException failure = new IllegalStateException("storage failure");
+    switch (failureLocation) {
+      case "index" -> when(dao.getSlotForFinalizedBlockRoot(any())).thenThrow(failure);
+      case "proofs" -> when(dao.getDataColumnSidecarsProofs(any())).thenThrow(failure);
+      case "sidecar" -> when(dao.getSidecar(any())).thenThrow(failure);
+      case "commit" -> {
+        sidecars.forEach(
+            sidecar ->
+                when(dao.getSidecar(DataColumnSlotAndIdentifier.fromDataColumn(sidecar)))
+                    .thenReturn(Optional.of(sidecar.sszSerialize())));
+        doThrow(failure).when(updater).commit();
+      }
+      default -> throw new IllegalArgumentException(failureLocation);
+    }
+
+    assertThatThrownBy(() -> database.archiveSidecarsProofs(slot, slot)).isSameAs(failure);
+
+    verify(dao).getSlotForFinalizedBlockRoot(block.getRoot());
+    verify(dao, never()).getFinalizedBlockAtSlot(any());
+    verify(updater).close();
+    if (failureLocation.equals("commit")) {
+      verify(updater).commit();
+    } else {
+      verify(updater, never()).commit();
+      verify(updater, never()).removeSidecar(any());
+    }
+  }
+
+  @Test
+  void archiveSidecarsProofs_isolatesMalformedIndex() {
+    final Spec spec = TestSpecFactory.createMinimalFulu();
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
+    final int columns = spec.getNumberOfDataColumns().orElseThrow();
+    final KvStoreCombinedDao dao = mock(KvStoreCombinedDao.class);
+    final FinalizedUpdater updater = mock(FinalizedUpdater.class);
+    final KvStoreDatabase database = new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec);
+    final List<DataColumnSlotAndIdentifier> identifiers = new ArrayList<>();
+    final UInt64 corruptSlot = UInt64.valueOf(2);
+    final KvStoreDeserializationException corruption =
+        new KvStoreDeserializationException("malformed stored value");
+    for (int slotNumber = 1; slotNumber <= 3; slotNumber++) {
+      final UInt64 slot = UInt64.valueOf(slotNumber);
+      final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(slot);
+      when(dao.getSlotForFinalizedBlockRoot(block.getRoot())).thenReturn(Optional.of(slot));
+      for (int index = 0; index < columns; index++) {
+        final DataColumnSidecar sidecar =
+            dataStructureUtil.randomDataColumnSidecar(block, UInt64.valueOf(index));
+        final DataColumnSlotAndIdentifier key = DataColumnSlotAndIdentifier.fromDataColumn(sidecar);
+        identifiers.add(key);
+        when(dao.getSidecar(key)).thenReturn(Optional.of(sidecar.sszSerialize()));
+      }
+      if (slot.equals(corruptSlot)) {
+        when(dao.getSlotForFinalizedBlockRoot(block.getRoot())).thenThrow(corruption);
+      }
+    }
+    when(dao.streamDataColumnIdentifiers(UInt64.ONE, UInt64.valueOf(3)))
+        .thenAnswer(__ -> identifiers.stream());
+    when(dao.finalizedUpdater()).thenReturn(updater);
+
+    database.archiveSidecarsProofs(UInt64.ONE, UInt64.valueOf(3));
+
+    verify(updater).addDataColumnSidecarsProofs(eq(UInt64.ONE), any());
+    verify(updater).addDataColumnSidecarsProofs(eq(UInt64.valueOf(3)), any());
+    verify(updater, never()).addDataColumnSidecarsProofs(eq(corruptSlot), any());
+    identifiers.stream()
+        .filter(key -> key.slot().equals(corruptSlot))
+        .forEach(key -> verify(updater, never()).removeSidecar(key));
+    verify(updater, times(columns)).removeSidecar(any());
+    verify(updater).commit();
+    verify(updater).close();
+  }
+
+  @Test
+  void archiveSidecarsProofs_rebuildsMalformedProofsFromCompleteColumns() {
+    final ArchiveSlotFixture fixture = createSlotWithMalformedProofs(true);
+
+    fixture.database().archiveSidecarsProofs(UInt64.ONE, UInt64.ONE);
+
+    final int halfColumns = fixture.sidecars().size() / 2;
+    verify(fixture.updater())
+        .addDataColumnSidecarsProofs(
+            UInt64.ONE,
+            fixture.sidecars().stream()
+                .skip(halfColumns)
+                .map(
+                    sidecar ->
+                        sidecar.getKzgProofs().stream().map(SszKZGProof::getKZGProof).toList())
+                .toList());
+    fixture.sidecars().stream()
+        .skip(halfColumns)
+        .map(DataColumnSlotAndIdentifier::fromDataColumn)
+        .forEach(key -> verify(fixture.updater()).removeSidecar(key));
+    verify(fixture.updater(), times(halfColumns)).removeSidecar(any());
+    verify(fixture.updater()).commit();
+  }
+
+  @Test
+  void archiveSidecarsProofs_preservesIncompleteColumnsWhenProofsAreMalformed() {
+    final ArchiveSlotFixture fixture = createSlotWithMalformedProofs(false);
+
+    fixture.database().archiveSidecarsProofs(UInt64.ONE, UInt64.ONE);
+
+    verify(fixture.updater(), never()).addDataColumnSidecarsProofs(any(), any());
+    verify(fixture.updater(), never()).removeSidecar(any());
+    verify(fixture.updater()).commit();
+  }
+
+  private ArchiveSlotFixture createSlotWithMalformedProofs(final boolean complete) {
+    final Spec spec = TestSpecFactory.createMinimalFulu();
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(UInt64.ONE);
+    final int columns = spec.getNumberOfDataColumns().orElseThrow();
+    final List<DataColumnSidecar> sidecars =
+        IntStream.range(0, columns)
+            .mapToObj(
+                index -> dataStructureUtil.randomDataColumnSidecar(block, UInt64.valueOf(index)))
+            .toList();
+    final KvStoreCombinedDao dao = mock(KvStoreCombinedDao.class);
+    final FinalizedUpdater updater = mock(FinalizedUpdater.class);
+    when(dao.finalizedUpdater()).thenReturn(updater);
+    when(dao.getSlotForFinalizedBlockRoot(block.getRoot())).thenReturn(Optional.of(UInt64.ONE));
+    when(dao.getDataColumnSidecarsProofs(UInt64.ONE))
+        .thenThrow(new KvStoreDeserializationException("malformed proofs"));
+    when(dao.streamDataColumnIdentifiers(UInt64.ONE, UInt64.ONE))
+        .thenAnswer(
+            __ ->
+                sidecars.stream()
+                    .limit(complete ? columns : columns - 1)
+                    .map(DataColumnSlotAndIdentifier::fromDataColumn));
+    sidecars.forEach(
+        sidecar ->
+            when(dao.getSidecar(DataColumnSlotAndIdentifier.fromDataColumn(sidecar)))
+                .thenReturn(Optional.of(sidecar.sszSerialize())));
+    return new ArchiveSlotFixture(
+        new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec), updater, sidecars);
+  }
+
+  private record ArchiveSlotFixture(
+      KvStoreDatabase database, FinalizedUpdater updater, List<DataColumnSidecar> sidecars) {}
 
   // Data column sidecar pruning is forward (oldest-first): each run removes the oldest up-to-limit
   // distinct populated slots at or before the cutoff, so the earliest retained slot keeps advancing
@@ -64,6 +303,207 @@ class KvStoreDatabaseTest {
 
   // Stands in for the persisted LAST_SLOT_DATA_COLUMN_PRUNED variable.
   private Optional<UInt64> prunedWatermark = Optional.empty();
+
+  // Orphaned execution payload detection runs on every finalization once Gloas is in the fork
+  // schedule. Before the fork, and for pre-Gloas parents at the fork boundary, no block body may
+  // be read from the database: nothing can have an execution payload envelope.
+
+  private final UInt64 gloasForkEpoch = UInt64.valueOf(1000);
+  private final Spec gloasScheduledSpec =
+      TestSpecFactory.createMinimalWithGloasForkEpoch(gloasForkEpoch);
+  private final DataStructureUtil gloasDataStructureUtil =
+      new DataStructureUtil(gloasScheduledSpec);
+  private final KvStoreCombinedDao gloasDao = mock(KvStoreCombinedDao.class);
+  private final KvStoreDatabase gloasDatabase =
+      new KvStoreDatabase(gloasDao, StateStorageMode.PRUNE, false, gloasScheduledSpec);
+
+  @Test
+  void findOrphanedExecutionPayloadRoots_shouldNotReadBlocksWhenFinalizedEpochIsBeforeGloas() {
+    final Bytes32 childRoot = gloasDataStructureUtil.randomBytes32();
+    final Bytes32 parentRoot = gloasDataStructureUtil.randomBytes32();
+
+    final Set<Bytes32> orphanedRoots =
+        gloasDatabase.findOrphanedExecutionPayloadRoots(
+            Optional.of(new Checkpoint(gloasForkEpoch.minus(1), childRoot)),
+            Map.of(childRoot, parentRoot),
+            Map.of(),
+            Map.of());
+
+    assertThat(orphanedRoots).isEmpty();
+    verify(gloasDao, never()).getHotBlock(any());
+    verify(gloasDao, never()).getFinalizedBlock(any());
+  }
+
+  @Test
+  void findOrphanedExecutionPayloadRoots_shouldNotReadPreGloasParentsAtForkBoundary() {
+    final Bytes32 childRoot = gloasDataStructureUtil.randomBytes32();
+    final Bytes32 parentRoot = gloasDataStructureUtil.randomBytes32();
+    final UInt64 preGloasSlot = gloasScheduledSpec.computeStartSlotAtEpoch(gloasForkEpoch).minus(1);
+
+    final Set<Bytes32> orphanedRoots =
+        gloasDatabase.findOrphanedExecutionPayloadRoots(
+            Optional.of(new Checkpoint(gloasForkEpoch, childRoot)),
+            Map.of(childRoot, parentRoot),
+            Map.of(),
+            // the pruned hot blocks carry the parent slot, so no block has to be read
+            Map.of(parentRoot, preGloasSlot));
+
+    assertThat(orphanedRoots).isEmpty();
+    verify(gloasDao, never()).getHotBlock(any());
+    verify(gloasDao, never()).getFinalizedBlock(any());
+  }
+
+  @Test
+  void findOrphanedExecutionPayloadRoots_shouldReadEachFinalizedBlockOnceWalkingTheChain() {
+    // Gloas from genesis: every finalized block may have an envelope
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final ChainBuilder chainBuilder = ChainBuilder.create(gloasSpec);
+    final SignedBlockAndState genesis = chainBuilder.generateGenesis();
+    chainBuilder.generateBlocksUpToSlot(2);
+    // The block at slot 3 builds on the EMPTY variant of the block at slot 2
+    chainBuilder.generateBlockAtSlot(
+        3, chainBuilder.createBlockOptionsBuildingOnEmptyParent(UInt64.valueOf(3)));
+    chainBuilder.generateBlockAtSlot(4);
+    final KvStoreCombinedDao dao = mock(KvStoreCombinedDao.class);
+    when(dao.getHotBlock(any()))
+        .thenAnswer(invocation -> chainBuilder.getBlock(invocation.getArgument(0)));
+    final KvStoreDatabase database =
+        new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, gloasSpec);
+    final Map<Bytes32, Bytes32> finalizedChildToParent = new HashMap<>();
+    chainBuilder
+        .streamBlocksAndStates(1, 4)
+        .forEach(block -> finalizedChildToParent.put(block.getRoot(), block.getParentRoot()));
+
+    final Set<Bytes32> orphanedRoots =
+        database.findOrphanedExecutionPayloadRoots(
+            Optional.of(new Checkpoint(UInt64.ZERO, chainBuilder.getBlockAtSlot(4).getRoot())),
+            finalizedChildToParent,
+            Map.of(),
+            Map.of());
+
+    // The genesis block is EMPTY too: the block at slot 1 builds on the EL genesis block
+    assertThat(orphanedRoots)
+        .containsExactlyInAnyOrder(genesis.getRoot(), chainBuilder.getBlockAtSlot(2).getRoot());
+    // Each block of the chain, down to the parent of the oldest finalized block, is read once
+    chainBuilder
+        .streamBlocksAndStates(1, 4)
+        .forEach(block -> verify(dao, times(1)).getHotBlock(block.getRoot()));
+    verify(dao, times(1)).getHotBlock(genesis.getRoot());
+    verify(dao, never()).getFinalizedBlock(any());
+  }
+
+  @Test
+  void update_shouldWriteAndDeleteEnvelopesInTheSameTransactionAsTheFinalizedBlockInPruneMode() {
+    assertEnvelopesAreUpdatedInTheSameTransactionAsTheFinalizedBlock(StateStorageMode.PRUNE);
+  }
+
+  @Test
+  void update_shouldWriteAndDeleteEnvelopesInTheSameTransactionAsTheFinalizedBlockInArchiveMode() {
+    assertEnvelopesAreUpdatedInTheSameTransactionAsTheFinalizedBlock(StateStorageMode.ARCHIVE);
+  }
+
+  private void assertEnvelopesAreUpdatedInTheSameTransactionAsTheFinalizedBlock(
+      final StateStorageMode storageMode) {
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final ChainBuilder chainBuilder = ChainBuilder.create(gloasSpec);
+    final SignedBlockAndState genesis = chainBuilder.generateGenesis();
+    final SignedBlockAndState parent = chainBuilder.generateBlockAtSlot(1);
+    // The child builds on the EMPTY variant of the parent, so the parent's envelope is orphaned
+    final SignedBlockAndState child =
+        chainBuilder.generateBlockAtSlot(
+            2, chainBuilder.createBlockOptionsBuildingOnEmptyParent(UInt64.valueOf(2)));
+    final SignedBlindedExecutionPayloadEnvelope parentEnvelope =
+        chainBuilder.getExecutionPayloadAtSlot(parent.getSlot()).orElseThrow().blind(gloasSpec);
+    final SignedBlindedExecutionPayloadEnvelope childEnvelope =
+        chainBuilder.getExecutionPayloadAtSlot(child.getSlot()).orElseThrow().blind(gloasSpec);
+    final Checkpoint anchor = new Checkpoint(UInt64.ZERO, genesis.getRoot());
+    final KvStoreCombinedDao dao = mock(KvStoreCombinedDao.class);
+    when(dao.getAnchor()).thenReturn(Optional.of(anchor));
+    when(dao.getFinalizedCheckpoint()).thenReturn(Optional.of(anchor));
+    when(dao.getHotBlock(any())).thenReturn(Optional.empty());
+    when(dao.getHotBlock(genesis.getRoot())).thenReturn(Optional.of(genesis.getBlock()));
+    when(dao.getHotBlockAsSsz(any())).thenReturn(Optional.empty());
+    when(dao.getHotState(any())).thenReturn(Optional.empty());
+    when(dao.getFinalizedBlock(any())).thenReturn(Optional.empty());
+    final FinalizedUpdater finalizedUpdater = mock(FinalizedUpdater.class);
+    final HotUpdater hotUpdater = mock(HotUpdater.class);
+    final KvStoreDatabase database =
+        new KvStoreDatabase(dao, storageMode, false, gloasSpec) {
+          @Override
+          protected FinalizedUpdater finalizedUpdater() {
+            return finalizedUpdater;
+          }
+
+          @Override
+          protected HotUpdater hotUpdater() {
+            return hotUpdater;
+          }
+        };
+    final FinalizedChainData finalizedChainData =
+        FinalizedChainData.builder()
+            .latestFinalized(AnchorPoint.fromInitialBlockAndState(gloasSpec, child))
+            .finalizedChildAndParent(parent.getRoot(), parent.getParentRoot())
+            // The previously finalized block is part of every finalization, as the base of the
+            // finalized chain
+            .finalizedChildAndParent(genesis.getRoot(), genesis.getParentRoot())
+            .finalizedBlock(parent.getBlock())
+            .build();
+
+    // Both envelopes arrive with the finalization of their blocks
+    database.update(
+        new StorageUpdate(
+            Optional.empty(),
+            Optional.of(finalizedChainData),
+            Optional.empty(),
+            Optional.empty(),
+            Map.of(),
+            Map.of(),
+            Map.of(parent.getRoot(), parentEnvelope, child.getRoot(), childEnvelope),
+            Map.of(),
+            Optional.empty(),
+            Map.of(),
+            Map.of(),
+            false,
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty(),
+            false,
+            false,
+            true));
+
+    // The orphaned envelope is deleted, and the chain's envelope written, by the transaction that
+    // writes the respective block, before it commits; no separate envelope transaction is needed
+    final InOrder parentOrder = inOrder(finalizedUpdater);
+    parentOrder.verify(finalizedUpdater).addFinalizedBlock(parent.getBlock());
+    parentOrder.verify(finalizedUpdater).deleteBlindedExecutionPayloadEnvelope(parent.getRoot());
+    parentOrder.verify(finalizedUpdater).commit();
+    final InOrder childOrder = inOrder(finalizedUpdater);
+    childOrder.verify(finalizedUpdater).addFinalizedBlock(child.getBlock());
+    childOrder
+        .verify(finalizedUpdater)
+        .addBlindedExecutionPayloadEnvelope(child.getRoot(), childEnvelope);
+    childOrder.verify(finalizedUpdater).commit();
+    verify(finalizedUpdater, never())
+        .addBlindedExecutionPayloadEnvelope(eq(parent.getRoot()), any());
+    verify(finalizedUpdater, times(1)).commit();
+  }
+
+  @Test
+  void findOrphanedExecutionPayloadRoots_shouldReadGloasParents() {
+    final Bytes32 childRoot = gloasDataStructureUtil.randomBytes32();
+    final Bytes32 parentRoot = gloasDataStructureUtil.randomBytes32();
+    final UInt64 gloasSlot = gloasScheduledSpec.computeStartSlotAtEpoch(gloasForkEpoch);
+    when(gloasDao.getHotBlock(any())).thenReturn(Optional.empty());
+    when(gloasDao.getFinalizedBlock(any())).thenReturn(Optional.empty());
+
+    gloasDatabase.findOrphanedExecutionPayloadRoots(
+        Optional.of(new Checkpoint(gloasForkEpoch.plus(1), childRoot)),
+        Map.of(childRoot, parentRoot),
+        Map.of(),
+        Map.of(parentRoot, gloasSlot));
+
+    verify(gloasDao).getHotBlock(parentRoot);
+  }
 
   @Test
   void prunesOldestDistinctSlotsInASingleCommit() {
@@ -184,6 +624,55 @@ class KvStoreDatabaseTest {
     assertThat(prunedWatermark).isEmpty();
   }
 
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("pruneWatermarkClampCases")
+  void streamDataColumnIdentifiers_shouldStartAbovePruneWatermark(
+      final String description,
+      final Optional<UInt64> watermark,
+      final long firstSlot,
+      final long lastSlot,
+      final List<SlotRange> expectedScans) {
+    final KvStoreDatabase database = database(UInt64.ZERO);
+    prunedWatermark = watermark;
+
+    try (final Stream<DataColumnSlotAndIdentifier> identifiers =
+        database.streamDataColumnIdentifiers(UInt64.valueOf(firstSlot), UInt64.valueOf(lastSlot))) {
+      assertThat(identifiers).isEmpty();
+    }
+
+    assertThat(streamedRanges).isEqualTo(expectedScans);
+  }
+
+  static Stream<Arguments> pruneWatermarkClampCases() {
+    final Optional<UInt64> watermark = Optional.of(UInt64.valueOf(100));
+    return Stream.of(
+        Arguments.of("fully pruned range skips the database", watermark, 10, 100, List.of()),
+        Arguments.of(
+            "straddling range starts above the watermark",
+            watermark,
+            10,
+            200,
+            List.of(new SlotRange(UInt64.valueOf(101), UInt64.valueOf(200)))),
+        Arguments.of(
+            "range just above the watermark is unchanged",
+            watermark,
+            101,
+            101,
+            List.of(new SlotRange(UInt64.valueOf(101), UInt64.valueOf(101)))),
+        Arguments.of(
+            "range well above the watermark is unchanged",
+            watermark,
+            150,
+            200,
+            List.of(new SlotRange(UInt64.valueOf(150), UInt64.valueOf(200)))),
+        Arguments.of(
+            "range without a watermark is unchanged",
+            Optional.empty(),
+            10,
+            200,
+            List.of(new SlotRange(UInt64.valueOf(10), UInt64.valueOf(200)))));
+  }
+
   @Test
   void streamBestLightClientUpdatesSkipsUnreadableRows() {
     final Spec spec = TestSpecFactory.createMinimalAltair();
@@ -226,23 +715,17 @@ class KvStoreDatabaseTest {
         .thenReturn(Optional.of(firstFuluSlot));
     final KvStoreCombinedDao dao = mock(KvStoreCombinedDao.class);
     when(dao.getLastDataColumnSidecarPrunedSlot()).thenAnswer(__ -> prunedWatermark);
+    when(dao.streamDataColumnIdentifiers(any(), any()))
+        .thenAnswer(
+            invocation -> streamPopulated(invocation.getArgument(0), invocation.getArgument(1)));
+    when(dao.streamNonCanonicalDataColumnIdentifiers(any(), any()))
+        .thenAnswer(
+            invocation -> streamPopulated(invocation.getArgument(0), invocation.getArgument(1)));
     return new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec) {
 
       @Override
       protected FinalizedUpdater finalizedUpdater() {
         return countingUpdater();
-      }
-
-      @Override
-      public Stream<DataColumnSlotAndIdentifier> streamDataColumnIdentifiers(
-          final UInt64 firstSlot, final UInt64 lastSlot) {
-        return streamPopulated(firstSlot, lastSlot);
-      }
-
-      @Override
-      public Stream<DataColumnSlotAndIdentifier> streamNonCanonicalDataColumnIdentifiers(
-          final UInt64 firstSlot, final UInt64 lastSlot) {
-        return streamPopulated(firstSlot, lastSlot);
       }
     };
   }

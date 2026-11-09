@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -1267,6 +1267,30 @@ class ProtoArrayTest {
   }
 
   @Test
+  void gloas_resolveParentNode_shouldRejectChildBuildingOnInvalidatedFullPayload() {
+    // FULL(block1a) is invalidated while BASE/EMPTY(block1a) stay valid: a child naming the
+    // invalidated payload must not be attached to EMPTY(block1a)
+    addValidBlock(1, block1a, GENESIS_CHECKPOINT.getRoot());
+    protoArray.createEmptyNode(block1a);
+    // FULL(block1a) imported optimistically
+    protoArray.onExecutionPayload(block1a, EXECUTION_BLOCK_NUMBER, EXECUTION_BLOCK_HASH);
+    final int emptyNodeIndex = protoArray.getEmptyNodeIndices().getInt(block1a);
+    final int fullNodeIndex = protoArray.getFullNodeIndices().getInt(block1a);
+    assertThat(protoArray.resolveParentIndex(block1a, EXECUTION_BLOCK_HASH))
+        .isEqualTo(Optional.of(fullNodeIndex));
+
+    // The execution layer later rejects FULL(block1a)'s payload
+    protoArray.invalidateFullNode(block1a);
+
+    assertThatThrownBy(() -> protoArray.resolveParentIndex(block1a, EXECUTION_BLOCK_HASH))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("invalidated");
+    // A child building on the parent's EMPTY variant names the execution head EMPTY inherited
+    assertThat(protoArray.resolveParentIndex(block1a, getExecutionBlockHash(block1a)))
+        .isEqualTo(Optional.of(emptyNodeIndex));
+  }
+
+  @Test
   void
       gloas_onForkChoiceUpdatedResult_invalidOnEmptyWithoutLatestValidHash_shouldInvalidateOwner() {
     // BASE and EMPTY nodes own no payload: they inherit the execution block hash of the nearest
@@ -1692,6 +1716,19 @@ class ProtoArrayTest {
       return gloasModel
           .resolveParentNode(protoArray, blockNodeIndex, parentRoot, childParentBlockHash)
           .flatMap(node -> protoArray.getNodeIndex(node.getForkChoiceNode()));
+    }
+
+    private void invalidateFullNode(final Bytes32 blockRoot) {
+      // Same flow as ForkChoiceStrategy.onForkChoiceUpdatedResult for an exact INVALID verdict
+      gloasModel.onForkChoiceUpdatedResult(
+          protoArray,
+          blockNodeIndex,
+          blockNodeIndex.getFullNode(blockRoot).orElseThrow(),
+          ExecutionPayloadStatus.INVALID,
+          Optional.empty(),
+          true,
+          new HeadSelectionContext(gloasModel, blockNodeIndex, UInt64.ZERO, Optional.empty()));
+      pruneRemovedProjections();
     }
 
     private void pruneRemovedProjections() {

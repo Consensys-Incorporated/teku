@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,7 +35,8 @@ import tech.pegasys.teku.infrastructure.json.types.CoreTypes;
 import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.json.types.StringValueTypeDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
-import tech.pegasys.teku.validator.client.ProposerConfig.BuilderConfig;
+import tech.pegasys.teku.validator.client.restapi.ValidatorTypes;
+import tech.pegasys.teku.validator.client.restapi.apis.schema.BuilderConfig;
 
 public class RuntimeProposerConfig {
   private final Optional<Path> storagePath;
@@ -59,8 +61,13 @@ public class RuntimeProposerConfig {
           .withOptionalField(
               "gas_limit",
               CoreTypes.UINT64_TYPE,
-              RuntimeConfig::getBuilderGasLimit,
+              RuntimeConfig::getGasLimit,
               RuntimeConfigBuilder::gasLimit)
+          .withOptionalField(
+              "builder_config",
+              ValidatorTypes.BUILDER_CONFIG_TYPE,
+              RuntimeConfig::getBuilderConfig,
+              RuntimeConfigBuilder::builderConfig)
           .build();
   private static final DeserializableTypeDefinition<Map<BLSPublicKey, RuntimeConfig>>
       CONFIG_MAP_TYPE =
@@ -87,7 +94,7 @@ public class RuntimeProposerConfig {
   }
 
   public Optional<UInt64> getGasLimitForPubKey(final BLSPublicKey publicKey) {
-    return getProposerConfig(publicKey).flatMap(RuntimeConfig::getBuilderGasLimit);
+    return getProposerConfig(publicKey).flatMap(RuntimeConfig::getGasLimit);
   }
 
   synchronized void updateFeeRecipient(
@@ -114,6 +121,21 @@ public class RuntimeProposerConfig {
     } else {
       RuntimeConfigBuilder configBuilder = new RuntimeConfigBuilder(currentConfig.get());
       configBuilder.gasLimit(Optional.of(gasLimit));
+      updateEntry(publicKey, configBuilder.build());
+    }
+    storagePath.ifPresent(this::save);
+  }
+
+  synchronized void updateBuilderConfig(
+      final BLSPublicKey publicKey, final BuilderConfig builderConfig) {
+    Preconditions.checkNotNull(builderConfig, "should delete rather than update to null");
+    final Optional<RuntimeConfig> currentConfig = getProposerConfig(publicKey);
+    if (currentConfig.isEmpty()) {
+      proposerConfigMap.put(
+          publicKey, new RuntimeConfigBuilder().builderConfig(Optional.of(builderConfig)).build());
+    } else {
+      RuntimeConfigBuilder configBuilder = new RuntimeConfigBuilder(currentConfig.get());
+      configBuilder.builderConfig(Optional.of(builderConfig));
       updateEntry(publicKey, configBuilder.build());
     }
     storagePath.ifPresent(this::save);
@@ -147,6 +169,16 @@ public class RuntimeProposerConfig {
     }
   }
 
+  synchronized void deleteBuilderConfig(final BLSPublicKey publicKey) {
+    final Optional<RuntimeConfig> currentConfig = getProposerConfig(publicKey);
+    if (currentConfig.isPresent()) {
+      RuntimeConfigBuilder builder = new RuntimeConfigBuilder(currentConfig.get());
+      builder.builderConfig(Optional.empty());
+      updateEntry(publicKey, builder.build());
+      storagePath.ifPresent(this::save);
+    }
+  }
+
   public Optional<RuntimeConfig> getProposerConfig(final BLSPublicKey publicKey) {
     return Optional.ofNullable(proposerConfigMap.get(publicKey));
   }
@@ -161,24 +193,83 @@ public class RuntimeProposerConfig {
 
   static class RuntimeConfig extends ProposerConfig.Config {
 
-    public RuntimeConfig(final Eth1Address feeRecipient, final BuilderConfig builder) {
-      super(feeRecipient, builder);
+    private final Optional<Eth1Address> feeRecipient;
+    private final Optional<UInt64> gasLimit;
+    private final Optional<BuilderConfig> builderConfig;
+    private final boolean isEmpty;
+
+    public RuntimeConfig(
+        final Optional<Eth1Address> feeRecipient,
+        final Optional<UInt64> gasLimit,
+        final Optional<BuilderConfig> builderConfig) {
+      super(feeRecipient.orElse(null), createBuilder(gasLimit, builderConfig));
+      this.feeRecipient = feeRecipient;
+      this.gasLimit = gasLimit;
+      this.builderConfig = builderConfig;
+      isEmpty = feeRecipient.isEmpty() && gasLimit.isEmpty() && builderConfig.isEmpty();
+    }
+
+    private static ProposerConfig.BuilderConfig createBuilder(
+        final Optional<UInt64> gasLimit, final Optional<BuilderConfig> builderConfig) {
+      if (gasLimit.isPresent() || builderConfig.isPresent()) {
+        final Optional<List<ProposerConfig.BuilderEntry>> builders =
+            builderConfig
+                .flatMap(BuilderConfig::builders)
+                .map(
+                    builderEntries ->
+                        builderEntries.stream()
+                            .map(
+                                builderEntry ->
+                                    new ProposerConfig.BuilderEntry(
+                                        builderEntry.url(),
+                                        builderEntry.authData().orElse(null),
+                                        builderEntry.builderPubkeys().orElse(null),
+                                        builderEntry.minBid().orElse(null),
+                                        builderEntry.builderBoostFactor().orElse(null),
+                                        builderEntry.maxExecutionPayment().orElse(null)))
+                            .toList());
+        return new ProposerConfig.BuilderConfig(
+            null,
+            gasLimit.orElse(null),
+            null,
+            builderConfig.flatMap(BuilderConfig::minBid).orElse(null),
+            builderConfig.flatMap(BuilderConfig::builderBoostFactor).orElse(null),
+            builders.orElse(null));
+      } else {
+        return null;
+      }
+    }
+
+    @Override
+    public Optional<Eth1Address> getFeeRecipient() {
+      return feeRecipient;
+    }
+
+    @Override
+    public Optional<UInt64> getGasLimit() {
+      return gasLimit;
+    }
+
+    public Optional<BuilderConfig> getBuilderConfig() {
+      return builderConfig;
     }
 
     public boolean isEmpty() {
-      return getFeeRecipient().isEmpty() && getBuilderGasLimit().isEmpty();
+      return isEmpty;
     }
   }
 
   static class RuntimeConfigBuilder {
     private Optional<Eth1Address> feeRecipient = Optional.empty();
     private Optional<UInt64> gasLimit = Optional.empty();
+    private Optional<BuilderConfig> builderConfig = Optional.empty();
 
     public RuntimeConfigBuilder() {}
 
     public RuntimeConfigBuilder(final RuntimeConfig currentConfig) {
       feeRecipient = currentConfig.getFeeRecipient();
-      gasLimit = currentConfig.getBuilderGasLimit();
+      gasLimit = currentConfig.getGasLimit();
+      builderConfig = currentConfig.getBuilderConfig();
     }
 
     public RuntimeConfigBuilder feeRecipient(final Optional<Eth1Address> feeRecipient) {
@@ -191,10 +282,13 @@ public class RuntimeProposerConfig {
       return this;
     }
 
+    public RuntimeConfigBuilder builderConfig(final Optional<BuilderConfig> builderConfig) {
+      this.builderConfig = builderConfig;
+      return this;
+    }
+
     public RuntimeConfig build() {
-      return new RuntimeConfig(
-          feeRecipient.orElse(null),
-          gasLimit.map(gl -> new ProposerConfig.BuilderConfig(null, gl, null)).orElse(null));
+      return new RuntimeConfig(feeRecipient, gasLimit, builderConfig);
     }
   }
 }

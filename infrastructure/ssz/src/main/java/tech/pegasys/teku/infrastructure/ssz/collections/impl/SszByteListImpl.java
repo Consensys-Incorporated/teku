@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -13,9 +13,6 @@
 
 package tech.pegasys.teku.infrastructure.ssz.collections.impl;
 
-import java.util.stream.IntStream;
-import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.MutableBytes;
 import tech.pegasys.teku.infrastructure.ssz.cache.IntCache;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszByteList;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszByte;
@@ -26,13 +23,6 @@ public class SszByteListImpl extends SszPrimitiveListImpl<Byte, SszByte> impleme
 
   public SszByteListImpl(final SszByteListSchema<?> schema, final TreeNode backingTree) {
     super(schema, backingTree);
-  }
-
-  @Override
-  public Bytes getBytes() {
-    MutableBytes bytes = MutableBytes.create(size());
-    IntStream.range(0, size()).forEach(idx -> bytes.set(idx, getElement(idx)));
-    return bytes;
   }
 
   @Override

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -234,10 +234,11 @@ public class AggregatingPayloadAttestationPool
                 payloadAttestationGroup.getData().getBeaconBlockRoot().equals(parentRoot))
         // Most validators first
         .sorted(Comparator.comparingInt(MatchingDataPayloadAttestationGroup::size).reversed())
-        .limit(payloadAttestationsSchema.getMaxLength())
-        .map(
+        // aggregates whose signature is the point at infinity are dropped before applying the limit
+        .flatMap(
             payloadAttestationGroup ->
-                payloadAttestationGroup.createAggregatedPayloadAttestation(ptc))
+                payloadAttestationGroup.createAggregatedPayloadAttestation(ptc).stream())
+        .limit(payloadAttestationsSchema.getMaxLength())
         .collect(payloadAttestationsSchema.collector());
   }
 
@@ -245,10 +246,10 @@ public class AggregatingPayloadAttestationPool
   public List<PayloadAttestation> getPayloadAttestations(final BeaconState state) {
     return payloadAttestationGroupByDataHash.values().stream()
         .filter(group -> group.size() > 0)
-        .map(
+        .flatMap(
             group -> {
               final IntList ptc = spec.getPtc(state, group.getData().getSlot());
-              return group.createAggregatedPayloadAttestation(ptc);
+              return group.createAggregatedPayloadAttestation(ptc).stream();
             })
         .toList();
   }

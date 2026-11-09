@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -42,6 +42,11 @@ class NoopRpcContextCodec<TPayload extends SszData> implements RpcContextCodec<B
   @Override
   public Optional<SszSchema<TPayload>> getSchemaFromContext(final Bytes bytes) {
     return Optional.of(schema);
+  }
+
+  @Override
+  public void verifyPayloadMatchesContext(final Bytes bytes, final TPayload responsePayload) {
+    // No-op
   }
 
   private static class EmptyContextDecoder implements RpcByteBufDecoder<Bytes> {

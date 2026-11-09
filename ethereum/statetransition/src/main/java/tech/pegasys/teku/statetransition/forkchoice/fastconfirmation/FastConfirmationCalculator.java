@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -391,13 +391,13 @@ class FastConfirmationCalculator {
   }
 
   /**
-   * Implements {@code get_block_support_between_slots}: the total effective balance (per {@code
+   * Implements {@code get_node_support_between_slots}: the total effective balance (per {@code
    * balanceSource}) of unslashed, active, non-equivocating validators assigned to the inclusive
-   * slot range whose latest vote is exactly {@code blockRoot}.
+   * slot range whose latest vote supports exactly {@code node} (per {@code get_supported_node}).
    */
-  UInt64 getBlockSupportBetweenSlots(
+  UInt64 getNodeSupportBetweenSlots(
       final BeaconState balanceSource,
-      final Bytes32 blockRoot,
+      final ForkChoiceNode node,
       final UInt64 startSlot,
       final UInt64 endSlot) {
     final List<UInt64> balances = getScoringBalances(balanceSource);
@@ -409,7 +409,20 @@ class FastConfirmationCalculator {
         continue;
       }
       final VoteTracker vote = votes.getVote(index);
-      if (!vote.isEquivocating() && vote.getNextRoot().equals(blockRoot)) {
+      if (vote.isEquivocating()) {
+        continue;
+      }
+      final Bytes32 votedRoot = vote.getNextRoot();
+      // A zero root means the validator is not in store.latest_messages.
+      if (votedRoot.isZero()) {
+        continue;
+      }
+      // Support is per fork-choice node, not per block: under Gloas two votes for the same block
+      // support different nodes when they disagree on whether the payload was present.
+      final Optional<ForkChoiceNode> maybeVotedNode =
+          forkChoice.getSupportedNode(
+              currentSlot, votedRoot, vote.getNextSlot(), vote.isNextFullPayloadHint());
+      if (maybeVotedNode.isPresent() && maybeVotedNode.get().equals(node)) {
         support = support.plus(balance);
       }
     }
@@ -558,8 +571,16 @@ class FastConfirmationCalculator {
     }
     final UInt64 firstEmptySlot = parentSlot.plus(1);
     final UInt64 lastEmptySlot = blockSlot.minus(1);
+    // The discountable support is that of the node the block actually built on, which under Gloas
+    // carries the parent's payload status rather than the parent's PENDING node.
+    final Optional<ForkChoiceNode> maybeParentNode =
+        forkChoice.getAncestorNode(getNodeForRoot(blockRoot), parentSlot);
+    if (maybeParentNode.isEmpty()) {
+      return UInt64.ZERO;
+    }
     final UInt64 parentSupportInEmptySlots =
-        getBlockSupportBetweenSlots(balanceSource, parentRoot, firstEmptySlot, lastEmptySlot);
+        getNodeSupportBetweenSlots(
+            balanceSource, maybeParentNode.get(), firstEmptySlot, lastEmptySlot);
     final UInt64 adversarialWeight =
         computeAdversarialWeight(balanceSource, firstEmptySlot, lastEmptySlot);
     return parentSupportInEmptySlots.isGreaterThan(adversarialWeight)

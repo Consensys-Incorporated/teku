@@ -52,8 +52,8 @@
           }
         }
       },
-      "415" : {
-        "description" : "Unsupported media type",
+      "406" : {
+        "description" : "Not acceptable",
         "content" : {
           "application/json" : {
             "schema" : {

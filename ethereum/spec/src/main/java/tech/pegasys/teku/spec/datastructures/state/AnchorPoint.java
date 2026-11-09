@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -142,6 +142,12 @@ public class AnchorPoint extends StateAndBlockSummary {
 
   public UInt64 getBlockSlot() {
     return blockSummary.getSlot();
+  }
+
+  public Optional<BeaconState> getBlockPostState(final Bytes32 blockRoot) {
+    return getRoot().equals(blockRoot) && getState().getSlot().equals(getBlockSlot())
+        ? Optional.of(getState())
+        : Optional.empty();
   }
 
   public UInt64 getEpoch() {

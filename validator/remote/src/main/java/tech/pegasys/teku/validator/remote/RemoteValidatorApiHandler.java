@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -130,21 +130,30 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
   }
 
   @Override
-  public SafeFuture<Map<BLSPublicKey, Integer>> getValidatorIndices(
+  public SafeFuture<Optional<Map<BLSPublicKey, Integer>>> getValidatorIndices(
       final Collection<BLSPublicKey> publicKeys) {
     if (publicKeys.isEmpty()) {
-      return SafeFuture.completedFuture(emptyMap());
+      return SafeFuture.completedFuture(Optional.of(emptyMap()));
     }
-    return sendRequest(
-        () ->
-            makeValidatorRequest(publicKeys, StateValidatorData::getIntegerIndex)
-                .orElse(emptyMap()));
+    return requestValidatorData(publicKeys, StateValidatorData::getIntegerIndex);
   }
 
   @Override
   public SafeFuture<Optional<Map<BLSPublicKey, StateValidatorData>>> getValidatorStatuses(
       final Collection<BLSPublicKey> publicKeys) {
-    return sendRequest(() -> makeValidatorRequest(publicKeys, Function.identity()));
+    return requestValidatorData(publicKeys, Function.identity());
+  }
+
+  private <T> SafeFuture<Optional<Map<BLSPublicKey, T>>> requestValidatorData(
+      final Collection<BLSPublicKey> publicKeys,
+      final Function<StateValidatorData, T> valueExtractor) {
+    return sendRequest(
+        () ->
+            Optional.of(
+                makeValidatorRequest(publicKeys, valueExtractor)
+                    .orElseThrow(
+                        () ->
+                            new IllegalStateException("Beacon node returned no validator data"))));
   }
 
   private <T> Optional<Map<BLSPublicKey, T>> makeValidatorRequest(

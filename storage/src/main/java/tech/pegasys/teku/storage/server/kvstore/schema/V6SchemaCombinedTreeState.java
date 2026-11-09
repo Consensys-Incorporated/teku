@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -257,6 +257,8 @@ public class V6SchemaCombinedTreeState extends V6SchemaCombined implements Schem
         .put(
             "LIGHT_CLIENT_UPDATE_SIGNATURE_BLOCK_ROOTS_BY_PERIOD",
             getBestLightClientUpdateSignatureBlockRootsByPeriod())
+        .put("LIGHT_CLIENT_BOOTSTRAPS_BY_SLOT", getLightClientBootstrapsBySlot())
+        .put("LIGHT_CLIENT_SYNC_COMMITTEES_BY_PERIOD", getLightClientSyncCommitteesByPeriod())
         .build();
   }
 

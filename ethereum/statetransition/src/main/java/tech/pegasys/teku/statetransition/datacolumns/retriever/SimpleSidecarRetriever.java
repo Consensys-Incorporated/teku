@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -407,10 +407,8 @@ public class SimpleSidecarRetriever
 
     // Preferring peers with the best response rate, then preferring less busy peers among equals
     final Comparator<ConnectedPeer> comparator =
-        Comparator.comparing(ConnectedPeer::getResponseScore)
-            .thenComparing(
-                (ConnectedPeer peer) ->
-                    ongoingRequestsTracker.getAvailableRequestCount(peer.nodeId));
+        Comparator.comparingInt(ConnectedPeer::getResponseScore)
+            .thenComparingInt(peer -> ongoingRequestsTracker.getAvailableRequestCount(peer.nodeId));
     return matchingPeers.max(comparator);
   }
 

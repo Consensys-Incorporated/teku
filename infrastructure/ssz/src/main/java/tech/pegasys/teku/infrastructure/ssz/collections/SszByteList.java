@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -18,12 +18,12 @@ import tech.pegasys.teku.infrastructure.ssz.primitive.SszByte;
 
 public interface SszByteList extends SszPrimitiveList<Byte, SszByte> {
 
+  /**
+   * Returns the list content. The SSZ encoding of a byte list is exactly its bytes, and
+   * serialization copies whole leaf chunks instead of walking the backing tree once per element.
+   */
   default Bytes getBytes() {
-    byte[] data = new byte[size()];
-    for (int i = 0; i < size(); i++) {
-      data[i] = getElement(i);
-    }
-    return Bytes.wrap(data);
+    return sszSerialize();
   }
 
   @Override

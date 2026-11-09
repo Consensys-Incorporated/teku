@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -65,6 +65,19 @@ public class SerializableObjectTypeDefinitionBuilder<TObject> {
         "Field %s was already defined, attempting to add twice.",
         name);
     this.fields.put(name, new OptionalSerializableFieldDefinition<>(name, getter, type));
+    return this;
+  }
+
+  /** Adds a required field that is written as {@code null} when the getter returns empty. */
+  public <TField> SerializableObjectTypeDefinitionBuilder<TObject> withNullableField(
+      final String name,
+      final SerializableTypeDefinition<TField> type,
+      final Function<TObject, Optional<TField>> getter) {
+    checkArgument(
+        !this.fields.containsKey(name),
+        "Field %s was already defined, attempting to add twice.",
+        name);
+    this.fields.put(name, new NullableSerializableFieldDefinition<>(name, getter, type));
     return this;
   }
 

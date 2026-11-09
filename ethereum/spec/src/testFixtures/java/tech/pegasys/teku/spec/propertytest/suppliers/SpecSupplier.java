@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -47,7 +47,9 @@ public class SpecSupplier implements ArbitrarySupplier<Spec> {
         Arbitraries.of(SpecMilestone.class)
             .filter(m -> m.isGreaterThanOrEqualTo(minimumSpecMilestone))
             .filter(m -> m.isLessThanOrEqualTo(maximumSpecMilestone));
-    Arbitrary<Eth2Network> network = Arbitraries.of(Eth2Network.class);
+    // Ephemery loads its config from a remote URL, which would be fetched for every generated spec
+    Arbitrary<Eth2Network> network =
+        Arbitraries.of(Eth2Network.class).filter(n -> n != Eth2Network.EPHEMERY);
     return Combinators.combine(milestone, network)
         .as(TestSpecFactory::create)
         // Not all network and milestone combinations create a valid config

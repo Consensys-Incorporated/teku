@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -15,11 +15,12 @@ package tech.pegasys.teku.spec.logic.versions.gloas.util;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,10 +45,12 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateSchemaGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
+import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.spec.logic.common.util.ForkChoiceUtil.BlockTimeliness;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
@@ -181,6 +184,54 @@ class ForkChoiceUtilGloasTest {
   }
 
   @Test
+  void computeCommitteeIndexForAttestation_shouldUseZeroForPreGloasHead() {
+    final BeaconBlock preGloasBlock = dataStructureUtil.randomBeaconBlock(gloasSlot.minus(1));
+
+    assertThat(
+            forkChoiceUtil.computeCommitteeIndexForAttestation(
+                gloasSlot,
+                preGloasBlock,
+                0,
+                Optional.of(ForkChoiceNode.createBase(preGloasBlock.getRoot()))))
+        .isZero();
+  }
+
+  @Test
+  void computeCommitteeIndexForAttestation_shouldUseZeroForPendingGloasHead() {
+    assertCommitteeIndex(gloasSlot.increment(), ForkChoiceNode::createBase, 0);
+  }
+
+  @Test
+  void computeCommitteeIndexForAttestation_shouldUseOneForFullHead() {
+    assertCommitteeIndex(gloasSlot.increment(), ForkChoiceNode::createFull, 1);
+  }
+
+  @Test
+  void computeCommitteeIndexForAttestation_shouldUseZeroForEmptyHead() {
+    assertCommitteeIndex(gloasSlot.increment(), ForkChoiceNode::createEmpty, 0);
+  }
+
+  @Test
+  void computeCommitteeIndexForAttestation_shouldUseZeroForFullHeadInAttestationSlot() {
+    assertCommitteeIndex(gloasSlot, ForkChoiceNode::createFull, 0);
+  }
+
+  private void assertCommitteeIndex(
+      final UInt64 attestationSlot,
+      final Function<Bytes32, ForkChoiceNode> nodeForRoot,
+      final int expectedIndex) {
+    final BeaconBlock gloasBlock = dataStructureUtil.randomBeaconBlock(gloasSlot);
+
+    assertThat(
+            forkChoiceUtil.computeCommitteeIndexForAttestation(
+                attestationSlot,
+                gloasBlock,
+                0,
+                Optional.of(nodeForRoot.apply(gloasBlock.getRoot()))))
+        .isEqualTo(expectedIndex);
+  }
+
+  @Test
   void
       computeBlockTimeliness_shouldMarkBlockLateForAttestationsAndPtcWhenBlockIsNotFromCurrentSlot() {
     assertThat(forkChoiceUtil.computeBlockTimeliness(gloasSlot, gloasSlot.plus(1), 0))
@@ -188,168 +239,130 @@ class ForkChoiceUtilGloasTest {
   }
 
   @Test
-  void getParentPayloadStatus_shouldReturnFull_whenParentBlockHashMatchesMessageBlockHash() {
-    // Create parent block with a specific block hash
-    final Bytes32 parentBlockHash = dataStructureUtil.randomBytes32();
-    final BeaconBlock parentBlock = createBlockWithBlockHash(parentBlockHash);
+  void blockDescendsFromLatestFinalizedBlock_shouldWalkFromFullParentWhenBuildingOnItsPayload() {
+    final Bytes32 parentPayloadHash = dataStructureUtil.randomBytes32();
+    final BeaconState preState = createPreState(gloasSlot, gloasSlot, parentPayloadHash);
+    final SignedBeaconBlock block = createBlockBuildingOn(parentPayloadHash);
 
-    // Create current block that references the parent's block hash
-    final BeaconBlock currentBlock =
-        createBlockWithParentAndParentBlockHash(parentBlock.getRoot(), parentBlockHash);
-
-    // Mock store
-    final ReadOnlyStore store = mock(ReadOnlyStore.class);
-    when(store.retrieveBlock(currentBlock.getParentRoot()))
-        .thenReturn(SafeFuture.completedFuture(Optional.of(parentBlock)));
-
-    // Test
-    final SafeFuture<ForkChoicePayloadStatus> result =
-        forkChoiceUtil.getParentPayloadStatus(store, currentBlock);
-
-    assertThat(result).isCompletedWithValue(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+    assertWalksFinalizedAncestryFrom(
+        block, preState, ForkChoiceNode.createFull(block.getParentRoot()));
   }
 
   @Test
-  void getParentPayloadStatus_shouldReturnEmpty_whenParentBlockIsPreGloas() {
-    // Create parent block which is pre-Gloas
-    final UInt64 preGloasSlot = spec.computeStartSlotAtEpoch(GLOAS_FORK_EPOCH).minusMinZero(1);
-    final BeaconBlock parentBlock = dataStructureUtil.randomBeaconBlock(preGloasSlot);
+  void
+      blockDescendsFromLatestFinalizedBlock_shouldWalkFromEmptyParentWhenNotBuildingOnItsPayload() {
+    final BeaconState preState =
+        createPreState(gloasSlot, gloasSlot, dataStructureUtil.randomBytes32());
+    final SignedBeaconBlock block = createBlockBuildingOn(dataStructureUtil.randomBytes32());
 
-    // Create current block that references any block hash (doesn't matter since the check is not
-    // done) but its parent is the pre-Gloas block
-    final BeaconBlock currentBlock =
+    assertWalksFinalizedAncestryFrom(
+        block, preState, ForkChoiceNode.createEmpty(block.getParentRoot()));
+  }
+
+  @Test
+  void blockDescendsFromLatestFinalizedBlock_shouldWalkFromBaseParentWhenParentIsPreGloas() {
+    // The fork upgrade seeds latest_execution_payload_bid with the pre-fork block hash, which the
+    // first Gloas block's bid names as parent_block_hash: that is not a payload FULL(parent) could
+    // represent, the pre-Gloas parent only has a base node. Skipped slots straddle the fork here.
+    final Bytes32 preForkBlockHash = dataStructureUtil.randomBytes32();
+    final BeaconState preState =
+        createPreState(gloasSlot.plus(1), gloasSlot.minus(2), preForkBlockHash);
+    final SignedBeaconBlock block = createBlockBuildingOn(preForkBlockHash);
+
+    assertWalksFinalizedAncestryFrom(
+        block, preState, ForkChoiceNode.createBase(block.getParentRoot()));
+  }
+
+  @Test
+  void checkOnBlockConditions_shouldCheckStateConsistencyBeforeParentPayload() {
+    // Spec order: the payload check follows the parent-known check. A pre-state that does not
+    // belong to the block's parent is invalid ancestry, also while fork choice is still awaiting
+    // that parent's payload.
+    final Bytes32 parentPayloadHash = dataStructureUtil.randomBytes32();
+    final BeaconState preState = createPreState(gloasSlot, gloasSlot, parentPayloadHash);
+    final SignedBeaconBlock block = createBlockBuildingOn(parentPayloadHash);
+    final ReadOnlyStore store = createStore();
+    when(store.getForkChoiceStrategy().isAwaitingExecutionPayload(block.getParentRoot()))
+        .thenReturn(true);
+
+    assertThat(forkChoiceUtil.checkOnBlockConditions(block, preState, store))
+        .isEqualTo(BlockImportResult.FAILED_INVALID_ANCESTRY);
+  }
+
+  /** A block at {@code gloasSlot} whose bid names {@code parentBlockHash}. */
+  private SignedBeaconBlock createBlockBuildingOn(final Bytes32 parentBlockHash) {
+    return dataStructureUtil.signedBlock(
         createBlockWithParentAndParentBlockHash(
-            parentBlock.getRoot(), dataStructureUtil.randomBytes32());
+            dataStructureUtil.randomBytes32(), parentBlockHash));
+  }
 
-    // Mock store
+  /**
+   * A pre-state at {@code stateSlot} whose latest block header is the parent's at {@code
+   * parentSlot} and whose latest execution payload bid, the parent's bid, has {@code
+   * parentBidBlockHash}.
+   */
+  private BeaconState createPreState(
+      final UInt64 stateSlot, final UInt64 parentSlot, final Bytes32 parentBidBlockHash) {
+    final ExecutionPayloadBid parentBid =
+        BeaconBlockBodyGloas.required(createBlockWithBlockHash(parentBidBlockHash).getBody())
+            .getSignedExecutionPayloadBid()
+            .getMessage();
+    return dataStructureUtil
+        .stateBuilderGloas(10, 1, 10)
+        .slot(stateSlot)
+        .build()
+        .updated(
+            state -> {
+              state.setLatestBlockHeader(
+                  dataStructureUtil.randomBeaconBlockHeader(parentSlot, UInt64.ZERO));
+              MutableBeaconStateGloas.required(state).setLatestExecutionPayloadBid(parentBid);
+            });
+  }
+
+  private void assertWalksFinalizedAncestryFrom(
+      final SignedBeaconBlock block,
+      final BeaconState preState,
+      final ForkChoiceNode expectedParentNode) {
+    final Checkpoint finalizedCheckpoint =
+        new Checkpoint(UInt64.ZERO, dataStructureUtil.randomBytes32());
     final ReadOnlyStore store = mock(ReadOnlyStore.class);
-    when(store.retrieveBlock(currentBlock.getParentRoot()))
-        .thenReturn(SafeFuture.completedFuture(Optional.of(parentBlock)));
+    when(store.getFinalizedCheckpoint()).thenReturn(finalizedCheckpoint);
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy = mock(ReadOnlyForkChoiceStrategy.class);
+    // Only the node the block builds on leads to the finalized root
+    when(forkChoiceStrategy.getAncestorNode(expectedParentNode, UInt64.ZERO))
+        .thenReturn(Optional.of(ForkChoiceNode.createBase(finalizedCheckpoint.getRoot())));
 
-    // Test
-    final SafeFuture<ForkChoicePayloadStatus> result =
-        forkChoiceUtil.getParentPayloadStatus(store, currentBlock);
-
-    assertThat(result).isCompletedWithValue(ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY);
+    assertThat(
+            forkChoiceUtil.blockDescendsFromLatestFinalizedBlock(
+                block, preState, store, forkChoiceStrategy))
+        .isTrue();
+    verify(forkChoiceStrategy).getAncestorNode(expectedParentNode, UInt64.ZERO);
   }
 
   @Test
-  void getParentPayloadStatus_shouldReturnEmpty_whenParentBlockHashDoesNotMatch() {
-    // Create parent block with one block hash
-    final Bytes32 parentBlockHash = dataStructureUtil.randomBytes32();
-    final BeaconBlock parentBlock = createBlockWithBlockHash(parentBlockHash);
-
-    // Create current block that references a DIFFERENT parent block hash
-    final Bytes32 differentParentBlockHash = dataStructureUtil.randomBytes32();
-    final BeaconBlock currentBlock =
-        createBlockWithParentAndParentBlockHash(parentBlock.getRoot(), differentParentBlockHash);
-
-    // Mock store
-    final ReadOnlyStore store = mock(ReadOnlyStore.class);
-    when(store.retrieveBlock(currentBlock.getParentRoot()))
-        .thenReturn(SafeFuture.completedFuture(Optional.of(parentBlock)));
-
-    // Test
-    final SafeFuture<ForkChoicePayloadStatus> result =
-        forkChoiceUtil.getParentPayloadStatus(store, currentBlock);
-
-    assertThat(result).isCompletedWithValue(ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY);
-  }
-
-  @Test
-  void getParentPayloadStatus_shouldThrowException_whenParentBlockNotFound() {
+  void isPayloadVerified_shouldReturnTrue_whenForkChoiceTracksTheFullNode() {
+    // The store's payload map is a bounded cache: fork choice is the authoritative signal
     final SignedBeaconBlock currentBlock = dataStructureUtil.randomSignedBeaconBlock();
-
-    // Mock store with no parent block
-    final ReadOnlyStore store = mock(ReadOnlyStore.class);
-    when(store.retrieveBlock(currentBlock.getParentRoot()))
-        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
-
-    // Test
-    assertThat(forkChoiceUtil.getParentPayloadStatus(store, currentBlock.getMessage()))
-        .failsWithin(Duration.ofSeconds(1))
-        .withThrowableThat()
-        .withCauseInstanceOf(IllegalStateException.class)
-        .withMessageContaining("Parent block not found");
-  }
-
-  @Test
-  void isParentNodeFull_shouldReturnTrue_whenParentHasFullPayload() {
-    // Create parent block with a specific block hash
-    final Bytes32 parentBlockHash = dataStructureUtil.randomBytes32();
-    final BeaconBlock parentBlock = createBlockWithBlockHash(parentBlockHash);
-
-    // Create current block that references the parent's block hash
-    final BeaconBlock currentBlock =
-        createBlockWithParentAndParentBlockHash(parentBlock.getRoot(), parentBlockHash);
-
-    // Mock store
-    final ReadOnlyStore store = mock(ReadOnlyStore.class);
-    when(store.retrieveBlock(currentBlock.getParentRoot()))
-        .thenReturn(SafeFuture.completedFuture(Optional.of(parentBlock)));
-
-    // Test
-    final SafeFuture<Boolean> result = forkChoiceUtil.isParentNodeFull(store, currentBlock);
-
-    assertThat(result).isCompletedWithValue(true);
-  }
-
-  @Test
-  void isParentNodeFull_shouldReturnFalse_whenParentHasEmptyPayload() {
-    // Create parent block with one block hash
-    final Bytes32 parentBlockHash = dataStructureUtil.randomBytes32();
-    final BeaconBlock parentBlock = createBlockWithBlockHash(parentBlockHash);
-
-    // Create current block that references a DIFFERENT parent block hash
-    final Bytes32 differentParentBlockHash = dataStructureUtil.randomBytes32();
-    final BeaconBlock currentBlock =
-        createBlockWithParentAndParentBlockHash(parentBlock.getRoot(), differentParentBlockHash);
-
-    // Mock store
-    final ReadOnlyStore store = mock(ReadOnlyStore.class);
-    when(store.retrieveBlock(currentBlock.getParentRoot()))
-        .thenReturn(SafeFuture.completedFuture(Optional.of(parentBlock)));
-
-    // Test
-    final SafeFuture<Boolean> result = forkChoiceUtil.isParentNodeFull(store, currentBlock);
-
-    assertThat(result).isCompletedWithValue(false);
-  }
-
-  @Test
-  void isParentNodeFull_shouldThrowException_whenParentBlockNotFound() {
-    final BeaconBlock currentBlock = dataStructureUtil.randomBeaconBlock();
-
-    // Mock store with no parent block
-    final ReadOnlyStore store = mock(ReadOnlyStore.class);
-    when(store.retrieveBlock(currentBlock.getParentRoot()))
-        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
-
-    // Test
-    assertThat(forkChoiceUtil.isParentNodeFull(store, currentBlock))
-        .failsWithin(Duration.ofSeconds(1))
-        .withThrowableThat()
-        .withCauseInstanceOf(IllegalStateException.class)
-        .withMessageContaining("Parent block not found");
-  }
-
-  @Test
-  void isPayloadVerified_shouldReturnTrue_whenPayloadIsAvailable() {
-    final SignedBeaconBlock currentBlock = dataStructureUtil.randomSignedBeaconBlock();
-    final ReadOnlyStore store = mock(ReadOnlyStore.class);
-    when(store.getExecutionPayloadIfAvailable(currentBlock.getRoot()))
-        .thenReturn(
-            Optional.of(
-                dataStructureUtil.randomSignedExecutionPayloadEnvelopeForBlock(currentBlock)));
+    final ReadOnlyStore store = createStore();
+    when(store.getForkChoiceStrategy().contains(ForkChoiceNode.createFull(currentBlock.getRoot())))
+        .thenReturn(true);
     assertThat(forkChoiceUtil.isPayloadVerified(store, currentBlock.getRoot())).isTrue();
   }
 
   @Test
-  void isPayloadVerified_shouldReturnFalse_whenPayloadIsNotAvailable() {
+  void isPayloadVerified_shouldReturnFalse_whenForkChoiceDoesNotTrackTheFullNode() {
+    // Never imported, or imported and since invalidated by the execution layer: whether the
+    // store's bounded cache still holds the envelope does not matter
     final SignedBeaconBlock currentBlock = dataStructureUtil.randomSignedBeaconBlock();
-    final ReadOnlyStore store = mock(ReadOnlyStore.class);
-    when(store.getExecutionPayloadIfAvailable(currentBlock.getRoot())).thenReturn(Optional.empty());
+    final ReadOnlyStore store = createStore();
     assertThat(forkChoiceUtil.isPayloadVerified(store, currentBlock.getRoot())).isFalse();
+  }
+
+  /** A store mock whose fork choice strategy tracks nothing. */
+  private ReadOnlyStore createStore() {
+    final ReadOnlyStore store = mock(ReadOnlyStore.class);
+    when(store.getForkChoiceStrategy()).thenReturn(mock(ReadOnlyForkChoiceStrategy.class));
+    return store;
   }
 
   @Test

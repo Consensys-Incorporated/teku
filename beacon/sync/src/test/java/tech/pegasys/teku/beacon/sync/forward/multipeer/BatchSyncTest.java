@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -267,6 +267,174 @@ class BatchSyncTest {
 
     gloasBatches.assertMarkedInvalid(batch0);
     verify(gloasBatchImporter, never()).importBatch(gloasBatches.getEventThreadOnlyBatch(batch0));
+  }
+
+  @Test
+  void shouldDropBoundaryExecutionPayloadWhenNextBatchDoesNotBuildOnIt() {
+    final UInt64 gloasForkEpoch = UInt64.valueOf(1000);
+    final Spec gloasSpec =
+        TestSpecFactory.createMinimalGloas(builder -> builder.gloasForkEpoch(gloasForkEpoch));
+    final StorageSystem gloasStorageSystem =
+        InMemoryStorageSystemBuilder.buildDefault(StateStorageMode.PRUNE, gloasSpec);
+    final ChainBuilder gloasChainBuilder = gloasStorageSystem.chainBuilder();
+    final RecentChainData gloasRecentChainData = gloasStorageSystem.recentChainData();
+    gloasStorageSystem.chainUpdater().initializeGenesis();
+    final StubBatchFactory gloasBatches =
+        new StubBatchFactory(eventThread, gloasSpec, BlobSidecarManager.NOOP, true);
+    final BatchImporter gloasBatchImporter = mock(BatchImporter.class);
+    when(gloasBatchImporter.importBatch(any()))
+        .thenAnswer(invocation -> gloasBatches.getImportResult(invocation.getArgument(0)));
+    final MultipeerCommonAncestorFinder gloasCommonAncestor =
+        mock(MultipeerCommonAncestorFinder.class);
+
+    final UInt64 commonAncestorSlot = gloasSpec.computeStartSlotAtEpoch(gloasForkEpoch).minus(1);
+    final UInt64 parentSlot = commonAncestorSlot.plus(BATCH_SIZE);
+    final UInt64 childSlot = parentSlot.plus(1);
+
+    for (UInt64 slot = commonAncestorSlot.plus(1);
+        slot.isLessThanOrEqualTo(parentSlot);
+        slot = slot.plus(1)) {
+      gloasChainBuilder.generateBlockAtSlot(slot);
+    }
+    // The first block of the second batch builds on the EMPTY variant of the last block of the
+    // first batch, so the envelope served for that last block is not part of the chain
+    gloasChainBuilder.generateBlockAtSlot(
+        childSlot, gloasChainBuilder.createBlockOptionsBuildingOnEmptyParent(childSlot));
+
+    final SignedBeaconBlock parentBlock = gloasChainBuilder.getBlockAtSlot(parentSlot);
+    final SignedBeaconBlock childBlock = gloasChainBuilder.getBlockAtSlot(childSlot);
+    final TargetChain gloasTargetChain =
+        chainWith(new SlotAndBlockRoot(childSlot, childBlock.getRoot()), syncSource);
+    when(gloasCommonAncestor.findCommonAncestor(any()))
+        .thenReturn(completedFuture(commonAncestorSlot));
+
+    final BatchSync gloasSync =
+        BatchSync.create(
+            eventThread,
+            asyncRunner,
+            gloasRecentChainData,
+            gloasBatchImporter,
+            gloasBatches,
+            BATCH_SIZE.intValue(),
+            5,
+            gloasCommonAncestor,
+            timeProvider,
+            syncPreImportBlockChannel);
+
+    assertThat(gloasSync.syncToChain(gloasTargetChain)).isNotDone();
+
+    final Batch batch0 = gloasBatches.get(0);
+    final Batch batch1 = gloasBatches.get(1);
+
+    gloasBatches.receiveBlocks(
+        batch0,
+        gloasChainBuilder
+            .streamBlocksAndStates(commonAncestorSlot.plus(1), parentSlot)
+            .map(SignedBlockAndState::getBlock)
+            .toArray(SignedBeaconBlock[]::new));
+    gloasBatches.receiveExecutionPayloads(
+        batch0,
+        gloasChainBuilder
+            .streamExecutionPayloads(commonAncestorSlot.plus(1), parentSlot)
+            .toArray(SignedExecutionPayloadEnvelope[]::new));
+    assertThat(batch0.getExecutionPayloadsByBlockRoot()).containsKey(parentBlock.getRoot());
+
+    gloasBatches.receiveBlocks(batch1, childBlock);
+    gloasBatches.receiveExecutionPayloads(
+        batch1, gloasChainBuilder.getExecutionPayloadAtSlot(childSlot).orElseThrow());
+
+    // The boundary envelope is dropped and the batch is imported without it
+    assertThat(batch0.getExecutionPayloadsByBlockRoot()).doesNotContainKey(parentBlock.getRoot());
+    verify(gloasBatchImporter).importBatch(gloasBatches.getEventThreadOnlyBatch(batch0));
+  }
+
+  @Test
+  void shouldRestoreBoundaryExecutionPayloadWhenReDownloadedNextBatchBuildsOnIt() {
+    final UInt64 gloasForkEpoch = UInt64.valueOf(1000);
+    final Spec gloasSpec =
+        TestSpecFactory.createMinimalGloas(builder -> builder.gloasForkEpoch(gloasForkEpoch));
+    final StorageSystem gloasStorageSystem =
+        InMemoryStorageSystemBuilder.buildDefault(StateStorageMode.PRUNE, gloasSpec);
+    final ChainBuilder gloasChainBuilder = gloasStorageSystem.chainBuilder();
+    final RecentChainData gloasRecentChainData = gloasStorageSystem.recentChainData();
+    gloasStorageSystem.chainUpdater().initializeGenesis();
+    final StubBatchFactory gloasBatches =
+        new StubBatchFactory(eventThread, gloasSpec, BlobSidecarManager.NOOP, true);
+    final BatchImporter gloasBatchImporter = mock(BatchImporter.class);
+    when(gloasBatchImporter.importBatch(any()))
+        .thenAnswer(invocation -> gloasBatches.getImportResult(invocation.getArgument(0)));
+    final MultipeerCommonAncestorFinder gloasCommonAncestor =
+        mock(MultipeerCommonAncestorFinder.class);
+
+    final UInt64 commonAncestorSlot = gloasSpec.computeStartSlotAtEpoch(gloasForkEpoch).minus(1);
+    final UInt64 parentSlot = commonAncestorSlot.plus(BATCH_SIZE);
+    final UInt64 childSlot = parentSlot.plus(1);
+
+    for (UInt64 slot = commonAncestorSlot.plus(1);
+        slot.isLessThanOrEqualTo(parentSlot);
+        slot = slot.plus(1)) {
+      gloasChainBuilder.generateBlockAtSlot(slot);
+    }
+    // Two children of the last block of the first batch: the fork's child builds on its EMPTY
+    // variant, the target chain's child builds on its payload
+    final ChainBuilder fork = gloasChainBuilder.fork();
+    final SignedBeaconBlock emptyChildBlock =
+        fork.generateBlockAtSlot(childSlot, fork.createBlockOptionsBuildingOnEmptyParent(childSlot))
+            .getBlock();
+    final SignedBeaconBlock fullChildBlock =
+        gloasChainBuilder.generateBlockAtSlot(childSlot).getBlock();
+
+    final SignedBeaconBlock parentBlock = gloasChainBuilder.getBlockAtSlot(parentSlot);
+    final TargetChain gloasTargetChain =
+        chainWith(new SlotAndBlockRoot(childSlot, fullChildBlock.getRoot()), syncSource);
+    when(gloasCommonAncestor.findCommonAncestor(any()))
+        .thenReturn(completedFuture(commonAncestorSlot));
+
+    final BatchSync gloasSync =
+        BatchSync.create(
+            eventThread,
+            asyncRunner,
+            gloasRecentChainData,
+            gloasBatchImporter,
+            gloasBatches,
+            BATCH_SIZE.intValue(),
+            5,
+            gloasCommonAncestor,
+            timeProvider,
+            syncPreImportBlockChannel);
+
+    assertThat(gloasSync.syncToChain(gloasTargetChain)).isNotDone();
+
+    final Batch batch0 = gloasBatches.get(0);
+    final Batch batch1 = gloasBatches.get(1);
+
+    gloasBatches.receiveBlocks(
+        batch0,
+        gloasChainBuilder
+            .streamBlocksAndStates(commonAncestorSlot.plus(1), parentSlot)
+            .map(SignedBlockAndState::getBlock)
+            .toArray(SignedBeaconBlock[]::new));
+    gloasBatches.receiveExecutionPayloads(
+        batch0,
+        gloasChainBuilder
+            .streamExecutionPayloads(commonAncestorSlot.plus(1), parentSlot)
+            .toArray(SignedExecutionPayloadEnvelope[]::new));
+
+    // The first download of the second batch is on the fork and does not build on the payload
+    gloasBatches.receiveBlocks(batch1, emptyChildBlock);
+    gloasBatches.receiveExecutionPayloads(
+        batch1, fork.getExecutionPayloadAtSlot(childSlot).orElseThrow());
+    assertThat(batch0.getExecutionPayloadsByBlockRoot()).doesNotContainKey(parentBlock.getRoot());
+
+    // Its last block does not match the target chain, so it is rejected and re-downloaded with
+    // the target chain's child, which does build on the payload
+    gloasBatches.assertMarkedInvalid(batch1);
+    gloasBatches.receiveBlocks(batch1, fullChildBlock);
+    gloasBatches.receiveExecutionPayloads(
+        batch1, gloasChainBuilder.getExecutionPayloadAtSlot(childSlot).orElseThrow());
+
+    gloasBatches.assertNotMarkedInvalid(batch0);
+    assertThat(batch0.getExecutionPayloadsByBlockRoot()).containsKey(parentBlock.getRoot());
   }
 
   @Test

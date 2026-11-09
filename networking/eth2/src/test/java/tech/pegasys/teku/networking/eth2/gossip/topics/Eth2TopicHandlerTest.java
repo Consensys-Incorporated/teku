@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -18,24 +18,34 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 
 import io.libp2p.core.pubsub.ValidationResult;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
+import tech.pegasys.teku.infrastructure.async.ExceptionThrowingFutureSupplier;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
+import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
+import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.gossip.encoding.DecodingException;
 import tech.pegasys.teku.networking.eth2.gossip.encoding.GossipEncoding;
+import tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers.DecodedPrefixFilter;
 import tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers.Eth2TopicHandler;
+import tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers.GossipInFlightLimiter;
 import tech.pegasys.teku.networking.p2p.gossip.PreparedGossipMessage;
+import tech.pegasys.teku.networking.p2p.gossip.PreparedGossipMessage.DecodedMessagePrefix;
 import tech.pegasys.teku.service.serviceutils.ServiceCapacityExceededException;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -57,6 +67,10 @@ public class Eth2TopicHandlerTest {
   private final Bytes blockBytes = GossipEncoding.SSZ_SNAPPY.encode(block);
   private final StubAsyncRunner asyncRunner = new StubAsyncRunner();
   private final DebugDataDumper debugDataDumper = mock(DebugDataDumper.class);
+  private final StubMetricsSystem metricsSystem = new StubMetricsSystem();
+
+  @SuppressWarnings("unchecked")
+  private final OperationProcessor<SignedBeaconBlock> processor = mock(OperationProcessor.class);
 
   @BeforeEach
   public void setup() {
@@ -125,9 +139,9 @@ public class Eth2TopicHandlerTest {
     final Bytes invalidBytes = Bytes.fromHexString("0x0102");
     final SafeFuture<ValidationResult> result =
         topicHandler.handleMessage(topicHandler.prepareMessage(invalidBytes, Optional.empty()));
+    asyncRunner.executeQueuedActions();
     verify(debugDataDumper)
         .saveGossipMessageDecodingError(eq(topicHandler.getTopic()), any(), any(), any());
-    asyncRunner.executeQueuedActions();
 
     assertThatSafeFuture(result).isCompletedWithValue(ValidationResult.Invalid);
   }
@@ -148,9 +162,9 @@ public class Eth2TopicHandlerTest {
 
     final SafeFuture<ValidationResult> result =
         topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
+    asyncRunner.executeQueuedActions();
     verify(debugDataDumper)
         .saveGossipMessageDecodingError(eq(topicHandler.getTopic()), any(), any(), any());
-    asyncRunner.executeQueuedActions();
 
     assertThatSafeFuture(result).isCompletedWithValue(ValidationResult.Invalid);
   }
@@ -171,9 +185,9 @@ public class Eth2TopicHandlerTest {
 
     final SafeFuture<ValidationResult> result =
         topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
+    asyncRunner.executeQueuedActions();
     verify(debugDataDumper)
         .saveGossipMessageDecodingError(eq(topicHandler.getTopic()), any(), any(), any());
-    asyncRunner.executeQueuedActions();
 
     assertThatSafeFuture(result).isCompletedWithValue(ValidationResult.Invalid);
   }
@@ -194,9 +208,9 @@ public class Eth2TopicHandlerTest {
 
     final SafeFuture<ValidationResult> result =
         topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
+    asyncRunner.executeQueuedActions();
     verify(debugDataDumper)
         .saveGossipMessageDecodingError(eq(topicHandler.getTopic()), any(), any(), any());
-    asyncRunner.executeQueuedActions();
 
     assertThatSafeFuture(result).isCompletedWithValue(ValidationResult.Invalid);
   }
@@ -317,6 +331,203 @@ public class Eth2TopicHandlerTest {
   }
 
   @Test
+  public void handleMessage_shouldDeserializeOnAsyncRunner() {
+    final AtomicInteger deserializeCount = new AtomicInteger();
+    final MockEth2TopicHandler topicHandler =
+        new MockEth2TopicHandler(
+            recentChainData,
+            spec,
+            asyncRunner,
+            (b, __) -> SafeFuture.completedFuture(InternalValidationResult.ACCEPT),
+            debugDataDumper);
+    topicHandler.setDeserializer(
+        message -> {
+          deserializeCount.incrementAndGet();
+          return GossipEncoding.SSZ_SNAPPY.decodeMessage(
+              message, spec.getGenesisSchemaDefinitions().getSignedBeaconBlockSchema());
+        });
+
+    final SafeFuture<ValidationResult> result =
+        topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
+    assertThat(deserializeCount).hasValue(0);
+
+    asyncRunner.executeQueuedActions();
+    assertThat(deserializeCount).hasValue(1);
+    assertThatSafeFuture(result).isCompletedWithValue(ValidationResult.Valid);
+  }
+
+  @Test
+  public void handleMessage_shouldIgnoreWithoutQueueingWhenDecodedPrefixFilterRejects() {
+    final List<Bytes> filteredPrefixes = new ArrayList<>();
+    final MockEth2TopicHandler topicHandler =
+        new MockEth2TopicHandler(
+            recentChainData,
+            spec,
+            asyncRunner,
+            processor,
+            debugDataDumper,
+            prefix -> {
+              filteredPrefixes.add(prefix);
+              return false;
+            },
+            GossipInFlightLimiter.UNLIMITED);
+
+    final SafeFuture<ValidationResult> result =
+        topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
+
+    assertThatSafeFuture(result).isCompletedWithValue(ValidationResult.Ignore);
+    assertThat(asyncRunner.hasDelayedActions()).isFalse();
+    verifyNoInteractions(processor);
+    final Bytes uncompressedBlock = block.sszSerialize();
+    assertThat(filteredPrefixes)
+        .containsExactly(uncompressedBlock.slice(0, DecodedMessagePrefix.MAX_LENGTH));
+  }
+
+  @Test
+  public void handleMessage_shouldQueueWhenDecodedPrefixFilterAccepts() {
+    final MockEth2TopicHandler topicHandler =
+        new MockEth2TopicHandler(
+            recentChainData,
+            spec,
+            asyncRunner,
+            (b, __) -> SafeFuture.completedFuture(InternalValidationResult.ACCEPT),
+            debugDataDumper,
+            prefix -> true,
+            GossipInFlightLimiter.UNLIMITED);
+
+    final SafeFuture<ValidationResult> result =
+        topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
+    asyncRunner.executeQueuedActions();
+
+    assertThatSafeFuture(result).isCompletedWithValue(ValidationResult.Valid);
+  }
+
+  @Test
+  public void handleMessage_shouldNotFilterMessageThatCannotBeUncompressed() {
+    final MockEth2TopicHandler topicHandler =
+        new MockEth2TopicHandler(
+            recentChainData,
+            spec,
+            asyncRunner,
+            processor,
+            debugDataDumper,
+            prefix -> false,
+            GossipInFlightLimiter.UNLIMITED);
+
+    final SafeFuture<ValidationResult> result =
+        topicHandler.handleMessage(
+            topicHandler.prepareMessage(Bytes.fromHexString("0x0102"), Optional.empty()));
+    asyncRunner.executeQueuedActions();
+
+    // decoding rejects it, which penalizes the peer that sent it
+    assertThatSafeFuture(result).isCompletedWithValue(ValidationResult.Invalid);
+  }
+
+  @Test
+  public void handleMessage_shouldIgnoreMessagesOverInFlightLimit() {
+    final int blockSize = block.sszSerialize().size();
+    final GossipInFlightLimiter limiter =
+        new GossipInFlightLimiter(metricsSystem, "test", 2L * blockSize);
+    final SafeFuture<InternalValidationResult> firstValidation = new SafeFuture<>();
+    final SafeFuture<InternalValidationResult> secondValidation = new SafeFuture<>();
+    final List<SafeFuture<InternalValidationResult>> validations =
+        new ArrayList<>(List.of(firstValidation, secondValidation));
+    final MockEth2TopicHandler topicHandler =
+        new MockEth2TopicHandler(
+            recentChainData,
+            spec,
+            asyncRunner,
+            (b, __) -> validations.removeFirst(),
+            debugDataDumper,
+            DecodedPrefixFilter.ACCEPT_ALL,
+            limiter);
+
+    final SafeFuture<ValidationResult> first =
+        topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
+    final SafeFuture<ValidationResult> second =
+        topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
+    // weighed by the uncompressed size
+    assertThat(limiter.getInFlightBytes()).isEqualTo(2L * blockSize);
+
+    final SafeFuture<ValidationResult> third =
+        topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
+    assertThatSafeFuture(third).isCompletedWithValue(ValidationResult.Ignore);
+    assertThat(getInFlightLimitDiscardedCount()).isEqualTo(1);
+
+    // queued messages hold their share of the limit until processing completes
+    asyncRunner.executeQueuedActions();
+    assertThat(limiter.getInFlightBytes()).isEqualTo(2L * blockSize);
+    firstValidation.complete(InternalValidationResult.ACCEPT);
+    assertThatSafeFuture(first).isCompletedWithValue(ValidationResult.Valid);
+    assertThat(limiter.getInFlightBytes()).isEqualTo(blockSize);
+
+    validations.add(SafeFuture.completedFuture(InternalValidationResult.ACCEPT));
+    final SafeFuture<ValidationResult> fourth =
+        topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
+    asyncRunner.executeQueuedActions();
+    assertThatSafeFuture(fourth).isCompletedWithValue(ValidationResult.Valid);
+
+    secondValidation.completeExceptionally(new NullPointerException());
+    assertThatSafeFuture(second).isCompletedWithValue(ValidationResult.Invalid);
+    assertThat(limiter.getInFlightBytes()).isZero();
+  }
+
+  @Test
+  public void handleMessage_shouldReleaseInFlightLimitWhenQueueIsFull() {
+    final GossipInFlightLimiter limiter =
+        new GossipInFlightLimiter(metricsSystem, "test", 1_000_000);
+    final MockEth2TopicHandler topicHandler =
+        new MockEth2TopicHandler(
+            recentChainData,
+            spec,
+            new StubAsyncRunner() {
+              @Override
+              public <U> SafeFuture<U> runAsync(final ExceptionThrowingFutureSupplier<U> action) {
+                return SafeFuture.failedFuture(new RejectedExecutionException("full"));
+              }
+            },
+            processor,
+            debugDataDumper,
+            DecodedPrefixFilter.ACCEPT_ALL,
+            limiter);
+
+    final SafeFuture<ValidationResult> result =
+        topicHandler.handleMessage(topicHandler.prepareMessage(blockBytes, Optional.empty()));
+
+    assertThatSafeFuture(result).isCompletedWithValue(ValidationResult.Ignore);
+    assertThat(limiter.getInFlightBytes()).isZero();
+  }
+
+  @Test
+  public void handleMessage_shouldWeighMessageThatCannotBeUncompressedByCompressedSize() {
+    final GossipInFlightLimiter limiter =
+        new GossipInFlightLimiter(metricsSystem, "test", 1_000_000);
+    final MockEth2TopicHandler topicHandler =
+        new MockEth2TopicHandler(
+            recentChainData,
+            spec,
+            asyncRunner,
+            processor,
+            debugDataDumper,
+            DecodedPrefixFilter.ACCEPT_ALL,
+            limiter);
+    final Bytes invalidBytes = Bytes.fromHexString("0x0102");
+
+    final SafeFuture<ValidationResult> result =
+        topicHandler.handleMessage(topicHandler.prepareMessage(invalidBytes, Optional.empty()));
+    assertThat(limiter.getInFlightBytes()).isEqualTo(invalidBytes.size());
+
+    asyncRunner.executeQueuedActions();
+    assertThatSafeFuture(result).isCompletedWithValue(ValidationResult.Invalid);
+    assertThat(limiter.getInFlightBytes()).isZero();
+  }
+
+  private long getInFlightLimitDiscardedCount() {
+    return metricsSystem.getLabelledCounterValue(
+        TekuMetricCategory.NETWORK, "gossip_messages_in_flight_limit_discarded_total", "test");
+  }
+
+  @Test
   public void getMaxMessageSize_shouldAllowWorstCaseSnappyExpansionOfMaxPayload() {
     final MockEth2TopicHandler topicHandler =
         new MockEth2TopicHandler(
@@ -344,6 +555,24 @@ public class Eth2TopicHandlerTest {
         final AsyncRunner asyncRunner,
         final OperationProcessor<SignedBeaconBlock> processor,
         final DebugDataDumper debugDataDumper) {
+      this(
+          recentChainData,
+          spec,
+          asyncRunner,
+          processor,
+          debugDataDumper,
+          DecodedPrefixFilter.ACCEPT_ALL,
+          GossipInFlightLimiter.UNLIMITED);
+    }
+
+    protected MockEth2TopicHandler(
+        final RecentChainData recentChainData,
+        final Spec spec,
+        final AsyncRunner asyncRunner,
+        final OperationProcessor<SignedBeaconBlock> processor,
+        final DebugDataDumper debugDataDumper,
+        final DecodedPrefixFilter decodedPrefixFilter,
+        final GossipInFlightLimiter inFlightLimiter) {
       super(
           recentChainData,
           asyncRunner,
@@ -355,7 +584,9 @@ public class Eth2TopicHandlerTest {
               spec, spec.getForkSchedule().getFork(UInt64.ZERO), message -> UInt64.ZERO),
           spec.getGenesisSchemaDefinitions().getSignedBeaconBlockSchema(),
           spec.getNetworkingConfig(),
-          debugDataDumper);
+          debugDataDumper,
+          decodedPrefixFilter,
+          inFlightLimiter);
       this.forkDigest =
           recentChainData.getForkDigestByMilestone(SpecMilestone.PHASE0).orElseThrow();
       deserializer =

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -20,7 +20,10 @@ import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.bls.BLS;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
@@ -36,6 +39,7 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
  * PayloadAttestationMessage} which all share the same {@link PayloadAttestationData}.
  */
 class MatchingDataPayloadAttestationGroup {
+  private static final Logger LOG = LogManager.getLogger();
 
   private final Map<Integer, PayloadAttestationMessage> payloadAttestationMessages =
       new ConcurrentHashMap<>();
@@ -70,7 +74,15 @@ class MatchingDataPayloadAttestationGroup {
         == null;
   }
 
-  PayloadAttestation createAggregatedPayloadAttestation(final IntList payloadTimelinessCommittee) {
+  /**
+   * Aggregates the payload attestation messages of this group according to the positions of their
+   * validators in the Payload Timeliness Committee.
+   *
+   * @return the aggregated payload attestation, or empty if the aggregated signature is the point
+   *     at infinity, which is invalid with non-empty participation
+   */
+  Optional<PayloadAttestation> createAggregatedPayloadAttestation(
+      final IntList payloadTimelinessCommittee) {
     checkArgument(!payloadAttestationMessages.isEmpty(), "Nothing to aggregate");
     // relative positions of the validator indices with respect to the Payload Timeliness Committee
     final IntList setBitIndices = new IntArrayList();
@@ -86,11 +98,19 @@ class MatchingDataPayloadAttestationGroup {
         signatures.add(payloadAttestationMessage.getSignature());
       }
     }
+    final BLSSignature aggregatedSignature = BLS.aggregate(signatures);
+    if (aggregatedSignature.isInfinity()) {
+      LOG.debug(
+          "Not creating payload attestation with infinity signature for slot {}, block root {}",
+          data.getSlot(),
+          data.getBeaconBlockRoot());
+      return Optional.empty();
+    }
     final PayloadAttestationSchema payloadAttestationSchema =
         SchemaDefinitionsGloas.required(spec.atSlot(data.getSlot()).getSchemaDefinitions())
             .getPayloadAttestationSchema();
     final SszBitvector aggregationBits =
         payloadAttestationSchema.getAggregationBitsSchema().ofBits(setBitIndices);
-    return payloadAttestationSchema.create(aggregationBits, data, BLS.aggregate(signatures));
+    return Optional.of(payloadAttestationSchema.create(aggregationBits, data, aggregatedSignature));
   }
 }

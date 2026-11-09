@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -37,6 +37,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
@@ -455,6 +456,14 @@ public class NoOpDatabase implements Database {
   public void pruneBestLightClientUpdatesBefore(final UInt64 period) {}
 
   @Override
+  public void storeLightClientBootstrap(final LightClientBootstrap bootstrap) {}
+
+  @Override
+  public Optional<LightClientBootstrap> getLightClientBootstrap(final UInt64 slot) {
+    return Optional.empty();
+  }
+
+  @Override
   public void setFirstCustodyIncompleteSlot(final UInt64 slot) {}
 
   @Override
@@ -468,6 +477,9 @@ public class NoOpDatabase implements Database {
 
   @Override
   public void compactStorage() {}
+
+  @Override
+  public void archiveSidecarsProofs(final UInt64 startSlot, final UInt64 tillSlotInclusive) {}
 
   @Override
   public void close() {}

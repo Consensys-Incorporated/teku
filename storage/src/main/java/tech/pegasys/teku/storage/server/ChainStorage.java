@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -14,10 +14,14 @@
 package tech.pegasys.teku.storage.server;
 
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -38,6 +42,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
@@ -57,6 +62,7 @@ import tech.pegasys.teku.storage.api.VoteUpdateChannel;
 import tech.pegasys.teku.storage.api.WeakSubjectivityState;
 import tech.pegasys.teku.storage.api.WeakSubjectivityUpdate;
 import tech.pegasys.teku.storage.archive.BlobSidecarsArchiver;
+import tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreDeserializationException;
 import tech.pegasys.teku.storage.server.state.FinalizedStateCache;
 
 public class ChainStorage
@@ -72,6 +78,8 @@ public class ChainStorage
   private final FinalizedStateCache finalizedStateCache;
   private final StateStorageMode dataStorageMode;
   private final BlobSidecarsArchiver blobSidecarsArchiver;
+  private final Consumer<UInt64> sidecarStoredListener;
+  private final Spec spec;
 
   private Optional<OnDiskStoreData> cachedStoreData = Optional.empty();
 
@@ -79,11 +87,15 @@ public class ChainStorage
       final Database database,
       final FinalizedStateCache finalizedStateCache,
       final StateStorageMode dataStorageMode,
-      final BlobSidecarsArchiver blobSidecarsArchiver) {
+      final BlobSidecarsArchiver blobSidecarsArchiver,
+      final Consumer<UInt64> sidecarStoredListener,
+      final Spec spec) {
     this.database = database;
     this.finalizedStateCache = finalizedStateCache;
     this.dataStorageMode = dataStorageMode;
     this.blobSidecarsArchiver = blobSidecarsArchiver;
+    this.sidecarStoredListener = sidecarStoredListener;
+    this.spec = spec;
   }
 
   public static ChainStorage create(
@@ -91,14 +103,17 @@ public class ChainStorage
       final Spec spec,
       final StateStorageMode dataStorageMode,
       final int stateRebuildTimeoutSeconds,
-      final BlobSidecarsArchiver blobSidecarsArchiver) {
+      final BlobSidecarsArchiver blobSidecarsArchiver,
+      final Consumer<UInt64> sidecarStoredListener) {
     final int finalizedStateCacheSize = spec.getSlotsPerEpoch(SpecConfig.GENESIS_EPOCH) * 3;
     return new ChainStorage(
         database,
         new FinalizedStateCache(
             spec, database, finalizedStateCacheSize, true, stateRebuildTimeoutSeconds),
         dataStorageMode,
-        blobSidecarsArchiver);
+        blobSidecarsArchiver,
+        sidecarStoredListener,
+        spec);
   }
 
   private synchronized Optional<OnDiskStoreData> getStore() {
@@ -444,6 +459,105 @@ public class ChainStorage
   }
 
   @Override
+  public SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyDataColumnIdentifiers(
+      final UInt64 slot) {
+    return getDataColumnIdentifiers(slot)
+        .thenApply(identifiers -> includeArchivedCustodyIdentifiers(slot, identifiers));
+  }
+
+  @Override
+  public SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyDataColumnIdentifiers(
+      final UInt64 startSlot, final UInt64 endSlot) {
+    return SafeFuture.of(
+        () -> {
+          try (final Stream<DataColumnSlotAndIdentifier> identifiers =
+              database.streamDataColumnIdentifiers(startSlot, endSlot)) {
+            final Map<UInt64, List<DataColumnSlotAndIdentifier>> identifiersBySlot =
+                identifiers.collect(
+                    Collectors.groupingBy(
+                        DataColumnSlotAndIdentifier::slot, TreeMap::new, Collectors.toList()));
+            return identifiersBySlot.entrySet().stream()
+                .flatMap(
+                    entry ->
+                        includeArchivedCustodyIdentifiers(entry.getKey(), entry.getValue())
+                            .stream())
+                .toList();
+          }
+        });
+  }
+
+  private List<DataColumnSlotAndIdentifier> includeArchivedCustodyIdentifiers(
+      final UInt64 slot, final List<DataColumnSlotAndIdentifier> identifiers) {
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElse(0);
+    final int halfColumns = numberOfColumns / 2;
+    if (numberOfColumns == 0 || identifiers.size() < halfColumns) {
+      return identifiers;
+    }
+    if (hasCompletePhysicalColumns(identifiers, numberOfColumns)) {
+      return identifiers;
+    }
+    // Read proofs after identifiers so concurrent archival cannot hide availability.
+    // Avoid loading the finalized block entirely when no archive exists.
+    if (!hasCompleteSidecarArchive(slot, halfColumns)) {
+      return identifiers;
+    }
+    final Optional<Bytes32> canonicalRoot =
+        identifiers.stream()
+            .map(DataColumnSlotAndIdentifier::blockRoot)
+            .distinct()
+            .filter(
+                root -> database.getSlotForFinalizedBlockRoot(root).map(slot::equals).orElse(false))
+            .findFirst();
+    if (canonicalRoot.isEmpty()) {
+      return identifiers;
+    }
+    return expandCanonicalCustodyIdentifiers(
+        slot, canonicalRoot.get(), identifiers, numberOfColumns);
+  }
+
+  private boolean hasCompleteSidecarArchive(final UInt64 slot, final int halfColumns) {
+    try {
+      return database
+          .getDataColumnSidecarsProofs(slot)
+          .map(proofs -> proofs.size() == halfColumns)
+          .orElse(false);
+    } catch (final KvStoreDeserializationException error) {
+      LOG.warn("Ignoring malformed archived proofs for custody at slot {}", slot, error);
+      return false;
+    }
+  }
+
+  private boolean hasCompletePhysicalColumns(
+      final List<DataColumnSlotAndIdentifier> identifiers, final int numberOfColumns) {
+    // Database identifiers are unique. A complete set for one root needs no archive.
+    return identifiers.size() == numberOfColumns
+        && identifiers.stream()
+            .allMatch(
+                identifier ->
+                    identifier.blockRoot().equals(identifiers.getFirst().blockRoot())
+                        && identifier.columnIndex().isLessThan(numberOfColumns));
+  }
+
+  private List<DataColumnSlotAndIdentifier> expandCanonicalCustodyIdentifiers(
+      final UInt64 slot,
+      final Bytes32 canonicalRoot,
+      final List<DataColumnSlotAndIdentifier> identifiers,
+      final int numberOfColumns) {
+    final int halfColumns = numberOfColumns / 2;
+    final Set<DataColumnSlotAndIdentifier> available = new HashSet<>(identifiers);
+    for (int index = 0; index < halfColumns; index++) {
+      if (!available.contains(
+          new DataColumnSlotAndIdentifier(slot, canonicalRoot, UInt64.valueOf(index)))) {
+        return identifiers;
+      }
+    }
+    for (int index = halfColumns; index < numberOfColumns; index++) {
+      available.add(new DataColumnSlotAndIdentifier(slot, canonicalRoot, UInt64.valueOf(index)));
+    }
+    return available.stream().sorted().toList();
+  }
+
+  @Override
   public SafeFuture<List<DataColumnSlotAndIdentifier>> getNonCanonicalDataColumnIdentifiers(
       final UInt64 slot) {
     return SafeFuture.of(
@@ -497,7 +611,8 @@ public class ChainStorage
 
   @Override
   public SafeFuture<Void> onNewSidecar(final DataColumnSidecar sidecar) {
-    return SafeFuture.fromRunnable(() -> database.addSidecar(sidecar));
+    return SafeFuture.fromRunnable(() -> database.addSidecar(sidecar))
+        .thenRun(() -> sidecarStoredListener.accept(sidecar.getSlot()));
   }
 
   @Override
@@ -536,5 +651,15 @@ public class ChainStorage
   @Override
   public SafeFuture<Void> onPruneBestLightClientUpdatesBefore(final UInt64 period) {
     return SafeFuture.fromRunnable(() -> database.pruneBestLightClientUpdatesBefore(period));
+  }
+
+  @Override
+  public SafeFuture<Void> onNewLightClientBootstrap(final LightClientBootstrap bootstrap) {
+    return SafeFuture.fromRunnable(() -> database.storeLightClientBootstrap(bootstrap));
+  }
+
+  @Override
+  public SafeFuture<Optional<LightClientBootstrap>> getLightClientBootstrap(final UInt64 slot) {
+    return SafeFuture.of(() -> database.getLightClientBootstrap(slot));
   }
 }

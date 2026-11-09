@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -69,6 +69,7 @@ class Eth2PeerTest {
   private final RateTracker blobSidecarsRateTracker = mock(RateTracker.class);
   private final RateTracker dataColumnSidecarsRateTracker = mock(RateTracker.class);
   private final RateTracker executionPayloadEnvelopesRateTracker = mock(RateTracker.class);
+  private final RateTracker lightClientUpdatesRateTracker = mock(RateTracker.class);
   private final RateTracker rateTracker = mock(RateTracker.class);
   private final MetricsSystem metricsSystem = mock(MetricsSystem.class);
   private final TimeProvider timeProvider = mock(TimeProvider.class);
@@ -93,6 +94,7 @@ class Eth2PeerTest {
           blobSidecarsRateTracker,
           dataColumnSidecarsRateTracker,
           executionPayloadEnvelopesRateTracker,
+          lightClientUpdatesRateTracker,
           rateTracker,
           metricsSystem,
           timeProvider,

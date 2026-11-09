@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -2521,6 +2521,11 @@ public final class DataStructureUtil {
   }
 
   public LightClientHeader randomLightClientHeader(final UInt64 slot) {
+    return randomLightClientHeader(slot, randomBeaconBlockHeader());
+  }
+
+  public LightClientHeader randomLightClientHeader(
+      final UInt64 slot, final BeaconBlockHeader beaconBlockHeader) {
     final LightClientHeaderSchema<?> headerSchema =
         getAltairSchemaDefinitions(slot).getLightClientHeaderSchema();
     final SpecMilestone milestone = spec.atSlot(slot).getMilestone();
@@ -2528,26 +2533,36 @@ public final class DataStructureUtil {
     if (milestone.isGreaterThanOrEqualTo(SpecMilestone.GLOAS)) {
       final LightClientHeaderSchemaGloas gloasSchema = headerSchema.toVersionGloasRequired();
       return gloasSchema.create(
-          randomBeaconBlockHeader(),
+          beaconBlockHeader,
           SszBytes32.of(randomBytes32()),
           randomSszBytes32Vector(gloasSchema.getExecutionBranchSchema(), this::randomBytes32));
     }
     if (milestone.isGreaterThanOrEqualTo(SpecMilestone.CAPELLA)) {
       final LightClientHeaderSchemaCapella capellaSchema = headerSchema.toVersionCapellaRequired();
       return capellaSchema.create(
-          randomBeaconBlockHeader(),
+          beaconBlockHeader,
           randomExecutionPayloadHeader(spec.atSlot(slot)),
           randomSszBytes32Vector(capellaSchema.getExecutionBranchSchema(), this::randomBytes32));
     }
-    return headerSchema.create(randomBeaconBlockHeader());
+    return headerSchema.create(beaconBlockHeader);
   }
 
   public LightClientBootstrap randomLightClientBoostrap(final UInt64 slot) {
+    return randomLightClientBoostrap(slot, randomLightClientHeader(slot));
+  }
+
+  public LightClientBootstrap randomLightClientBoostrapWithHeaderSlot(final UInt64 slot) {
+    return randomLightClientBoostrap(
+        slot, randomLightClientHeader(slot, randomBeaconBlockHeader(slot, randomUInt64())));
+  }
+
+  private LightClientBootstrap randomLightClientBoostrap(
+      final UInt64 slot, final LightClientHeader header) {
     final LightClientBootstrapSchema bootstrapSchema =
         getAltairSchemaDefinitions(slot).getLightClientBootstrapSchema();
 
     return bootstrapSchema.create(
-        randomLightClientHeader(slot),
+        header,
         randomSyncCommittee(),
         randomSszBytes32Vector(
             bootstrapSchema.getSyncCommitteeBranchSchema(), this::randomBytes32));
@@ -2613,7 +2628,8 @@ public final class DataStructureUtil {
   }
 
   public LightClientUpdateWithContext randomLightClientUpdateWithContext(final UInt64 slot) {
-    return new LightClientUpdateWithContext(randomBytes4(), randomLightClientUpdate(slot));
+    return new LightClientUpdateWithContext(
+        randomBytes4(), spec.atSlot(slot).getMilestone(), randomLightClientUpdate(slot));
   }
 
   public Withdrawal randomWithdrawal() {
@@ -2756,7 +2772,7 @@ public final class DataStructureUtil {
     final BlobSchema blobSchema = getDenebSchemaDefinitions(randomSlot()).getBlobSchema();
     List<Bytes> blobElements =
         Stream.generate(this::randomBlobElement).limit(blobSchema.getLength() / 32).toList();
-    return blobSchema.create(Bytes.wrap(blobElements));
+    return blobSchema.create(Bytes.concatenate(blobElements));
   }
 
   private Bytes randomBlobElement() {
@@ -3079,7 +3095,9 @@ public final class DataStructureUtil {
           lightClientHeaderAtSlot(attestedSlot),
           randomSyncCommittee(),
           branch(schema.getSyncCommitteeBranchSchema(), syncCommitteeBranch),
-          lightClientHeaderAtSlot(finalizedSlot),
+          getAltairSchemaDefinitions(attestedSlot)
+              .getLightClientHeaderSchema()
+              .create(randomBeaconBlockHeader(finalizedSlot, UInt64.ZERO)),
           branch(schema.getFinalityBranchSchema(), finalityBranch),
           syncAggregate(),
           SszUInt64.of(signatureSlot));

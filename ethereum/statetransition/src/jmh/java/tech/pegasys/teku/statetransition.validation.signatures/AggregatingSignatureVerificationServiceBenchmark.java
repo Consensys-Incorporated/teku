@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@
 package tech.pegasys.teku.statetransition.validation.signatures;
 
 import com.google.common.collect.Streams;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -67,7 +68,9 @@ public class AggregatingSignatureVerificationServiceBenchmark {
           2,
           15_000,
           250,
-          false);
+          false,
+          SignatureVerificationMode.GATHER_AND_GROUP,
+          Duration.ofMillis(10));
 
   private final int signaturesToVerify = 10_000;
 

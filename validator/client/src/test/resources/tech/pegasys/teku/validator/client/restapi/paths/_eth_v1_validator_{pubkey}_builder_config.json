@@ -1,0 +1,242 @@
+{
+  "get" : {
+    "tags" : [ "Builder Config" ],
+    "operationId" : "getBuilderConfig",
+    "summary" : "Get Builder Configuration",
+    "description" : "Get the builder configuration in effect for an individual validator public key, with omitted values resolved.\nA key with no configuration of its own is returned with the validator client's own configuration.\n",
+    "parameters" : [ {
+      "name" : "pubkey",
+      "required" : true,
+      "in" : "path",
+      "schema" : {
+        "type" : "string",
+        "pattern" : "^0x[a-fA-F0-9]{96}$",
+        "example" : "0x93247f2209abcacf57b75a51dafae777f9dd38bc7053d1af526f220a7489a6d3a2753e5f3e8b1cfe39b56f43611df74a"
+      }
+    } ],
+    "security" : [ {
+      "bearerAuth" : [ ]
+    } ],
+    "responses" : {
+      "200" : {
+        "description" : "Success response",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/GetBuilderConfigResponse"
+            }
+          }
+        }
+      },
+      "401" : {
+        "description" : "Unauthorized, no token is found",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "403" : {
+        "description" : "Forbidden, a token is found but is invalid",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "404" : {
+        "description" : "Not found",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "400" : {
+        "description" : "The request could not be processed, check the response for more information.",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "500" : {
+        "description" : "Internal server error",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      }
+    }
+  },
+  "post" : {
+    "tags" : [ "Builder Config" ],
+    "operationId" : "setBuilderConfig",
+    "summary" : "Set Builder Configuration",
+    "description" : "Set the builder configuration for an individual validator public key. The submission replaces\nthe key's stored configuration in full; the server MUST NOT merge it with what was stored\nbefore.\n\nEach entry in the `builders` array MUST contain a `url`, and no two entries may share both\ntheir `url` and their `auth_data`. The server MUST reject a submission that violates either\nrule with a 400 rather than storing a partial list or silently dropping an entry.\n\nA `POST` body of `{}` stores a configuration with no overrides, which resolves identically to\nhaving none, so it is behaviorally equivalent to `DELETE`. An empty `builders` array is a\nconfiguration that names no builders, not a removal.\n",
+    "parameters" : [ {
+      "name" : "pubkey",
+      "required" : true,
+      "in" : "path",
+      "schema" : {
+        "type" : "string",
+        "pattern" : "^0x[a-fA-F0-9]{96}$",
+        "example" : "0x93247f2209abcacf57b75a51dafae777f9dd38bc7053d1af526f220a7489a6d3a2753e5f3e8b1cfe39b56f43611df74a"
+      }
+    } ],
+    "requestBody" : {
+      "content" : {
+        "application/json" : {
+          "schema" : {
+            "$ref" : "#/components/schemas/BuilderConfig"
+          }
+        }
+      }
+    },
+    "security" : [ {
+      "bearerAuth" : [ ]
+    } ],
+    "responses" : {
+      "202" : {
+        "description" : "Success",
+        "content" : { }
+      },
+      "401" : {
+        "description" : "Unauthorized, no token is found",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "403" : {
+        "description" : "Forbidden, a token is found but is invalid",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "404" : {
+        "description" : "Not found",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "400" : {
+        "description" : "The request could not be processed, check the response for more information.",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "500" : {
+        "description" : "Internal server error",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      }
+    }
+  },
+  "delete" : {
+    "tags" : [ "Builder Config" ],
+    "operationId" : "deleteBuilderConfig",
+    "summary" : "Delete Builder Configuration",
+    "description" : "Remove this public key's builder configuration entirely.\nThe key then follows the validator client's own configuration.\n",
+    "parameters" : [ {
+      "name" : "pubkey",
+      "required" : true,
+      "in" : "path",
+      "schema" : {
+        "type" : "string",
+        "pattern" : "^0x[a-fA-F0-9]{96}$",
+        "example" : "0x93247f2209abcacf57b75a51dafae777f9dd38bc7053d1af526f220a7489a6d3a2753e5f3e8b1cfe39b56f43611df74a"
+      }
+    } ],
+    "security" : [ {
+      "bearerAuth" : [ ]
+    } ],
+    "responses" : {
+      "204" : {
+        "description" : "Successfully removed the builder configuration, or there was none set for the requested public key.",
+        "content" : { }
+      },
+      "403" : {
+        "description" : "Forbidden, a token is found but is invalid",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "401" : {
+        "description" : "Unauthorized, no token is found",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "404" : {
+        "description" : "Not found",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "400" : {
+        "description" : "The request could not be processed, check the response for more information.",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "500" : {
+        "description" : "Internal server error",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      }
+    }
+  }
+}

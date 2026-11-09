@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -77,7 +77,7 @@ public class LibP2PGossipNetwork implements GossipNetwork {
     final Topic libP2PTopic = new Topic(topic);
     final GossipHandler gossipHandler =
         new GossipHandler(metricsSystem, libP2PTopic, publisher, topicHandler);
-    PubsubSubscription subscription = gossip.subscribe(gossipHandler, libP2PTopic);
+    final PubsubSubscription subscription = gossip.subscribe(gossipHandler, libP2PTopic);
     return new LibP2PTopicChannel(gossipHandler, subscription);
   }
 

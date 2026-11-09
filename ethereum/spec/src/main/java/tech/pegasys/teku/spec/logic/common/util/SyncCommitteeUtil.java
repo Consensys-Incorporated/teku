@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -364,9 +364,14 @@ public class SyncCommitteeUtil {
 
     if (signatures.isEmpty()) {
       return schema.createEmpty();
-    } else {
-      return schema.create(participantIndices, BLS.aggregate(signatures));
     }
+    final BLSSignature aggregatedSignature = BLS.aggregate(signatures);
+    if (aggregatedSignature.isInfinity()) {
+      // An aggregate signature at the point at infinity is invalid with non-empty participation:
+      // reset the participation to empty
+      return schema.createEmpty();
+    }
+    return schema.create(participantIndices, aggregatedSignature);
   }
 
   public void setGenesisStateSyncCommittees(final MutableBeaconState state) {

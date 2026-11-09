@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -12,6 +12,8 @@
  */
 
 package tech.pegasys.teku.networking.eth2.peers;
+
+import static tech.pegasys.teku.spec.constants.NetworkConstants.MAX_REQUEST_LIGHT_CLIENT_UPDATES;
 
 import java.util.Optional;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
@@ -90,6 +92,8 @@ public class Eth2PeerFactory {
             "data_column_sidecars"),
         RateTracker.create(
             peerBlocksRateLimit, TIME_OUT, timeProvider, "execution_payload_envelopes"),
+        RateTracker.create(
+            MAX_REQUEST_LIGHT_CLIENT_UPDATES, TIME_OUT, timeProvider, "light_client_updates"),
         RateTracker.create(peerRequestLimit, TIME_OUT, timeProvider, "request_tracker"),
         metricsSystem,
         timeProvider,

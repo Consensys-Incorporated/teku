@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -246,9 +246,13 @@ public class MiscHelpersFulu extends MiscHelpersElectra {
   }
 
   public boolean verifyDataColumnSidecar(final DataColumnSidecar dataColumnSidecar) {
+    if (!(dataColumnSidecar instanceof DataColumnSidecarFulu dataColumnSidecarFulu)) {
+      LOG.trace(
+          "DataColumnSidecar is a {}, expected a Fulu data column sidecar",
+          dataColumnSidecar.getClass().getSimpleName());
+      return false;
+    }
     final int numberOfColumns = specConfigFulu.getNumberOfColumns();
-    final DataColumnSidecarFulu dataColumnSidecarFulu =
-        DataColumnSidecarFulu.required(dataColumnSidecar);
     final UInt64 epoch = computeEpochAtSlot(dataColumnSidecarFulu.getSlot());
 
     if (!dataColumnSidecarFulu.getIndex().isLessThan(numberOfColumns)) {

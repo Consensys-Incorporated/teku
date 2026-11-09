@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -289,17 +289,21 @@ public abstract class AbstractSszProgressiveListSchema<
   private int sszSerializeFixed(
       final TreeNode dataNode, final SszWriter writer, final int elementsCount) {
     if (elementSchema instanceof AbstractSszPrimitiveSchema) {
-      // Primitive packing: multiple values per 32-byte leaf chunk
+      // Primitive packing: multiple values per 32-byte leaf chunk. Chunks are laid out in order
+      // across the spine levels (level 0, then level 1, ...), so a single in-order traversal from
+      // the first to the last chunk visits every data leaf exactly once without walking the tree
+      // from the root per chunk.
       final int chunksCount = getChunks(elementsCount);
-      int bytesCnt = 0;
-      for (int c = 0; c < chunksCount; c++) {
-        final long gIdx = ProgressiveTreeUtil.getElementGeneralizedIndex(c);
-        final LeafNode leafNode = (LeafNode) dataNode.get(gIdx);
-        final Bytes data = leafNode.getData();
-        writer.write(data);
-        bytesCnt += data.size();
-      }
-      return bytesCnt;
+      final int[] bytesCnt = new int[1];
+      TreeUtil.iterateLeavesData(
+          dataNode,
+          ProgressiveTreeUtil.getElementGeneralizedIndex(0),
+          ProgressiveTreeUtil.getElementGeneralizedIndex(chunksCount - 1),
+          leafData -> {
+            writer.write(leafData);
+            bytesCnt[0] += leafData.size();
+          });
+      return bytesCnt[0];
     } else {
       // Fixed-size composite elements: one per chunk
       int bytesCnt = 0;
@@ -503,7 +507,7 @@ public abstract class AbstractSszProgressiveListSchema<
     final long dataRootGIndex = GIndexUtil.gIdxLeftGIndex(rootGIndex);
 
     final TreeNode dataTree =
-        loadProgressiveDataTree(nodeSource, dataHash, dataRootGIndex, totalChunks);
+        loadProgressiveDataTree(nodeSource, dataHash, dataRootGIndex, totalChunks, length);
 
     return BranchNode.create(dataTree, toLengthNode(length));
   }
@@ -601,8 +605,24 @@ public abstract class AbstractSszProgressiveListSchema<
       final TreeNodeSource nodeSource,
       final Bytes32 dataHash,
       final long dataRootGIndex,
-      final int totalChunks) {
+      final int totalChunks,
+      final int length) {
     final int superNodeDepth = getSuperNodeDepth();
+    // Node stores do not persist leaves of <= 32 bytes and hand back the zero-padded 32-byte
+    // chunk on load, so a partially filled last primitive chunk must be trimmed back to its
+    // canonical SSZ length (serialization writes the leaf data as-is).
+    final long lastChunkGIndex;
+    final int lastChunkBytes;
+    if (elementSchema.isPrimitive() && totalChunks > 0) {
+      lastChunkGIndex =
+          GIndexUtil.gIdxCompose(
+              dataRootGIndex, ProgressiveTreeUtil.getElementGeneralizedIndex(totalChunks - 1));
+      final int elementsInLastChunk = length - (totalChunks - 1) * elementsPerChunk;
+      lastChunkBytes = bitsCeilToBytes(elementsInLastChunk * getSszElementBitSize());
+    } else {
+      lastChunkGIndex = GIndexUtil.SELF_G_INDEX;
+      lastChunkBytes = LeafNode.MAX_BYTE_SIZE;
+    }
     return ProgressiveTreeUtil.loadProgressiveSpine(
         nodeSource,
         dataHash,
@@ -610,7 +630,14 @@ public abstract class AbstractSszProgressiveListSchema<
         totalChunks,
         (levelHash, levelGIndex, chunksInLevel, depth) ->
             loadLevelSubtree(
-                nodeSource, levelHash, levelGIndex, chunksInLevel, depth, superNodeDepth));
+                nodeSource,
+                levelHash,
+                levelGIndex,
+                chunksInLevel,
+                depth,
+                superNodeDepth,
+                lastChunkGIndex,
+                lastChunkBytes));
   }
 
   private TreeNode loadLevelSubtree(
@@ -619,12 +646,14 @@ public abstract class AbstractSszProgressiveListSchema<
       final long levelGIndex,
       final int chunksInLevel,
       final int depth,
-      final int superNodeDepth) {
+      final int superNodeDepth,
+      final long lastChunkGIndex,
+      final int lastChunkBytes) {
     final int childDepth = Math.max(0, depth - superNodeDepth);
 
     if (depth == 0) {
       // Level 0: single chunk
-      return loadChunkNode(nodeSource, levelHash, levelGIndex);
+      return loadChunkNode(nodeSource, levelHash, levelGIndex, lastChunkGIndex, lastChunkBytes);
     } else if (childDepth == 0) {
       // SuperNode covers entire level subtree
       if (TreeUtil.ZERO_TREES_BY_ROOT.containsKey(levelHash)) {
@@ -641,7 +670,8 @@ public abstract class AbstractSszProgressiveListSchema<
       final LoadingUtil.ChildLoader childLoader =
           superNodeDepth == 0
               ? (childNodeSource, childHash, childGIndex) ->
-                  loadChunkNode(childNodeSource, childHash, childGIndex)
+                  loadChunkNode(
+                      childNodeSource, childHash, childGIndex, lastChunkGIndex, lastChunkBytes)
               : (childNodeSource, childHash, childGIndex) -> {
                 if (TreeUtil.ZERO_TREES_BY_ROOT.containsKey(childHash)) {
                   return new SszSuperNode(
@@ -663,17 +693,22 @@ public abstract class AbstractSszProgressiveListSchema<
   }
 
   private TreeNode loadChunkNode(
-      final TreeNodeSource nodeSource, final Bytes32 chunkHash, final long chunkGIndex) {
+      final TreeNodeSource nodeSource,
+      final Bytes32 chunkHash,
+      final long chunkGIndex,
+      final long lastChunkGIndex,
+      final int lastChunkBytes) {
+    final int chunkBytes = chunkGIndex == lastChunkGIndex ? lastChunkBytes : LeafNode.MAX_BYTE_SIZE;
     if (TreeUtil.ZERO_TREES_BY_ROOT.containsKey(chunkHash)) {
       if (elementSchema.isPrimitive()) {
-        return LeafNode.ZERO_LEAVES[LeafNode.MAX_BYTE_SIZE];
+        return LeafNode.ZERO_LEAVES[chunkBytes];
       } else {
         return elementSchema.getDefaultTree();
       }
     }
     if (elementSchema.isPrimitive()) {
       final Bytes data = nodeSource.loadLeafNode(chunkHash, chunkGIndex);
-      return LeafNode.create(data);
+      return LeafNode.create(data.size() > chunkBytes ? data.slice(0, chunkBytes) : data);
     } else {
       return elementSchema.loadBackingNodes(nodeSource, chunkHash, chunkGIndex);
     }

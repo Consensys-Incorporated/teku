@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -89,7 +89,10 @@ public class RandomChainBuilderForkChoiceStrategy implements ReadOnlyForkChoiceS
 
   @Override
   public Optional<ForkChoiceNode> getParentBeaconBlockNode(final ForkChoiceNode node) {
-    return Optional.empty();
+    // Single-variant tree: the parent beacon block node is the base (PENDING) node of the parent
+    return getBlock(node.blockRoot())
+        .flatMap(block -> getBlock(block.getParentRoot()))
+        .map(parent -> ForkChoiceNode.createBase(parent.getRoot()));
   }
 
   @Override

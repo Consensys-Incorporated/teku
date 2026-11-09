@@ -33,29 +33,7 @@
             "schema" : {
               "type" : "array",
               "items" : {
-                "type" : "object",
-                "required" : [ "version", "data" ],
-                "properties" : {
-                  "version" : {
-                    "type" : "string",
-                    "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze" ]
-                  },
-                  "data" : {
-                    "title" : "LightClientUpdate",
-                    "type" : "object",
-                    "oneOf" : [ {
-                      "$ref" : "#/components/schemas/LightClientUpdateAltair"
-                    }, {
-                      "$ref" : "#/components/schemas/LightClientUpdateCapella"
-                    }, {
-                      "$ref" : "#/components/schemas/LightClientUpdateDeneb"
-                    }, {
-                      "$ref" : "#/components/schemas/LightClientUpdateElectra"
-                    }, {
-                      "$ref" : "#/components/schemas/LightClientUpdateGloas"
-                    } ]
-                  }
-                }
+                "$ref" : "#/components/schemas/GetLightClientUpdatesByRangeResponse"
               }
             }
           },

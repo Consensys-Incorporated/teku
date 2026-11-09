@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -79,6 +79,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.execution.versions.capella.Withdrawal;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeDataWithParent;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeValidationStatus;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
@@ -92,12 +93,8 @@ import tech.pegasys.teku.spec.datastructures.state.Validator;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.altair.BeaconStateAltair;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.BeaconStateElectra;
-import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.fulu.BeaconStateFulu;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateSchemaGloas;
-import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingConsolidation;
-import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDeposit;
-import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingPartialWithdrawal;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.generator.AttestationGenerator;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
@@ -183,7 +180,8 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
     when(recentChainData.getJustifiedCheckpoint()).thenReturn(Optional.of(justifiedCheckpoint));
     when(recentChainData.getFinalizedCheckpoint()).thenReturn(Optional.of(finalizedCheckpoint));
     when(recentChainData.getForkChoiceStrategy()).thenReturn(Optional.of(forkChoiceStrategy));
-    when(forkChoiceStrategy.getBlockData()).thenReturn(List.of(node));
+    when(forkChoiceStrategy.getBlockDataWithParent())
+        .thenReturn(List.of(new ProtoNodeDataWithParent(node, Optional.empty())));
     when(forkChoiceStrategy.getPayloadAttesterCount(blockRoot)).thenReturn(UInt64.valueOf(4));
     when(forkChoiceStrategy.getPayloadAvailabilityYesCount(blockRoot))
         .thenReturn(UInt64.valueOf(2));
@@ -202,6 +200,75 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
     assertThat(forkChoiceNode.getPayloadAttesterCount()).isEqualTo(UInt64.valueOf(4));
     assertThat(forkChoiceNode.getPayloadAvailabilityYesCount()).isEqualTo(UInt64.valueOf(2));
     assertThat(forkChoiceNode.getPayloadDataAvailabilityYesCount()).isEqualTo(UInt64.valueOf(3));
+    // no retained parent
+    assertThat(forkChoiceNode.getParentRoot()).isEqualTo(node.getParentRoot());
+    assertThat(forkChoiceNode.getParentPayloadStatus()).isEmpty();
+  }
+
+  @Test
+  public void getForkChoiceDataV2_shouldReturnGloasParentRootsAndParentPayloadStatuses() {
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final CombinedChainDataClient chainDataClient = mock(CombinedChainDataClient.class);
+    final RecentChainData recentChainData = mock(RecentChainData.class);
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy = mock(ReadOnlyForkChoiceStrategy.class);
+    final Checkpoint checkpoint = new Checkpoint(UInt64.ZERO, Bytes32.fromHexString("0x1111"));
+    final Bytes32 parentBlockRoot = Bytes32.fromHexString("0x2222");
+    final Bytes32 blockRoot = Bytes32.fromHexString("0x3333");
+    final ProtoNodeData parentFullNode =
+        gloasNode(UInt64.ONE, parentBlockRoot, ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+    final ProtoNodeData pendingNode =
+        gloasNode(UInt64.valueOf(2), blockRoot, ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING);
+    final ProtoNodeData emptyNode =
+        gloasNode(UInt64.valueOf(2), blockRoot, ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY);
+    final ChainDataProvider provider =
+        new ChainDataProvider(
+            gloasSpec,
+            recentChainData,
+            chainDataClient,
+            rewardCalculatorMock,
+            mockBlobSidecarReconstructionProvider,
+            mockBlobReconstructionProvider,
+            new LightClientUpdateStore(spec));
+    when(chainDataClient.isStoreAvailable()).thenReturn(true);
+    when(recentChainData.getJustifiedCheckpoint()).thenReturn(Optional.of(checkpoint));
+    when(recentChainData.getFinalizedCheckpoint()).thenReturn(Optional.of(checkpoint));
+    when(recentChainData.getForkChoiceStrategy()).thenReturn(Optional.of(forkChoiceStrategy));
+    when(forkChoiceStrategy.getBlockDataWithParent())
+        .thenReturn(
+            List.of(
+                new ProtoNodeDataWithParent(pendingNode, Optional.of(parentFullNode)),
+                new ProtoNodeDataWithParent(emptyNode, Optional.of(pendingNode))));
+    when(forkChoiceStrategy.getPayloadAttesterCount(any())).thenReturn(ZERO);
+    when(forkChoiceStrategy.getPayloadAvailabilityYesCount(any())).thenReturn(ZERO);
+    when(forkChoiceStrategy.getPayloadDataAvailabilityYesCount(any())).thenReturn(ZERO);
+
+    final List<ForkChoiceNodeDataV2> nodes = provider.getForkChoiceDataV2().getNodes();
+
+    // the PENDING node's parent is the parent block's FULL node
+    assertThat(nodes.get(0).getParentRoot()).isEqualTo(parentBlockRoot);
+    assertThat(nodes.get(0).getParentPayloadStatus())
+        .contains(ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
+    // the EMPTY node's parent is the same block's PENDING node
+    assertThat(nodes.get(1).getParentRoot()).isEqualTo(blockRoot);
+    assertThat(nodes.get(1).getParentPayloadStatus())
+        .contains(ForkChoicePayloadStatus.PAYLOAD_STATUS_PENDING);
+  }
+
+  private ProtoNodeData gloasNode(
+      final UInt64 slot, final Bytes32 blockRoot, final ForkChoicePayloadStatus payloadStatus) {
+    final Checkpoint checkpoint = new Checkpoint(UInt64.ZERO, Bytes32.fromHexString("0x1111"));
+    return new ProtoNodeData(
+        slot,
+        blockRoot,
+        Bytes32.fromHexString("0x2222"),
+        Bytes32.fromHexString("0x5555"),
+        ZERO,
+        Bytes32.fromHexString("0x6666"),
+        ZERO,
+        ProtoNodeValidationStatus.VALID,
+        new BlockCheckpoints(checkpoint, checkpoint, checkpoint, checkpoint),
+        ZERO,
+        payloadStatus);
   }
 
   @Test
@@ -733,9 +800,17 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
             candidate.getSignature());
     final BeaconBlockHeader expectedBlockHeader = BeaconBlockHeader.fromState(internalState);
 
-    when(mockCombinedChainDataClient.getStateByBlockRoot(eq(block.getRoot())))
-        .thenReturn(completedFuture(Optional.of(internalState)));
+    when(mockCombinedChainDataClient.getLightClientBootstrap(eq(block.getRoot())))
+        .thenReturn(
+            completedFuture(
+                Optional.of(
+                    spec.getLightClientUtilRequired(block.getSlot())
+                        .createLightClientBootstrap(internalState, block))));
     when(mockCombinedChainDataClient.getBlockByBlockRoot(eq(block.getRoot())))
+        .thenReturn(completedFuture(Optional.of(block)));
+    when(mockCombinedChainDataClient.getRecentChainData()).thenReturn(recentChainData);
+    when(mockCombinedChainDataClient.isFinalizedEpoch(ONE)).thenReturn(true);
+    when(mockCombinedChainDataClient.getBlockInEffectAtSlot(spec.computeStartSlotAtEpoch(ONE)))
         .thenReturn(completedFuture(Optional.of(block)));
 
     final SafeFuture<Optional<ObjectAndMetaData<LightClientBootstrap>>> future =
@@ -1220,178 +1295,6 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
   }
 
   @Test
-  void getPendingConsolidations_shouldReturnStatePendingConsolidations() {
-    final Spec electra = TestSpecFactory.createMinimalElectra();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(electra);
-    final ChainDataProvider chainDataProvider = setupBySpec(electra, dataStructureUtil, 16);
-
-    final StateAndMetaData stateAndMetaData =
-        getTestDataWithPartialConsolidations(dataStructureUtil, 1);
-
-    final Optional<ObjectAndMetaData<SszList<PendingConsolidation>>> data =
-        chainDataProvider.getPendingConsolidations(Optional.of(stateAndMetaData));
-
-    assertThat(data).isPresent();
-    assertThat(data.get().getData())
-        .isEqualTo(
-            stateAndMetaData.getData().toVersionElectra().orElseThrow().getPendingConsolidations());
-  }
-
-  @Test
-  void getPendingPartialConsolidations_canBeEmpty() {
-    final Spec electra = TestSpecFactory.createMinimalElectra();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(electra);
-    final ChainDataProvider chainDataProvider = setupBySpec(electra, dataStructureUtil, 16);
-
-    final StateAndMetaData stateAndMetaData = getTestDataWithDeposits(dataStructureUtil, 0);
-
-    final Optional<ObjectAndMetaData<SszList<PendingConsolidation>>> data =
-        chainDataProvider.getPendingConsolidations(Optional.of(stateAndMetaData));
-
-    assertThat(data).isPresent();
-    assertThat(data.get().getData())
-        .isEqualTo(
-            stateAndMetaData.getData().toVersionElectra().orElseThrow().getPendingConsolidations());
-  }
-
-  @Test
-  void getStatePendingPartialWithdrawals_shouldReturnPartialWithdrawals() {
-    final Spec electra = TestSpecFactory.createMinimalElectra();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(electra);
-    final ChainDataProvider chainDataProvider = setupBySpec(electra, dataStructureUtil, 16);
-
-    final StateAndMetaData stateAndMetaData =
-        getTestDataWithPartialWithdrawals(dataStructureUtil, 1);
-
-    final Optional<ObjectAndMetaData<SszList<PendingPartialWithdrawal>>> data =
-        chainDataProvider.getPendingPartialWithdrawals(Optional.of(stateAndMetaData));
-
-    assertThat(data).isPresent();
-    assertThat(data.get().getData())
-        .isEqualTo(
-            stateAndMetaData
-                .getData()
-                .toVersionElectra()
-                .orElseThrow()
-                .getPendingPartialWithdrawals());
-  }
-
-  @Test
-  void getStatePendingPartialWithdrawals_canBeEmpty() {
-    final Spec electra = TestSpecFactory.createMinimalElectra();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(electra);
-    final ChainDataProvider chainDataProvider = setupBySpec(electra, dataStructureUtil, 16);
-
-    final StateAndMetaData stateAndMetaData =
-        getTestDataWithPartialWithdrawals(dataStructureUtil, 0);
-
-    final Optional<ObjectAndMetaData<SszList<PendingPartialWithdrawal>>> data =
-        chainDataProvider.getPendingPartialWithdrawals(Optional.of(stateAndMetaData));
-
-    assertThat(data).isPresent();
-    assertThat(data.get().getData())
-        .isEqualTo(
-            stateAndMetaData
-                .getData()
-                .toVersionElectra()
-                .orElseThrow()
-                .getPendingPartialWithdrawals());
-  }
-
-  @Test
-  void getPendingDeposits_shouldReturnPendingDeposits() {
-    final Spec electra = TestSpecFactory.createMinimalElectra();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(electra);
-    final ChainDataProvider chainDataProvider = setupBySpec(electra, dataStructureUtil, 16);
-
-    final StateAndMetaData stateAndMetaData = getTestDataWithDeposits(dataStructureUtil, 1);
-
-    final Optional<ObjectAndMetaData<SszList<PendingDeposit>>> data =
-        chainDataProvider.getPendingDeposits(Optional.of(stateAndMetaData));
-
-    assertThat(data).isPresent();
-    assertThat(data.get().getData())
-        .isEqualTo(
-            stateAndMetaData.getData().toVersionElectra().orElseThrow().getPendingDeposits());
-  }
-
-  @Test
-  void getPendingPartialDeposits_canBeEmpty() {
-    final Spec electra = TestSpecFactory.createMinimalElectra();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(electra);
-    final ChainDataProvider chainDataProvider = setupBySpec(electra, dataStructureUtil, 16);
-
-    final StateAndMetaData stateAndMetaData = getTestDataWithDeposits(dataStructureUtil, 0);
-
-    final Optional<ObjectAndMetaData<SszList<PendingDeposit>>> data =
-        chainDataProvider.getPendingDeposits(Optional.of(stateAndMetaData));
-
-    assertThat(data).isPresent();
-    assertThat(data.get().getData())
-        .isEqualTo(
-            stateAndMetaData.getData().toVersionElectra().orElseThrow().getPendingDeposits());
-  }
-
-  private StateAndMetaData getTestDataWithDeposits(
-      final DataStructureUtil dataStructureUtil, final int depositsCount) {
-    final BeaconStateElectra state =
-        dataStructureUtil.randomBeaconState().toVersionElectra().orElseThrow();
-    final SszList<PendingDeposit> pendingDeposits =
-        switch (depositsCount) {
-          case 1 ->
-              state.getPendingDeposits().getSchema().of(dataStructureUtil.randomPendingDeposit());
-          case 0 -> state.getPendingDeposits().getSchema().of();
-          default -> throw new IllegalArgumentException("Not implemented");
-        };
-    final BeaconStateElectra electraState =
-        state.updatedElectra(data -> data.setPendingDeposits(pendingDeposits));
-
-    return new StateAndMetaData(electraState, SpecMilestone.ELECTRA, false, true, true);
-  }
-
-  private StateAndMetaData getTestDataWithPartialWithdrawals(
-      final DataStructureUtil dataStructureUtil, final int withdrawalCount) {
-    final BeaconStateElectra state =
-        dataStructureUtil.randomBeaconState().toVersionElectra().orElseThrow();
-    final SszList<PendingPartialWithdrawal> withdrawalSszList =
-        switch (withdrawalCount) {
-          case 1 ->
-              state
-                  .getPendingPartialWithdrawals()
-                  .getSchema()
-                  .of(dataStructureUtil.randomPendingPartialWithdrawal());
-          case 0 -> state.getPendingPartialWithdrawals().getSchema().of();
-          default -> throw new IllegalArgumentException("Not implemented");
-        };
-
-    final BeaconStateElectra electraState =
-        state.updatedElectra(data -> data.setPendingPartialWithdrawals(withdrawalSszList));
-
-    return new StateAndMetaData(electraState, SpecMilestone.ELECTRA, false, true, true);
-  }
-
-  private StateAndMetaData getTestDataWithPartialConsolidations(
-      final DataStructureUtil dataStructureUtil, final int consolidationCount) {
-    final BeaconStateElectra state =
-        dataStructureUtil.randomBeaconState().toVersionElectra().orElseThrow();
-    final SszList<PendingConsolidation> pendingConsolidations =
-        switch (consolidationCount) {
-          case 1 ->
-              state
-                  .getPendingConsolidations()
-                  .getSchema()
-                  .of(dataStructureUtil.randomPendingConsolidation());
-          case 0 -> state.getPendingConsolidations().getSchema().of();
-          default -> throw new IllegalArgumentException("Not implemented");
-        };
-
-    final BeaconStateElectra electraState =
-        state.updatedElectra(data -> data.setPendingConsolidations(pendingConsolidations));
-
-    return new StateAndMetaData(electraState, SpecMilestone.ELECTRA, false, true, true);
-  }
-
-  @Test
   void getExpectedWithdrawalsFailsTooFarInFutureRequest() {
     final Spec capella = TestSpecFactory.createMinimalCapella();
     final DataStructureUtil dataStructureUtil = new DataStructureUtil(capella);
@@ -1406,40 +1309,75 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
   }
 
   @Test
-  void getProposerLookahead_withEmptyInput() {
-    final Spec capella = TestSpecFactory.createMinimalCapella();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(capella);
-    final ChainDataProvider chainDataProvider = setupBySpec(capella, dataStructureUtil, 16);
-    assertThat(chainDataProvider.getProposerLookahead(Optional.empty())).isEmpty();
+  void getStateField_shouldBeEmptyWhenStateIsNotFound() {
+    final Spec gloas = TestSpecFactory.createMinimalGloas();
+    final ChainDataProvider chainDataProvider =
+        setupBySpec(gloas, new DataStructureUtil(gloas), 16);
+    assertThat(
+            chainDataProvider.getStateField(
+                Optional.empty(), SpecMilestone.GLOAS, "slot", BeaconState::getSlot))
+        .isEmpty();
   }
 
   @Test
-  void getProposerLookahead_respondsSuccessfully() {
-    final Spec capella = TestSpecFactory.createMinimalFulu();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(capella);
-    final BeaconStateFulu fuluState =
-        BeaconStateFulu.required(dataStructureUtil.randomBeaconState());
-    final ChainDataProvider chainDataProvider = setupBySpec(capella, dataStructureUtil, 16);
+  void getStateField_shouldExtractFieldAndKeepMetadata() {
+    final Spec gloas = TestSpecFactory.createMinimalGloas();
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(gloas);
+    final ChainDataProvider chainDataProvider = setupBySpec(gloas, dataStructureUtil, 16);
+    final BeaconStateGloas state = BeaconStateGloas.required(dataStructureUtil.randomBeaconState());
     final StateAndMetaData stateAndMetaData =
-        new StateAndMetaData(fuluState, SpecMilestone.FULU, true, true, true);
-    final var expectedResult =
-        new ObjectAndMetaData<>(
-            fuluState.getProposerLookahead(), SpecMilestone.FULU, true, true, true);
-    assertThat(chainDataProvider.getProposerLookahead(Optional.of(stateAndMetaData)))
-        .isEqualTo(Optional.of(expectedResult));
+        new StateAndMetaData(state, SpecMilestone.GLOAS, true, false, true);
+
+    assertThat(
+            chainDataProvider.getStateField(
+                Optional.of(stateAndMetaData),
+                SpecMilestone.GLOAS,
+                "builder pending payments",
+                s -> BeaconStateGloas.required(s).getBuilderPendingPayments()))
+        .contains(
+            new ObjectAndMetaData<>(
+                state.getBuilderPendingPayments(), SpecMilestone.GLOAS, true, false, true));
   }
 
   @Test
-  void getProposerLookahead_failsBeforeFulu() {
-    final Spec capella = TestSpecFactory.createMinimalCapella();
-    final DataStructureUtil dataStructureUtil = new DataStructureUtil(capella);
-    final ChainDataProvider chainDataProvider = setupBySpec(capella, dataStructureUtil, 16);
+  void getStateField_shouldAcceptStateAfterMinimumMilestone() {
+    final Spec gloas = TestSpecFactory.createMinimalGloas();
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(gloas);
+    final ChainDataProvider chainDataProvider = setupBySpec(gloas, dataStructureUtil, 16);
+    final BeaconStateGloas state = BeaconStateGloas.required(dataStructureUtil.randomBeaconState());
+    final StateAndMetaData stateAndMetaData =
+        new StateAndMetaData(state, SpecMilestone.GLOAS, false, true, false);
+
+    assertThat(
+            chainDataProvider.getStateField(
+                Optional.of(stateAndMetaData),
+                SpecMilestone.ELECTRA,
+                "pending deposits",
+                s -> BeaconStateElectra.required(s).getPendingDeposits()))
+        .contains(
+            new ObjectAndMetaData<>(
+                state.getPendingDeposits(), SpecMilestone.GLOAS, false, true, false));
+  }
+
+  @Test
+  void getStateField_shouldRejectStateBeforeMinimumMilestone() {
+    final Spec fulu = TestSpecFactory.createMinimalFulu();
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(fulu);
+    final ChainDataProvider chainDataProvider = setupBySpec(fulu, dataStructureUtil, 16);
     final StateAndMetaData stateAndMetaData =
         new StateAndMetaData(
-            dataStructureUtil.randomBeaconState(), SpecMilestone.CAPELLA, true, true, true);
-    assertThatThrownBy(() -> chainDataProvider.getProposerLookahead(Optional.of(stateAndMetaData)))
+            dataStructureUtil.randomBeaconState(), SpecMilestone.FULU, false, true, false);
+
+    assertThatThrownBy(
+            () ->
+                chainDataProvider.getStateField(
+                    Optional.of(stateAndMetaData),
+                    SpecMilestone.GLOAS,
+                    "builder pending payments",
+                    s -> BeaconStateGloas.required(s).getBuilderPendingPayments()))
         .isInstanceOf(BadRequestException.class)
-        .hasMessageContaining("does not contain proposer lookahead");
+        .hasMessage(
+            "The state was successfully retrieved, but was prior to GLOAS and does not contain builder pending payments.");
   }
 
   @Test

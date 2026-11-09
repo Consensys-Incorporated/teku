@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -18,8 +18,10 @@ import static java.util.stream.Collectors.groupingBy;
 import static tech.pegasys.teku.infrastructure.logging.DbLogger.DB_LOGGER;
 import static tech.pegasys.teku.infrastructure.logging.StatusLogger.STATUS_LOG;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
+import static tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas.isParentBlockFull;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Suppliers;
 import com.google.errorprone.annotations.MustBeClosed;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -30,8 +32,10 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -46,6 +50,7 @@ import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.ethereum.pow.api.DepositTreeSnapshot;
 import tech.pegasys.teku.ethereum.pow.api.DepositsFromBlockEvent;
 import tech.pegasys.teku.ethereum.pow.api.MinGenesisTimeBlockEvent;
+import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.kzg.KZGProof;
 import tech.pegasys.teku.spec.Spec;
@@ -66,12 +71,16 @@ import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadSummary;
 import tech.pegasys.teku.spec.datastructures.execution.SlotAndExecutionPayloadSummary;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
 import tech.pegasys.teku.spec.datastructures.hashtree.HashTree;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrapSchema;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.type.SszKZGProof;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
 import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
 import tech.pegasys.teku.storage.api.GloasForkChoiceRebuildData;
 import tech.pegasys.teku.storage.api.OnDiskStoreData;
 import tech.pegasys.teku.storage.api.StorageUpdate;
@@ -98,6 +107,7 @@ import tech.pegasys.teku.storage.server.kvstore.schema.SchemaCombinedSnapshotSta
 import tech.pegasys.teku.storage.server.kvstore.schema.SchemaCombinedTreeState;
 import tech.pegasys.teku.storage.server.kvstore.schema.SchemaFinalizedSnapshotStateAdapter;
 import tech.pegasys.teku.storage.server.kvstore.schema.SchemaHotAdapter;
+import tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreDeserializationException;
 import tech.pegasys.teku.storage.server.state.StateRootRecorder;
 
 public class KvStoreDatabase implements Database {
@@ -1300,7 +1310,18 @@ public class KvStoreDatabase implements Database {
   @MustBeClosed
   public Stream<DataColumnSlotAndIdentifier> streamDataColumnIdentifiers(
       final UInt64 firstSlot, final UInt64 lastSlot) {
-    return dao.streamDataColumnIdentifiers(firstSlot, lastSlot);
+    // Everything up to and including the prune watermark has been deleted, so start the scan just
+    // above it. Seeking into the pruned range would land on the band of deletion tombstones left
+    // there - stepping over them can take minutes on a node that pruned many slots - and a range
+    // that is entirely pruned can skip the database altogether.
+    final UInt64 fromSlot =
+        dao.getLastDataColumnSidecarPrunedSlot()
+            .map(lastPruned -> lastPruned.plus(1).max(firstSlot))
+            .orElse(firstSlot);
+    if (fromSlot.isGreaterThan(lastSlot)) {
+      return Stream.empty();
+    }
+    return dao.streamDataColumnIdentifiers(fromSlot, lastSlot);
   }
 
   @Override
@@ -1316,16 +1337,10 @@ public class KvStoreDatabase implements Database {
     if (maybeFirstDataColumnSidecarSlot.isEmpty()) {
       return Optional.empty();
     }
-    // Start the scan just above the last pruned slot rather than at the first slot with data column
-    // sidecar support. Everything up to and including the watermark has been deleted, so seeking to
-    // watermark + 1 lands directly on live data instead of crossing the band of deletion tombstones
-    // left below it - a forward scan over those tombstones can take minutes on a backlogged node.
-    final UInt64 fromSlot =
-        dao.getLastDataColumnSidecarPrunedSlot()
-            .map(lastPruned -> lastPruned.plus(1))
-            .orElse(maybeFirstDataColumnSidecarSlot.get());
+    // streamDataColumnIdentifiers starts above the prune watermark, so this lands directly on live
+    // data rather than on the deletion tombstones left below it
     try (final Stream<DataColumnSlotAndIdentifier> identifiers =
-        streamDataColumnIdentifiers(fromSlot, UInt64.MAX_VALUE)) {
+        streamDataColumnIdentifiers(maybeFirstDataColumnSidecarSlot.get(), UInt64.MAX_VALUE)) {
       return identifiers.findFirst().map(DataColumnSlotAndIdentifier::slot);
     }
   }
@@ -1380,6 +1395,69 @@ public class KvStoreDatabase implements Database {
       periodsToDelete = periods.filter(storedPeriod -> storedPeriod.isLessThan(period)).toList();
     }
     removeBestLightClientUpdates(periodsToDelete);
+    pruneLightClientBootstrapsBefore(period);
+  }
+
+  private void pruneLightClientBootstrapsBefore(final UInt64 period) {
+    final List<UInt64> slotsToDelete;
+    try (final Stream<UInt64> slots = dao.streamLightClientBootstrapSlots()) {
+      slotsToDelete =
+          slots.takeWhile(slot -> syncCommitteePeriodAtSlot(slot).isLessThan(period)).toList();
+    }
+    final List<UInt64> committeePeriodsToDelete;
+    try (final Stream<UInt64> periods = dao.streamLightClientSyncCommitteePeriods()) {
+      committeePeriodsToDelete =
+          periods.takeWhile(storedPeriod -> storedPeriod.isLessThan(period)).toList();
+    }
+    if (slotsToDelete.isEmpty() && committeePeriodsToDelete.isEmpty()) {
+      return;
+    }
+    try (final HotUpdater updater = hotUpdater()) {
+      slotsToDelete.forEach(updater::removeLightClientBootstrap);
+      committeePeriodsToDelete.forEach(updater::removeLightClientSyncCommittee);
+      updater.commit();
+    }
+  }
+
+  @Override
+  public void storeLightClientBootstrap(final LightClientBootstrap bootstrap) {
+    final UInt64 slot = bootstrap.getLightClientHeader().getBeacon().getSlot();
+    try (final HotUpdater updater = hotUpdater()) {
+      updater.addLightClientBootstrap(
+          slot,
+          Bytes.concatenate(
+              bootstrap.getSyncCommitteeBranch().sszSerialize(),
+              bootstrap.getLightClientHeader().sszSerialize()),
+          syncCommitteePeriodAtSlot(slot),
+          bootstrap.getCurrentSyncCommittee().sszSerialize());
+      updater.commit();
+    }
+  }
+
+  @Override
+  public Optional<LightClientBootstrap> getLightClientBootstrap(final UInt64 slot) {
+    return dao.getLightClientBootstrap(slot)
+        .flatMap(
+            stored ->
+                dao.getLightClientSyncCommittee(syncCommitteePeriodAtSlot(slot))
+                    .map(syncCommittee -> deserializeBootstrap(slot, stored, syncCommittee)));
+  }
+
+  private LightClientBootstrap deserializeBootstrap(
+      final UInt64 slot, final Bytes stored, final Bytes syncCommittee) {
+    final LightClientBootstrapSchema schema =
+        SchemaDefinitionsAltair.required(spec.atSlot(slot).getSchemaDefinitions())
+            .getLightClientBootstrapSchema();
+    final int branchSize = schema.getSyncCommitteeBranchSchema().getLength() * Bytes32.SIZE;
+    return schema.create(
+        schema.getFieldSchema0().sszDeserialize(stored.slice(branchSize)),
+        schema.getFieldSchema1().sszDeserialize(syncCommittee),
+        schema.getSyncCommitteeBranchSchema().sszDeserialize(stored.slice(0, branchSize)));
+  }
+
+  private UInt64 syncCommitteePeriodAtSlot(final UInt64 slot) {
+    return spec.getSyncCommitteeUtilRequired(slot)
+        .computeSyncCommitteePeriod(spec.computeEpochAtSlot(slot));
   }
 
   @Override
@@ -1430,15 +1508,173 @@ public class KvStoreDatabase implements Database {
         "Data column sidecars pruning completed in {} ms", System.currentTimeMillis() - startTime);
   }
 
+  @Override
+  public void archiveSidecarsProofs(final UInt64 startSlot, final UInt64 tillSlotInclusive) {
+    if (getFirstDataColumnSidecarSlot().isEmpty()) {
+      return;
+    }
+    // Extension columns (indices >= NUMBER_OF_COLUMNS / 2) are the reconstructable half whose
+    // proofs we retain while dropping the columns themselves.
+    final int numberOfColumns =
+        spec.getNumberOfDataColumns()
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "Cannot archive data column sidecar proofs before the Fulu milestone"));
+    try (final Stream<DataColumnSlotAndIdentifier> dataColumnSidecars =
+        streamDataColumnIdentifiers(startSlot, tillSlotInclusive)) {
+
+      int archivedSlots = 0;
+
+      final NavigableMap<UInt64, List<DataColumnSlotAndIdentifier>> archiveMap =
+          dataColumnSidecars.collect(
+              Collectors.groupingBy(
+                  DataColumnSlotAndIdentifier::slot, TreeMap::new, Collectors.toList()));
+
+      if (!archiveMap.isEmpty()) {
+        LOG.debug(
+            "Archiving data column sidecars to proofs from slots {} to {}",
+            archiveMap.firstKey(),
+            archiveMap.lastKey());
+        try (final FinalizedUpdater updater = finalizedUpdater()) {
+          for (final UInt64 slot : archiveMap.keySet()) {
+            try {
+              if (archiveSidecarsProofsForSlot(
+                  slot, archiveMap.get(slot), numberOfColumns, updater)) {
+                ++archivedSlots;
+              }
+            } catch (final SszDeserializeException | KvStoreDeserializationException error) {
+              // All reads for a slot precede its writes, so a malformed slot is left untouched.
+              LOG.warn("Skipping archival for slot {}: malformed stored data", slot, error);
+            }
+          }
+          updater.commit();
+        }
+        LOG.debug("Archived data column sidecars to proofs across {} slots", archivedSlots);
+      }
+    }
+  }
+
+  private boolean archiveSidecarsProofsForSlot(
+      final UInt64 slot,
+      final List<DataColumnSlotAndIdentifier> slotKeys,
+      final int numberOfColumns,
+      final FinalizedUpdater updater) {
+    final int halfColumns = numberOfColumns / 2;
+    if (slotKeys.stream().noneMatch(key -> key.columnIndex().isGreaterThanOrEqualTo(halfColumns))) {
+      return false;
+    }
+    final Optional<Bytes32> finalizedRoot =
+        slotKeys.stream()
+            .map(DataColumnSlotAndIdentifier::blockRoot)
+            .distinct()
+            .filter(root -> getSlotForFinalizedBlockRoot(root).map(slot::equals).orElse(false))
+            .findFirst();
+    if (finalizedRoot.isEmpty()) {
+      return false;
+    }
+    final List<DataColumnSlotAndIdentifier> canonicalKeys =
+        slotKeys.stream().filter(key -> key.blockRoot().equals(finalizedRoot.get())).toList();
+    final List<DataColumnSlotAndIdentifier> extensionKeys =
+        canonicalKeys.stream()
+            .filter(key -> key.columnIndex().isGreaterThanOrEqualTo(halfColumns))
+            .sorted()
+            .toList();
+    if (extensionKeys.isEmpty()) {
+      return false;
+    }
+    if (hasCompleteSidecarArchive(slot, canonicalKeys.size() - extensionKeys.size(), halfColumns)) {
+      // These stored extension columns are redundant with the existing archive.
+      extensionKeys.forEach(updater::removeSidecar);
+      return false;
+    }
+    if (!hasUniqueCompleteCanonicalBlock(slot, slotKeys, finalizedRoot.get(), numberOfColumns)) {
+      return false;
+    }
+    return storeSidecarArchive(slot, extensionKeys, updater);
+  }
+
+  private boolean hasCompleteSidecarArchive(
+      final UInt64 slot, final int firstHalfColumnCount, final int halfColumns) {
+    if (firstHalfColumnCount != halfColumns) {
+      return false;
+    }
+    try {
+      return getDataColumnSidecarsProofs(slot)
+          .map(proofs -> proofs.size() == halfColumns)
+          .orElse(false);
+    } catch (final KvStoreDeserializationException error) {
+      LOG.warn(
+          "Ignoring malformed archived proofs at slot {}: a complete column set is required to rebuild them",
+          slot,
+          error);
+      return false;
+    }
+  }
+
+  private boolean hasUniqueCompleteCanonicalBlock(
+      final UInt64 slot,
+      final List<DataColumnSlotAndIdentifier> slotKeys,
+      final Bytes32 finalizedRoot,
+      final int numberOfColumns) {
+    // Never-imported blocks may leave columns in the canonical table. Slot-keyed proofs
+    // require exactly one complete block, and it must be the finalized canonical block.
+    final List<List<DataColumnSlotAndIdentifier>> completeBlocks =
+        slotKeys.stream()
+            .collect(Collectors.groupingBy(DataColumnSlotAndIdentifier::blockRoot))
+            .values()
+            .stream()
+            .filter(keys -> keys.size() == numberOfColumns)
+            .toList();
+    if (completeBlocks.size() != 1) {
+      LOG.trace(
+          "Skipping archival for slot {}: {} blocks have all {} columns",
+          slot,
+          completeBlocks.size(),
+          numberOfColumns);
+      return false;
+    }
+    return completeBlocks.getFirst().getFirst().blockRoot().equals(finalizedRoot);
+  }
+
+  private boolean storeSidecarArchive(
+      final UInt64 slot,
+      final List<DataColumnSlotAndIdentifier> extensionKeys,
+      final FinalizedUpdater updater) {
+    final List<Optional<List<KZGProof>>> maybeProofs =
+        extensionKeys.stream()
+            .map(
+                key ->
+                    dao.getSidecar(key)
+                        .map(
+                            sidecar ->
+                                spec.deserializeSidecar(sidecar, slot).getKzgProofs().stream()
+                                    .map(SszKZGProof::getKZGProof)
+                                    .toList()))
+            .toList();
+    if (!maybeProofs.stream().allMatch(Optional::isPresent)) {
+      LOG.trace("Skipping archival for slot {}: extension columns could not be read", slot);
+      return false;
+    }
+    updater.addDataColumnSidecarsProofs(
+        slot, maybeProofs.stream().map(Optional::orElseThrow).toList());
+    extensionKeys.forEach(updater::removeSidecar);
+    LOG.trace(
+        "Pruned {} extension data column sidecars, keeping their proofs, at slot {}",
+        extensionKeys.size(),
+        slot);
+    return true;
+  }
+
   /**
    * Prunes data column sidecars oldest-first: each run removes the oldest (up to) {@code
    * pruneSlotLimit} distinct populated slots at or before the cutoff, in a single committed
    * transaction. Pruning oldest-first keeps the earliest retained slot advancing and prevents a gap
    * from forming when sidecars are stored faster than they can be pruned.
    *
-   * <p>For canonical sidecars the forward scan resumes from the persisted prune watermark ({@link
-   * KvStoreCombinedDao#getLastDataColumnSidecarPrunedSlot()}) rather than the fixed first slot with
-   * data column sidecar support, so the opening seek lands directly on live data instead of
+   * <p>For canonical sidecars the forward scan resumes above the persisted prune watermark ({@link
+   * KvStoreCombinedDao#getLastDataColumnSidecarPrunedSlot()}, applied by {@link
+   * #streamDataColumnIdentifiers}), so the opening seek lands directly on live data instead of
    * crossing the deletion tombstones left below it - including across restarts. The watermark is
    * advanced atomically with the deletions. Non-canonical sidecars are sparse, so they always scan
    * from the first supported slot. Gaps between populated slots are skipped, so the batch always
@@ -1460,13 +1696,7 @@ public class KvStoreDatabase implements Database {
       return;
     }
 
-    final UInt64 firstSupportedSlot = maybeFirstDataColumnSidecarSlot.get();
-    final UInt64 fromSlot =
-        sidecarType == DataColumnSidecarType.CANONICAL
-            ? dao.getLastDataColumnSidecarPrunedSlot()
-                .map(lastPruned -> lastPruned.plus(1))
-                .orElse(firstSupportedSlot)
-            : firstSupportedSlot;
+    final UInt64 fromSlot = maybeFirstDataColumnSidecarSlot.get();
     if (fromSlot.isGreaterThan(tillSlotInclusive)) {
       return;
     }
@@ -1489,6 +1719,14 @@ public class KvStoreDatabase implements Database {
       // supported slot.
       if (sidecarType == DataColumnSidecarType.CANONICAL) {
         updater.setLastDataColumnSidecarPrunedSlot(toPrune.keys().getLast().slot());
+        final List<UInt64> prunedSlots =
+            toPrune.keys().stream().map(DataColumnSlotAndIdentifier::slot).distinct().toList();
+        LOG.debug(
+            "Removing any archived data column sidecar proofs for {} pruned canonical slots ({}..{})",
+            prunedSlots.size(),
+            prunedSlots.getFirst(),
+            prunedSlots.getLast());
+        prunedSlots.forEach(updater::removeDataColumnSidecarsProofs);
       }
       updater.commit();
     }
@@ -1580,7 +1818,20 @@ public class KvStoreDatabase implements Database {
   private UpdateResult doUpdate(final StorageUpdate update) {
     LOG.trace("Applying finalized updates");
     long startTime = System.currentTimeMillis();
-    // Update finalized blocks and states
+    // Envelopes of finalized blocks whose payload the finalized chain did not build on are
+    // resolved before the finalized blocks are written, so they can be deleted in the same
+    // transactions as the blocks and a failure in between cannot leave them behind
+    final Set<Bytes32> orphanedExecutionPayloadRoots =
+        update.isExecutionPayloadEnvelopesEnabled()
+            ? findOrphanedExecutionPayloadRoots(
+                update.getFinalizedCheckpoint(),
+                update.getFinalizedChildToParentMap(),
+                update.getFinalizedBlocks(),
+                update.getDeletedHotBlocks())
+            : Set.of();
+
+    // Update finalized blocks and states. Envelopes of the finalized blocks are written and the
+    // orphaned ones deleted in the same transactions as the blocks.
     final Optional<SlotAndExecutionPayloadSummary> finalizedOptimisticExecutionPayload =
         updateFinalizedData(
             update.getFinalizedChildToParentMap(),
@@ -1588,14 +1839,36 @@ public class KvStoreDatabase implements Database {
             update.getFinalizedStates(),
             update.getDeletedHotBlocks(),
             update.isFinalizedOptimisticTransitionBlockRootSet(),
-            update.getOptimisticTransitionBlockRoot());
+            update.getOptimisticTransitionBlockRoot(),
+            update.getBlindedExecutionPayloads(),
+            orphanedExecutionPayloadRoots);
 
     if (update.isExecutionPayloadEnvelopesEnabled()) {
-      final Set<Bytes32> nonCanonicalPrunedRoots =
-          update.getDeletedHotBlocks().keySet().stream()
-              .filter(root -> !update.getFinalizedChildToParentMap().containsKey(root))
+      final Map<Bytes32, Bytes32> finalizedChildToParentMap = update.getFinalizedChildToParentMap();
+      // Envelopes of pruned non-canonical blocks are dropped here, as is the envelope of an
+      // orphaned root that is not a key of the finalized map: the previously finalized block,
+      // which prune mode does not write again (archive mode does, making this a harmless repeat).
+      final Set<Bytes32> prunedExecutionPayloadRoots =
+          Stream.concat(
+                  update.getDeletedHotBlocks().keySet().stream()
+                      .filter(root -> !finalizedChildToParentMap.containsKey(root)),
+                  orphanedExecutionPayloadRoots.stream()
+                      .filter(root -> !finalizedChildToParentMap.containsKey(root)))
               .collect(Collectors.toSet());
-      updateBlindedExecutionPayloads(update.getBlindedExecutionPayloads(), nonCanonicalPrunedRoots);
+      // Envelopes of blocks that are not being finalized are written here. Those of the finalized
+      // blocks were written with their blocks, and the envelope of an orphaned block arriving in
+      // the same update as its finalization is not stored at all. The common update finalizes
+      // nothing and passes its envelopes straight through.
+      final Map<Bytes32, SignedBlindedExecutionPayloadEnvelope> blindedExecutionPayloads =
+          finalizedChildToParentMap.isEmpty() && orphanedExecutionPayloadRoots.isEmpty()
+              ? update.getBlindedExecutionPayloads()
+              : update.getBlindedExecutionPayloads().entrySet().stream()
+                  .filter(
+                      entry ->
+                          !finalizedChildToParentMap.containsKey(entry.getKey())
+                              && !orphanedExecutionPayloadRoots.contains(entry.getKey()))
+                  .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+      updateBlindedExecutionPayloads(blindedExecutionPayloads, prunedExecutionPayloadRoots);
     }
 
     if (update.isBlobSidecarsEnabled()) {
@@ -1692,7 +1965,9 @@ public class KvStoreDatabase implements Database {
       final Map<Bytes32, BeaconState> finalizedStates,
       final Map<Bytes32, UInt64> deletedHotBlocksRootsWithSlot,
       final boolean isFinalizedOptimisticBlockRootSet,
-      final Optional<Bytes32> finalizedOptimisticTransitionBlockRoot) {
+      final Optional<Bytes32> finalizedOptimisticTransitionBlockRoot,
+      final Map<Bytes32, SignedBlindedExecutionPayloadEnvelope> blindedExecutionPayloads,
+      final Set<Bytes32> orphanedExecutionPayloadRoots) {
     if (finalizedChildToParentMap.isEmpty()) {
       // Nothing to do
       return Optional.empty();
@@ -1702,9 +1977,18 @@ public class KvStoreDatabase implements Database {
         updateFinalizedOptimisticTransitionBlock(
             isFinalizedOptimisticBlockRootSet, finalizedOptimisticTransitionBlockRoot);
     if (stateStorageMode.storesFinalizedStates()) {
-      updateFinalizedDataArchiveMode(finalizedChildToParentMap, finalizedBlocks, finalizedStates);
+      updateFinalizedDataArchiveMode(
+          finalizedChildToParentMap,
+          finalizedBlocks,
+          finalizedStates,
+          blindedExecutionPayloads,
+          orphanedExecutionPayloadRoots);
     } else {
-      updateFinalizedDataPruneMode(finalizedChildToParentMap, finalizedBlocks);
+      updateFinalizedDataPruneMode(
+          finalizedChildToParentMap,
+          finalizedBlocks,
+          blindedExecutionPayloads,
+          orphanedExecutionPayloadRoots);
     }
 
     storeNonCanonicalBlocks(deletedHotBlocksRootsWithSlot.keySet(), finalizedChildToParentMap);
@@ -1832,7 +2116,9 @@ public class KvStoreDatabase implements Database {
   private void updateFinalizedDataArchiveMode(
       final Map<Bytes32, Bytes32> finalizedChildToParentMap,
       final Map<Bytes32, SignedBeaconBlock> finalizedBlocks,
-      final Map<Bytes32, BeaconState> finalizedStates) {
+      final Map<Bytes32, BeaconState> finalizedStates,
+      final Map<Bytes32, SignedBlindedExecutionPayloadEnvelope> blindedExecutionPayloads,
+      final Set<Bytes32> orphanedExecutionPayloadRoots) {
 
     final Optional<Checkpoint> initialCheckpoint = dao.getAnchor();
     final Optional<Bytes32> initialBlockRoot = initialCheckpoint.map(Checkpoint::getRoot);
@@ -1860,6 +2146,8 @@ public class KvStoreDatabase implements Database {
 
           final Optional<UInt64> maybeBlockSlot =
               addFinalizedBlock(blockRoot, finalizedBlocks, updater, initialBlockRoot);
+          updateExecutionPayloadEnvelopeOfFinalizedBlock(
+              blockRoot, blindedExecutionPayloads, orphanedExecutionPayloadRoots, updater);
 
           Optional.ofNullable(finalizedStates.get(blockRoot))
               .or(() -> getHotState(blockRoot))
@@ -1884,7 +2172,9 @@ public class KvStoreDatabase implements Database {
 
   private void updateFinalizedDataPruneMode(
       final Map<Bytes32, Bytes32> finalizedChildToParentMap,
-      final Map<Bytes32, SignedBeaconBlock> finalizedBlocks) {
+      final Map<Bytes32, SignedBeaconBlock> finalizedBlocks,
+      final Map<Bytes32, SignedBlindedExecutionPayloadEnvelope> blindedExecutionPayloads,
+      final Set<Bytes32> orphanedExecutionPayloadRoots) {
     final Optional<Bytes32> initialBlockRoot = dao.getAnchor().map(Checkpoint::getRoot);
 
     final List<Bytes32> finalizedRoots = new ArrayList<>(finalizedChildToParentMap.keySet());
@@ -1896,6 +2186,8 @@ public class KvStoreDatabase implements Database {
           final Bytes32 root = finalizedRoots.get(i);
 
           addFinalizedBlock(root, finalizedBlocks, updater, initialBlockRoot);
+          updateExecutionPayloadEnvelopeOfFinalizedBlock(
+              root, blindedExecutionPayloads, orphanedExecutionPayloadRoots, updater);
 
           i++;
         }
@@ -1931,6 +2223,93 @@ public class KvStoreDatabase implements Database {
     }
 
     return Optional.empty();
+  }
+
+  /**
+   * Finds the finalized blocks whose execution payload is not part of the finalized chain: their
+   * finalized child built on their EMPTY variant, so their blinded envelope must not be retained.
+   * Block bodies are read from the database, as the store's block cache does not hold blocks that
+   * are finalized long after import. The newly finalized block has no finalized child yet, so it is
+   * resolved by the finalization that finalizes its child, when it is the parent already in the
+   * finalized database. The pair of the previously finalized block and its own parent is part of
+   * every finalization update, so it is re-evaluated each time, which is harmless.
+   *
+   * @param deletedHotBlocks the slots of the hot blocks pruned by this update, used to skip
+   *     pre-Gloas parents without reading them
+   */
+  @VisibleForTesting
+  Set<Bytes32> findOrphanedExecutionPayloadRoots(
+      final Optional<Checkpoint> finalizedCheckpoint,
+      final Map<Bytes32, Bytes32> finalizedChildToParentMap,
+      final Map<Bytes32, SignedBeaconBlock> finalizedBlocks,
+      final Map<Bytes32, UInt64> deletedHotBlocks) {
+    // Nothing finalized before the Gloas fork can have an envelope. This matters on networks
+    // where Gloas is scheduled but not yet active, where reading the finalized blocks on every
+    // finalization would be wasted work.
+    if (finalizedCheckpoint.isEmpty()
+        || !spec.isExecutionPayloadEnvelopeAvailableAtSlot(
+            finalizedCheckpoint.get().getEpochStartSlot(spec))) {
+      return Set.of();
+    }
+    final Function<Bytes32, Optional<SignedBeaconBlock>> getBlock =
+        root ->
+            Optional.ofNullable(finalizedBlocks.get(root))
+                .or(() -> dao.getHotBlock(root))
+                // The parent of the oldest finalized child is only in finalized storage. This is
+                // the dao's finalized lookup, not the getFinalizedBlock(root) helper of this
+                // class, which reads the hot column.
+                .or(() -> dao.getFinalizedBlock(root));
+    final Set<Bytes32> orphanedExecutionPayloadRoots = new HashSet<>();
+    // Walk the finalized chain from the newly finalized block back to the previously finalized
+    // block one pair at a time, so each block is read once and only two are held at a time
+    // however many blocks a finalization covers
+    final Bytes32 newlyFinalizedRoot = finalizedCheckpoint.get().getRoot();
+    Bytes32 childRoot = newlyFinalizedRoot;
+    // The child is only read once there is a Gloas parent to compare it with
+    Supplier<Optional<SignedBeaconBlock>> child =
+        Suppliers.memoize(() -> getBlock.apply(newlyFinalizedRoot));
+    while (finalizedChildToParentMap.containsKey(childRoot)) {
+      final Bytes32 parentRoot = finalizedChildToParentMap.get(childRoot);
+      // Finalized parents are pruned hot blocks, so their slot is usually known without reading
+      // the block, which stops the walk cheaply at the Gloas fork boundary
+      final UInt64 knownParentSlot = deletedHotBlocks.get(parentRoot);
+      if (knownParentSlot != null
+          && !spec.isExecutionPayloadEnvelopeAvailableAtSlot(knownParentSlot)) {
+        break;
+      }
+      final Optional<SignedBeaconBlock> parent = getBlock.apply(parentRoot);
+      if (parent.isEmpty()
+          || !spec.isExecutionPayloadEnvelopeAvailableAtSlot(parent.get().getSlot())) {
+        break;
+      }
+      if (child
+          .get()
+          .filter(childBlock -> !isParentBlockFull(parent.get(), childBlock))
+          .isPresent()) {
+        orphanedExecutionPayloadRoots.add(parentRoot);
+      }
+      childRoot = parentRoot;
+      child = () -> parent;
+    }
+    return orphanedExecutionPayloadRoots;
+  }
+
+  /**
+   * Writes or deletes the blinded envelope of a finalized block in the same transaction that writes
+   * the block, so that neither can be committed without the other: deleted when the chain did not
+   * build on the payload, written when it arrived in this update and the chain did.
+   */
+  private void updateExecutionPayloadEnvelopeOfFinalizedBlock(
+      final Bytes32 blockRoot,
+      final Map<Bytes32, SignedBlindedExecutionPayloadEnvelope> blindedExecutionPayloads,
+      final Set<Bytes32> orphanedExecutionPayloadRoots,
+      final FinalizedUpdater updater) {
+    if (orphanedExecutionPayloadRoots.contains(blockRoot)) {
+      updater.deleteBlindedExecutionPayloadEnvelope(blockRoot);
+      return;
+    }
+    Optional.ofNullable(blindedExecutionPayloads.get(blockRoot))
+        .ifPresent(envelope -> updater.addBlindedExecutionPayloadEnvelope(blockRoot, envelope));
   }
 
   private void updateBlindedExecutionPayloads(

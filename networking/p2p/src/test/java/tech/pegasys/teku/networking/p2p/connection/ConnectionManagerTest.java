@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -36,12 +36,13 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
-import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
+import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
+import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.network.p2p.peer.StubPeer;
 import tech.pegasys.teku.networking.p2p.discovery.DiscoveryPeer;
@@ -72,6 +73,7 @@ class ConnectionManagerTest {
   private final P2PNetwork<Peer> network = mock(P2PNetwork.class);
 
   private final PeerPools peerPools = new PeerPools();
+  private final StubMetricsSystem metricsSystem = new StubMetricsSystem();
 
   private final DiscoveryService discoveryService = mock(DiscoveryService.class);
   private final PeerSelectionStrategy peerSelectionStrategy = mock(PeerSelectionStrategy.class);
@@ -81,6 +83,12 @@ class ConnectionManagerTest {
   @BeforeEach
   public void setUp() {
     when(discoveryService.searchForPeers()).thenReturn(SafeFuture.completedFuture(emptyList()));
+    when(network.createPeerAddress(any(DiscoveryPeer.class)))
+        .thenAnswer(
+            invocation -> {
+              final DiscoveryPeer peer = invocation.getArgument(0);
+              return Optional.of(new PeerAddress(new MockNodeId(peer.getPublicKey())));
+            });
     when(peerSelectionStrategy.selectPeersToConnect(eq(network), any(), any()))
         .thenAnswer(
             invocation -> {
@@ -268,6 +276,84 @@ class ConnectionManagerTest {
 
     verify(network).connect(PEER1);
     verify(network).connect(PEER2);
+  }
+
+  @Test
+  public void shouldConnectToKnownPeerWithOnlyQuicAddress() {
+    final ConnectionManager manager = createManager();
+    when(discoveryService.streamKnownPeers())
+        .thenReturn(
+            Stream.of(
+                createDiscoveryPeer(PEER1, Optional.empty(), Optional.of(loopbackAddress(9100)))));
+    when(network.connect(any(PeerAddress.class))).thenReturn(new SafeFuture<>());
+
+    manager.start().join();
+    asyncRunner.executeDueActionsRepeatedly();
+
+    verify(network).connect(PEER1);
+  }
+
+  @Test
+  public void shouldNotConnectToKnownPeerWithAnyLocalTcpAddress() {
+    final ConnectionManager manager = createManager();
+    when(discoveryService.streamKnownPeers())
+        .thenReturn(
+            Stream.of(
+                createDiscoveryPeer(PEER1, Optional.of(anyLocalAddress(9000)), Optional.empty())));
+
+    manager.start().join();
+    asyncRunner.executeDueActionsRepeatedly();
+
+    verify(network, never()).connect(any());
+  }
+
+  @Test
+  public void shouldNotConnectToKnownPeerWithAnyLocalQuicAddress() {
+    final ConnectionManager manager = createManager();
+    when(discoveryService.streamKnownPeers())
+        .thenReturn(
+            Stream.of(
+                createDiscoveryPeer(
+                    PEER1,
+                    Optional.of(loopbackAddress(9000)),
+                    Optional.of(anyLocalAddress(9100)))));
+
+    manager.start().join();
+    asyncRunner.executeDueActionsRepeatedly();
+
+    verify(network, never()).connect(any());
+  }
+
+  @Test
+  public void shouldNotConnectToKnownQuicOnlyPeerWithAnyLocalAddress() {
+    final ConnectionManager manager = createManager();
+    when(discoveryService.streamKnownPeers())
+        .thenReturn(
+            Stream.of(
+                createDiscoveryPeer(PEER1, Optional.empty(), Optional.of(anyLocalAddress(9100)))));
+
+    manager.start().join();
+    asyncRunner.executeDueActionsRepeatedly();
+
+    verify(network, never()).connect(any());
+  }
+
+  @Test
+  public void shouldNotOfferCandidateWithNoDialableAddressToSelection() {
+    final ConnectionManager manager = createManager();
+    when(discoveryService.streamKnownPeers())
+        .thenReturn(Stream.of(DISCOVERY_PEER1, DISCOVERY_PEER2));
+    when(network.createPeerAddress(DISCOVERY_PEER1)).thenReturn(Optional.empty());
+    when(network.connect(any(PeerAddress.class))).thenReturn(new SafeFuture<>());
+
+    manager.start().join();
+    asyncRunner.executeDueActionsRepeatedly();
+
+    verify(network).connect(PEER2);
+    verify(network, never()).connect(PEER1);
+    assertThat(candidateCount("considered")).isEqualTo(2);
+    assertThat(candidateCount("no_dialable_address")).isEqualTo(1);
+    assertThat(candidateCount("eligible")).isEqualTo(1);
   }
 
   @Test
@@ -630,9 +716,14 @@ class ConnectionManagerTest {
     return captor.getValue();
   }
 
+  private long candidateCount(final String result) {
+    return metricsSystem.getLabelledCounterValue(
+        TekuMetricCategory.NETWORK, "peer_candidate_count_total", result);
+  }
+
   private ConnectionManager createManager(final PeerAddress... peers) {
     return new ConnectionManager(
-        new NoOpMetricsSystem(),
+        metricsSystem,
         discoveryService,
         asyncRunner,
         timeProvider,
@@ -646,11 +737,37 @@ class ConnectionManagerTest {
     return createDiscoveryPeer(peer.getId().toBytes(), subnetIds);
   }
 
+  private static DiscoveryPeer createDiscoveryPeer(
+      final PeerAddress peer,
+      final Optional<InetSocketAddress> tcpAddress,
+      final Optional<InetSocketAddress> quicAddress) {
+    return new DiscoveryPeer(
+        peer.getId().toBytes(),
+        Bytes32.ZERO,
+        tcpAddress,
+        quicAddress,
+        ENR_FORK_ID,
+        SCHEMA_DEFINITIONS_SUPPLIER.getAttnetsENRFieldSchema().getDefault(),
+        SCHEMA_DEFINITIONS_SUPPLIER.getSyncnetsENRFieldSchema().getDefault(),
+        Optional.empty(),
+        Optional.empty());
+  }
+
+  private static InetSocketAddress loopbackAddress(final int port) {
+    return new InetSocketAddress(InetAddress.getLoopbackAddress(), port);
+  }
+
+  private static InetSocketAddress anyLocalAddress(final int port) {
+    return new InetSocketAddress(port);
+  }
+
   private static DiscoveryPeer createDiscoveryPeer(final Bytes peerId, final int... subnetIds) {
     return new DiscoveryPeer(
         peerId,
         Bytes32.ZERO,
-        new InetSocketAddress(InetAddress.getLoopbackAddress(), peerId.trimLeadingZeros().toInt()),
+        Optional.of(
+            new InetSocketAddress(
+                InetAddress.getLoopbackAddress(), peerId.trimLeadingZeros().toInt())),
         Optional.empty(),
         ENR_FORK_ID,
         SCHEMA_DEFINITIONS_SUPPLIER.getAttnetsENRFieldSchema().ofBits(subnetIds),

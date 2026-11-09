@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -37,6 +37,8 @@ import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.client.Validator;
+import tech.pegasys.teku.validator.client.restapi.apis.schema.BuilderConfig;
+import tech.pegasys.teku.validator.client.restapi.apis.schema.BuilderEntry;
 import tech.pegasys.teku.validator.client.restapi.apis.schema.DeleteKeyResult;
 import tech.pegasys.teku.validator.client.restapi.apis.schema.DeleteKeysRequest;
 import tech.pegasys.teku.validator.client.restapi.apis.schema.DeleteKeysResponse;
@@ -210,6 +212,33 @@ class ValidatorTypesTest {
                     "{ \"pubkey\": \"0xa4654ac3105a58c7634031b5718c4880c87300f72091cfbc69fe490b71d93a671e00e80a388e1ceb8ea1de112003e976\", \"url\": \"/\", \"readonly\": true}",
                     ValidatorTypes.EXTERNAL_VALIDATOR_RESPONSE_TYPE))
         .hasRootCauseInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void builderConfigType_roundTrip() throws Exception {
+    final BuilderEntry fullBuilderEntry =
+        new BuilderEntry(
+            "https://builder-a.example.com",
+            Optional.of(dataStructureUtil.randomBytes(32)),
+            Optional.of(
+                List.of(dataStructureUtil.randomPublicKey(), dataStructureUtil.randomPublicKey())),
+            Optional.of(dataStructureUtil.randomUInt64()),
+            Optional.of(dataStructureUtil.randomUInt64()),
+            Optional.of(dataStructureUtil.randomUInt64()));
+    final BuilderEntry minimalBuilderEntry =
+        new BuilderEntry(
+            "https://builder-b.example.com",
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty());
+    final BuilderConfig builderConfig =
+        new BuilderConfig(
+            Optional.of(dataStructureUtil.randomUInt64()),
+            Optional.of(dataStructureUtil.randomUInt64()),
+            Optional.of(List.of(fullBuilderEntry, minimalBuilderEntry)));
+    assertRoundTrip(builderConfig, ValidatorTypes.BUILDER_CONFIG_TYPE);
   }
 
   @Test

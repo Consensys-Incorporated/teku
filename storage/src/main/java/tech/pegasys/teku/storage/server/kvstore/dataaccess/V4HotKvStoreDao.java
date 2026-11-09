@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -137,6 +137,24 @@ public class V4HotKvStoreDao {
 
   public Optional<Bytes32> getBestLightClientUpdateSignatureBlockRoot(final UInt64 period) {
     return db.get(schema.getLightClientUpdateSignatureBlockRootsByPeriod(), period);
+  }
+
+  public Optional<Bytes> getLightClientBootstrap(final UInt64 slot) {
+    return db.get(schema.getLightClientBootstrapsBySlot(), slot);
+  }
+
+  public Optional<Bytes> getLightClientSyncCommittee(final UInt64 period) {
+    return db.get(schema.getLightClientSyncCommitteesByPeriod(), period);
+  }
+
+  @MustBeClosed
+  public Stream<UInt64> streamLightClientBootstrapSlots() {
+    return db.streamKeys(schema.getLightClientBootstrapsBySlot());
+  }
+
+  @MustBeClosed
+  public Stream<UInt64> streamLightClientSyncCommitteePeriods() {
+    return db.streamKeys(schema.getLightClientSyncCommitteesByPeriod());
   }
 
   @MustBeClosed
@@ -295,6 +313,23 @@ public class V4HotKvStoreDao {
     public void removeBestLightClientUpdate(final UInt64 period) {
       transaction.delete(schema.getLightClientUpdatesByPeriod(), period);
       transaction.delete(schema.getLightClientUpdateSignatureBlockRootsByPeriod(), period);
+    }
+
+    @Override
+    public void addLightClientBootstrap(
+        final UInt64 slot, final Bytes bootstrap, final UInt64 period, final Bytes syncCommittee) {
+      transaction.put(schema.getLightClientBootstrapsBySlot(), slot, bootstrap);
+      transaction.put(schema.getLightClientSyncCommitteesByPeriod(), period, syncCommittee);
+    }
+
+    @Override
+    public void removeLightClientBootstrap(final UInt64 slot) {
+      transaction.delete(schema.getLightClientBootstrapsBySlot(), slot);
+    }
+
+    @Override
+    public void removeLightClientSyncCommittee(final UInt64 period) {
+      transaction.delete(schema.getLightClientSyncCommitteesByPeriod(), period);
     }
 
     @Override

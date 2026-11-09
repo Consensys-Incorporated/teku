@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -94,7 +94,6 @@ public class ValidatorClientService extends Service {
 
   private static final Logger LOG = LogManager.getLogger();
   private static final Duration DOPPELGANGER_DETECTOR_CHECK_DELAY = Duration.ofSeconds(12);
-  private static final Duration DOPPELGANGER_DETECTOR_TIMEOUT = Duration.ofMinutes(15);
   private static final int DOPPELGANGER_DETECTOR_MAX_EPOCHS = 2;
   private static final int MIN_SIZE_TO_SCHEDULE_ATTESTATION_DUTIES_IN_BATCHES = 1000;
   private final EventChannels eventChannels;
@@ -351,7 +350,6 @@ public class ValidatorClientService extends Service {
             timeProvider,
             genesisDataProvider,
             DOPPELGANGER_DETECTOR_CHECK_DELAY,
-            DOPPELGANGER_DETECTOR_TIMEOUT,
             DOPPELGANGER_DETECTOR_MAX_EPOCHS);
     maybeDoppelgangerDetector = Optional.of(doppelgangerDetector);
   }
@@ -470,9 +468,15 @@ public class ValidatorClientService extends Service {
     final OwnedValidators validators = validatorLoader.getOwnedValidators();
     final BlockContainerSigner blockContainerSigner = new MilestoneBasedBlockContainerSigner(spec);
     final ValidatorDutyMetrics validatorDutyMetrics = ValidatorDutyMetrics.create(metricsSystem);
-    final BuilderConfigProvider builderConfigProvider =
-        new BuilderConfigProvider(spec, config.getValidatorConfig());
-    validatorTimingChannels.add(builderConfigProvider);
+    final BuilderConfigProvider builderConfigProvider;
+    if (spec.isMilestoneSupported(SpecMilestone.GLOAS)) {
+      final DefaultBuilderConfigProvider builderConfigProviderImpl =
+          new DefaultBuilderConfigProvider(spec, proposerConfigManager.orElseThrow());
+      validatorTimingChannels.add(builderConfigProviderImpl);
+      builderConfigProvider = builderConfigProviderImpl;
+    } else {
+      builderConfigProvider = BuilderConfigProvider.NOOP;
+    }
     final BlockDutyFactory blockDutyFactory =
         new BlockDutyFactory(
             forkProvider,
@@ -618,7 +622,11 @@ public class ValidatorClientService extends Service {
       validatorTimingChannels.add(proposerPreferencesPublisher);
       final BuilderPreferencesPublisher builderPreferencesPublisher =
           new BuilderPreferencesPublisher(
-              validators, spec, validatorApiChannel, builderConfigProvider);
+              validators,
+              spec,
+              validatorApiChannel,
+              proposerConfigManager.orElseThrow(),
+              builderConfigProvider);
       validatorTimingChannels.add(builderPreferencesPublisher);
     }
 

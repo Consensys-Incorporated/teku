@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.test.acceptance;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.test.acceptance.dsl.TekuNodeConfigBuilder.DEFAULT_NETWORK_NAME;
 
 import java.io.IOException;
@@ -25,7 +26,6 @@ import tech.pegasys.teku.test.acceptance.dsl.TekuValidatorNode;
 
 public class RemoteValidatorAcceptanceTest extends AcceptanceTestBase {
   private static final int VALIDATOR_COUNT = 8;
-
   private TekuBeaconNode beaconNode;
   private TekuValidatorNode validatorClient;
 
@@ -71,7 +71,6 @@ public class RemoteValidatorAcceptanceTest extends AcceptanceTestBase {
 
     beaconNode.start();
 
-    waitForSuccessfulEventStreamConnection();
     waitForValidatorDutiesToComplete();
   }
 
@@ -97,14 +96,12 @@ public class RemoteValidatorAcceptanceTest extends AcceptanceTestBase {
 
     validatorClient.start();
 
-    waitForSuccessfulEventStreamConnection();
     waitForValidatorDutiesToComplete();
 
     beaconNode.stop(false);
 
     validatorClient.waitForLogMessageContaining(
         "Switching to failover beacon node for event streaming");
-    waitForSuccessfulEventStreamConnection();
     waitForValidatorDutiesToComplete();
 
     // primary beacon node recovers
@@ -112,7 +109,6 @@ public class RemoteValidatorAcceptanceTest extends AcceptanceTestBase {
 
     validatorClient.waitForLogMessageContaining(
         "Switching back to the primary beacon node for event streaming");
-    waitForSuccessfulEventStreamConnection();
     waitForValidatorDutiesToComplete();
   }
 
@@ -142,7 +138,6 @@ public class RemoteValidatorAcceptanceTest extends AcceptanceTestBase {
         "The primary beacon node is NOT ready to accept requests");
     validatorClient.waitForLogMessageContaining(
         "Switching to failover beacon node for event streaming");
-    waitForSuccessfulEventStreamConnection();
     waitForValidatorDutiesToComplete();
   }
 
@@ -152,10 +147,24 @@ public class RemoteValidatorAcceptanceTest extends AcceptanceTestBase {
   }
 
   private void waitForValidatorDutiesToComplete() {
+    waitForSuccessfulEventStreamConnection();
+    validatorClient.waitForHeadEventsReceived();
     validatorClient.waitForLogMessageContaining("Published block");
     validatorClient.waitForLogMessageContaining("Published attestation");
     validatorClient.waitForLogMessageContaining("Published aggregate");
     validatorClient.waitForLogMessageContaining("Published sync_signature");
     validatorClient.waitForLogMessageContaining("Published sync_contribution");
+    assertNoMissingHeadEventsWarning();
+  }
+
+  /**
+   * The validator client reports a stream which was opened and then failed without delivering any
+   * head event, and on a healthy connection that must never happen.
+   */
+  private void assertNoMissingHeadEventsWarning() {
+    assertThat(
+            validatorClient.getFilteredOutputContaining(
+                "No head events were received from the beacon node event stream"))
+        .isEmpty();
   }
 }

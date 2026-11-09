@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@
 package tech.pegasys.teku.networking.p2p.libp2p;
 
 import static tech.pegasys.teku.networking.p2p.libp2p.LibP2PNetwork.MAXIMUM_ACTIVE_INBOUND_RPC_STREAMS;
+import static tech.pegasys.teku.networking.p2p.libp2p.LibP2PNetwork.MAXIMUM_ACTIVE_INBOUND_RPC_STREAMS_PER_PEER;
 import static tech.pegasys.teku.networking.p2p.libp2p.LibP2PNetwork.REMOTE_OPEN_STREAMS_RATE_LIMIT;
 import static tech.pegasys.teku.networking.p2p.libp2p.LibP2PNetwork.REMOTE_PARALLEL_OPEN_STREAMS_COUNT_LIMIT;
 
@@ -129,6 +130,7 @@ public class LibP2PNetworkBuilder {
         advertisedAddresses,
         gossipNetwork,
         listenPorts,
+        config.isTcpEnabled(),
         config.isQuicEnabled());
   }
 
@@ -291,7 +293,10 @@ public class LibP2PNetworkBuilder {
 
   protected List<? extends RpcHandler<?, ?, ?>> createRpcHandlers() {
     final InboundRpcStreamLimiter inboundRpcStreamLimiter =
-        new InboundRpcStreamLimiter(MAXIMUM_ACTIVE_INBOUND_RPC_STREAMS);
+        new InboundRpcStreamLimiter(
+            metricsSystem,
+            MAXIMUM_ACTIVE_INBOUND_RPC_STREAMS,
+            MAXIMUM_ACTIVE_INBOUND_RPC_STREAMS_PER_PEER);
     return rpcMethods.stream()
         .map(m -> new RpcHandler<>(asyncRunner, m, metricsSystem, inboundRpcStreamLimiter))
         .toList();

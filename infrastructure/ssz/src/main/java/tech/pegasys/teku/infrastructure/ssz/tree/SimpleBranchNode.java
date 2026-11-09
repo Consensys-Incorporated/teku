@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -77,7 +77,7 @@ class SimpleBranchNode implements BranchNode, TreeNode {
   }
 
   @Override
-  @SuppressWarnings("ReferenceComparison")
+  @SuppressWarnings({"ReferenceComparison", "ReferenceEquality"})
   public String toString() {
     return left == right ? ("(2x " + left + ")") : ("(" + left + ", " + right + ')');
   }

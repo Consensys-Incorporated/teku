@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -51,8 +51,9 @@ public class ExecutionPayloadGossipValidator {
   private final BlockGossipValidator blockGossipValidator;
   private final SigningRootUtil signingRootUtil;
 
+  // isPayloadSeen iterates while envelope validation may add entries
   private final Set<BlockRootAndBuilderIndex> seenPayloads =
-      LimitedSet.createSynchronizedLRU(VALID_EXECUTION_PAYLOAD_SET_SIZE);
+      LimitedSet.createSynchronizedIterable(VALID_EXECUTION_PAYLOAD_SET_SIZE);
 
   private final Map<Bytes32, BlockImportResult> invalidBlockRoots;
 

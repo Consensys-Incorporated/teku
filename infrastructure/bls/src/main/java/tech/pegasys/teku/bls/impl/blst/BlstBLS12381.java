@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -13,16 +13,19 @@
 
 package tech.pegasys.teku.bls.impl.blst;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static tech.pegasys.teku.bls.impl.blst.HashToCurve.ETH2_DST;
 
 import java.math.BigInteger;
 import java.security.SecureRandom;
 import java.util.List;
 import java.util.Random;
+import java.util.stream.IntStream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.bytes.Bytes48;
 import supranational.blst.BLST_ERROR;
+import supranational.blst.P1;
 import supranational.blst.P2;
 import supranational.blst.P2_Affine;
 import supranational.blst.Pairing;
@@ -100,6 +103,10 @@ public class BlstBLS12381 implements BLS12381 {
 
   @Override
   public BlstPublicKey aggregatePublicKeys(final List<? extends PublicKey> publicKeys) {
+    return aggregateBlstPublicKeys(publicKeys);
+  }
+
+  private static BlstPublicKey aggregateBlstPublicKeys(final List<? extends PublicKey> publicKeys) {
     return BlstPublicKey.aggregate(publicKeys.stream().map(BlstPublicKey::fromPublicKey).toList());
   }
 
@@ -156,6 +163,133 @@ public class BlstBLS12381 implements BLS12381 {
 
     aggregate1.mergeWith(aggregate2);
     return aggregate1;
+  }
+
+  @Override
+  public BlstSemiAggregate prepareBatchVerifySameMessage(
+      final List<? extends List<? extends PublicKey>> publicKeys,
+      final Bytes message,
+      final List<? extends Signature> signatures,
+      final boolean parallel) {
+    checkArgument(
+        publicKeys.size() == signatures.size(),
+        "Different collection sizes: %s public key lists, %s signatures",
+        publicKeys.size(),
+        signatures.size());
+    checkArgument(!signatures.isEmpty(), "No signatures to verify");
+
+    IntStream indices = IntStream.range(0, signatures.size());
+    if (parallel) {
+      indices = indices.parallel();
+    }
+    // Mutable per-thread accumulators: the scaled points are added in place, so the only
+    // allocations per signature are the two scaled points themselves.
+    final ScaledSum sum =
+        indices.collect(
+            ScaledSum::new,
+            (acc, i) -> acc.addScaled(publicKeys.get(i), signatures.get(i)),
+            ScaledSum::combine);
+
+    if (!sum.isValid()) {
+      return BlstSemiAggregate.createInvalid();
+    }
+
+    final Pairing ctx = new Pairing(true, ETH2_DST);
+    final BLST_ERROR ret =
+        ctx.aggregate(sum.publicKey.to_affine(), sum.signature.to_affine(), message.toArray());
+
+    if (ret != BLST_ERROR.BLST_SUCCESS) {
+      if (ret == BLST_ERROR.BLST_PK_IS_INFINITY) {
+        return BlstSemiAggregate.createInvalid();
+      } else {
+        throw new BlsException("Error in Blst, error code: " + ret);
+      }
+    }
+
+    ctx.commit();
+
+    return new BlstSemiAggregate(ctx);
+  }
+
+  @Override
+  public BlstSemiAggregate prepareBatchVerifyChunk(
+      final List<? extends List<? extends PublicKey>> publicKeys,
+      final List<Bytes> messages,
+      final List<? extends Signature> signatures) {
+    checkArgument(
+        publicKeys.size() == messages.size() && publicKeys.size() == signatures.size(),
+        "Different collection sizes: %s public key lists, %s messages, %s signatures",
+        publicKeys.size(),
+        messages.size(),
+        signatures.size());
+    checkArgument(!signatures.isEmpty(), "No signatures to verify");
+
+    final Pairing ctx = new Pairing(true, ETH2_DST);
+    for (int i = 0; i < signatures.size(); i++) {
+      final BlstPublicKey aggrPubKey = aggregatePublicKeys(publicKeys.get(i));
+      if (aggrPubKey.isInfinity()) {
+        return BlstSemiAggregate.createInvalid();
+      }
+      final BlstSignature blstSignature = BlstSignature.fromSignature(signatures.get(i));
+      final BLST_ERROR ret =
+          ctx.mul_n_aggregate(
+              aggrPubKey.ecPoint,
+              blstSignature.ec2Point,
+              nextBatchRandomMultiplier(),
+              messages.get(i).toArray());
+
+      if (ret != BLST_ERROR.BLST_SUCCESS) {
+        if (ret == BLST_ERROR.BLST_PK_IS_INFINITY) {
+          return BlstSemiAggregate.createInvalid();
+        } else {
+          throw new BlsException("Error in Blst, error code: " + ret);
+        }
+      }
+    }
+
+    ctx.commit();
+
+    return new BlstSemiAggregate(ctx);
+  }
+
+  /**
+   * Running sum of (public key, signature) pairs, each pair scaled by the same fresh random
+   * multiplier so that summing several pairs over the same message is still a sound randomised
+   * batch check. Not thread-safe: each thread of a parallel stream gets its own instance and the
+   * instances are merged with {@link #combine}.
+   */
+  private static final class ScaledSum {
+    private final P1 publicKey = new P1();
+    private final P2 signature = new P2();
+    private boolean valid = true;
+
+    void addScaled(final List<? extends PublicKey> publicKeys, final Signature signature) {
+      final BlstPublicKey aggrPubKey = aggregateBlstPublicKeys(publicKeys);
+      if (aggrPubKey.isInfinity()) {
+        valid = false;
+        return;
+      }
+      final BlstSignature blstSignature = BlstSignature.fromSignature(signature);
+      if (!blstSignature.ec2Point.in_group()) {
+        throw new BlsException("Error in Blst, error code: " + BLST_ERROR.BLST_POINT_NOT_IN_GROUP);
+      }
+      final BigInteger multiplier = nextBatchRandomMultiplier();
+      this.publicKey.add(new P1(aggrPubKey.ecPoint).mult(multiplier));
+      this.signature.add(new P2(blstSignature.ec2Point).mult(multiplier));
+    }
+
+    void combine(final ScaledSum other) {
+      if (!other.valid) {
+        valid = false;
+        return;
+      }
+      publicKey.add(other.publicKey);
+      signature.add(other.signature);
+    }
+
+    boolean isValid() {
+      return valid;
+    }
   }
 
   @Override

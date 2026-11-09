@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -13,7 +13,6 @@
 
 package tech.pegasys.teku.networking.eth2.rpc.core;
 
-import com.google.common.annotations.VisibleForTesting;
 import io.netty.buffer.ByteBuf;
 import java.time.Duration;
 import java.util.Optional;
@@ -137,8 +136,8 @@ public class Eth2IncomingRequestHandler<
         .finishStackTrace();
   }
 
-  @VisibleForTesting
-  boolean hasRequestBeenReceived() {
+  @Override
+  public boolean hasRequestBeenReceived() {
     return requestHandled.get();
   }
 

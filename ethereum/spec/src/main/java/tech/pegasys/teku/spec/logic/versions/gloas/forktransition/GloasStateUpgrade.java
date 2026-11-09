@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -18,8 +18,10 @@ import static tech.pegasys.teku.spec.logic.common.helpers.Predicates.getExecutio
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.IntStream;
 import org.apache.logging.log4j.LogManager;
@@ -215,11 +217,7 @@ public class GloasStateUpgrade implements StateUpgrade<BeaconStateFulu> {
         "Starting onboarding builders at fork from {} pending deposits",
         state.getPendingDeposits().size());
     final List<PendingDeposit> pendingDeposits = new ArrayList<>();
-    // Pubkeys with at least one already-queued pending deposit carrying a valid signature, i.e. the
-    // pubkeys for which isPendingValidator(pendingDeposits, pubkey) would return true. Maintained
-    // incrementally so the query is an O(1) lookup instead of an O(queue) rescan-and-verify, which
-    // is quadratic when a pubkey is repeated across many deposits.
-    final Set<BLSPublicKey> pendingValidatorPubkeys = new HashSet<>();
+    final PendingValidatorTracker pendingValidators = new PendingValidatorTracker();
 
     for (final PendingDeposit deposit : state.getPendingDeposits()) {
       final BLSPublicKey pubkey = deposit.getPublicKey();
@@ -243,20 +241,14 @@ public class GloasStateUpgrade implements StateUpgrade<BeaconStateFulu> {
               // queue to be applied to that validator later.
               () -> {
                 // Deposits without builder credentials stay in the pending queue. Such a deposit is
-                // the only kind that can newly make its pubkey a pending validator, so verify its
-                // signature once here and record the pubkey rather than rescanning the queue later.
+                // the only kind that can newly make its pubkey a pending validator, so record it
+                // for a signature check that only runs if a builder deposit later needs the answer.
                 if (!predicates.isBuilderWithdrawalCredential(deposit.getWithdrawalCredentials())) {
                   pendingDeposits.add(deposit);
-                  if (miscHelpers.isValidDepositSignature(
-                      pubkey,
-                      deposit.getWithdrawalCredentials(),
-                      deposit.getAmount(),
-                      deposit.getSignature())) {
-                    pendingValidatorPubkeys.add(pubkey);
-                  }
+                  pendingValidators.addPendingDeposit(deposit);
                   return;
                 }
-                if (pendingValidatorPubkeys.contains(pubkey)) {
+                if (pendingValidators.isPendingValidator(pubkey)) {
                   pendingDeposits.add(deposit);
                   return;
                 }
@@ -284,5 +276,44 @@ public class GloasStateUpgrade implements StateUpgrade<BeaconStateFulu> {
         pendingDeposits.size(),
         state.getBuilders().size(),
         System.currentTimeMillis() - startTimeMillis);
+  }
+
+  /**
+   * Answers is_pending_validator for the validator deposits queued so far during builder
+   * onboarding. Deposit signatures are verified lazily, only when a builder deposit asks about the
+   * pubkey, and each deposit is verified at most once. The check is existential, so once one valid
+   * deposit is found the pubkey stays pending without verifying its remaining deposits.
+   */
+  private class PendingValidatorTracker {
+    private final Map<BLSPublicKey, List<PendingDeposit>> unverifiedDeposits = new HashMap<>();
+    private final Set<BLSPublicKey> pendingValidatorPubkeys = new HashSet<>();
+
+    void addPendingDeposit(final PendingDeposit deposit) {
+      final BLSPublicKey pubkey = deposit.getPublicKey();
+      if (!pendingValidatorPubkeys.contains(pubkey)) {
+        unverifiedDeposits.computeIfAbsent(pubkey, __ -> new ArrayList<>()).add(deposit);
+      }
+    }
+
+    boolean isPendingValidator(final BLSPublicKey pubkey) {
+      if (pendingValidatorPubkeys.contains(pubkey)) {
+        return true;
+      }
+      final List<PendingDeposit> deposits = unverifiedDeposits.remove(pubkey);
+      if (deposits == null) {
+        return false;
+      }
+      for (final PendingDeposit deposit : deposits) {
+        if (miscHelpers.isValidDepositSignature(
+            pubkey,
+            deposit.getWithdrawalCredentials(),
+            deposit.getAmount(),
+            deposit.getSignature())) {
+          pendingValidatorPubkeys.add(pubkey);
+          return true;
+        }
+      }
+      return false;
+    }
   }
 }

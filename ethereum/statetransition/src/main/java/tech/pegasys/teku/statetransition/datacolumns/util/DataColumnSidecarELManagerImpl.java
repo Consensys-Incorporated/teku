@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -264,13 +264,15 @@ public class DataColumnSidecarELManagerImpl extends AbstractIgnoringFutureHistor
   }
 
   private RecoveryTask createRecoveryTask(final DataColumnSidecar dataColumnSidecar) {
-    if (dataColumnSidecar.getMaybeKzgCommitments().isPresent()) {
-      final DataColumnSidecarUtil dataColumnSidecarUtil =
-          spec.getDataColumnSidecarUtil(dataColumnSidecar.getSlot());
+    final DataColumnSidecarUtil dataColumnSidecarUtil =
+        spec.getDataColumnSidecarUtil(dataColumnSidecar.getSlot());
+    final Optional<SszList<SszKZGCommitment>> maybeKzgCommitments =
+        dataColumnSidecarUtil.getMaybeKzgCommitments(dataColumnSidecar);
+    if (maybeKzgCommitments.isPresent()) {
       final RecoveryTask recoveryTask =
           new RecoveryTask(
               dataColumnSidecar.getMaybeSignedBlockHeader(),
-              SafeFuture.completedFuture(dataColumnSidecar.getMaybeKzgCommitments().get()),
+              SafeFuture.completedFuture(maybeKzgCommitments.get()),
               dataColumnSidecarUtil
                   .getMaybeKzgCommitmentsInclusionProof(dataColumnSidecar)
                   .map(SszPrimitiveCollection::asListUnboxed),

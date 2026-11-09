@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -84,7 +84,7 @@ public class BeaconNodeReadinessManager extends Service implements ValidatorTimi
 
   public Iterator<? extends RemoteValidatorApiChannel> getFailoversInOrderOfReadiness() {
     return failoverBeaconNodeApis.stream()
-        .sorted(Comparator.comparing(this::getReadinessStatusWeight).reversed())
+        .sorted(Comparator.comparingInt(this::getReadinessStatusWeight).reversed())
         .iterator();
   }
 
@@ -168,7 +168,7 @@ public class BeaconNodeReadinessManager extends Service implements ValidatorTimi
         lastErrorTimestamp.get().plus(ERRORED_SECONDARY_READINESS_CHECK_INTERVAL_DELAY_MS));
   }
 
-  @SuppressWarnings("ReferenceComparison")
+  @SuppressWarnings({"ReferenceComparison", "ReferenceEquality"})
   private boolean isPrimary(final RemoteValidatorApiChannel beaconNodeApi) {
     return beaconNodeApi == primaryBeaconNodeApi;
   }

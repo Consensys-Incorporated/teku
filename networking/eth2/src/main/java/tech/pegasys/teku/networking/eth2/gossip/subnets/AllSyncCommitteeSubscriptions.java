@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -32,7 +32,8 @@ public class AllSyncCommitteeSubscriptions extends SyncCommitteeSubscriptionMana
 
   @Override
   public synchronized void onSlot(final UInt64 slot) {
-    // no-op, we don't need to ever unsubscribe
+    // never unsubscribe from subnets, only forget ended duties
+    pruneDuties(slot);
   }
 
   @Override

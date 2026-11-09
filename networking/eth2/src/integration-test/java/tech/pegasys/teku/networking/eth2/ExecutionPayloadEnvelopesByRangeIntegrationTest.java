@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -34,6 +34,7 @@ import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 
 @TestSpecContext(milestone = {FULU, GLOAS})
@@ -90,6 +91,10 @@ public class ExecutionPayloadEnvelopesByRangeIntegrationTest
     final UInt64 targetSlot = UInt64.valueOf(3);
     final SignedBlockAndState block = peerStorage.chainUpdater().advanceChainUntil(targetSlot);
     peerStorage.chainUpdater().updateBestBlock(block);
+    // fork choice selected the FULL variant of the head, so the head payload is part of the chain
+    peerStorage
+        .recentChainData()
+        .updateHead(ForkChoiceNode.createFull(block.getRoot()), block.getSlot());
 
     // grab expected execution payload envelopes from storage
     final List<SignedExecutionPayloadEnvelope> expectedExecutionPayloadEnvelopes =
@@ -138,8 +143,11 @@ public class ExecutionPayloadEnvelopesByRangeIntegrationTest
                   });
         });
 
-    // ensure canonical head is set as the best block
+    // ensure canonical head is set as the best block, with its payload part of the chain
     peerStorage.chainUpdater().updateBestBlock(canonicalHead);
+    peerStorage
+        .recentChainData()
+        .updateHead(ForkChoiceNode.createFull(canonicalHead.getRoot()), canonicalHead.getSlot());
 
     // verify non-canonical envelopes exist and are different from canonical ones
     assertThat(nonCanonicalEnvelopes).hasSize(3);
@@ -157,6 +165,62 @@ public class ExecutionPayloadEnvelopesByRangeIntegrationTest
     // only canonical envelopes should be returned, not the non-canonical fork ones
     assertThat(envelopes).containsExactlyInAnyOrderElementsOf(expectedEnvelopes);
     assertThat(envelopes).doesNotContainAnyElementsOf(nonCanonicalEnvelopes);
+  }
+
+  @TestTemplate
+  public void
+      requestExecutionPayloadEnvelopes_shouldNotReturnEnvelopesOfPayloadsTheChainDidNotBuildOn()
+          throws ExecutionException, InterruptedException, TimeoutException {
+    assumeThat(specMilestone).isGreaterThanOrEqualTo(GLOAS);
+
+    // canonical chain to slot 3, every payload built on
+    peerStorage.chainUpdater().advanceChainUntil(UInt64.valueOf(3));
+
+    // the block at slot 4 builds on the EMPTY variant of the block at slot 3: the payload of slot 3
+    // is not part of the chain even though its envelope is stored
+    final UInt64 emptyPayloadSlot = UInt64.valueOf(3);
+    final UInt64 headSlot = UInt64.valueOf(4);
+    final SignedBlockAndState head =
+        peerStorage
+            .chainUpdater()
+            .advanceChain(
+                headSlot,
+                peerStorage.chainBuilder().createBlockOptionsBuildingOnEmptyParent(headSlot));
+    // the head payload has been stored but fork choice has selected the EMPTY variant
+    peerStorage.chainUpdater().updateBestBlock(head);
+    peerStorage
+        .recentChainData()
+        .updateHead(ForkChoiceNode.createEmpty(head.getRoot()), head.getSlot());
+
+    final SignedExecutionPayloadEnvelope emptyPayloadEnvelope =
+        peerStorage.chainBuilder().getExecutionPayloadAtSlot(emptyPayloadSlot).orElseThrow();
+    final SignedExecutionPayloadEnvelope headEnvelope =
+        peerStorage.chainBuilder().getExecutionPayloadAtSlot(headSlot).orElseThrow();
+    assertThat(peerStorage.recentChainData().containsExecutionPayload(head.getRoot())).isTrue();
+
+    final List<SignedExecutionPayloadEnvelope> envelopes =
+        requestExecutionPayloadEnvelopesByRange(peer, UInt64.ONE, UInt64.valueOf(4));
+
+    assertThat(envelopes)
+        .containsExactlyInAnyOrderElementsOf(
+            peerStorage
+                .chainBuilder()
+                .streamExecutionPayloads(UInt64.ONE, UInt64.valueOf(2))
+                .toList())
+        .doesNotContain(emptyPayloadEnvelope, headEnvelope);
+
+    // once fork choice selects the FULL variant of the head, its envelope is served
+    peerStorage
+        .recentChainData()
+        .updateHead(ForkChoiceNode.createFull(head.getRoot()), head.getSlot());
+
+    final List<SignedExecutionPayloadEnvelope> envelopesWithFullHead =
+        requestExecutionPayloadEnvelopesByRange(peer, UInt64.ONE, UInt64.valueOf(4));
+
+    assertThat(envelopesWithFullHead)
+        .hasSize(3)
+        .contains(headEnvelope)
+        .doesNotContain(emptyPayloadEnvelope);
   }
 
   private List<SignedExecutionPayloadEnvelope> requestExecutionPayloadEnvelopesByRange(

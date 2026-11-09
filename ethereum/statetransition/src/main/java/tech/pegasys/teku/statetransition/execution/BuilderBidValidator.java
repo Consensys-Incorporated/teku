@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -176,7 +176,13 @@ public class BuilderBidValidator {
       return false;
     }
 
-    if (!bid.getParentBlockHash().equals(stateGloas.getLatestExecutionPayloadBid().getBlockHash())
+    // A bid may extend the parent's payload (its bid block hash) or the parent's EMPTY variant
+    // (the state's latest block hash). A zero parent bid block hash commits to no payload, as the
+    // Gloas genesis bid does, so only the EMPTY variant can be extended there.
+    final Bytes32 parentBidBlockHash = stateGloas.getLatestExecutionPayloadBid().getBlockHash();
+    final boolean extendsParentPayload =
+        !parentBidBlockHash.isZero() && bid.getParentBlockHash().equals(parentBidBlockHash);
+    if (!extendsParentPayload
         && !bid.getParentBlockHash().equals(stateGloas.getLatestBlockHash())) {
       LOG.warn(
           "Bid from {} (builder {}) rejected: parent block hash does not extend a known parent",

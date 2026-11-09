@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -157,6 +157,16 @@ public class MiscHelpersFuluTest {
         dataStructureUtil.randomDataColumnSidecar(
             dataStructureUtil.randomSignedBeaconBlockWithCommitments(0), UInt64.ONE);
     assertThat(miscHelpersFulu.verifyDataColumnSidecar(emptyKzgCommitments)).isFalse();
+  }
+
+  @Test
+  public void verifyDataColumnSidecar_shouldRejectSidecarOfAnotherFork() {
+    final DataStructureUtil gloasData = new DataStructureUtil(TestSpecFactory.createMinimalGloas());
+    final DataColumnSidecar gloasSidecar =
+        gloasData.randomDataColumnSidecar(
+            gloasData.randomSignedBeaconBlockWithCommitments(UInt64.ONE, 3), UInt64.ZERO);
+
+    assertThat(miscHelpersFulu.verifyDataColumnSidecar(gloasSidecar)).isFalse();
   }
 
   @Test

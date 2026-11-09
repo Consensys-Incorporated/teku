@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -50,18 +50,21 @@ public class ApiSchemas {
   public static final SignedBuilderRequestAuthSchema SIGNED_BUILDER_REQUEST_AUTH_SCHEMA =
       new SignedBuilderRequestAuthSchema(BUILDER_REQUEST_AUTH_SCHEMA);
 
-  private static final long MAX_BUILDER_URL_SIZE = 2048;
-  // MAX_BUILDER_ENTRIES * (MIN_SEED_LOOKAHEAD + 1) * SLOTS_PER_EPOCH
-  private static final long MAX_BUILDER_PREFERENCES_ENTRIES = 4096;
+  public static final long MAX_BUILDER_URL_SIZE = 2048;
+  public static final long MAX_BUILDER_PUBKEYS = 64;
 
   public static final BuilderEntrySchema BUILDER_ENTRY_SCHEMA =
-      new BuilderEntrySchema(MAX_BUILDER_URL_SIZE, SIGNED_BUILDER_REQUEST_AUTH_SCHEMA);
+      new BuilderEntrySchema(
+          MAX_BUILDER_URL_SIZE, MAX_BUILDER_PUBKEYS, SIGNED_BUILDER_REQUEST_AUTH_SCHEMA);
 
   public static final BuilderConfigSchema BUILDER_CONFIG_SCHEMA =
       new BuilderConfigSchema(BUILDER_ENTRY_SCHEMA);
 
   public static final BuilderPreferencesEntrySchema BUILDER_PREFERENCES_ENTRY_SCHEMA =
       new BuilderPreferencesEntrySchema(MAX_BUILDER_URL_SIZE, SIGNED_BUILDER_REQUEST_AUTH_SCHEMA);
+
+  // MAX_BUILDER_ENTRIES * (MIN_SEED_LOOKAHEAD + 1) * SLOTS_PER_EPOCH
+  private static final long MAX_BUILDER_PREFERENCES_ENTRIES = 4096;
 
   @SuppressWarnings("unchecked")
   public static final SszListSchema<BuilderPreferencesEntry, SszList<BuilderPreferencesEntry>>

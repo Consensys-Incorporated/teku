@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -120,7 +120,7 @@ public class GossipProposerPreferencesTestExecutor implements TestExecutor {
     // when that time is earlier than the store's time (which only moves forward). This is necessary
     // for the disparity-boundary tests, where blocks must be imported after their slot starts but
     // messages are validated at a time before that slot starts.
-    final UInt64[] validationTimeMs = {UInt64.valueOf(metaData.getCurrentTimeMs())};
+    final UInt64[] validationTimeMs = {UInt64.ZERO};
     final GossipValidationHelper gossipValidationHelper =
         new GossipValidationHelper(spec, ctx.recentChainData, ctx.metricsSystem) {
           @Override
@@ -157,9 +157,6 @@ public class GossipProposerPreferencesTestExecutor implements TestExecutor {
     @JsonProperty(value = "messages", required = true)
     private List<Message> messages;
 
-    @JsonProperty(value = "current_time_ms", required = true)
-    private long currentTimeMs;
-
     @JsonProperty(value = "bls_setting", defaultValue = "0")
     private int blsSetting;
 
@@ -169,10 +166,6 @@ public class GossipProposerPreferencesTestExecutor implements TestExecutor {
 
     public List<Message> getMessages() {
       return messages;
-    }
-
-    public long getCurrentTimeMs() {
-      return currentTimeMs;
     }
 
     public BlsSetting getBlsSetting() {

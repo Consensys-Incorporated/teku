@@ -1,4 +1,5 @@
 dependencies {
+	implementation 'com.google.errorprone:error_prone_annotations'
 	implementation project(':beacon:pow')
 	implementation project(':ethereum:execution-types')
 	implementation project(':ethereum:dataproviders')
@@ -45,6 +46,7 @@ dependencies {
 
 	integrationTestImplementation 'commons-io:commons-io'
 
+	testFixturesImplementation 'com.google.errorprone:error_prone_annotations'
 	testFixturesApi project(':ethereum:networks')
 	testFixturesApi project(':storage')
 	testFixturesApi project(':storage:api')

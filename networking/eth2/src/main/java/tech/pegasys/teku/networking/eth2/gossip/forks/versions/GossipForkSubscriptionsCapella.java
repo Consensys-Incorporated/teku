@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -25,6 +25,8 @@ import tech.pegasys.teku.networking.p2p.discovery.DiscoveryNetwork;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.SignedBlsToExecutionChange;
@@ -62,6 +64,10 @@ public class GossipForkSubscriptionsCapella extends GossipForkSubscriptionsBella
           signedContributionAndProofOperationProcessor,
       final OperationProcessor<ValidatableSyncCommitteeMessage>
           syncCommitteeMessageOperationProcessor,
+      final Optional<OperationProcessor<LightClientFinalityUpdate>>
+          lightClientFinalityUpdateProcessor,
+      final Optional<OperationProcessor<LightClientOptimisticUpdate>>
+          lightClientOptimisticUpdateProcessor,
       final OperationProcessor<SignedBlsToExecutionChange>
           signedBlsToExecutionChangeOperationProcessor,
       final DebugDataDumper debugDataDumper) {
@@ -81,6 +87,8 @@ public class GossipForkSubscriptionsCapella extends GossipForkSubscriptionsBella
         voluntaryExitProcessor,
         signedContributionAndProofOperationProcessor,
         syncCommitteeMessageOperationProcessor,
+        lightClientFinalityUpdateProcessor,
+        lightClientOptimisticUpdateProcessor,
         debugDataDumper);
 
     this.signedBlsToExecutionChangeOperationProcessor =

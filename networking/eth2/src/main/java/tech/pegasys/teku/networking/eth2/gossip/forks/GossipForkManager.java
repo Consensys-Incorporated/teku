@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -43,6 +43,8 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionProof;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.SignedBlsToExecutionChange;
@@ -288,6 +290,22 @@ public class GossipForkManager {
         message,
         "proposer preferences",
         GossipForkSubscriptions::publishProposerPreferences);
+  }
+
+  public void publishLightClientFinalityUpdate(final LightClientFinalityUpdate message) {
+    publishMessage(
+        message.getAttestedHeader().getBeacon().getSlot(),
+        message,
+        "light client finality update",
+        GossipForkSubscriptions::publishLightClientFinalityUpdate);
+  }
+
+  public void publishLightClientOptimisticUpdate(final LightClientOptimisticUpdate message) {
+    publishMessage(
+        message.getAttestedHeader().getBeacon().getSlot(),
+        message,
+        "light client optimistic update",
+        GossipForkSubscriptions::publishLightClientOptimisticUpdate);
   }
 
   private synchronized <T> void publishMessage(

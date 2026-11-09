@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -209,6 +209,70 @@ public class BeaconStateAccessorsTest {
     final UInt64 fraction = beaconStateAccessors.calculateCommitteeFraction(state, 1);
     // should be 1% of balance per slot...
     assertThat(fraction).isEqualTo(totalActiveBalancePerSlot.dividedBy(100));
+  }
+
+  @Test
+  void calculateCommitteeFraction_shouldExcludeSlashedValidators() {
+    final BeaconState state = stateWithOneSlashedOfFourValidators();
+    final UInt64 unslashedBalancePerSlot =
+        UInt64.THIRTY_TWO_ETH.times(3).dividedBy(specConfig.getSlotsPerEpoch());
+
+    assertThat(beaconStateAccessors.getTotalActiveUnslashedBalance(state))
+        .isEqualTo(UInt64.THIRTY_TWO_ETH.times(3));
+    assertThat(beaconStateAccessors.calculateCommitteeFraction(state, 100))
+        .isEqualTo(unslashedBalancePerSlot);
+  }
+
+  @Test
+  void getProposerBoostAmount_shouldExcludeSlashedValidators() {
+    final BeaconState state = stateWithOneSlashedOfFourValidators();
+    final UInt64 unslashedBalancePerSlot =
+        UInt64.THIRTY_TWO_ETH.times(3).dividedBy(specConfig.getSlotsPerEpoch());
+
+    assertThat(beaconStateAccessors.getProposerBoostAmount(state))
+        .isEqualTo(
+            unslashedBalancePerSlot.times(specConfig.getProposerScoreBoost()).dividedBy(100));
+  }
+
+  @Test
+  void getTotalActiveUnslashedBalance_shouldExcludeValidatorSlashedAfterCacheWasPopulated() {
+    final BeaconState state =
+        new BeaconStateTestBuilder(dataStructureUtil)
+            .activeValidator(UInt64.THIRTY_TWO_ETH)
+            .activeValidator(UInt64.THIRTY_TWO_ETH)
+            .build();
+    assertThat(beaconStateAccessors.getTotalActiveUnslashedBalance(state))
+        .isEqualTo(UInt64.THIRTY_TWO_ETH.times(2));
+
+    final BeaconStateMutators beaconStateMutators = genesisSpec.beaconStateMutators();
+    final BeaconState slashedState =
+        state.updated(
+            mutableState ->
+                beaconStateMutators.slashValidator(
+                    mutableState,
+                    1,
+                    beaconStateMutators.createValidatorExitContextSupplier(mutableState)));
+
+    assertThat(beaconStateAccessors.getTotalActiveUnslashedBalance(slashedState))
+        .isEqualTo(UInt64.THIRTY_TWO_ETH);
+    assertThat(beaconStateAccessors.getTotalActiveUnslashedBalance(state))
+        .isEqualTo(UInt64.THIRTY_TWO_ETH.times(2));
+  }
+
+  private BeaconState stateWithOneSlashedOfFourValidators() {
+    return new BeaconStateTestBuilder(dataStructureUtil)
+        .activeValidator(UInt64.THIRTY_TWO_ETH)
+        .activeValidator(UInt64.THIRTY_TWO_ETH)
+        .activeValidator(UInt64.THIRTY_TWO_ETH)
+        .validator(
+            dataStructureUtil
+                .validatorBuilder()
+                .slashed(true)
+                .effectiveBalance(UInt64.THIRTY_TWO_ETH)
+                .activationEpoch(UInt64.ZERO)
+                .exitEpoch(SpecConfig.FAR_FUTURE_EPOCH)
+                .build())
+        .build();
   }
 
   private BeaconState createBeaconState() {

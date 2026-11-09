@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -16,12 +16,15 @@ package tech.pegasys.teku.networking.eth2.gossip.topics;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.List;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.networking.eth2.P2PConfig;
 import tech.pegasys.teku.networking.eth2.gossip.encoding.GossipEncoding;
+import tech.pegasys.teku.networking.p2p.libp2p.config.LibP2PParamsFactory;
 import tech.pegasys.teku.networking.p2p.libp2p.gossip.LibP2PGossipNetworkBuilder;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -56,22 +59,24 @@ public class GossipTopicsTest {
   }
 
   @Test
-  public void maxSubscribedTopicsConstantIsLargeEnough() {
+  public void subscriptionLimitsAreLargeEnoughForAllTopics() {
     final SpecMilestone latestMilestone = SpecMilestone.getHighestMilestone();
     final Spec spec = TestSpecFactory.createMainnet(latestMilestone);
-    final P2PConfig p2pConfig = P2PConfig.builder().specProvider(spec).build();
+    // every optional topic enabled, so the count is the real worst case
+    final P2PConfig p2pConfig =
+        P2PConfig.builder().specProvider(spec).executionProofTopicEnabled(true).build();
 
     final StorageSystem storageSystem = InMemoryStorageSystemBuilder.buildDefault(32, spec);
     storageSystem.chainUpdater().initializeGenesis();
     final Bytes32 genesisValidatorsRoot =
         storageSystem.recentChainData().getGenesisData().orElseThrow().getGenesisValidatorsRoot();
 
-    // sum of all topics for highest fork + (fork-1) + (fork-2)
-    int exactMaxSubscribedTopics =
+    // all topics for highest fork, (fork-1) and (fork-2)
+    final List<Integer> topicsPerFork =
         SpecMilestone.getMilestonesUpTo(latestMilestone).stream()
             .sorted(Comparator.reverseOrder())
             .limit(3)
-            .mapToInt(
+            .map(
                 milestone -> {
                   final Fork fork = spec.getForkSchedule().getFork(milestone);
                   final Bytes4 forkDigest =
@@ -82,9 +87,12 @@ public class GossipTopicsTest {
                           gossipEncoding, forkDigest, spec, milestone, p2pConfig)
                       .size();
                 })
-            .sum();
+            .toList();
 
-    assertThat(exactMaxSubscribedTopics)
+    assertThat(topicsPerFork.stream().mapToInt(Integer::intValue).sum())
         .isLessThanOrEqualTo(LibP2PGossipNetworkBuilder.MAX_SUBSCRIBED_TOPICS);
+    // a peer announces the topics of two forks in one RPC around a fork
+    assertThat(2 * Collections.max(topicsPerFork))
+        .isLessThanOrEqualTo(LibP2PParamsFactory.MAX_INBOUND_SUBSCRIPTIONS_PER_RPC);
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -29,6 +29,7 @@ import tech.pegasys.teku.infrastructure.http.UrlSanitizer;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.CheckpointState;
@@ -37,6 +38,7 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.util.ChainDataLoader;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.EpochProcessingException;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.SlotProcessingException;
+import tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas;
 import tech.pegasys.teku.storage.api.StorageQueryChannel;
 import tech.pegasys.teku.storage.api.StorageUpdateChannel;
 import tech.pegasys.teku.storage.api.WeakSubjectivityUpdate;
@@ -178,6 +180,31 @@ public class WeakSubjectivityInitializer {
     }
   }
 
+  /**
+   * A Gloas genesis block is EMPTY: its execution payload bid names the execution layer genesis
+   * block as parent and commits to no payload, as in the consensus-specs genesis helper,
+   * eth-beacon-genesis and Teku's {@code GenesisGenerator}. Genesis states written by earlier Teku
+   * versions made the genesis block FULL and relied on a synthetic genesis payload that no longer
+   * exists, so a node started on one would never import the slot-1 block. Anchors after genesis are
+   * left alone.
+   */
+  public void validateGloasGenesisAnchor(final AnchorPoint anchor) {
+    if (!anchor.getBlockSlot().equals(SpecConfig.GENESIS_SLOT)) {
+      return;
+    }
+    final boolean genesisBlockIsFull =
+        anchor.getState().toVersionGloas().map(MiscHelpersGloas::isParentBlockFull).orElse(false);
+    if (genesisBlockIsFull) {
+      throw new InvalidConfigurationException(
+          "The Gloas genesis state commits to the execution layer genesis block as the genesis "
+              + "block's own execution payload (latest_execution_payload_bid.block_hash equals "
+              + "latest_block_hash). This layout was produced by earlier Teku versions and is no "
+              + "longer supported: the genesis block must be EMPTY, with a zero bid block hash, as "
+              + "produced by this Teku version and by eth-beacon-genesis. Regenerate the genesis "
+              + "state and wipe the beacon node database.");
+    }
+  }
+
   public void validateInitialAnchor(
       final AnchorPoint initialAnchor,
       final UInt64 currentSlot,
@@ -198,6 +225,7 @@ public class WeakSubjectivityInitializer {
                 initialAnchor, currentSlot, spec, wsCalculator));
 
     if (initialAnchor.isGenesis()) {
+      validateGloasGenesisAnchor(initialAnchor);
       // Skip extra validations for genesis state
       return;
     }

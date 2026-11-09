@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -44,8 +44,11 @@ import tech.pegasys.teku.spec.config.SpecConfigElectra;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.fulu.MatrixEntry;
+import tech.pegasys.teku.spec.datastructures.blobs.versions.gloas.DataColumnSidecarGloas;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodyGloas;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
@@ -267,6 +270,36 @@ public class MiscHelpersGloas extends MiscHelpersFulu {
     return bid.getParentBlockHash().equals(state.getLatestExecutionPayloadBid().getBlockHash());
   }
 
+  /**
+   * Spec mapping: {@code is_parent_block_full(state)}. Whether the execution payload of the latest
+   * block has been applied to the state: the latest bid's block hash is the state's latest block
+   * hash. A Gloas genesis state is never full, since its bid commits to no payload.
+   */
+  public static boolean isParentBlockFull(final BeaconStateGloas state) {
+    return state.getLatestExecutionPayloadBid().getBlockHash().equals(state.getLatestBlockHash());
+  }
+
+  /**
+   * Whether {@code block} builds on the execution payload of {@code parentBlock}, i.e. the parent
+   * block is FULL on the chain through {@code block}: the parent hash of the block's bid is the
+   * block hash committed to by the parent's bid. Pre-Gloas parents have no execution payload
+   * envelope to build on.
+   */
+  public static boolean isParentBlockFull(
+      final SignedBeaconBlock parentBlock, final SignedBeaconBlock block) {
+    final Optional<BeaconBlockBodyGloas> maybeParentBlockBody =
+        parentBlock.getMessage().getBody().toVersionGloas();
+    if (maybeParentBlockBody.isEmpty()) {
+      return false;
+    }
+    return BeaconBlockBodyGloas.required(block.getMessage().getBody())
+        .getSignedExecutionPayloadBid()
+        .getMessage()
+        .getParentBlockHash()
+        .equals(
+            maybeParentBlockBody.get().getSignedExecutionPayloadBid().getMessage().getBlockHash());
+  }
+
   public boolean isExecutionRequestsRootMatchingLatestBid(
       final BeaconStateGloas state, final ExecutionRequests executionRequests) {
     return executionRequests
@@ -316,6 +349,13 @@ public class MiscHelpersGloas extends MiscHelpersFulu {
 
   @Override
   public boolean verifyDataColumnSidecar(final DataColumnSidecar dataColumnSidecar) {
+    if (!(dataColumnSidecar instanceof DataColumnSidecarGloas)) {
+      LOG.trace(
+          "DataColumnSidecar is a {}, expected a Gloas data column sidecar",
+          dataColumnSidecar.getClass().getSimpleName());
+      return false;
+    }
+
     final int numberOfColumns = specConfigGloas.getNumberOfColumns();
 
     // The sidecar index must be within the valid range

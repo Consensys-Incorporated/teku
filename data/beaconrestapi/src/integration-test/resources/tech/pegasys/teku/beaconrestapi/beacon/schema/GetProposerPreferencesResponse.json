@@ -1,0 +1,17 @@
+{
+  "title" : "GetProposerPreferencesResponse",
+  "type" : "object",
+  "required" : [ "version", "data" ],
+  "properties" : {
+    "version" : {
+      "type" : "string",
+      "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze" ]
+    },
+    "data" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/SignedProposerPreferences"
+      }
+    }
+  }
+}

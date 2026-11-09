@@ -1,0 +1,50 @@
+name: 'merge junit xml'
+description: 'Merge every Gradle TEST-*.xml under build/test-results into one <testsuites> file'
+
+# Gradle writes one XML file per test class. dorny/test-reporter renders one table row and
+# one section per file and splices them with argument spread, which overflows the Node call
+# stack on tens of thousands of files (dorny/test-reporter#249, reference tests hit it) and
+# fills its 65535-byte check run budget with file rows before any failure is listed. One
+# file per shard keeps the report small; dorny's java-junit parser reads <testsuites>.
+
+inputs:
+  output:
+    description: 'Path of the merged XML file'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Merge JUnit XML
+      shell: bash
+      env:
+        OUTPUT: ${{ inputs.output }}
+      run: |
+        python3 <<'PY'
+        import glob, os, xml.etree.ElementTree as ET
+
+        output = os.environ["OUTPUT"]
+        merged = ET.Element("testsuites")
+        count = 0
+        for report in sorted(glob.glob("**/build/test-results/**/TEST-*.xml", recursive=True)):
+            if os.path.abspath(report) == os.path.abspath(output):
+                continue
+            try:
+                root = ET.parse(report).getroot()
+            except ET.ParseError as e:
+                print(f"Skipping {report}: {e}")
+                continue
+            if root.tag == "testsuite":
+                merged.append(root)
+            elif root.tag == "testsuites":
+                merged.extend(list(root))
+            count += 1
+
+        if count == 0:
+            print("No JUnit XML files found, nothing to merge")
+            raise SystemExit(0)
+
+        os.makedirs(os.path.dirname(output), exist_ok=True)
+        ET.ElementTree(merged).write(output, encoding="utf-8", xml_declaration=True)
+        print(f"Merged {count} JUnit XML files into {output}")
+        PY

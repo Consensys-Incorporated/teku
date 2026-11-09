@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -41,7 +41,7 @@ public abstract class DelegatingP2PNetwork<T extends Peer> implements P2PNetwork
   }
 
   @Override
-  public PeerAddress createPeerAddress(final DiscoveryPeer discoveryPeer) {
+  public Optional<PeerAddress> createPeerAddress(final DiscoveryPeer discoveryPeer) {
     return network.createPeerAddress(discoveryPeer);
   }
 

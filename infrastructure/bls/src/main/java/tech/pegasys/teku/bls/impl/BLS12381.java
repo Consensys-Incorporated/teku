@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -139,12 +139,54 @@ public interface BLS12381 {
   /**
    * https://ethresear.ch/t/fast-verification-of-multiple-bls-signatures/5407
    *
+   * <p>Variant of {@link #prepareBatchVerify(int, List, Bytes, Signature)} for several signatures
+   * over the <b>same</b> message. Since <code>e(P1 * r1, M) * e(P2 * r2, M) * ... = e(P1 * r1 + P2
+   * * r2 + ..., M)</code> the message is hashed to the curve and paired only once, while the random
+   * multipliers are still applied to each signature and aggregated public key individually.
+   *
+   * <p>For above batch verification method pre-calculates and returns two values: <code>
+   * S1 * r1 + S2 * r2 + ...</code> and <code>e(P1 * r1 + P2 * r2 + ..., M)</code>
+   *
+   * @param publicKeys one list of public keys per signature (aggregated per signature)
+   * @param message the message all signatures are over
+   * @param signatures the signatures, same size as publicKeys
+   * @param parallel whether per-signature work may be spread over the common ForkJoinPool
+   * @return the pair of values above in an opaque instance
+   */
+  BatchSemiAggregate prepareBatchVerifySameMessage(
+      List<? extends List<? extends PublicKey>> publicKeys,
+      Bytes message,
+      List<? extends Signature> signatures,
+      boolean parallel);
+
+  /**
+   * https://ethresear.ch/t/fast-verification-of-multiple-bls-signatures/5407
+   *
+   * <p>Prepares several (public keys, message, signature) entries sequentially in one pairing
+   * context. Each entry gets its own random multiplier, exactly as in {@link
+   * #prepareBatchVerify(int, List, Bytes, Signature)}, but the pairs share one multi-pair Miller
+   * loop. The result can be mixed with the results of the other prepare methods.
+   *
+   * @param publicKeys one list of public keys per entry (aggregated per entry)
+   * @param messages one message per entry, same size as publicKeys
+   * @param signatures one signature per entry, same size as publicKeys
+   * @return the accumulated values in an opaque instance
+   */
+  BatchSemiAggregate prepareBatchVerifyChunk(
+      List<? extends List<? extends PublicKey>> publicKeys,
+      List<Bytes> messages,
+      List<? extends Signature> signatures);
+
+  /**
+   * https://ethresear.ch/t/fast-verification-of-multiple-bls-signatures/5407
+   *
    * <p>Does the final job of batch verification: calculates the final product and sum, does final
    * pairing and exponentiation
    *
    * @param preparedList the list of instances returned by {@link #prepareBatchVerify(int, List,
-   *     Bytes, Signature)} or {@link #prepareBatchVerify2(int, List, Bytes, Signature, List, Bytes,
-   *     Signature)} or mixed from both
+   *     Bytes, Signature)}, {@link #prepareBatchVerify2(int, List, Bytes, Signature, List, Bytes,
+   *     Signature)}, {@link #prepareBatchVerifySameMessage(List, Bytes, List, boolean)} or {@link
+   *     #prepareBatchVerifyChunk(List, List, List)}, or mixed from any of them
    * @return True if the verification is successful, false otherwise
    */
   boolean completeBatchVerify(List<? extends BatchSemiAggregate> preparedList);

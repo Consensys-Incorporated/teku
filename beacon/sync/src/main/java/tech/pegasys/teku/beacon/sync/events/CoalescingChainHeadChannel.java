@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -48,15 +48,7 @@ public class CoalescingChainHeadChannel implements ChainHeadChannel, SyncSubscri
       final Optional<ForkChoicePayloadStatus> payloadStatus,
       final Optional<ReorgContext> optionalReorgContext) {
     if (!syncing) {
-      optionalReorgContext.ifPresent(
-          reorg ->
-              eventLogger.reorgEvent(
-                  reorg.getOldBestBlockRoot(),
-                  reorg.getOldBestBlockSlot(),
-                  bestBlockRoot,
-                  slot,
-                  reorg.getCommonAncestorRoot(),
-                  reorg.getCommonAncestorSlot()));
+      optionalReorgContext.ifPresent(reorg -> logReorg(reorg, slot, bestBlockRoot, payloadStatus));
       delegate.chainHeadUpdated(
           slot,
           stateRoot,
@@ -96,6 +88,44 @@ public class CoalescingChainHeadChannel implements ChainHeadChannel, SyncSubscri
                               payloadStatus,
                               optionalReorgContext)));
     }
+  }
+
+  private void logReorg(
+      final ReorgContext reorg,
+      final UInt64 slot,
+      final Bytes32 bestBlockRoot,
+      final Optional<ForkChoicePayloadStatus> payloadStatus) {
+    if (reorg.isPayloadReorg()) {
+      eventLogger.payloadReorgEvent(
+          bestBlockRoot,
+          slot,
+          reorg.oldBestExecutionBlockHash(),
+          reorg.newBestExecutionBlockHash());
+      return;
+    }
+    eventLogger.reorgEvent(
+        reorg.oldBestBlockRoot(),
+        reorg.oldBestBlockSlot(),
+        bestBlockRoot,
+        slot,
+        reorg.commonAncestorRoot(),
+        reorg.commonAncestorSlot(),
+        payloadStatus.flatMap(CoalescingChainHeadChannel::toLoggedPayloadStatus),
+        toLoggedPayloadStatus(reorg.oldBestPayloadStatus()),
+        toLoggedPayloadStatus(reorg.commonAncestorPayloadStatusOnOldBranch()),
+        toLoggedPayloadStatus(reorg.commonAncestorPayloadStatusOnNewBranch()));
+  }
+
+  /**
+   * The event logger cannot depend on the spec types, so the payload status is passed by name.
+   * PENDING carries no information (pre-Gloas, or unresolved) and is not displayed.
+   */
+  private static Optional<String> toLoggedPayloadStatus(final ForkChoicePayloadStatus status) {
+    return switch (status) {
+      case PAYLOAD_STATUS_PENDING -> Optional.empty();
+      case PAYLOAD_STATUS_EMPTY -> Optional.of("EMPTY");
+      case PAYLOAD_STATUS_FULL -> Optional.of("FULL");
+    };
   }
 
   @Override
@@ -172,18 +202,33 @@ public class CoalescingChainHeadChannel implements ChainHeadChannel, SyncSubscri
       this.previousDutyDependentRoot = previousDutyDependentRoot;
       this.currentDutyDependentRoot = currentDutyDependentRoot;
       this.payloadStatus = payloadStatus;
-      if (reorgContext.isPresent() && hasEarlierCommonAncestor(reorgContext)) {
-        this.reorgContext = reorgContext;
-      }
+      reorgContext.ifPresent(this::mergeReorgContext);
       return this;
     }
 
-    private boolean hasEarlierCommonAncestor(final Optional<ReorgContext> reorgContext) {
-      return this.reorgContext.isEmpty()
-          || reorgContext
-              .orElseThrow()
-              .getCommonAncestorSlot()
-              .isLessThan(this.reorgContext.orElseThrow().getCommonAncestorSlot());
+    /**
+     * While syncing only the last head update is delivered (without logging), so the pending reorg
+     * context must keep whatever the consumers need to act on. A block reorg is what pools, light
+     * client pruning and the chain_reorg event act on, so it is never displaced by a payload reorg;
+     * between block reorgs the earliest common ancestor covers the most ground. No consumer acts on
+     * a payload reorg, so one is only kept while no block reorg is pending (the latest, so that the
+     * delivered event is not stripped of a context that was reported) and the delivered payload
+     * status reflects the final head regardless of which context is kept.
+     */
+    private void mergeReorgContext(final ReorgContext incoming) {
+      if (this.reorgContext.isEmpty()) {
+        this.reorgContext = Optional.of(incoming);
+        return;
+      }
+      final ReorgContext pending = this.reorgContext.get();
+      if (pending.isPayloadReorg()) {
+        // a block reorg replaces it, a newer payload reorg refreshes it
+        this.reorgContext = Optional.of(incoming);
+      } else if (incoming.isBlockReorg()
+          && incoming.commonAncestorSlot().isLessThan(pending.commonAncestorSlot())) {
+        this.reorgContext = Optional.of(incoming);
+      }
+      // otherwise the pending block reorg is kept
     }
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -73,6 +73,21 @@ public class BuilderBidValidatorImpl implements BuilderBidValidator {
       throw new BuilderBidValidationException(
           "Invalid proposed payload with respect to consensus.", e);
     }
+
+    signedBuilderBid
+        .getMessage()
+        .getOptionalBlobKzgCommitments()
+        .ifPresent(
+            commitments -> {
+              final int maxBlobsPerBlock =
+                  spec.getMaxBlobsPerBlockAtSlot(state.getSlot()).orElseThrow();
+              if (commitments.size() > maxBlobsPerBlock) {
+                throw new BuilderBidValidationException(
+                    String.format(
+                        "Number of kzg commitments in builder bid (%s) exceeds max blobs per block (%s)",
+                        commitments.size(), maxBlobsPerBlock));
+              }
+            });
 
     // validating the withdrawals root
     localExecutionPayload

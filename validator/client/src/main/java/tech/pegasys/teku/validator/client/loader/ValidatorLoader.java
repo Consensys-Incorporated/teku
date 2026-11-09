@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -114,6 +114,14 @@ public class ValidatorLoader {
     final BLSPublicKey publicKey =
         BLSPublicKey.fromBytesCompressed(Bytes48.wrap(keyStoreData.getPubkey()));
 
+    // A loaded validator's slashing protection is held by the running slashing protector, so
+    // importing history for it would be overwritten by the cached record on the next signature.
+    if (ownedValidators.hasValidator(publicKey)) {
+      return new LocalValidatorImportResult.Builder(PostKeyResult.duplicate(), password)
+          .publicKey(Optional.of(publicKey))
+          .keyStoreData(Optional.of(keyStoreData))
+          .build();
+    }
     if (slashingProtectionImporter.isPresent()) {
       final Optional<String> errorString =
           slashingProtectionImporter.get().updateSigningRecord(publicKey, LOG::debug);
@@ -124,12 +132,6 @@ public class ValidatorLoader {
             .keyStoreData(Optional.of(keyStoreData))
             .build();
       }
-    }
-    if (ownedValidators.hasValidator(publicKey)) {
-      return new LocalValidatorImportResult.Builder(PostKeyResult.duplicate(), password)
-          .publicKey(Optional.of(publicKey))
-          .keyStoreData(Optional.of(keyStoreData))
-          .build();
     }
 
     if (addToOwnedValidators) {

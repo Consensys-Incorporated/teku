@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -41,6 +41,20 @@ public interface Batch {
   Map<Bytes32, List<BlobSidecar>> getBlobSidecarsByBlockRoot();
 
   Map<Bytes32, SignedExecutionPayloadEnvelope> getExecutionPayloadsByBlockRoot();
+
+  /**
+   * Keeps the execution payload envelope of the block with the given root, if any, aside because
+   * the next block did not build on it. It is neither imported nor served, but can be restored by
+   * {@link #restoreExecutionPayload(Bytes32)} if a re-downloaded next block does build on it.
+   */
+  void dropExecutionPayload(Bytes32 blockRoot);
+
+  /**
+   * Restores an execution payload envelope kept aside by {@link #dropExecutionPayload(Bytes32)}.
+   *
+   * @return whether an envelope for the block is available afterwards
+   */
+  boolean restoreExecutionPayload(Bytes32 blockRoot);
 
   Optional<SyncSource> getSource();
 

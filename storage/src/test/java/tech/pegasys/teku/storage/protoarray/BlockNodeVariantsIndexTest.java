@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -34,6 +34,25 @@ class BlockNodeVariantsIndexTest {
   private static final BlockCheckpoints GENESIS_BLOCK_CHECKPOINTS =
       new BlockCheckpoints(
           GENESIS_CHECKPOINT, GENESIS_CHECKPOINT, GENESIS_CHECKPOINT, GENESIS_CHECKPOINT);
+
+  @Test
+  void putBaseNode_shouldPreserveExistingVariants() {
+    final Bytes32 blockRoot = Bytes32.fromHexStringLenient("0x01");
+    final ForkChoiceNode baseNode = ForkChoiceNode.createBase(blockRoot);
+    final ForkChoiceNode emptyNode = ForkChoiceNode.createEmpty(blockRoot);
+    final ForkChoiceNode fullNode = ForkChoiceNode.createFull(blockRoot);
+    final BlockNodeVariantsIndex index = new BlockNodeVariantsIndex();
+    index.putBaseNode(blockRoot, UInt64.ONE, baseNode);
+    index.attachEmptyNode(blockRoot, emptyNode);
+    index.attachFullNode(blockRoot, fullNode);
+
+    index.putBaseNode(blockRoot, UInt64.ONE, baseNode);
+
+    assertThat(index.getSlot(blockRoot)).contains(UInt64.ONE);
+    assertThat(index.getBaseNode(blockRoot)).contains(baseNode);
+    assertThat(index.getEmptyNode(blockRoot)).contains(emptyNode);
+    assertThat(index.getFullNode(blockRoot)).contains(fullNode);
+  }
 
   @Test
   void attachProjectedNodes_requiresBaseNodeToExistFirst() {

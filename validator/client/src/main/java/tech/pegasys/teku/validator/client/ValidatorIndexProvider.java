@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -68,12 +68,21 @@ public class ValidatorIndexProvider {
     LOG.trace("Looking up {} unknown validators", unknownValidators.size());
     validatorApiChannel
         .getValidatorIndices(unknownValidators)
-        .thenAccept(
-            knownValidators -> {
-              logNewValidatorIndices(knownValidators);
-              validatorIndicesByPublicKey.putAll(knownValidators);
-              firstSuccessfulRequest.complete(null);
-            })
+        .thenCompose(
+            maybeKnownValidators ->
+                maybeKnownValidators
+                    .map(
+                        knownValidators -> {
+                          logNewValidatorIndices(knownValidators);
+                          validatorIndicesByPublicKey.putAll(knownValidators);
+                          firstSuccessfulRequest.complete(null);
+                          return SafeFuture.COMPLETE;
+                        })
+                    .orElseGet(
+                        () ->
+                            SafeFuture.failedFuture(
+                                new NodeDataUnavailableException(
+                                    "Beacon node returned no validator index data"))))
         .orTimeout(30, TimeUnit.SECONDS)
         .whenComplete((result, error) -> requestInProgress.set(false))
         .finish(

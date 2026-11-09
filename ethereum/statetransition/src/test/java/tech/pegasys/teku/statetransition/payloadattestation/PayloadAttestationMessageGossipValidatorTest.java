@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -33,9 +33,12 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
+import tech.pegasys.teku.bls.BLSPublicKey;
+import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -47,6 +50,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestat
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
+import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
@@ -56,6 +60,7 @@ public class PayloadAttestationMessageGossipValidatorTest {
   private final Spec spec = mock(Spec.class);
   private final Map<Bytes32, BlockImportResult> invalidBlockRoots = new HashMap<>();
   private final GossipValidationHelper gossipValidationHelper = mock(GossipValidationHelper.class);
+  private final AsyncBLSSignatureVerifier signatureVerifier = mock(AsyncBLSSignatureVerifier.class);
 
   private PayloadAttestationMessageGossipValidator payloadAttestationMessageGossipValidator;
 
@@ -64,13 +69,15 @@ public class PayloadAttestationMessageGossipValidatorTest {
   private UInt64 validatorIndex;
   private Bytes32 blockRoot;
   private BeaconState postState;
+  private BLSPublicKey validatorPublicKey;
+  private Bytes32 signingRoot;
 
   @BeforeEach
   void setup(final TestSpecInvocationContextProvider.SpecContext specContext) {
     final DataStructureUtil dataStructureUtil = specContext.getDataStructureUtil();
     this.payloadAttestationMessageGossipValidator =
         new PayloadAttestationMessageGossipValidator(
-            spec, gossipValidationHelper, invalidBlockRoots);
+            spec, gossipValidationHelper, signatureVerifier, invalidBlockRoots);
 
     final PayloadAttestationMessage randomPayloadAttestationMessage =
         dataStructureUtil.randomPayloadAttestationMessage();
@@ -93,16 +100,23 @@ public class PayloadAttestationMessageGossipValidatorTest {
         .thenReturn(SafeFuture.completedFuture(Optional.of(postState)));
     final SpecVersion specVersion = mock(SpecVersion.class);
     final MiscHelpers miscHelpers = mock(MiscHelpers.class);
-    final Bytes32 signingRoot = Bytes32.random();
+    signingRoot = Bytes32.random();
     when(miscHelpers.computeSigningRoot(eq(payloadAttestationMessage.getData()), any()))
         .thenReturn(signingRoot);
     when(specVersion.miscHelpers()).thenReturn(miscHelpers);
     when(spec.isPayloadAttestationAvailableAtSlot(slot)).thenReturn(true);
     when(spec.atSlot(slot)).thenReturn(specVersion);
     when(spec.getPtc(postState, slot)).thenReturn(IntList.of(validatorIndex.intValue()));
-    when(gossipValidationHelper.isSignatureValidWithRespectToProposerIndex(
-            any(), any(), any(), any()))
-        .thenReturn(true);
+    validatorPublicKey = dataStructureUtil.randomPublicKey();
+    when(spec.getValidatorPubKey(postState, validatorIndex))
+        .thenReturn(Optional.of(validatorPublicKey));
+    signatureVerifierReturns(SafeFuture.completedFuture(true));
+  }
+
+  private void signatureVerifierReturns(final SafeFuture<Boolean> result) {
+    when(signatureVerifier.verify(
+            any(BLSPublicKey.class), any(Bytes.class), any(BLSSignature.class)))
+        .thenReturn(result);
   }
 
   @TestTemplate
@@ -273,9 +287,7 @@ public class PayloadAttestationMessageGossipValidatorTest {
 
   @TestTemplate
   void shouldReject_whenSignatureIsInvalid() {
-    when(gossipValidationHelper.isSignatureValidWithRespectToProposerIndex(
-            any(), any(), any(), any()))
-        .thenReturn(false);
+    signatureVerifierReturns(SafeFuture.completedFuture(false));
     assertThatSafeFuture(
             payloadAttestationMessageGossipValidator.validate(
                 validatablePayloadAttestationMessage()))
@@ -291,10 +303,10 @@ public class PayloadAttestationMessageGossipValidatorTest {
         .isCompletedWithValue(ACCEPT);
     verify(gossipValidationHelper).isBlockAvailable(blockRoot);
     verify(gossipValidationHelper).getStateAtBlockRoot(any());
-    verify(gossipValidationHelper)
-        .isSignatureValidWithRespectToProposerIndex(any(), any(), any(), any());
+    verify(signatureVerifier)
+        .verify(any(BLSPublicKey.class), any(Bytes.class), any(BLSSignature.class));
 
-    clearInvocations(gossipValidationHelper);
+    clearInvocations(gossipValidationHelper, signatureVerifier);
 
     // Second validation is ignored
     assertThatSafeFuture(
@@ -306,31 +318,85 @@ public class PayloadAttestationMessageGossipValidatorTest {
                 slot, validatorIndex));
     verify(gossipValidationHelper, never()).isBlockAvailable(blockRoot);
     verify(gossipValidationHelper, never()).getStateAtBlockRoot(any());
-    verify(gossipValidationHelper, never())
-        .isSignatureValidWithRespectToProposerIndex(any(), any(), any(), any());
+    verify(signatureVerifier, never())
+        .verify(any(BLSPublicKey.class), any(Bytes.class), any(BLSSignature.class));
   }
 
   @TestTemplate
   void shouldNotMarkAsSeenIfValidationFails() {
     // Fail validation due to bad signature
-    when(gossipValidationHelper.isSignatureValidWithRespectToProposerIndex(
-            any(), any(), any(), any()))
-        .thenReturn(false);
+    signatureVerifierReturns(SafeFuture.completedFuture(false));
     assertThatSafeFuture(
             payloadAttestationMessageGossipValidator.validate(
                 validatablePayloadAttestationMessage()))
         .isCompletedWithValueMatching(InternalValidationResult::isReject);
 
     // Fix the signature and try again
-    when(gossipValidationHelper.isSignatureValidWithRespectToProposerIndex(
-            any(), any(), any(), any()))
-        .thenReturn(true);
+    signatureVerifierReturns(SafeFuture.completedFuture(true));
 
     // It should be accepted now
     assertThatSafeFuture(
             payloadAttestationMessageGossipValidator.validate(
                 validatablePayloadAttestationMessage()))
         .isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldVerifySignatureWithTheAsyncSignatureVerifier() {
+    assertThatSafeFuture(
+            payloadAttestationMessageGossipValidator.validate(
+                validatablePayloadAttestationMessage()))
+        .isCompletedWithValue(ACCEPT);
+
+    verify(signatureVerifier)
+        .verify(validatorPublicKey, signingRoot, payloadAttestationMessage.getSignature());
+  }
+
+  @TestTemplate
+  void shouldCompleteOnlyOnceSignatureVerificationCompletes() {
+    final SafeFuture<Boolean> signatureResult = new SafeFuture<>();
+    signatureVerifierReturns(signatureResult);
+
+    final SafeFuture<InternalValidationResult> validationResult =
+        payloadAttestationMessageGossipValidator.validate(validatablePayloadAttestationMessage());
+    assertThatSafeFuture(validationResult).isNotDone();
+
+    signatureResult.complete(true);
+    assertThatSafeFuture(validationResult).isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldNotMarkAsSeenWhileSignatureVerificationIsPending() {
+    final SafeFuture<Boolean> signatureResult = new SafeFuture<>();
+    signatureVerifierReturns(signatureResult);
+    final SafeFuture<InternalValidationResult> pendingResult =
+        payloadAttestationMessageGossipValidator.validate(validatablePayloadAttestationMessage());
+
+    // A copy arriving while the first is being verified is verified as well, and whichever
+    // finishes first is accepted
+    signatureVerifierReturns(SafeFuture.completedFuture(true));
+    assertThatSafeFuture(
+            payloadAttestationMessageGossipValidator.validate(
+                validatablePayloadAttestationMessage()))
+        .isCompletedWithValue(ACCEPT);
+
+    signatureResult.complete(true);
+    assertThatSafeFuture(pendingResult)
+        .isCompletedWithValue(
+            ignore(
+                "Payload attestation for slot %s and validator index %s already seen",
+                slot, validatorIndex));
+  }
+
+  @TestTemplate
+  void shouldReject_whenValidatorPublicKeyIsUnknown() {
+    when(spec.getValidatorPubKey(postState, validatorIndex)).thenReturn(Optional.empty());
+    assertThatSafeFuture(
+            payloadAttestationMessageGossipValidator.validate(
+                validatablePayloadAttestationMessage()))
+        .isCompletedWithValue(reject("Invalid payload attestation signature"));
+    verify(signatureVerifier, never())
+        .verify(any(BLSPublicKey.class), any(Bytes.class), any(BLSSignature.class));
   }
 
   private ValidatablePayloadAttestationMessage validatablePayloadAttestationMessage() {

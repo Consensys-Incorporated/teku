@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -504,19 +504,12 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
                 "process_proposer_slashings: %s",
                 invalidReason.map(OperationInvalidReason::describe).orElse(""));
 
-            removeBuilderPendingPayment(proposerSlashing, state);
-
             beaconStateMutators.slashValidator(
                 state,
                 proposerSlashing.getHeader1().getMessage().getProposerIndex().intValue(),
                 validatorExitContextSupplier);
           }
         });
-  }
-
-  protected void removeBuilderPendingPayment(
-      final ProposerSlashing proposerSlashing, final MutableBeaconState state) {
-    // NO-OP until Gloas
   }
 
   protected BlockValidationResult verifyProposerSlashings(

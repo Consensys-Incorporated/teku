@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -144,6 +144,28 @@ public class GossipValidationHelperTest {
         slot2TimeMillis.minusMinZero(gossipValidationHelper.getMaxOffsetTimeInMillis());
     storageSystem.chainUpdater().setTimeMillis(insideTolerance);
     assertThat(gossipValidationHelper.isSlotFromFuture(slot2)).isFalse();
+  }
+
+  @TestTemplate
+  void getMaxCurrentSlot_shouldAllowForClockDisparity() {
+    storageSystem.chainUpdater().setCurrentSlot(UInt64.ONE);
+    assertThat(gossipValidationHelper.getMaxCurrentSlot()).isEqualTo(UInt64.ONE);
+
+    final UInt64 slot2TimeMillis =
+        spec.computeTimeMillisAtSlot(
+            UInt64.valueOf(2),
+            secondsToMillis(
+                recentChainData.getBestState().orElseThrow().getImmediately().getGenesisTime()));
+
+    final UInt64 notYetInsideTolerance =
+        slot2TimeMillis.minusMinZero(gossipValidationHelper.getMaxOffsetTimeInMillis()).decrement();
+    storageSystem.chainUpdater().setTimeMillis(notYetInsideTolerance);
+    assertThat(gossipValidationHelper.getMaxCurrentSlot()).isEqualTo(UInt64.ONE);
+
+    final UInt64 insideTolerance =
+        slot2TimeMillis.minusMinZero(gossipValidationHelper.getMaxOffsetTimeInMillis());
+    storageSystem.chainUpdater().setTimeMillis(insideTolerance);
+    assertThat(gossipValidationHelper.getMaxCurrentSlot()).isEqualTo(UInt64.valueOf(2));
   }
 
   @TestTemplate

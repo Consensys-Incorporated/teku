@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -260,10 +260,6 @@ public abstract class BLSTest {
     return BLSSecretKey.fromBytes(Bytes32.ZERO);
   }
 
-  private static BLSSecretKey secretKeyFromInteger(final BigInteger value) {
-    return BLSSecretKey.fromBytes(Bytes32.leftPad(Bytes.wrap(value.toByteArray())));
-  }
-
   @Test
   void succeedsWhenPubkeyAndSignatureBothTheIdentityIsFailed() {
     Bytes message = Bytes.wrap("Hello, world!".getBytes(UTF_8));
@@ -346,9 +342,8 @@ public abstract class BLSTest {
 
   @Test
   void batchVerifyWithPairingReturnsFalseWhenFirstAggregatePublicKeyIsInfinity() {
-    final BLSKeyPair keyPair1 = new BLSKeyPair(secretKeyFromInteger(BigInteger.ONE));
-    final BLSKeyPair keyPair2 =
-        new BLSKeyPair(secretKeyFromInteger(BLSConstants.CURVE_ORDER_BI.subtract(BigInteger.ONE)));
+    final BLSKeyPair keyPair1 = new BLSKeyPair(BLSTestUtil.secretKeyFromInteger(BigInteger.ONE));
+    final BLSKeyPair keyPair2 = BLSTestUtil.negate(keyPair1);
     final BLSKeyPair keyPair3 = BLSTestUtil.randomKeyPair(3);
 
     assertTrue(keyPair1.getPublicKey().isValid());

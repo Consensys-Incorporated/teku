@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -33,11 +33,25 @@ import tech.pegasys.teku.spec.config.NetworkingSpecConfig;
 
 public class LibP2PParamsFactory {
 
-  public static final int MAX_SUBSCRIPTIONS_PER_MESSAGE = 200;
+  // A peer announces every topic it is subscribed to in one RPC when a stream opens, and the
+  // whole RPC is dropped when it carries more entries than this. On mainnet a node subscribed to
+  // all subnets has ~225 topics per fork and announces two forks worth of topics around a fork.
+  // Three overlapping forks (devnets with forks at consecutive epochs) do not fit; raise this
+  // if that matters, nothing else depends on the value. Enforced inbound via
+  // MaxCountTopicSubscriptionFilter.
+  public static final int MAX_INBOUND_SUBSCRIPTIONS_PER_RPC = 500;
+  // Our own announcements are split into RPCs of at most this many subscriptions. Kept at the
+  // inbound limit of earlier Teku releases so they still accept our announcements.
+  public static final int MAX_OUTBOUND_SUBSCRIPTIONS_PER_RPC = 200;
   private static final int MAX_PUBLISHED_MESSAGES = 1000;
   private static final int MAX_TOPICS_PER_PUBLISHED_MESSAGE = 1;
   private static final int MAX_IHAVE_MESSAGE_IDS = 5000;
   private static final int MAX_IDONTWANT_MESSAGE_IDS = 5000;
+  // Inbound protobuf field-count budget, backstopping the 256 KiB control-byte budget against
+  // empty-envelope allocation amplification. Half the jvm-libp2p default: real Ethereum shapes
+  // hit the byte budget first (<= ~27k fields), and the outbound IHAVE estimate (4 fields per
+  // id) keeps an all-subnets heartbeat (~5.5k ids) in one RPC. Lower values split it.
+  private static final int MAX_TOTAL_FIELDS = 32768;
 
   public static GossipParams createGossipParams(
       final GossipConfig gossipConfig, final NetworkingSpecConfig networkingSpecConfig) {
@@ -87,13 +101,12 @@ public class LibP2PParamsFactory {
         .maxGossipMessageSize(maxMessageSize(maxPayloadSize))
         .maxPublishedMessages(MAX_PUBLISHED_MESSAGES)
         .maxTopicsPerPublishedMessage(MAX_TOPICS_PER_PUBLISHED_MESSAGE)
-        // Keeps our outbound subscription batches within what our own
-        // MaxCountTopicSubscriptionFilter accepts inbound.
-        .maxSubscriptionsPerRpc(MAX_SUBSCRIPTIONS_PER_MESSAGE)
+        .maxSubscriptionsPerRpc(MAX_OUTBOUND_SUBSCRIPTIONS_PER_RPC)
         .maxPeersSentInPruneMsg(0)
         .maxPeersAcceptedInPruneMsg(0)
         .maxIHaveLength(MAX_IHAVE_MESSAGE_IDS)
-        .maxIDontWantMessageIds(MAX_IDONTWANT_MESSAGE_IDS);
+        .maxIDontWantMessageIds(MAX_IDONTWANT_MESSAGE_IDS)
+        .maxTotalFields(MAX_TOTAL_FIELDS);
   }
 
   public static GossipScoreParams createGossipScoreParams(final GossipScoringConfig config) {

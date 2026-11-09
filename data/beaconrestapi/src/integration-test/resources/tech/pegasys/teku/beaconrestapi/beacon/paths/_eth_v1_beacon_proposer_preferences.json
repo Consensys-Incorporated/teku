@@ -1,0 +1,76 @@
+{
+  "get" : {
+    "tags" : [ "Beacon" ],
+    "operationId" : "getProposerPreferences",
+    "summary" : "Get signed proposer preferences",
+    "description" : "Retrieves signed proposer preferences known by the node for upcoming proposal slots.\n\nSigned proposer preferences are only broadcast once per proposal slot and dependent root.\nThis allows builders to retrieve the ones that were broadcast before they subscribed to the\n`proposer_preferences` event.",
+    "parameters" : [ {
+      "name" : "slot",
+      "in" : "query",
+      "schema" : {
+        "type" : "string",
+        "description" : "Only return signed proposer preferences for this proposal slot.",
+        "example" : "1",
+        "format" : "uint64"
+      }
+    }, {
+      "name" : "dependent_root",
+      "in" : "query",
+      "schema" : {
+        "type" : "string",
+        "description" : "Only return signed proposer preferences with this dependent root.",
+        "example" : "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
+        "format" : "byte"
+      }
+    } ],
+    "responses" : {
+      "200" : {
+        "description" : "Successful response",
+        "headers" : {
+          "Eth-Consensus-Version" : {
+            "description" : "Required in response so client can deserialize returned json or ssz data more effectively.",
+            "required" : true,
+            "schema" : {
+              "type" : "string",
+              "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze" ],
+              "example" : "phase0"
+            }
+          }
+        },
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/GetProposerPreferencesResponse"
+            }
+          },
+          "application/octet-stream" : {
+            "schema" : {
+              "type" : "string",
+              "format" : "binary"
+            }
+          }
+        }
+      },
+      "400" : {
+        "description" : "The request could not be processed, check the response for more information.",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      },
+      "500" : {
+        "description" : "Internal server error",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/HttpErrorResponse"
+            }
+          }
+        }
+      }
+    }
+  }
+}

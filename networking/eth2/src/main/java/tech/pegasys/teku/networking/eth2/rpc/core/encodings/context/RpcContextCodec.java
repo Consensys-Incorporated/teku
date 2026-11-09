@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -18,6 +18,7 @@ import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszSchema;
+import tech.pegasys.teku.networking.eth2.rpc.core.RpcException;
 import tech.pegasys.teku.networking.eth2.rpc.core.encodings.RpcByteBufDecoder;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.storage.client.RecentChainData;
@@ -40,4 +41,7 @@ public interface RpcContextCodec<TContext, TPayload extends SszData> {
   Bytes encodeContext(TPayload responsePayload);
 
   Optional<SszSchema<TPayload>> getSchemaFromContext(final TContext context);
+
+  /** Throws if a fully decoded payload is inconsistent with the context bytes it arrived with. */
+  void verifyPayloadMatchesContext(TContext context, TPayload responsePayload) throws RpcException;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -61,6 +61,20 @@ public class TestDefinition {
     return configName;
   }
 
+  /**
+   * The network whose configuration these fixtures are built against. This is not always the config
+   * name: fork-choice-compliance fixtures live under their own spec directory but are generated
+   * with the minimal config, so callers that need a loadable network name (rather than the fixture
+   * location) must use this.
+   */
+  public Eth2Network getNetwork() {
+    return switch (configName) {
+      case TestSpecConfig.MAINNET -> Eth2Network.MAINNET;
+      case TestSpecConfig.MINIMAL, "fork-choice-compliance" -> Eth2Network.MINIMAL;
+      default -> throw new IllegalArgumentException("Unknown configName: " + configName);
+    };
+  }
+
   public String getFork() {
     return fork;
   }
@@ -91,12 +105,7 @@ public class TestDefinition {
   }
 
   private void createSpec(final boolean blsSignatureVerificationEnabled) {
-    final Eth2Network network =
-        switch (configName) {
-          case TestSpecConfig.MAINNET -> Eth2Network.MAINNET;
-          case TestSpecConfig.MINIMAL -> Eth2Network.MINIMAL;
-          default -> throw new IllegalArgumentException("Unknown configName: " + configName);
-        };
+    final Eth2Network network = getNetwork();
     final SpecMilestone milestone = getMilestone();
     final BLSSignatureVerifier blsSignatureVerifier =
         blsSignatureVerificationEnabled ? BLSSignatureVerifier.SIMPLE : BLSSignatureVerifier.NOOP;
@@ -139,13 +148,21 @@ public class TestDefinition {
 
   public Path getTestDirectory() {
     Path directory = ReferenceTestRoot.fromSystemProperties().getSpecDirectory(configName);
-    if (!fork.isEmpty()) {
-      directory = directory.resolve(fork);
+    if (configName.equals("fork-choice-compliance")) {
+      return directory
+          .resolve("tests")
+          .resolve("minimal")
+          .resolve(fork)
+          .resolve(pathFromPhaseTestDir);
+    } else {
+      if (!fork.isEmpty()) {
+        directory = directory.resolve(fork);
+      }
+      if (!pathFromPhaseTestDir.isEmpty()) {
+        directory = directory.resolve(pathFromPhaseTestDir);
+      }
+      return directory;
     }
-    if (!pathFromPhaseTestDir.isEmpty()) {
-      directory = directory.resolve(pathFromPhaseTestDir);
-    }
-    return directory;
   }
 
   /// some reference tests ship a partial `config.yaml` overriding a handful of constants on top of

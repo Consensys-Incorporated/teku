@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -16,6 +16,7 @@ package tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods;
 import static tech.pegasys.teku.infrastructure.async.SafeFuture.completedFuture;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ZERO;
 import static tech.pegasys.teku.networking.eth2.rpc.core.RpcResponseStatus.INVALID_REQUEST_CODE;
+import static tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL;
 
 import com.google.common.annotations.VisibleForTesting;
 import java.util.NavigableMap;
@@ -24,7 +25,6 @@ import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
 import org.hyperledger.besu.plugin.services.metrics.LabelledMetric;
@@ -40,6 +40,7 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.MinimalBeaconBlockSummary;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.ExecutionPayloadEnvelopesByRangeRequestMessage;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 
@@ -135,26 +136,31 @@ public class ExecutionPayloadEnvelopesByRangeMessageHandler
     final UInt64 adjustedStartSlot = startSlot.max(minServableSlot);
     final UInt64 adjustedCount = count.minusMinZero(adjustedStartSlot.minusMinZero(startSlot));
 
-    final NavigableMap<UInt64, Bytes32> hotRoots;
+    // Envelopes are only served for payloads that are part of the chain defined by the current
+    // head: the fork choice node of the block on the head chain must be FULL. Slots from the
+    // finalized block onwards are resolved on the head chain, which decides the payload status of
+    // the finalized block itself. Slots before the finalized block are served from the finalized
+    // database, which only retains envelopes of payloads the finalized chain built on.
+    final NavigableMap<UInt64, ForkChoiceNode> hotNodes;
 
-    if (combinedChainDataClient.isFinalized(message.getMaxSlot())) {
-      // All execution payloads are finalized so skip scanning the protoarray
-      hotRoots = new TreeMap<>();
+    final UInt64 finalizedBlockSlot = combinedChainDataClient.getFinalizedBlockSlot().orElse(ZERO);
+    if (message.getMaxSlot().isLessThan(finalizedBlockSlot)) {
+      // All requested slots are before the finalized block so skip scanning the protoarray
+      hotNodes = new TreeMap<>();
     } else {
-      hotRoots =
-          combinedChainDataClient.getAncestorRoots(adjustedStartSlot, UInt64.ONE, adjustedCount);
+      hotNodes = combinedChainDataClient.getAncestorNodes(adjustedStartSlot, adjustedCount);
     }
 
     final UInt64 headSlot =
-        hotRoots.isEmpty()
+        hotNodes.isEmpty()
             ? combinedChainDataClient
                 .getChainHead()
                 .map(MinimalBeaconBlockSummary::getSlot)
                 .orElse(ZERO)
-            : hotRoots.lastKey();
+            : hotNodes.lastKey();
 
     final RequestState initialState =
-        new RequestState(callback, adjustedStartSlot, adjustedCount, headSlot, hotRoots);
+        new RequestState(callback, adjustedStartSlot, adjustedCount, headSlot, hotNodes);
 
     final SafeFuture<RequestState> response;
 
@@ -246,7 +252,7 @@ public class ExecutionPayloadEnvelopesByRangeMessageHandler
     private UInt64 currentSlot;
     private UInt64 remainingExecutionPayloadEnvelopes;
     private final UInt64 headSlot;
-    private final NavigableMap<UInt64, Bytes32> knownBlockRoots;
+    private final NavigableMap<UInt64, ForkChoiceNode> knownNodes;
 
     private final AtomicInteger sentExecutionPayloadEnvelopes = new AtomicInteger(0);
 
@@ -255,12 +261,12 @@ public class ExecutionPayloadEnvelopesByRangeMessageHandler
         final UInt64 startSlot,
         final UInt64 count,
         final UInt64 headSlot,
-        final NavigableMap<UInt64, Bytes32> knownBlockRoots) {
+        final NavigableMap<UInt64, ForkChoiceNode> knownNodes) {
       this.callback = callback;
       this.currentSlot = startSlot;
       this.remainingExecutionPayloadEnvelopes = count;
       this.headSlot = headSlot;
-      this.knownBlockRoots = knownBlockRoots;
+      this.knownNodes = knownNodes;
     }
 
     private boolean needsMoreExecutionPayloadEnvelopes() {
@@ -292,16 +298,22 @@ public class ExecutionPayloadEnvelopesByRangeMessageHandler
 
     SafeFuture<Optional<SignedExecutionPayloadEnvelope>> loadNextExecutionPayloadEnvelope() {
       final UInt64 slot = this.currentSlot;
-      final Bytes32 knownBlockRoot = knownBlockRoots.get(slot);
-      if (knownBlockRoot != null) {
-        // Known root so lookup by root
+      final ForkChoiceNode knownNode = knownNodes.get(slot);
+      if (knownNode != null) {
+        if (knownNode.payloadStatus() != PAYLOAD_STATUS_FULL) {
+          // The payload is not part of the head chain: the next block built on the EMPTY variant,
+          // or the head itself is EMPTY or PENDING because fork choice has not selected its
+          // payload. Its envelope must not be served even if we hold it.
+          return SafeFuture.completedFuture(Optional.empty());
+        }
+        // Known node whose payload is part of the chain so lookup by root
         return combinedChainDataClient
-            .getExecutionPayloadByBlockRoot(knownBlockRoot)
+            .getExecutionPayloadByBlockRoot(knownNode.blockRoot())
             .thenApply(
                 maybeExecutionPayload ->
                     maybeExecutionPayload.filter(
                         executionPayload -> executionPayload.getSlot().equals(slot)));
-      } else if ((!knownBlockRoots.isEmpty() && slot.compareTo(knownBlockRoots.firstKey()) >= 0)
+      } else if ((!knownNodes.isEmpty() && slot.compareTo(knownNodes.firstKey()) >= 0)
           || slot.compareTo(headSlot) > 0) {
         // Unknown root but not finalized means this is an empty slot (or payload absent)
         // Could also be because the first execution payload requested is above our head slot

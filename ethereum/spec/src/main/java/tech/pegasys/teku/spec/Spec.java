@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -85,6 +85,7 @@ import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadHeader;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequestsDataCodec;
 import tech.pegasys.teku.spec.datastructures.execution.versions.capella.Withdrawal;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 import tech.pegasys.teku.spec.datastructures.forkchoice.MutableStore;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
@@ -906,6 +907,16 @@ public class Spec {
     return forGetAncestor(forkChoiceStrategy, root, startSlot)
         .getForkChoiceUtil()
         .getAncestors(forkChoiceStrategy, root, startSlot, step, count);
+  }
+
+  public NavigableMap<UInt64, ForkChoiceNode> getAncestorNodes(
+      final ReadOnlyForkChoiceStrategy forkChoiceStrategy,
+      final ForkChoiceNode node,
+      final UInt64 startSlot,
+      final UInt64 count) {
+    return forGetAncestor(forkChoiceStrategy, node.blockRoot(), startSlot)
+        .getForkChoiceUtil()
+        .getAncestorNodes(forkChoiceStrategy, node, startSlot, count);
   }
 
   public NavigableMap<UInt64, Bytes32> getAncestorsOnFork(

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -29,6 +29,8 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.bls.BLS;
+import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.collections.LimitedMap;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
@@ -38,12 +40,14 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
+import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
 import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
+import tech.pegasys.teku.statetransition.block.FutureBlockPool;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
 
 public class BlockGossipValidator {
@@ -97,6 +101,18 @@ public class BlockGossipValidator {
       return completedFuture(InternalValidationResult.IGNORE);
     }
 
+    /*
+     * [IGNORE] The block is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance)
+     * Blocks too far in the future to be queued for later processing are ignored before the block
+     * root is computed for the equivocation check, which can take a long time for a large block.
+     */
+    if (FutureBlockPool.isBeyondFutureSlotTolerance(
+        block.getSlot(), gossipValidationHelper.getMaxCurrentSlot())) {
+      LOG.trace(
+          "BlockValidator: Block slot {} is too far in the future. Dropping.", block.getSlot());
+      return completedFuture(InternalValidationResult.IGNORE);
+    }
+
     // Intermediate equivocation check without marking the block as received to avoid rejecting
     // other blocks that could still come from gossip
     final InternalValidationResult intermediateValidationResult =
@@ -114,7 +130,7 @@ public class BlockGossipValidator {
      */
     if (gossipValidationHelper.isSlotFromFuture(block.getSlot())) {
       LOG.trace("BlockValidator: Block is from the future. Saving for future processing.");
-      return completedFuture(InternalValidationResult.SAVE_FOR_FUTURE);
+      return checkSignatureBeforeSavingForFuture(block);
     }
 
     if (gossipValidationHelper.isBlockAvailable(block.getRoot())) {
@@ -133,7 +149,7 @@ public class BlockGossipValidator {
      */
     if (!gossipValidationHelper.isBlockAvailable(block.getParentRoot())) {
       LOG.trace("Block parent is not available. Saving for future processing.");
-      return completedFuture(InternalValidationResult.SAVE_FOR_FUTURE);
+      return checkSignatureBeforeSavingForFuture(block);
     }
 
     /*
@@ -154,7 +170,7 @@ public class BlockGossipValidator {
     if (maybeParentBlockSlot.isEmpty()) {
       LOG.trace(
           "BlockValidator: Parent block does not exist. It will be saved for future processing");
-      return completedFuture(InternalValidationResult.SAVE_FOR_FUTURE);
+      return checkSignatureBeforeSavingForFuture(block);
     }
 
     /*
@@ -236,6 +252,15 @@ public class BlockGossipValidator {
       }
     }
 
+    /*
+     * [REJECT] The proposer signature, signed_beacon_block.signature, is valid with respect to the proposer_index pubkey.
+     * Checked before the execution payload bid's parent, which may save the block for future
+     * processing, so that only correctly signed blocks are queued.
+     */
+    if (!blockSignatureIsValidWithRespectToProposerIndex(block, parentState)) {
+      return reject("Block signature is invalid");
+    }
+
     if (maybeSignedExecutionPayloadBid.isPresent()) {
       final ExecutionPayloadBid executionPayloadBid =
           maybeSignedExecutionPayloadBid.get().getMessage();
@@ -262,12 +287,6 @@ public class BlockGossipValidator {
       }
     }
 
-    /*
-     * [REJECT] The proposer signature, signed_beacon_block.signature, is valid with respect to the proposer_index pubkey.
-     */
-    if (!blockSignatureIsValidWithRespectToProposerIndex(block, parentState)) {
-      return reject("Block signature is invalid");
-    }
     final EquivocationCheckResult secondEquivocationCheckResult =
         performBlockEquivocationCheck(markAsReceived, block);
 
@@ -323,10 +342,17 @@ public class BlockGossipValidator {
     return Optional.empty();
   }
 
-  synchronized EquivocationCheckResult performBlockEquivocationCheck(
+  EquivocationCheckResult performBlockEquivocationCheck(
       final boolean markAsReceived, final SignedBeaconBlock block) {
-    final SlotAndProposer slotAndProposer = new SlotAndProposer(block);
+    // computed before taking the lock, so that blocks are hashed in parallel
     final Bytes32 blockRoot = block.getRoot();
+    return performBlockEquivocationCheck(markAsReceived, new SlotAndProposer(block), blockRoot);
+  }
+
+  private synchronized EquivocationCheckResult performBlockEquivocationCheck(
+      final boolean markAsReceived,
+      final SlotAndProposer slotAndProposer,
+      final Bytes32 blockRoot) {
     return Optional.ofNullable(receivedValidBlockRoots.get(slotAndProposer))
         .map(
             previouslySeenBlockRoot -> {
@@ -348,6 +374,64 @@ public class BlockGossipValidator {
     FIRST_BLOCK_FOR_SLOT_PROPOSER,
     BLOCK_ALREADY_SEEN_FOR_SLOT_PROPOSER,
     EQUIVOCATING_BLOCK_FOR_SLOT_PROPOSER
+  }
+
+  /**
+   * Verifies the proposer signature of a block that is about to be saved for future processing
+   * before being fully validated, because its slot is in the future or its parent is not yet known.
+   * Without this check any peer could fill the future and pending block queues with blocks nobody
+   * signed, at no cost to its peer score.
+   *
+   * <p>The parent state isn't available, so the signing domain is taken from the fork schedule and
+   * the proposer's pubkey from the latest finalized state, or from the head state for a validator
+   * that isn't finalized yet. Whether the block was proposed by the expected proposer depends on
+   * its branch's shuffling and is checked, along with the rest of the block, once it is processed.
+   *
+   * <p>Matching Prysm, an invalid signature is rejected, and a proposer index that the head state
+   * doesn't have is ignored rather than rejected.
+   */
+  private SafeFuture<InternalValidationResult> checkSignatureBeforeSavingForFuture(
+      final SignedBeaconBlock block) {
+    final Optional<ForkInfo> maybeForkInfo =
+        gossipValidationHelper.getForkInfo(spec.computeEpochAtSlot(block.getSlot()));
+    if (maybeForkInfo.isEmpty()) {
+      return completedFuture(InternalValidationResult.SAVE_FOR_FUTURE);
+    }
+    final Optional<BLSPublicKey> maybeFinalizedProposerPublicKey =
+        spec.getValidatorPubKey(
+            gossipValidationHelper.getLatestFinalizedState(), block.getProposerIndex());
+    if (maybeFinalizedProposerPublicKey.isPresent()) {
+      return completedFuture(
+          checkProposerSignature(
+              block, maybeFinalizedProposerPublicKey.get(), maybeForkInfo.get()));
+    }
+    // the validator may have been added since the latest finalized state, so use the head state
+    return gossipValidationHelper
+        .getHeadState()
+        .thenApply(
+            maybeHeadState ->
+                maybeHeadState
+                    .flatMap(
+                        headState -> spec.getValidatorPubKey(headState, block.getProposerIndex()))
+                    .map(
+                        proposerPublicKey ->
+                            checkProposerSignature(block, proposerPublicKey, maybeForkInfo.get()))
+                    .orElseGet(
+                        () ->
+                            ignore(
+                                "Block proposer index %s is not a known validator",
+                                block.getProposerIndex())));
+  }
+
+  private InternalValidationResult checkProposerSignature(
+      final SignedBeaconBlock block,
+      final BLSPublicKey proposerPublicKey,
+      final ForkInfo forkInfo) {
+    final Bytes signingRoot = signingRootUtil.signingRootForSignBlock(block.getMessage(), forkInfo);
+    if (!BLS.verify(proposerPublicKey, signingRoot, block.getSignature())) {
+      return reject("Block signature is invalid");
+    }
+    return InternalValidationResult.SAVE_FOR_FUTURE;
   }
 
   private boolean blockSignatureIsValidWithRespectToProposerIndex(

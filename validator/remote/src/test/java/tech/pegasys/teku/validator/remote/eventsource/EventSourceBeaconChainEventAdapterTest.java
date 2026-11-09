@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@
 package tech.pegasys.teku.validator.remote.eventsource;
 
 import static java.util.Collections.emptyMap;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -23,7 +24,6 @@ import static org.mockito.Mockito.when;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Stream;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
@@ -32,11 +32,12 @@ import org.hyperledger.besu.plugin.services.metrics.LabelledMetric;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import tech.pegasys.teku.api.response.EventType;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.logging.ValidatorLogger;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
 import tech.pegasys.teku.validator.api.required.SyncingStatus;
 import tech.pegasys.teku.validator.beaconnode.BeaconChainEventAdapter;
@@ -65,13 +66,15 @@ public class EventSourceBeaconChainEventAdapterTest {
     when(beaconApiMock.getEndpoint()).thenReturn(httpUrlMock);
   }
 
-  @ParameterizedTest(name = "subscribe_to_slashing_events: {0}")
-  @ValueSource(strings = {"true", "false"})
-  public void shouldSubscribeToSlashingEvents(final boolean shutdownWhenValidatorSlashedEnabled) {
+  @ParameterizedTest(name = "gloasScheduled={0}, shutdownWhenValidatorSlashed={1}")
+  @CsvSource({"true,true", "true,false", "false,true", "false,false"})
+  public void shouldSubscribeToTheHeadTopicForTheScheduledMilestones(
+      final boolean gloasScheduled, final boolean shutdownWhenValidatorSlashedEnabled) {
     final EventSourceBeaconChainEventAdapter eventSourceBeaconChainEventAdapter =
-        initEventSourceBeaconChainEventAdapter(shutdownWhenValidatorSlashedEnabled);
+        initEventSourceBeaconChainEventAdapter(gloasScheduled, shutdownWhenValidatorSlashedEnabled);
     eventSourceBeaconChainEventAdapter.createEventSource(beaconApiMock);
-    verifyEventSourceSubscriptionUrl(httpUrlMock, shutdownWhenValidatorSlashedEnabled);
+    verifyEventSourceSubscriptionUrl(
+        httpUrlMock, gloasScheduled, shutdownWhenValidatorSlashedEnabled);
   }
 
   @Test
@@ -137,8 +140,24 @@ public class EventSourceBeaconChainEventAdapterTest {
     verify(beaconNodeReadinessManager).performPrimaryReadinessCheck();
   }
 
+  @Test
+  public void shouldUseASeparateEventHandlerPerBeaconNode() {
+    // a beacon node which stops delivering events must be reported on its own, rather than being
+    // masked by another beacon node which is working
+    final EventSourceBeaconChainEventAdapter eventSourceBeaconChainEventAdapter =
+        initEventSourceBeaconChainEventAdapter(false, false);
+    final RemoteValidatorApiChannel otherBeaconApiMock = mock(RemoteValidatorApiChannel.class);
+    when(otherBeaconApiMock.getEndpoint()).thenReturn(httpUrlMock);
+
+    assertThat(eventSourceBeaconChainEventAdapter.createEventSourceHandler(beaconApiMock))
+        .isNotSameAs(
+            eventSourceBeaconChainEventAdapter.createEventSourceHandler(otherBeaconApiMock));
+  }
+
   private EventSourceBeaconChainEventAdapter initEventSourceBeaconChainEventAdapter(
-      final boolean shutdownWhenValidatorSlashedEnabled) {
+      final boolean gloasScheduled, final boolean shutdownWhenValidatorSlashedEnabled) {
+    Spec mockSpec = mock(Spec.class);
+    when(mockSpec.isMilestoneSupported(SpecMilestone.GLOAS)).thenReturn(gloasScheduled);
     return new EventSourceBeaconChainEventAdapter(
         mock(BeaconNodeReadinessManager.class),
         mock(RemoteValidatorApiChannel.class),
@@ -150,19 +169,28 @@ public class EventSourceBeaconChainEventAdapterTest {
         metricsSystemMock,
         true,
         shutdownWhenValidatorSlashedEnabled,
-        mock(Spec.class));
+        mockSpec);
   }
 
   public void verifyEventSourceSubscriptionUrl(
-      final HttpUrl endpoint, final boolean shutdownWhenValidatorSlashedEnabled) {
-    Stream<EventType> eventTypes =
-        shutdownWhenValidatorSlashedEnabled
-            ? Stream.of(EventType.head, EventType.attester_slashing, EventType.proposer_slashing)
-            : Stream.of(EventType.head);
+      final HttpUrl endpoint,
+      final boolean gloasScheduled,
+      final boolean shutdownWhenValidatorSlashedEnabled) {
+    List<EventType> eventTypeList = new ArrayList<>();
+    if (gloasScheduled) {
+      eventTypeList.add(EventType.head_v2);
+      eventTypeList.add(EventType.execution_payload_available);
+    } else {
+      eventTypeList.add(EventType.head);
+    }
+    if (shutdownWhenValidatorSlashedEnabled) {
+      eventTypeList.add(EventType.attester_slashing);
+      eventTypeList.add(EventType.proposer_slashing);
+    }
     verify(endpoint)
         .resolve(
             ValidatorApiMethod.EVENTS.getPath(emptyMap())
                 + "?topics="
-                + String.join(",", eventTypes.map(EventType::name).toList()));
+                + String.join(",", eventTypeList.stream().map(EventType::name).toList()));
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -16,6 +16,7 @@ package tech.pegasys.teku.networking.eth2.gossip.topics;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -24,11 +25,13 @@ import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.gossip.BlockGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers.Eth2TopicHandler;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.generator.ChainBuilder.BlockOptions;
+import tech.pegasys.teku.statetransition.block.FutureBlockPool;
 import tech.pegasys.teku.statetransition.util.DebugDataDumper;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 
@@ -39,6 +42,7 @@ public class BlockTopicHandlerTest extends AbstractTopicHandlerTest<SignedBeacon
     return new BlockGossipManager(
             recentChainData,
             spec,
+            new StubMetricsSystem(),
             asyncRunner,
             gossipNetwork,
             gossipEncoding,
@@ -80,6 +84,42 @@ public class BlockTopicHandlerTest extends AbstractTopicHandlerTest<SignedBeacon
   }
 
   @Test
+  public void handleMessage_shouldIgnoreFarFutureBlockWithoutDecodingIt() {
+    final UInt64 farFutureSlot =
+        recentChainData
+            .getCurrentSlot()
+            .orElseThrow()
+            .plus(FutureBlockPool.FUTURE_SLOT_TOLERANCE)
+            .plus(1);
+    final SignedBeaconBlock block = chainBuilder.generateBlockAtSlot(farFutureSlot).getBlock();
+    final Bytes serialized = gossipEncoding.encode(block);
+
+    final SafeFuture<ValidationResult> result =
+        topicHandler.handleMessage(topicHandler.prepareMessage(serialized, Optional.empty()));
+
+    assertThat(result).isCompletedWithValue(ValidationResult.Ignore);
+    assertThat(asyncRunner.hasDelayedActions()).isFalse();
+    verifyNoInteractions(processor);
+  }
+
+  @Test
+  public void handleMessage_shouldProcessFutureBlockWithinTolerance() {
+    final UInt64 futureSlot =
+        recentChainData.getCurrentSlot().orElseThrow().plus(FutureBlockPool.FUTURE_SLOT_TOLERANCE);
+    final SignedBeaconBlock block = chainBuilder.generateBlockAtSlot(futureSlot).getBlock();
+    final Bytes serialized = gossipEncoding.encode(block);
+    when(processor.process(eq(block), any()))
+        .thenReturn(SafeFuture.completedFuture(InternalValidationResult.SAVE_FOR_FUTURE));
+
+    final SafeFuture<ValidationResult> result =
+        topicHandler.handleMessage(topicHandler.prepareMessage(serialized, Optional.empty()));
+    asyncRunner.executeQueuedActions();
+
+    assertThat(result).isCompletedWithValue(ValidationResult.Ignore);
+    verify(processor).process(eq(block), any());
+  }
+
+  @Test
   public void handleMessage_invalidBlock_unknownPreState() {
     SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(validSlot);
     Bytes serialized = gossipEncoding.encode(block);
@@ -100,7 +140,7 @@ public class BlockTopicHandlerTest extends AbstractTopicHandlerTest<SignedBeacon
     Bytes serialized = gossipEncoding.encode(prevForkBlock);
     final SafeFuture<ValidationResult> result =
         topicHandler.handleMessage(topicHandler.prepareMessage(serialized, Optional.empty()));
-    assertThat(asyncRunner.countDelayedActions()).isEqualTo(0);
+    asyncRunner.executeQueuedActions();
     assertThat(result).isCompletedWithValue(ValidationResult.Invalid);
     verifyNoInteractions(processor);
   }

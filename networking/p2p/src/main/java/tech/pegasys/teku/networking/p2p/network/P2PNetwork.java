@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -63,9 +63,10 @@ public interface P2PNetwork<T extends Peer> extends GossipNetwork {
    *
    * @param discoveryPeer the discovery peer to convert
    * @return a {@link PeerAddress} which is supported by {@link #connect(PeerAddress)} for
-   *     initiating connections
+   *     initiating connections, or empty if the peer advertises neither a QUIC address this network
+   *     can dial nor a TCP address
    */
-  PeerAddress createPeerAddress(DiscoveryPeer discoveryPeer);
+  Optional<PeerAddress> createPeerAddress(DiscoveryPeer discoveryPeer);
 
   long subscribeConnect(PeerConnectedSubscriber<T> subscriber);
 

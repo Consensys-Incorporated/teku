@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -117,15 +117,35 @@ public class SyncCommitteeMessagePool implements SlotEventsChannel {
   public synchronized Optional<SyncCommitteeContribution> createContribution(
       final UInt64 slot, final Bytes32 blockRoot, final int subcommitteeIndex) {
     return getContributionData(slot, blockRoot, subcommitteeIndex)
-        .map(
+        .flatMap(
             contributionData ->
-                spec.getSyncCommitteeUtilRequired(slot)
-                    .createSyncCommitteeContribution(
-                        slot,
-                        blockRoot,
-                        UInt64.valueOf(subcommitteeIndex),
-                        contributionData.getParticipationIndices(),
-                        contributionData.getAggregatedSignature()));
+                toContribution(slot, blockRoot, subcommitteeIndex, contributionData));
+  }
+
+  private Optional<SyncCommitteeContribution> toContribution(
+      final UInt64 slot,
+      final Bytes32 blockRoot,
+      final int subcommitteeIndex,
+      final ContributionData contributionData) {
+    final BLSSignature aggregatedSignature = contributionData.getAggregatedSignature();
+    // A contribution signature at the point at infinity is invalid with non-empty participation
+    if (aggregatedSignature.isInfinity()) {
+      LOG.debug(
+          "Not creating sync committee contribution with infinity signature for slot {},"
+              + " block root {}, subcommittee {}",
+          slot,
+          blockRoot,
+          subcommitteeIndex);
+      return Optional.empty();
+    }
+    return Optional.of(
+        spec.getSyncCommitteeUtilRequired(slot)
+            .createSyncCommitteeContribution(
+                slot,
+                blockRoot,
+                UInt64.valueOf(subcommitteeIndex),
+                contributionData.getParticipationIndices(),
+                aggregatedSignature));
   }
 
   /**

@@ -1,5 +1,5 @@
 /*
- * Copyright Consensys Software Inc., 2026
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -90,6 +90,7 @@ public class ProposerPreferencesPublisherTest {
             proposerConfigPropertiesProvider,
             forkProvider);
 
+    when(proposerConfigPropertiesProvider.refresh()).thenReturn(SafeFuture.COMPLETE);
     when(proposerConfigPropertiesProvider.getFeeRecipient(publicKey))
         .thenReturn(Optional.of(feeRecipient));
     when(proposerConfigPropertiesProvider.getGasLimit(eq(publicKey), any())).thenReturn(gasLimit);
@@ -114,6 +115,7 @@ public class ProposerPreferencesPublisherTest {
             List.of(new ProposerDuty(publicKey, 42, slot)),
             false));
 
+    verify(proposerConfigPropertiesProvider).refresh();
     verify(validatorApiChannel).sendSignedProposerPreferences(anyList());
     // duties may be for a future epoch, so the gas limit must be resolved for that epoch
     verify(proposerConfigPropertiesProvider).getGasLimit(publicKey, epoch);
