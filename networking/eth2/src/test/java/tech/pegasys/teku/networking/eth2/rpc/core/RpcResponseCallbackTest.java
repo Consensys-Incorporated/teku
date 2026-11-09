@@ -30,6 +30,7 @@ import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
+import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.networking.p2p.rpc.RpcStream;
 import tech.pegasys.teku.networking.p2p.rpc.StreamClosedException;
 
@@ -37,7 +38,8 @@ class RpcResponseCallbackTest {
 
   private static final String PROTOCOL_ID = "/eth2/beacon_chain/req/test/1/ssz_snappy";
 
-  private final StubAsyncRunner asyncRunner = new StubAsyncRunner();
+  private final StubTimeProvider timeProvider = StubTimeProvider.withTimeInSeconds(0);
+  private final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
   private final RpcStream rpcStream = mock(RpcStream.class);
 
   @SuppressWarnings("unchecked")
@@ -202,14 +204,155 @@ class RpcResponseCallbackTest {
     }
   }
 
+  @Test
+  void respondAndCompleteSuccessfullyShouldHalfCloseStreamWhenWriteSucceeds() {
+    when(responseEncoder.encodeSuccessfulResponse(data)).thenReturn(Bytes.EMPTY);
+    when(rpcStream.writeBytes(any())).thenReturn(SafeFuture.COMPLETE);
+    when(rpcStream.closeWriteStream()).thenReturn(SafeFuture.COMPLETE);
+
+    callback.respondAndCompleteSuccessfully(data);
+
+    verify(rpcStream).closeWriteStream();
+    verify(rpcStream, never()).closeAbruptly();
+  }
+
+  @Test
+  void respondAndCompleteSuccessfullyShouldCloseStreamAbruptlyWhenWriteFailsWithStopSending() {
+    failWriteWith(new ChannelOutputShutdownException("STOP_SENDING frame received"));
+    when(rpcStream.closeAbruptly()).thenReturn(SafeFuture.COMPLETE);
+
+    callback.respondAndCompleteSuccessfully(data);
+
+    // Over QUIC a stream whose peer sent STOP_SENDING can never be half-closed (our FIN is
+    // refused), so only an explicit close releases it; otherwise it leaks an inbound RPC stream
+    // permit until the connection dies.
+    verify(rpcStream).closeAbruptly();
+    verify(rpcStream, never()).closeWriteStream();
+  }
+
+  @Test
+  void respondAndCompleteSuccessfullyShouldCloseStreamAbruptlyWhenWriteFailsWithClosedChannel() {
+    failWriteWith(new ClosedChannelException());
+    when(rpcStream.closeAbruptly()).thenReturn(SafeFuture.COMPLETE);
+
+    callback.respondAndCompleteSuccessfully(data);
+
+    verify(rpcStream).closeAbruptly();
+  }
+
+  @Test
+  void respondAndCompleteSuccessfullyShouldCloseStreamAbruptlyWhenWriteFailsWithUnexpectedError() {
+    failWriteWith(new IllegalStateException("Boom"));
+    when(rpcStream.closeAbruptly()).thenReturn(SafeFuture.COMPLETE);
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(RpcResponseCallback.class)) {
+      callback.respondAndCompleteSuccessfully(data);
+
+      logCaptor.assertErrorLog("Failed to write req/resp response");
+    }
+    verify(rpcStream).closeAbruptly();
+  }
+
+  @Test
+  void completeSuccessfullyShouldCloseStreamAbruptlyWhenHalfCloseFails() {
+    when(rpcStream.closeWriteStream())
+        .thenReturn(
+            SafeFuture.failedFuture(
+                new ChannelOutputShutdownException("STOP_SENDING frame received")));
+    when(rpcStream.closeAbruptly()).thenReturn(SafeFuture.COMPLETE);
+
+    callback.completeSuccessfully();
+
+    verify(rpcStream).closeAbruptly();
+  }
+
+  @Test
+  void completeSuccessfullyShouldNotCloseStreamAbruptlyWhenHalfCloseSucceeds() {
+    when(rpcStream.closeWriteStream()).thenReturn(SafeFuture.COMPLETE);
+
+    callback.completeSuccessfully();
+
+    verify(rpcStream, never()).closeAbruptly();
+  }
+
+  @Test
+  void completeSuccessfullyShouldCloseStreamAbruptlyWhenHalfCloseDoesNotComplete() {
+    // our FIN is stuck in the transport
+    when(rpcStream.closeWriteStream()).thenReturn(new SafeFuture<>());
+    when(rpcStream.closeAbruptly()).thenReturn(SafeFuture.COMPLETE);
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(RpcResponseCallback.class, Level.DEBUG)) {
+      callback.completeSuccessfully();
+
+      timeProvider.advanceTimeBy(RpcResponseCallback.RESPONSE_WRITE_TIMEOUT.minusMillis(1));
+      asyncRunner.executeDueActions();
+      verify(rpcStream, never()).closeAbruptly();
+
+      timeProvider.advanceTimeByMillis(1);
+      asyncRunner.executeDueActions();
+      verify(rpcStream).closeAbruptly();
+      logCaptor.assertDebugLog("Timed out half-closing RPC stream for " + PROTOCOL_ID);
+    }
+  }
+
+  @Test
+  void completeSuccessfullyShouldNotCloseStreamAbruptlyWhenHalfCloseCompletesInTime() {
+    final SafeFuture<Void> halfCloseFuture = new SafeFuture<>();
+    when(rpcStream.closeWriteStream()).thenReturn(halfCloseFuture);
+
+    callback.completeSuccessfully();
+    timeProvider.advanceTimeBy(RpcResponseCallback.RESPONSE_WRITE_TIMEOUT.minusMillis(1));
+    asyncRunner.executeDueActions();
+    halfCloseFuture.complete(null);
+
+    timeProvider.advanceTimeBy(RpcResponseCallback.RESPONSE_WRITE_TIMEOUT);
+    asyncRunner.executeDueActions();
+    verify(rpcStream, never()).closeAbruptly();
+  }
+
+  @Test
+  void completeWithErrorResponseShouldHalfCloseStreamWhenWriteSucceeds() {
+    when(responseEncoder.encodeErrorResponse(any())).thenReturn(Bytes.EMPTY);
+    when(rpcStream.writeBytes(any())).thenReturn(SafeFuture.COMPLETE);
+    when(rpcStream.closeWriteStream()).thenReturn(SafeFuture.COMPLETE);
+
+    callback.completeWithErrorResponse(new RpcException.ServerErrorException());
+
+    verify(rpcStream).closeWriteStream();
+    verify(rpcStream, never()).closeAbruptly();
+  }
+
+  @Test
+  void completeWithErrorResponseShouldCloseStreamAbruptlyWhenWriteFailsWithStopSending() {
+    failErrorResponseWriteWith(new ChannelOutputShutdownException("STOP_SENDING frame received"));
+    when(rpcStream.closeAbruptly()).thenReturn(SafeFuture.COMPLETE);
+
+    callback.completeWithErrorResponse(new RpcException.ServerErrorException());
+
+    verify(rpcStream).closeAbruptly();
+    verify(rpcStream, never()).closeWriteStream();
+  }
+
+  @Test
+  void completeWithErrorResponseShouldCloseStreamAbruptlyWhenWriteFailsWithUnexpectedError() {
+    failErrorResponseWriteWith(new IllegalStateException("Boom"));
+    when(rpcStream.closeAbruptly()).thenReturn(SafeFuture.COMPLETE);
+
+    callback.completeWithErrorResponse(new RpcException.ServerErrorException());
+
+    verify(rpcStream).closeAbruptly();
+  }
+
   private void failErrorResponseWriteWith(final Throwable error) {
     when(responseEncoder.encodeErrorResponse(any())).thenReturn(Bytes.EMPTY);
     when(rpcStream.writeBytes(any())).thenReturn(SafeFuture.failedFuture(error));
     when(rpcStream.closeWriteStream()).thenReturn(SafeFuture.COMPLETE);
+    when(rpcStream.closeAbruptly()).thenReturn(SafeFuture.COMPLETE);
   }
 
   private void failWriteWith(final Throwable error) {
     when(responseEncoder.encodeSuccessfulResponse(any())).thenReturn(Bytes.EMPTY);
     when(rpcStream.writeBytes(any())).thenReturn(SafeFuture.failedFuture(error));
+    when(rpcStream.closeAbruptly()).thenReturn(SafeFuture.COMPLETE);
   }
 }

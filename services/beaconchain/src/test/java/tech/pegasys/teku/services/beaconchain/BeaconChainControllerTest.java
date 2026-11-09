@@ -16,9 +16,11 @@ package tech.pegasys.teku.services.beaconchain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -26,7 +28,11 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networks.Eth2NetworkConfiguration;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
+import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.lightclient.LightClientServerService;
+import tech.pegasys.teku.storage.client.ChainHead;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
@@ -125,6 +131,35 @@ class BeaconChainControllerTest {
 
     assertThat(controller.loadLightClientUpdates()).isCompleted();
     verifyNoInteractions(lightClientServerService);
+  }
+
+  @Test
+  void loadLightClientUpdates_shouldProcessFinalizedCheckpointAndChainHead() {
+    final Spec spec = TestSpecFactory.createMinimalAltair();
+    final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
+    final BeaconChainController controller = createController(spec);
+    final BeaconChainConfiguration beaconConfig = mock(BeaconChainConfiguration.class);
+    final Eth2NetworkConfiguration networkConfig = mock(Eth2NetworkConfiguration.class);
+    when(beaconConfig.eth2NetworkConfig()).thenReturn(networkConfig);
+    when(networkConfig.isLightClientServerEnabled()).thenReturn(true);
+    final Checkpoint finalizedCheckpoint = dataStructureUtil.randomCheckpoint();
+    final SignedBeaconBlock headBlock = dataStructureUtil.randomSignedBeaconBlock(9);
+    final ChainHead chainHead = mock(ChainHead.class);
+    when(chainHead.getBlock()).thenReturn(SafeFuture.completedFuture(Optional.of(headBlock)));
+    when(chainHead.isOptimistic()).thenReturn(true);
+    when(recentChainData.getFinalizedCheckpoint()).thenReturn(Optional.of(finalizedCheckpoint));
+    final CombinedChainDataClient combinedChainDataClient = mock(CombinedChainDataClient.class);
+    when(combinedChainDataClient.getBestLightClientUpdates())
+        .thenReturn(SafeFuture.completedFuture(List.of()));
+    when(combinedChainDataClient.getChainHead()).thenReturn(Optional.of(chainHead));
+    final LightClientServerService lightClientServerService = mock(LightClientServerService.class);
+    controller.beaconConfig = beaconConfig;
+    controller.combinedChainDataClient = combinedChainDataClient;
+    controller.lightClientServerService = lightClientServerService;
+
+    assertThat(controller.loadLightClientUpdates()).isCompleted();
+    verify(lightClientServerService).onNewFinalizedCheckpoint(finalizedCheckpoint, false);
+    verify(lightClientServerService).onBlockImported(headBlock, true);
   }
 
   private Spec createFuluSpecWithRetentionPeriod(

@@ -20,6 +20,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ZERO;
@@ -416,21 +417,49 @@ public class Phase0AttestationValidatorTest extends AbstractAttestationValidator
   }
 
   @Test
-  public void shouldDeferFutureSlotAttestationOnWrongSubnetWhenSignatureIsValid() {
-    // A future-slot attestation is only rejected for an invalid signature; other gossip failures
-    // (here, the wrong subnet) defer rather than penalise the sender. Contrast with
-    // shouldRejectAttestationsSentOnTheWrongSubnet, which rejects an in-window attestation.
+  public void shouldRejectFutureSlotAttestationOnWrongSubnetWithoutVerifyingSignature() {
+    // Like an in-window attestation (see shouldRejectAttestationsSentOnTheWrongSubnet), and checked
+    // before the signature so that a valid attestation replayed on other subnets doesn't cost a BLS
+    // verification for each copy
     final StateAndBlockSummary blockAndState = storageSystem.getChainHead();
     final Attestation attestation = attestationGenerator.validAttestation(blockAndState, ONE);
     assertThat(attestation.getData().getSlot()).isEqualTo(ONE);
     final int subnetId = spec.computeSubnetForAttestation(blockAndState.getState(), attestation);
+    final AsyncBLSSignatureVerifier signatureVerifier = mock(AsyncBLSSignatureVerifier.class);
+    final AttestationValidator validator =
+        new AttestationValidator(
+            spec, signatureVerifier, gossipValidationHelper, invalidBlockRoots);
     chainUpdater.setCurrentSlot(ZERO);
 
     assertThat(
-            validator
-                .validate(ValidatableAttestation.fromNetwork(spec, attestation, subnetId + 1))
-                .join()
-                .code())
-        .isEqualTo(SAVE_FOR_FUTURE);
+            validator.validate(ValidatableAttestation.fromNetwork(spec, attestation, subnetId + 1)))
+        .matches(rejected("Attestation received on incorrect subnet"), "Rejected incorrect subnet");
+    verifyNoInteractions(signatureVerifier);
+  }
+
+  @Test
+  public void shouldRejectFutureSlotAttestationWithCommitteeIndexNotInTheExpectedRange() {
+    final StateAndBlockSummary blockAndState = storageSystem.getChainHead();
+    final Attestation attestation = attestationGenerator.validAttestation(blockAndState, ONE);
+    final AttestationData data = attestation.getData();
+    final int subnetId = spec.computeSubnetForAttestation(blockAndState.getState(), attestation);
+    chainUpdater.setCurrentSlot(ZERO);
+
+    assertThat(
+            validator.validate(
+                ValidatableAttestation.fromNetwork(
+                    spec,
+                    attestationSchema.create(
+                        attestation.getAggregationBits(),
+                        new AttestationData(
+                            data.getSlot(),
+                            spec.getCommitteeCountPerSlot(
+                                blockAndState.getState(), data.getTarget().getEpoch()),
+                            data.getBeaconBlockRoot(),
+                            data.getSource(),
+                            data.getTarget()),
+                        attestation.getAggregateSignature()),
+                    subnetId)))
+        .matches(rejected("Committee index 2 is out of range"), "Rejected committee out of range");
   }
 }

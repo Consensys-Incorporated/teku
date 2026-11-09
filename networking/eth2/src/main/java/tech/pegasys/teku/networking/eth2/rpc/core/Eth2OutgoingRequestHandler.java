@@ -187,6 +187,12 @@ public class Eth2OutgoingRequestHandler<
 
   @Override
   public void closed(final NodeId nodeId, final RpcStream rpcStream) {
+    // see RpcRequestHandler for the threading contract
+    try {
+      responseDecoder.close();
+    } catch (final Exception ex) {
+      LOG.debug("Encountered error while closing response decoder", ex);
+    }
     if (!transferToState(CLOSED, List.of(READ_COMPLETE))) {
       abortRequest(rpcStream, new IllegalStateException("Unexpected state: " + state));
     }
@@ -237,9 +243,8 @@ public class Eth2OutgoingRequestHandler<
 
     LOG.trace("Abort request: {}", error.getMessage());
 
-    // releasing any resources
+    // the decoder is released in closed(), see RpcRequestHandler
     try {
-      responseDecoder.close();
       rpcStream.closeAbruptly().finishDebug(LOG);
     } catch (Exception ex) {
       LOG.debug("Encountered error while aborting outgoing request", ex);

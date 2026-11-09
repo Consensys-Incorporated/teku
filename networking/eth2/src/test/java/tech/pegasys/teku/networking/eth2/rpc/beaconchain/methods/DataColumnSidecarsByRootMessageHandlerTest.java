@@ -61,6 +61,7 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.DataColumnSidecarsByRootRequestMessage;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.DataColumnSidecarsByRootRequestMessageSchema;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.DataColumnsByRootIdentifier;
@@ -144,10 +145,6 @@ public class DataColumnSidecarsByRootMessageHandlerTest {
     reset(combinedChainDataClient);
     when(combinedChainDataClient.getSlotByBlockRoot(any()))
         .thenReturn(SafeFuture.completedFuture(Optional.of(currentForkFirstSlot)));
-    when(combinedChainDataClient.getBlockByBlockRoot(any()))
-        .thenReturn(
-            SafeFuture.completedFuture(
-                Optional.of(dataStructureUtil.randomSignedBeaconBlock(currentForkFirstSlot))));
     // fulu fork epoch is finalized
     when(combinedChainDataClient.getFinalizedBlock())
         .thenReturn(Optional.of(dataStructureUtil.randomSignedBeaconBlock(currentForkFirstSlot)));
@@ -541,8 +538,10 @@ public class DataColumnSidecarsByRootMessageHandlerTest {
     when(dataColumnSidecarArchiveReconstructor.reconstructDataColumnSidecar(any(), any(), anyInt()))
         .thenAnswer(
             invocation -> {
-              final SignedBeaconBlock block = invocation.getArgument(0);
+              final SlotAndBlockRoot slotAndBlockRoot = invocation.getArgument(0);
               final UInt64 index = invocation.getArgument(1);
+              final SignedBeaconBlock block =
+                  dataStructureUtil.randomSignedBeaconBlock(slotAndBlockRoot.getSlot());
               return SafeFuture.completedFuture(
                   Optional.of(dataStructureUtil.randomDataColumnSidecar(block, index)));
             });
@@ -574,15 +573,15 @@ public class DataColumnSidecarsByRootMessageHandlerTest {
   }
 
   @TestTemplate
-  public void shouldNotReconstructWhenBlockIsMissing() {
+  public void shouldLeaveLoadingTheBlockToTheReconstructor() {
     final DataColumnsByRootIdentifier[] dataColumnsByRootIdentifiers =
         generateDataColumnsByRootIdentifiers(4, 1);
+    final UInt64 slot = spec.computeStartSlotAtEpoch(currentForkEpoch);
 
     when(combinedChainDataClient.getSidecar(any(DataColumnSlotAndIdentifier.class)))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
     when(dataColumnSidecarArchiveReconstructor.isSidecarPruned(any(), any())).thenReturn(true);
-    // block for the requested root is not available, so reconstruction cannot run
-    when(combinedChainDataClient.getBlockByBlockRoot(any()))
+    when(dataColumnSidecarArchiveReconstructor.reconstructDataColumnSidecar(any(), any(), anyInt()))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
 
     handler.onIncomingMessage(
@@ -591,8 +590,13 @@ public class DataColumnSidecarsByRootMessageHandlerTest {
     verify(peer).adjustDataColumnSidecarsRequest(any(), eq(Long.valueOf(0)));
     verify(callback, never()).respond(any());
     verify(callback).completeSuccessfully();
-    verify(dataColumnSidecarArchiveReconstructor, never())
-        .reconstructDataColumnSidecar(any(), any(), anyInt());
+    // each requested block is passed by slot and root; the handler loads no block itself
+    verify(combinedChainDataClient, never()).getBlockByBlockRoot(any());
+    for (final DataColumnsByRootIdentifier identifier : dataColumnsByRootIdentifiers) {
+      verify(dataColumnSidecarArchiveReconstructor)
+          .reconstructDataColumnSidecar(
+              eq(new SlotAndBlockRoot(slot, identifier.getBlockRoot())), eq(ZERO), anyInt());
+    }
   }
 
   @TestTemplate

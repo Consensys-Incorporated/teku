@@ -34,32 +34,53 @@ import tech.pegasys.teku.validator.client.BuilderUrlParser;
 public class BuilderOptions {
 
   @CommandLine.Option(
-      names = {"--Xbuilder-min-bid"},
+      names = {"--builder-min-bid"},
       paramLabel = "<uint64>",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS,
       description =
-          "Minimum total payment, in Gwei, accepted from bids (p2p or builder). A bid whose `value` plus `execution_payment` is below this MUST be rejected.",
+          "Minimum total payment, in Gwei, accepted from bids of the configured builders. A bid whose `value` plus counted `execution_payment` is below this MUST be rejected.",
       arity = "1",
-      hidden = true,
       converter = UInt64Converter.class)
   private UInt64 builderMinBid = ValidatorConfig.DEFAULT_BUILDER_MIN_BID;
 
   @CommandLine.Option(
-      names = {"--Xbuilder-boost-factor"},
+      names = {"--p2p-builder-min-bid"},
+      paramLabel = "<uint64>",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS,
+      description =
+          "Minimum payment, in Gwei, accepted from bids received over p2p. A bid whose `value` is below this MUST be rejected.",
+      arity = "1",
+      converter = UInt64Converter.class)
+  private UInt64 p2pBuilderMinBid = ValidatorConfig.DEFAULT_P2P_BUILDER_MIN_BID;
+
+  @CommandLine.Option(
+      names = {"--builder-boost-factor"},
       paramLabel = "<uint64>",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS,
       description =
           """
-            Percentage multiplier applied to a bid (p2p or builder): `0` prefers the local
+            Percentage multiplier applied to bids of the configured builders: `0` prefers the local
             payload, `100` is profit maximization, and `2**64 - 1` prefers the bid, each unless
             an error or health check makes the preferred payload unviable.""",
       arity = "1",
-      hidden = true,
       converter = UInt64Converter.class)
   private UInt64 builderBoostFactor = ValidatorConfig.DEFAULT_BUILDER_BOOST_FACTOR;
 
   @CommandLine.Option(
-      names = {"--Xbuilder-max-execution-payment"},
+      names = {"--p2p-builder-boost-factor"},
+      paramLabel = "<uint64>",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS,
+      description =
+          """
+            Percentage multiplier applied to bids received over p2p: `0` prefers the local
+            payload, `100` is profit maximization, and `2**64 - 1` prefers the bid, each unless
+            an error or health check makes the preferred payload unviable.""",
+      arity = "1",
+      converter = UInt64Converter.class)
+  private UInt64 p2pBuilderBoostFactor = ValidatorConfig.DEFAULT_P2P_BUILDER_BOOST_FACTOR;
+
+  @CommandLine.Option(
+      names = {"--builder-max-execution-payment"},
       paramLabel = "<uint64>",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS,
       description =
@@ -68,17 +89,15 @@ public class BuilderOptions {
             `0` is the default which counts no execution payment, leaving the bid valued at its trustless value alone.
             This parameter may be adjusted based on the level of trust in the builder's reliability and reputation.""",
       arity = "1",
-      hidden = true,
       converter = UInt64Converter.class)
   private UInt64 builderMaxExecutionPayment = ValidatorConfig.DEFAULT_BUILDER_MAX_EXECUTION_PAYMENT;
 
   @CommandLine.Option(
-      names = {"--Xbuilder-urls"},
+      names = {"--builder-urls"},
       paramLabel = "<url>",
       description = "Comma separated list of urls of builders to use when proposing",
       split = ",",
-      arity = "0..*",
-      hidden = true)
+      arity = "0..*")
   private final List<String> builderUrls = new ArrayList<>();
 
   public void configure(final TekuConfiguration.Builder builder) {
@@ -87,6 +106,8 @@ public class BuilderOptions {
             config
                 .builderMinBid(builderMinBid)
                 .builderBoostFactor(builderBoostFactor)
+                .p2pBuilderMinBid(p2pBuilderMinBid)
+                .p2pBuilderBoostFactor(p2pBuilderBoostFactor)
                 .builderMaxExecutionPayment(builderMaxExecutionPayment)
                 .builderUrls(parseBuilderUrls()));
   }

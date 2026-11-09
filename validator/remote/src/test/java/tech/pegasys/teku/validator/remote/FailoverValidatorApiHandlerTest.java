@@ -733,7 +733,7 @@ class FailoverValidatorApiHandlerTest {
             "getValidatorIndices",
             apiChannel -> apiChannel.getValidatorIndices(List.of(publicKey)),
             BeaconNodeRequestLabels.GET_VALIDATOR_INDICES_METHOD,
-            Map.of(publicKey, 0)),
+            Optional.of(Map.of(publicKey, 0))),
         getArguments(
             "getValidatorStatuses",
             apiChannel -> apiChannel.getValidatorStatuses(List.of(publicKey)),

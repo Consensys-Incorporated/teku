@@ -57,6 +57,12 @@ class DataColumnSidecarDBImpl implements DataColumnSidecarDB {
   }
 
   @Override
+  public SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyColumnIdentifiers(
+      final UInt64 slot) {
+    return combinedChainDataClient.getCustodyDataColumnIdentifiers(slot);
+  }
+
+  @Override
   public SafeFuture<Void> setFirstCustodyIncompleteSlot(final UInt64 slot) {
     return getFirstCustodyIncompleteSlot()
         .thenCompose(

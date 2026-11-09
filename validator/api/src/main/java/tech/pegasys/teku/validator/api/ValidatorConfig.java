@@ -74,7 +74,9 @@ public class ValidatorConfig {
   public static final boolean DEFAULT_ATTESTATIONS_V2_APIS_ENABLED = false;
   // Builder default options
   public static final UInt64 DEFAULT_BUILDER_MIN_BID = UInt64.ZERO;
-  public static final UInt64 DEFAULT_BUILDER_BOOST_FACTOR = UInt64.valueOf(90);
+  public static final UInt64 DEFAULT_P2P_BUILDER_MIN_BID = UInt64.ZERO;
+  public static final UInt64 DEFAULT_BUILDER_BOOST_FACTOR = UInt64.valueOf(100);
+  public static final UInt64 DEFAULT_P2P_BUILDER_BOOST_FACTOR = UInt64.valueOf(100);
   // leave the bid valued at its trustless value alone
   public static final UInt64 DEFAULT_BUILDER_MAX_EXECUTION_PAYMENT = UInt64.ZERO;
 
@@ -125,6 +127,8 @@ public class ValidatorConfig {
   // Builder options
   private final UInt64 builderMinBid;
   private final UInt64 builderBoostFactor;
+  private final UInt64 p2pBuilderMinBid;
+  private final UInt64 p2pBuilderBoostFactor;
   private final UInt64 builderMaxExecutionPayment;
   private final List<URL> builderUrls;
 
@@ -171,6 +175,8 @@ public class ValidatorConfig {
       final boolean attestationsV2ApisEnabled,
       final UInt64 builderMinBid,
       final UInt64 builderBoostFactor,
+      final UInt64 p2pBuilderMinBid,
+      final UInt64 p2pBuilderBoostFactor,
       final UInt64 builderMaxExecutionPayment,
       final List<URL> builderUrls) {
     this.validatorKeys = validatorKeys;
@@ -220,6 +226,8 @@ public class ValidatorConfig {
     this.attestationsV2ApisEnabled = attestationsV2ApisEnabled;
     this.builderMinBid = builderMinBid;
     this.builderBoostFactor = builderBoostFactor;
+    this.p2pBuilderMinBid = p2pBuilderMinBid;
+    this.p2pBuilderBoostFactor = p2pBuilderBoostFactor;
     this.builderMaxExecutionPayment = builderMaxExecutionPayment;
     this.builderUrls = builderUrls;
 
@@ -412,6 +420,14 @@ public class ValidatorConfig {
     return builderBoostFactor;
   }
 
+  public UInt64 getP2pBuilderMinBid() {
+    return p2pBuilderMinBid;
+  }
+
+  public UInt64 getP2pBuilderBoostFactor() {
+    return p2pBuilderBoostFactor;
+  }
+
   public UInt64 getBuilderMaxExecutionPayment() {
     return builderMaxExecutionPayment;
   }
@@ -476,6 +492,8 @@ public class ValidatorConfig {
     private boolean attestationsV2ApisEnabled = DEFAULT_ATTESTATIONS_V2_APIS_ENABLED;
     private UInt64 builderMinBid = DEFAULT_BUILDER_MIN_BID;
     private UInt64 builderBoostFactor = DEFAULT_BUILDER_BOOST_FACTOR;
+    private UInt64 p2pBuilderMinBid = DEFAULT_P2P_BUILDER_MIN_BID;
+    private UInt64 p2pBuilderBoostFactor = DEFAULT_P2P_BUILDER_BOOST_FACTOR;
     private UInt64 builderMaxExecutionPayment = DEFAULT_BUILDER_MAX_EXECUTION_PAYMENT;
     private List<URL> builderUrls = new ArrayList<>();
 
@@ -761,6 +779,16 @@ public class ValidatorConfig {
       return this;
     }
 
+    public Builder p2pBuilderMinBid(final UInt64 p2pBuilderMinBid) {
+      this.p2pBuilderMinBid = p2pBuilderMinBid;
+      return this;
+    }
+
+    public Builder p2pBuilderBoostFactor(final UInt64 p2pBuilderBoostFactor) {
+      this.p2pBuilderBoostFactor = p2pBuilderBoostFactor;
+      return this;
+    }
+
     public Builder builderMaxExecutionPayment(final UInt64 builderMaxExecutionPayment) {
       this.builderMaxExecutionPayment = builderMaxExecutionPayment;
       return this;
@@ -819,6 +847,8 @@ public class ValidatorConfig {
           attestationsV2ApisEnabled,
           builderMinBid,
           builderBoostFactor,
+          p2pBuilderMinBid,
+          p2pBuilderBoostFactor,
           builderMaxExecutionPayment,
           builderUrls);
     }

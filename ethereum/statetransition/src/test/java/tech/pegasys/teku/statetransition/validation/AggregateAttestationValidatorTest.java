@@ -27,6 +27,7 @@ import static tech.pegasys.teku.spec.SpecMilestone.PHASE0;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.reject;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.Supplier;
@@ -37,6 +38,7 @@ import org.junit.jupiter.api.TestTemplate;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBitlist;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -165,6 +167,21 @@ class AggregateAttestationValidatorTest {
             spec, attestationValidator, AsyncBLSSignatureVerifier.wrap(BLSSignatureVerifier.NOOP));
   }
 
+  private void useRealAttestationValidator() {
+    final AsyncBLSSignatureVerifier signatureVerifier =
+        AsyncBLSSignatureVerifier.wrap(BLSSignatureVerifier.SIMPLE);
+    validator =
+        new AggregateAttestationValidator(
+            spec,
+            new AttestationValidator(
+                spec,
+                signatureVerifier,
+                new GossipValidationHelper(
+                    spec, storageSystem.recentChainData(), new StubMetricsSystem()),
+                Map.of()),
+            signatureVerifier);
+  }
+
   @TestTemplate
   public void shouldReturnValidForValidAggregate() {
     final StateAndBlockSummary chainHead = storageSystem.getChainHead();
@@ -261,6 +278,135 @@ class AggregateAttestationValidatorTest {
 
     assertThat(validator.validate(attestation))
         .isCompletedWithValue(InternalValidationResult.SAVE_FOR_FUTURE);
+  }
+
+  @TestTemplate
+  public void shouldSaveForFutureValidAggregateWhenAttestationValidatorSavesForFutureWithState() {
+    final SignedAggregateAndProof aggregate =
+        generator.validAggregateAndProof(storageSystem.getChainHead());
+    whenAttestationIsSavedForFuture(aggregate);
+
+    assertThat(validator.validate(ValidatableAttestation.aggregateFromValidator(spec, aggregate)))
+        .isCompletedWithValue(InternalValidationResult.SAVE_FOR_FUTURE);
+  }
+
+  @TestTemplate
+  public void shouldRejectFutureAggregateIfAggregateAndProofSignatureIsNotValid() {
+    final SignedAggregateAndProof validAggregate =
+        generator.validAggregateAndProof(storageSystem.getChainHead());
+    final SignedAggregateAndProof invalidAggregate =
+        signedAggregateAndProofSchema.create(
+            validAggregate.getMessage(), dataStructureUtil.randomSignature());
+    whenAttestationIsSavedForFuture(invalidAggregate);
+
+    // The aggregate checks and signatures are verified before a future aggregate is deferred
+    assertThat(
+            validator.validate(
+                ValidatableAttestation.aggregateFromValidator(spec, invalidAggregate)))
+        .isCompletedWithValueMatching(InternalValidationResult::isReject);
+  }
+
+  @TestTemplate
+  public void shouldNotMarkFutureAggregateAsSeen() {
+    final SignedAggregateAndProof aggregate =
+        generator.validAggregateAndProof(storageSystem.getChainHead());
+    final ValidatableAttestation attestation =
+        ValidatableAttestation.aggregateFromValidator(spec, aggregate);
+    final BeaconState state = getStateFor(aggregate).orElseThrow();
+    when(attestationValidator.singleOrAggregateAttestationChecks(
+            any(), eq(attestation), eq(OptionalInt.empty())))
+        .thenReturn(
+            SafeFuture.completedFuture(InternalValidationResultWithState.saveForFuture(state)))
+        .thenReturn(SafeFuture.completedFuture(InternalValidationResultWithState.accept(state)));
+
+    assertThat(validator.validate(attestation))
+        .isCompletedWithValue(InternalValidationResult.SAVE_FOR_FUTURE);
+    // Once its slot arrives, the same aggregate is accepted rather than ignored as a duplicate
+    assertThat(validator.validate(attestation))
+        .isCompletedWithValue(InternalValidationResult.ACCEPT);
+  }
+
+  @TestTemplate
+  public void shouldVerifyFutureSlotAggregateBeforeSavingItForFuture() {
+    useRealAttestationValidator();
+    chainUpdater.setCurrentSlot(ONE);
+    final UInt64 futureSlot = UInt64.valueOf(2);
+    final SignedAggregateAndProof aggregate =
+        generator.validAggregateAndProof(bestBlock.toUnsigned(), futureSlot);
+    final ValidatableAttestation attestation =
+        ValidatableAttestation.aggregateFromNetwork(spec, aggregate);
+
+    assertThat(validator.validate(attestation))
+        .isCompletedWithValue(InternalValidationResult.SAVE_FOR_FUTURE);
+    // The attestation signature is verified and cached, so fork choice doesn't verify it again
+    assertThat(attestation.isValidIndexedAttestation()).isTrue();
+
+    // Once its slot arrives, the same aggregate is accepted rather than ignored as a duplicate
+    chainUpdater.setCurrentSlot(futureSlot);
+    assertThat(validator.validate(ValidatableAttestation.aggregateFromNetwork(spec, aggregate)))
+        .isCompletedWithValue(InternalValidationResult.ACCEPT);
+  }
+
+  @TestTemplate
+  public void shouldRejectFutureSlotAggregateWithInvalidAttestationSignature() {
+    useRealAttestationValidator();
+    chainUpdater.setCurrentSlot(ONE);
+    final SignedAggregateAndProof aggregate =
+        aggregateWithInvalidAttestationSignature(bestBlock.toUnsigned(), UInt64.valueOf(2));
+
+    assertThat(validator.validate(ValidatableAttestation.aggregateFromNetwork(spec, aggregate)))
+        .isCompletedWithValueMatching(InternalValidationResult::isReject);
+  }
+
+  @TestTemplate
+  public void shouldVerifyAggregateForUnknownBlockBeforeSavingItForFuture() {
+    useRealAttestationValidator();
+    final SignedBlockAndState unknownBlock =
+        storageSystem.chainBuilder().generateBlockAtSlot(UInt64.valueOf(2));
+    chainUpdater.setCurrentSlot(unknownBlock.getSlot());
+    final ValidatableAttestation attestation =
+        ValidatableAttestation.aggregateFromNetwork(
+            spec, generator.validAggregateAndProof(unknownBlock.toUnsigned()));
+
+    assertThat(validator.validate(attestation))
+        .isCompletedWithValue(InternalValidationResult.SAVE_FOR_FUTURE);
+    // Verified against the target checkpoint state and cached, so fork choice doesn't verify it
+    // again once the block is imported
+    assertThat(attestation.isValidIndexedAttestation()).isTrue();
+  }
+
+  @TestTemplate
+  public void shouldRejectAggregateForUnknownBlockWithInvalidAttestationSignature() {
+    useRealAttestationValidator();
+    final SignedBlockAndState unknownBlock =
+        storageSystem.chainBuilder().generateBlockAtSlot(UInt64.valueOf(2));
+    chainUpdater.setCurrentSlot(unknownBlock.getSlot());
+    final SignedAggregateAndProof aggregate =
+        aggregateWithInvalidAttestationSignature(unknownBlock.toUnsigned(), unknownBlock.getSlot());
+
+    assertThat(validator.validate(ValidatableAttestation.aggregateFromNetwork(spec, aggregate)))
+        .isCompletedWithValueMatching(InternalValidationResult::isReject);
+  }
+
+  /**
+   * The selection proof and aggregator signature are valid, only the aggregate signature is not.
+   */
+  private SignedAggregateAndProof aggregateWithInvalidAttestationSignature(
+      final StateAndBlockSummary blockAndState, final UInt64 slot) {
+    final Attestation validAttestation =
+        generator.getAttestationGenerator().validAttestation(blockAndState, slot);
+    final AttestationSchema<?> attestationSchema = aggregateAndProofSchema.getAttestationSchema();
+    final Attestation invalidAttestation =
+        attestationSchema.create(
+            validAttestation.getAggregationBits(),
+            validAttestation.getData(),
+            dataStructureUtil.randomSignature(),
+            getCommitteeBitsSupplier(attestationSchema, validAttestation.getFirstCommitteeIndex()));
+    return generator
+        .generator()
+        .blockAndState(blockAndState, slot)
+        .aggregate(invalidAttestation)
+        .generate();
   }
 
   @TestTemplate
@@ -698,6 +844,16 @@ class AggregateAttestationValidatorTest {
     when(attestationValidator.singleOrAggregateAttestationChecks(
             any(), eq(attestation), eq(OptionalInt.empty())))
         .thenReturn(SafeFuture.completedFuture(InternalValidationResultWithState.accept(state)));
+  }
+
+  private void whenAttestationIsSavedForFuture(final SignedAggregateAndProof aggregate) {
+    final ValidatableAttestation attestation =
+        ValidatableAttestation.aggregateFromValidator(spec, aggregate);
+    final BeaconState state = getStateFor(aggregate).orElseThrow();
+    when(attestationValidator.singleOrAggregateAttestationChecks(
+            any(), eq(attestation), eq(OptionalInt.empty())))
+        .thenReturn(
+            SafeFuture.completedFuture(InternalValidationResultWithState.saveForFuture(state)));
   }
 
   private Optional<BeaconState> getStateFor(final SignedAggregateAndProof aggregate) {

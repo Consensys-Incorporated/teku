@@ -16,7 +16,10 @@ package tech.pegasys.teku.networking.p2p.libp2p.rpc;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -30,25 +33,38 @@ import io.libp2p.core.Stream;
 import io.libp2p.core.StreamPromise;
 import io.libp2p.core.multistream.ProtocolBinding;
 import io.libp2p.core.mux.StreamMuxer.Session;
+import io.libp2p.etc.util.netty.mux.RemoteWriteClosed;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.util.concurrent.EventExecutor;
+import io.netty.util.concurrent.ScheduledFuture;
+import io.netty.util.concurrent.Ticker;
 import java.lang.Thread.UncaughtExceptionHandler;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import kotlin.Unit;
+import org.apache.logging.log4j.Level;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
+import tech.pegasys.teku.networking.p2p.libp2p.LibP2PNodeId;
+import tech.pegasys.teku.networking.p2p.libp2p.rpc.InboundRpcStreamLimiter.AcquireResult;
 import tech.pegasys.teku.networking.p2p.libp2p.rpc.RpcHandler.Controller;
+import tech.pegasys.teku.networking.p2p.peer.NodeId;
 import tech.pegasys.teku.networking.p2p.peer.PeerDisconnectedException;
 import tech.pegasys.teku.networking.p2p.rpc.RpcMethod;
 import tech.pegasys.teku.networking.p2p.rpc.RpcRequestHandler;
@@ -64,12 +80,15 @@ public class RpcHandlerTest {
 
   private static final PeerId REMOTE_PEER_ID =
       PeerId.fromBase58("16Uiu2HAmFxCpRh2nZevFR3KGXJ3jhpixMYFSuawqKZyZYHrYoiK5");
+  private static final NodeId REMOTE_NODE_ID = new LibP2PNodeId(REMOTE_PEER_ID);
 
   StubAsyncRunner asyncRunner = new StubAsyncRunner();
   RpcMethod<RpcRequestHandler, RpcRequest, RpcResponseHandler<?>> rpcMethod = mock(RpcMethod.class);
   StubMetricsSystem metricsSystem = new StubMetricsSystem();
+  InboundRpcStreamLimiter inboundRpcStreamLimiter =
+      new InboundRpcStreamLimiter(metricsSystem, 128, 16);
   RpcHandler<RpcRequestHandler, RpcRequest, RpcResponseHandler<?>> rpcHandler =
-      new RpcHandler<>(asyncRunner, rpcMethod, metricsSystem, new InboundRpcStreamLimiter(128));
+      new RpcHandler<>(asyncRunner, rpcMethod, metricsSystem, inboundRpcStreamLimiter);
 
   Connection connection = mock(Connection.class);
   Session session = mock(Session.class);
@@ -85,9 +104,15 @@ public class RpcHandlerTest {
   final RpcResponseHandler<?> responseHandler = mock(RpcResponseHandler.class);
   final RpcRequest request = mock(RpcRequest.class);
   final String protocolId = "test";
+  // its event loop runs the deadlines of the streams activated with context, on a frozen clock
+  final EmbeddedChannel eventLoopChannel = new EmbeddedChannel();
+  final ChannelHandlerContext context = mock(ChannelHandlerContext.class);
 
   @BeforeEach
   void init() {
+    eventLoopChannel.freezeTime();
+    when(context.executor()).thenReturn(eventLoopChannel.eventLoop());
+
     when(connection.muxerSession()).thenReturn(session);
     when(session.createStream((ProtocolBinding<Controller<RpcRequestHandler>>) any()))
         .thenReturn(streamPromise);
@@ -100,7 +125,7 @@ public class RpcHandlerTest {
 
   @Test
   void shouldRejectInboundStreamsAtLimitAndReleasePermitWhenStreamCloses() {
-    final InboundRpcStreamLimiter limiter = new InboundRpcStreamLimiter(1);
+    final InboundRpcStreamLimiter limiter = createLimiter(1, 1);
     final RpcHandler<RpcRequestHandler, RpcRequest, RpcResponseHandler<?>> handler =
         createRpcHandler(limiter);
     final RpcRequestHandler requestHandler = mock(RpcRequestHandler.class);
@@ -111,7 +136,6 @@ public class RpcHandlerTest {
         captureController(firstStream);
     final SafeFuture<Controller<RpcRequestHandler>> firstInit =
         handler.initChannel(firstStream, protocolId);
-    final ChannelHandlerContext context = mock(ChannelHandlerContext.class);
     firstController.get().channelActive(context);
 
     assertThat(firstInit).isCompletedWithValue(firstController.get());
@@ -145,8 +169,27 @@ public class RpcHandlerTest {
   }
 
   @Test
+  void shouldRejectInboundStreamsAbovePerPeerCapWhileGlobalPermitsRemain() {
+    final InboundRpcStreamLimiter limiter = createLimiter(128, 1);
+    final RpcHandler<RpcRequestHandler, RpcRequest, RpcResponseHandler<?>> handler =
+        createRpcHandler(limiter);
+
+    // createP2PStream binds every stream to REMOTE_PEER_ID, so both come from the same peer
+    activateStream(handler, createP2PStream(false));
+
+    final Stream secondStream = createP2PStream(false);
+    final SafeFuture<Controller<RpcRequestHandler>> secondInit =
+        handler.initChannel(secondStream, protocolId);
+
+    assertThatSafeFuture(secondInit).isCompletedExceptionallyWith(IllegalStateException.class);
+    verify(secondStream).close();
+    assertThat(limiter.getActiveStreams()).isOne();
+    assertThat(limiter.getActiveStreams(REMOTE_NODE_ID)).isOne();
+  }
+
+  @Test
   void shouldReleaseInboundPermitWhenHandlerInitializationFails() {
-    final InboundRpcStreamLimiter limiter = new InboundRpcStreamLimiter(1);
+    final InboundRpcStreamLimiter limiter = createLimiter(1, 1);
     final RpcHandler<RpcRequestHandler, RpcRequest, RpcResponseHandler<?>> handler =
         createRpcHandler(limiter);
     final Stream inboundStream = createP2PStream(false);
@@ -163,30 +206,224 @@ public class RpcHandlerTest {
 
   @Test
   void shouldNotApplyInboundLimitToOutboundStreams() {
-    final InboundRpcStreamLimiter limiter = new InboundRpcStreamLimiter(1);
-    assertThat(limiter.tryAcquire()).isTrue();
+    final InboundRpcStreamLimiter limiter = createLimiter(1, 1);
+    assertThat(limiter.tryAcquire(REMOTE_NODE_ID)).isEqualTo(AcquireResult.ACQUIRED);
     final RpcHandler<RpcRequestHandler, RpcRequest, RpcResponseHandler<?>> handler =
         createRpcHandler(limiter);
     final Stream outboundStream = createP2PStream(true);
-    final AtomicReference<Controller<RpcRequestHandler>> outboundController =
-        captureController(outboundStream);
-    final ChannelHandlerContext context = mock(ChannelHandlerContext.class);
+    final Controller<RpcRequestHandler> outboundController =
+        activateStream(handler, outboundStream);
 
-    final SafeFuture<Controller<RpcRequestHandler>> initFuture =
-        handler.initChannel(outboundStream, protocolId);
-    outboundController.get().channelActive(context);
-
-    assertThat(initFuture).isCompletedWithValue(outboundController.get());
     assertThat(limiter.getActiveStreams()).isOne();
     verify(outboundStream, never()).close();
     verify(rpcMethod, never()).createIncomingRequestHandler(any());
 
-    outboundController.get().handlerRemoved(context);
+    outboundController.handlerRemoved(context);
 
     assertThat(limiter.getActiveStreams()).isOne();
 
-    limiter.release();
+    limiter.release(REMOTE_NODE_ID);
     assertThat(limiter.getActiveStreams()).isZero();
+  }
+
+  @Test
+  void shouldCloseInboundStreamAndReleasePermitWhenLifetimeDeadlineExpires() {
+    final Stream p2pStream = createP2PStream(false);
+    final Controller<RpcRequestHandler> streamController = activateStream(rpcHandler, p2pStream);
+
+    assertClosedExactlyAfter(p2pStream, RpcHandler.INBOUND_STREAM_LIFETIME);
+    assertExpiredCounterValue("lifetime", 1);
+    assertThat(inboundRpcStreamLimiter.getActiveStreams()).isOne();
+
+    // netty's reaction to close()
+    streamController.handlerRemoved(context);
+    assertThat(inboundRpcStreamLimiter.getActiveStreams()).isZero();
+  }
+
+  @Test
+  void shouldLogStreamStateWhenLifetimeDeadlineExpires() {
+    final RpcRequestHandler requestHandler = mock(RpcRequestHandler.class);
+    when(requestHandler.hasRequestBeenReceived()).thenReturn(true);
+    final Stream p2pStream = createP2PStream(false);
+    // our FIN is stuck in the transport
+    when(p2pStream.closeWrite()).thenReturn(new CompletableFuture<>());
+    final Controller<RpcRequestHandler> streamController =
+        activateStream(rpcHandler, p2pStream, requestHandler);
+    assertThat(streamController.getRpcStream().closeWriteStream()).isNotDone();
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(RpcHandler.class, Level.DEBUG)) {
+      advanceTimeBy(RpcHandler.INBOUND_STREAM_LIFETIME);
+
+      assertThat(logCaptor.getDebugLogs())
+          .singleElement()
+          .asString()
+          .contains(
+              "deadline=lifetime",
+              "protocol=" + protocolId,
+              "age=" + RpcHandler.INBOUND_STREAM_LIFETIME,
+              "requestReceived=true",
+              "halfCloseRequested=true",
+              "halfCloseCompleted=false",
+              "peerFinReceived=false");
+    }
+  }
+
+  @Test
+  void shouldLogStreamStateWhenFinGraceDeadlineExpires() {
+    final Stream p2pStream = createP2PStream(false);
+    final Controller<RpcRequestHandler> streamController = activateStream(rpcHandler, p2pStream);
+    streamController.userEventTriggered(context, RemoteWriteClosed.INSTANCE);
+    assertThat(streamController.getRpcStream().closeWriteStream()).isCompleted();
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(RpcHandler.class, Level.DEBUG)) {
+      advanceTimeBy(RpcHandler.INBOUND_STREAM_FIN_GRACE);
+
+      assertThat(logCaptor.getDebugLogs())
+          .singleElement()
+          .asString()
+          .contains(
+              "deadline=fin_grace",
+              "protocol=" + protocolId,
+              "age=" + RpcHandler.INBOUND_STREAM_FIN_GRACE,
+              "requestReceived=false",
+              "halfCloseRequested=true",
+              "halfCloseCompleted=true",
+              "peerFinReceived=true");
+    }
+  }
+
+  @Test
+  void shouldRemoveDeadlineWhenInboundStreamClosesNormally() {
+    final Stream p2pStream = createP2PStream(false);
+    final Controller<RpcRequestHandler> streamController = activateStream(rpcHandler, p2pStream);
+    assertThat(hasScheduledDeadline()).isTrue();
+
+    streamController.handlerRemoved(context);
+
+    assertThat(hasScheduledDeadline()).isFalse();
+    assertThat(inboundRpcStreamLimiter.getActiveStreams()).isZero();
+    advanceTimeBy(RpcHandler.INBOUND_STREAM_LIFETIME);
+    verify(p2pStream, never()).close();
+    assertExpiredCounterValue("lifetime", 0);
+  }
+
+  @Test
+  void shouldNotScheduleDeadlineForOutboundStreams() {
+    final Stream outboundStream = createP2PStream(true);
+    final Controller<RpcRequestHandler> outboundController =
+        activateStream(rpcHandler, outboundStream);
+
+    assertThat(outboundController.getRpcStream().closeWriteStream()).isCompleted();
+
+    assertThat(hasScheduledDeadline()).isFalse();
+    verify(outboundStream, never()).close();
+  }
+
+  @Test
+  void shouldShortenDeadlineToFinGraceOnceInboundStreamIsHalfClosed() {
+    final Stream p2pStream = createP2PStream(false);
+    final Controller<RpcRequestHandler> streamController = activateStream(rpcHandler, p2pStream);
+
+    assertThat(streamController.getRpcStream().closeWriteStream()).isCompleted();
+    verify(p2pStream).closeWrite();
+
+    assertClosedExactlyAfter(p2pStream, RpcHandler.INBOUND_STREAM_FIN_GRACE);
+    assertExpiredCounterValue("fin_grace", 1);
+    assertExpiredCounterValue("lifetime", 0);
+
+    streamController.handlerRemoved(context);
+    assertThat(inboundRpcStreamLimiter.getActiveStreams()).isZero();
+  }
+
+  @Test
+  void shouldShortenDeadlineOnEventLoopRatherThanOnThreadCompletingHalfClose() {
+    final Controller<RpcRequestHandler> streamController =
+        activateStream(rpcHandler, createP2PStream(false));
+
+    assertThat(streamController.getRpcStream().closeWriteStream()).isCompleted();
+    // the deadline is only touched on the event loop, so the change waits for it to run
+    assertThat(nanosUntilNextScheduledTask())
+        .isEqualTo(RpcHandler.INBOUND_STREAM_LIFETIME.toNanos());
+
+    eventLoopChannel.runPendingTasks();
+    assertThat(nanosUntilNextScheduledTask())
+        .isEqualTo(RpcHandler.INBOUND_STREAM_FIN_GRACE.toNanos());
+  }
+
+  @Test
+  void shouldCompleteHalfCloseWhenEventLoopHasShutDown() {
+    final EventExecutor shutDownEventLoop = mock(EventExecutor.class);
+    when(shutDownEventLoop.ticker()).thenReturn(Ticker.systemTicker());
+    doReturn(mock(ScheduledFuture.class))
+        .when(shutDownEventLoop)
+        .schedule(any(Runnable.class), anyLong(), any(TimeUnit.class));
+    doThrow(new RejectedExecutionException("event executor terminated"))
+        .when(shutDownEventLoop)
+        .execute(any());
+    when(context.executor()).thenReturn(shutDownEventLoop);
+    final Controller<RpcRequestHandler> streamController =
+        activateStream(rpcHandler, createP2PStream(false));
+
+    assertThat(streamController.getRpcStream().closeWriteStream()).isCompleted();
+  }
+
+  @Test
+  void shouldShortenDeadlineToFinGraceEvenWhenPeerClosedItsSideFirst() {
+    // the transport should close the stream once we half-close too, but a QUIC stream whose peer
+    // sent STOP_SENDING stays open as our FIN is never sent
+    final Stream p2pStream = createP2PStream(false);
+    final Controller<RpcRequestHandler> streamController = activateStream(rpcHandler, p2pStream);
+
+    streamController.userEventTriggered(context, RemoteWriteClosed.INSTANCE);
+    assertThat(streamController.getRpcStream().closeWriteStream()).isCompleted();
+
+    assertClosedExactlyAfter(p2pStream, RpcHandler.INBOUND_STREAM_FIN_GRACE);
+    assertExpiredCounterValue("fin_grace", 1);
+  }
+
+  @Test
+  void shouldNotExtendDeadlineWhenLessThanFinGraceIsLeft() {
+    final Stream p2pStream = createP2PStream(false);
+    final Controller<RpcRequestHandler> streamController = activateStream(rpcHandler, p2pStream);
+    final Duration remaining = RpcHandler.INBOUND_STREAM_FIN_GRACE.minusSeconds(1);
+    advanceTimeBy(RpcHandler.INBOUND_STREAM_LIFETIME.minus(remaining));
+
+    assertThat(streamController.getRpcStream().closeWriteStream()).isCompleted();
+
+    assertClosedExactlyAfter(p2pStream, remaining);
+    assertExpiredCounterValue("lifetime", 1);
+    assertExpiredCounterValue("fin_grace", 0);
+  }
+
+  @Test
+  void shouldNotScheduleDeadlineWhenHalfCloseCompletesAfterChannelClosed() {
+    final Stream p2pStream = createP2PStream(false);
+    final Controller<RpcRequestHandler> streamController = activateStream(rpcHandler, p2pStream);
+
+    // the deadline is only shortened once the event loop runs the queued task, after the close
+    assertThat(streamController.getRpcStream().closeWriteStream()).isCompleted();
+    streamController.handlerRemoved(context);
+
+    assertThat(hasScheduledDeadline()).isFalse();
+    advanceTimeBy(RpcHandler.INBOUND_STREAM_LIFETIME);
+    verify(p2pStream, never()).close();
+    assertExpiredCounterValue("fin_grace", 0);
+    assertExpiredCounterValue("lifetime", 0);
+    assertThat(inboundRpcStreamLimiter.getActiveStreams()).isZero();
+  }
+
+  @Test
+  void shouldKeepLifetimeDeadlineWhenHalfCloseFails() {
+    final Stream p2pStream = createP2PStream(false);
+    when(p2pStream.closeWrite())
+        .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("closed")));
+    final Controller<RpcRequestHandler> streamController = activateStream(rpcHandler, p2pStream);
+
+    assertThat(streamController.getRpcStream().closeWriteStream()).isCompletedExceptionally();
+
+    assertClosedExactlyAfter(p2pStream, RpcHandler.INBOUND_STREAM_LIFETIME);
+    assertExpiredCounterValue("lifetime", 1);
+    assertExpiredCounterValue("fin_grace", 0);
   }
 
   @Test
@@ -514,18 +751,8 @@ public class RpcHandlerTest {
     // -XX:+ExitOnOutOfMemoryError does not detect it because it is thrown by Java code. Without
     // escalation this handler would only log it and complete the future, so the node would keep
     // running with no usable direct memory.
-    final RpcHandler<RpcRequestHandler, RpcRequest, RpcResponseHandler<?>> handler =
-        createRpcHandler(new InboundRpcStreamLimiter(1));
-    when(rpcMethod.createIncomingRequestHandler(protocolId))
-        .thenReturn(mock(RpcRequestHandler.class));
-    final Stream p2pStream = createP2PStream(false);
-    final AtomicReference<Controller<RpcRequestHandler>> capturedController =
-        captureController(p2pStream);
-    final SafeFuture<Controller<RpcRequestHandler>> init =
-        handler.initChannel(p2pStream, protocolId);
-    final ChannelHandlerContext context = mock(ChannelHandlerContext.class);
-    capturedController.get().channelActive(context);
-    assertThat(init).isCompleted();
+    final Controller<RpcRequestHandler> streamController =
+        activateStream(rpcHandler, createP2PStream(false));
 
     final OutOfMemoryError error =
         new OutOfMemoryError("Cannot reserve 1048576 bytes of direct buffer memory");
@@ -534,7 +761,7 @@ public class RpcHandlerTest {
     final UncaughtExceptionHandler original = thread.getUncaughtExceptionHandler();
     thread.setUncaughtExceptionHandler((t, e) -> escalated.add(e));
     try {
-      capturedController.get().exceptionCaught(context, error);
+      streamController.exceptionCaught(context, error);
     } finally {
       thread.setUncaughtExceptionHandler(original);
     }
@@ -542,9 +769,68 @@ public class RpcHandlerTest {
     assertThat(escalated).containsExactly(error);
   }
 
+  private void assertExpiredCounterValue(final String reason, final long expectedValue) {
+    assertThat(
+            metricsSystem.getLabelledCounterValue(
+                TekuMetricCategory.LIBP2P, "rpc_inbound_streams_expired_total", reason))
+        .isEqualTo(expectedValue);
+  }
+
+  private Controller<RpcRequestHandler> activateStream(
+      final RpcHandler<RpcRequestHandler, RpcRequest, RpcResponseHandler<?>> handler,
+      final Stream p2pStream) {
+    return activateStream(handler, p2pStream, mock(RpcRequestHandler.class));
+  }
+
+  private Controller<RpcRequestHandler> activateStream(
+      final RpcHandler<RpcRequestHandler, RpcRequest, RpcResponseHandler<?>> handler,
+      final Stream p2pStream,
+      final RpcRequestHandler requestHandler) {
+    when(rpcMethod.createIncomingRequestHandler(protocolId)).thenReturn(requestHandler);
+    final AtomicReference<Controller<RpcRequestHandler>> capturedController =
+        captureController(p2pStream);
+    final SafeFuture<Controller<RpcRequestHandler>> init =
+        handler.initChannel(p2pStream, protocolId);
+    capturedController.get().channelActive(context);
+    assertThat(init).isCompletedWithValue(capturedController.get());
+    return capturedController.get();
+  }
+
+  private void advanceTimeBy(final Duration duration) {
+    // tasks queued by earlier steps run first, as they happened before this time passed
+    eventLoopChannel.runPendingTasks();
+    eventLoopChannel.advanceTimeBy(duration.toNanos(), TimeUnit.NANOSECONDS);
+    eventLoopChannel.runPendingTasks();
+    eventLoopChannel.checkException();
+  }
+
+  private void assertClosedExactlyAfter(final Stream p2pStream, final Duration delay) {
+    advanceTimeBy(delay.minusMillis(1));
+    verify(p2pStream, never()).close();
+    advanceTimeBy(Duration.ofMillis(1));
+    verify(p2pStream).close();
+  }
+
+  private long nanosUntilNextScheduledTask() {
+    // runs only scheduled tasks that are due, leaving the ones handed to the event loop queued
+    return eventLoopChannel.runScheduledPendingTasks();
+  }
+
+  private boolean hasScheduledDeadline() {
+    eventLoopChannel.runPendingTasks();
+    // -1 once the event loop holds no scheduled task at all, so a cancelled one was removed
+    return eventLoopChannel.runScheduledPendingTasks() != -1;
+  }
+
+  private static InboundRpcStreamLimiter createLimiter(
+      final int maximumActiveStreams, final int maximumActiveStreamsPerPeer) {
+    return new InboundRpcStreamLimiter(
+        new StubMetricsSystem(), maximumActiveStreams, maximumActiveStreamsPerPeer);
+  }
+
   private RpcHandler<RpcRequestHandler, RpcRequest, RpcResponseHandler<?>> createRpcHandler(
       final InboundRpcStreamLimiter limiter) {
-    return new RpcHandler<>(asyncRunner, rpcMethod, new StubMetricsSystem(), limiter);
+    return new RpcHandler<>(asyncRunner, rpcMethod, metricsSystem, limiter);
   }
 
   private Stream createP2PStream(final boolean initiator) {
@@ -554,6 +840,7 @@ public class RpcHandlerTest {
     when(p2pStream.isInitiator()).thenReturn(initiator);
     when(p2pStream.getConnection()).thenReturn(connection);
     when(p2pStream.close()).thenReturn(CompletableFuture.completedFuture(Unit.INSTANCE));
+    when(p2pStream.closeWrite()).thenReturn(CompletableFuture.completedFuture(Unit.INSTANCE));
     when(connection.secureSession()).thenReturn(secureSession);
     when(secureSession.getRemoteId()).thenReturn(REMOTE_PEER_ID);
     return p2pStream;

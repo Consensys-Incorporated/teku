@@ -160,6 +160,16 @@ public class MiscHelpersFuluTest {
   }
 
   @Test
+  public void verifyDataColumnSidecar_shouldRejectSidecarOfAnotherFork() {
+    final DataStructureUtil gloasData = new DataStructureUtil(TestSpecFactory.createMinimalGloas());
+    final DataColumnSidecar gloasSidecar =
+        gloasData.randomDataColumnSidecar(
+            gloasData.randomSignedBeaconBlockWithCommitments(UInt64.ONE, 3), UInt64.ZERO);
+
+    assertThat(miscHelpersFulu.verifyDataColumnSidecar(gloasSidecar)).isFalse();
+  }
+
+  @Test
   public void shouldRejectIfDataColumnAndKzgProofsMismatch() {
     final DataColumnSidecar invalidDataColumnKzgProofs =
         dataStructureUtil.randomDataColumnSidecar(

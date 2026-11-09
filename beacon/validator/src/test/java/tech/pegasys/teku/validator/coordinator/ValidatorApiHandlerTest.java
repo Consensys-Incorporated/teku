@@ -1364,14 +1364,20 @@ class ValidatorApiHandlerTest {
   }
 
   @Test
-  void getValidatorIndices_shouldThrowExceptionWhenBestStateNotAvailable() {
+  void getValidatorIndices_shouldReturnEmptyWhenBestStateNotAvailable() {
     when(chainDataClient.getBestState()).thenReturn(Optional.empty());
 
-    // The validator client needs to be able to differentiate between the state not yet being loaded
-    // and the requested validators not existing so it doesn't skip scheduling duties.
     assertThatSafeFuture(
             validatorApiHandler.getValidatorIndices(List.of(dataStructureUtil.randomPublicKey())))
-        .isCompletedExceptionallyWith(IllegalStateException.class);
+        .isCompletedWithValue(Optional.empty());
+  }
+
+  @Test
+  void getValidatorIndices_shouldReturnEmptyMapForEmptyRequestWhenBestStateNotAvailable() {
+    when(chainDataClient.getBestState()).thenReturn(Optional.empty());
+
+    assertThatSafeFuture(validatorApiHandler.getValidatorIndices(List.of()))
+        .isCompletedWithValue(Optional.of(Map.of()));
   }
 
   @Test
@@ -1384,7 +1390,7 @@ class ValidatorApiHandlerTest {
 
     assertThatSafeFuture(
             validatorApiHandler.getValidatorIndices(List.of(validator0, unknownValidator)))
-        .isCompletedWithValue(Map.of(validator0, 0));
+        .isCompletedWithValue(Optional.of(Map.of(validator0, 0)));
   }
 
   @Test

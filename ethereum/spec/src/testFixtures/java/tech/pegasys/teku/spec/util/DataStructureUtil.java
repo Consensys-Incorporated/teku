@@ -2521,6 +2521,11 @@ public final class DataStructureUtil {
   }
 
   public LightClientHeader randomLightClientHeader(final UInt64 slot) {
+    return randomLightClientHeader(slot, randomBeaconBlockHeader());
+  }
+
+  public LightClientHeader randomLightClientHeader(
+      final UInt64 slot, final BeaconBlockHeader beaconBlockHeader) {
     final LightClientHeaderSchema<?> headerSchema =
         getAltairSchemaDefinitions(slot).getLightClientHeaderSchema();
     final SpecMilestone milestone = spec.atSlot(slot).getMilestone();
@@ -2528,26 +2533,36 @@ public final class DataStructureUtil {
     if (milestone.isGreaterThanOrEqualTo(SpecMilestone.GLOAS)) {
       final LightClientHeaderSchemaGloas gloasSchema = headerSchema.toVersionGloasRequired();
       return gloasSchema.create(
-          randomBeaconBlockHeader(),
+          beaconBlockHeader,
           SszBytes32.of(randomBytes32()),
           randomSszBytes32Vector(gloasSchema.getExecutionBranchSchema(), this::randomBytes32));
     }
     if (milestone.isGreaterThanOrEqualTo(SpecMilestone.CAPELLA)) {
       final LightClientHeaderSchemaCapella capellaSchema = headerSchema.toVersionCapellaRequired();
       return capellaSchema.create(
-          randomBeaconBlockHeader(),
+          beaconBlockHeader,
           randomExecutionPayloadHeader(spec.atSlot(slot)),
           randomSszBytes32Vector(capellaSchema.getExecutionBranchSchema(), this::randomBytes32));
     }
-    return headerSchema.create(randomBeaconBlockHeader());
+    return headerSchema.create(beaconBlockHeader);
   }
 
   public LightClientBootstrap randomLightClientBoostrap(final UInt64 slot) {
+    return randomLightClientBoostrap(slot, randomLightClientHeader(slot));
+  }
+
+  public LightClientBootstrap randomLightClientBoostrapWithHeaderSlot(final UInt64 slot) {
+    return randomLightClientBoostrap(
+        slot, randomLightClientHeader(slot, randomBeaconBlockHeader(slot, randomUInt64())));
+  }
+
+  private LightClientBootstrap randomLightClientBoostrap(
+      final UInt64 slot, final LightClientHeader header) {
     final LightClientBootstrapSchema bootstrapSchema =
         getAltairSchemaDefinitions(slot).getLightClientBootstrapSchema();
 
     return bootstrapSchema.create(
-        randomLightClientHeader(slot),
+        header,
         randomSyncCommittee(),
         randomSszBytes32Vector(
             bootstrapSchema.getSyncCommitteeBranchSchema(), this::randomBytes32));

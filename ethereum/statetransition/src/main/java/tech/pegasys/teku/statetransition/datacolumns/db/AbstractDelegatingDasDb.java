@@ -39,6 +39,12 @@ abstract class AbstractDelegatingDasDb implements DataColumnSidecarDbAccessor {
   }
 
   @Override
+  public SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyColumnIdentifiers(
+      final UInt64 slot) {
+    return delegateDb.getCustodyColumnIdentifiers(slot);
+  }
+
+  @Override
   public SafeFuture<Void> addSidecar(final DataColumnSidecar sidecar) {
     return delegateDb.addSidecar(sidecar);
   }

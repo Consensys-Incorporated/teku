@@ -128,7 +128,7 @@ public class FailoverValidatorApiHandler implements ValidatorApiChannel {
   }
 
   @Override
-  public SafeFuture<Map<BLSPublicKey, Integer>> getValidatorIndices(
+  public SafeFuture<Optional<Map<BLSPublicKey, Integer>>> getValidatorIndices(
       final Collection<BLSPublicKey> publicKeys) {
     return tryRequestUntilSuccess(
         apiChannel -> apiChannel.getValidatorIndices(publicKeys),

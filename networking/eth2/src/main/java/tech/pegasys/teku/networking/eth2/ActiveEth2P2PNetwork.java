@@ -440,12 +440,18 @@ public class ActiveEth2P2PNetwork extends DelegatingP2PNetwork<Eth2Peer> impleme
 
   @Override
   public void publishLightClientFinalityUpdate(final LightClientFinalityUpdate finalityUpdate) {
+    if (!gossipStarted.get()) {
+      return;
+    }
     gossipForkManager.publishLightClientFinalityUpdate(finalityUpdate);
   }
 
   @Override
   public void publishLightClientOptimisticUpdate(
       final LightClientOptimisticUpdate optimisticUpdate) {
+    if (!gossipStarted.get()) {
+      return;
+    }
     gossipForkManager.publishLightClientOptimisticUpdate(optimisticUpdate);
   }
 

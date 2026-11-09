@@ -16,6 +16,7 @@ package tech.pegasys.teku.validator.client;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -71,6 +72,29 @@ class PtcDutySchedulerTest {
     dutyScheduler.onPayloadAttestationCreationDue(SLOT);
 
     verify(duties).performProductionDuty(SLOT);
+  }
+
+  @Test
+  void shouldNotPerformProductionForASlotWhichIsNotTheCurrentOne() {
+    dutyScheduler = createDutyScheduler(spec);
+    final UInt64 epoch = spec.computeEpochAtSlot(SLOT);
+    dutyScheduler.onSlot(SLOT);
+    requestedDutiesByEpoch.get(epoch).complete(Optional.of(duties));
+
+    // a payload becoming available for an earlier slot, for example while the beacon node catches
+    // up, produces an attestation which peers would ignore
+    dutyScheduler.onPayloadAttestationCreationDue(SLOT.minus(1));
+
+    verify(duties, never()).performProductionDuty(any());
+  }
+
+  @Test
+  void shouldNotPerformProductionBeforeTheCurrentSlotIsKnown() {
+    dutyScheduler = createDutyScheduler(spec);
+
+    dutyScheduler.onPayloadAttestationCreationDue(SLOT);
+
+    verify(duties, never()).performProductionDuty(any());
   }
 
   @Test
