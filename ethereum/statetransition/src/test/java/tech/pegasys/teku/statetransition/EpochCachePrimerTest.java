@@ -24,11 +24,14 @@ import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 
 import java.util.Optional;
 import java.util.function.Consumer;
+import org.apache.logging.log4j.Level;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
+import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -48,9 +51,10 @@ class EpochCachePrimerTest {
   private final BeaconStateUtil beaconStateUtil = mock(BeaconStateUtil.class);
   private final RecentChainData recentChainData = storageSystem.recentChainData();
   private final StubAsyncRunner asyncRunner = new StubAsyncRunner();
+  private final StubTimeProvider timeProvider = StubTimeProvider.withTimeInMillis(1_000_000);
 
   private final EpochCachePrimer primer =
-      new EpochCachePrimer(mockSpec, recentChainData, asyncRunner);
+      new EpochCachePrimer(mockSpec, recentChainData, asyncRunner, timeProvider);
 
   @BeforeEach
   void setUp() {
@@ -183,5 +187,25 @@ class EpochCachePrimerTest {
             new SlotAndBlockRoot(realSpec.computeStartSlotAtEpoch(epoch), headBlock));
     assertThatSafeFuture(stateFuture).isCompletedWithNonEmptyOptional();
     return stateFuture.getNow(null).orElseThrow();
+  }
+
+  @Test
+  void shouldLogPrecomputeTimings() {
+    when(mockSpec.getBeaconProposerIndex(any(), any()))
+        .thenAnswer(
+            invocation -> {
+              timeProvider.advanceTimeByMillis(7);
+              return 0;
+            });
+    try (final LogCaptor logCaptor = LogCaptor.forClass(EpochCachePrimer.class, Level.DEBUG)) {
+      primer.primeCacheForEpoch(UInt64.ONE);
+      asyncRunner.executeQueuedActions();
+
+      final int slotsPerEpoch = realSpec.getSlotsPerEpoch(UInt64.ZERO);
+      logCaptor.assertDebugLog(
+          "Precomputed epoch 1: state transition 0 ms, cache priming "
+              + (7 * slotsPerEpoch)
+              + " ms");
+    }
   }
 }
