@@ -14,18 +14,33 @@
 package tech.pegasys.teku.data;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.endsWith;
+import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ZERO;
 
+import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tech.pegasys.teku.ethereum.signingrecord.ValidatorSigningRecord;
@@ -179,6 +194,285 @@ public class SlashingProtectionRepairerTest {
     assertThat(fileContents(tempDir.resolve(keys.get(1)))).isEqualTo(testData.get(keys.get(1)));
     assertThat(fileContents(tempDir.resolve(keys.get(2)))).isEqualTo(testData.get(keys.get(2)));
     assertThat(fileContents(tempDir.resolve(keys.get(3)))).isEqualTo(testData.get(keys.get(3)));
+  }
+
+  @Test
+  public void shouldRewriteNonEmptyCorruptFile(@TempDir final Path tempDir) throws IOException {
+    final String key = randomValidatorFile();
+    writeRawFile(tempDir, key, "garbage: [");
+    final SlashingProtectionRepairer repairer =
+        SlashingProtectionRepairer.create(subCommandLogger, tempDir, false);
+    assertThat(repairer.hasUpdates()).isTrue();
+    verify(subCommandLogger)
+        .display(pubkeyOf(key) + ": Incomplete or invalid slashing protection data");
+
+    repairer.updateRecords(UInt64.valueOf(1234), UInt64.valueOf(154));
+
+    assertThat(fileContents(tempDir.resolve(key)))
+        .isEqualTo(
+            optionalSigningRecord(UInt64.valueOf(1234), UInt64.valueOf(154), UInt64.valueOf(154)));
+  }
+
+  @Test
+  public void shouldTreatRecordWithMissingFieldAsInvalid(@TempDir final Path tempDir)
+      throws IOException {
+    final String key = randomValidatorFile();
+    writeRawFile(
+        tempDir, key, "---\nlastSignedBlockSlot: 5000\nlastSignedAttestationSourceEpoch: 600\n");
+    final SlashingProtectionRepairer repairer =
+        SlashingProtectionRepairer.create(subCommandLogger, tempDir, false);
+    assertThat(repairer.hasUpdates()).isTrue();
+
+    repairer.updateRecords(UInt64.valueOf(1234), UInt64.valueOf(154));
+
+    // the partial record's higher slot is not kept, the file is replaced with the supplied values
+    assertThat(fileContents(tempDir.resolve(key)))
+        .isEqualTo(
+            optionalSigningRecord(UInt64.valueOf(1234), UInt64.valueOf(154), UInt64.valueOf(154)));
+  }
+
+  @Test
+  public void shouldReportEmptyFileAsInvalidRatherThanEmpty(@TempDir final Path tempDir)
+      throws IOException {
+    final String key = randomValidatorFile();
+    writeRawFile(tempDir, key, "");
+    SlashingProtectionRepairer.create(subCommandLogger, tempDir, false);
+
+    verify(subCommandLogger)
+        .display(pubkeyOf(key) + ": Incomplete or invalid slashing protection data");
+    verify(subCommandLogger, never()).display(endsWith(": Empty slashing protection record"));
+  }
+
+  @Test
+  public void shouldDropGenesisValidatorsRootWhenRewritingInvalidFile(@TempDir final Path tempDir)
+      throws IOException {
+    final String key = randomValidatorFile();
+    writeRawFile(
+        tempDir,
+        key,
+        "---\ngenesisValidatorsRoot: \""
+            + Bytes32.fromHexStringLenient("0x1234").toHexString()
+            + "\"\nlastSignedBlockSlot: 5000\n");
+    final SlashingProtectionRepairer repairer =
+        SlashingProtectionRepairer.create(subCommandLogger, tempDir, false);
+
+    repairer.updateRecords(UInt64.valueOf(1234), UInt64.valueOf(154));
+
+    assertThat(fileContents(tempDir.resolve(key)).orElseThrow().genesisValidatorsRoot()).isEmpty();
+  }
+
+  @Test
+  public void shouldPreserveGenesisValidatorsRootWhenUpdatingValidRecords(
+      @TempDir final Path tempDir) throws IOException {
+    final Optional<Bytes32> genesisValidatorsRoot = Optional.of(dataStructureUtil.randomBytes32());
+    final String lowKey = randomValidatorFile();
+    final String highKey = randomValidatorFile();
+    final ValidatorSigningRecord highRecord =
+        new ValidatorSigningRecord(
+            genesisValidatorsRoot, UInt64.valueOf(5000), UInt64.valueOf(600), UInt64.valueOf(600));
+    setupPathForTest(
+        tempDir,
+        Map.of(
+            lowKey,
+            Optional.of(new ValidatorSigningRecord(genesisValidatorsRoot, ONE, ONE, ONE)),
+            highKey,
+            Optional.of(highRecord)));
+
+    SlashingProtectionRepairer.create(subCommandLogger, tempDir, true)
+        .updateRecords(UInt64.valueOf(1234), UInt64.valueOf(154));
+
+    assertThat(fileContents(tempDir.resolve(lowKey)))
+        .contains(
+            new ValidatorSigningRecord(
+                genesisValidatorsRoot,
+                UInt64.valueOf(1234),
+                UInt64.valueOf(154),
+                UInt64.valueOf(154)));
+    assertThat(fileContents(tempDir.resolve(highKey))).contains(highRecord);
+    verify(subCommandLogger, never()).display(pubkeyOf(highKey) + ": updating");
+  }
+
+  @Test
+  public void shouldFindRecordsFromOtherNetworks(@TempDir final Path tempDir) throws IOException {
+    final Bytes32 networkRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 otherRoot = dataStructureUtil.randomBytes32();
+    final String matchingKey = randomValidatorFile();
+    final String otherNetworkKey = randomValidatorFile();
+    final String noRootKey = randomValidatorFile();
+    final String corruptKey = randomValidatorFile();
+    setupPathForTest(
+        tempDir,
+        Map.of(
+            matchingKey,
+            Optional.of(new ValidatorSigningRecord(Optional.of(networkRoot), ONE, ONE, ONE)),
+            otherNetworkKey,
+            Optional.of(new ValidatorSigningRecord(Optional.of(otherRoot), ONE, ONE, ONE)),
+            noRootKey,
+            optionalSigningRecord(ONE, ONE, ONE)));
+    writeRawFile(tempDir, corruptKey, "garbage: [");
+
+    final SlashingProtectionRepairer repairer =
+        SlashingProtectionRepairer.create(subCommandLogger, tempDir, false);
+
+    assertThat(repairer.getPubkeysWithDifferentGenesisValidatorsRoot(networkRoot))
+        .containsExactly(pubkeyOf(otherNetworkKey));
+    assertThat(repairer.getPubkeysWithDifferentGenesisValidatorsRoot(otherRoot))
+        .containsExactly(pubkeyOf(matchingKey));
+    assertThat(repairer.hasRecordsWithGenesisValidatorsRoot()).isTrue();
+  }
+
+  @Test
+  public void shouldNotFindOtherNetworksWhenRecordsHaveNoGenesisValidatorsRoot(
+      @TempDir final Path tempDir) throws IOException {
+    setupPathForTest(tempDir, Map.of(randomValidatorFile(), optionalSigningRecord(ONE, ONE, ONE)));
+    final SlashingProtectionRepairer repairer =
+        SlashingProtectionRepairer.create(subCommandLogger, tempDir, true);
+
+    assertThat(
+            repairer.getPubkeysWithDifferentGenesisValidatorsRoot(
+                dataStructureUtil.randomBytes32()))
+        .isEmpty();
+    assertThat(repairer.hasRecordsWithGenesisValidatorsRoot()).isFalse();
+  }
+
+  @Test
+  public void shouldNotCreateFilesForKeysWithoutRecords(@TempDir final Path tempDir)
+      throws IOException {
+    final String key = randomValidatorFile();
+    setupPathForTest(tempDir, Map.of(key, optionalSigningRecord(ONE, ONE, ONE)));
+    final SlashingProtectionRepairer repairer =
+        SlashingProtectionRepairer.create(subCommandLogger, tempDir, true);
+
+    repairer.updateRecords(UInt64.valueOf(1234), UInt64.valueOf(154));
+
+    // the repairer only knows about files that already exist; it never loads validator keys
+    assertThat(listFileNames(tempDir)).containsExactly(key);
+  }
+
+  @Test
+  public void shouldHaveNoUpdatesForEmptyDirectory(@TempDir final Path tempDir) {
+    assertThat(SlashingProtectionRepairer.create(subCommandLogger, tempDir, false).hasUpdates())
+        .isFalse();
+    assertThat(SlashingProtectionRepairer.create(subCommandLogger, tempDir, true).hasUpdates())
+        .isFalse();
+  }
+
+  @Test
+  public void shouldHaveNoUpdatesWhenAllRecordsValidAndUpdateAllDisabled(
+      @TempDir final Path tempDir) throws IOException {
+    setupPathForTest(tempDir, Map.of(randomValidatorFile(), optionalSigningRecord(ONE, ONE, ONE)));
+    assertThat(SlashingProtectionRepairer.create(subCommandLogger, tempDir, false).hasUpdates())
+        .isFalse();
+  }
+
+  @Test
+  public void shouldNotLowerRecordsWhenRepairedAgainWithLowerSlot(@TempDir final Path tempDir)
+      throws IOException {
+    final String key = randomValidatorFile();
+    setupPathForTest(tempDir, Map.of(key, optionalSigningRecord(ONE, ONE, ONE)));
+    SlashingProtectionRepairer.create(subCommandLogger, tempDir, true)
+        .updateRecords(UInt64.valueOf(1234), UInt64.valueOf(154));
+    final Optional<ValidatorSigningRecord> afterFirstRun = fileContents(tempDir.resolve(key));
+    assertThat(afterFirstRun)
+        .isEqualTo(
+            optionalSigningRecord(UInt64.valueOf(1234), UInt64.valueOf(154), UInt64.valueOf(154)));
+
+    reset(subCommandLogger);
+    SlashingProtectionRepairer.create(subCommandLogger, tempDir, true)
+        .updateRecords(UInt64.valueOf(123), UInt64.valueOf(15));
+
+    assertThat(fileContents(tempDir.resolve(key))).isEqualTo(afterFirstRun);
+    verify(subCommandLogger, never()).display(endsWith(": updating"));
+  }
+
+  @Test
+  public void shouldRaiseNeverSignedAttestationEpochs(@TempDir final Path tempDir)
+      throws IOException {
+    final String key = randomValidatorFile();
+    setupPathForTest(
+        tempDir, Map.of(key, Optional.of(ValidatorSigningRecord.emptySigningRecord(null))));
+
+    // a never-signed record is valid, so it is left alone unless update-all is enabled
+    assertThat(SlashingProtectionRepairer.create(subCommandLogger, tempDir, false).hasUpdates())
+        .isFalse();
+
+    SlashingProtectionRepairer.create(subCommandLogger, tempDir, true)
+        .updateRecords(UInt64.valueOf(1234), UInt64.valueOf(154));
+
+    assertThat(fileContents(tempDir.resolve(key)))
+        .isEqualTo(
+            optionalSigningRecord(UInt64.valueOf(1234), UInt64.valueOf(154), UInt64.valueOf(154)));
+  }
+
+  @Test
+  public void shouldOnlyLogUpdatingForRecordsThatChange(@TempDir final Path tempDir)
+      throws IOException {
+    final String lowKey = randomValidatorFile();
+    final String highKey = randomValidatorFile();
+    setupPathForTest(
+        tempDir,
+        Map.of(
+            lowKey, optionalSigningRecord(ONE, ONE, ONE),
+            highKey,
+                optionalSigningRecord(
+                    UInt64.valueOf(5000), UInt64.valueOf(600), UInt64.valueOf(600))));
+    final SlashingProtectionRepairer repairer =
+        SlashingProtectionRepairer.create(subCommandLogger, tempDir, true);
+    verify(subCommandLogger).display(pubkeyOf(lowKey) + ": looks valid");
+    verify(subCommandLogger).display(pubkeyOf(highKey) + ": looks valid");
+
+    repairer.updateRecords(UInt64.valueOf(1234), UInt64.valueOf(154));
+
+    verify(subCommandLogger).display(pubkeyOf(lowKey) + ": updating");
+    verify(subCommandLogger, never()).display(pubkeyOf(highKey) + ": updating");
+  }
+
+  @Test
+  public void shouldReportWriteFailures(@TempDir final Path tempDir) throws IOException {
+    assumeTrue(FileSystems.getDefault().supportedFileAttributeViews().contains("posix"));
+    final String key = randomValidatorFile();
+    writeRawFile(tempDir, key, "garbage: [");
+    final SlashingProtectionRepairer repairer =
+        SlashingProtectionRepairer.create(subCommandLogger, tempDir, false);
+
+    final Set<PosixFilePermission> originalDirPermissions = Files.getPosixFilePermissions(tempDir);
+    final Set<PosixFilePermission> readOnly = PosixFilePermissions.fromString("r-xr-xr-x");
+    Files.setPosixFilePermissions(tempDir.resolve(key), readOnly);
+    Files.setPosixFilePermissions(tempDir, readOnly);
+    try {
+      repairer.updateRecords(UInt64.valueOf(1234), UInt64.valueOf(154));
+    } finally {
+      Files.setPosixFilePermissions(tempDir, originalDirPermissions);
+    }
+
+    verify(subCommandLogger).display("The following errors were encountered:");
+    verify(subCommandLogger).display(startsWith(pubkeyOf(key) + ": update failed, "));
+    assertThat(Files.readString(tempDir.resolve(key), StandardCharsets.UTF_8))
+        .isEqualTo("garbage: [");
+  }
+
+  @Test
+  public void shouldNotReportErrorsWhenWritesSucceed(@TempDir final Path tempDir)
+      throws IOException {
+    writeRawFile(tempDir, randomValidatorFile(), "garbage: [");
+    SlashingProtectionRepairer.create(subCommandLogger, tempDir, false)
+        .updateRecords(UInt64.valueOf(1234), UInt64.valueOf(154));
+
+    verify(subCommandLogger, never()).display("The following errors were encountered:");
+    verify(subCommandLogger, never()).display(contains(": update failed"));
+  }
+
+  private void writeRawFile(final Path dir, final String fileName, final String content)
+      throws IOException {
+    Files.writeString(dir.resolve(fileName), content, StandardCharsets.UTF_8);
+  }
+
+  private String pubkeyOf(final String fileName) {
+    return fileName.substring(0, fileName.length() - ".yml".length());
+  }
+
+  private List<String> listFileNames(final Path dir) {
+    return Arrays.stream(dir.toFile().listFiles()).map(File::getName).toList();
   }
 
   private Optional<ValidatorSigningRecord> fileContents(final Path file) throws IOException {
