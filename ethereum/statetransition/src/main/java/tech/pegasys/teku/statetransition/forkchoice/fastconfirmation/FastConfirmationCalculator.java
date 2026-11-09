@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.statetransition.forkchoice.fastconfirmation;
 
+import static com.google.common.base.Preconditions.checkState;
+
 import com.google.common.annotations.VisibleForTesting;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
@@ -615,12 +617,22 @@ class FastConfirmationCalculator {
     final UInt64 supportDiscount = getSupportDiscount(balanceSource, blockRoot);
     final UInt64 adversarialWeight = getAdversarialWeight(balanceSource, blockRoot);
 
-    // (maximumSupport + proposerScore + 2 * adversarialWeight - supportDiscount) // 2, guarded
-    // against underflow.
-    final UInt64 gross = maximumSupport.plus(proposerScore).plus(adversarialWeight.times(2));
-    return supportDiscount.isLessThan(gross)
-        ? gross.minus(supportDiscount).dividedBy(2)
-        : UInt64.ZERO;
+    // With precise committee weight computation the support discount never exceeds the maximum
+    // support: it is the support of a subset of the same committees, less the adversarial weight.
+    checkState(
+        supportDiscount.isLessThanOrEqualTo(maximumSupport),
+        "Support discount %s exceeds maximum support %s for block %s at slot %s",
+        supportDiscount,
+        maximumSupport,
+        blockRoot,
+        currentSlot);
+
+    // (maximumSupport + proposerScore - supportDiscount) // 2 + adversarialWeight
+    return maximumSupport
+        .plus(proposerScore)
+        .plus(adversarialWeight.times(2))
+        .minus(supportDiscount)
+        .dividedBy(2);
   }
 
   /**
@@ -1161,7 +1173,7 @@ class FastConfirmationCalculator {
 
     // Identity comparison, like the identity-keyed per-source maps: value equality would hash the
     // whole state.
-    @SuppressWarnings("ReferenceComparison")
+    @SuppressWarnings({"ReferenceComparison", "ReferenceEquality"})
     private CommitteeWeights(final BeaconState balanceSource) {
       this.balanceSourceEpoch = spec.getCurrentEpoch(balanceSource);
       this.validators = balanceSource.getValidators();

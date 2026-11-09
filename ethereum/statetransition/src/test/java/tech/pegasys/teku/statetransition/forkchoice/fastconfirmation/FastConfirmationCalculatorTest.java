@@ -14,10 +14,13 @@
 package tech.pegasys.teku.statetransition.forkchoice.fastconfirmation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
@@ -853,9 +856,8 @@ class FastConfirmationCalculatorTest {
     when(store.getVoteSnapshot()).thenReturn(voteSnapshot(Map.of(voter, vote(parent, 3L, true))));
     final FastConfirmationCalculator calculator = calculatorWithHeadState(balanceSource, 10);
 
-    final UInt64 total = spec.getTotalActiveBalance(balanceSource);
     final UInt64 adversarial =
-        estimate(total, 3, 3)
+        committeeWeight(balanceSource, 3, 3)
             .dividedBy(100)
             .times(FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
     final UInt64 expected = effectiveBalance(balanceSource, voter).minus(adversarial);
@@ -881,6 +883,74 @@ class FastConfirmationCalculatorTest {
     final UInt64 expected =
         maximumSupport.plus(proposerScore).plus(adversarial.times(2)).dividedBy(2);
     assertThat(calculator.computeSafetyThreshold(chain.get(3), balanceSource)).isEqualTo(expected);
+  }
+
+  @Test
+  void shouldSubtractEmptySlotSupportDiscountFromSafetyThreshold() {
+    final BeaconState balanceSource = genesisState();
+    // Block at slot 4 whose parent is at slot 2 leaves slot 3 empty.
+    final Bytes32 parent = Bytes32.random();
+    final Bytes32 block = Bytes32.random();
+    when(forkChoice.blockSlot(parent)).thenReturn(Optional.of(UInt64.valueOf(2)));
+    when(forkChoice.blockSlot(block)).thenReturn(Optional.of(UInt64.valueOf(4)));
+    when(forkChoice.blockParentRoot(block)).thenReturn(Optional.of(parent));
+    when(forkChoice.getAncestorNode(ForkChoiceNode.createBase(block), UInt64.valueOf(2)))
+        .thenReturn(Optional.of(ForkChoiceNode.createBase(parent)));
+    // A slot-3 committee member supports the parent across the empty slot.
+    final int voter = firstCommitteeMember(balanceSource, UInt64.valueOf(3));
+    when(store.getVoteSnapshot()).thenReturn(voteSnapshot(Map.of(voter, vote(parent))));
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(balanceSource, 10);
+
+    // parentSlot + 1 = 3 .. currentSlot - 1 = 9, crossing the epoch boundary
+    final UInt64 maximumSupport = committeeWeight(balanceSource, 3, 9);
+    final UInt64 proposerScore = spec.getProposerBoostAmount(balanceSource);
+    // Not crossing an epoch boundary from the parent, so the range starts at the block slot (4).
+    final UInt64 adversarial = byzantineFraction(committeeWeight(balanceSource, 4, 9));
+    final UInt64 supportDiscount =
+        effectiveBalance(balanceSource, voter)
+            .minus(byzantineFraction(committeeWeight(balanceSource, 3, 3)));
+    assertThat(supportDiscount).isGreaterThan(UInt64.ZERO);
+
+    final UInt64 expected =
+        maximumSupport
+            .plus(proposerScore)
+            .plus(adversarial.times(2))
+            .minus(supportDiscount)
+            .dividedBy(2);
+    assertThat(calculator.computeSafetyThreshold(block, balanceSource)).isEqualTo(expected);
+  }
+
+  @Test
+  void shouldAllowSupportDiscountEqualToMaximumSupport() {
+    buildLinearChain(11);
+    final BeaconState balanceSource = genesisState();
+    final FastConfirmationCalculator calculator = spy(calculatorWithHeadState(balanceSource, 5));
+    // parentSlot + 1 = 3 .. currentSlot - 1 = 4
+    final UInt64 maximumSupport = committeeWeight(balanceSource, 3, 4);
+    doReturn(maximumSupport).when(calculator).getSupportDiscount(balanceSource, chain.get(3));
+
+    // The discount cancels the maximum support, leaving (proposerScore + 2 * adversarial) // 2.
+    final UInt64 expected =
+        spec.getProposerBoostAmount(balanceSource)
+            .plus(byzantineFraction(committeeWeight(balanceSource, 3, 4)).times(2))
+            .dividedBy(2);
+    assertThat(calculator.computeSafetyThreshold(chain.get(3), balanceSource)).isEqualTo(expected);
+  }
+
+  @Test
+  void shouldRejectSupportDiscountExceedingMaximumSupport() {
+    buildLinearChain(11);
+    final BeaconState balanceSource = genesisState();
+    final FastConfirmationCalculator calculator = spy(calculatorWithHeadState(balanceSource, 5));
+    // Impossible with a precise committee weight; stubbed to exercise the spec assertion.
+    final UInt64 maximumSupport = committeeWeight(balanceSource, 3, 4);
+    doReturn(maximumSupport.plus(1))
+        .when(calculator)
+        .getSupportDiscount(balanceSource, chain.get(3));
+
+    assertThatThrownBy(() -> calculator.computeSafetyThreshold(chain.get(3), balanceSource))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("exceeds maximum support");
   }
 
   @Test
@@ -1159,6 +1229,10 @@ class FastConfirmationCalculatorTest {
         latestConfirmedCalculator(genesisState(), chain.get(10), chain.get(10), 10);
 
     assertThat(calculator.getLatestConfirmed()).isEqualTo(chain.get(10));
+  }
+
+  private UInt64 byzantineFraction(final UInt64 weight) {
+    return weight.dividedBy(100).times(FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
   }
 
   private UInt64 committeeWeight(
