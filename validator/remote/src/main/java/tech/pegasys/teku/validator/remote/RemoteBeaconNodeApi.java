@@ -261,7 +261,7 @@ public class RemoteBeaconNodeApi implements BeaconNodeApi {
 
   public static OkHttpClient createOkHttpClient(
       final List<HttpUrl> endpoints, final int maxResponseSizeMegabytes) {
-    checkArgument(maxResponseSizeMegabytes > 0, "Maximum response size must be positive");
+    checkArgument(maxResponseSizeMegabytes >= 0, "Maximum response size must be non-negative");
     final OkHttpClient.Builder httpClientBuilder =
         new OkHttpClient.Builder().callTimeout(REST_CALL_TIMEOUT);
     if (endpoints.size() > 1) {
@@ -270,8 +270,10 @@ public class RemoteBeaconNodeApi implements BeaconNodeApi {
       OkHttpClientAuth.addAuthInterceptor(endpoints.get(0), httpClientBuilder);
     }
     addInterceptorForUserAgentHeader(httpClientBuilder);
-    httpClientBuilder.addInterceptor(
-        new RestResponseSizeLimitInterceptor(maxResponseSizeMegabytes));
+    if (maxResponseSizeMegabytes > 0) {
+      httpClientBuilder.addInterceptor(
+          new RestResponseSizeLimitInterceptor(maxResponseSizeMegabytes));
+    }
 
     return httpClientBuilder.build();
   }

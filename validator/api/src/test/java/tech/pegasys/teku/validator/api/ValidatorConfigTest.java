@@ -28,10 +28,17 @@ class ValidatorConfigTest {
   private final ValidatorConfig.Builder configBuilder = ValidatorConfig.builder();
 
   @Test
-  void rejectsNonPositiveBeaconApiMaxResponseSize() {
-    Assertions.assertThatExceptionOfType(InvalidConfigurationException.class)
-        .isThrownBy(() -> configBuilder.beaconApiMaxResponseSizeMegabytes(0).build())
-        .withMessageContaining("--Xvalidator-client-beacon-api-max-response-size");
+  void acceptsZeroBeaconApiMaxResponseSize() {
+    Assertions.assertThat(
+            configBuilder
+                .beaconApiMaxResponseSizeMegabytes(0)
+                .build()
+                .getBeaconApiMaxResponseSizeMegabytes())
+        .isZero();
+  }
+
+  @Test
+  void rejectsNegativeBeaconApiMaxResponseSize() {
     Assertions.assertThatExceptionOfType(InvalidConfigurationException.class)
         .isThrownBy(() -> configBuilder.beaconApiMaxResponseSizeMegabytes(-1).build())
         .withMessageContaining("--Xvalidator-client-beacon-api-max-response-size");

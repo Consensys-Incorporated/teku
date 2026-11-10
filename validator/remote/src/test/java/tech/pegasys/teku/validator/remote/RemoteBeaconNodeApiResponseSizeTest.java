@@ -81,6 +81,18 @@ class RemoteBeaconNodeApiResponseSizeTest {
   }
 
   @Test
+  void zeroDisablesRestResponseLimit() throws IOException {
+    server.enqueue(
+        new MockResponse().setBody("small").setHeader("Content-Length", MAX_RESPONSE_BYTES + 1));
+    final OkHttpClient client = RemoteBeaconNodeApi.createOkHttpClient(List.of(server.url("/")), 0);
+
+    assertThat(client.interceptors()).noneMatch(RestResponseSizeLimitInterceptor.class::isInstance);
+    try (final Response response = client.newCall(request()).execute()) {
+      assertThat(response.body().source().readUtf8(5)).isEqualTo("small");
+    }
+  }
+
+  @Test
   void acceptsAdvertisedSizeAtConfiguredLimit() throws IOException {
     server.enqueue(new MockResponse().setBody("small").setHeader("Content-Length", 1_000_000));
 

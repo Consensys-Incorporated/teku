@@ -870,9 +870,9 @@ public class ValidatorConfig {
     }
 
     private void validateBeaconApiMaxResponseSize() {
-      if (beaconApiMaxResponseSizeMegabytes <= 0) {
+      if (beaconApiMaxResponseSizeMegabytes < 0) {
         throw new InvalidConfigurationException(
-            "--Xvalidator-client-beacon-api-max-response-size must be greater than zero");
+            "--Xvalidator-client-beacon-api-max-response-size must be non-negative");
       }
     }
 

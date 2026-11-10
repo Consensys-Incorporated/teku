@@ -167,7 +167,7 @@ public class ValidatorOptions {
       showDefaultValue = Visibility.ALWAYS,
       hidden = true,
       description =
-          "Maximum size in MB of a Beacon Node REST API response received by the validator client (excluding event streams)",
+          "Maximum size in MB of a Beacon Node REST API response received by the validator client (excluding event streams; 0 disables the limit)",
       arity = "1")
   private int beaconApiMaxResponseSizeMegabytes =
       ValidatorConfig.DEFAULT_BEACON_API_MAX_RESPONSE_SIZE_MB;
