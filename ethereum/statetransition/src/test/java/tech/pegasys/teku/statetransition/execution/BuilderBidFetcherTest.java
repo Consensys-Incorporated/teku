@@ -18,6 +18,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -26,10 +27,12 @@ import static tech.pegasys.teku.spec.schemas.ApiSchemas.BUILDER_ENTRY_SCHEMA;
 
 import java.util.List;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.builder.rest.StakedBuilderClient;
 import tech.pegasys.teku.builder.rest.StakedBuilderClientProvider;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionPerformance;
@@ -42,6 +45,7 @@ import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderConfi
 import tech.pegasys.teku.spec.datastructures.builder.versions.gloas.BuilderEntry;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidManager.RemoteBid;
 
@@ -60,11 +64,8 @@ public class BuilderBidFetcherTest {
   private final ExecutionPayloadBidCircuitBreaker circuitBreaker =
       mock(ExecutionPayloadBidCircuitBreaker.class);
 
-  private final BannedBuilderUrls bannedBuilderUrls = mock(BannedBuilderUrls.class);
-
   private final BuilderBidFetcher fetcher =
-      new BuilderBidFetcher(
-          spec, stakedBuilderClientProvider, bidValidator, circuitBreaker, bannedBuilderUrls);
+      new BuilderBidFetcher(spec, stakedBuilderClientProvider, bidValidator, circuitBreaker);
 
   @BeforeEach
   void setUp() {
@@ -248,62 +249,117 @@ public class BuilderBidFetcherTest {
   }
 
   @Test
-  void bansUrlAndDoesNotValidateTheBidWhenBuilderIsNotAllowed() {
+  void rejectsInvalidBidClaimingBannedBuilderWithoutAffectingLaterRequests() {
     final BeaconState state = dataStructureUtil.randomBeaconState();
     final SignedExecutionPayloadBid bid = createBidFromBuilder(state, UInt64.valueOf(3));
     final BuilderConfig builderConfig = dataStructureUtil.randomBuilderConfig(1);
-    final String url = builderConfig.getBuilders().get(0).getUrl();
+    when(stakedBuilderClientProvider.getClient(any())).thenReturn(builderClient);
+    when(builderClient.getExecutionPayloadBid(any(), any(), any(), any(), any()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(bid)));
+    when(bidValidator.validateBid(any(), any(), any(), any(), any())).thenReturn(false);
+    when(circuitBreaker.isBuilderAllowed(UInt64.valueOf(3), state)).thenReturn(false);
+
+    assertThat(getBuilderBids(state, builderConfig)).isEmpty();
+    assertThat(getBuilderBids(state, builderConfig)).isEmpty();
+
+    // the bid is validated before the circuit breaker is consulted, and the entry is requested
+    // again because a builder index claimed by an invalid bid proves nothing about the URL
+    verify(circuitBreaker, never()).isBuilderAllowed(any(), any());
+    verify(builderClient, times(2)).getExecutionPayloadBid(any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void dropsValidBidFromBannedBuilderAndKeepsRequestingEntryWithEmptyAllowlist() {
+    final BeaconState state = dataStructureUtil.randomBeaconState();
+    final SignedExecutionPayloadBid bid = createBidFromBuilder(state, UInt64.valueOf(3));
+    final BuilderConfig builderConfig = dataStructureUtil.randomBuilderConfig(1);
     when(stakedBuilderClientProvider.getClient(any())).thenReturn(builderClient);
     when(builderClient.getExecutionPayloadBid(any(), any(), any(), any(), any()))
         .thenReturn(SafeFuture.completedFuture(Optional.of(bid)));
     when(circuitBreaker.isBuilderAllowed(UInt64.valueOf(3), state)).thenReturn(false);
 
     assertThat(getBuilderBids(state, builderConfig)).isEmpty();
-    verify(bannedBuilderUrls).ban(url, state.getSlot());
-    verify(bidValidator, never()).validateBid(any(), any(), any(), any(), any());
+    assertThat(getBuilderBids(state, builderConfig)).isEmpty();
+
+    verify(bidValidator, times(2)).validateBid(any(), any(), any(), any(), any());
+    verify(builderClient, times(2)).getExecutionPayloadBid(any(), any(), any(), any(), any());
   }
 
   @Test
-  void doesNotBanUrlWhenBuilderIsAllowed() {
+  void skipsEntryWhenAllAllowedBuildersAreBanned() {
     final BeaconState state = dataStructureUtil.randomBeaconState();
-    final SignedExecutionPayloadBid bid = createBidFromBuilder(state, UInt64.valueOf(3));
-    final BuilderConfig builderConfig = dataStructureUtil.randomBuilderConfig(1);
+    final BuilderConfig builderConfig =
+        configWithEntries(entryAllowing(builderPubkey(state, 0), builderPubkey(state, 1)));
+    when(circuitBreaker.isBuilderAllowed(UInt64.valueOf(0), state)).thenReturn(false);
+    when(circuitBreaker.isBuilderAllowed(UInt64.valueOf(1), state)).thenReturn(false);
+
+    assertThat(getBuilderBids(state, builderConfig)).isEmpty();
+    verifyNoInteractions(stakedBuilderClientProvider, blockProductionPerformance);
+  }
+
+  @Test
+  void requestsEntryWhenOnlySomeAllowedBuildersAreBanned() {
+    final BeaconState state = dataStructureUtil.randomBeaconState();
+    final SignedExecutionPayloadBid bid = createBidFromBuilder(state, UInt64.valueOf(1));
+    final BuilderConfig builderConfig =
+        configWithEntries(entryAllowing(builderPubkey(state, 0), builderPubkey(state, 1)));
+    when(circuitBreaker.isBuilderAllowed(UInt64.valueOf(0), state)).thenReturn(false);
     when(stakedBuilderClientProvider.getClient(any())).thenReturn(builderClient);
     when(builderClient.getExecutionPayloadBid(any(), any(), any(), any(), any()))
         .thenReturn(SafeFuture.completedFuture(Optional.of(bid)));
 
     assertThat(getBuilderBids(state, builderConfig)).map(RemoteBid::bid).containsExactly(bid);
-    verify(bannedBuilderUrls, never()).ban(any(), any());
   }
 
   @Test
-  void requestsOnlyUrlsWhichAreNotBanned() {
+  void requestsEntryWhenAnAllowedKeyIsNotAKnownBuilder() {
     final BeaconState state = dataStructureUtil.randomBeaconState();
-    final SignedExecutionPayloadBid secondBid = createBidFromBuilder(state, UInt64.valueOf(4));
-    final BuilderConfig builderConfig = dataStructureUtil.randomBuilderConfig(2);
-    final String firstUrl = builderConfig.getBuilders().get(0).getUrl();
-    final String secondUrl = builderConfig.getBuilders().get(1).getUrl();
-    when(bannedBuilderUrls.isBanned(firstUrl, state.getSlot())).thenReturn(true);
-    when(stakedBuilderClientProvider.getClient(secondUrl)).thenReturn(builderClient);
+    final BuilderConfig builderConfig =
+        configWithEntries(
+            entryAllowing(builderPubkey(state, 0), dataStructureUtil.randomPublicKey()));
+    when(circuitBreaker.isBuilderAllowed(UInt64.valueOf(0), state)).thenReturn(false);
+    when(stakedBuilderClientProvider.getClient(any())).thenReturn(builderClient);
     when(builderClient.getExecutionPayloadBid(any(), any(), any(), any(), any()))
-        .thenReturn(SafeFuture.completedFuture(Optional.of(secondBid)));
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
 
-    assertThat(getBuilderBids(state, builderConfig)).map(RemoteBid::bid).containsExactly(secondBid);
-    verify(stakedBuilderClientProvider, never()).getClient(firstUrl);
+    assertThat(getBuilderBids(state, builderConfig)).isEmpty();
+    verify(builderClient).getExecutionPayloadBid(any(), any(), any(), any(), any());
   }
 
   @Test
-  void onlyBansUrlsWhichReturnedBidsFromNotAllowedBuilders() {
+  void decidesSkipPerProposerConfigForASharedUrl() {
+    final BeaconState state = dataStructureUtil.randomBeaconState();
+    final SignedExecutionPayloadBid bid = createBidFromBuilder(state, UInt64.valueOf(1));
+    final BuilderEntry onlyBannedBuilder = entryAllowing(builderPubkey(state, 0));
+    final BuilderEntry onlyAllowedBuilder =
+        entryAllowing(onlyBannedBuilder.getUrlBytes(), builderPubkey(state, 1));
+    when(circuitBreaker.isBuilderAllowed(UInt64.valueOf(0), state)).thenReturn(false);
+    when(stakedBuilderClientProvider.getClient(any())).thenReturn(builderClient);
+    when(builderClient.getExecutionPayloadBid(any(), any(), any(), any(), any()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(bid)));
+
+    // a proposer whose entry only allows a banned builder doesn't request the URL
+    assertThat(getBuilderBids(state, configWithEntries(onlyBannedBuilder))).isEmpty();
+    verifyNoInteractions(builderClient);
+
+    // another proposer using the same URL with a different allowlist still requests it
+    assertThat(getBuilderBids(state, configWithEntries(onlyAllowedBuilder)))
+        .map(RemoteBid::bid)
+        .containsExactly(bid);
+  }
+
+  @Test
+  void dropsOnlyBidsFromBannedBuilders() {
     final BeaconState state = dataStructureUtil.randomBeaconState();
     final SignedExecutionPayloadBid firstBid = createBidFromBuilder(state, UInt64.valueOf(3));
     final SignedExecutionPayloadBid secondBid = createBidFromBuilder(state, UInt64.valueOf(4));
     final BuilderConfig builderConfig = dataStructureUtil.randomBuilderConfig(2);
-    final String firstUrl = builderConfig.getBuilders().get(0).getUrl();
-    final String secondUrl = builderConfig.getBuilders().get(1).getUrl();
     final StakedBuilderClient firstClient = mock(StakedBuilderClient.class);
     final StakedBuilderClient secondClient = mock(StakedBuilderClient.class);
-    when(stakedBuilderClientProvider.getClient(firstUrl)).thenReturn(firstClient);
-    when(stakedBuilderClientProvider.getClient(secondUrl)).thenReturn(secondClient);
+    when(stakedBuilderClientProvider.getClient(builderConfig.getBuilders().get(0).getUrl()))
+        .thenReturn(firstClient);
+    when(stakedBuilderClientProvider.getClient(builderConfig.getBuilders().get(1).getUrl()))
+        .thenReturn(secondClient);
     when(firstClient.getExecutionPayloadBid(any(), any(), any(), any(), any()))
         .thenReturn(SafeFuture.completedFuture(Optional.of(firstBid)));
     when(secondClient.getExecutionPayloadBid(any(), any(), any(), any(), any()))
@@ -311,8 +367,28 @@ public class BuilderBidFetcherTest {
     when(circuitBreaker.isBuilderAllowed(UInt64.valueOf(3), state)).thenReturn(false);
 
     assertThat(getBuilderBids(state, builderConfig)).map(RemoteBid::bid).containsExactly(secondBid);
-    verify(bannedBuilderUrls).ban(firstUrl, state.getSlot());
-    verify(bannedBuilderUrls, never()).ban(eq(secondUrl), any());
+  }
+
+  private BLSPublicKey builderPubkey(final BeaconState state, final int builderIndex) {
+    return BeaconStateGloas.required(state).getBuilders().get(builderIndex).getPublicKey();
+  }
+
+  private BuilderEntry entryAllowing(final BLSPublicKey... builderPubkeys) {
+    return entryAllowing(dataStructureUtil.randomBuilderEntry().getUrlBytes(), builderPubkeys);
+  }
+
+  private BuilderEntry entryAllowing(final Bytes url, final BLSPublicKey... builderPubkeys) {
+    return BUILDER_ENTRY_SCHEMA.create(
+        url,
+        dataStructureUtil.randomSignedBuilderRequestAuth(),
+        List.of(builderPubkeys),
+        UInt64.ZERO,
+        UInt64.ZERO,
+        UInt64.valueOf(100));
+  }
+
+  private BuilderConfig configWithEntries(final BuilderEntry... entries) {
+    return BUILDER_CONFIG_SCHEMA.create(UInt64.ZERO, UInt64.valueOf(100), List.of(entries));
   }
 
   private List<RemoteBid> getBuilderBids(

@@ -33,8 +33,6 @@ public class ExecutionLayerConfiguration {
   public static final int DEFAULT_BUILDER_CIRCUIT_BREAKER_WINDOW = 32;
   public static final int DEFAULT_BUILDER_CIRCUIT_BREAKER_ALLOWED_FAULTS = 5;
   public static final int DEFAULT_BUILDER_CIRCUIT_BREAKER_ALLOWED_CONSECUTIVE_FAULTS = 3;
-  // around 27 hours of a ban for builder URLs whose builder index has triggered the circuit breaker
-  public static final int DEFAULT_BUILDER_CIRCUIT_BREAKER_BAN_URL_EPOCHS = 256;
   public static final int BUILDER_CIRCUIT_BREAKER_WINDOW_HARD_CAP = 64;
   public static final UInt64 DEFAULT_BUILDER_BID_COMPARE_FACTOR = UInt64.valueOf(90);
   public static final boolean DEFAULT_BUILDER_SET_USER_AGENT_HEADER = true;
@@ -52,7 +50,6 @@ public class ExecutionLayerConfiguration {
   private final int builderCircuitBreakerWindow;
   private final int builderCircuitBreakerAllowedFaults;
   private final int builderCircuitBreakerAllowedConsecutiveFaults;
-  private final int builderCircuitBreakerBanUrlEpochs;
   private final UInt64 builderBidCompareFactor;
   private final boolean builderSetUserAgentHeader;
   private final boolean useShouldOverrideBuilderFlag;
@@ -69,7 +66,6 @@ public class ExecutionLayerConfiguration {
       final int builderCircuitBreakerWindow,
       final int builderCircuitBreakerAllowedFaults,
       final int builderCircuitBreakerAllowedConsecutiveFaults,
-      final int builderCircuitBreakerBanUrlEpochs,
       final UInt64 builderBidCompareFactor,
       final boolean builderSetUserAgentHeader,
       final boolean useShouldOverrideBuilderFlag,
@@ -85,7 +81,6 @@ public class ExecutionLayerConfiguration {
     this.builderCircuitBreakerAllowedFaults = builderCircuitBreakerAllowedFaults;
     this.builderCircuitBreakerAllowedConsecutiveFaults =
         builderCircuitBreakerAllowedConsecutiveFaults;
-    this.builderCircuitBreakerBanUrlEpochs = builderCircuitBreakerBanUrlEpochs;
     this.builderBidCompareFactor = builderBidCompareFactor;
     this.builderSetUserAgentHeader = builderSetUserAgentHeader;
     this.useShouldOverrideBuilderFlag = useShouldOverrideBuilderFlag;
@@ -140,10 +135,6 @@ public class ExecutionLayerConfiguration {
     return builderCircuitBreakerAllowedConsecutiveFaults;
   }
 
-  public int getBuilderCircuitBreakerBanUrlEpochs() {
-    return builderCircuitBreakerBanUrlEpochs;
-  }
-
   public UInt64 getBuilderBidCompareFactor() {
     return builderBidCompareFactor;
   }
@@ -175,7 +166,6 @@ public class ExecutionLayerConfiguration {
     private int builderCircuitBreakerAllowedFaults = DEFAULT_BUILDER_CIRCUIT_BREAKER_ALLOWED_FAULTS;
     private int builderCircuitBreakerAllowedConsecutiveFaults =
         DEFAULT_BUILDER_CIRCUIT_BREAKER_ALLOWED_CONSECUTIVE_FAULTS;
-    private int builderCircuitBreakerBanUrlEpochs = DEFAULT_BUILDER_CIRCUIT_BREAKER_BAN_URL_EPOCHS;
     private String builderBidCompareFactor = DEFAULT_BUILDER_BID_COMPARE_FACTOR.toString();
     private boolean builderSetUserAgentHeader = DEFAULT_BUILDER_SET_USER_AGENT_HEADER;
     private boolean useShouldOverrideBuilderFlag = DEFAULT_USE_SHOULD_OVERRIDE_BUILDER_FLAG;
@@ -217,7 +207,6 @@ public class ExecutionLayerConfiguration {
           builderCircuitBreakerWindow,
           builderCircuitBreakerAllowedFaults,
           builderCircuitBreakerAllowedConsecutiveFaults,
-          builderCircuitBreakerBanUrlEpochs,
           builderBidCompareFactor,
           builderSetUserAgentHeader,
           useShouldOverrideBuilderFlag,
@@ -265,11 +254,6 @@ public class ExecutionLayerConfiguration {
         final int builderCircuitBreakerAllowedConsecutiveFaults) {
       this.builderCircuitBreakerAllowedConsecutiveFaults =
           builderCircuitBreakerAllowedConsecutiveFaults;
-      return this;
-    }
-
-    public Builder builderCircuitBreakerBanUrlEpochs(final int builderCircuitBreakerBanUrlEpochs) {
-      this.builderCircuitBreakerBanUrlEpochs = builderCircuitBreakerBanUrlEpochs;
       return this;
     }
 
@@ -321,10 +305,6 @@ public class ExecutionLayerConfiguration {
         throw new InvalidConfigurationException(
             "Builder Circuit Breaker window cannot exceed "
                 + BUILDER_CIRCUIT_BREAKER_WINDOW_HARD_CAP);
-      }
-      if (builderCircuitBreakerBanUrlEpochs < 0) {
-        throw new InvalidConfigurationException(
-            "Builder Circuit Breaker epochs for banning a builder URL must not be negative");
       }
     }
 

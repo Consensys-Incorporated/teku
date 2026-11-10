@@ -18,7 +18,6 @@ import static tech.pegasys.teku.services.executionlayer.ExecutionLayerConfigurat
 import static tech.pegasys.teku.services.executionlayer.ExecutionLayerConfiguration.DEFAULT_BUILDER_BID_COMPARE_FACTOR;
 import static tech.pegasys.teku.services.executionlayer.ExecutionLayerConfiguration.DEFAULT_BUILDER_CIRCUIT_BREAKER_ALLOWED_CONSECUTIVE_FAULTS;
 import static tech.pegasys.teku.services.executionlayer.ExecutionLayerConfiguration.DEFAULT_BUILDER_CIRCUIT_BREAKER_ALLOWED_FAULTS;
-import static tech.pegasys.teku.services.executionlayer.ExecutionLayerConfiguration.DEFAULT_BUILDER_CIRCUIT_BREAKER_BAN_URL_EPOCHS;
 import static tech.pegasys.teku.services.executionlayer.ExecutionLayerConfiguration.DEFAULT_BUILDER_CIRCUIT_BREAKER_ENABLED;
 import static tech.pegasys.teku.services.executionlayer.ExecutionLayerConfiguration.DEFAULT_BUILDER_CIRCUIT_BREAKER_WINDOW;
 import static tech.pegasys.teku.services.executionlayer.ExecutionLayerConfiguration.DEFAULT_BUILDER_SET_USER_AGENT_HEADER;
@@ -100,16 +99,6 @@ public class ExecutionLayerOptions {
       DEFAULT_BUILDER_CIRCUIT_BREAKER_ALLOWED_CONSECUTIVE_FAULTS;
 
   @Option(
-      names = {"--Xbuilder-circuit-breaker-ban-url-epochs"},
-      paramLabel = "<INTEGER>",
-      description =
-          "Number of epochs a builder URL is not requested for after returning a bid from a builder banned by the Circuit Breaker. Set to 0 to keep requesting such URLs.",
-      arity = "1",
-      showDefaultValue = Visibility.ALWAYS,
-      hidden = true)
-  private int builderCircuitBreakerBanUrlEpochs = DEFAULT_BUILDER_CIRCUIT_BREAKER_BAN_URL_EPOCHS;
-
-  @Option(
       names = {"--builder-bid-compare-factor"},
       paramLabel = "<STRING>",
       showDefaultValue = Visibility.ALWAYS,
@@ -179,7 +168,6 @@ public class ExecutionLayerOptions {
                 .builderCircuitBreakerAllowedFaults(builderCircuitBreakerAllowedFaults)
                 .builderCircuitBreakerAllowedConsecutiveFaults(
                     builderCircuitBreakerAllowedConsecutiveFaults)
-                .builderCircuitBreakerBanUrlEpochs(builderCircuitBreakerBanUrlEpochs)
                 .builderBidCompareFactor(builderBidCompareFactor)
                 .builderSetUserAgentHeader(builderSetUserAgentHeader)
                 .useShouldOverrideBuilderFlag(useShouldOverrideBuilderFlag)

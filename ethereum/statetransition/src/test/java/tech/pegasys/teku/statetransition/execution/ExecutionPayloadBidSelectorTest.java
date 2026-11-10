@@ -17,8 +17,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.spec.executionlayer.BuilderBoostFactorEvaluator.BUILDER_BOOST_FACTOR_MAX_PROFIT;
 import static tech.pegasys.teku.spec.executionlayer.BuilderBoostFactorEvaluator.BUILDER_BOOST_FACTOR_PREFER_BUILDER;
@@ -188,13 +186,15 @@ public class ExecutionPayloadBidSelectorTest {
     final RemoteBid allowedBid =
         toRemoteBid(createBid(slot, parentRoot, parentBlockHash, UInt64.valueOf(100)));
     final RemoteBid disallowedBid =
-        toRemoteBid(createBid(slot, parentRoot, parentBlockHash, UInt64.valueOf(200)));
+        toBuilderApiBid(
+            createBid(slot, parentRoot, parentBlockHash, UInt64.valueOf(200)),
+            createBuilderEntry(UInt64.ZERO, BUILDER_BOOST_FACTOR_PREFER_BUILDER));
     when(circuitBreaker.isBuilderAllowed(allowedBid.builderIndex(), state)).thenReturn(true);
 
     assertThat(
             selector.selectBestRemoteBid(
-                Set.of(allowedBid, disallowedBid),
-                List.of(),
+                Set.of(allowedBid),
+                List.of(disallowedBid),
                 parentRoot,
                 parentBlockHash,
                 state,
@@ -289,29 +289,25 @@ public class ExecutionPayloadBidSelectorTest {
   }
 
   @Test
-  void selectBestRemoteBidAppliesCircuitBreakerToP2PBidsOnly() {
+  void selectBestRemoteBidFiltersBuilderNotAllowed() {
     final UInt64 slot = UInt64.valueOf(10);
     final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
     final Bytes32 parentBlockHash = dataStructureUtil.randomBytes32();
     final SignedExecutionPayloadBid p2pBid =
         createBid(slot, parentRoot, parentBlockHash, UInt64.valueOf(100));
-    final RemoteBid builderBid =
-        toBuilderApiBid(
-            createBid(slot, parentRoot, parentBlockHash, UInt64.valueOf(42)),
-            createBuilderEntry(UInt64.ZERO, BUILDER_BOOST_FACTOR_MAX_PROFIT));
+    final SignedExecutionPayloadBid builderBid =
+        createBid(slot, parentRoot, parentBlockHash, UInt64.valueOf(42));
     when(circuitBreaker.isBuilderAllowed(any(), any())).thenReturn(false);
 
-    // builder API bids have already been checked against the circuit breaker by the fetcher
     assertThat(
             selector.selectBestRemoteBid(
                 Set.of(toRemoteBid(p2pBid)),
-                List.of(builderBid),
+                List.of(toRemoteBid(builderBid)),
                 parentRoot,
                 parentBlockHash,
                 state,
                 BuilderConfig.NO_OP))
-        .contains(builderBid);
-    verify(circuitBreaker, never()).isBuilderAllowed(builderBid.builderIndex(), state);
+        .isEmpty();
   }
 
   @Test
