@@ -24,6 +24,7 @@ import picocli.CommandLine.Help.Visibility;
 import tech.pegasys.teku.cli.converter.PicoCliVersionProvider;
 import tech.pegasys.teku.cli.options.Eth2NetworkOptions;
 import tech.pegasys.teku.cli.options.ValidatorClientDataOptions;
+import tech.pegasys.teku.cli.options.ValidatorKeysOptions;
 import tech.pegasys.teku.cli.util.SlashingProtectionCommandUtils;
 import tech.pegasys.teku.data.SlashingProtectionRepairer;
 import tech.pegasys.teku.infrastructure.logging.SubCommandLogger;
@@ -45,7 +46,8 @@ import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
     descriptionHeading = "%nDescription:%n%n",
     optionListHeading = "%nOptions:%n",
     footerHeading = "%n",
-    footer = "Teku is licensed under the Apache License 2.0")
+    footer = "Teku is licensed under the Apache License 2.0",
+    modelTransformer = HideUnusedRepairOptions.class)
 public class RepairCommand implements Runnable {
   public static final SubCommandLogger SUB_COMMAND_LOG = new SubCommandLogger();
 
@@ -54,6 +56,9 @@ public class RepairCommand implements Runnable {
 
   @CommandLine.Mixin(name = "Network")
   private Eth2NetworkOptions eth2NetworkOptions;
+
+  @CommandLine.Mixin(name = "Validator Keys")
+  private ValidatorKeysOptions validatorKeysOptions;
 
   @CommandLine.Option(
       names = {"--check-only-enabled"},
@@ -69,7 +74,9 @@ public class RepairCommand implements Runnable {
       paramLabel = "<BOOLEAN>",
       showDefaultValue = Visibility.ALWAYS,
       fallbackValue = "true",
-      description = "All validator slashing protection records should be updated.",
+      description =
+          "All validator slashing protection records should be updated, and records created for"
+              + " validator keys that don't have one.",
       arity = "0..1")
   private boolean updateAllEnabled = false;
 
@@ -77,7 +84,7 @@ public class RepairCommand implements Runnable {
       names = {"--slot"},
       paramLabel = "<INTEGER>",
       description =
-          "Update slashing protection files to contain the specified slot as a minimum."
+          "Update slashing protection files to contain the specified slot as a minimum. "
               + "Should be a future slot, or after when the validators stopped performing duties.\n"
               + "NOTE: This can be calculated for most networks, and is generally not required.",
       arity = "1")
@@ -85,12 +92,20 @@ public class RepairCommand implements Runnable {
 
   private final WeakSubjectivityInitializer wsInitializer = new WeakSubjectivityInitializer();
 
+  // set when the records are read, for the confirmation prompt
+  private int recordsToCreate = 0;
+
   @Override
   public void run() {
     final Path slashProtectionPath =
         SlashingProtectionCommandUtils.getSlashingProtectionPath(dataOptions);
-    SlashingProtectionCommandUtils.verifySlashingProtectionPathExists(
-        SUB_COMMAND_LOG, slashProtectionPath);
+    final KnownValidatorKeys knownValidatorKeys =
+        KnownValidatorKeys.load(SUB_COMMAND_LOG, dataOptions, validatorKeysOptions);
+    if (!knownValidatorKeys.willCreateSlashingProtectionPath(
+        SUB_COMMAND_LOG, slashProtectionPath, updateAllEnabled, checkOnlyEnabled)) {
+      SlashingProtectionCommandUtils.verifySlashingProtectionPathExists(
+          SUB_COMMAND_LOG, slashProtectionPath);
+    }
     final Eth2NetworkConfiguration networkConfiguration =
         eth2NetworkOptions.getNetworkConfiguration();
     final Spec spec = networkConfiguration.getSpec();
@@ -103,7 +118,7 @@ public class RepairCommand implements Runnable {
     final UInt64 computedEpoch =
         spec.atSlot(computedSlot).miscHelpers().computeEpochAtSlot(computedSlot);
     final SlashingProtectionRepairer repairer =
-        SlashingProtectionRepairer.create(SUB_COMMAND_LOG, slashProtectionPath, updateAllEnabled);
+        createRepairer(slashProtectionPath, knownValidatorKeys);
 
     if (repairer.hasUpdates()) {
       if (!checkOnlyEnabled) {
@@ -159,6 +174,9 @@ public class RepairCommand implements Runnable {
     if (updateAllEnabled) {
       SUB_COMMAND_LOG.display("All valid slashing protection files will also be updated.");
     }
+    if (recordsToCreate > 0) {
+      SUB_COMMAND_LOG.display(SlashingProtectionRepairer.describeRecordsToCreate(recordsToCreate));
+    }
     SUB_COMMAND_LOG.display("block slot -> " + slot);
     SUB_COMMAND_LOG.display("attestation source/target -> " + epoch);
     SUB_COMMAND_LOG.display("Are you sure you wish to continue (yes/no)? ");
@@ -169,5 +187,17 @@ public class RepairCommand implements Runnable {
       SUB_COMMAND_LOG.display("Operation cancelled.");
       System.exit(1);
     }
+  }
+
+  private SlashingProtectionRepairer createRepairer(
+      final Path slashProtectionPath, final KnownValidatorKeys knownValidatorKeys) {
+    final SlashingProtectionRepairer repairer =
+        SlashingProtectionRepairer.create(
+            SUB_COMMAND_LOG,
+            slashProtectionPath,
+            updateAllEnabled,
+            knownValidatorKeys.publicKeys());
+    recordsToCreate = repairer.getRecordsToCreateCount();
+    return repairer;
   }
 }
