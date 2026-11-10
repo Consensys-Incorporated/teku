@@ -13,9 +13,11 @@
 
 package tech.pegasys.teku.statetransition;
 
+import java.util.function.Consumer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
+import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blocks.MinimalBeaconBlockSummary;
@@ -31,12 +33,17 @@ public class EpochCachePrimer {
   private final Spec spec;
   private final RecentChainData recentChainData;
   private final AsyncRunner asyncRunner;
+  private final TimeProvider timeProvider;
 
   public EpochCachePrimer(
-      final Spec spec, final RecentChainData recentChainData, final AsyncRunner asyncRunner) {
+      final Spec spec,
+      final RecentChainData recentChainData,
+      final AsyncRunner asyncRunner,
+      final TimeProvider timeProvider) {
     this.spec = spec;
     this.recentChainData = recentChainData;
     this.asyncRunner = asyncRunner;
+    this.timeProvider = timeProvider;
   }
 
   public void primeCacheForEpoch(final UInt64 epoch) {
@@ -57,11 +64,26 @@ public class EpochCachePrimer {
 
   private void primeCacheForBlockAtSlot(
       final MinimalBeaconBlockSummary headBlock, final UInt64 firstSlotOfEpoch) {
+    final Consumer<BeaconState> primer =
+        LOG.isDebugEnabled() ? timedPrimer(firstSlotOfEpoch) : this::primeEpochStateCaches;
     recentChainData
         .retrieveBlockState(new SlotAndBlockRoot(firstSlotOfEpoch, headBlock.getRoot()))
         .finish(
-            maybeState -> maybeState.ifPresent(this::primeEpochStateCaches),
+            maybeState -> maybeState.ifPresent(primer),
             error -> LOG.warn("Failed to precompute epoch transition", error));
+  }
+
+  private Consumer<BeaconState> timedPrimer(final UInt64 firstSlotOfEpoch) {
+    final UInt64 startTime = timeProvider.getTimeInMillis();
+    return state -> {
+      final UInt64 stateReadyTime = timeProvider.getTimeInMillis();
+      primeEpochStateCaches(state);
+      LOG.debug(
+          "Precomputed epoch {}: state transition {} ms, cache priming {} ms",
+          spec.computeEpochAtSlot(firstSlotOfEpoch),
+          stateReadyTime.minusMinZero(startTime),
+          timeProvider.getTimeInMillis().minusMinZero(stateReadyTime));
+    };
   }
 
   private boolean isWithinOneEpochOfHeadBlock(
