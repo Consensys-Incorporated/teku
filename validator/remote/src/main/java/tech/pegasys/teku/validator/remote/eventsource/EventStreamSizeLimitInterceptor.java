@@ -1,0 +1,129 @@
+/*
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ */
+
+package tech.pegasys.teku.validator.remote.eventsource;
+
+import java.io.IOException;
+import okhttp3.Interceptor;
+import okhttp3.MediaType;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
+import okio.Buffer;
+import okio.BufferedSource;
+import okio.ForwardingSource;
+import okio.Okio;
+
+/** Bounds each SSE frame before okhttp-eventsource can buffer its field values. */
+public class EventStreamSizeLimitInterceptor implements Interceptor {
+
+  static final int BYTES_PER_MEGABYTE = 1_000_000;
+  // Cap temporary read-ahead to 8 KiB; maxFrameBytes below is the separate per-event limit.
+  private static final int READ_CHUNK_SIZE = 8192;
+
+  private final int maxEventSizeMegabytes;
+
+  public EventStreamSizeLimitInterceptor(final int maxEventSizeMegabytes) {
+    this.maxEventSizeMegabytes = maxEventSizeMegabytes;
+  }
+
+  @Override
+  public Response intercept(final Chain chain) throws IOException {
+    final Response response = chain.proceed(chain.request());
+    final ResponseBody body = response.body();
+    if (body == null) {
+      return response;
+    }
+
+    final BufferedSource limitedSource =
+        Okio.buffer(
+            new ForwardingSource(body.source()) {
+              private final long maxFrameBytes = (long) maxEventSizeMegabytes * BYTES_PER_MEGABYTE;
+              private long frameBytes;
+              private boolean lineHasContent;
+              private boolean afterCarriageReturn;
+              private boolean blankLineAtCarriageReturn;
+
+              @Override
+              public long read(final Buffer sink, final long byteCount) throws IOException {
+                if (byteCount == 0) {
+                  return 0;
+                }
+                final Buffer chunk = new Buffer();
+                final long bytesRead = super.read(chunk, Math.min(byteCount, READ_CHUNK_SIZE));
+                for (long i = 0; i < bytesRead; i++) {
+                  final byte value = chunk.getByte(i);
+                  frameBytes++;
+                  if (frameBytes > maxFrameBytes) {
+                    throw new EventStreamSizeLimitException(maxEventSizeMegabytes);
+                  }
+                  if (afterCarriageReturn && value == '\n') {
+                    if (blankLineAtCarriageReturn) {
+                      frameBytes = 0;
+                    }
+                    afterCarriageReturn = false;
+                    continue;
+                  }
+                  afterCarriageReturn = false;
+                  if (value == '\r' || value == '\n') {
+                    final boolean blankLine = !lineHasContent;
+                    if (blankLine) {
+                      frameBytes = 0;
+                    }
+                    lineHasContent = false;
+                    afterCarriageReturn = value == '\r';
+                    blankLineAtCarriageReturn = afterCarriageReturn && blankLine;
+                  } else {
+                    lineHasContent = true;
+                  }
+                }
+                if (bytesRead > 0) {
+                  sink.write(chunk, bytesRead);
+                }
+                return bytesRead;
+              }
+            });
+    return response
+        .newBuilder()
+        .body(
+            new ResponseBody() {
+              @Override
+              public MediaType contentType() {
+                return body.contentType();
+              }
+
+              @Override
+              public long contentLength() {
+                return body.contentLength();
+              }
+
+              @Override
+              public BufferedSource source() {
+                return limitedSource;
+              }
+            })
+        .build();
+  }
+}
+
+class EventStreamSizeLimitException extends IOException {
+  private final int maxEventSizeMegabytes;
+
+  EventStreamSizeLimitException(final int maxEventSizeMegabytes) {
+    super("Beacon node event stream event exceeded " + maxEventSizeMegabytes + " MB");
+    this.maxEventSizeMegabytes = maxEventSizeMegabytes;
+  }
+
+  int getMaxEventSizeMegabytes() {
+    return maxEventSizeMegabytes;
+  }
+}

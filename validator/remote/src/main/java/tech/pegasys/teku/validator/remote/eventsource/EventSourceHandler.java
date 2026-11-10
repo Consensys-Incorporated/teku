@@ -225,13 +225,22 @@ class EventSourceHandler implements BackgroundEventHandler {
 
   @Override
   public void onError(final Throwable t) {
+    final Throwable cause = Throwables.getRootCause(t);
     if (connected) {
       connected = false;
-      warnIfNoHeadEventsWereReceived();
+      if (!(cause instanceof EventStreamSizeLimitException)) {
+        warnIfNoHeadEventsWereReceived();
+      }
     }
-    if (Throwables.getRootCause(t) instanceof SocketTimeoutException) {
+    if (cause instanceof SocketTimeoutException) {
       timeoutCounter.inc();
       LOG.info("Timed out waiting for events from beacon node event stream. Reconnecting.");
+    } else if (cause instanceof EventStreamSizeLimitException sizeLimitException) {
+      errorCounter.inc();
+      LOG.warn(
+          "Beacon node event stream from {} exceeded the {} MB per-event limit. Reconnecting.",
+          beaconNodeEndpoint,
+          sizeLimitException.getMaxEventSizeMegabytes());
     } else {
       errorCounter.inc();
       validatorLogger.beaconNodeEventStreamConnectionError();

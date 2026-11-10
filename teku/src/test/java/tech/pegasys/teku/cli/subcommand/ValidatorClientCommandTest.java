@@ -204,6 +204,77 @@ public class ValidatorClientCommandTest extends AbstractBeaconNodeCommandTest {
   }
 
   @Test
+  void eventStreamLimitDefaultsToEightMegabytes() {
+    final TekuConfiguration config =
+        getTekuConfigurationFromArguments(
+            "vc", "--network", "minimal", "--validator-keys=keys:pass");
+
+    assertThat(config.validatorClient().getValidatorConfig().getEventStreamMaxEventSizeMegabytes())
+        .isEqualTo(8);
+  }
+
+  @Test
+  void eventStreamLimitCanBeSetAlongsideSentryConfig() {
+    final TekuConfiguration config =
+        getTekuConfigurationFromArguments(
+            "vc",
+            "--network",
+            "minimal",
+            "--validator-keys=keys:pass",
+            "--sentry-config-file",
+            pathFor("sentry_node_config.json"),
+            "--Xvalidator-client-event-stream-max-event-size-megabytes=16");
+
+    assertThat(config.validatorClient().getValidatorConfig().getEventStreamMaxEventSizeMegabytes())
+        .isEqualTo(16);
+  }
+
+  @Test
+  void eventStreamLimitCanBeDisabled() {
+    final TekuConfiguration config =
+        getTekuConfigurationFromArguments(
+            "vc",
+            "--network",
+            "minimal",
+            "--validator-keys=keys:pass",
+            "--Xvalidator-client-event-stream-max-event-size-megabytes=0");
+
+    assertThat(config.validatorClient().getValidatorConfig().getEventStreamMaxEventSizeMegabytes())
+        .isZero();
+  }
+
+  @Test
+  void eventStreamLimitRejectsNegativeValues() {
+    final int parseResult =
+        beaconNodeCommand.parse(
+            new String[] {
+              "vc",
+              "--network",
+              "minimal",
+              "--validator-keys=keys:pass",
+              "--Xvalidator-client-event-stream-max-event-size-megabytes=-1"
+            });
+
+    assertThat(parseResult).isEqualTo(2);
+    assertThat(getCommandLineOutput())
+        .contains("--Xvalidator-client-event-stream-max-event-size-megabytes must be non-negative");
+  }
+
+  @Test
+  void eventStreamLimitAcceptsOverridesAboveThePreviousCeiling() {
+    final TekuConfiguration config =
+        getTekuConfigurationFromArguments(
+            "vc",
+            "--network",
+            "minimal",
+            "--validator-keys=keys:pass",
+            "--Xvalidator-client-event-stream-max-event-size-megabytes=257");
+
+    assertThat(config.validatorClient().getValidatorConfig().getEventStreamMaxEventSizeMegabytes())
+        .isEqualTo(257);
+  }
+
+  @Test
   public void clientExecutorThreadsShouldBeSetValue() {
 
     final String[] args = {

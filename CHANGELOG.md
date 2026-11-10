@@ -20,6 +20,7 @@
  - Added the `GET /eth/v1/beacon/proposer_preferences` Gloas Beacon API endpoint, which returns the signed proposer preferences known by the node, optionally filtered by `slot` and `dependent_root`. [#11548](https://github.com/Consensys-Incorporated/teku/pull/11548)
 
 ### Bug Fixes
+ - Limited validator client beacon node event stream frames to 8 MB by default to prevent oversized or unterminated events from exhausting the heap. The hidden `--Xvalidator-client-event-stream-max-event-size-megabytes` option adjusts the limit or disables it when set to 0. [#11600](https://github.com/Consensys-Incorporated/teku/issues/11600)
  - MEV-Boost bids exceeding the slot's blob commitment limit now trigger fallback to the local execution payload instead of failing block production. [#11614](https://github.com/Consensys-Incorporated/teku/pull/11614)
  - With doppelganger detection enabled, Teku no longer starts validator duties after a 15-minute beacon-node outage without checking for doppelgangers. Detection remains pending and retries until the beacon node provides the required data. [#11598](https://github.com/Consensys-Incorporated/teku/issues/11598)
  - Docker images no longer trust the emSign ECC Root CA - G3, emSign Root CA - G1, emSign Root CA - G2 or AAA Certificate Services roots, which OpenJDK removed after the eMudhra intermediate certificate authorities were compromised in October 2026. The Eclipse Temurin base images do not include this fix yet.
