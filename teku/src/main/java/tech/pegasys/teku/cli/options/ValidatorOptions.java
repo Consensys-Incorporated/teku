@@ -162,6 +162,17 @@ public class ValidatorOptions {
   private OptionalInt beaconApiReadinessExecutorThreads = OptionalInt.empty();
 
   @Option(
+      names = {"--Xvalidator-client-beacon-api-max-response-size"},
+      paramLabel = "<MEGABYTES>",
+      showDefaultValue = Visibility.ALWAYS,
+      hidden = true,
+      description =
+          "Maximum size in MB of a Beacon Node REST API response received by the validator client (excluding event streams)",
+      arity = "1")
+  private int beaconApiMaxResponseSizeMegabytes =
+      ValidatorConfig.DEFAULT_BEACON_API_MAX_RESPONSE_SIZE_MB;
+
+  @Option(
       names = {"--exit-when-no-validator-keys-enabled"},
       paramLabel = "<BOOLEAN>",
       description = "Enable terminating the process if no validator keys are found during startup",
@@ -212,7 +223,8 @@ public class ValidatorOptions {
                 .shutdownWhenValidatorSlashedEnabled(shutdownWhenValidatorSlashed)
                 .executorMaxQueueSize(executorMaxQueueSize)
                 .beaconApiExecutorThreads(beaconApiExecutorThreads)
-                .beaconApiReadinessExecutorThreads(beaconApiReadinessExecutorThreads));
+                .beaconApiReadinessExecutorThreads(beaconApiReadinessExecutorThreads)
+                .beaconApiMaxResponseSizeMegabytes(beaconApiMaxResponseSizeMegabytes));
     validatorProposerOptions.configure(builder);
     validatorKeysOptions.configure(builder);
     builderOptions.configure(builder);

@@ -73,7 +73,8 @@ public class SentryBeaconNodeApi implements BeaconNodeApi {
     final BeaconNodesSentryConfig beaconNodesSentryConfig =
         sentryNodesConfig.getBeaconNodesSentryConfig();
     final OkHttpClient sentryNodesHttpClient =
-        beaconNodesSentryConfig.createOkHttpClientForSentryNodes();
+        beaconNodesSentryConfig.createOkHttpClientForSentryNodes(
+            validatorConfig.getBeaconApiMaxResponseSizeMegabytes());
 
     final BeaconNodeRoleConfig dutiesProviderNodeConfig =
         beaconNodesSentryConfig.getDutiesProviderNodeConfig();

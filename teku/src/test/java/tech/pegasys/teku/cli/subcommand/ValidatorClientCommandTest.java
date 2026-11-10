@@ -40,6 +40,18 @@ public class ValidatorClientCommandTest extends AbstractBeaconNodeCommandTest {
   }
 
   @Test
+  void canSetBeaconApiMaxResponseSizeOnVcCommand() {
+    final TekuConfiguration config =
+        getTekuConfigurationFromArguments(
+            "vc",
+            "--network=minimal",
+            "--validator-keys=keys:pass",
+            "--Xvalidator-client-beacon-api-max-response-size=128");
+    assertThat(config.validatorClient().getValidatorConfig().getBeaconApiMaxResponseSizeMegabytes())
+        .isEqualTo(128);
+  }
+
+  @Test
   public void networkOption_ShouldFail_IfSpecifiedOnParentCommand() {
     final String[] argsNetworkOptOnParent =
         new String[] {"--network", "auto", "vc", "--validator-keys=keys:pass"};
