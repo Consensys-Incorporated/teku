@@ -16,7 +16,10 @@ package tech.pegasys.teku.storage.store;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Arrays;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -25,6 +28,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 
@@ -44,6 +49,17 @@ public class FileKeyValueStoreTest {
     store.remove("aaa");
     Optional<Bytes> v2 = store.get("aaa");
     assertThat(v2).isEmpty();
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void entriesShouldBeReadableOnlyByOwner() throws IOException {
+    final FileKeyValueStore store = new FileKeyValueStore(kvDir);
+
+    store.put("generated-node-key", Bytes.fromHexString("0x112233"));
+
+    assertThat(Files.getPosixFilePermissions(kvDir.resolve("generated-node-key.dat")))
+        .isEqualTo(PosixFilePermissions.fromString("rw-------"));
   }
 
   @Test

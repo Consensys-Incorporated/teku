@@ -36,12 +36,30 @@ public class SyncDataAccessor {
 
   private static final Logger LOG = LogManager.getLogger();
   private final boolean atomicFileMoveSupport;
+  private final boolean ownerOnly;
 
   SyncDataAccessor(final boolean atomicFileMoveSupport) {
+    this(atomicFileMoveSupport, false);
+  }
+
+  SyncDataAccessor(final boolean atomicFileMoveSupport, final boolean ownerOnly) {
     this.atomicFileMoveSupport = atomicFileMoveSupport;
+    this.ownerOnly = ownerOnly;
   }
 
   public static SyncDataAccessor create(final Path path) {
+    return create(path, false);
+  }
+
+  /**
+   * Creates an accessor whose written files are readable and writable only by their owner. Use it
+   * for files holding secrets, see {@link SecretFiles}.
+   */
+  public static SyncDataAccessor createOwnerOnly(final Path path) {
+    return create(path, true);
+  }
+
+  private static SyncDataAccessor create(final Path path, final boolean ownerOnly) {
 
     boolean atomicFileMoveSupport;
     final Path tmpFile;
@@ -58,7 +76,7 @@ public class SyncDataAccessor {
     }
 
     try {
-      atomicSyncedWrite(tmpFile, Bytes32.ZERO);
+      atomicSyncedWrite(tmpFile, Bytes32.ZERO, false);
 
       atomicFileMoveSupport = true;
     } catch (AtomicMoveNotSupportedException e) {
@@ -74,7 +92,7 @@ public class SyncDataAccessor {
         LOG.debug("Failed to delete the temporary file ", e);
       }
     }
-    return new SyncDataAccessor(atomicFileMoveSupport);
+    return new SyncDataAccessor(atomicFileMoveSupport, ownerOnly);
   }
 
   /**
@@ -97,7 +115,8 @@ public class SyncDataAccessor {
    * Writes data to the specified path, ensuring both the file content and metadata is immediately
    * flushed to hardware storage. If the filesystem support atomic operation it creates a temporary
    * file before writing the actual file. If the file exists it is overwritten, otherwise it is
-   * created.
+   * created. If this accessor was created with {@link #createOwnerOnly(Path)} the file is
+   * restricted to its owner before any data is written.
    *
    * @param path the path to write to
    * @param data the data to write
@@ -105,13 +124,17 @@ public class SyncDataAccessor {
    */
   public void syncedWrite(final Path path, final Bytes data) throws IOException {
     if (atomicFileMoveSupport) {
-      atomicSyncedWrite(path, data);
+      atomicSyncedWrite(path, data, ownerOnly);
     } else {
-      nonAtomicSyncedWrite(path, data);
+      nonAtomicSyncedWrite(path, data, ownerOnly);
     }
   }
 
-  private static void nonAtomicSyncedWrite(final Path path, final Bytes data) throws IOException {
+  private static void nonAtomicSyncedWrite(
+      final Path path, final Bytes data, final boolean ownerOnly) throws IOException {
+    if (ownerOnly) {
+      SecretFiles.restrictToOwner(path);
+    }
     Files.write(
         path,
         data.toArrayUnsafe(),
@@ -120,10 +143,12 @@ public class SyncDataAccessor {
         StandardOpenOption.TRUNCATE_EXISTING);
   }
 
-  private static void atomicSyncedWrite(final Path path, final Bytes data) throws IOException {
+  private static void atomicSyncedWrite(final Path path, final Bytes data, final boolean ownerOnly)
+      throws IOException {
     final Path absolutePath = path.toAbsolutePath();
     final Path tmpFile = Paths.get(path + ".tmp");
-    nonAtomicSyncedWrite(tmpFile, data);
+    // The move keeps the temporary file's permissions
+    nonAtomicSyncedWrite(tmpFile, data, ownerOnly);
     Files.move(
         tmpFile, absolutePath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
   }
