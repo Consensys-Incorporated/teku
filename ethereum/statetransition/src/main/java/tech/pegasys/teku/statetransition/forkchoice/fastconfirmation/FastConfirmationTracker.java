@@ -151,8 +151,9 @@ public class FastConfirmationTracker {
       new AtomicReference<>(Optional.empty());
 
   /**
-   * Whether the node is in sync: {@code get_restart_resilient_confirmed_root} MUST only be called
-   * once the node is fully synced.
+   * Whether the node is in sync. Per-slot updates are skipped until it is, as {@code
+   * get_restart_resilient_confirmed_root} MUST only be called once the node is fully synced (see
+   * {@link #processFastConfirmationInput}).
    */
   private final AtomicBoolean inSync = new AtomicBoolean(false);
 
@@ -337,7 +338,7 @@ public class FastConfirmationTracker {
 
   /**
    * Runs the {@code on_fast_confirmation} handler for the given slot head immediately, bypassing
-   * both the async runner and the once-per-slot guard that {@link #onSlot} applies.
+   * the async runner and the in-sync and once-per-slot guards that {@link #onSlot} applies.
    *
    * <p>Only for the fork choice reference test runner, which must reproduce the call sequence the
    * vectors were generated with: the spec test harness invokes {@code on_fast_confirmation}
@@ -358,6 +359,16 @@ public class FastConfirmationTracker {
     final FastConfirmationStore currentStore = fastConfirmationStore.get();
     if (currentStore == null) {
       LOG.debug("Skipping fast confirmation update because store is not initialized");
+      return SafeFuture.COMPLETE;
+    }
+
+    // Skip the whole update until the node is in sync, as for a stale head (see
+    // runFastConfirmation): get_restart_resilient_confirmed_root MUST only be called once the node
+    // is fully synced, and until then the rule could only follow a lagging head. Nothing is
+    // reported, logged or persisted meanwhile, so a restart does not report the seeded finalized
+    // root while it catches up.
+    if (!inSync.get()) {
+      LOG.debug("Skipping fast confirmation update for slot {}: not in sync", input.slot());
       return SafeFuture.COMPLETE;
     }
 
@@ -547,11 +558,11 @@ public class FastConfirmationTracker {
   }
 
   /**
-   * Returns the confirmed root to report for this update: while the node is in sync, {@code
+   * Returns the confirmed root to report for this update: {@code
    * get_restart_resilient_confirmed_root(fcr_store)} once {@code on_fast_confirmation} has produced
-   * {@code confirmedRoot} ({@code fcr_store.confirmed_root}); otherwise {@code confirmedRoot}
-   * itself. {@code fcr_store.confirmed_root} is left as the rule computed it (see {@link
-   * #restartResilientConfirmedRoot}).
+   * {@code confirmedRoot} ({@code fcr_store.confirmed_root}). Only reached while the node is in
+   * sync (see {@link #processFastConfirmationInput}). {@code fcr_store.confirmed_root} is left as
+   * the rule computed it (see {@link #restartResilientConfirmedRoot}).
    *
    * <p>Evaluated on every update, as the spec does. A restored root is therefore reported until the
    * rule's own {@code confirmed_root} reaches its slot, it leaves the canonical chain, or it is old
@@ -563,9 +574,6 @@ public class FastConfirmationTracker {
       final FastConfirmationInput input,
       final ReadOnlyForkChoiceStrategy forkChoiceStrategy,
       final Bytes32 confirmedRoot) {
-    if (!inSync.get()) {
-      return confirmedRoot;
-    }
     return rootConfirmedBeforeRestart
         .get()
         .map(

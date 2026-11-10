@@ -2543,8 +2543,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
     syncService.subscribeToSyncStateChangesAndUpdate(
         syncState -> forkChoiceNotifier.onSyncingStatusChanged(syncState.isInSync()));
 
-    // fastConfirmationTracker subscription, the confirmed root from before a restart is only
-    // restored once in sync
+    // fastConfirmationTracker subscription, fast confirmation only runs once in sync
     syncService.subscribeToSyncStateChangesAndUpdate(
         syncState -> fastConfirmationTracker.onSyncingStatusChanged(syncState.isInSync()));
 

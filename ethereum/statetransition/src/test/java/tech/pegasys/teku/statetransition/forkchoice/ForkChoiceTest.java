@@ -312,14 +312,15 @@ class ForkChoiceTest {
   @Test
   void prepareForBlockProduction_shouldRunFastConfirmationForProposalSlotWhenEnabled() {
     final StubAsyncRunner fastConfirmationAsyncRunner = new StubAsyncRunner();
-    recreateForkChoice(
+    final FastConfirmationTracker fastConfirmationTracker =
         FastConfirmationTracker.create(
             spec,
             Optional.of(fastConfirmationAsyncRunner),
             FastConfirmationEventChannel.NOOP,
             metricsSystem,
-            StubTimeProvider.withTimeInMillis(0)),
-        LateBlockReorgPreparationHandler.NOOP);
+            StubTimeProvider.withTimeInMillis(0));
+    fastConfirmationTracker.onSyncingStatusChanged(true);
+    recreateForkChoice(fastConfirmationTracker, LateBlockReorgPreparationHandler.NOOP);
     // Move within tolerance of slot 1 so prepareForBlockProduction advances the store into it (as
     // when proposing), stealing the slot boundary from ForkChoice.onTick.
     storageSystem

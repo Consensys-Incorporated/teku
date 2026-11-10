@@ -15,6 +15,7 @@ package tech.pegasys.teku.statetransition.forkchoice.fastconfirmation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -126,6 +127,7 @@ class FastConfirmationTrackerTest {
         FastConfirmationTracker.create(
             spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
     tracker.initialize(store);
+    tracker.onSyncingStatusChanged(true);
     final Bytes32 headRoot = Bytes32.random();
 
     // Slot 13 is a mid-epoch slot (minimal SLOTS_PER_EPOCH == 8), so only the slot heads rotate.
@@ -151,6 +153,7 @@ class FastConfirmationTrackerTest {
         FastConfirmationTracker.create(
             spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
     tracker.initialize(store);
+    tracker.onSyncingStatusChanged(true);
     final Bytes32 headRoot = Bytes32.random();
 
     // The head block slot is stubbed at 12 (epoch 1, minimal SLOTS_PER_EPOCH == 8). Slot 24 is
@@ -181,6 +184,7 @@ class FastConfirmationTrackerTest {
         FastConfirmationTracker.create(
             spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
     tracker.initialize(store);
+    tracker.onSyncingStatusChanged(true);
 
     // Head block slot 12 (epoch 1); slot 17 is epoch 2 — one epoch behind, which is tolerated, so
     // the full rule runs and the source states are loaded (here empty, so it falls back).
@@ -198,6 +202,7 @@ class FastConfirmationTrackerTest {
         FastConfirmationTracker.create(
             spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
     tracker.initialize(store);
+    tracker.onSyncingStatusChanged(true);
 
     applyUpdate(tracker, asyncRunner, UInt64.valueOf(13), Bytes32.random());
 
@@ -221,6 +226,7 @@ class FastConfirmationTrackerTest {
         FastConfirmationTracker.create(
             spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
     tracker.initialize(store);
+    tracker.onSyncingStatusChanged(true);
 
     applyUpdate(tracker, asyncRunner, UInt64.valueOf(13), Bytes32.random());
 
@@ -238,6 +244,7 @@ class FastConfirmationTrackerTest {
         FastConfirmationTracker.create(
             spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
     tracker.initialize(store);
+    tracker.onSyncingStatusChanged(true);
     // A confirmation beyond finality ends the warm-up, so the next pin to finality is a real
     // fallback.
     tracker.recordConfirmationOutcome(
@@ -295,6 +302,7 @@ class FastConfirmationTrackerTest {
         FastConfirmationTracker.create(
             spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
     tracker.initialize(store);
+    tracker.onSyncingStatusChanged(true);
 
     // Slot 15 is the last slot of epoch 1 (minimal SLOTS_PER_EPOCH == 8): the checkpoint that
     // rotates into the next epoch's current balance source is prefetched.
@@ -320,6 +328,7 @@ class FastConfirmationTrackerTest {
         FastConfirmationTracker.create(
             spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
     tracker.initialize(store);
+    tracker.onSyncingStatusChanged(true);
 
     // Slot 15 is the last slot of epoch 1 (minimal SLOTS_PER_EPOCH == 8), so the prefetch fires.
     // Its retrieval never resolves, so the bound is scheduled and nothing else is left queued.
@@ -346,6 +355,7 @@ class FastConfirmationTrackerTest {
         FastConfirmationTracker.create(
             spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
     tracker.initialize(store);
+    tracker.onSyncingStatusChanged(true);
     final Bytes32 headRoot = Bytes32.random();
     // The pulled-up-head-state load hangs (the head lags the current epoch, so it is fetched as
     // the (current epoch, head) checkpoint state); the balance-source loads resolve immediately
@@ -383,6 +393,7 @@ class FastConfirmationTrackerTest {
         FastConfirmationTracker.create(
             spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
     tracker.initialize(store);
+    tracker.onSyncingStatusChanged(true);
     final Bytes32 headRoot = Bytes32.random();
     // The pulled-up-head-state load fails (the head lags the current epoch, so it is fetched as
     // the (current epoch, head) checkpoint state), which takes the same abandon branch as a load
@@ -417,6 +428,7 @@ class FastConfirmationTrackerTest {
         FastConfirmationTracker.create(
             spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
     tracker.initialize(store);
+    tracker.onSyncingStatusChanged(true);
 
     final Bytes32 headA = Bytes32.random();
     final Bytes32 headB = Bytes32.random();
@@ -622,6 +634,7 @@ class FastConfirmationTrackerTest {
         FastConfirmationTracker.create(
             spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
     tracker.initialize(store);
+    tracker.onSyncingStatusChanged(true);
     confirmBeyondFinality(tracker);
 
     // Slot 13 opens the fallback episode (source states unavailable).
@@ -649,6 +662,7 @@ class FastConfirmationTrackerTest {
         FastConfirmationTracker.create(
             spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
     tracker.initialize(store);
+    tracker.onSyncingStatusChanged(true);
 
     try (final LogCaptor logCaptor = LogCaptor.forClass(FastConfirmationTracker.class)) {
       applyUpdate(tracker, asyncRunner, UInt64.valueOf(13), Bytes32.random());
@@ -670,6 +684,7 @@ class FastConfirmationTrackerTest {
         FastConfirmationTracker.create(
             spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
     tracker.initialize(store);
+    tracker.onSyncingStatusChanged(true);
 
     try (final LogCaptor logCaptor = LogCaptor.forClass(FastConfirmationTracker.class)) {
       applyUpdate(tracker, asyncRunner, UInt64.valueOf(13), Bytes32.random());
@@ -701,6 +716,7 @@ class FastConfirmationTrackerTest {
         FastConfirmationTracker.create(
             spec, Optional.of(asyncRunner), eventChannel, metricsSystem, timeProvider);
     tracker.initialize(store);
+    tracker.onSyncingStatusChanged(true);
     tracker.recordConfirmationOutcome(
         tracker.getFastConfirmationStore().orElseThrow(),
         Bytes32.random(),
@@ -893,29 +909,64 @@ class FastConfirmationTrackerTest {
   }
 
   @Test
-  void shouldRestoreRootConfirmedBeforeRestartOnlyWhileInSync() {
+  void shouldSkipUpdateEntirelyUntilInSync() {
     final StubAsyncRunner asyncRunner = new StubAsyncRunner();
     final Bytes32 rootBeforeRestart = knownRoot(UInt64.valueOf(13));
     final Bytes32 headRoot = knownRoot(UInt64.valueOf(14));
     onSameChain(rootBeforeRestart, headRoot);
     final FastConfirmationTracker tracker =
         createTrackerAfterRestart(asyncRunner, Optional.of(rootBeforeRestart));
-    final Bytes32 finalizedRoot = finalizedCheckpoint.getRoot();
 
+    // Not in sync yet: nothing rotates, no source states are loaded, and nothing is logged or
+    // reported, so the seeded finalized root never reaches the event stream or the persisted root
+    try (final LogCaptor logCaptor = LogCaptor.forClass(FastConfirmationTracker.class)) {
+      applyUpdate(tracker, asyncRunner, UInt64.valueOf(14), headRoot);
+
+      assertThat(perSlotUpdateLogs(logCaptor)).isEmpty();
+    }
+    assertThat(currentSlotHead(tracker)).isEqualTo(finalizedCheckpoint.getRoot());
+    verify(store, never()).retrieveCheckpointState(any());
+    verify(store, never()).retrieveBlockState(any(Bytes32.class));
+    verify(eventChannel, never()).onFastConfirmation(any(), any(), any());
+
+    // The first in-sync update runs the rule and reports the restored root straight away
+    tracker.onSyncingStatusChanged(true);
+    applyUpdate(tracker, asyncRunner, UInt64.valueOf(15), headRoot);
+
+    assertThat(currentSlotHead(tracker)).isEqualTo(headRoot);
+    verify(eventChannel)
+        .onFastConfirmation(rootBeforeRestart, UInt64.valueOf(13), UInt64.valueOf(15));
+  }
+
+  @Test
+  void shouldKeepReportedRootWhileOutOfSync() {
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner();
+    final Bytes32 rootBeforeRestart = knownRoot(UInt64.valueOf(13));
+    final Bytes32 headRoot = knownRoot(UInt64.valueOf(14));
+    onSameChain(rootBeforeRestart, headRoot);
+    final FastConfirmationTracker tracker =
+        createTrackerAfterRestart(asyncRunner, Optional.of(rootBeforeRestart));
+    tracker.onSyncingStatusChanged(true);
     applyUpdate(tracker, asyncRunner, UInt64.valueOf(14), headRoot);
-    assertThat(reportedConfirmedRoot(tracker)).isEqualTo(finalizedRoot);
 
-    tracker.onSyncingStatusChanged(true);
-    applyUpdate(tracker, asyncRunner, UInt64.valueOf(17), headRoot);
-    assertThat(reportedConfirmedRoot(tracker)).isEqualTo(rootBeforeRestart);
-
+    // Falling out of sync pauses the rule: the last reported root is kept, nothing is emitted
     tracker.onSyncingStatusChanged(false);
-    applyUpdate(tracker, asyncRunner, UInt64.valueOf(18), headRoot);
-    assertThat(reportedConfirmedRoot(tracker)).isEqualTo(finalizedRoot);
+    final Bytes32 laterHeadRoot = knownRoot(UInt64.valueOf(15));
+    onSameChain(rootBeforeRestart, laterHeadRoot);
+    applyUpdate(tracker, asyncRunner, UInt64.valueOf(16), laterHeadRoot);
 
-    tracker.onSyncingStatusChanged(true);
-    applyUpdate(tracker, asyncRunner, UInt64.valueOf(19), headRoot);
     assertThat(reportedConfirmedRoot(tracker)).isEqualTo(rootBeforeRestart);
+    assertThat(currentSlotHead(tracker)).isEqualTo(headRoot);
+    verify(eventChannel, never()).onFastConfirmation(any(), any(), eq(UInt64.valueOf(16)));
+
+    // Back in sync, the rule resumes from the state it kept
+    tracker.onSyncingStatusChanged(true);
+    applyUpdate(tracker, asyncRunner, UInt64.valueOf(17), laterHeadRoot);
+
+    assertThat(previousSlotHead(tracker)).isEqualTo(headRoot);
+    assertThat(currentSlotHead(tracker)).isEqualTo(laterHeadRoot);
+    verify(eventChannel)
+        .onFastConfirmation(rootBeforeRestart, UInt64.valueOf(13), UInt64.valueOf(17));
   }
 
   @Test
