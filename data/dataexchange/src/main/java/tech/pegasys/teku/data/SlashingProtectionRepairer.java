@@ -178,6 +178,10 @@ public class SlashingProtectionRepairer {
         .toList();
   }
 
+  public boolean hasValidRecords() {
+    return !validRecords.isEmpty();
+  }
+
   public boolean hasRecordsWithGenesisValidatorsRoot() {
     return validRecords.values().stream()
         .anyMatch(record -> record.genesisValidatorsRoot().isPresent());

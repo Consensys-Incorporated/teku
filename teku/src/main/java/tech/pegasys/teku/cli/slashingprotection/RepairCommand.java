@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.Scanner;
+import java.util.function.BooleanSupplier;
 import org.apache.tuweni.bytes.Bytes32;
 import picocli.CommandLine;
 import picocli.CommandLine.Help.Visibility;
@@ -111,21 +112,93 @@ public class RepairCommand implements Runnable {
     final SlashingProtectionRepairer repairer =
         SlashingProtectionRepairer.create(SUB_COMMAND_LOG, slashProtectionPath, updateAllEnabled);
 
-    initialAnchor.ifPresentOrElse(
-        anchor -> verifyRecordsMatchNetwork(repairer, anchor.getState().getGenesisValidatorsRoot()),
-        () ->
-            SUB_COMMAND_LOG.display(
-                "NOTE: --slot was supplied, so existing records were not checked against the network."));
+    final Optional<String> networkMismatch =
+        initialAnchor.flatMap(
+            anchor ->
+                findNetworkMismatch(
+                    repairer, anchor.getState().getGenesisValidatorsRoot(), getNetworkName()));
+    if (initialAnchor.isEmpty()) {
+      SUB_COMMAND_LOG.display(
+          "NOTE: --slot was supplied, so existing records were not checked against the network.");
+    } else if (!repairer.hasValidRecords()) {
+      SUB_COMMAND_LOG.display("NOTE: there are no existing records to check against the network.");
+    } else if (!repairer.hasRecordsWithGenesisValidatorsRoot()) {
+      SUB_COMMAND_LOG.display(
+          "NOTE: no existing records contain a genesis validators root, so the network could not be verified.");
+    }
 
-    if (repairer.hasUpdates()) {
-      if (!checkOnlyEnabled) {
-        confirmOrExit(computedSlot, computedEpoch);
-        repairer.updateRecords(computedSlot, computedEpoch);
-      } else {
-        SUB_COMMAND_LOG.display("Updates have been skipped as --check-only-enabled was set.");
-      }
+    final RepairOutcome outcome =
+        repair(
+            repairer,
+            networkMismatch,
+            checkOnlyEnabled,
+            computedSlot,
+            computedEpoch,
+            () -> confirm(computedSlot, computedEpoch),
+            SUB_COMMAND_LOG);
+    if (outcome == RepairOutcome.NETWORK_MISMATCH || outcome == RepairOutcome.CANCELLED) {
+      System.exit(1);
     }
     SUB_COMMAND_LOG.display("done");
+  }
+
+  enum RepairOutcome {
+    NOTHING_TO_UPDATE,
+    NETWORK_MISMATCH,
+    CHECK_ONLY,
+    CANCELLED,
+    UPDATED
+  }
+
+  /**
+   * Decides what to do with the records and applies the updates.
+   *
+   * <p>Nothing is written unless records need updating, the network matches, check-only is off and
+   * the user confirms.
+   */
+  static RepairOutcome repair(
+      final SlashingProtectionRepairer repairer,
+      final Optional<String> networkMismatch,
+      final boolean checkOnly,
+      final UInt64 slot,
+      final UInt64 epoch,
+      final BooleanSupplier confirm,
+      final SubCommandLogger log) {
+    if (networkMismatch.isPresent()) {
+      log.error(networkMismatch.get());
+      return RepairOutcome.NETWORK_MISMATCH;
+    }
+    if (!repairer.hasUpdates()) {
+      return RepairOutcome.NOTHING_TO_UPDATE;
+    }
+    if (checkOnly) {
+      log.display("Updates have been skipped as --check-only-enabled was set.");
+      return RepairOutcome.CHECK_ONLY;
+    }
+    if (!confirm.getAsBoolean()) {
+      log.display("Operation cancelled.");
+      return RepairOutcome.CANCELLED;
+    }
+    repairer.updateRecords(slot, epoch);
+    return RepairOutcome.UPDATED;
+  }
+
+  /** Only an answer of "yes", in any case, confirms the repair. */
+  static boolean isConfirmed(final String answer) {
+    return answer.equalsIgnoreCase("yes");
+  }
+
+  /**
+   * The slot used when none is supplied: the current slot plus one epoch, so validators miss at
+   * most one epoch of duties.
+   */
+  static UInt64 computeRepairSlot(
+      final Spec spec, final UInt64 genesisTime, final UInt64 currentTime) {
+    final MiscHelpers miscHelpers = spec.atTime(genesisTime, currentTime).miscHelpers();
+    final SpecConfig specConfig = spec.atTime(genesisTime, currentTime).getConfig();
+    return miscHelpers
+        .computeSlotAtTime(genesisTime, currentTime)
+        .plus(specConfig.getSlotsPerEpoch());
   }
 
   /**
@@ -164,16 +237,6 @@ public class RepairCommand implements Runnable {
             mismatched.size(), networkName, genesisValidatorsRoot, mismatched.getFirst()));
   }
 
-  private void verifyRecordsMatchNetwork(
-      final SlashingProtectionRepairer repairer, final Bytes32 genesisValidatorsRoot) {
-    findNetworkMismatch(repairer, genesisValidatorsRoot, getNetworkName())
-        .ifPresent(error -> SUB_COMMAND_LOG.exit(1, error));
-    if (!repairer.hasRecordsWithGenesisValidatorsRoot()) {
-      SUB_COMMAND_LOG.display(
-          "NOTE: no existing records contain a genesis validators root, so the network could not be verified.");
-    }
-  }
-
   private String getNetworkName() {
     return eth2NetworkOptions.getNetwork() == null ? "" : eth2NetworkOptions.getNetwork();
   }
@@ -184,15 +247,11 @@ public class RepairCommand implements Runnable {
 
       return suppliedSlot;
     } else if (initialAnchor.isPresent()) {
-      final UInt64 genesisTime = initialAnchor.get().getState().getGenesisTime();
-      final MiscHelpers miscHelpers =
-          spec.atTime(genesisTime, SYSTEM_TIME_PROVIDER.getTimeInSeconds()).miscHelpers();
-      final SpecConfig specConfig =
-          spec.atTime(genesisTime, SYSTEM_TIME_PROVIDER.getTimeInSeconds()).getConfig();
-      final UInt64 currentSlot =
-          miscHelpers.computeSlotAtTime(genesisTime, SYSTEM_TIME_PROVIDER.getTimeInSeconds());
-
-      final UInt64 computedSlot = currentSlot.plus(specConfig.getSlotsPerEpoch());
+      final UInt64 computedSlot =
+          computeRepairSlot(
+              spec,
+              initialAnchor.get().getState().getGenesisTime(),
+              SYSTEM_TIME_PROVIDER.getTimeInSeconds());
       displaySlotUpdateMessage(computedSlot, spec, "Computed " + getNetworkName() + " slot");
       return computedSlot;
     }
@@ -213,7 +272,7 @@ public class RepairCommand implements Runnable {
             + spec.atSlot(slot).miscHelpers().computeEpochAtSlot(slot));
   }
 
-  private void confirmOrExit(final UInt64 slot, final UInt64 epoch) {
+  private boolean confirm(final UInt64 slot, final UInt64 epoch) {
     SUB_COMMAND_LOG.display("");
     SUB_COMMAND_LOG.display(
         "REMINDER! If the validator is running, you should not be updating slashing protection records.");
@@ -224,11 +283,6 @@ public class RepairCommand implements Runnable {
     SUB_COMMAND_LOG.display("attestation source/target -> " + epoch);
     SUB_COMMAND_LOG.display("Are you sure you wish to continue (yes/no)? ");
     final Scanner scanner = new Scanner(System.in, Charset.defaultCharset());
-    final String confirmation = scanner.next();
-
-    if (!confirmation.equalsIgnoreCase("yes")) {
-      SUB_COMMAND_LOG.display("Operation cancelled.");
-      System.exit(1);
-    }
+    return isConfirmed(scanner.next());
   }
 }

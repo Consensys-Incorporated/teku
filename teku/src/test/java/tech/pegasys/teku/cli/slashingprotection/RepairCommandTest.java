@@ -15,22 +15,31 @@ package tech.pegasys.teku.cli.slashingprotection;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static tech.pegasys.teku.cli.slashingprotection.RepairCommand.computeRepairSlot;
 import static tech.pegasys.teku.cli.slashingprotection.RepairCommand.findNetworkMismatch;
 import static tech.pegasys.teku.cli.slashingprotection.RepairCommand.getStateResourceForComputingSlot;
+import static tech.pegasys.teku.cli.slashingprotection.RepairCommand.isConfirmed;
+import static tech.pegasys.teku.cli.slashingprotection.RepairCommand.repair;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tech.pegasys.teku.cli.slashingprotection.RepairCommand.RepairOutcome;
 import tech.pegasys.teku.data.SlashingProtectionRepairer;
 import tech.pegasys.teku.ethereum.signingrecord.ValidatorSigningRecord;
 import tech.pegasys.teku.infrastructure.logging.SubCommandLogger;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networks.Eth2NetworkConfiguration;
 import tech.pegasys.teku.networks.StateBoostrapConfig;
+import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.networks.Eth2Network;
 
 class RepairCommandTest {
@@ -40,6 +49,8 @@ class RepairCommandTest {
       Bytes32.fromHexString("0x4b363db94e286120d76eb905340fdd4e54bfe9f06bf33ff6cf5ad27f511bfe95");
   private static final Bytes32 HOODI_ROOT =
       Bytes32.fromHexString("0x212f13fc4df078b6cb7db228f1c8307566dcecf900867401a92023d7ba99cb5f");
+  private static final UInt64 REPAIR_SLOT = UInt64.valueOf(1234);
+  private static final UInt64 REPAIR_EPOCH = UInt64.valueOf(38);
   private static final String PUBKEY_A =
       "a99a76ed7796f7be22d5b7e85deeb7c5677e88e511e0b337618f8c4eb61349b4bf2d153f649f7b53359fe8b94a38e44c";
   private static final String PUBKEY_B =
@@ -121,6 +132,152 @@ class RepairCommandTest {
     writeRecord(tempDir, PUBKEY_A, Optional.empty());
 
     assertThat(findNetworkMismatch(createRepairer(tempDir), HOODI_ROOT, "hoodi")).isEmpty();
+  }
+
+  @Test
+  void shouldUseCurrentSlotPlusOneEpochAsRepairSlot() {
+    final UInt64 genesisTime = UInt64.valueOf(1_000_000);
+    // minimal: 6 second slots, 8 slots per epoch; 3 seconds into slot 20
+    assertThat(
+            computeRepairSlot(
+                TestSpecFactory.createMinimalPhase0(), genesisTime, genesisTime.plus(6 * 20 + 3)))
+        .isEqualTo(UInt64.valueOf(28));
+    // mainnet: 12 second slots, 32 slots per epoch
+    assertThat(
+            computeRepairSlot(
+                TestSpecFactory.createMainnetPhase0(), genesisTime, genesisTime.plus(12 * 100)))
+        .isEqualTo(UInt64.valueOf(132));
+  }
+
+  @Test
+  void shouldOnlyAcceptYesAsConfirmation() {
+    assertThat(isConfirmed("yes")).isTrue();
+    assertThat(isConfirmed("YES")).isTrue();
+    assertThat(isConfirmed("Yes")).isTrue();
+    assertThat(isConfirmed("y")).isFalse();
+    assertThat(isConfirmed("no")).isFalse();
+    assertThat(isConfirmed("yes please")).isFalse();
+  }
+
+  @Test
+  void shouldStopBeforeConfirmingWhenNetworkDoesNotMatch(@TempDir final Path tempDir)
+      throws IOException {
+    writeRawFile(tempDir, PUBKEY_A, "garbage: [");
+    final SubCommandLogger log = mock(SubCommandLogger.class);
+    final AtomicBoolean asked = new AtomicBoolean();
+
+    final RepairOutcome outcome =
+        repair(
+            createRepairer(tempDir),
+            Optional.of("wrong network"),
+            false,
+            REPAIR_SLOT,
+            REPAIR_EPOCH,
+            answer(asked, true),
+            log);
+
+    assertThat(outcome).isEqualTo(RepairOutcome.NETWORK_MISMATCH);
+    assertThat(asked).isFalse();
+    verify(log).error("wrong network");
+    assertThat(Files.readString(tempDir.resolve(PUBKEY_A + ".yml"))).isEqualTo("garbage: [");
+  }
+
+  @Test
+  void shouldNotAskWhenNothingNeedsUpdating(@TempDir final Path tempDir) throws IOException {
+    writeRecord(tempDir, PUBKEY_A, Optional.of(HOODI_ROOT));
+    final AtomicBoolean asked = new AtomicBoolean();
+
+    assertThat(
+            repair(
+                createRepairer(tempDir),
+                Optional.empty(),
+                false,
+                REPAIR_SLOT,
+                REPAIR_EPOCH,
+                answer(asked, true),
+                mock(SubCommandLogger.class)))
+        .isEqualTo(RepairOutcome.NOTHING_TO_UPDATE);
+    assertThat(asked).isFalse();
+  }
+
+  @Test
+  void shouldNotWriteOrAskWhenCheckOnly(@TempDir final Path tempDir) throws IOException {
+    writeRawFile(tempDir, PUBKEY_A, "garbage: [");
+    final SubCommandLogger log = mock(SubCommandLogger.class);
+    final AtomicBoolean asked = new AtomicBoolean();
+
+    final RepairOutcome outcome =
+        repair(
+            createRepairer(tempDir),
+            Optional.empty(),
+            true,
+            REPAIR_SLOT,
+            REPAIR_EPOCH,
+            answer(asked, true),
+            log);
+
+    assertThat(outcome).isEqualTo(RepairOutcome.CHECK_ONLY);
+    assertThat(asked).isFalse();
+    verify(log).display("Updates have been skipped as --check-only-enabled was set.");
+    assertThat(Files.readString(tempDir.resolve(PUBKEY_A + ".yml"))).isEqualTo("garbage: [");
+  }
+
+  @Test
+  void shouldNotWriteWhenCancelled(@TempDir final Path tempDir) throws IOException {
+    writeRawFile(tempDir, PUBKEY_A, "garbage: [");
+    final SubCommandLogger log = mock(SubCommandLogger.class);
+    final AtomicBoolean asked = new AtomicBoolean();
+
+    final RepairOutcome outcome =
+        repair(
+            createRepairer(tempDir),
+            Optional.empty(),
+            false,
+            REPAIR_SLOT,
+            REPAIR_EPOCH,
+            answer(asked, false),
+            log);
+
+    assertThat(outcome).isEqualTo(RepairOutcome.CANCELLED);
+    assertThat(asked).isTrue();
+    verify(log).display("Operation cancelled.");
+    assertThat(Files.readString(tempDir.resolve(PUBKEY_A + ".yml"))).isEqualTo("garbage: [");
+  }
+
+  @Test
+  void shouldWriteWhenConfirmed(@TempDir final Path tempDir) throws IOException {
+    writeRawFile(tempDir, PUBKEY_A, "garbage: [");
+    final AtomicBoolean asked = new AtomicBoolean();
+
+    final RepairOutcome outcome =
+        repair(
+            createRepairer(tempDir),
+            Optional.empty(),
+            false,
+            REPAIR_SLOT,
+            REPAIR_EPOCH,
+            answer(asked, true),
+            mock(SubCommandLogger.class));
+
+    assertThat(outcome).isEqualTo(RepairOutcome.UPDATED);
+    assertThat(asked).isTrue();
+    assertThat(
+            ValidatorSigningRecord.fromBytes(
+                Bytes.wrap(Files.readAllBytes(tempDir.resolve(PUBKEY_A + ".yml")))))
+        .isEqualTo(
+            new ValidatorSigningRecord(Optional.empty(), REPAIR_SLOT, REPAIR_EPOCH, REPAIR_EPOCH));
+  }
+
+  private BooleanSupplier answer(final AtomicBoolean asked, final boolean confirmed) {
+    return () -> {
+      asked.set(true);
+      return confirmed;
+    };
+  }
+
+  private void writeRawFile(final Path dir, final String pubkey, final String content)
+      throws IOException {
+    Files.writeString(dir.resolve(pubkey + ".yml"), content);
   }
 
   private SlashingProtectionRepairer createRepairer(final Path dir) {

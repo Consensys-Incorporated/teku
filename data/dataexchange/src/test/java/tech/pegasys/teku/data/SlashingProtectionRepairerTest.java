@@ -322,6 +322,21 @@ public class SlashingProtectionRepairerTest {
   }
 
   @Test
+  public void shouldOnlyCountReadableRecordsAsValid(@TempDir final Path tempDir)
+      throws IOException {
+    assertThat(SlashingProtectionRepairer.create(subCommandLogger, tempDir, true).hasValidRecords())
+        .isFalse();
+
+    writeRawFile(tempDir, randomValidatorFile(), "garbage: [");
+    assertThat(SlashingProtectionRepairer.create(subCommandLogger, tempDir, true).hasValidRecords())
+        .isFalse();
+
+    setupPathForTest(tempDir, Map.of(randomValidatorFile(), optionalSigningRecord(ONE, ONE, ONE)));
+    assertThat(SlashingProtectionRepairer.create(subCommandLogger, tempDir, true).hasValidRecords())
+        .isTrue();
+  }
+
+  @Test
   public void shouldNotFindOtherNetworksWhenRecordsHaveNoGenesisValidatorsRoot(
       @TempDir final Path tempDir) throws IOException {
     setupPathForTest(tempDir, Map.of(randomValidatorFile(), optionalSigningRecord(ONE, ONE, ONE)));
@@ -345,7 +360,7 @@ public class SlashingProtectionRepairerTest {
 
     repairer.updateRecords(UInt64.valueOf(1234), UInt64.valueOf(154));
 
-    // the repairer only knows about files that already exist; it never loads validator keys
+    // the repairer only creates files for keys it is given
     assertThat(listFileNames(tempDir)).containsExactly(key);
   }
 
