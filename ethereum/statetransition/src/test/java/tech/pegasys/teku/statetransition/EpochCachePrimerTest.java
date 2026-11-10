@@ -203,7 +203,7 @@ class EpochCachePrimerTest {
 
       final int slotsPerEpoch = realSpec.getSlotsPerEpoch(UInt64.ZERO);
       logCaptor.assertDebugLog(
-          "Precomputed epoch 1: state transition 0 ms, cache priming "
+          "Precomputed epoch 1: state retrieval 0 ms, cache priming "
               + (7 * slotsPerEpoch)
               + " ms");
     }

@@ -73,13 +73,19 @@ public class EpochCachePrimer {
             error -> LOG.warn("Failed to precompute epoch transition", error));
   }
 
+  /**
+   * The state retrieval is not the epoch transition: on a node in sync the state of the first slot
+   * of the next epoch has usually been generated already (the payload attributes for the next slot
+   * need it as soon as the last block of the epoch is imported), so the retrieval is a cache hit.
+   * The epoch transition itself is timed where it runs, by the debug log of StateAtSlotTask.
+   */
   private Consumer<BeaconState> timedPrimer(final UInt64 firstSlotOfEpoch) {
     final UInt64 startTime = timeProvider.getTimeInMillis();
     return state -> {
       final UInt64 stateReadyTime = timeProvider.getTimeInMillis();
       primeEpochStateCaches(state);
       LOG.debug(
-          "Precomputed epoch {}: state transition {} ms, cache priming {} ms",
+          "Precomputed epoch {}: state retrieval {} ms, cache priming {} ms",
           spec.computeEpochAtSlot(firstSlotOfEpoch),
           stateReadyTime.minusMinZero(startTime),
           timeProvider.getTimeInMillis().minusMinZero(stateReadyTime));
