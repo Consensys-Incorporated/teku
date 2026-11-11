@@ -302,7 +302,7 @@ class EventSourceHandlerTest {
   }
 
   @Test
-  void onError_shouldNotMisdiagnoseAnOversizedEventAsAnOutdatedBeaconNode() {
+  void onError_shouldCountOversizedEventSeparatelyWithoutOutdatedNodeWarning() {
     handler.onOpen();
 
     handler.onError(new EventStreamSizeLimitException(8));
@@ -310,8 +310,12 @@ class EventSourceHandlerTest {
     verify(validatorLogger, never()).noHeadEventsReceivedFromBeaconNodeEventStream(ENDPOINT);
     assertThat(
             metricsSystem.getLabelledCounterValue(
-                TekuMetricCategory.VALIDATOR, "event_stream_disconnections_total", "error"))
+                TekuMetricCategory.VALIDATOR, "event_stream_disconnections_total", "size_limit"))
         .isEqualTo(1);
+    assertThat(
+            metricsSystem.getLabelledCounterValue(
+                TekuMetricCategory.VALIDATOR, "event_stream_disconnections_total", "error"))
+        .isZero();
   }
 
   @Test
