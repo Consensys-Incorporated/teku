@@ -120,7 +120,17 @@ public class MappedOperationPoolTest {
     assertThat(different).isNotEqualTo(item);
 
     assertThat(pool.addLocal(different))
-        .isCompletedWithValueMatching(result -> result.isIgnore() && !result.isIgnoreAlreadySeen());
+        .isCompletedWithValueMatching(
+            result ->
+                result.isIgnore()
+                    && !result.isIgnoreAlreadySeen()
+                    && result
+                        .getDescription()
+                        .orElseThrow()
+                        .equals(
+                            "Another operation for validator "
+                                + item.getValidatorId()
+                                + " is already in the pool. This submission was not added."));
     assertThat(pool.getAll()).containsExactly(item);
   }
 

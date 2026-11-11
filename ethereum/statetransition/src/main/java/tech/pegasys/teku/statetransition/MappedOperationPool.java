@@ -154,9 +154,13 @@ public class MappedOperationPool<T extends MessageWithValidatorId> implements Op
   private static InternalValidationResult rejectForDuplicatedMessage(
       final String metricType, final UInt64 validatorIndex, final boolean isSameOperation) {
     final String logMessage =
-        String.format(
-            "Cannot add to %s as validator %s is already in this pool.",
-            metricType, validatorIndex);
+        isSameOperation
+            ? String.format(
+                "Cannot add to %s as validator %s is already in this pool.",
+                metricType, validatorIndex)
+            : String.format(
+                "Another operation for validator %s is already in the pool. This submission was not added.",
+                validatorIndex);
     LOG.trace(logMessage);
     return isSameOperation
         ? InternalValidationResult.create(IGNORE, IGNORE_ALREADY_SEEN, logMessage)
