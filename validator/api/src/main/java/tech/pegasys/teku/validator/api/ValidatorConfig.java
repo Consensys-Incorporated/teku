@@ -783,7 +783,7 @@ public class ValidatorConfig {
     public Builder eventStreamMaxEventSizeMegabytes(final int eventStreamMaxEventSizeMegabytes) {
       if (eventStreamMaxEventSizeMegabytes < 0) {
         throw new InvalidConfigurationException(
-            "--Xvalidator-client-event-stream-max-event-size-megabytes must be non-negative");
+            "--Xvalidator-client-event-stream-max-event-size must be non-negative");
       }
       this.eventStreamMaxEventSizeMegabytes = eventStreamMaxEventSizeMegabytes;
       return this;

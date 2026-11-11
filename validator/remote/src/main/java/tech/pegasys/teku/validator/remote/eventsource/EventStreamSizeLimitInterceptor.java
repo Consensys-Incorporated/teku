@@ -114,16 +114,3 @@ public class EventStreamSizeLimitInterceptor implements Interceptor {
         .build();
   }
 }
-
-class EventStreamSizeLimitException extends IOException {
-  private final int maxEventSizeMegabytes;
-
-  EventStreamSizeLimitException(final int maxEventSizeMegabytes) {
-    super("Beacon node event stream event exceeded " + maxEventSizeMegabytes + " MB");
-    this.maxEventSizeMegabytes = maxEventSizeMegabytes;
-  }
-
-  int getMaxEventSizeMegabytes() {
-    return maxEventSizeMegabytes;
-  }
-}

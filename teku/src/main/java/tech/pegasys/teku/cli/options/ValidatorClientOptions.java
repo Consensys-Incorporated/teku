@@ -98,7 +98,7 @@ public class ValidatorClientOptions {
   private boolean attestationsV2ApisEnabled = ValidatorConfig.DEFAULT_ATTESTATIONS_V2_APIS_ENABLED;
 
   @Option(
-      names = {"--Xvalidator-client-event-stream-max-event-size-megabytes"},
+      names = {"--Xvalidator-client-event-stream-max-event-size"},
       paramLabel = "<MB>",
       description = "Maximum size of a beacon node event stream event in megabytes (0 disables)",
       hidden = true,
