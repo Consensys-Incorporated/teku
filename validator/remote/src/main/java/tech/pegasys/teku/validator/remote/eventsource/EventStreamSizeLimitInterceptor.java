@@ -20,6 +20,7 @@ import okhttp3.Response;
 import okhttp3.ResponseBody;
 import okio.Buffer;
 import okio.BufferedSource;
+import okio.ByteString;
 import okio.ForwardingSource;
 import okio.Okio;
 
@@ -29,6 +30,7 @@ public class EventStreamSizeLimitInterceptor implements Interceptor {
   static final int BYTES_PER_MEGABYTE = 1_000_000;
   // Cap temporary read-ahead to 8 KiB; maxFrameBytes below is the separate per-event limit.
   private static final int READ_CHUNK_SIZE = 8192;
+  private static final ByteString CR_OR_LF = ByteString.of((byte) '\r', (byte) '\n');
 
   private final int maxEventSizeMegabytes;
 
@@ -48,6 +50,7 @@ public class EventStreamSizeLimitInterceptor implements Interceptor {
         Okio.buffer(
             new ForwardingSource(body.source()) {
               private final long maxFrameBytes = (long) maxEventSizeMegabytes * BYTES_PER_MEGABYTE;
+              private final Buffer chunk = new Buffer();
               private long frameBytes;
               private boolean lineHasContent;
               private boolean afterCarriageReturn;
@@ -58,10 +61,23 @@ public class EventStreamSizeLimitInterceptor implements Interceptor {
                 if (byteCount == 0) {
                   return 0;
                 }
-                final Buffer chunk = new Buffer();
                 final long bytesRead = super.read(chunk, Math.min(byteCount, READ_CHUNK_SIZE));
-                for (long i = 0; i < bytesRead; i++) {
-                  final byte value = chunk.getByte(i);
+                long offset = 0;
+                while (offset < bytesRead) {
+                  final long lineEnding = chunk.indexOfElement(CR_OR_LF, offset);
+                  final long contentEnd = lineEnding == -1 ? bytesRead : lineEnding;
+                  if (contentEnd > offset) {
+                    frameBytes += contentEnd - offset;
+                    if (frameBytes > maxFrameBytes) {
+                      throw new EventStreamSizeLimitException(maxEventSizeMegabytes);
+                    }
+                    lineHasContent = true;
+                    afterCarriageReturn = false;
+                  }
+                  if (lineEnding == -1) {
+                    break;
+                  }
+                  final byte value = chunk.getByte(lineEnding);
                   frameBytes++;
                   if (frameBytes > maxFrameBytes) {
                     throw new EventStreamSizeLimitException(maxEventSizeMegabytes);
@@ -71,10 +87,8 @@ public class EventStreamSizeLimitInterceptor implements Interceptor {
                       frameBytes = 0;
                     }
                     afterCarriageReturn = false;
-                    continue;
-                  }
-                  afterCarriageReturn = false;
-                  if (value == '\r' || value == '\n') {
+                  } else {
+                    afterCarriageReturn = false;
                     final boolean blankLine = !lineHasContent;
                     if (blankLine) {
                       frameBytes = 0;
@@ -82,9 +96,8 @@ public class EventStreamSizeLimitInterceptor implements Interceptor {
                     lineHasContent = false;
                     afterCarriageReturn = value == '\r';
                     blankLineAtCarriageReturn = afterCarriageReturn && blankLine;
-                  } else {
-                    lineHasContent = true;
                   }
+                  offset = lineEnding + 1;
                 }
                 if (bytesRead > 0) {
                   sink.write(chunk, bytesRead);

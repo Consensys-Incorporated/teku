@@ -113,6 +113,25 @@ class EventStreamSizeLimitInterceptorTest {
   }
 
   @Test
+  void acceptsEventsWhenCrLfIsSplitAcrossHttpChunks() throws Exception {
+    try (final MockWebServer server = new MockWebServer()) {
+      final int chunkSize = 8192;
+      final String prefix = "event: head\r\ndata: ";
+      final String data = "x".repeat(chunkSize * 74 - prefix.length() - 1);
+      server.enqueue(
+          new MockResponse()
+              .setHeader("Content-Type", "text/event-stream")
+              .setChunkedBody((prefix + data + "\r\n\r\n").repeat(2), chunkSize));
+      server.start();
+
+      try (final EventSource eventSource = eventSource(server)) {
+        assertThat(eventSource.readMessage().getData()).isEqualTo(data);
+        assertThat(eventSource.readMessage().getData()).isEqualTo(data);
+      }
+    }
+  }
+
+  @Test
   void rejectsAnOversizedCommentWithoutAnyData() throws Exception {
     try (final MockWebServer server = new MockWebServer()) {
       server.enqueue(
