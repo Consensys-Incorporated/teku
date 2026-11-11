@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.cli.subcommand;
 
+import static com.google.common.base.Preconditions.checkArgument;
+
 import java.net.URI;
 import java.util.HashMap;
 import java.util.List;
@@ -26,22 +28,26 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecFactory;
 import tech.pegasys.teku.spec.config.SpecConfigLoader;
 import tech.pegasys.teku.storage.server.ShuttingDownException;
+import tech.pegasys.teku.validator.remote.RemoteBeaconNodeApi;
 import tech.pegasys.teku.validator.remote.apiclient.OkHttpClientAuth;
 import tech.pegasys.teku.validator.remote.typedef.OkHttpValidatorMinimalTypeDefClient;
 
 class RemoteSpecLoader {
 
   private static final long RETRY_DELAY = 5000;
+  private static final int NO_RESPONSE_SIZE_LIMIT_MB = 0;
 
-  static Spec getSpecWithRetry(final List<URI> beaconEndpoints) {
-    return retry(() -> getSpec(beaconEndpoints));
+  static Spec getSpecWithRetry(
+      final List<URI> beaconEndpoints, final int maxResponseSizeMegabytes) {
+    checkArgument(maxResponseSizeMegabytes >= 0, "Maximum response size must be non-negative");
+    return retry(() -> getSpec(beaconEndpoints, maxResponseSizeMegabytes));
   }
 
-  static Spec getSpec(final List<URI> beaconEndpoints) {
+  static Spec getSpec(final List<URI> beaconEndpoints, final int maxResponseSizeMegabytes) {
     if (beaconEndpoints.size() > 1) {
-      return getSpecWithFailovers(createTypeDefClients(beaconEndpoints));
+      return getSpecWithFailovers(createTypeDefClients(beaconEndpoints, maxResponseSizeMegabytes));
     }
-    return getSpec(createTypeDefClients(beaconEndpoints).get(0));
+    return getSpec(createTypeDefClients(beaconEndpoints, maxResponseSizeMegabytes).get(0));
   }
 
   static Spec getSpec(final OkHttpValidatorMinimalTypeDefClient apiClient) {
@@ -62,7 +68,7 @@ class RemoteSpecLoader {
   }
 
   static OkHttpValidatorMinimalTypeDefClient createTypeDefClient(final URI endpoint) {
-    return createTypeDefClients(List.of(endpoint)).get(0);
+    return createTypeDefClients(List.of(endpoint), NO_RESPONSE_SIZE_LIMIT_MB).get(0);
   }
 
   private static Spec getSpecWithFailovers(
@@ -102,7 +108,7 @@ class RemoteSpecLoader {
   }
 
   private static List<OkHttpValidatorMinimalTypeDefClient> createTypeDefClients(
-      final List<URI> baseEndpoints) {
+      final List<URI> baseEndpoints, final int maxResponseSizeMegabytes) {
     final OkHttpClient.Builder httpClientBuilder =
         new OkHttpClient.Builder().readTimeout(30, TimeUnit.SECONDS);
     List<HttpUrl> apiEndpoints = baseEndpoints.stream().map(HttpUrl::get).toList();
@@ -111,6 +117,8 @@ class RemoteSpecLoader {
     } else {
       OkHttpClientAuth.addAuthInterceptor(apiEndpoints.get(0), httpClientBuilder);
     }
+    RemoteBeaconNodeApi.addResponseSizeLimitInterceptors(
+        httpClientBuilder, maxResponseSizeMegabytes);
     // Strip any authentication info from the URL(s) to ensure it doesn't get logged.
     apiEndpoints = stripAuthentication(apiEndpoints);
     final OkHttpClient okHttpClient = httpClientBuilder.build();

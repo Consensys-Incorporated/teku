@@ -256,12 +256,14 @@ public class RemoteBeaconNodeApi implements BeaconNodeApi {
     builder
         .interceptors()
         .removeIf(interceptor -> interceptor instanceof RestResponseSizeLimitInterceptor);
+    builder
+        .networkInterceptors()
+        .removeIf(interceptor -> interceptor instanceof RestResponseSizeLimitInterceptor);
     return builder.build();
   }
 
   public static OkHttpClient createOkHttpClient(
       final List<HttpUrl> endpoints, final int maxResponseSizeMegabytes) {
-    checkArgument(maxResponseSizeMegabytes >= 0, "Maximum response size must be non-negative");
     final OkHttpClient.Builder httpClientBuilder =
         new OkHttpClient.Builder().callTimeout(REST_CALL_TIMEOUT);
     if (endpoints.size() > 1) {
@@ -270,12 +272,25 @@ public class RemoteBeaconNodeApi implements BeaconNodeApi {
       OkHttpClientAuth.addAuthInterceptor(endpoints.get(0), httpClientBuilder);
     }
     addInterceptorForUserAgentHeader(httpClientBuilder);
+    addResponseSizeLimitInterceptors(httpClientBuilder, maxResponseSizeMegabytes);
+
+    return httpClientBuilder.build();
+  }
+
+  public static void addResponseSizeLimitInterceptors(
+      final OkHttpClient.Builder httpClientBuilder, final int maxResponseSizeMegabytes) {
+    checkArgument(maxResponseSizeMegabytes >= 0, "Maximum response size must be non-negative");
     if (maxResponseSizeMegabytes > 0) {
       httpClientBuilder.addInterceptor(
           new RestResponseSizeLimitInterceptor(maxResponseSizeMegabytes));
+      httpClientBuilder.addNetworkInterceptor(
+          new RestResponseSizeLimitInterceptor(maxResponseSizeMegabytes));
+      LOG.debug(
+          "Beacon Node REST API response size limit set to {} MB (encoded and decoded)",
+          maxResponseSizeMegabytes);
+    } else {
+      LOG.debug("Beacon Node REST API response size limit disabled");
     }
-
-    return httpClientBuilder.build();
   }
 
   private static void addInterceptorForUserAgentHeader(

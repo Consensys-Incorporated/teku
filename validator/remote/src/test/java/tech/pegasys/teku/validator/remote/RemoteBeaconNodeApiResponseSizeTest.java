@@ -30,6 +30,8 @@ import okio.Buffer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class RemoteBeaconNodeApiResponseSizeTest {
   private static final long MAX_RESPONSE_BYTES = 64L * 1_000_000;
@@ -87,6 +89,8 @@ class RemoteBeaconNodeApiResponseSizeTest {
     final OkHttpClient client = RemoteBeaconNodeApi.createOkHttpClient(List.of(server.url("/")), 0);
 
     assertThat(client.interceptors()).noneMatch(RestResponseSizeLimitInterceptor.class::isInstance);
+    assertThat(client.networkInterceptors())
+        .noneMatch(RestResponseSizeLimitInterceptor.class::isInstance);
     try (final Response response = client.newCall(request()).execute()) {
       assertThat(response.body().source().readUtf8(5)).isEqualTo("small");
     }
@@ -136,11 +140,47 @@ class RemoteBeaconNodeApiResponseSizeTest {
             .setHeader("Content-Encoding", "gzip")
             .setBody(new Buffer().write(compressed.toByteArray())));
 
-    try (final Response response = limitedClient(1).newCall(request()).execute()) {
+    try (final Response response =
+        RemoteBeaconNodeApi.createOkHttpClient(List.of(server.url("/")), 1)
+            .newCall(request())
+            .execute()) {
       assertThatThrownBy(() -> response.body().string())
           .isInstanceOf(IOException.class)
           .hasMessageContaining("1 MB");
     }
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {0x08, 0x10})
+  void rejectsGzipResponseWithOversizedMetadataBeforeDecompression(final int flag)
+      throws IOException {
+    final ByteArrayOutputStream compressed = new ByteArrayOutputStream();
+    try (final GZIPOutputStream gzip = new GZIPOutputStream(compressed)) {
+      gzip.write("ok".getBytes(StandardCharsets.UTF_8));
+    }
+    final byte[] gzipBytes = compressed.toByteArray();
+    gzipBytes[3] |= (byte) flag;
+    final ByteArrayOutputStream withFilename = new ByteArrayOutputStream();
+    withFilename.write(gzipBytes, 0, 10);
+    withFilename.write("a".repeat(1_000_001).getBytes(StandardCharsets.UTF_8));
+    withFilename.write(0);
+    withFilename.write(gzipBytes, 10, gzipBytes.length - 10);
+    server.enqueue(
+        new MockResponse()
+            .setHeader("Content-Encoding", "gzip")
+            .setChunkedBody(new Buffer().write(withFilename.toByteArray()), 8192));
+
+    assertThatThrownBy(
+            () -> {
+              try (final Response response =
+                  RemoteBeaconNodeApi.createOkHttpClient(List.of(server.url("/")), 1)
+                      .newCall(request())
+                      .execute()) {
+                response.body().string();
+              }
+            })
+        .isInstanceOf(IOException.class)
+        .hasMessageContaining("1 MB");
   }
 
   private OkHttpClient limitedClient(final int maxMegabytes) {

@@ -229,4 +229,8 @@ public class ValidatorOptions {
     validatorKeysOptions.configure(builder);
     builderOptions.configure(builder);
   }
+
+  public int getBeaconApiMaxResponseSizeMegabytes() {
+    return beaconApiMaxResponseSizeMegabytes;
+  }
 }
