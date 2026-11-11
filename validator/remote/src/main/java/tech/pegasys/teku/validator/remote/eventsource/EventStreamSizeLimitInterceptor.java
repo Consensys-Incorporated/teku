@@ -15,7 +15,6 @@ package tech.pegasys.teku.validator.remote.eventsource;
 
 import java.io.IOException;
 import okhttp3.Interceptor;
-import okhttp3.MediaType;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 import okio.Buffer;
@@ -107,23 +106,7 @@ public class EventStreamSizeLimitInterceptor implements Interceptor {
             });
     return response
         .newBuilder()
-        .body(
-            new ResponseBody() {
-              @Override
-              public MediaType contentType() {
-                return body.contentType();
-              }
-
-              @Override
-              public long contentLength() {
-                return body.contentLength();
-              }
-
-              @Override
-              public BufferedSource source() {
-                return limitedSource;
-              }
-            })
+        .body(ResponseBody.create(limitedSource, body.contentType(), body.contentLength()))
         .build();
   }
 }
