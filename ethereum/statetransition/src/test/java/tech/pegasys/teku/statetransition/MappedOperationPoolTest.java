@@ -105,11 +105,23 @@ public class MappedOperationPoolTest {
   }
 
   @Test
-  void shouldRejectDuplicateEntryFromPool() throws ExecutionException, InterruptedException {
+  void shouldIgnoreDuplicateEntryAlreadyInPool() {
     final SignedBlsToExecutionChange item = initPoolWithSingleItem();
 
     final SafeFuture<InternalValidationResult> future = pool.addLocal(item);
-    assertThat(future.get().code()).isEqualTo(InternalValidationResult.IGNORE.code());
+    assertThat(future).isCompletedWithValueMatching(InternalValidationResult::isIgnoreAlreadySeen);
+  }
+
+  @Test
+  void shouldNotMarkDifferentOperationForSameValidatorAsAlreadySeen() {
+    final SignedBlsToExecutionChange item = initPoolWithSingleItem();
+    final SignedBlsToExecutionChange different =
+        item.getSchema().create(item.getMessage(), dataStructureUtil.randomSignature());
+    assertThat(different).isNotEqualTo(item);
+
+    assertThat(pool.addLocal(different))
+        .isCompletedWithValueMatching(result -> result.isIgnore() && !result.isIgnoreAlreadySeen());
+    assertThat(pool.getAll()).containsExactly(item);
   }
 
   @Test

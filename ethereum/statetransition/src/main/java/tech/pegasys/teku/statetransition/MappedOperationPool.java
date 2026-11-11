@@ -14,6 +14,7 @@
 package tech.pegasys.teku.statetransition;
 
 import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.IGNORE;
+import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.ValidationResultSubCode.IGNORE_ALREADY_SEEN;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -151,13 +152,15 @@ public class MappedOperationPool<T extends MessageWithValidatorId> implements Op
   }
 
   private static InternalValidationResult rejectForDuplicatedMessage(
-      final String metricType, final UInt64 validatorIndex) {
+      final String metricType, final UInt64 validatorIndex, final boolean isSameOperation) {
     final String logMessage =
         String.format(
             "Cannot add to %s as validator %s is already in this pool.",
             metricType, validatorIndex);
     LOG.trace(logMessage);
-    return InternalValidationResult.create(IGNORE, logMessage);
+    return isSameOperation
+        ? InternalValidationResult.create(IGNORE, IGNORE_ALREADY_SEEN, logMessage)
+        : InternalValidationResult.create(IGNORE, logMessage);
   }
 
   @Override
@@ -209,8 +212,11 @@ public class MappedOperationPool<T extends MessageWithValidatorId> implements Op
   public SafeFuture<InternalValidationResult> addLocal(final T item) {
     final UInt64 validatorIndex = item.getValidatorId();
     LOG.debug("Adding local validator id {} to {}", validatorIndex, metricType);
-    if (operations.containsKey(validatorIndex)) {
-      return SafeFuture.completedFuture(rejectForDuplicatedMessage(metricType, validatorIndex))
+    final OperationPoolEntry<T> existingEntry = operations.get(validatorIndex);
+    if (existingEntry != null) {
+      return SafeFuture.completedFuture(
+              rejectForDuplicatedMessage(
+                  metricType, validatorIndex, item.equals(existingEntry.getMessage())))
           .thenPeek(result -> validationReasonCounter.labels(result.code().toString()).inc());
     }
     return add(item, false);
@@ -221,8 +227,11 @@ public class MappedOperationPool<T extends MessageWithValidatorId> implements Op
       final T item, final Optional<UInt64> arrivalTimestamp) {
     final UInt64 validatorIndex = item.getValidatorId();
     LOG.debug("Adding remote validator id {} to {}", validatorIndex, metricType);
-    if (operations.containsKey(validatorIndex)) {
-      return SafeFuture.completedFuture(rejectForDuplicatedMessage(metricType, validatorIndex))
+    final OperationPoolEntry<T> existingEntry = operations.get(validatorIndex);
+    if (existingEntry != null) {
+      return SafeFuture.completedFuture(
+              rejectForDuplicatedMessage(
+                  metricType, validatorIndex, item.equals(existingEntry.getMessage())))
           .thenPeek(result -> validationReasonCounter.labels(result.code().toString()).inc());
     }
     return add(item, true);
