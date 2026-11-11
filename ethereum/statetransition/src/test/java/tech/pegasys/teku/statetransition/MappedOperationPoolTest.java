@@ -125,6 +125,20 @@ public class MappedOperationPoolTest {
   }
 
   @Test
+  void shouldDistinguishRemoteDuplicateFromDifferentOperationForSameValidator() {
+    final SignedBlsToExecutionChange item = initPoolWithSingleItem();
+    final SignedBlsToExecutionChange different =
+        item.getSchema().create(item.getMessage(), dataStructureUtil.randomSignature());
+    assertThat(different).isNotEqualTo(item);
+
+    assertThat(pool.addRemote(item, Optional.empty()))
+        .isCompletedWithValueMatching(InternalValidationResult::isIgnoreAlreadySeen);
+    assertThat(pool.addRemote(different, Optional.empty()))
+        .isCompletedWithValueMatching(result -> result.isIgnore() && !result.isIgnoreAlreadySeen());
+    assertThat(pool.getAll()).containsExactly(item);
+  }
+
+  @Test
   void shouldRemoveEntryFromPool() {
     final SignedBlsToExecutionChange item = initPoolWithSingleItem();
     pool.removeAll(
