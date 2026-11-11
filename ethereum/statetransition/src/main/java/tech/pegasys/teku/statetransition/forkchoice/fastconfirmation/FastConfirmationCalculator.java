@@ -22,10 +22,12 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ForkJoinPool;
 import java.util.stream.IntStream;
@@ -391,11 +393,11 @@ class FastConfirmationCalculator {
   /**
    * Implements {@code get_node_support_between_slots}: the total effective balance (per {@code
    * balanceSource}) of unslashed, active, non-equivocating validators assigned to the inclusive
-   * slot range whose latest vote supports exactly {@code node} (per {@code get_supported_node}).
+   * slot range whose latest vote supports any of {@code nodes} (per {@code get_supported_node}).
    */
   UInt64 getNodeSupportBetweenSlots(
       final BeaconState balanceSource,
-      final ForkChoiceNode node,
+      final Set<ForkChoiceNode> nodes,
       final UInt64 startSlot,
       final UInt64 endSlot) {
     final List<UInt64> balances = getScoringBalances(balanceSource);
@@ -420,7 +422,7 @@ class FastConfirmationCalculator {
       final Optional<ForkChoiceNode> maybeVotedNode =
           forkChoice.getSupportedNode(
               currentSlot, votedRoot, vote.getNextSlot(), vote.isNextFullPayloadHint());
-      if (maybeVotedNode.isPresent() && maybeVotedNode.get().equals(node)) {
+      if (maybeVotedNode.isPresent() && nodes.contains(maybeVotedNode.get())) {
         support = support.plus(balance);
       }
     }
@@ -536,6 +538,11 @@ class FastConfirmationCalculator {
    * Implements {@code compute_empty_slot_support_discount}: weight discountable from the safety
    * threshold when empty slots precede the block, i.e. parent support from the empty slots'
    * committees beyond what could be adversarial.
+   *
+   * <p>Implements the Gloas modification too: support is discounted for the parent block's
+   * (PENDING) node together with the node the block built on, i.e. the parent's FULL or EMPTY
+   * variant. Support for the other variant counts against the block, so it is not discounted.
+   * Pre-Gloas both are the same node, as in the phase0 spec.
    */
   UInt64 computeEmptySlotSupportDiscount(final BeaconState balanceSource, final Bytes32 blockRoot) {
     final Bytes32 parentRoot = getBlockParentRoot(blockRoot);
@@ -547,16 +554,13 @@ class FastConfirmationCalculator {
     }
     final UInt64 firstEmptySlot = parentSlot.plus(1);
     final UInt64 lastEmptySlot = blockSlot.minus(1);
-    // The discountable support is that of the node the block actually built on, which under Gloas
-    // carries the parent's payload status rather than the parent's PENDING node.
-    final Optional<ForkChoiceNode> maybeParentNode =
-        forkChoice.getAncestorNode(getNodeForRoot(blockRoot), parentSlot);
-    if (maybeParentNode.isEmpty()) {
-      return UInt64.ZERO;
-    }
+    final Set<ForkChoiceNode> discountableNodes = new HashSet<>();
+    discountableNodes.add(getNodeForRoot(parentRoot));
+    forkChoice
+        .getAncestorNode(getNodeForRoot(blockRoot), parentSlot)
+        .ifPresent(discountableNodes::add);
     final UInt64 parentSupportInEmptySlots =
-        getNodeSupportBetweenSlots(
-            balanceSource, maybeParentNode.get(), firstEmptySlot, lastEmptySlot);
+        getNodeSupportBetweenSlots(balanceSource, discountableNodes, firstEmptySlot, lastEmptySlot);
     final UInt64 adversarialWeight =
         computeAdversarialWeight(balanceSource, firstEmptySlot, lastEmptySlot);
     return parentSupportInEmptySlots.isGreaterThan(adversarialWeight)
