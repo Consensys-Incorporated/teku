@@ -72,8 +72,6 @@ public class ValidatorConfig {
   public static final UInt64 DEFAULT_BUILDER_REGISTRATION_GAS_LIMIT = UInt64.valueOf(60_000_000);
   public static final boolean DEFAULT_OBOL_DVT_SELECTIONS_ENDPOINT_ENABLED = false;
   public static final boolean DEFAULT_ATTESTATIONS_V2_APIS_ENABLED = false;
-  // Two Electra indexed attestations can contain 131,072 indices each; their decimal JSON is
-  // under 8 MB, including the enclosing attester slashing and SSE framing.
   public static final int DEFAULT_EVENT_STREAM_MAX_EVENT_SIZE_MEGABYTES = 8;
   // Builder default options
   public static final UInt64 DEFAULT_BUILDER_MIN_BID = UInt64.ZERO;
