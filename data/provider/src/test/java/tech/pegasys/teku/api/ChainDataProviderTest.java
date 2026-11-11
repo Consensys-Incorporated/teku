@@ -56,6 +56,7 @@ import tech.pegasys.teku.api.migrated.BlockHeadersResponse;
 import tech.pegasys.teku.api.migrated.BlockRewardData;
 import tech.pegasys.teku.api.migrated.BuilderStatus;
 import tech.pegasys.teku.api.migrated.StateBuilderData;
+import tech.pegasys.teku.api.migrated.StatePtcData;
 import tech.pegasys.teku.api.migrated.StateSyncCommitteesData;
 import tech.pegasys.teku.api.migrated.StateValidatorIdentity;
 import tech.pegasys.teku.api.migrated.SyncCommitteeRewardData;
@@ -1064,6 +1065,106 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
             () -> provider.getBuildersFromState(data.randomBeaconState(), List.of(), List.of()))
         .isInstanceOf(BadRequestException.class)
         .hasMessageContaining("prior to GLOAS");
+  }
+
+  @Test
+  public void getStatePtc_shouldDefaultToStateSlotAndKeepCommitteeOrder() {
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final BeaconState state =
+        new DataStructureUtil(gloasSpec).randomBeaconState(UInt64.valueOf(19));
+
+    final StatePtcData ptc =
+        ptcProvider(gloasSpec)
+            .getStatePtc(Optional.of(gloasStateAndMetaData(state)), Optional.empty())
+            .orElseThrow()
+            .getData();
+
+    assertThat(ptc.slot()).isEqualTo(UInt64.valueOf(19));
+    assertThat(ptc.validators())
+        .isEqualTo(BeaconStateGloas.required(state).getPtcWindow().get(11).asListUnboxed());
+  }
+
+  @ParameterizedTest
+  @MethodSource("getStatePtcWindowArgs")
+  public void getStatePtc_shouldEnforcePtcWindow(
+      final long stateSlot, final long requestedSlot, final boolean inWindow) {
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final BeaconState state =
+        new DataStructureUtil(gloasSpec).randomBeaconState(UInt64.valueOf(stateSlot));
+    final ChainDataProvider provider = ptcProvider(gloasSpec);
+    final Optional<StateAndMetaData> stateAndMetaData = Optional.of(gloasStateAndMetaData(state));
+    final Optional<UInt64> slot = Optional.of(UInt64.valueOf(requestedSlot));
+
+    if (inWindow) {
+      assertThat(provider.getStatePtc(stateAndMetaData, slot).orElseThrow().getData().validators())
+          .isEqualTo(
+              gloasSpec
+                  .getPtc(state, UInt64.valueOf(requestedSlot))
+                  .intStream()
+                  .mapToObj(UInt64::valueOf)
+                  .toList());
+    } else {
+      assertThatThrownBy(() -> provider.getStatePtc(stateAndMetaData, slot))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("is not queryable");
+    }
+  }
+
+  static Stream<Arguments> getStatePtcWindowArgs() {
+    return Stream.of(
+        Arguments.of(16, 7, false),
+        Arguments.of(16, 8, true),
+        Arguments.of(16, 31, true),
+        Arguments.of(16, 32, false),
+        Arguments.of(0, 0, true),
+        Arguments.of(0, 15, true),
+        Arguments.of(0, 16, false));
+  }
+
+  @Test
+  public void getStatePtc_shouldRejectPreGloasSlot() {
+    final Spec gloasSpec = TestSpecFactory.createMinimalWithGloasForkEpoch(ONE);
+    final BeaconState state = new DataStructureUtil(gloasSpec).randomBeaconState(UInt64.valueOf(8));
+
+    assertThatThrownBy(
+            () ->
+                ptcProvider(gloasSpec)
+                    .getStatePtc(
+                        Optional.of(gloasStateAndMetaData(state)), Optional.of(UInt64.valueOf(7))))
+        .isInstanceOf(BadRequestException.class)
+        .hasMessageContaining("prior to GLOAS");
+  }
+
+  @Test
+  public void getStatePtc_shouldRejectPreGloasState() {
+    final StateAndMetaData stateAndMetaData =
+        new StateAndMetaData(
+            data.randomBeaconState(), spec.getGenesisSpec().getMilestone(), false, true, false);
+
+    assertThatThrownBy(
+            () -> ptcProvider(spec).getStatePtc(Optional.of(stateAndMetaData), Optional.empty()))
+        .isInstanceOf(BadRequestException.class)
+        .hasMessageContaining("prior to GLOAS");
+  }
+
+  @Test
+  public void getStatePtc_shouldReturnEmptyWhenStateNotFound() {
+    assertThat(ptcProvider(spec).getStatePtc(Optional.empty(), Optional.empty())).isEmpty();
+  }
+
+  private ChainDataProvider ptcProvider(final Spec providerSpec) {
+    return new ChainDataProvider(
+        providerSpec,
+        recentChainData,
+        combinedChainDataClient,
+        rewardCalculatorMock,
+        mockBlobSidecarReconstructionProvider,
+        mockBlobReconstructionProvider,
+        new LightClientUpdateStore(providerSpec));
+  }
+
+  private StateAndMetaData gloasStateAndMetaData(final BeaconState state) {
+    return new StateAndMetaData(state, SpecMilestone.GLOAS, false, true, false);
   }
 
   private BeaconStateGloas createGloasStateWithBuilders(
