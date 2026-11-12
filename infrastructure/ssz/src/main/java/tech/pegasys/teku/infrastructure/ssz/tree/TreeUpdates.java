@@ -86,17 +86,12 @@ public class TreeUpdates {
         updates.stream().map(Update::getNewNode).toArray(TreeNode[]::new));
   }
 
-  public TreeUpdates(final List<Long> gIndices, final List<TreeNode> nodes) {
-    this(toLongArray(gIndices), nodes.toArray(TreeNode[]::new));
+  public TreeUpdates(final LongList gIndices, final List<TreeNode> nodes) {
+    this(gIndices.toLongArray(), nodes.toArray(TreeNode[]::new));
   }
 
   private TreeUpdates(final long[] gIndices, final TreeNode[] nodes) {
-    this(gIndices, nodes, 0, gIndices.length, 1, getDepthAndValidate(gIndices));
-    checkArgument(
-        gIndices.length == nodes.length,
-        "%s generalized indices for %s nodes",
-        gIndices.length,
-        nodes.length);
+    this(gIndices, nodes, 0, gIndices.length, 1, getDepthAndValidate(gIndices, nodes.length));
   }
 
   private TreeUpdates(
@@ -112,12 +107,6 @@ public class TreeUpdates {
     this.to = to;
     this.prefix = prefix;
     this.heightFromLeaf = heightFromLeaf;
-  }
-
-  private static long[] toLongArray(final List<Long> values) {
-    return values instanceof LongList longList
-        ? longList.toLongArray()
-        : values.stream().mapToLong(Long::longValue).toArray();
   }
 
   /**
@@ -166,7 +155,12 @@ public class TreeUpdates {
     return nodes[from + Objects.checkIndex(index, size())];
   }
 
-  private static int getDepthAndValidate(final long[] gIndices) {
+  private static int getDepthAndValidate(final long[] gIndices, final int nodeCount) {
+    checkArgument(
+        gIndices.length == nodeCount,
+        "%s generalized indices for %s nodes",
+        gIndices.length,
+        nodeCount);
     if (gIndices.length == 0) {
       return 0;
     }

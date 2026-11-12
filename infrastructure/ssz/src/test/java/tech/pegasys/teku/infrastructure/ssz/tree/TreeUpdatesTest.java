@@ -258,24 +258,8 @@ public class TreeUpdatesTest {
   }
 
   @Test
-  public void boxedAndPrimitiveIndexListsShouldGiveTheSameUpdates() {
-    final List<TreeNode> nodes = List.of(newTestLeaf(1), newTestLeaf(2));
-    final TreeUpdates fromBoxed = new TreeUpdates(List.of(4L, 6L), nodes);
-    final TreeUpdates fromPrimitive = new TreeUpdates(LongArrayList.of(4L, 6L), nodes);
-
-    for (final TreeUpdates updates : List.of(fromBoxed, fromPrimitive)) {
-      assertThat(updates.size()).isEqualTo(2);
-      final Pair<TreeUpdates, TreeUpdates> split = updates.splitAtPivot();
-      assertThat(split.getLeft().getGIndex(0)).isEqualTo(4);
-      assertThat(split.getLeft().getNode(0)).isEqualTo(newTestLeaf(1));
-      assertThat(split.getRight().getGIndex(0)).isEqualTo(6);
-      assertThat(split.getRight().getNode(0)).isEqualTo(newTestLeaf(2));
-    }
-  }
-
-  @Test
   public void differentNumbersOfIndicesAndNodesShouldBeRejected() {
-    assertThatThrownBy(() -> new TreeUpdates(List.of(4L, 5L), List.of(newTestLeaf(1))))
+    assertThatThrownBy(() -> new TreeUpdates(LongArrayList.of(4L, 5L), List.of(newTestLeaf(1))))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
