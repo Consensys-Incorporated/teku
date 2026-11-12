@@ -19,13 +19,11 @@ import tech.pegasys.teku.infrastructure.ssz.SszData;
 public record SszBooleanField<E extends SszData>(
     SszContainerSchema<? extends E> schema, String name, int offset) implements SszFixedField<E> {
 
-  public SszBooleanField(
-      final SszContainerSchema<? extends E> schema, final String name, final int offset) {
+  // The parameters of a compact constructor are implicit and cannot be declared final
+  @SuppressWarnings("MethodInputParametersMustBeFinal")
+  public SszBooleanField {
     SszFixedFieldLayout.checkOffset(
         schema, name, offset, SszFixedFieldLayout.booleanOffset(schema, name));
-    this.schema = schema;
-    this.name = name;
-    this.offset = offset;
   }
 
   public SszBooleanField(final SszContainerSchema<? extends E> schema, final String name) {

@@ -23,17 +23,11 @@ public record SszByteVectorField<E extends SszData>(
     SszContainerSchema<? extends E> schema, String name, int offset, int length)
     implements SszFixedField<E> {
 
-  public SszByteVectorField(
-      final SszContainerSchema<? extends E> schema,
-      final String name,
-      final int offset,
-      final int length) {
+  // The parameters of a compact constructor are implicit and cannot be declared final
+  @SuppressWarnings("MethodInputParametersMustBeFinal")
+  public SszByteVectorField {
     SszFixedFieldLayout.checkOffset(
         schema, name, offset, SszFixedFieldLayout.byteVectorOffset(schema, name, length));
-    this.schema = schema;
-    this.name = name;
-    this.offset = offset;
-    this.length = length;
   }
 
   public SszByteVectorField(

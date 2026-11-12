@@ -24,13 +24,11 @@ import tech.pegasys.teku.infrastructure.ssz.SszData;
 public record SszUInt64Field<E extends SszData>(
     SszContainerSchema<? extends E> schema, String name, int offset) implements SszFixedField<E> {
 
-  public SszUInt64Field(
-      final SszContainerSchema<? extends E> schema, final String name, final int offset) {
+  // The parameters of a compact constructor are implicit and cannot be declared final
+  @SuppressWarnings("MethodInputParametersMustBeFinal")
+  public SszUInt64Field {
     SszFixedFieldLayout.checkOffset(
         schema, name, offset, SszFixedFieldLayout.uint64Offset(schema, name));
-    this.schema = schema;
-    this.name = name;
-    this.offset = offset;
   }
 
   public SszUInt64Field(final SszContainerSchema<? extends E> schema, final String name) {
