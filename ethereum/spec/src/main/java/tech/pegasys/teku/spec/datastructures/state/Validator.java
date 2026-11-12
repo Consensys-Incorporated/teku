@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.spec.datastructures.state;
 
+import com.google.common.annotations.VisibleForTesting;
 import java.nio.ByteOrder;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -126,6 +127,12 @@ public class Validator
     super(type, IntCache.noop());
     this.packed = packed;
     this.packedOffset = packedOffset;
+  }
+
+  /** True for a view that reads its fields from the packed bytes of the registry. */
+  @VisibleForTesting
+  boolean isPackedView() {
+    return packed != null;
   }
 
   @Override
