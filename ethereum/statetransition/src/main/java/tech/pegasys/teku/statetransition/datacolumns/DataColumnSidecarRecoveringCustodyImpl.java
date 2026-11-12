@@ -211,11 +211,22 @@ public class DataColumnSidecarRecoveringCustodyImpl implements DataColumnSidecar
       if (!isSuperNode.get()) {
         LOG.debug(
             "Number of required custody groups reached maximum. Activating super node reconstruction.");
+        storeColumnsReceivedBeforeSuperNode();
         isSuperNode.set(true);
       }
       return false;
     }
     return true;
+  }
+
+  // Tasks may hold columns sampled while custody was smaller, which weren't stored. Custody now
+  // covers every group, so they're stored here and tasks hold only stored columns from now on.
+  private void storeColumnsReceivedBeforeSuperNode() {
+    recoveryTasks.values().stream()
+        .flatMap(task -> task.existingSidecars().values().stream())
+        .forEach(
+            sidecar ->
+                delegate.onNewValidatedDataColumnSidecar(sidecar, RECOVERED).finishError(LOG));
   }
 
   protected void maybeStartRecovery(final RecoveryTask task) {
@@ -307,19 +318,20 @@ public class DataColumnSidecarRecoveringCustodyImpl implements DataColumnSidecar
     final Set<UInt64> existingSidecarsIndices =
         sidecars.stream().map(DataColumnSidecar::getIndex).collect(Collectors.toUnmodifiableSet());
     totalDataAvailabilityReconstructedColumns.inc(recoveredSidecars.size() - sidecars.size());
-    recoveredSidecars.stream()
-        .filter(sidecar -> !existingSidecarsIndices.contains(sidecar.getIndex()))
-        .forEach(
-            dataColumnSidecar -> {
-              delegate
-                  .onNewValidatedDataColumnSidecar(dataColumnSidecar, RECOVERED)
-                  .finishError(LOG);
-              if (inSync) {
-                dataColumnSidecarPublisher.accept(dataColumnSidecar, RECOVERED);
-              }
-              recoveredColumnSidecarSubscribers.forEach(
-                  subscriber -> subscriber.onNewValidSidecar(dataColumnSidecar, RECOVERED));
-            });
+    recoveredSidecars.forEach(
+        dataColumnSidecar -> {
+          // A received column isn't necessarily stored, e.g. one sampled before custody grew to
+          // it, so custody gets every column and skips the ones it already stored
+          delegate.onNewValidatedDataColumnSidecar(dataColumnSidecar, RECOVERED).finishError(LOG);
+          if (existingSidecarsIndices.contains(dataColumnSidecar.getIndex())) {
+            return;
+          }
+          if (inSync) {
+            dataColumnSidecarPublisher.accept(dataColumnSidecar, RECOVERED);
+          }
+          recoveredColumnSidecarSubscribers.forEach(
+              subscriber -> subscriber.onNewValidSidecar(dataColumnSidecar, RECOVERED));
+        });
     completedSlots.add(sidecars.stream().findFirst().orElseThrow().getSlotAndBlockRoot());
     recoveryTask.existingSidecars.clear();
     LOG.debug(
