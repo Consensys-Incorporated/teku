@@ -70,15 +70,6 @@ public abstract class AbstractSszComposite<SszChildT extends SszData>
     this(schema, backingNode, null, cache);
   }
 
-  /**
-   * Creates an instance without a backing node: it is created by {@link #createLazyBackingNode()}
-   * when it is first asked for.
-   */
-  protected AbstractSszComposite(
-      final SszCompositeSchema<?> schema, final IntCache<SszChildT> cache) {
-    this(schema, null, null, cache);
-  }
-
   private AbstractSszComposite(
       final SszCompositeSchema<?> schema,
       final TreeNode backingNode,
@@ -156,8 +147,8 @@ public abstract class AbstractSszComposite<SszChildT extends SszData>
   }
 
   /**
-   * Creates the backing node of an instance created without one, see {@link
-   * #AbstractSszComposite(SszCompositeSchema, IntCache)}.
+   * Creates the backing node of an instance created with a null backing node and no supplier, when
+   * the node is first asked for.
    */
   protected TreeNode createLazyBackingNode() {
     throw new IllegalStateException("No backing node and no way to create it: " + getSchema());

@@ -40,13 +40,6 @@ public abstract class AbstractSszImmutableContainer extends SszContainerImpl {
     super(schema, backingNode);
   }
 
-  /** A container whose backing node is created by {@link #createLazyBackingNode()} on demand. */
-  protected AbstractSszImmutableContainer(
-      final SszContainerSchema<? extends AbstractSszImmutableContainer> schema,
-      final IntCache<SszData> cache) {
-    super(schema, cache);
-  }
-
   protected AbstractSszImmutableContainer(
       final SszContainerSchema<? extends AbstractSszImmutableContainer> schema,
       final SszData... memberValues) {

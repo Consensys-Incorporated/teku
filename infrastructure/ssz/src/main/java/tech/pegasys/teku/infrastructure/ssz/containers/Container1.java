@@ -14,7 +14,6 @@
 package tech.pegasys.teku.infrastructure.ssz.containers;
 
 import tech.pegasys.teku.infrastructure.ssz.SszData;
-import tech.pegasys.teku.infrastructure.ssz.cache.IntCache;
 import tech.pegasys.teku.infrastructure.ssz.impl.AbstractSszImmutableContainer;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 
@@ -28,11 +27,6 @@ public class Container1<C extends Container1<C, V0>, V0 extends SszData>
 
   protected Container1(final ContainerSchema1<C, V0> schema, final TreeNode backingNode) {
     super(schema, backingNode);
-  }
-
-  /** A container whose backing node is created by {@code createLazyBackingNode()} on demand. */
-  protected Container1(final ContainerSchema1<C, V0> schema, final IntCache<SszData> cache) {
-    super(schema, cache);
   }
 
   protected Container1(final ContainerSchema1<C, V0> schema, final V0 arg0) {

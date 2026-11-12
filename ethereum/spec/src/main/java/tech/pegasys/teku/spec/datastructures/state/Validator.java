@@ -19,6 +19,7 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.bytes.Bytes48;
 import tech.pegasys.teku.bls.BLSPublicKey;
+import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.cache.IntCache;
 import tech.pegasys.teku.infrastructure.ssz.containers.Container8;
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema8;
@@ -123,10 +124,17 @@ public class Validator
   }
 
   private Validator(final ValidatorSchema type, final Bytes packed, final int packedOffset) {
-    // No child views are cached: the getters read the bytes
-    super(type, IntCache.noop());
+    // Set before the super constructor runs, which asks createCache() for the cache of child views
     this.packed = packed;
     this.packedOffset = packedOffset;
+    // No backing node: createLazyBackingNode() creates it when it is asked for
+    super(type, (TreeNode) null);
+  }
+
+  /** The getters of a view over packed bytes read the bytes, so it caches no child views. */
+  @Override
+  protected IntCache<SszData> createCache() {
+    return packed != null ? IntCache.noop() : super.createCache();
   }
 
   /** True for a view that reads its fields from the packed bytes of the registry. */
