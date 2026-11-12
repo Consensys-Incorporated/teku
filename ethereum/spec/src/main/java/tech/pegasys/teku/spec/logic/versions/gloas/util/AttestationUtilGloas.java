@@ -90,7 +90,14 @@ public class AttestationUtilGloas extends AttestationUtilElectra {
     // Verify aggregate signature
     final List<BLSPublicKey> pubKeys =
         indices.stream()
-            .map(index -> state.getValidators().get(index.intValue()).getPublicKey())
+            // Through the pubkey cache: a view of the registry does not keep its decoded key
+            .map(
+                index ->
+                    beaconStateAccessors
+                        .getValidatorPubKey(state, index)
+                        .orElseThrow(
+                            () ->
+                                new IndexOutOfBoundsException("Invalid validator index " + index)))
             .toList();
     final Bytes32 domain =
         beaconStateAccessors.getDomain(

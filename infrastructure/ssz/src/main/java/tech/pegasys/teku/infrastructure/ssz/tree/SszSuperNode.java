@@ -59,6 +59,11 @@ public class SszSuperNode implements TreeNode, LeafDataNode {
     checkArgument(getElementsCount() <= getMaxElements());
   }
 
+  /** Depth of the packed subtree: the node holds up to {@code 2^depth} elements. */
+  public int getDepth() {
+    return depth;
+  }
+
   private int getMaxElements() {
     return 1 << depth;
   }
