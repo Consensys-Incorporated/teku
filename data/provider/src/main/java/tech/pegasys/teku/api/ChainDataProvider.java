@@ -853,15 +853,14 @@ public class ChainDataProvider {
             stateAndMetaData.map(
                 state -> {
                   final UInt64 slot = maybeSlot.orElse(state.getSlot());
-                  if (spec.atSlot(slot).getMilestone().isLessThan(SpecMilestone.GLOAS)) {
-                    throw new BadRequestException(
-                        String.format(
-                            "Slot %s is prior to GLOAS and has no payload timeliness committee.",
-                            slot));
-                  }
                   return new StatePtcData(
                       slot,
-                      spec.getPtc(state, slot).intStream().mapToObj(UInt64::valueOf).toList());
+                      spec.atSlot(state.getSlot())
+                          .beaconStateAccessors()
+                          .getPtc(state, slot)
+                          .intStream()
+                          .mapToObj(UInt64::valueOf)
+                          .toList());
                 }));
   }
 

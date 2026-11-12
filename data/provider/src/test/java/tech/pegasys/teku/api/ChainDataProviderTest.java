@@ -1131,8 +1131,8 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
                 ptcProvider(gloasSpec)
                     .getStatePtc(
                         Optional.of(gloasStateAndMetaData(state)), Optional.of(UInt64.valueOf(7))))
-        .isInstanceOf(BadRequestException.class)
-        .hasMessageContaining("prior to GLOAS");
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("before the Gloas fork epoch");
   }
 
   @Test
