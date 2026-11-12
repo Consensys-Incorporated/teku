@@ -1762,17 +1762,15 @@ class ValidatorApiHandlerTest {
   }
 
   @Test
-  public void getPtcDuties_shouldFailForGloasForkEpochBeforeTheFork() {
+  public void getPtcDuties_shouldReturnEmptyForGloasForkEpochBeforeTheFork() {
     setUp(TestSpecFactory.createMinimalWithGloasForkEpoch(EPOCH));
     when(chainDataClient.getCurrentEpoch()).thenReturn(PREVIOUS_EPOCH);
 
     final SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> result =
         validatorApiHandler.getPayloadTimelinessCommitteeDuties(EPOCH, IntList.of(3, 8));
 
-    assertThat(result).isCompletedExceptionally();
-    assertThatThrownBy(result::get)
-        .hasRootCauseInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("not available before the fork");
+    // not yet available (503 over REST), so validator clients quietly retry
+    assertThat(assertCompletedSuccessfully(result)).isEmpty();
     verify(chainDataClient, never()).getStateAtSlotExact(any());
   }
 

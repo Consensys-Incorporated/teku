@@ -394,11 +394,12 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
     // updated at the end of the previous epoch, so it is only known from the upgraded state
     final boolean isGloasForkEpoch = spec.isMilestoneActivationEpoch(SpecMilestone.GLOAS, epoch);
     if (isGloasForkEpoch && combinedChainDataClient.getCurrentEpoch().isLessThan(epoch)) {
-      return SafeFuture.failedFuture(
-          new IllegalArgumentException(
-              String.format(
-                  "Payload Timeliness Committee duties for the Gloas fork epoch %s are not available before the fork.",
-                  epoch)));
+      // Not available yet rather than invalid: a validator client asks at the first slot of the
+      // fork, which can reach us just before our own clock does, and should quietly retry
+      LOG.debug(
+          "Payload Timeliness Committee duties for the Gloas fork epoch {} are not available before the fork",
+          epoch);
+      return SafeFuture.completedFuture(Optional.empty());
     }
     final UInt64 slot =
         spec.computeStartSlotAtEpoch(isGloasForkEpoch ? epoch : epoch.minusMinZero(1));
