@@ -350,6 +350,36 @@ public class LightClientServerServiceTest {
   }
 
   @TestTemplate
+  public void onBlockImported_shouldStorePendingBootstrapOnceMissingBlockArrives() {
+    final Chain chain = generateChain();
+    final LightClientUpdateChannel channel =
+        mock(LightClientUpdateChannel.class, invocation -> SafeFuture.COMPLETE);
+    final LightClientServerService bootstrapService =
+        new LightClientServerService(
+            spec,
+            new LightClientUpdateStore(spec, channel),
+            this::lookUpBlock,
+            this::lookUpState,
+            CANONICAL,
+            asyncRunner,
+            timeProvider);
+    final SignedBlockAndState anchor = chain.attested();
+    blocksByRoot.remove(anchor.getRoot());
+
+    bootstrapService.onNewFinalizedCheckpoint(checkpointAt(anchor), false);
+    bootstrapService.onBlockImported(chain.signature().getBlock(), false);
+    verify(channel, never()).onNewLightClientBootstrap(any());
+
+    blocksByRoot.put(anchor.getRoot(), anchor.getBlock());
+    bootstrapService.onBlockImported(chain.signature().getBlock(), false);
+
+    verify(channel)
+        .onNewLightClientBootstrap(
+            spec.getLightClientUtilRequired(anchor.getSlot())
+                .createLightClientBootstrap(anchor.getState(), anchor.getBlock()));
+  }
+
+  @TestTemplate
   public void onNewFinalizedCheckpoint_shouldSkipBootstrapWhenStateIsNotBlockPostState() {
     final Chain chain = generateChain();
     final LightClientUpdateChannel channel =

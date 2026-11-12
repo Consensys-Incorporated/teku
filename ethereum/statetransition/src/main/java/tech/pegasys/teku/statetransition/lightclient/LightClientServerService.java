@@ -171,6 +171,7 @@ public class LightClientServerService
       return;
     }
 
+    pendingBootstrap.getAndSet(Optional.empty()).ifPresent(this::retryPendingBootstrap);
     captureBoundaryBootstraps(block);
 
     final Optional<SyncAggregate> maybeSyncAggregate =
