@@ -40,6 +40,11 @@ public class SszContainerImpl extends AbstractSszComposite<SszData> implements S
     super(type, backingNode, cache);
   }
 
+  /** A container whose backing node is created by {@link #createLazyBackingNode()} on demand. */
+  protected SszContainerImpl(final SszCompositeSchema<?> type, final IntCache<SszData> cache) {
+    super(type, cache);
+  }
+
   @Override
   protected SszData getImpl(final int index) {
     SszCompositeSchema<?> type = this.getSchema();

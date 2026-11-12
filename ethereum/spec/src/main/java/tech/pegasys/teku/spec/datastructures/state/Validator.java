@@ -13,15 +13,21 @@
 
 package tech.pegasys.teku.spec.datastructures.state;
 
+import java.nio.ByteOrder;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.bytes.Bytes48;
 import tech.pegasys.teku.bls.BLSPublicKey;
+import tech.pegasys.teku.infrastructure.ssz.cache.IntCache;
 import tech.pegasys.teku.infrastructure.ssz.containers.Container8;
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema8;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBit;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBytes32;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszPackedViewSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszPrimitiveSchemas;
+import tech.pegasys.teku.infrastructure.ssz.tree.SszNodeTemplate;
+import tech.pegasys.teku.infrastructure.ssz.tree.SszSuperNode;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -41,7 +47,12 @@ public class Validator
         SszUInt64,
         SszUInt64> {
 
-  public static class ValidatorSchema
+  /**
+   * One instance, {@link #SSZ_SCHEMA}, for every fork: the getters of a {@link Validator} read from
+   * a supernode's bytes use its field offsets and its node template. A fork that changes the
+   * validator needs its own schema and view class.
+   */
+  public static final class ValidatorSchema
       extends ContainerSchema8<
           Validator,
           SszPublicKey,
@@ -51,9 +62,10 @@ public class Validator
           SszUInt64,
           SszUInt64,
           SszUInt64,
-          SszUInt64> {
+          SszUInt64>
+      implements SszPackedViewSchema<Validator> {
 
-    public ValidatorSchema() {
+    private ValidatorSchema() {
       super(
           "Validator",
           namedSchema("pubkey", SszPublicKeySchema.INSTANCE),
@@ -70,12 +82,70 @@ public class Validator
     public Validator createFromBackingNode(final TreeNode node) {
       return new Validator(this, node);
     }
+
+    @Override
+    public Validator createFromPackedBytes(final Bytes packed, final int offset) {
+      return new Validator(this, packed, offset);
+    }
   }
 
   public static final ValidatorSchema SSZ_SCHEMA = new ValidatorSchema();
 
+  // The byte offsets of the fields in a serialized validator, read by the views created from the
+  // packed bytes of the registry
+  private static final int PUBKEY_OFFSET = fieldOffset("pubkey");
+  private static final int WITHDRAWAL_CREDENTIALS_OFFSET = fieldOffset("withdrawal_credentials");
+  private static final int EFFECTIVE_BALANCE_OFFSET = fieldOffset("effective_balance");
+  private static final int SLASHED_OFFSET = fieldOffset("slashed");
+  private static final int ACTIVATION_ELIGIBILITY_EPOCH_OFFSET =
+      fieldOffset("activation_eligibility_epoch");
+  private static final int ACTIVATION_EPOCH_OFFSET = fieldOffset("activation_epoch");
+  private static final int EXIT_EPOCH_OFFSET = fieldOffset("exit_epoch");
+  private static final int WITHDRAWABLE_EPOCH_OFFSET = fieldOffset("withdrawable_epoch");
+
+  private static final int SSZ_SIZE = SSZ_SCHEMA.getSszFixedPartSize();
+  private static final SszNodeTemplate NODE_TEMPLATE = SszNodeTemplate.createFromType(SSZ_SCHEMA);
+
+  // Set on a view created from the content of a supernode of the registry: the fields are read
+  // from these bytes and the backing node is only created when it is asked for
+  private final Bytes packed;
+  private final int packedOffset;
+
   private Validator(final ValidatorSchema type, final TreeNode backingNode) {
     super(type, backingNode);
+    this.packed = null;
+    this.packedOffset = 0;
+  }
+
+  private Validator(final ValidatorSchema type, final Bytes packed, final int packedOffset) {
+    // No child views are cached: the getters read the bytes
+    super(type, IntCache.noop());
+    this.packed = packed;
+    this.packedOffset = packedOffset;
+  }
+
+  @Override
+  protected TreeNode createLazyBackingNode() {
+    return new SszSuperNode(0, NODE_TEMPLATE, packed.slice(packedOffset, SSZ_SIZE));
+  }
+
+  // The sum of the fixed sizes of the fields before it
+  private static int fieldOffset(final String fieldName) {
+    final int fieldIndex = SSZ_SCHEMA.getFieldIndex(fieldName);
+    int offset = 0;
+    for (int i = 0; i < fieldIndex; i++) {
+      offset += SSZ_SCHEMA.getChildSchema(i).getSszFixedPartSize();
+    }
+    return offset;
+  }
+
+  private UInt64 packedUInt64(final int fieldOffset) {
+    return UInt64.fromLongBits(packed.getLong(packedOffset + fieldOffset, ByteOrder.LITTLE_ENDIAN));
+  }
+
+  // Copies, so a value that outlives the view never keeps the supernode's bytes alive
+  private byte[] packedBytes(final int fieldOffset, final int length) {
+    return packed.slice(packedOffset + fieldOffset, length).toArray();
   }
 
   public Validator(
@@ -97,6 +167,8 @@ public class Validator
         SszUInt64.of(activationEpoch),
         SszUInt64.of(exitEpoch),
         SszUInt64.of(withdrawableEpoch));
+    this.packed = null;
+    this.packedOffset = 0;
   }
 
   public Validator(
@@ -118,6 +190,8 @@ public class Validator
         SszUInt64.of(activationEpoch),
         SszUInt64.of(exitEpoch),
         SszUInt64.of(withdrawableEpoch));
+    this.packed = null;
+    this.packedOffset = 0;
   }
 
   /**
@@ -129,39 +203,45 @@ public class Validator
    * the {@link BeaconState} instance and validator index is available
    */
   public Bytes48 getPubkeyBytes() {
-    return getField0().getBytes();
+    return packed != null
+        ? Bytes48.wrap(packedBytes(PUBKEY_OFFSET, Bytes48.SIZE))
+        : getField0().getBytes();
   }
 
   public BLSPublicKey getPublicKey() {
-    return getField0().getBLSPublicKey();
+    return packed != null
+        ? BLSPublicKey.fromBytesCompressed(getPubkeyBytes())
+        : getField0().getBLSPublicKey();
   }
 
   public Bytes32 getWithdrawalCredentials() {
-    return getField1().get();
+    return packed != null
+        ? Bytes32.wrap(packedBytes(WITHDRAWAL_CREDENTIALS_OFFSET, Bytes32.SIZE))
+        : getField1().get();
   }
 
   public UInt64 getEffectiveBalance() {
-    return getField2().get();
+    return packed != null ? packedUInt64(EFFECTIVE_BALANCE_OFFSET) : getField2().get();
   }
 
   public boolean isSlashed() {
-    return getField3().get();
+    return packed != null ? packed.get(packedOffset + SLASHED_OFFSET) != 0 : getField3().get();
   }
 
   public UInt64 getActivationEligibilityEpoch() {
-    return getField4().get();
+    return packed != null ? packedUInt64(ACTIVATION_ELIGIBILITY_EPOCH_OFFSET) : getField4().get();
   }
 
   public UInt64 getActivationEpoch() {
-    return getField5().get();
+    return packed != null ? packedUInt64(ACTIVATION_EPOCH_OFFSET) : getField5().get();
   }
 
   public UInt64 getExitEpoch() {
-    return getField6().get();
+    return packed != null ? packedUInt64(EXIT_EPOCH_OFFSET) : getField6().get();
   }
 
   public UInt64 getWithdrawableEpoch() {
-    return getField7().get();
+    return packed != null ? packedUInt64(WITHDRAWABLE_EPOCH_OFFSET) : getField7().get();
   }
 
   public Validator withEffectiveBalance(final UInt64 effectiveBalance) {
