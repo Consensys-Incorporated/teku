@@ -43,7 +43,9 @@ public enum EventType {
   execution_payload_bid,
   payload_attestation_message,
   proposer_preferences,
-  fast_confirmation;
+  fast_confirmation,
+  light_client_finality_update,
+  light_client_optimistic_update;
 
   private static final Set<String> TOPIC_NAMES =
       Arrays.stream(values()).map(EventType::name).collect(Collectors.toUnmodifiableSet());
