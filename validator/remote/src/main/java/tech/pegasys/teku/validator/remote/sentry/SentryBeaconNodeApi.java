@@ -181,7 +181,8 @@ public class SentryBeaconNodeApi implements BeaconNodeApi {
             beaconNodeReadinessManager,
             dutiesProviderPrimaryValidatorApiChannel,
             dutiesProviderFailoverValidatorApiChannel,
-            createOkHttpClientForStreamFromClient(sentryNodesHttpClient),
+            createOkHttpClientForStreamFromClient(
+                sentryNodesHttpClient, validatorConfig.getEventStreamMaxEventSizeMegabytes()),
             ValidatorLogger.VALIDATOR_LOGGER,
             new ForkAwareTimeBasedEventAdapter(
                 new GenesisDataProvider(asyncRunner, dutiesProviderValidatorApi),
