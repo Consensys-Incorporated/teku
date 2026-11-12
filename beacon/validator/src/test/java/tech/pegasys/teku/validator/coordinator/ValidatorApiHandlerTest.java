@@ -595,7 +595,26 @@ class ValidatorApiHandlerTest {
     final BeaconState blockSlotState = dataStructureUtil.randomBeaconState(newSlot);
     mockRequiredMethodsForBlockProduction(blockSlotState, newSlot);
     final Bytes32 parentRoot = spec.getBlockRootAtSlot(blockSlotState, newSlot.minus(1));
-    when(chainDataClient.isOptimisticBlock(parentRoot)).thenReturn(true);
+    when(chainDataClient.isOptimisticNode(ForkChoiceNode.createBase(parentRoot))).thenReturn(true);
+
+    final SafeFuture<Optional<BlockContainerAndMetaData>> result =
+        validatorApiHandler.createUnsignedBlock(
+            newSlot, dataStructureUtil.randomSignature(), Optional.empty(), Optional.of(ONE));
+
+    assertThat(result).isCompletedExceptionally();
+    assertThatThrownBy(result::get).hasRootCauseInstanceOf(NodeSyncingException.class);
+    verifyNoInteractions(blockFactory);
+  }
+
+  @Test
+  public void createUnsignedBlock_shouldFailWhenParentPayloadIsOptimistic() {
+    final UInt64 newSlot = UInt64.valueOf(25);
+    final BeaconState blockSlotState = dataStructureUtil.randomBeaconState(newSlot);
+    final Bytes32 parentRoot =
+        mockRequiredMethodsForBlockProduction(
+            chainHead, blockSlotState, newSlot, PAYLOAD_STATUS_FULL);
+    // Only the payload of the FULL variant being built on is optimistic, not the parent block
+    when(chainDataClient.isOptimisticNode(ForkChoiceNode.createFull(parentRoot))).thenReturn(true);
 
     final SafeFuture<Optional<BlockContainerAndMetaData>> result =
         validatorApiHandler.createUnsignedBlock(
@@ -1598,7 +1617,7 @@ class ValidatorApiHandlerTest {
     final BeaconBlockAndState blockAndState = dataStructureUtil.randomBlockAndState(newSlot);
     when(chainDataClient.getBlockAndStateInEffectAtSlot(eq(newSlot)))
         .thenReturn(SafeFuture.completedFuture(Optional.of(blockAndState)));
-    when(chainDataClient.isOptimisticBlock(blockAndState.getParentRoot())).thenReturn(true);
+    when(chainDataClient.isOptimisticParentNode(blockAndState)).thenReturn(true);
 
     final SafeFuture<Optional<ExecutionPayloadEnvelope>> result =
         validatorApiHandler.createUnsignedExecutionPayload(newSlot, blockAndState.getRoot());
