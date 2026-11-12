@@ -400,6 +400,15 @@ public class Spec {
     return forkSchedule.getSupportedMilestones().contains(milestone);
   }
 
+  /**
+   * Returns true if the given epoch is the first epoch in which the milestone (or a later one) is
+   * active, including the genesis epoch when the milestone is active from genesis.
+   */
+  public boolean isMilestoneActivationEpoch(final SpecMilestone milestone, final UInt64 epoch) {
+    return atEpoch(epoch).getMilestone().isGreaterThanOrEqualTo(milestone)
+        && (epoch.isZero() || atEpoch(epoch.minus(1)).getMilestone().isLessThan(milestone));
+  }
+
   public Fork fork(final UInt64 epoch) {
     return forkSchedule.getFork(epoch);
   }
