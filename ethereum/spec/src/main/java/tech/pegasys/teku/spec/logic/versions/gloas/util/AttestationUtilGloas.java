@@ -87,10 +87,10 @@ public class AttestationUtilGloas extends AttestationUtilElectra {
     if (indices.isEmpty() || !Comparators.isInOrder(indices, UInt64::compareTo)) {
       return false;
     }
-    // Verify aggregate signature
+    // Verify aggregate signature, taking the public keys from the pubkey cache, which keeps them
+    // decoded between calls
     final List<BLSPublicKey> pubKeys =
         indices.stream()
-            // Through the pubkey cache: a view of the registry does not keep its decoded key
             .map(
                 index ->
                     beaconStateAccessors
