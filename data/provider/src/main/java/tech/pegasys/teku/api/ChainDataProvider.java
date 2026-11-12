@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.IntPredicate;
 import java.util.function.Predicate;
@@ -202,6 +203,16 @@ public class ChainDataProvider {
 
   public Optional<LightClientOptimisticUpdate> getLatestLightClientOptimisticUpdate() {
     return lightClientUpdateStore.getLatestOptimisticUpdate();
+  }
+
+  public void subscribeToNewLightClientFinalityUpdates(
+      final Consumer<LightClientFinalityUpdate> subscriber) {
+    lightClientUpdateStore.subscribeToNewFinalityUpdates(subscriber);
+  }
+
+  public void subscribeToNewLightClientOptimisticUpdates(
+      final Consumer<LightClientOptimisticUpdate> subscriber) {
+    lightClientUpdateStore.subscribeToNewOptimisticUpdates(subscriber);
   }
 
   public UInt64 getCurrentEpoch(final BeaconState state) {

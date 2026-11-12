@@ -22,6 +22,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiPredicate;
 import org.apache.tuweni.bytes.Bytes32;
@@ -427,6 +428,49 @@ public class LightClientUpdateStoreTest {
 
     store.addFinalityUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
     assertThat(store.getLatestFinalityUpdate()).contains(newer);
+  }
+
+  @TestTemplate
+  public void addFinalityUpdate_shouldNotifySubscribersOnlyWhenLatestChanges() {
+    final List<LightClientFinalityUpdate> notified = new ArrayList<>();
+    store.subscribeToNewFinalityUpdates(notified::add);
+    final LightClientFinalityUpdate older =
+        dataStructureUtil.randomLightClientFinalityUpdate(
+            periodOneStartSlot(), periodOneStartSlot());
+    final LightClientFinalityUpdate newer =
+        dataStructureUtil.randomLightClientFinalityUpdate(
+            periodOneStartSlot().increment(), periodOneStartSlot());
+
+    store.addFinalityUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
+    store.addFinalityUpdate(newer, dataStructureUtil.randomBytes32(), CANONICAL);
+    store.addFinalityUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
+    store.addFinalityUpdate(
+        dataStructureUtil.randomLightClientFinalityUpdate(
+            periodOneStartSlot().plus(2), periodOneStartSlot()),
+        dataStructureUtil.randomBytes32(),
+        (slot, root) -> false);
+
+    assertThat(notified).containsExactly(older, newer);
+  }
+
+  @TestTemplate
+  public void addOptimisticUpdate_shouldNotifySubscribersOnlyWhenLatestChanges() {
+    final List<LightClientOptimisticUpdate> notified = new ArrayList<>();
+    store.subscribeToNewOptimisticUpdates(notified::add);
+    final LightClientOptimisticUpdate older =
+        dataStructureUtil.randomLightClientOptimisticUpdate(periodOneStartSlot());
+    final LightClientOptimisticUpdate newer =
+        dataStructureUtil.randomLightClientOptimisticUpdate(periodOneStartSlot().increment());
+
+    store.addOptimisticUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
+    store.addOptimisticUpdate(newer, dataStructureUtil.randomBytes32(), CANONICAL);
+    store.addOptimisticUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
+    store.addOptimisticUpdate(
+        dataStructureUtil.randomLightClientOptimisticUpdate(periodOneStartSlot().plus(2)),
+        dataStructureUtil.randomBytes32(),
+        (slot, root) -> false);
+
+    assertThat(notified).containsExactly(older, newer);
   }
 
   @TestTemplate
