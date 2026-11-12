@@ -68,14 +68,15 @@ public class Validator
     private ValidatorSchema() {
       super(
           "Validator",
-          namedSchema("pubkey", SszPublicKeySchema.INSTANCE),
-          namedSchema("withdrawal_credentials", SszPrimitiveSchemas.BYTES32_SCHEMA),
-          namedSchema("effective_balance", SszPrimitiveSchemas.UINT64_SCHEMA),
-          namedSchema("slashed", SszPrimitiveSchemas.BIT_SCHEMA),
-          namedSchema("activation_eligibility_epoch", SszPrimitiveSchemas.UINT64_SCHEMA),
-          namedSchema("activation_epoch", SszPrimitiveSchemas.UINT64_SCHEMA),
-          namedSchema("exit_epoch", SszPrimitiveSchemas.UINT64_SCHEMA),
-          namedSchema("withdrawable_epoch", SszPrimitiveSchemas.UINT64_SCHEMA));
+          namedSchema(ValidatorFields.PUBKEY, SszPublicKeySchema.INSTANCE),
+          namedSchema(ValidatorFields.WITHDRAWAL_CREDENTIALS, SszPrimitiveSchemas.BYTES32_SCHEMA),
+          namedSchema(ValidatorFields.EFFECTIVE_BALANCE, SszPrimitiveSchemas.UINT64_SCHEMA),
+          namedSchema(ValidatorFields.SLASHED, SszPrimitiveSchemas.BIT_SCHEMA),
+          namedSchema(
+              ValidatorFields.ACTIVATION_ELIGIBILITY_EPOCH, SszPrimitiveSchemas.UINT64_SCHEMA),
+          namedSchema(ValidatorFields.ACTIVATION_EPOCH, SszPrimitiveSchemas.UINT64_SCHEMA),
+          namedSchema(ValidatorFields.EXIT_EPOCH, SszPrimitiveSchemas.UINT64_SCHEMA),
+          namedSchema(ValidatorFields.WITHDRAWABLE_EPOCH, SszPrimitiveSchemas.UINT64_SCHEMA));
     }
 
     @Override
@@ -93,15 +94,18 @@ public class Validator
 
   // The byte offsets of the fields in a serialized validator, read by the views created from the
   // packed bytes of the registry
-  private static final int PUBKEY_OFFSET = fieldOffset("pubkey");
-  private static final int WITHDRAWAL_CREDENTIALS_OFFSET = fieldOffset("withdrawal_credentials");
-  private static final int EFFECTIVE_BALANCE_OFFSET = fieldOffset("effective_balance");
-  private static final int SLASHED_OFFSET = fieldOffset("slashed");
+  private static final int PUBKEY_OFFSET = fieldOffset(ValidatorFields.PUBKEY);
+  private static final int WITHDRAWAL_CREDENTIALS_OFFSET =
+      fieldOffset(ValidatorFields.WITHDRAWAL_CREDENTIALS);
+  private static final int EFFECTIVE_BALANCE_OFFSET =
+      fieldOffset(ValidatorFields.EFFECTIVE_BALANCE);
+  private static final int SLASHED_OFFSET = fieldOffset(ValidatorFields.SLASHED);
   private static final int ACTIVATION_ELIGIBILITY_EPOCH_OFFSET =
-      fieldOffset("activation_eligibility_epoch");
-  private static final int ACTIVATION_EPOCH_OFFSET = fieldOffset("activation_epoch");
-  private static final int EXIT_EPOCH_OFFSET = fieldOffset("exit_epoch");
-  private static final int WITHDRAWABLE_EPOCH_OFFSET = fieldOffset("withdrawable_epoch");
+      fieldOffset(ValidatorFields.ACTIVATION_ELIGIBILITY_EPOCH);
+  private static final int ACTIVATION_EPOCH_OFFSET = fieldOffset(ValidatorFields.ACTIVATION_EPOCH);
+  private static final int EXIT_EPOCH_OFFSET = fieldOffset(ValidatorFields.EXIT_EPOCH);
+  private static final int WITHDRAWABLE_EPOCH_OFFSET =
+      fieldOffset(ValidatorFields.WITHDRAWABLE_EPOCH);
 
   private static final int SSZ_SIZE = SSZ_SCHEMA.getSszFixedPartSize();
   private static final SszNodeTemplate NODE_TEMPLATE = SszNodeTemplate.createFromType(SSZ_SCHEMA);
@@ -130,8 +134,8 @@ public class Validator
   }
 
   // The sum of the fixed sizes of the fields before it
-  private static int fieldOffset(final String fieldName) {
-    final int fieldIndex = SSZ_SCHEMA.getFieldIndex(fieldName);
+  private static int fieldOffset(final ValidatorFields field) {
+    final int fieldIndex = SSZ_SCHEMA.getFieldIndex(field);
     int offset = 0;
     for (int i = 0; i < fieldIndex; i++) {
       offset += SSZ_SCHEMA.getChildSchema(i).getSszFixedPartSize();
