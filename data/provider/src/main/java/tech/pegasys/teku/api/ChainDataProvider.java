@@ -847,7 +847,7 @@ public class ChainDataProvider {
   Optional<ObjectAndMetaData<StatePtcData>> getStatePtc(
       final Optional<StateAndMetaData> maybeStateAndMetadata, final Optional<UInt64> maybeSlot) {
     checkMinimumMilestone(
-        maybeStateAndMetadata, SpecMilestone.GLOAS, "the payload timeliness committee");
+        maybeStateAndMetadata, SpecMilestone.GLOAS, "payload timeliness committee");
     return maybeStateAndMetadata.map(
         stateAndMetaData ->
             stateAndMetaData.map(

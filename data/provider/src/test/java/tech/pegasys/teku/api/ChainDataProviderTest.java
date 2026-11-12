@@ -1072,9 +1072,18 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
     final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
     final BeaconState state =
         new DataStructureUtil(gloasSpec).randomBeaconState(UInt64.valueOf(19));
+    final ChainDataProvider provider =
+        new ChainDataProvider(
+            gloasSpec,
+            recentChainData,
+            combinedChainDataClient,
+            rewardCalculatorMock,
+            mockBlobSidecarReconstructionProvider,
+            mockBlobReconstructionProvider,
+            new LightClientUpdateStore(gloasSpec));
 
     final StatePtcData ptc =
-        ptcProvider(gloasSpec)
+        provider
             .getStatePtc(Optional.of(gloasStateAndMetaData(state)), Optional.empty())
             .orElseThrow()
             .getData();
@@ -1091,7 +1100,15 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
     final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
     final BeaconState state =
         new DataStructureUtil(gloasSpec).randomBeaconState(UInt64.valueOf(stateSlot));
-    final ChainDataProvider provider = ptcProvider(gloasSpec);
+    final ChainDataProvider provider =
+        new ChainDataProvider(
+            gloasSpec,
+            recentChainData,
+            combinedChainDataClient,
+            rewardCalculatorMock,
+            mockBlobSidecarReconstructionProvider,
+            mockBlobReconstructionProvider,
+            new LightClientUpdateStore(gloasSpec));
     final Optional<StateAndMetaData> stateAndMetaData = Optional.of(gloasStateAndMetaData(state));
     final Optional<UInt64> slot = Optional.of(UInt64.valueOf(requestedSlot));
 
@@ -1125,12 +1142,20 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
   public void getStatePtc_shouldRejectPreGloasSlot() {
     final Spec gloasSpec = TestSpecFactory.createMinimalWithGloasForkEpoch(ONE);
     final BeaconState state = new DataStructureUtil(gloasSpec).randomBeaconState(UInt64.valueOf(8));
+    final ChainDataProvider provider =
+        new ChainDataProvider(
+            gloasSpec,
+            recentChainData,
+            combinedChainDataClient,
+            rewardCalculatorMock,
+            mockBlobSidecarReconstructionProvider,
+            mockBlobReconstructionProvider,
+            new LightClientUpdateStore(gloasSpec));
 
     assertThatThrownBy(
             () ->
-                ptcProvider(gloasSpec)
-                    .getStatePtc(
-                        Optional.of(gloasStateAndMetaData(state)), Optional.of(UInt64.valueOf(7))))
+                provider.getStatePtc(
+                    Optional.of(gloasStateAndMetaData(state)), Optional.of(UInt64.valueOf(7))))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("before the Gloas fork epoch");
   }
@@ -1140,27 +1165,34 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
     final StateAndMetaData stateAndMetaData =
         new StateAndMetaData(
             data.randomBeaconState(), spec.getGenesisSpec().getMilestone(), false, true, false);
+    final ChainDataProvider provider =
+        new ChainDataProvider(
+            spec,
+            recentChainData,
+            combinedChainDataClient,
+            rewardCalculatorMock,
+            mockBlobSidecarReconstructionProvider,
+            mockBlobReconstructionProvider,
+            new LightClientUpdateStore(spec));
 
-    assertThatThrownBy(
-            () -> ptcProvider(spec).getStatePtc(Optional.of(stateAndMetaData), Optional.empty()))
+    assertThatThrownBy(() -> provider.getStatePtc(Optional.of(stateAndMetaData), Optional.empty()))
         .isInstanceOf(BadRequestException.class)
         .hasMessageContaining("prior to GLOAS");
   }
 
   @Test
   public void getStatePtc_shouldReturnEmptyWhenStateNotFound() {
-    assertThat(ptcProvider(spec).getStatePtc(Optional.empty(), Optional.empty())).isEmpty();
-  }
+    final ChainDataProvider provider =
+        new ChainDataProvider(
+            spec,
+            recentChainData,
+            combinedChainDataClient,
+            rewardCalculatorMock,
+            mockBlobSidecarReconstructionProvider,
+            mockBlobReconstructionProvider,
+            new LightClientUpdateStore(spec));
 
-  private ChainDataProvider ptcProvider(final Spec providerSpec) {
-    return new ChainDataProvider(
-        providerSpec,
-        recentChainData,
-        combinedChainDataClient,
-        rewardCalculatorMock,
-        mockBlobSidecarReconstructionProvider,
-        mockBlobReconstructionProvider,
-        new LightClientUpdateStore(providerSpec));
+    assertThat(provider.getStatePtc(Optional.empty(), Optional.empty())).isEmpty();
   }
 
   private StateAndMetaData gloasStateAndMetaData(final BeaconState state) {
