@@ -18,11 +18,16 @@ import static tech.pegasys.teku.infrastructure.ssz.SszDataAssert.assertThatSszDa
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.SszMutableList;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
+import tech.pegasys.teku.infrastructure.ssz.tree.BranchNode;
+import tech.pegasys.teku.infrastructure.ssz.tree.LazyBranchNode;
+import tech.pegasys.teku.infrastructure.ssz.tree.SszSuperNode;
+import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecContext;
@@ -42,7 +47,8 @@ class ValidatorPackedViewTest {
   private DataStructureUtil dataStructureUtil;
   private SszListSchema<Validator, ?> registrySchema;
   private List<Validator> validators;
-  // Created from elements, the registry is a tree of element nodes: its views are tree-backed
+  // Created from elements: a progressive registry is then a tree of element nodes, whose views are
+  // tree-backed, while a bounded one is packed in supernodes all the same
   private SszList<Validator> treeRegistry;
   // SSZ deserialization is the path that packs supernodes
   private SszList<Validator> packedRegistry;
@@ -143,6 +149,59 @@ class ValidatorPackedViewTest {
     // a view is created on every access instead of being cached for the life of the list
     assertThat(packedRegistry.get(7)).isNotSameAs(packedRegistry.get(7));
     assertThat(packedRegistry.get(7)).isEqualTo(packedRegistry.get(7));
+  }
+
+  @TestTemplate
+  void readsEveryElementOfAPackedRegistryFromItsPackedBytes(final SpecContext specContext) {
+    // Level 0 of a progressive list, its first element, is a plain node and never a supernode
+    final int firstPacked =
+        specContext.getSpecMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS) ? 1 : 0;
+    for (int i = 0; i < COUNT; i++) {
+      assertThat(packedRegistry.get(i).isPackedView())
+          .describedAs("validator %s", i)
+          .isEqualTo(i >= firstPacked);
+    }
+  }
+
+  @TestTemplate
+  void readsAProgressiveRegistryBuiltFromElementsThroughItsTreeNodes(
+      final SpecContext specContext) {
+    specContext.assumeMilestoneActive(SpecMilestone.GLOAS);
+    for (int i = 0; i < COUNT; i++) {
+      assertThat(treeRegistry.get(i).isPackedView()).describedAs("validator %s", i).isFalse();
+    }
+  }
+
+  @TestTemplate
+  void readingOneValidatorLoadsOnlyItsSupernode() {
+    final AtomicInteger loadedSuperNodes = new AtomicInteger();
+    final SszList<Validator> lazyRegistry =
+        registrySchema.createFromBackingNode(
+            loadedLazily(packedRegistry.getBackingNode(), loadedSuperNodes));
+
+    assertThat(lazyRegistry.get(300)).isEqualTo(validators.get(300));
+    assertThat(loadedSuperNodes).hasValue(1);
+
+    // the same supernode again, then one of another supernode
+    assertThat(lazyRegistry.get(301)).isEqualTo(validators.get(301));
+    assertThat(loadedSuperNodes).hasValue(1);
+    assertThat(lazyRegistry.get(540)).isEqualTo(validators.get(540));
+    assertThat(loadedSuperNodes).hasValue(2);
+  }
+
+  /** A copy of the tree whose branches load their children on demand, counting the supernodes. */
+  private static TreeNode loadedLazily(final TreeNode node, final AtomicInteger loadedSuperNodes) {
+    if (node instanceof BranchNode branch) {
+      return LazyBranchNode.createWithUnknownHash(
+          branch.left().hashTreeRoot(),
+          branch.right().hashTreeRoot(),
+          () -> loadedLazily(branch.left(), loadedSuperNodes),
+          () -> loadedLazily(branch.right(), loadedSuperNodes));
+    }
+    if (node instanceof SszSuperNode) {
+      loadedSuperNodes.incrementAndGet();
+    }
+    return node;
   }
 
   @TestTemplate

@@ -99,6 +99,27 @@ public abstract class AbstractSszProgressiveListSchema<
    */
   private final long maxLength;
 
+  /** A group for each level: level 0 is a plain element node, the levels above cap the depth. */
+  private final SszSuperNodeLayout superNodeLayout =
+      new SszSuperNodeLayout() {
+        @Override
+        public int groupOf(final int elementIndex) {
+          return ProgressiveTreeUtil.levelForIndex(elementIndex);
+        }
+
+        @Override
+        public int groupStart(final int level) {
+          return level == 0
+              ? 0
+              : Math.toIntExact(ProgressiveTreeUtil.cumulativeCapacity(level - 1));
+        }
+
+        @Override
+        public int superNodeDepth(final int level) {
+          return Math.min(ProgressiveTreeUtil.levelDepth(level), getSuperNodeDepth());
+        }
+      };
+
   protected AbstractSszProgressiveListSchema(final SszSchema<ElementDataT> elementSchema) {
     this(elementSchema, SszSchemaHints.none());
   }
@@ -513,6 +534,11 @@ public abstract class AbstractSszProgressiveListSchema<
   }
 
   // ===== Store/Load helpers =====
+
+  @Override
+  public Optional<SszSuperNodeLayout> getSuperNodeLayout() {
+    return getSuperNodeDepth() > 0 ? Optional.of(superNodeLayout) : Optional.empty();
+  }
 
   private int getSuperNodeDepth() {
     if (elementSchema.isPrimitive() || !elementSchema.isFixedSize()) {
