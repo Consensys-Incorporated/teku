@@ -45,6 +45,7 @@ class EventSourceHandler implements BackgroundEventHandler {
   private final Counter invalidEventCounter;
   private final Counter timeoutCounter;
   private final Counter errorCounter;
+  private final Counter sizeLimitCounter;
   private final boolean generateEarlyAttestations;
   private final ValidatorLogger validatorLogger;
   private final String beaconNodeEndpoint;
@@ -106,6 +107,7 @@ class EventSourceHandler implements BackgroundEventHandler {
     disconnectCounter = eventSourceMetrics.labels("disconnect");
     timeoutCounter = eventSourceMetrics.labels("timeout");
     errorCounter = eventSourceMetrics.labels("error");
+    sizeLimitCounter = eventSourceMetrics.labels("size_limit");
     this.generateEarlyAttestations = generateEarlyAttestations;
     this.spec = spec;
     this.validatorLogger = validatorLogger;
@@ -225,13 +227,22 @@ class EventSourceHandler implements BackgroundEventHandler {
 
   @Override
   public void onError(final Throwable t) {
+    final Throwable cause = Throwables.getRootCause(t);
     if (connected) {
       connected = false;
-      warnIfNoHeadEventsWereReceived();
+      if (!(cause instanceof EventStreamSizeLimitException)) {
+        warnIfNoHeadEventsWereReceived();
+      }
     }
-    if (Throwables.getRootCause(t) instanceof SocketTimeoutException) {
+    if (cause instanceof SocketTimeoutException) {
       timeoutCounter.inc();
       LOG.info("Timed out waiting for events from beacon node event stream. Reconnecting.");
+    } else if (cause instanceof EventStreamSizeLimitException sizeLimitException) {
+      sizeLimitCounter.inc();
+      LOG.warn(
+          "Beacon node event stream from {} exceeded the {} MB per-event limit. Reconnecting.",
+          beaconNodeEndpoint,
+          sizeLimitException.getMaxEventSizeMegabytes());
     } else {
       errorCounter.inc();
       validatorLogger.beaconNodeEventStreamConnectionError();

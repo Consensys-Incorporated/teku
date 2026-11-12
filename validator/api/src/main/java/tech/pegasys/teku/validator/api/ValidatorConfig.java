@@ -72,6 +72,7 @@ public class ValidatorConfig {
   public static final UInt64 DEFAULT_BUILDER_REGISTRATION_GAS_LIMIT = UInt64.valueOf(60_000_000);
   public static final boolean DEFAULT_OBOL_DVT_SELECTIONS_ENDPOINT_ENABLED = false;
   public static final boolean DEFAULT_ATTESTATIONS_V2_APIS_ENABLED = false;
+  public static final int DEFAULT_EVENT_STREAM_MAX_EVENT_SIZE_MEGABYTES = 8;
   // Builder default options
   public static final UInt64 DEFAULT_BUILDER_MIN_BID = UInt64.ZERO;
   public static final UInt64 DEFAULT_P2P_BUILDER_MIN_BID = UInt64.ZERO;
@@ -123,6 +124,7 @@ public class ValidatorConfig {
   private final boolean isLocalSlashingProtectionSynchronizedModeEnabled;
   private final boolean dvtSelectionsEndpointEnabled;
   private final boolean attestationsV2ApisEnabled;
+  private final int eventStreamMaxEventSizeMegabytes;
 
   // Builder options
   private final UInt64 builderMinBid;
@@ -173,6 +175,7 @@ public class ValidatorConfig {
       final boolean isLocalSlashingProtectionSynchronizedModeEnabled,
       final boolean dvtSelectionsEndpointEnabled,
       final boolean attestationsV2ApisEnabled,
+      final int eventStreamMaxEventSizeMegabytes,
       final UInt64 builderMinBid,
       final UInt64 builderBoostFactor,
       final UInt64 p2pBuilderMinBid,
@@ -224,6 +227,7 @@ public class ValidatorConfig {
         isLocalSlashingProtectionSynchronizedModeEnabled;
     this.dvtSelectionsEndpointEnabled = dvtSelectionsEndpointEnabled;
     this.attestationsV2ApisEnabled = attestationsV2ApisEnabled;
+    this.eventStreamMaxEventSizeMegabytes = eventStreamMaxEventSizeMegabytes;
     this.builderMinBid = builderMinBid;
     this.builderBoostFactor = builderBoostFactor;
     this.p2pBuilderMinBid = p2pBuilderMinBid;
@@ -412,6 +416,10 @@ public class ValidatorConfig {
     return attestationsV2ApisEnabled;
   }
 
+  public int getEventStreamMaxEventSizeMegabytes() {
+    return eventStreamMaxEventSizeMegabytes;
+  }
+
   public UInt64 getBuilderMinBid() {
     return builderMinBid;
   }
@@ -490,6 +498,7 @@ public class ValidatorConfig {
         DEFAULT_VALIDATOR_IS_LOCAL_SLASHING_PROTECTION_SYNCHRONIZED_ENABLED;
     private boolean dvtSelectionsEndpointEnabled = DEFAULT_OBOL_DVT_SELECTIONS_ENDPOINT_ENABLED;
     private boolean attestationsV2ApisEnabled = DEFAULT_ATTESTATIONS_V2_APIS_ENABLED;
+    private int eventStreamMaxEventSizeMegabytes = DEFAULT_EVENT_STREAM_MAX_EVENT_SIZE_MEGABYTES;
     private UInt64 builderMinBid = DEFAULT_BUILDER_MIN_BID;
     private UInt64 builderBoostFactor = DEFAULT_BUILDER_BOOST_FACTOR;
     private UInt64 p2pBuilderMinBid = DEFAULT_P2P_BUILDER_MIN_BID;
@@ -769,6 +778,15 @@ public class ValidatorConfig {
       return this;
     }
 
+    public Builder eventStreamMaxEventSizeMegabytes(final int eventStreamMaxEventSizeMegabytes) {
+      if (eventStreamMaxEventSizeMegabytes < 0) {
+        throw new InvalidConfigurationException(
+            "--Xvalidator-client-event-stream-max-event-size must be non-negative");
+      }
+      this.eventStreamMaxEventSizeMegabytes = eventStreamMaxEventSizeMegabytes;
+      return this;
+    }
+
     public Builder builderMinBid(final UInt64 builderMinBid) {
       this.builderMinBid = builderMinBid;
       return this;
@@ -845,6 +863,7 @@ public class ValidatorConfig {
           isLocalSlashingProtectionSynchronizedModeEnabled,
           dvtSelectionsEndpointEnabled,
           attestationsV2ApisEnabled,
+          eventStreamMaxEventSizeMegabytes,
           builderMinBid,
           builderBoostFactor,
           p2pBuilderMinBid,
