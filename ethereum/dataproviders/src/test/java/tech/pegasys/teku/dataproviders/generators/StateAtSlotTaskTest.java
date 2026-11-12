@@ -22,9 +22,11 @@ import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThat
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.apache.logging.log4j.Level;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -102,6 +104,56 @@ class StateAtSlotTaskTest {
     final SafeFuture<Optional<BeaconState>> result = task.performTask();
     final BeaconState expectedState = spec.processSlots(blockAndState.getState(), slot);
     assertThatSafeFuture(result).isCompletedWithOptionalContaining(expectedState);
+  }
+
+  @Test
+  void performTask_shouldLogTheTimeOfAnAdvanceAcrossEpochBoundaries() {
+    final Checkpoint checkpoint = chainBuilder.getCurrentCheckpointForEpoch(EPOCH);
+    when(stateProvider.getState(checkpoint.getRoot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(chainBuilder.getStateAtSlot(0))));
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(StateAtSlotTask.class, Level.DEBUG)) {
+      assertThatSafeFuture(createTask(slot, checkpoint.getRoot()).performTask())
+          .isCompletedWithNonEmptyOptional();
+
+      assertThat(logCaptor.getDebugLogs())
+          .singleElement()
+          .asString()
+          .matches(
+              "Advanced the state of block "
+                  + checkpoint.getRoot()
+                  + " from slot 0 to slot "
+                  + slot
+                  + ", 2 epoch transition\\(s\\): \\d+ ms");
+    }
+  }
+
+  @Test
+  void performTask_shouldNotLogAnAdvanceWithinAnEpoch() {
+    final SignedBlockAndState blockAndState = chainBuilder.getBlockAndStateAtSlot(0);
+    when(stateProvider.getState(blockAndState.getRoot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(blockAndState.getState())));
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(StateAtSlotTask.class, Level.DEBUG)) {
+      assertThatSafeFuture(createTask(UInt64.valueOf(5), blockAndState.getRoot()).performTask())
+          .isCompletedWithNonEmptyOptional();
+
+      assertThat(logCaptor.getDebugLogs()).isEmpty();
+    }
+  }
+
+  @Test
+  void performTask_shouldNotLogWhenDebugIsOff() {
+    final Checkpoint checkpoint = chainBuilder.getCurrentCheckpointForEpoch(EPOCH);
+    when(stateProvider.getState(checkpoint.getRoot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(chainBuilder.getStateAtSlot(0))));
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(StateAtSlotTask.class, Level.INFO)) {
+      assertThatSafeFuture(createTask(slot, checkpoint.getRoot()).performTask())
+          .isCompletedWithNonEmptyOptional();
+
+      assertThat(logCaptor.getDebugLogs()).isEmpty();
+    }
   }
 
   @Test
