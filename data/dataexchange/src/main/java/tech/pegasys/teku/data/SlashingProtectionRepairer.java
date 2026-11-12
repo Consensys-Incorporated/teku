@@ -19,21 +19,22 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.api.exceptions.PublicKeyException;
 import tech.pegasys.teku.bls.BLSPublicKey;
-import tech.pegasys.teku.data.slashinginterchange.SigningHistory;
 import tech.pegasys.teku.ethereum.signingrecord.ValidatorSigningRecord;
 import tech.pegasys.teku.infrastructure.io.SyncDataAccessor;
 import tech.pegasys.teku.infrastructure.logging.SubCommandLogger;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 
 public class SlashingProtectionRepairer {
-  private final List<SigningHistory> signingHistoryList = new ArrayList<>();
+  private final Map<BLSPublicKey, ValidatorSigningRecord> validRecords = new LinkedHashMap<>();
   private final Set<String> invalidRecords = new HashSet<>();
   private final SyncDataAccessor syncDataAccessor;
   private final List<String> errorList = new ArrayList<>();
@@ -83,7 +84,7 @@ public class SlashingProtectionRepairer {
         log.display(filePrefix + ": looks valid");
       }
       final ValidatorSigningRecord validatorSigningRecord = maybeRecord.get();
-      signingHistoryList.add(SigningHistory.createSigningHistory(pubkey, validatorSigningRecord));
+      validRecords.put(pubkey, validatorSigningRecord);
 
     } catch (PublicKeyException e) {
       log.display(" --- " + file.getName() + " - invalid public key - ignoring file");
@@ -109,20 +110,22 @@ public class SlashingProtectionRepairer {
             writeValidatorSigningRecord(
                 new ValidatorSigningRecord(Optional.empty(), slot, epoch, epoch), pubkey));
     if (updateAllEnabled) {
-      signingHistoryList.forEach(
-          (historyRecord) -> updateValidatorSigningRecord(slot, epoch, historyRecord));
+      validRecords.forEach(
+          (pubkey, currentRecord) ->
+              updateValidatorSigningRecord(slot, epoch, pubkey, currentRecord));
     }
     displayUpdateErrors();
   }
 
   private void updateValidatorSigningRecord(
-      final UInt64 slot, final UInt64 epoch, final SigningHistory historyRecord) {
-    final ValidatorSigningRecord currentRecord =
-        historyRecord.toValidatorSigningRecord(Optional.empty(), null);
+      final UInt64 slot,
+      final UInt64 epoch,
+      final BLSPublicKey pubkey,
+      final ValidatorSigningRecord currentRecord) {
     final ValidatorSigningRecord updatedRecord =
         updateSigningRecord(slot, epoch, Optional.of(currentRecord));
     if (!currentRecord.equals(updatedRecord)) {
-      writeValidatorSigningRecord(updatedRecord, toDisplayString(historyRecord.pubkey()));
+      writeValidatorSigningRecord(updatedRecord, toDisplayString(pubkey));
     }
   }
 
@@ -153,9 +156,40 @@ public class SlashingProtectionRepairer {
     }
   }
 
+  /**
+   * Finds valid records that were written for a different network.
+   *
+   * <p>Records without a genesis validators root can't be checked and are not returned.
+   *
+   * @param genesisValidatorsRoot the genesis validators root of the network being repaired
+   * @return public keys of records whose genesis validators root differs
+   */
+  public List<String> getPubkeysWithDifferentGenesisValidatorsRoot(
+      final Bytes32 genesisValidatorsRoot) {
+    return validRecords.entrySet().stream()
+        .filter(
+            entry ->
+                entry
+                    .getValue()
+                    .genesisValidatorsRoot()
+                    .map(root -> !root.equals(genesisValidatorsRoot))
+                    .orElse(false))
+        .map(entry -> toDisplayString(entry.getKey()))
+        .toList();
+  }
+
+  public boolean hasValidRecords() {
+    return !validRecords.isEmpty();
+  }
+
+  public boolean hasRecordsWithGenesisValidatorsRoot() {
+    return validRecords.values().stream()
+        .anyMatch(record -> record.genesisValidatorsRoot().isPresent());
+  }
+
   public boolean hasUpdates() {
     if (updateAllEnabled) {
-      return signingHistoryList.size() + invalidRecords.size() > 0;
+      return validRecords.size() + invalidRecords.size() > 0;
     }
     return !invalidRecords.isEmpty();
   }
