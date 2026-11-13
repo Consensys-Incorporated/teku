@@ -256,6 +256,8 @@ public class RemoteBeaconNodeApi implements BeaconNodeApi {
     // call timeout must be disabled for event streams, we use read timeout instead
     final OkHttpClient.Builder builder =
         client.newBuilder().callTimeout(Duration.ZERO).readTimeout(EVENT_STREAM_READ_TIMEOUT);
+    builder.interceptors().removeIf(RestResponseSizeLimitInterceptor.class::isInstance);
+    builder.networkInterceptors().removeIf(RestResponseSizeLimitInterceptor.class::isInstance);
     if (maxEventSizeMegabytes != 0) {
       builder.addInterceptor(new EventStreamSizeLimitInterceptor(maxEventSizeMegabytes));
     }

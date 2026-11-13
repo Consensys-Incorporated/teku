@@ -32,6 +32,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import tech.pegasys.teku.validator.api.ValidatorConfig;
 
 class RemoteBeaconNodeApiResponseSizeTest {
   private static final long MAX_RESPONSE_BYTES = 64L * 1_000_000;
@@ -59,14 +60,20 @@ class RemoteBeaconNodeApiResponseSizeTest {
         .hasMessageContaining("64 MB");
   }
 
-  @Test
-  void streamClientDoesNotApplyRestResponseLimit() throws IOException {
+  @ParameterizedTest
+  @ValueSource(ints = {0, ValidatorConfig.DEFAULT_EVENT_STREAM_MAX_EVENT_SIZE_MEGABYTES})
+  void streamClientDoesNotApplyRestResponseLimit(final int maxEventSizeMegabytes)
+      throws IOException {
     server.enqueue(
         new MockResponse().setBody("small").setHeader("Content-Length", MAX_RESPONSE_BYTES + 1));
     final OkHttpClient client =
         RemoteBeaconNodeApi.createOkHttpClientForStreamFromClient(
-            RemoteBeaconNodeApi.createOkHttpClient(List.of(server.url("/")), 64));
+            RemoteBeaconNodeApi.createOkHttpClient(List.of(server.url("/")), 64),
+            maxEventSizeMegabytes);
 
+    assertThat(client.interceptors()).noneMatch(RestResponseSizeLimitInterceptor.class::isInstance);
+    assertThat(client.networkInterceptors())
+        .noneMatch(RestResponseSizeLimitInterceptor.class::isInstance);
     try (final Response response = client.newCall(request()).execute()) {
       assertThat(response.body().source().readUtf8(5)).isEqualTo("small");
     }
