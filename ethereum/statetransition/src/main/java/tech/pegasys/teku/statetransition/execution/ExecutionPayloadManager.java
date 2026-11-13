@@ -73,6 +73,9 @@ public interface ExecutionPayloadManager {
         @Override
         public void subscribeFailedPayloadExecution(
             final FailedPayloadExecutionSubscriber subscriber) {}
+
+        @Override
+        public void subscribeFailedPayloadImport(final FailedPayloadImportSubscriber subscriber) {}
       };
 
   /**
@@ -140,6 +143,18 @@ public interface ExecutionPayloadManager {
 
   interface FailedPayloadExecutionSubscriber {
     void onPayloadExecutionFailed(SignedExecutionPayloadEnvelope executionPayload);
+  }
+
+  /**
+   * Subscribes to payload imports which end without the payload being imported, whatever the
+   * reason. The subscriber is called once no other import for the same block root is in flight, so
+   * a fetch which was skipped because of {@link #isExecutionPayloadImportedOrImporting} can be
+   * requested again.
+   */
+  void subscribeFailedPayloadImport(FailedPayloadImportSubscriber subscriber);
+
+  interface FailedPayloadImportSubscriber {
+    void onPayloadImportFailed(Bytes32 beaconBlockRoot);
   }
 
   record ValidateAndImportResult(

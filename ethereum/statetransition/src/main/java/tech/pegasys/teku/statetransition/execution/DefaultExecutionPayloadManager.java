@@ -73,6 +73,9 @@ public class DefaultExecutionPayloadManager
   private final Subscribers<FailedPayloadExecutionSubscriber> failedPayloadExecutionSubscribers =
       Subscribers.create(true);
 
+  private final Subscribers<FailedPayloadImportSubscriber> failedPayloadImportSubscribers =
+      Subscribers.create(true);
+
   private final Spec spec;
   private final AsyncRunner asyncRunner;
   private final ExecutionPayloadGossipValidator executionPayloadGossipValidator;
@@ -283,7 +286,16 @@ public class DefaultExecutionPayloadManager
         .alwaysRun(
             () ->
                 executionPayloadImportsInProgress.computeIfPresent(
-                    beaconBlockRoot, (root, count) -> count == 1 ? null : count - 1));
+                    beaconBlockRoot, (root, count) -> count == 1 ? null : count - 1))
+        .thenPeek(
+            result -> {
+              // a fetch skipped while this import was in flight has to be requested again
+              if (!result.isSuccessful()
+                  && !executionPayloadImportsInProgress.containsKey(beaconBlockRoot)) {
+                failedPayloadImportSubscribers.deliver(
+                    FailedPayloadImportSubscriber::onPayloadImportFailed, beaconBlockRoot);
+              }
+            });
   }
 
   private static boolean skipsValidation(
@@ -329,6 +341,11 @@ public class DefaultExecutionPayloadManager
   @Override
   public void subscribeFailedPayloadExecution(final FailedPayloadExecutionSubscriber subscriber) {
     failedPayloadExecutionSubscribers.subscribe(subscriber);
+  }
+
+  @Override
+  public void subscribeFailedPayloadImport(final FailedPayloadImportSubscriber subscriber) {
+    failedPayloadImportSubscribers.subscribe(subscriber);
   }
 
   @Override
