@@ -14,32 +14,26 @@
 package tech.pegasys.teku.statetransition.forkchoice.fastconfirmation;
 
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
-import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.storage.store.UpdatableStore.StoreTransaction;
 
 class StoredFastConfirmedRootUpdaterTest {
   private final RecentChainData recentChainData = mock(RecentChainData.class);
   private final StoreTransaction storeTransaction = mock(StoreTransaction.class);
-  private final Checkpoint finalizedCheckpoint =
-      new Checkpoint(UInt64.valueOf(1), Bytes32.fromHexString("0x01"));
   private final StoredFastConfirmedRootUpdater updater =
       new StoredFastConfirmedRootUpdater(recentChainData);
 
   @BeforeEach
   void setUp() {
-    when(recentChainData.getFinalizedCheckpoint()).thenReturn(Optional.of(finalizedCheckpoint));
     when(recentChainData.startStoreTransaction()).thenReturn(storeTransaction);
     when(storeTransaction.commit()).thenReturn(SafeFuture.COMPLETE);
   }
@@ -59,10 +53,15 @@ class StoredFastConfirmedRootUpdaterTest {
   }
 
   @Test
-  void shouldNotStoreFinalizedRoot() {
-    updater.onFastConfirmation(
-        finalizedCheckpoint.getRoot(), UInt64.valueOf(8), UInt64.valueOf(10));
+  void shouldStoreFinalizedRootAfterAFallbackToFinality() {
+    final Bytes32 confirmedRoot = Bytes32.fromHexString("0x02");
+    final Bytes32 finalizedRoot = Bytes32.fromHexString("0x01");
 
-    verify(recentChainData, never()).startStoreTransaction();
+    updater.onFastConfirmation(confirmedRoot, UInt64.valueOf(9), UInt64.valueOf(10));
+    updater.onFastConfirmation(finalizedRoot, UInt64.valueOf(8), UInt64.valueOf(11));
+
+    // The finalized root is the confirmed root now, so a restart must not restore the earlier one
+    verify(storeTransaction).setFastConfirmedRoot(confirmedRoot);
+    verify(storeTransaction).setFastConfirmedRoot(finalizedRoot);
   }
 }

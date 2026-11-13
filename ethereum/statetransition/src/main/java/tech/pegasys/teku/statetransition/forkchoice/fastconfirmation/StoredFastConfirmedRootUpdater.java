@@ -25,10 +25,10 @@ import tech.pegasys.teku.storage.store.UpdatableStore.StoreTransaction;
  * Persists the confirmed root so that {@link FastConfirmationTracker} can restore it as {@code
  * get_root_confirmed_before_restart} after a restart.
  *
- * <p>Only writes when the root changes, and never writes the finalized root: a restarted node
- * starts from at least its finalized block anyway, and until the node is in sync and the root is
- * restored the rule reports the finalized root, which would otherwise overwrite the root confirmed
- * before the restart.
+ * <p>Only writes when the root changes. The finalized root is written too, as after a fallback to
+ * finality it is the confirmed root. Nothing is reported before the node is in sync, and from then
+ * on the reported root is the restored one for as long as it can be restored, so the finalized root
+ * the rule starts from does not overwrite it.
  */
 public class StoredFastConfirmedRootUpdater implements FastConfirmationEventChannel {
   private static final Logger LOG = LogManager.getLogger();
@@ -43,12 +43,7 @@ public class StoredFastConfirmedRootUpdater implements FastConfirmationEventChan
   @Override
   public void onFastConfirmation(
       final Bytes32 confirmedRoot, final UInt64 confirmedSlot, final UInt64 currentSlot) {
-    final boolean isFinalizedRoot =
-        recentChainData
-            .getFinalizedCheckpoint()
-            .map(checkpoint -> checkpoint.getRoot().equals(confirmedRoot))
-            .orElse(false);
-    if (isFinalizedRoot || confirmedRoot.equals(lastStoredRoot.get())) {
+    if (confirmedRoot.equals(lastStoredRoot.get())) {
       return;
     }
     final StoreTransaction transaction = recentChainData.startStoreTransaction();
