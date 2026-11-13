@@ -170,6 +170,25 @@ class RecentExecutionPayloadsFetchServiceTest {
   }
 
   @Test
+  public void fetchExecutionPayloadWhenTheImportFailsRightAfterItWasSeenInFlight() {
+    final Bytes32 beaconBlockRoot = dataStructureUtil.randomBytes32();
+    final FailedPayloadImportSubscriber failedImportSubscriber =
+        startAndGetFailedImportSubscriber();
+    // the import is seen in flight and fails before the request gets back from the check
+    when(executionPayloadManager.isExecutionPayloadImportedOrImporting(beaconBlockRoot))
+        .thenAnswer(
+            invocation -> {
+              failedImportSubscriber.onPayloadImportFailed(beaconBlockRoot);
+              return true;
+            })
+        .thenReturn(false);
+
+    recentExecutionPayloadsFetchService.requestRecentExecutionPayload(beaconBlockRoot);
+
+    assertTaskCounts(1, 1, 0);
+  }
+
+  @Test
   public void doNotFetchExecutionPayloadWhenTheImportItWasRequestedDuringSucceeds() {
     final SignedExecutionPayloadEnvelope executionPayload =
         dataStructureUtil.randomSignedExecutionPayloadEnvelope(1);
