@@ -546,7 +546,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
         "parent block {}:({})",
         blockProductionContext.parentRoot(),
         blockProductionContext.proposalSlot());
-    if (combinedChainDataClient.isOptimisticBlock(blockProductionContext.parentRoot())) {
+    if (combinedChainDataClient.isOptimisticNode(blockProductionContext.parentForkChoiceNode())) {
       LOG.warn(
           "Unable to produce block at slot {} because parent has optimistically validated payload",
           blockProductionContext.proposalSlot());
@@ -1116,7 +1116,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
                   "Producing unsigned execution payload for slot {} and block {}",
                   slot,
                   beaconBlockRoot);
-              if (combinedChainDataClient.isOptimisticBlock(blockAndState.getParentRoot())) {
+              if (combinedChainDataClient.isOptimisticParentNode(blockAndState)) {
                 LOG.warn(
                     "Unable to produce execution payload for slot {} and block {} because parent has optimistically validated payload",
                     slot,

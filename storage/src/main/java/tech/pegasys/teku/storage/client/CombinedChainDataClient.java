@@ -878,6 +878,41 @@ public class CombinedChainDataClient {
         .orElse(false);
   }
 
+  /**
+   * Whether the exact fork choice node is optimistic. From Gloas a block's FULL node carries the
+   * execution status of its payload, so it can be optimistic while the block itself is not. Falls
+   * back to {@link #isOptimisticBlock(Bytes32)} when fork choice doesn't track the node.
+   */
+  public boolean isOptimisticNode(final ForkChoiceNode node) {
+    return recentChainData
+        .getForkChoiceStrategy()
+        .map(
+            forkChoice ->
+                forkChoice
+                    .getNodeData(node)
+                    .map(ProtoNodeData::isOptimistic)
+                    .orElseGet(() -> isOptimistic(node.blockRoot(), forkChoice)))
+        .orElse(false);
+  }
+
+  /**
+   * Whether the node {@code block} builds on is optimistic. From Gloas that is the FULL or EMPTY
+   * variant of its parent, rather than the parent block itself. Falls back to {@link
+   * #isOptimisticBlock(Bytes32)} for the parent root when fork choice doesn't track the block.
+   */
+  public boolean isOptimisticParentNode(final BeaconBlockSummary block) {
+    return recentChainData
+        .getForkChoiceStrategy()
+        .map(
+            forkChoice ->
+                forkChoice
+                    .getParentBeaconBlockNode(ForkChoiceNode.createBase(block.getRoot()))
+                    .flatMap(forkChoice::getNodeData)
+                    .map(ProtoNodeData::isOptimistic)
+                    .orElseGet(() -> isOptimistic(block.getParentRoot(), forkChoice)))
+        .orElse(false);
+  }
+
   public RecentChainData getRecentChainData() {
     return recentChainData;
   }

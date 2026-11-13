@@ -193,6 +193,60 @@ class CombinedChainDataClientForkChoiceNodeTest {
             });
   }
 
+  @TestTemplate
+  void shouldReportOptimisticPayloadOfValidatedBlock() {
+    specContext.assumeIsNotOneOf(SpecMilestone.FULU);
+    initializeFromGenesis();
+    importValidBlockAtSlot(1);
+    final SignedBlockAndState block = importOptimisticBlockAtSlot(2);
+
+    // The block itself is validated, only its payload is optimistic
+    assertThat(client.isOptimisticBlock(block.getRoot())).isFalse();
+    assertThat(client.isOptimisticNode(ForkChoiceNode.createBase(block.getRoot()))).isFalse();
+    assertThat(client.isOptimisticNode(ForkChoiceNode.createEmpty(block.getRoot()))).isFalse();
+    assertThat(client.isOptimisticNode(ForkChoiceNode.createFull(block.getRoot()))).isTrue();
+  }
+
+  @TestTemplate
+  void shouldReportOptimisticNodeWhenBlockIsOptimistic() {
+    specContext.assumeIsOneOf(SpecMilestone.FULU);
+    initializeFromGenesis();
+    importValidBlockAtSlot(1);
+    final SignedBlockAndState block = importOptimisticBlockAtSlot(2);
+
+    assertThat(client.isOptimisticNode(ForkChoiceNode.createBase(block.getRoot()))).isTrue();
+  }
+
+  @TestTemplate
+  void shouldReportOptimisticParentNodeWhenBuildingOnOptimisticNode() {
+    initializeFromGenesis();
+    importValidBlockAtSlot(1);
+    final SignedBlockAndState parent = importOptimisticBlockAtSlot(2);
+    // Built on the FULL parent from Gloas (the chain builder reveals the parent payload)
+    final SignedBlockAndState child = importOptimisticBlockAtSlot(3);
+
+    assertThat(client.isOptimisticParentNode(child.getBlock())).isTrue();
+    if (isGloas()) {
+      // checking the parent block alone misses the optimistic payload being built on
+      assertThat(client.isOptimisticBlock(parent.getRoot())).isFalse();
+    }
+  }
+
+  @TestTemplate
+  void shouldNotReportOptimisticParentNodeWhenBuildingOnEmptyVariant() {
+    specContext.assumeIsNotOneOf(SpecMilestone.FULU);
+    initializeFromGenesis();
+    importValidBlockAtSlot(1);
+    importOptimisticBlockAtSlot(2);
+    // Built on the EMPTY parent, so the optimistic payload is not part of its chain
+    final SignedBlockAndState child =
+        importBlock(
+            chainBuilder.generateBlockAtSlot(
+                3, chainBuilder.createBlockOptionsBuildingOnEmptyParent(UInt64.valueOf(3))));
+
+    assertThat(client.isOptimisticParentNode(child.getBlock())).isFalse();
+  }
+
   private void initializeFromGenesis() {
     final SignedBlockAndState genesis = chainBuilder.generateGenesis();
     recentChainData.initializeFromGenesis(genesis.getState(), UInt64.ZERO);
