@@ -125,12 +125,14 @@ public class RecentExecutionPayloadsFetchService
       executionPayloadsRequestedDuringSync.add(beaconBlockRoot);
       return;
     }
+    // Recorded before the check, so an import failing right after it was seen in flight still
+    // finds the request to replay
+    skippedExecutionPayloadRequests.add(beaconBlockRoot);
     if (executionPayloadManager.isExecutionPayloadImportedOrImporting(beaconBlockRoot)) {
-      // We've already got this execution payload, or we are importing it: remember the request
-      // so we can replay it if that import fails
-      skippedExecutionPayloadRequests.add(beaconBlockRoot);
+      // We've already got this execution payload, or we are importing it
       return;
     }
+    skippedExecutionPayloadRequests.remove(beaconBlockRoot);
     final FetchExecutionPayloadTask task = createTask(beaconBlockRoot);
     if (allTasks.putIfAbsent(beaconBlockRoot, task) != null) {
       // We're already tracking this task
