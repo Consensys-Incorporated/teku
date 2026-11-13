@@ -75,4 +75,5 @@ dependencies {
 	testImplementation project(':data:provider')
 	testImplementation 'org.awaitility:awaitility'
 	testImplementation 'org.jsoup:jsoup'
+	testImplementation 'com.squareup.okhttp3:mockwebserver'
 }

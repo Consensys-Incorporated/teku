@@ -467,6 +467,7 @@ class KvStoreDatabaseTest {
             Optional.empty(),
             Optional.empty(),
             Optional.empty(),
+            Optional.empty(),
             false,
             false,
             true));
