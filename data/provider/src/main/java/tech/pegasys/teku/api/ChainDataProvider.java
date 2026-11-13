@@ -47,6 +47,7 @@ import tech.pegasys.teku.api.migrated.BlockRewardData;
 import tech.pegasys.teku.api.migrated.BuilderStatus;
 import tech.pegasys.teku.api.migrated.GetAttestationRewardsResponse;
 import tech.pegasys.teku.api.migrated.StateBuilderData;
+import tech.pegasys.teku.api.migrated.StatePtcData;
 import tech.pegasys.teku.api.migrated.StateSyncCommitteesData;
 import tech.pegasys.teku.api.migrated.StateValidatorIdentity;
 import tech.pegasys.teku.api.migrated.SyncCommitteeRewardData;
@@ -832,6 +833,35 @@ public class ChainDataProvider {
         committeeIndices,
         Lists.partition(
             committeeIndices, spec.atEpoch(epoch).getConfig().getTargetCommitteeSize()));
+  }
+
+  public SafeFuture<Optional<ObjectAndMetaData<StatePtcData>>> getStatePtc(
+      final String stateIdParam, final Optional<UInt64> slot) {
+    return stateSelectorFactory
+        .createSelectorForStateId(stateIdParam)
+        .getState()
+        .thenApply(maybeStateAndMetadata -> getStatePtc(maybeStateAndMetadata, slot));
+  }
+
+  @VisibleForTesting
+  Optional<ObjectAndMetaData<StatePtcData>> getStatePtc(
+      final Optional<StateAndMetaData> maybeStateAndMetadata, final Optional<UInt64> maybeSlot) {
+    checkMinimumMilestone(
+        maybeStateAndMetadata, SpecMilestone.GLOAS, "payload timeliness committee");
+    return maybeStateAndMetadata.map(
+        stateAndMetaData ->
+            stateAndMetaData.map(
+                state -> {
+                  final UInt64 slot = maybeSlot.orElse(state.getSlot());
+                  return new StatePtcData(
+                      slot,
+                      spec.atSlot(state.getSlot())
+                          .beaconStateAccessors()
+                          .getPtc(state, slot)
+                          .intStream()
+                          .mapToObj(UInt64::valueOf)
+                          .toList());
+                }));
   }
 
   public SafeFuture<Optional<SyncCommitteeRewardData>> getSyncCommitteeRewardsFromBlockId(
