@@ -16,6 +16,8 @@ package tech.pegasys.teku.statetransition.forkchoice.fastconfirmation;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import it.unimi.dsi.fastutil.ints.IntSet;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -39,6 +41,7 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 import tech.pegasys.teku.bls.BLSPublicKey;
+import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -54,6 +57,7 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteSnapshot;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
+import tech.pegasys.teku.spec.datastructures.state.Validator;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
@@ -69,11 +73,21 @@ import tech.pegasys.teku.spec.util.DataStructureUtil;
  * linear chain whose ancestor lookups walk the parent chain the way protoarray does, so per-check
  * costs are comparable to production. The head state is built directly in the current epoch, so the
  * benchmark excludes the epoch-transition (pull-up) cost, which the scoring optimization does not
- * affect.
+ * affect. As in production, the head state and the balance source are distinct state instances, so
+ * committee weights read the balance source's flat balances rather than individual validators.
  *
  * <p>{@code perBlockScoreTwoEpochChain} reproduces the pre-optimization cost model (one full
  * validator pass per block) for direct comparison with {@code batchScoreTwoEpochChain} (one pass
  * for the whole segment).
+ *
+ * <p>The mid-epoch fixture targets {@code compute_committee_weight_between_slots}: blocks at every
+ * slot up to the middle of epoch 2, the confirmed root in the middle of epoch 1, and head votes
+ * from epoch 2. {@code midEpochGetLatestConfirmed} then walks the previous-epoch blocks, whose
+ * safety-threshold ranges all cross the epoch boundary, behind the FFG gates, which weigh
+ * committees against the pulled-up head state. {@code committeeWeightForChainRanges} isolates the
+ * weights of those block ranges, and {@code naiveCommitteeWeightForChainRanges} computes the same
+ * ranges the way the spec does (materialized union of the committees, per-validator activity check)
+ * for direct comparison.
  *
  * <p>Quick run: {@code ./gradlew :ethereum:statetransition:jmh --args="FastConfirmationBenchmark -p
  * validatorCount=1000000 -wi 1 -i 2 -f 0"}
@@ -96,6 +110,14 @@ public class FastConfirmationBenchmark {
 
   private static final UInt64 CURRENT_SLOT = UInt64.valueOf(CHAIN_LENGTH);
 
+  /** One block at every slot up to the middle of epoch 2; the current slot follows the last one. */
+  private static final int MID_EPOCH_CHAIN_LENGTH = SLOTS_PER_EPOCH * 2 + SLOTS_PER_EPOCH / 2;
+
+  private static final UInt64 MID_EPOCH_SLOT = UInt64.valueOf(MID_EPOCH_CHAIN_LENGTH);
+
+  /** Slot of the confirmed root in the mid-epoch fixture: the middle of epoch 1. */
+  private static final int MID_EPOCH_CONFIRMED_SLOT = SLOTS_PER_EPOCH + SLOTS_PER_EPOCH / 2;
+
   @Param({"100000", "1000000"})
   private int validatorCount;
 
@@ -104,6 +126,9 @@ public class FastConfirmationBenchmark {
   private FastConfirmationStates states;
   private Bytes32 head;
   private List<Bytes32> scoredChain;
+
+  private FastConfirmationStore midEpochFcrStore;
+  private Bytes32 midEpochHead;
 
   @Setup(Level.Trial)
   public void init() {
@@ -120,6 +145,16 @@ public class FastConfirmationBenchmark {
                 });
     balanceSource =
         dataStructureUtil.randomBeaconStateWithActiveValidators(validatorCount, CURRENT_SLOT);
+    // A distinct instance, as the justified-checkpoint balance source and the head state are in
+    // production; a no-op update returns the same instance, so change a field the FCR never reads.
+    // Both fixtures' current slots are in epoch 2, so it serves as the pulled-up head state for
+    // either.
+    final BeaconState headState =
+        balanceSource.updated(
+            state -> state.setEth1DepositIndex(state.getEth1DepositIndex().plus(1)));
+    if (headState == balanceSource) {
+      throw new IllegalStateException("Head state must be a distinct instance");
+    }
 
     final List<Bytes32> chain = new ArrayList<>(CHAIN_LENGTH);
     for (int slot = 0; slot < CHAIN_LENGTH; slot++) {
@@ -165,7 +200,7 @@ public class FastConfirmationBenchmark {
             observedJustified,
             previousSlotHead,
             head);
-    states = new FastConfirmationStates(Optional.of(balanceSource), balanceSource, balanceSource);
+    states = new FastConfirmationStates(Optional.of(balanceSource), balanceSource, headState);
     // The full 2-epoch segment above the finalized block, for the scoring benchmarks.
     scoredChain = List.copyOf(chain.subList(1, CHAIN_LENGTH));
 
@@ -179,6 +214,75 @@ public class FastConfirmationBenchmark {
     System.out.printf(
         "init done: %d validators, cold 2-epoch catch-up took %d ms%n",
         validatorCount, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos));
+
+    initMidEpochFixture(random);
+  }
+
+  private void initMidEpochFixture(final Random random) {
+    final List<Bytes32> chain = new ArrayList<>(MID_EPOCH_CHAIN_LENGTH);
+    for (int slot = 0; slot < MID_EPOCH_CHAIN_LENGTH; slot++) {
+      chain.add(Bytes32.random(random));
+    }
+    midEpochHead = chain.get(MID_EPOCH_CHAIN_LENGTH - 1);
+    final Bytes32 previousSlotHead = chain.get(MID_EPOCH_CHAIN_LENGTH - 2);
+
+    final Checkpoint finalized = new Checkpoint(UInt64.ZERO, chain.get(0));
+    final Checkpoint observedJustified = new Checkpoint(UInt64.ONE, chain.get(SLOTS_PER_EPOCH));
+    final BlockCheckpoints blockCheckpoints =
+        new BlockCheckpoints(finalized, finalized, observedJustified, finalized);
+    final LinearChainForkChoiceStrategy forkChoice =
+        new LinearChainForkChoiceStrategy(chain, blockCheckpoints);
+
+    // 90% vote for the head in the current epoch, so they also support the current target; 10%
+    // are spread across the previous epoch's unconfirmed blocks, each voted in its own slot.
+    final int spreadStart = MID_EPOCH_CONFIRMED_SLOT + 1;
+    final int spreadLength = SLOTS_PER_EPOCH * 2 - spreadStart;
+    final VoteTracker[] votes = new VoteTracker[validatorCount];
+    for (int index = 0; index < validatorCount; index++) {
+      final int votedSlot =
+          index % 10 == 0
+              ? spreadStart + ((index / 10) % spreadLength)
+              : MID_EPOCH_CHAIN_LENGTH - 1;
+      votes[index] =
+          new VoteTracker(
+              Bytes32.ZERO,
+              chain.get(votedSlot),
+              false,
+              false,
+              UInt64.valueOf(votedSlot),
+              false,
+              UInt64.ZERO,
+              false);
+    }
+
+    final ReadOnlyStore store = mock(ReadOnlyStore.class);
+    when(store.getForkChoiceStrategy()).thenReturn(forkChoice);
+    when(store.getVoteSnapshot())
+        .thenReturn(VoteSnapshot.create(UInt64.valueOf(validatorCount - 1), votes));
+    when(store.getFinalizedCheckpoint()).thenReturn(finalized);
+    // Read by will_no_conflicting_checkpoint_be_justified as the unrealized-justified floor.
+    when(store.getJustifiedCheckpoint()).thenReturn(finalized);
+
+    midEpochFcrStore =
+        new FastConfirmationStore(
+            store,
+            chain.get(MID_EPOCH_CONFIRMED_SLOT),
+            observedJustified,
+            observedJustified,
+            observedJustified,
+            previousSlotHead,
+            midEpochHead);
+
+    // Fail fast if the fixture stops walking both epochs behind the FFG gates.
+    final long startNanos = System.nanoTime();
+    final Bytes32 confirmed = newMidEpochCalculator().getLatestConfirmed();
+    if (!confirmed.equals(midEpochHead)) {
+      throw new IllegalStateException(
+          "Mid-epoch fixture did not advance the confirmed root to the head: " + confirmed);
+    }
+    System.out.printf(
+        "mid-epoch init done: cold mid-epoch confirmation took %d ms%n",
+        TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos));
   }
 
   /** The acceptance-criterion scenario: must average comfortably below one slot (12s). */
@@ -202,8 +306,68 @@ public class FastConfirmationBenchmark {
     }
   }
 
+  /**
+   * A mid-epoch slot whose previous-epoch blocks have boundary-crossing ranges and whose walk runs
+   * behind both FFG gates.
+   */
+  @Benchmark
+  public void midEpochGetLatestConfirmed(final Blackhole bh) {
+    bh.consume(newMidEpochCalculator().getLatestConfirmed());
+  }
+
+  /**
+   * The maximum-support range of every unconfirmed block of the mid-epoch fixture, from the block
+   * slot to the slot before the current one; most cross the epoch boundary.
+   */
+  @Benchmark
+  public void committeeWeightForChainRanges(final Blackhole bh) {
+    final FastConfirmationCalculator calculator = newMidEpochCalculator();
+    final UInt64 endSlot = MID_EPOCH_SLOT.minus(1);
+    for (int startSlot = MID_EPOCH_CONFIRMED_SLOT + 1;
+        startSlot < MID_EPOCH_CHAIN_LENGTH;
+        startSlot++) {
+      bh.consume(
+          calculator.computeCommitteeWeightBetweenSlots(
+              balanceSource, UInt64.valueOf(startSlot), endSlot));
+    }
+  }
+
+  /**
+   * The same ranges as {@link #committeeWeightForChainRanges} computed the way the spec does:
+   * materialize the union of the range's committees, then check each member's activity.
+   */
+  @Benchmark
+  public void naiveCommitteeWeightForChainRanges(final Blackhole bh) {
+    final FastConfirmationCalculator calculator = newMidEpochCalculator();
+    final UInt64 endSlot = MID_EPOCH_SLOT.minus(1);
+    final UInt64 epoch = SPEC.getCurrentEpoch(balanceSource);
+    final SszList<Validator> validators = balanceSource.getValidators();
+    for (int startSlot = MID_EPOCH_CONFIRMED_SLOT + 1;
+        startSlot < MID_EPOCH_CHAIN_LENGTH;
+        startSlot++) {
+      final IntSet participants = new IntOpenHashSet();
+      for (UInt64 slot = UInt64.valueOf(startSlot);
+          slot.isLessThanOrEqualTo(endSlot);
+          slot = slot.increment()) {
+        participants.addAll(calculator.getSlotCommittee(slot));
+      }
+      long weight = 0;
+      for (final int index : participants) {
+        final Validator validator = validators.get(index);
+        if (SPEC.atEpoch(epoch).predicates().isActiveValidator(validator, epoch)) {
+          weight += validator.getEffectiveBalance().longValue();
+        }
+      }
+      bh.consume(weight);
+    }
+  }
+
   private FastConfirmationCalculator newCalculator() {
     return new FastConfirmationCalculator(SPEC, fcrStore, states, CURRENT_SLOT);
+  }
+
+  private FastConfirmationCalculator newMidEpochCalculator() {
+    return new FastConfirmationCalculator(SPEC, midEpochFcrStore, states, MID_EPOCH_SLOT);
   }
 
   public static void main(final String[] args) {
@@ -222,12 +386,15 @@ public class FastConfirmationBenchmark {
       for (final Bytes32 blockRoot : benchmark.scoredChain) {
         calculator.getAttestationScore(blockRoot, benchmark.balanceSource);
       }
+      final long midEpochStart = System.nanoTime();
+      benchmark.newMidEpochCalculator().getLatestConfirmed();
       final long endNanos = System.nanoTime();
       System.out.printf(
-          "catch-up %d ms, batch score %d ms, per-block score (old model) %d ms%n",
+          "catch-up %d ms, batch score %d ms, per-block score (old model) %d ms, mid-epoch %d ms%n",
           TimeUnit.NANOSECONDS.toMillis(batchStart - catchUpStart),
           TimeUnit.NANOSECONDS.toMillis(perBlockStart - batchStart),
-          TimeUnit.NANOSECONDS.toMillis(endNanos - perBlockStart));
+          TimeUnit.NANOSECONDS.toMillis(midEpochStart - perBlockStart),
+          TimeUnit.NANOSECONDS.toMillis(endNanos - midEpochStart));
     }
   }
 
