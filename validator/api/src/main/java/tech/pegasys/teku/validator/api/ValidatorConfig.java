@@ -73,6 +73,7 @@ public class ValidatorConfig {
   public static final boolean DEFAULT_OBOL_DVT_SELECTIONS_ENDPOINT_ENABLED = false;
   public static final boolean DEFAULT_ATTESTATIONS_V2_APIS_ENABLED = false;
   public static final int DEFAULT_EVENT_STREAM_MAX_EVENT_SIZE_MEGABYTES = 8;
+  public static final int DEFAULT_BEACON_API_MAX_RESPONSE_SIZE_MB = 64;
   // Builder default options
   public static final UInt64 DEFAULT_BUILDER_MIN_BID = UInt64.ZERO;
   public static final UInt64 DEFAULT_P2P_BUILDER_MIN_BID = UInt64.ZERO;
@@ -120,6 +121,7 @@ public class ValidatorConfig {
 
   private final OptionalInt beaconApiExecutorThreads;
   private final OptionalInt beaconApiReadinessExecutorThreads;
+  private final int beaconApiMaxResponseSizeMegabytes;
 
   private final boolean isLocalSlashingProtectionSynchronizedModeEnabled;
   private final boolean dvtSelectionsEndpointEnabled;
@@ -171,6 +173,7 @@ public class ValidatorConfig {
       final int executorThreads,
       final OptionalInt beaconApiExecutorThreads,
       final OptionalInt beaconApiReadinessExecutorThreads,
+      final int beaconApiMaxResponseSizeMegabytes,
       final Optional<String> sentryNodeConfigurationFile,
       final boolean isLocalSlashingProtectionSynchronizedModeEnabled,
       final boolean dvtSelectionsEndpointEnabled,
@@ -222,6 +225,7 @@ public class ValidatorConfig {
     this.executorThreads = executorThreads;
     this.beaconApiExecutorThreads = beaconApiExecutorThreads;
     this.beaconApiReadinessExecutorThreads = beaconApiReadinessExecutorThreads;
+    this.beaconApiMaxResponseSizeMegabytes = beaconApiMaxResponseSizeMegabytes;
     this.sentryNodeConfigurationFile = sentryNodeConfigurationFile;
     this.isLocalSlashingProtectionSynchronizedModeEnabled =
         isLocalSlashingProtectionSynchronizedModeEnabled;
@@ -391,6 +395,10 @@ public class ValidatorConfig {
     return beaconApiReadinessExecutorThreads;
   }
 
+  public int getBeaconApiMaxResponseSizeMegabytes() {
+    return beaconApiMaxResponseSizeMegabytes;
+  }
+
   public Optional<String> getSentryNodeConfigurationFile() {
     return sentryNodeConfigurationFile;
   }
@@ -492,6 +500,7 @@ public class ValidatorConfig {
     private OptionalInt executorMaxQueueSize = OptionalInt.empty();
     private OptionalInt beaconApiExecutorThreads = OptionalInt.empty();
     private OptionalInt beaconApiReadinessExecutorThreads = OptionalInt.empty();
+    private int beaconApiMaxResponseSizeMegabytes = DEFAULT_BEACON_API_MAX_RESPONSE_SIZE_MB;
     private Optional<String> sentryNodeConfigurationFile = Optional.empty();
     private int executorThreads = DEFAULT_VALIDATOR_EXECUTOR_THREADS;
     private boolean isLocalSlashingProtectionSynchronizedModeEnabled =
@@ -749,6 +758,15 @@ public class ValidatorConfig {
       return this;
     }
 
+    public Builder beaconApiMaxResponseSizeMegabytes(final int beaconApiMaxResponseSizeMegabytes) {
+      if (beaconApiMaxResponseSizeMegabytes < 0) {
+        throw new InvalidConfigurationException(
+            "--Xvalidator-client-beacon-api-max-response-size must be non-negative");
+      }
+      this.beaconApiMaxResponseSizeMegabytes = beaconApiMaxResponseSizeMegabytes;
+      return this;
+    }
+
     public Builder executorMaxQueueSizeIfDefault(final int executorMaxQueueSize) {
       if (this.executorMaxQueueSize.isEmpty()) {
         this.executorMaxQueueSize = OptionalInt.of(executorMaxQueueSize);
@@ -859,6 +877,7 @@ public class ValidatorConfig {
           executorThreads,
           beaconApiExecutorThreads,
           beaconApiReadinessExecutorThreads,
+          beaconApiMaxResponseSizeMegabytes,
           sentryNodeConfigurationFile,
           isLocalSlashingProtectionSynchronizedModeEnabled,
           dvtSelectionsEndpointEnabled,

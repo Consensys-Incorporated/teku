@@ -73,7 +73,7 @@ public class BeaconNodesSentryConfig {
     return attestationPublisherConfig;
   }
 
-  public OkHttpClient createOkHttpClientForSentryNodes() {
+  public OkHttpClient createOkHttpClientForSentryNodes(final int maxResponseSizeMegabytes) {
     final List<HttpUrl> allBeaconNodeEndpoints =
         new ArrayList<>(convertToOkHttpUrls(getDutiesProviderNodeConfig().getEndpointsAsURIs()));
     getBlockHandlerNodeConfig()
@@ -81,7 +81,7 @@ public class BeaconNodesSentryConfig {
     getAttestationPublisherConfig()
         .ifPresent(c -> allBeaconNodeEndpoints.addAll(convertToOkHttpUrls(c.getEndpointsAsURIs())));
 
-    return createOkHttpClient(allBeaconNodeEndpoints);
+    return createOkHttpClient(allBeaconNodeEndpoints, maxResponseSizeMegabytes);
   }
 
   public static class Builder {
