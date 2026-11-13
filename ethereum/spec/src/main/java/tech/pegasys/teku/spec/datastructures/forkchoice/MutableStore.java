@@ -96,6 +96,12 @@ public interface MutableStore extends ReadOnlyStore {
 
   void setCustodyGroupCount(UInt64 custodyGroupCount);
 
+  /**
+   * Persists the fast confirmed root, to be loaded as {@link #getFastConfirmedRootBeforeRestart()}
+   * on the next start.
+   */
+  void setFastConfirmedRoot(Bytes32 fastConfirmedRoot);
+
   void removeProposerBoostRoot();
 
   void removeFinalizedOptimisticTransitionPayload();
