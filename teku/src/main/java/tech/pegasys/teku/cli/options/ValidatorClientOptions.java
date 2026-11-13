@@ -97,6 +97,15 @@ public class ValidatorClientOptions {
       fallbackValue = "true")
   private boolean attestationsV2ApisEnabled = ValidatorConfig.DEFAULT_ATTESTATIONS_V2_APIS_ENABLED;
 
+  @Option(
+      names = {"--Xvalidator-client-event-stream-max-event-size"},
+      paramLabel = "<MB>",
+      description = "Maximum size of a beacon node event stream event in megabytes (0 disables)",
+      hidden = true,
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  private int eventStreamMaxEventSizeMegabytes =
+      ValidatorConfig.DEFAULT_EVENT_STREAM_MAX_EVENT_SIZE_MEGABYTES;
+
   public void configure(final TekuConfiguration.Builder builder) {
     configureBeaconNodeApiEndpoints();
 
@@ -111,7 +120,8 @@ public class ValidatorClientOptions {
                 .failoversPublishSignedDutiesEnabled(failoversPublishSignedDutiesEnabled)
                 .sentryNodeConfigurationFile(exclusiveParams.sentryConfigFile)
                 .obolDvtSelectionsEndpointEnabled(obolDvtSelectionsEndpointEnabled)
-                .attestationsV2ApisEnabled(attestationsV2ApisEnabled));
+                .attestationsV2ApisEnabled(attestationsV2ApisEnabled)
+                .eventStreamMaxEventSizeMegabytes(eventStreamMaxEventSizeMegabytes));
   }
 
   private void configureBeaconNodeApiEndpoints() {

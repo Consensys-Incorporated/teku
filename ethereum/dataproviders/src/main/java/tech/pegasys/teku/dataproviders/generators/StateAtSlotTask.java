@@ -13,9 +13,13 @@
 
 package tech.pegasys.teku.dataproviders.generators;
 
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
+
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Stream;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.dataproviders.generators.CachingTaskQueue.CacheableTask;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -30,6 +34,7 @@ import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.EpochProce
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.SlotProcessingException;
 
 public class StateAtSlotTask implements CacheableTask<SlotAndBlockRoot, BeaconState> {
+  private static final Logger LOG = LogManager.getLogger();
 
   /**
    * The number of previous slots to search for an existing checkpoint state with the same root but
@@ -91,6 +96,12 @@ public class StateAtSlotTask implements CacheableTask<SlotAndBlockRoot, BeaconSt
     return new StateAtSlotTask(spec, slotAndBlockRoot, stateProvider, newBaseValue);
   }
 
+  /**
+   * Every state at a slot the node asks for is generated here, whoever asks first (payload
+   * attributes preparation, the epoch cache primer, block import, attestation validation), so this
+   * is where the cost of an epoch transition on a running node shows up. With debug logging
+   * enabled, an advance that crosses an epoch boundary logs how long it took.
+   */
   @Override
   public SafeFuture<Optional<BeaconState>> performTask() {
     return getBaseState().thenApply(maybeState -> maybeState.map(this::regenerateFromState));
@@ -114,10 +125,35 @@ public class StateAtSlotTask implements CacheableTask<SlotAndBlockRoot, BeaconSt
         return state;
       }
 
+      if (LOG.isDebugEnabled()) {
+        final UInt64 epochTransitions = countEpochTransitions(state);
+        if (epochTransitions.isGreaterThan(UInt64.ZERO)) {
+          return processSlotsTimed(state, epochTransitions);
+        }
+      }
       return spec.processSlots(state, slotAndBlockRoot.getSlot());
     } catch (SlotProcessingException | EpochProcessingException | IllegalArgumentException e) {
       throw new InvalidCheckpointException(e);
     }
+  }
+
+  private UInt64 countEpochTransitions(final BeaconState state) {
+    return spec.computeEpochAtSlot(slotAndBlockRoot.getSlot())
+        .minusMinZero(spec.computeEpochAtSlot(state.getSlot()));
+  }
+
+  private BeaconState processSlotsTimed(final BeaconState state, final UInt64 epochTransitions)
+      throws SlotProcessingException, EpochProcessingException {
+    final long start = System.nanoTime();
+    final BeaconState result = spec.processSlots(state, slotAndBlockRoot.getSlot());
+    LOG.debug(
+        "Advanced the state of block {} from slot {} to slot {}, {} epoch transition(s): {} ms",
+        slotAndBlockRoot.getBlockRoot(),
+        state.getSlot(),
+        slotAndBlockRoot.getSlot(),
+        epochTransitions,
+        NANOSECONDS.toMillis(System.nanoTime() - start));
+    return result;
   }
 
   @FunctionalInterface

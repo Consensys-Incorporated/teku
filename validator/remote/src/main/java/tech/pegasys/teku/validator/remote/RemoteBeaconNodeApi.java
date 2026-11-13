@@ -41,6 +41,7 @@ import tech.pegasys.teku.validator.beaconnode.GenesisDataProvider;
 import tech.pegasys.teku.validator.beaconnode.metrics.MetricRecordingValidatorApiChannel;
 import tech.pegasys.teku.validator.remote.apiclient.OkHttpClientAuth;
 import tech.pegasys.teku.validator.remote.eventsource.EventSourceBeaconChainEventAdapter;
+import tech.pegasys.teku.validator.remote.eventsource.EventStreamSizeLimitInterceptor;
 
 public class RemoteBeaconNodeApi implements BeaconNodeApi {
 
@@ -170,7 +171,8 @@ public class RemoteBeaconNodeApi implements BeaconNodeApi {
             beaconNodeReadinessManager,
             primaryValidatorApi,
             failoverValidatorApis,
-            createOkHttpClientForStreamFromClient(okHttpClient),
+            createOkHttpClientForStreamFromClient(
+                okHttpClient, validatorConfig.getEventStreamMaxEventSizeMegabytes()),
             ValidatorLogger.VALIDATOR_LOGGER,
             new ForkAwareTimeBasedEventAdapter(
                 new GenesisDataProvider(asyncRunner, validatorApi),
@@ -245,13 +247,15 @@ public class RemoteBeaconNodeApi implements BeaconNodeApi {
         .toList();
   }
 
-  public static OkHttpClient createOkHttpClientForStreamFromClient(final OkHttpClient client) {
+  public static OkHttpClient createOkHttpClientForStreamFromClient(
+      final OkHttpClient client, final int maxEventSizeMegabytes) {
     // call timeout must be disabled for event streams, we use read timeout instead
-    return client
-        .newBuilder()
-        .callTimeout(Duration.ZERO)
-        .readTimeout(EVENT_STREAM_READ_TIMEOUT)
-        .build();
+    final OkHttpClient.Builder builder =
+        client.newBuilder().callTimeout(Duration.ZERO).readTimeout(EVENT_STREAM_READ_TIMEOUT);
+    if (maxEventSizeMegabytes != 0) {
+      builder.addInterceptor(new EventStreamSizeLimitInterceptor(maxEventSizeMegabytes));
+    }
+    return builder.build();
   }
 
   public static OkHttpClient createOkHttpClient(final List<HttpUrl> endpoints) {

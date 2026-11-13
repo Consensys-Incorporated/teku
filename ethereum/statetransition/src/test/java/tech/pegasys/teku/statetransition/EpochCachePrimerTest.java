@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.statetransition;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
@@ -31,7 +32,6 @@ import org.junit.jupiter.api.Test;
 import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
-import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -51,10 +51,9 @@ class EpochCachePrimerTest {
   private final BeaconStateUtil beaconStateUtil = mock(BeaconStateUtil.class);
   private final RecentChainData recentChainData = storageSystem.recentChainData();
   private final StubAsyncRunner asyncRunner = new StubAsyncRunner();
-  private final StubTimeProvider timeProvider = StubTimeProvider.withTimeInMillis(1_000_000);
 
   private final EpochCachePrimer primer =
-      new EpochCachePrimer(mockSpec, recentChainData, asyncRunner, timeProvider);
+      new EpochCachePrimer(mockSpec, recentChainData, asyncRunner);
 
   @BeforeEach
   void setUp() {
@@ -191,21 +190,15 @@ class EpochCachePrimerTest {
 
   @Test
   void shouldLogPrecomputeTimings() {
-    when(mockSpec.getBeaconProposerIndex(any(), any()))
-        .thenAnswer(
-            invocation -> {
-              timeProvider.advanceTimeByMillis(7);
-              return 0;
-            });
     try (final LogCaptor logCaptor = LogCaptor.forClass(EpochCachePrimer.class, Level.DEBUG)) {
       primer.primeCacheForEpoch(UInt64.ONE);
       asyncRunner.executeQueuedActions();
 
-      final int slotsPerEpoch = realSpec.getSlotsPerEpoch(UInt64.ZERO);
-      logCaptor.assertDebugLog(
-          "Precomputed epoch 1: state transition 0 ms, cache priming "
-              + (7 * slotsPerEpoch)
-              + " ms");
+      assertThat(logCaptor.getDebugLogs())
+          .filteredOn(log -> log.startsWith("Precomputed epoch"))
+          .singleElement()
+          .asString()
+          .matches("Precomputed epoch 1: state retrieval \\d+ ms, cache priming \\d+ ms");
     }
   }
 }
