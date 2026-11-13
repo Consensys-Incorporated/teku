@@ -29,7 +29,9 @@ import static tech.pegasys.teku.statetransition.validation.InternalValidationRes
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.SAVE_FOR_FUTURE;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.reject;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import org.apache.tuweni.bytes.Bytes32;
@@ -547,6 +549,52 @@ class DefaultExecutionPayloadManagerTest {
     assertThat(secondResult).isCompleted();
     assertThat(executionPayloadManager.isExecutionPayloadImportedOrImporting(beaconBlockRoot))
         .isFalse();
+  }
+
+  @Test
+  public void shouldNotifyFailedImportOnceNoImportOfTheRootIsInFlight() {
+    final Bytes32 beaconBlockRoot = signedExecutionPayload.getBeaconBlockRoot();
+    final List<Bytes32> failedImports = new ArrayList<>();
+    executionPayloadManager.subscribeFailedPayloadImport(failedImports::add);
+    final SafeFuture<ExecutionPayloadImportResult> firstImport = new SafeFuture<>();
+    final SafeFuture<ExecutionPayloadImportResult> secondImport = new SafeFuture<>();
+    when(forkChoice.onExecutionPayloadEnvelope(
+            eq(signedExecutionPayload), eq(executionLayer), any()))
+        .thenReturn(firstImport)
+        .thenReturn(secondImport);
+
+    executionPayloadManager
+        .importExecutionPayload(signedExecutionPayload, false)
+        .finishStackTrace();
+    executionPayloadManager
+        .importExecutionPayload(signedExecutionPayload, false)
+        .finishStackTrace();
+    asyncRunner.executeDueActions();
+
+    // a data availability timeout is only logged, so nothing else would retry this payload
+    final ExecutionPayloadImportResult failure =
+        ExecutionPayloadImportResult.failedDataAvailabilityCheckNotAvailable(Optional.empty());
+    firstImport.complete(failure);
+    // the fetch gate is still closed by the second import
+    assertThat(failedImports).isEmpty();
+
+    secondImport.complete(failure);
+    assertThat(failedImports).containsExactly(beaconBlockRoot);
+  }
+
+  @Test
+  public void shouldNotNotifyFailedImportWhenPayloadIsImported() {
+    final List<Bytes32> failedImports = new ArrayList<>();
+    executionPayloadManager.subscribeFailedPayloadImport(failedImports::add);
+    givenSuccessfulImport(signedExecutionPayload);
+
+    final SafeFuture<ExecutionPayloadImportResult> resultFuture =
+        executionPayloadManager.importExecutionPayload(signedExecutionPayload, false);
+    asyncRunner.executeDueActions();
+
+    assertThat(resultFuture)
+        .isCompletedWithValueMatching(ExecutionPayloadImportResult::isSuccessful);
+    assertThat(failedImports).isEmpty();
   }
 
   private void givenValidationResult(

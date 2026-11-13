@@ -50,6 +50,10 @@ public class RecentExecutionPayloadsFetchService
   private final PendingPool<PayloadAttestationMessage> pendingPayloadAttestationsPool;
   private final Set<Bytes32> executionPayloadsRequestedDuringSync =
       LimitedSet.createSynchronizedIterable(MAX_DEFERRED_REPLAY_REQUESTS);
+  // Requests skipped because the payload was imported or being imported, replayed if an import of
+  // that payload fails. The ones for an imported payload are never replayed and age out.
+  private final Set<Bytes32> skippedExecutionPayloadRequests =
+      LimitedSet.createSynchronizedLRU(MAX_DEFERRED_REPLAY_REQUESTS);
 
   RecentExecutionPayloadsFetchService(
       final AsyncRunner asyncRunner,
@@ -122,7 +126,9 @@ public class RecentExecutionPayloadsFetchService
       return;
     }
     if (executionPayloadManager.isExecutionPayloadImportedOrImporting(beaconBlockRoot)) {
-      // We've already got this execution payload
+      // We've already got this execution payload, or we are importing it: remember the request
+      // so we can replay it if that import fails
+      skippedExecutionPayloadRequests.add(beaconBlockRoot);
       return;
     }
     final FetchExecutionPayloadTask task = createTask(beaconBlockRoot);
@@ -138,6 +144,7 @@ public class RecentExecutionPayloadsFetchService
   @Override
   public void cancelRecentExecutionPayloadRequest(final Bytes32 beaconBlockRoot) {
     executionPayloadsRequestedDuringSync.remove(beaconBlockRoot);
+    skippedExecutionPayloadRequests.remove(beaconBlockRoot);
     cancelRequest(beaconBlockRoot);
   }
 
@@ -158,6 +165,16 @@ public class RecentExecutionPayloadsFetchService
     pendingPayloadAttestationsPool.subscribeRequiredBlockRootDropped(
         this::cancelRecentExecutionPayloadRequest);
     forwardSync.subscribeToSyncChanges(this::onSyncStatusChanged);
+    executionPayloadManager.subscribeFailedPayloadImport(this::onExecutionPayloadImportFailed);
+  }
+
+  private void onExecutionPayloadImportFailed(final Bytes32 beaconBlockRoot) {
+    if (skippedExecutionPayloadRequests.remove(beaconBlockRoot)) {
+      LOG.debug(
+          "Import of execution payload {} failed while it was requested, fetching it again",
+          beaconBlockRoot);
+      requestRecentExecutionPayload(beaconBlockRoot);
+    }
   }
 
   private void onSyncStatusChanged(final boolean syncActive) {
