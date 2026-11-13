@@ -71,13 +71,11 @@ public class PostVoluntaryExit extends RestApiEndpoint {
                     exit.getMessage().getValidatorIndex(),
                     internalValidationResult.code(),
                     internalValidationResult.getDescription().orElse(""));
-                if (internalValidationResult.isIgnore()) {
+                if (internalValidationResult.isIgnoreAlreadySeen()) {
                   LOG.info(
-                      "Voluntary exit for validator id {} is already seen. It will be periodically resent as required.",
+                      "Voluntary exit for validator id {} is already in the pool.",
                       exit.getMessage().getValidatorIndex());
-                  // though the API says we MUST send over network to respond 200, we've already
-                  // sent it if it's in our pool, and the pool will manage retries periodically.
-                  return AsyncApiResponse.respondWithCode(200);
+                  return AsyncApiResponse.respondWithCode(SC_OK);
                 }
                 return AsyncApiResponse.respondWithError(
                     SC_BAD_REQUEST,
