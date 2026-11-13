@@ -40,7 +40,7 @@ class ValidatorConfigTest {
   @Test
   void rejectsNegativeBeaconApiMaxResponseSize() {
     Assertions.assertThatExceptionOfType(InvalidConfigurationException.class)
-        .isThrownBy(() -> configBuilder.beaconApiMaxResponseSizeMegabytes(-1).build())
+        .isThrownBy(() -> configBuilder.beaconApiMaxResponseSizeMegabytes(-1))
         .withMessageContaining("--Xvalidator-client-beacon-api-max-response-size");
   }
 

@@ -759,6 +759,10 @@ public class ValidatorConfig {
     }
 
     public Builder beaconApiMaxResponseSizeMegabytes(final int beaconApiMaxResponseSizeMegabytes) {
+      if (beaconApiMaxResponseSizeMegabytes < 0) {
+        throw new InvalidConfigurationException(
+            "--Xvalidator-client-beacon-api-max-response-size must be non-negative");
+      }
       this.beaconApiMaxResponseSizeMegabytes = beaconApiMaxResponseSizeMegabytes;
       return this;
     }
@@ -832,7 +836,6 @@ public class ValidatorConfig {
     }
 
     public ValidatorConfig build() {
-      validateBeaconApiMaxResponseSize();
       validateExternalSignerUrlAndPublicKeys();
       validateExternalSignerKeystoreAndPasswordFileConfig();
       validateExternalSignerTruststoreAndPasswordFileConfig();
@@ -886,13 +889,6 @@ public class ValidatorConfig {
           p2pBuilderBoostFactor,
           builderMaxExecutionPayment,
           builderUrls);
-    }
-
-    private void validateBeaconApiMaxResponseSize() {
-      if (beaconApiMaxResponseSizeMegabytes < 0) {
-        throw new InvalidConfigurationException(
-            "--Xvalidator-client-beacon-api-max-response-size must be non-negative");
-      }
     }
 
     private void validateExternalSignerUrlAndPublicKeys() {
