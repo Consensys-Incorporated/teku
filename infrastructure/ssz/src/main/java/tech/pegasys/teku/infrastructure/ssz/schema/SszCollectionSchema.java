@@ -16,6 +16,7 @@ package tech.pegasys.teku.infrastructure.ssz.schema;
 import static com.google.common.base.Preconditions.checkArgument;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collector;
 import java.util.stream.Collectors;
 import tech.pegasys.teku.infrastructure.ssz.SszCollection;
@@ -29,6 +30,14 @@ public interface SszCollectionSchema<
     extends SszCompositeSchema<SszCollectionT> {
 
   SszSchema<SszElementT> getElementSchema();
+
+  /**
+   * How the trees built by this schema hold their elements in supernodes, or empty when they never
+   * do.
+   */
+  default Optional<SszSuperNodeLayout> getSuperNodeLayout() {
+    return Optional.empty();
+  }
 
   @Override
   default void storeChildNode(

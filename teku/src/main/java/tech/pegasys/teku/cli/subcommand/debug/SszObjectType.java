@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.cli.subcommand.debug;
 
+import static tech.pegasys.teku.spec.datastructures.state.Validator.SSZ_SCHEMA;
+
 import java.util.function.Function;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszSchema;
 import tech.pegasys.teku.spec.SpecVersion;
@@ -37,7 +39,6 @@ import tech.pegasys.teku.spec.datastructures.state.HistoricalBatch.HistoricalBat
 import tech.pegasys.teku.spec.datastructures.state.PendingAttestation.PendingAttestationSchema;
 import tech.pegasys.teku.spec.datastructures.state.SigningData.SigningDataSchema;
 import tech.pegasys.teku.spec.datastructures.state.SyncCommittee.SyncCommitteeSchema;
-import tech.pegasys.teku.spec.datastructures.state.Validator.ValidatorSchema;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsBellatrix;
@@ -86,7 +87,7 @@ public enum SszObjectType {
   SyncCommittee(altairConfig(SyncCommitteeSchema::new)),
   SyncAggregate(altairConfig(c -> SyncAggregateSchema.create(c.getSyncCommitteeSize()))),
   SignedAggregateAndProof(schemas(SchemaDefinitions::getSignedAggregateAndProofSchema)),
-  Validator(new ValidatorSchema()),
+  Validator(SSZ_SCHEMA),
   HistoricalBatch(config(c -> new HistoricalBatchSchema(c.getSlotsPerHistoricalRoot()))),
   ExecutionPayload(bellatrixSchemas(SchemaDefinitionsBellatrix::getExecutionPayloadSchema)),
   ExecutionPayloadHeader(

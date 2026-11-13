@@ -41,8 +41,9 @@ public abstract class AbstractSszComposite<SszChildT extends SszData>
   private int sizeCache = -1;
   private final SszCompositeSchema<?> schema;
 
-  // Exactly one of these fields is set at a time: either the backing node has already been
-  // materialized, or the supplier is still available to create it lazily.
+  // At most one of these fields is set at a time: either the backing node has already been
+  // materialized, or the supplier is still available to create it lazily. With neither, the node
+  // is created by createLazyBackingNode().
   private volatile TreeNode backingNode;
   private volatile Supplier<TreeNode> lazyBackingNode;
 
@@ -75,8 +76,14 @@ public abstract class AbstractSszComposite<SszChildT extends SszData>
       final Supplier<TreeNode> lazyBackingNode,
       final IntCache<SszChildT> cache) {
     this.schema = schema;
-    this.backingNode = backingNode;
-    this.lazyBackingNode = lazyBackingNode;
+    // Only the field that is set is written: an instance created without a backing node, on every
+    // access to a packed element, does not pay for two volatile stores of null
+    if (backingNode != null) {
+      this.backingNode = backingNode;
+    }
+    if (lazyBackingNode != null) {
+      this.lazyBackingNode = lazyBackingNode;
+    }
     this.childrenViewCache = cache != null ? cache : createCache();
   }
 
@@ -132,10 +139,19 @@ public abstract class AbstractSszComposite<SszChildT extends SszData>
 
   private synchronized TreeNode resolveLazyBackingNode() {
     if (backingNode == null) {
-      backingNode = lazyBackingNode.get();
+      final Supplier<TreeNode> supplier = lazyBackingNode;
+      backingNode = supplier != null ? supplier.get() : createLazyBackingNode();
       lazyBackingNode = null;
     }
     return backingNode;
+  }
+
+  /**
+   * Creates the backing node of an instance created with a null backing node and no supplier, when
+   * the node is first asked for.
+   */
+  protected TreeNode createLazyBackingNode() {
+    throw new IllegalStateException("No backing node and no way to create it: " + getSchema());
   }
 
   @Override

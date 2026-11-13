@@ -33,6 +33,7 @@ import tech.pegasys.teku.infrastructure.ssz.schema.SszPrimitiveSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszSchemaHints;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszSchemaHints.SszSuperNodeHint;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszSuperNodeLayout;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszType;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszReader;
@@ -54,6 +55,8 @@ public abstract class AbstractSszCollectionSchema<
   protected final Supplier<SszNodeTemplate> elementSszSupernodeTemplate =
       Suppliers.memoize(() -> SszNodeTemplate.createFromType(getElementSchema()));
   private final int treeDepth;
+  // Null when the hint does not apply to this schema
+  private final SszSuperNodeLayout superNodeLayout;
   private volatile TreeNode defaultTree;
 
   protected AbstractSszCollectionSchema(
@@ -65,6 +68,24 @@ public abstract class AbstractSszCollectionSchema<
     this.elementSchema = elementSchema;
     this.hints = hints;
     this.treeDepth = SszCompositeSchema.super.treeDepth();
+    // Supernodes only hold fixed-size composite elements
+    this.superNodeLayout =
+        elementSchema.isPrimitive() || !elementSchema.isFixedSize()
+            ? null
+            : hints
+                .getHint(SszSuperNodeHint.class)
+                .map(SszSuperNodeHint::getDepth)
+                .filter(depth -> depth > 0)
+                .map(SszSuperNodeLayout::uniform)
+                .orElse(null);
+  }
+
+  /**
+   * See {@code SszCollectionSchema#getSuperNodeLayout()}, which the list and vector schemas
+   * inherit.
+   */
+  public Optional<SszSuperNodeLayout> getSuperNodeLayout() {
+    return Optional.ofNullable(superNodeLayout);
   }
 
   protected abstract TreeNode createDefaultTree();
