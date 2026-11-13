@@ -29,7 +29,7 @@ public interface ExecutionPayloadManager {
   ExecutionPayloadManager NOOP =
       new ExecutionPayloadManager() {
         @Override
-        public boolean isExecutionPayloadRecentlySeen(final Bytes32 beaconBlockRoot) {
+        public boolean isExecutionPayloadImportedOrImporting(final Bytes32 beaconBlockRoot) {
           return false;
         }
 
@@ -73,13 +73,17 @@ public interface ExecutionPayloadManager {
         @Override
         public void subscribeFailedPayloadExecution(
             final FailedPayloadExecutionSubscriber subscriber) {}
+
+        @Override
+        public void subscribeFailedPayloadImport(final FailedPayloadImportSubscriber subscriber) {}
       };
 
   /**
-   * {@link SignedExecutionPayloadEnvelope} has been recently seen referencing the block. This is
-   * used for RPC fetch de-duplication.
+   * {@link SignedExecutionPayloadEnvelope} referencing the block has been imported, or its import
+   * is in flight. This is used to skip RPC fetches for payloads we already have. Seeing an envelope
+   * on gossip is not enough, as its import may have failed.
    */
-  boolean isExecutionPayloadRecentlySeen(Bytes32 beaconBlockRoot);
+  boolean isExecutionPayloadImportedOrImporting(Bytes32 beaconBlockRoot);
 
   /**
    * {@link SignedExecutionPayloadEnvelope} was seen before {@code get_payload_due_ms()}. This
@@ -139,6 +143,18 @@ public interface ExecutionPayloadManager {
 
   interface FailedPayloadExecutionSubscriber {
     void onPayloadExecutionFailed(SignedExecutionPayloadEnvelope executionPayload);
+  }
+
+  /**
+   * Subscribes to payload imports which end without the payload being imported, whatever the
+   * reason. The subscriber is called once no other import for the same block root is in flight, so
+   * a fetch which was skipped because of {@link #isExecutionPayloadImportedOrImporting} can be
+   * requested again.
+   */
+  void subscribeFailedPayloadImport(FailedPayloadImportSubscriber subscriber);
+
+  interface FailedPayloadImportSubscriber {
+    void onPayloadImportFailed(Bytes32 beaconBlockRoot);
   }
 
   record ValidateAndImportResult(

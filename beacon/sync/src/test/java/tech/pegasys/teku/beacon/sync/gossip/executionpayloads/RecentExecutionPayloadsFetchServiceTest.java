@@ -44,6 +44,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.OperationAddedSubscriber;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadManager;
+import tech.pegasys.teku.statetransition.execution.ExecutionPayloadManager.FailedPayloadImportSubscriber;
 import tech.pegasys.teku.statetransition.payloadattestation.PayloadAttestationPool;
 import tech.pegasys.teku.statetransition.util.PendingPool;
 import tech.pegasys.teku.statetransition.util.PendingPool.RequiredBlockRootDroppedSubscriber;
@@ -103,6 +104,7 @@ class RecentExecutionPayloadsFetchServiceTest {
     final Bytes32 beaconBlockRoot = dataStructureUtil.randomBytes32();
     recentExecutionPayloadsFetchService.requestRecentExecutionPayload(beaconBlockRoot);
 
+    verify(executionPayloadManager).isExecutionPayloadImportedOrImporting(beaconBlockRoot);
     assertTaskCounts(1, 1, 0);
     assertThat(importedExecutionPayloads).isEmpty();
 
@@ -134,13 +136,86 @@ class RecentExecutionPayloadsFetchServiceTest {
   }
 
   @Test
-  public void ignoreKnownExecutionPayload() {
+  public void ignoreImportedExecutionPayload() {
     final Bytes32 beaconBlockRoot = dataStructureUtil.randomBytes32();
-    when(executionPayloadManager.isExecutionPayloadRecentlySeen(beaconBlockRoot)).thenReturn(true);
+    when(executionPayloadManager.isExecutionPayloadImportedOrImporting(beaconBlockRoot))
+        .thenReturn(true);
     recentExecutionPayloadsFetchService.requestRecentExecutionPayload(beaconBlockRoot);
 
     assertTaskCounts(0, 0, 0);
     assertThat(importedExecutionPayloads).isEmpty();
+  }
+
+  @Test
+  public void fetchExecutionPayloadRequestedDuringAnImportWhichFails() {
+    final Bytes32 beaconBlockRoot = dataStructureUtil.randomBytes32();
+    final FailedPayloadImportSubscriber failedImportSubscriber =
+        startAndGetFailedImportSubscriber();
+    when(executionPayloadManager.isExecutionPayloadImportedOrImporting(beaconBlockRoot))
+        .thenReturn(true);
+    recentExecutionPayloadsFetchService.requestRecentExecutionPayload(beaconBlockRoot);
+    assertTaskCounts(0, 0, 0);
+
+    // the import ends without the payload being imported, nothing else will ask for it again
+    when(executionPayloadManager.isExecutionPayloadImportedOrImporting(beaconBlockRoot))
+        .thenReturn(false);
+    failedImportSubscriber.onPayloadImportFailed(beaconBlockRoot);
+    assertTaskCounts(1, 1, 0);
+
+    // one replay per skipped request
+    taskFutures.getFirst().complete(FetchResult.createFailed(Status.CANCELLED));
+    assertTaskCounts(0, 0, 0);
+    failedImportSubscriber.onPayloadImportFailed(beaconBlockRoot);
+    assertTaskCounts(0, 0, 0);
+  }
+
+  @Test
+  public void fetchExecutionPayloadWhenTheImportFailsRightAfterItWasSeenInFlight() {
+    final Bytes32 beaconBlockRoot = dataStructureUtil.randomBytes32();
+    final FailedPayloadImportSubscriber failedImportSubscriber =
+        startAndGetFailedImportSubscriber();
+    // the import is seen in flight and fails before the request gets back from the check
+    when(executionPayloadManager.isExecutionPayloadImportedOrImporting(beaconBlockRoot))
+        .thenAnswer(
+            invocation -> {
+              failedImportSubscriber.onPayloadImportFailed(beaconBlockRoot);
+              return true;
+            })
+        .thenReturn(false);
+
+    recentExecutionPayloadsFetchService.requestRecentExecutionPayload(beaconBlockRoot);
+
+    assertTaskCounts(1, 1, 0);
+  }
+
+  @Test
+  public void doNotFetchExecutionPayloadWhenTheImportItWasRequestedDuringSucceeds() {
+    final SignedExecutionPayloadEnvelope executionPayload =
+        dataStructureUtil.randomSignedExecutionPayloadEnvelope(1);
+    final Bytes32 beaconBlockRoot = executionPayload.getBeaconBlockRoot();
+    final FailedPayloadImportSubscriber failedImportSubscriber =
+        startAndGetFailedImportSubscriber();
+    when(executionPayloadManager.isExecutionPayloadImportedOrImporting(beaconBlockRoot))
+        .thenReturn(true);
+    recentExecutionPayloadsFetchService.requestRecentExecutionPayload(beaconBlockRoot);
+
+    recentExecutionPayloadsFetchService.onExecutionPayloadImported(executionPayload, false);
+
+    // a later failure for the same root, e.g. of a duplicate import, has nothing to replay
+    when(executionPayloadManager.isExecutionPayloadImportedOrImporting(beaconBlockRoot))
+        .thenReturn(false);
+    failedImportSubscriber.onPayloadImportFailed(beaconBlockRoot);
+    assertTaskCounts(0, 0, 0);
+  }
+
+  @Test
+  public void doNotFetchExecutionPayloadWhenAnImportNobodyAskedForFails() {
+    final FailedPayloadImportSubscriber failedImportSubscriber =
+        startAndGetFailedImportSubscriber();
+
+    failedImportSubscriber.onPayloadImportFailed(dataStructureUtil.randomBytes32());
+
+    assertTaskCounts(0, 0, 0);
   }
 
   @Test
@@ -367,6 +442,14 @@ class RecentExecutionPayloadsFetchServiceTest {
     tasks.add(task);
 
     return task;
+  }
+
+  private FailedPayloadImportSubscriber startAndGetFailedImportSubscriber() {
+    assertThat(recentExecutionPayloadsFetchService.start()).isCompleted();
+    final ArgumentCaptor<FailedPayloadImportSubscriber> captor =
+        ArgumentCaptor.forClass(FailedPayloadImportSubscriber.class);
+    verify(executionPayloadManager).subscribeFailedPayloadImport(captor.capture());
+    return captor.getValue();
   }
 
   private void assertTaskCounts(

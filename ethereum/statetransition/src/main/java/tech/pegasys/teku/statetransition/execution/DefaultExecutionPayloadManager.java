@@ -19,6 +19,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -36,6 +37,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.BlockRootAndBuilderIndex;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannel;
@@ -60,11 +62,18 @@ public class DefaultExecutionPayloadManager
   private final Set<Bytes32> executionPayloadsSeenBeforePayloadDue =
       LimitedSet.createSynchronizedNatural(VALID_EXECUTION_PAYLOAD_SET_SIZE);
 
+  // number of in-flight imports per block root, so RPC fetches are not queued for a payload
+  // that is already being imported
+  private final Map<Bytes32, Integer> executionPayloadImportsInProgress = new ConcurrentHashMap<>();
+
   // pending pool
   private final Map<BlockRootAndBuilderIndex, PendingExecutionPayload> pendingExecutionPayloads =
       LimitedMap.createSynchronizedNatural(PENDING_EXECUTION_PAYLOADS_CACHE_SIZE);
 
   private final Subscribers<FailedPayloadExecutionSubscriber> failedPayloadExecutionSubscribers =
+      Subscribers.create(true);
+
+  private final Subscribers<FailedPayloadImportSubscriber> failedPayloadImportSubscribers =
       Subscribers.create(true);
 
   private final Spec spec;
@@ -102,8 +111,13 @@ public class DefaultExecutionPayloadManager
   }
 
   @Override
-  public boolean isExecutionPayloadRecentlySeen(final Bytes32 beaconBlockRoot) {
-    return executionPayloadGossipValidator.isPayloadSeen(beaconBlockRoot);
+  public boolean isExecutionPayloadImportedOrImporting(final Bytes32 beaconBlockRoot) {
+    // a FULL fork choice node is the authoritative signal that the payload has been imported
+    return executionPayloadImportsInProgress.containsKey(beaconBlockRoot)
+        || recentChainData
+            .getForkChoiceStrategy()
+            .map(strategy -> strategy.contains(ForkChoiceNode.createFull(beaconBlockRoot)))
+            .orElse(false);
   }
 
   @Override
@@ -151,6 +165,8 @@ public class DefaultExecutionPayloadManager
       final SignedExecutionPayloadEnvelope signedExecutionPayload,
       final Optional<BroadcastValidationLevel> broadcastValidationLevel) {
     final UInt64 arrivalTimestamp = recentChainData.getStore().getTimeInMillis();
+    // NOT_REQUIRED skips validation, so the envelope is not proven to be the committed payload
+    final boolean payloadCommitmentVerified = !skipsValidation(broadcastValidationLevel);
     return executionPayloadGossipValidator
         .validate(signedExecutionPayload, broadcastValidationLevel)
         .thenApply(
@@ -162,7 +178,10 @@ public class DefaultExecutionPayloadManager
                   recordIfExecutionPayloadIsSeenBeforeDeadline(
                       signedExecutionPayload, arrivalTimestamp);
                   return new ValidateAndImportResult(
-                      result, Optional.of(importExecutionPayload(signedExecutionPayload, true)));
+                      result,
+                      Optional.of(
+                          importExecutionPayload(
+                              signedExecutionPayload, payloadCommitmentVerified)));
                 }
                 case SAVE_FOR_FUTURE ->
                     saveForFuture(
@@ -193,7 +212,11 @@ public class DefaultExecutionPayloadManager
     } else {
       // since no slashing is implemented in order to prevent DoS, we keep one pending
       // payload: the latest candidate received before payload due, or the first candidate
-      // if none arrived before payload due
+      // if none arrived before payload due.
+      // Known edge: the content hash is only checked once the block is known, so a forged
+      // envelope that arrives first and is followed by the correct one after payload due stays
+      // pending. It is ignored when the block arrives and the correct envelope is recovered
+      // through the by-root fetch, one slot later.
       pendingExecutionPayloads.merge(
           signedExecutionPayload.getBlockRootAndBuilderIndex(),
           new PendingExecutionPayload(signedExecutionPayload, arrivalTimestamp),
@@ -208,6 +231,8 @@ public class DefaultExecutionPayloadManager
     // taken before anything else: verification and the data availability check which follow can
     // take long enough to put an on time payload past its deadline
     final UInt64 arrivalTimestamp = recentChainData.getStore().getTimeInMillis();
+    final Bytes32 beaconBlockRoot = signedExecutionPayload.getBeaconBlockRoot();
+    executionPayloadImportsInProgress.merge(beaconBlockRoot, 1, Integer::sum);
     return asyncRunner
         .runAsync(
             () ->
@@ -223,6 +248,7 @@ public class DefaultExecutionPayloadManager
                     signedExecutionPayload::toLogString);
                 receivedExecutionPayloadEventsChannelPublisher.onExecutionPayloadImported(
                     signedExecutionPayload, result.isImportedOptimistically());
+                blockRootsWithInvalidExecutionPayload.remove(beaconBlockRoot);
                 return;
               }
               switch (result.getFailureReason()) {
@@ -237,8 +263,7 @@ public class DefaultExecutionPayloadManager
                 }
                 case FAILED_VERIFICATION, FAILED_DATA_AVAILABILITY_CHECK_INVALID -> {
                   if (payloadCommitmentVerified) {
-                    blockRootsWithInvalidExecutionPayload.add(
-                        signedExecutionPayload.getBeaconBlockRoot());
+                    blockRootsWithInvalidExecutionPayload.add(beaconBlockRoot);
                   }
                   logFailedExecutionPayloadImport(signedExecutionPayload, result);
                 }
@@ -257,7 +282,26 @@ public class DefaultExecutionPayloadManager
                       signedExecutionPayload.sszSerialize().toHexString());
               LOG.error(internalErrorMessage, ex);
               return ExecutionPayloadImportResult.internalError(ex);
+            })
+        .alwaysRun(
+            () ->
+                executionPayloadImportsInProgress.computeIfPresent(
+                    beaconBlockRoot, (root, count) -> count == 1 ? null : count - 1))
+        .thenPeek(
+            result -> {
+              // a fetch skipped while this import was in flight has to be requested again
+              if (!result.isSuccessful()
+                  && !executionPayloadImportsInProgress.containsKey(beaconBlockRoot)) {
+                failedPayloadImportSubscribers.deliver(
+                    FailedPayloadImportSubscriber::onPayloadImportFailed, beaconBlockRoot);
+              }
             });
+  }
+
+  private static boolean skipsValidation(
+      final Optional<BroadcastValidationLevel> broadcastValidationLevel) {
+    return broadcastValidationLevel.isPresent()
+        && broadcastValidationLevel.get() == BroadcastValidationLevel.NOT_REQUIRED;
   }
 
   private void logFailedExecutionPayloadImport(
@@ -297,6 +341,11 @@ public class DefaultExecutionPayloadManager
   @Override
   public void subscribeFailedPayloadExecution(final FailedPayloadExecutionSubscriber subscriber) {
     failedPayloadExecutionSubscribers.subscribe(subscriber);
+  }
+
+  @Override
+  public void subscribeFailedPayloadImport(final FailedPayloadImportSubscriber subscriber) {
+    failedPayloadImportSubscribers.subscribe(subscriber);
   }
 
   @Override
