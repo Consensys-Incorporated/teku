@@ -312,6 +312,12 @@ public class CombinedStorageChannelSplitter implements CombinedStorageChannel {
   }
 
   @Override
+  public SafeFuture<List<DataColumnSidecar>> getSidecars(
+      final List<DataColumnSlotAndIdentifier> identifiers) {
+    return asyncRunner.runAsync(() -> queryDelegate.getSidecars(identifiers));
+  }
+
+  @Override
   public SafeFuture<List<DataColumnSlotAndIdentifier>> getDataColumnIdentifiers(final UInt64 slot) {
     return asyncRunner.runAsync(() -> queryDelegate.getDataColumnIdentifiers(slot));
   }
@@ -350,6 +356,11 @@ public class CombinedStorageChannelSplitter implements CombinedStorageChannel {
   @Override
   public SafeFuture<Optional<List<List<KZGProof>>>> getDataColumnSidecarsProofs(final UInt64 slot) {
     return asyncRunner.runAsync(() -> queryDelegate.getDataColumnSidecarsProofs(slot));
+  }
+
+  @Override
+  public SafeFuture<Optional<UInt64>> getLastDataColumnSidecarArchivedSlot() {
+    return asyncRunner.runAsync(queryDelegate::getLastDataColumnSidecarArchivedSlot);
   }
 
   @Override

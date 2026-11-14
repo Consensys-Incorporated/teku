@@ -293,24 +293,37 @@ class CombinedChainDataClientTest {
         .thenReturn(
             SafeFuture.completedFuture(
                 List.of(firstIdentifier, otherBlockIdentifier, secondIdentifier)));
-    when(historicalChainData.getSidecar(any()))
-        .thenAnswer(
-            args -> {
-              final DataColumnSlotAndIdentifier identifier = args.getArgument(0);
-              if (identifier.equals(firstIdentifier)) {
-                return SafeFuture.completedFuture(Optional.of(firstSidecar));
-              } else if (identifier.equals(secondIdentifier)) {
-                return SafeFuture.completedFuture(Optional.of(secondSidecar));
-              }
-              return SafeFuture.completedFuture(Optional.empty());
-            });
+    when(historicalChainData.getSidecars(List.of(firstIdentifier, secondIdentifier)))
+        .thenReturn(SafeFuture.completedFuture(List.of(firstSidecar, secondSidecar)));
 
     final List<DataColumnSidecar> result =
         SafeFutureAssert.safeJoin(
             client.getDataColumnSidecars(new SlotAndBlockRoot(slot, blockRoot), List.of()));
 
     assertThat(result).containsExactly(firstSidecar, secondSidecar);
-    verify(historicalChainData, never()).getSidecar(otherBlockIdentifier);
+    verify(historicalChainData).getSidecars(List.of(firstIdentifier, secondIdentifier));
+    verify(historicalChainData, never()).getSidecar(any());
+  }
+
+  @Test
+  void getsSelectedDataColumnSidecarsInOneBatchAfterFilteringIdentifiers() {
+    final SlotAndBlockRoot block =
+        new SlotAndBlockRoot(UInt64.valueOf(42), dataStructureUtil.randomBytes32());
+    final List<DataColumnSlotAndIdentifier> identifiers =
+        List.of(
+            new DataColumnSlotAndIdentifier(block.getSlot(), block.getBlockRoot(), UInt64.ZERO),
+            new DataColumnSlotAndIdentifier(block.getSlot(), block.getBlockRoot(), UInt64.ONE));
+    final List<DataColumnSidecar> sidecars = List.of(mock(DataColumnSidecar.class));
+    when(historicalChainData.getDataColumnIdentifiers(block.getSlot()))
+        .thenReturn(SafeFuture.completedFuture(identifiers));
+    when(historicalChainData.getSidecars(identifiers))
+        .thenReturn(SafeFuture.completedFuture(sidecars));
+
+    assertThat(client.getDataColumnSidecars(block, List.of(UInt64.ONE, UInt64.ZERO, UInt64.ONE)))
+        .isCompletedWithValue(sidecars);
+    verify(historicalChainData).getSidecars(identifiers);
+    verify(historicalChainData).getDataColumnIdentifiers(block.getSlot());
+    verify(historicalChainData, never()).getSidecar(any());
   }
 
   @Test

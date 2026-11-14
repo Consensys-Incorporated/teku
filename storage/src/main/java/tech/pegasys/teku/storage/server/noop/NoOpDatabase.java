@@ -426,7 +426,7 @@ public class NoOpDatabase implements Database {
   public void setEarliestAvailableDataColumnSlot(final UInt64 slot) {}
 
   @Override
-  public Optional<UInt64> getLastDataColumnSidecarsProofsSlot() {
+  public Optional<UInt64> getLastDataColumnSidecarArchivedSlot() {
     return Optional.empty();
   }
 

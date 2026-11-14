@@ -133,6 +133,9 @@ public interface StorageQueryChannel extends ChannelInterface {
 
   SafeFuture<Optional<DataColumnSidecar>> getSidecar(DataColumnSlotAndIdentifier identifier);
 
+  /** Reads the requested physical sidecars in one storage task, preserving identifier order. */
+  SafeFuture<List<DataColumnSidecar>> getSidecars(List<DataColumnSlotAndIdentifier> identifiers);
+
   SafeFuture<Optional<DataColumnSidecar>> getNonCanonicalSidecar(
       DataColumnSlotAndIdentifier identifier);
 
@@ -155,6 +158,8 @@ public interface StorageQueryChannel extends ChannelInterface {
   SafeFuture<Optional<UInt64>> getEarliestDataColumnSidecarSlot();
 
   SafeFuture<Optional<List<List<KZGProof>>>> getDataColumnSidecarsProofs(UInt64 slot);
+
+  SafeFuture<Optional<UInt64>> getLastDataColumnSidecarArchivedSlot();
 
   SafeFuture<List<StoredLightClientUpdate>> getBestLightClientUpdates();
 

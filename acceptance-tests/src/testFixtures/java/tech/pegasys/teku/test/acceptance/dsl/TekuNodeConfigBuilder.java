@@ -675,6 +675,31 @@ public class TekuNodeConfigBuilder {
     return this;
   }
 
+  public TekuNodeConfigBuilder withDataColumnSidecarExtensionRetentionEpochs(final int epochs) {
+    configMap.put("Xdata-column-sidecar-extension-retention-epochs", epochs);
+    return this;
+  }
+
+  public TekuNodeConfigBuilder withDataColumnSidecarRecoveryMaxDelayMillis(final long millis) {
+    configMap.put("Xdata-column-sidecar-recovery-max-delay", millis);
+    return this;
+  }
+
+  public TekuNodeConfigBuilder withDataColumnPruningIntervalSeconds(final int seconds) {
+    configMap.put("Xdata-storage-data-column-pruning-interval", seconds);
+    return this;
+  }
+
+  public TekuNodeConfigBuilder withCustodySyncBatchSize(final int slots) {
+    configMap.put("Xp2p-sidecar-custody-sync-batch-size", slots);
+    return this;
+  }
+
+  public TekuNodeConfigBuilder withCustodySyncPollPeriodSeconds(final int seconds) {
+    configMap.put("Xp2p-sidecar-custody-sync-poll-period-seconds", seconds);
+    return this;
+  }
+
   public TekuNodeConfigBuilder withDasPublishWithholdColumnsEverySlots(
       final int dasPublishWithholdColumnsEverySlots) {
     LOG.debug("Xdas-publish-withhold-columns-every-slots: {}", dasPublishWithholdColumnsEverySlots);

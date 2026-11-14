@@ -448,6 +448,13 @@ public class ChainStorage
   }
 
   @Override
+  public SafeFuture<List<DataColumnSidecar>> getSidecars(
+      final List<DataColumnSlotAndIdentifier> identifiers) {
+    return SafeFuture.of(
+        () -> identifiers.stream().map(database::getSidecar).flatMap(Optional::stream).toList());
+  }
+
+  @Override
   public SafeFuture<List<DataColumnSlotAndIdentifier>> getDataColumnIdentifiers(final UInt64 slot) {
     return SafeFuture.of(
         () -> {
@@ -592,6 +599,11 @@ public class ChainStorage
   @Override
   public SafeFuture<Optional<List<List<KZGProof>>>> getDataColumnSidecarsProofs(final UInt64 slot) {
     return SafeFuture.of(() -> database.getDataColumnSidecarsProofs(slot));
+  }
+
+  @Override
+  public SafeFuture<Optional<UInt64>> getLastDataColumnSidecarArchivedSlot() {
+    return SafeFuture.of(database::getLastDataColumnSidecarArchivedSlot);
   }
 
   @Override

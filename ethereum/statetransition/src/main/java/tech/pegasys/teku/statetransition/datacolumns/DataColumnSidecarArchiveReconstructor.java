@@ -28,6 +28,11 @@ public interface DataColumnSidecarArchiveReconstructor
   DataColumnSidecarArchiveReconstructor NOOP =
       new DataColumnSidecarArchiveReconstructor() {
         @Override
+        public SafeFuture<Void> loadLastArchivedSlot() {
+          return SafeFuture.COMPLETE;
+        }
+
+        @Override
         public int onRequest() {
           return 0;
         }
@@ -39,7 +44,7 @@ public interface DataColumnSidecarArchiveReconstructor
         }
 
         @Override
-        public boolean isSidecarPruned(final UInt64 slot, final UInt64 index) {
+        public boolean isSidecarArchived(final UInt64 slot, final UInt64 index) {
           return false;
         }
 
@@ -55,6 +60,12 @@ public interface DataColumnSidecarArchiveReconstructor
       };
 
   /**
+   * Loads the last archived slot from storage. Must complete before ReqResp requests are served:
+   * archives written under an earlier retention setting are found only this way.
+   */
+  SafeFuture<Void> loadLastArchivedSlot();
+
+  /**
    * Should be called on request start
    *
    * @return assigned request id
@@ -68,7 +79,8 @@ public interface DataColumnSidecarArchiveReconstructor
   SafeFuture<Optional<DataColumnSidecar>> reconstructDataColumnSidecar(
       SlotAndBlockRoot slotAndBlockRoot, UInt64 index, int requestId);
 
-  boolean isSidecarPruned(UInt64 slot, UInt64 index);
+  /** Whether a missing sidecar may be served from an archive, regardless of current retention. */
+  boolean isSidecarArchived(UInt64 slot, UInt64 index);
 
   /** Should be called on request completion, releasing any state kept for the request */
   void onRequestCompleted(int requestId);

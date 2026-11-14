@@ -415,6 +415,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
   protected volatile GossipValidationHelper gossipValidationHelper;
   protected volatile DasGossipLogger dasGossipLogger;
   protected volatile DasReqRespLogger dasReqRespLogger;
+  protected volatile DataColumnSidecarArchiveReconstructor dataColumnSidecarArchiveReconstructor =
+      DataColumnSidecarArchiveReconstructor.NOOP;
   protected volatile LightClientUpdateStore lightClientUpdateStore;
   protected volatile LightClientServerService lightClientServerService;
   protected volatile SyncCommitteeSubscriptionManager syncCommitteeSubscriptionManager;
@@ -723,6 +725,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
         // Init other services
         .thenRun(this::initAll)
         .thenCompose(__ -> loadLightClientUpdates())
+        // before startServices starts the p2p network, so ReqResp handlers see existing archives
+        .thenCompose(__ -> dataColumnSidecarArchiveReconstructor.loadLastArchivedSlot())
         .thenRun(
             () -> {
               // complete spec initialization
@@ -2187,7 +2191,6 @@ public class BeaconChainController extends Service implements BeaconChainControl
     final SuperNodeSupplier isSuperNodeSupplier =
         new SuperNodeSupplier(spec, () -> custodyGroupCountManager);
 
-    final DataColumnSidecarArchiveReconstructor dataColumnSidecarArchiveReconstructor;
     if (spec.isMilestoneSupported(SpecMilestone.FULU)) {
       dataColumnSidecarArchiveReconstructor =
           new DataColumnSidecarArchiveReconstructorImpl(
@@ -2203,8 +2206,6 @@ public class BeaconChainController extends Service implements BeaconChainControl
       eventChannels
           .subscribe(FinalizedCheckpointChannel.class, dataColumnSidecarArchiveReconstructor)
           .subscribe(SlotEventsChannel.class, dataColumnSidecarArchiveReconstructor);
-    } else {
-      dataColumnSidecarArchiveReconstructor = DataColumnSidecarArchiveReconstructor.NOOP;
     }
 
     final Eth2P2PNetworkBuilder p2pNetworkBuilder =
@@ -2782,6 +2783,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
     }
     slotProcessor.setCurrentSlot(currentSlot);
     performanceTracker.start(currentSlot);
+    dataColumnSidecarArchiveReconstructor.onNewFinalizedCheckpoint(
+        recentChainData.getStore().getFinalizedCheckpoint(), false);
   }
 
   protected UInt64 getCurrentSlot(final UInt64 genesisTime) {
