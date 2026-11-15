@@ -31,6 +31,7 @@ import java.util.stream.LongStream;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -1061,12 +1062,13 @@ class FastConfirmationCalculatorTest {
       setCheckpoints(chain.get(i), observedJustified, observedJustified);
     }
     when(store.getFinalizedCheckpoint()).thenReturn(new Checkpoint(UInt64.ZERO, chain.get(0)));
-    // Confirmed root is the finalized block. The previous observed justified checkpoint is stale
-    // and its state has been pruned, so there is no previous balance source.
+    // Confirmed root is a previous-epoch block, so reconfirmation has blocks 9..10 to score. The
+    // previous observed justified checkpoint is stale and its state has been pruned, so there is no
+    // previous balance source to score them against.
     final FastConfirmationStore fcrStore =
         new FastConfirmationStore(
             store,
-            chain.get(0),
+            chain.get(10),
             new Checkpoint(UInt64.ZERO, Bytes32.random()),
             observedJustified,
             zero,
@@ -1075,12 +1077,15 @@ class FastConfirmationCalculatorTest {
     final BeaconState state = genesisState();
     final FastConfirmationStates states =
         new FastConfirmationStates(Optional.empty(), state, state);
-    // currentSlot 16 = epoch 2 start: reverting to finalized never reads the previous balance
-    // source, and the rule restarts from the observed justified checkpoint block.
+    // currentSlot 16 = epoch 2 start: reconfirmation fails without the previous balance source, so
+    // the rule reverts to finalized and restarts from the observed justified checkpoint block.
     final FastConfirmationCalculator calculator =
         new FastConfirmationCalculator(spec, fcrStore, states, UInt64.valueOf(16));
 
-    assertThat(calculator.getLatestConfirmed()).isEqualTo(chain.get(8));
+    try (final LogCaptor logCaptor = LogCaptor.forClass(FastConfirmationCalculator.class)) {
+      assertThat(calculator.getLatestConfirmed()).isEqualTo(chain.get(8));
+      assertThat(logCaptor.getDebugLogs()).anyMatch(log -> log.contains("previous balance source"));
+    }
   }
 
   @Test

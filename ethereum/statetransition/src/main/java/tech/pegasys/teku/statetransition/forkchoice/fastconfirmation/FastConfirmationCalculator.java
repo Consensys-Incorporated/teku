@@ -819,6 +819,11 @@ class FastConfirmationCalculator {
     }
     final Optional<BeaconState> maybePreviousBalanceSource = states.previousBalanceSource();
     if (maybePreviousBalanceSource.isEmpty()) {
+      LOG.debug(
+          "Fast confirmation for slot {}: previous balance source for {} unavailable, cannot reconfirm {}",
+          currentSlot,
+          fcrStore.previousEpochObservedJustifiedCheckpoint(),
+          confirmedRoot);
       return false;
     }
     final BeaconState previousBalanceSource = maybePreviousBalanceSource.get();
