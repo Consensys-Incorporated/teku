@@ -14,6 +14,7 @@
 package tech.pegasys.teku.cli.subcommand;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -23,11 +24,15 @@ import com.google.common.io.Resources;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import okhttp3.mockwebserver.MockResponse;
+import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.api.ConfigProvider;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
+import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -81,6 +86,22 @@ class RemoteSpecLoaderTest {
     assertThat(specConfig.getMinEpochsForBlockRequests()).isEqualTo(33024);
     assertThat(specConfig.getAttestationPropagationSlotRange()).isEqualTo(32);
     assertThat(specConfig.getMaximumGossipClockDisparity()).isEqualTo(500);
+  }
+
+  @Test
+  void shouldLimitRemoteSpecResponseWithConfiguredLimit() throws IOException, InterruptedException {
+    final MockWebServer server = new MockWebServer();
+    server.start();
+    try {
+      server.enqueue(new MockResponse().setChunkedBody("x".repeat(1_000_001), 8192));
+
+      assertThatThrownBy(() -> RemoteSpecLoader.getSpec(List.of(server.url("/").uri()), 1))
+          .isInstanceOf(InvalidConfigurationException.class)
+          .hasMessageContaining("1 MB");
+      assertThat(server.takeRequest().getPath()).isEqualTo("/eth/v1/config/spec");
+    } finally {
+      server.shutdown();
+    }
   }
 
   private Map<String, Object> getRawConfigForSpec(final Spec spec) {
