@@ -855,6 +855,7 @@ public class KvStoreDatabase implements Database {
     final BeaconState finalizedState = dao.getLatestFinalizedState().orElseThrow();
     final Optional<Bytes32> latestCanonicalBlockRoot = dao.getLatestCanonicalBlockRoot();
     final Optional<UInt64> custodyGroupCount = dao.getCustodyGroupCount();
+    final Optional<Bytes32> fastConfirmedRoot = dao.getFastConfirmedRoot();
 
     final Map<UInt64, VoteTracker> votes = dao.getVotes();
 
@@ -904,7 +905,8 @@ public class KvStoreDatabase implements Database {
             blockInformation,
             votes,
             latestCanonicalBlockRoot,
-            custodyGroupCount));
+            custodyGroupCount,
+            fastConfirmedRoot));
   }
 
   private void enrichFinalizedGloasBlockMetadata(
@@ -1904,6 +1906,7 @@ public class KvStoreDatabase implements Database {
 
       update.getLatestCanonicalBlockRoot().ifPresent(updater::setLatestCanonicalBlockRoot);
       update.getCustodyGroupCount().ifPresent(updater::setCustodyGroupCount);
+      update.getFastConfirmedRoot().ifPresent(updater::setFastConfirmedRoot);
       update.getJustifiedCheckpoint().ifPresent(updater::setJustifiedCheckpoint);
       update.getBestJustifiedCheckpoint().ifPresent(updater::setBestJustifiedCheckpoint);
       latestFinalizedStateUpdateStartTime = System.currentTimeMillis();

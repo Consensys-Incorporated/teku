@@ -265,4 +265,27 @@ public class ValidatorOptionsTest extends AbstractBeaconNodeCommandTest {
                 .getBeaconApiReadinessExecutorThreads())
         .hasValue(4);
   }
+
+  @Test
+  void beaconApiMaxResponseSizeDefaultsTo64Megabytes() {
+    final ValidatorConfig config =
+        getTekuConfigurationFromArguments().validatorClient().getValidatorConfig();
+    assertThat(config.getBeaconApiMaxResponseSizeMegabytes()).isEqualTo(64);
+  }
+
+  @Test
+  void beaconApiMaxResponseSizeCanBeSet() {
+    final ValidatorConfig config =
+        getTekuConfigurationFromArguments("--Xvalidator-client-beacon-api-max-response-size=128")
+            .validatorClient()
+            .getValidatorConfig();
+    assertThat(config.getBeaconApiMaxResponseSizeMegabytes()).isEqualTo(128);
+  }
+
+  @Test
+  void beaconApiMaxResponseSizeIsHiddenFromHelp() {
+    beaconNodeCommand.parse(new String[] {"--help"});
+    assertThat(getCommandLineOutput())
+        .doesNotContain("--Xvalidator-client-beacon-api-max-response-size");
+  }
 }

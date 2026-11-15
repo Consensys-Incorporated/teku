@@ -80,6 +80,10 @@ public class V4HotKvStoreDao {
     return db.get(schema.getVariableCustodyGroupCount());
   }
 
+  public Optional<Bytes32> getFastConfirmedRoot() {
+    return db.get(schema.getVariableFastConfirmedRoot());
+  }
+
   public Optional<Checkpoint> getFinalizedCheckpoint() {
     return db.get(schema.getVariableFinalizedCheckpoint());
   }
@@ -299,6 +303,11 @@ public class V4HotKvStoreDao {
     @Override
     public void setCustodyGroupCount(final UInt64 custodyGroupCount) {
       transaction.put(schema.getVariableCustodyGroupCount(), custodyGroupCount);
+    }
+
+    @Override
+    public void setFastConfirmedRoot(final Bytes32 fastConfirmedRoot) {
+      transaction.put(schema.getVariableFastConfirmedRoot(), fastConfirmedRoot);
     }
 
     @Override
