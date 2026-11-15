@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.statetransition;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
@@ -24,9 +25,11 @@ import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 
 import java.util.Optional;
 import java.util.function.Consumer;
+import org.apache.logging.log4j.Level;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -183,5 +186,19 @@ class EpochCachePrimerTest {
             new SlotAndBlockRoot(realSpec.computeStartSlotAtEpoch(epoch), headBlock));
     assertThatSafeFuture(stateFuture).isCompletedWithNonEmptyOptional();
     return stateFuture.getNow(null).orElseThrow();
+  }
+
+  @Test
+  void shouldLogPrecomputeTimings() {
+    try (final LogCaptor logCaptor = LogCaptor.forClass(EpochCachePrimer.class, Level.DEBUG)) {
+      primer.primeCacheForEpoch(UInt64.ONE);
+      asyncRunner.executeQueuedActions();
+
+      assertThat(logCaptor.getDebugLogs())
+          .filteredOn(log -> log.startsWith("Precomputed epoch"))
+          .singleElement()
+          .asString()
+          .matches("Precomputed epoch 1: state retrieval \\d+ ms, cache priming \\d+ ms");
+    }
   }
 }

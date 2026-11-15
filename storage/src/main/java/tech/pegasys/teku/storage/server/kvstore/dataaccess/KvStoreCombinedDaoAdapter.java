@@ -157,6 +157,11 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
   }
 
   @Override
+  public Optional<Bytes32> getFastConfirmedRoot() {
+    return hotDao.getFastConfirmedRoot();
+  }
+
+  @Override
   @MustBeClosed
   public HotUpdater hotUpdater() {
     return hotDao.hotUpdater();
@@ -568,6 +573,11 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
     @Override
     public void setCustodyGroupCount(final UInt64 custodyGroupCount) {
       hotUpdater.setCustodyGroupCount(custodyGroupCount);
+    }
+
+    @Override
+    public void setFastConfirmedRoot(final Bytes32 fastConfirmedRoot) {
+      hotUpdater.setFastConfirmedRoot(fastConfirmedRoot);
     }
 
     @Override

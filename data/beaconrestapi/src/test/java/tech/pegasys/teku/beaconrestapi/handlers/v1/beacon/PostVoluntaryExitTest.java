@@ -20,6 +20,7 @@ import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMetadataEmptyResponse;
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMetadataErrorResponse;
+import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.ValidationResultSubCode.IGNORE_ALREADY_SEEN;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import java.io.IOException;
@@ -63,6 +64,35 @@ public class PostVoluntaryExitTest extends AbstractMigratedBeaconHandlerTest {
     final HttpErrorResponse expectedBody = new HttpErrorResponse(SC_BAD_REQUEST, "Oh dear");
     assertThat(request.getResponseCode()).isEqualTo(SC_BAD_REQUEST);
     assertThat(request.getResponseBody()).isEqualTo(expectedBody);
+  }
+
+  @Test
+  void shouldReturnBadRequest_ifVoluntaryExitIsFromFutureEpoch() throws Exception {
+    final SignedVoluntaryExit exit = dataStructureUtil.randomSignedVoluntaryExit();
+    request.setRequestBody(exit);
+    final String reason = "Voluntary exit is from a future epoch.";
+    when(nodeDataProvider.postVoluntaryExit(exit))
+        .thenReturn(SafeFuture.completedFuture(InternalValidationResult.ignore(reason)));
+
+    handler.handleRequest(request);
+
+    assertThat(request.getResponseCode()).isEqualTo(SC_BAD_REQUEST);
+    assertThat(request.getResponseBody()).isEqualTo(new HttpErrorResponse(SC_BAD_REQUEST, reason));
+  }
+
+  @Test
+  void shouldReturnOk_ifVoluntaryExitIsAlreadyInPool() throws Exception {
+    final SignedVoluntaryExit exit = dataStructureUtil.randomSignedVoluntaryExit();
+    request.setRequestBody(exit);
+    when(nodeDataProvider.postVoluntaryExit(exit))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                InternalValidationResult.ignore(IGNORE_ALREADY_SEEN, "Already in pool")));
+
+    handler.handleRequest(request);
+
+    assertThat(request.getResponseCode()).isEqualTo(SC_OK);
+    assertThat(request.getResponseBody()).isNull();
   }
 
   @Test

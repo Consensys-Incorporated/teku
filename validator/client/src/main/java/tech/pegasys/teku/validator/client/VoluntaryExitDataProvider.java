@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.validator.client;
 
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.apache.tuweni.bytes.Bytes32;
@@ -56,7 +57,7 @@ public class VoluntaryExitDataProvider {
     return genesisDataProvider
         .getGenesisData()
         .thenCombine(
-            validatorApiChannel.getValidatorIndices(Set.of(publicKey)),
+            getValidatorIndices(publicKey),
             (genesisData, indicesMap) -> {
               final UInt64 currentEpoch = calculateCurrentEpoch(genesisData.getGenesisTime());
               final UInt64 epoch = maybeEpoch.orElse(currentEpoch);
@@ -76,6 +77,20 @@ public class VoluntaryExitDataProvider {
 
               return createSignedVoluntaryExit(validatorIndex, publicKey, epoch, forkInfo);
             });
+  }
+
+  private SafeFuture<Map<BLSPublicKey, Integer>> getValidatorIndices(final BLSPublicKey publicKey) {
+    return validatorApiChannel
+        .getValidatorIndices(Set.of(publicKey))
+        .thenCompose(
+            maybeValidatorIndices ->
+                maybeValidatorIndices
+                    .map(SafeFuture::completedFuture)
+                    .orElseGet(
+                        () ->
+                            SafeFuture.failedFuture(
+                                new NodeDataUnavailableException(
+                                    "Beacon node returned no validator index data"))));
   }
 
   UInt64 calculateCurrentEpoch(final UInt64 genesisTime) {

@@ -16,7 +16,6 @@ package tech.pegasys.teku.networking.eth2.rpc.core.encodings.compression.snappy;
 import static tech.pegasys.teku.networking.eth2.rpc.core.encodings.compression.snappy.SnappyUtil.validateChecksum;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.handler.codec.compression.DecompressionException;
 import java.util.Optional;
 import tech.pegasys.teku.networking.eth2.rpc.core.encodings.AbstractByteBufDecoder;
 import tech.pegasys.teku.networking.eth2.rpc.core.encodings.compression.exceptions.CompressionException;
@@ -45,15 +44,23 @@ public abstract class SnappyFrameDecoder
   private static final int SNAPPY_IDENTIFIER_LEN = 6;
   // See https://github.com/google/snappy/blob/1.1.9/framing_format.txt#L95
   private static final int MAX_UNCOMPRESSED_DATA_SIZE = 65536 + 4;
+  // an uncompressed chunk holds at least its checksum
+  private static final int MIN_UNCOMPRESSED_DATA_SIZE = 4;
+  // a compressed chunk holds its checksum and a block, which starts with a length varint
+  private static final int MIN_COMPRESSED_CHUNK_SIZE = 5;
   // See https://github.com/google/snappy/blob/1.1.9/framing_format.txt#L82
   protected static final int MAX_DECOMPRESSED_DATA_SIZE = 65536;
-  // See https://github.com/google/snappy/blob/1.1.9/framing_format.txt#L82
-  private static final int MAX_COMPRESSED_CHUNK_SIZE = 16777216 - 1;
+  // A compressed chunk holds a checksum and a snappy block of at most MAX_DECOMPRESSED_DATA_SIZE
+  // bytes. The format bounds such a block at 5 + 6n bytes: a length varint of at most 5 bytes, a
+  // literal of L >= 1 bytes takes at most L + 5, and a copy of at least 1 byte at most 5.
+  static final int MAX_COMPRESSED_CHUNK_SIZE = 4 + 5 + 6 * MAX_DECOMPRESSED_DATA_SIZE;
 
   private final boolean validateChecksums;
 
   private boolean started;
   private boolean corrupted;
+  // remaining bytes of a skippable chunk, dropped as they arrive instead of being buffered
+  private int bytesToSkip;
 
   /**
    * Creates a new snappy-framed decoder with validation of checksums turned on. To turn checksum
@@ -84,6 +91,11 @@ public abstract class SnappyFrameDecoder
     ByteBuf ret = null;
 
     try {
+      if (bytesToSkip > 0) {
+        skipPendingBytes(in);
+        return Optional.empty();
+      }
+
       int idx = in.readerIndex();
       final int inSize = in.readableBytes();
       if (inSize < 4) {
@@ -129,11 +141,9 @@ public abstract class SnappyFrameDecoder
                 "Received RESERVED_SKIPPABLE tag before STREAM_IDENTIFIER");
           }
 
-          if (inSize < 4 + chunkLength) {
-            return Optional.empty();
-          }
-
-          in.skipBytes(4 + chunkLength);
+          in.skipBytes(4);
+          bytesToSkip = chunkLength;
+          skipPendingBytes(in);
         }
         case RESERVED_UNSKIPPABLE ->
             // The spec mandates that reserved unskippable chunks must immediately
@@ -147,7 +157,15 @@ public abstract class SnappyFrameDecoder
                 "Received UNCOMPRESSED_DATA tag before STREAM_IDENTIFIER");
           }
           if (chunkLength > MAX_UNCOMPRESSED_DATA_SIZE) {
-            throw new CompressionException("Received UNCOMPRESSED_DATA larger than 65540 bytes");
+            throw new CompressionException(
+                "Received UNCOMPRESSED_DATA larger than " + MAX_UNCOMPRESSED_DATA_SIZE + " bytes");
+          }
+          if (chunkLength < MIN_UNCOMPRESSED_DATA_SIZE) {
+            throw new CompressionException(
+                "Received UNCOMPRESSED_DATA shorter than "
+                    + MIN_UNCOMPRESSED_DATA_SIZE
+                    + " bytes: "
+                    + chunkLength);
           }
 
           if (inSize < 4 + chunkLength) {
@@ -169,11 +187,18 @@ public abstract class SnappyFrameDecoder
           }
 
           if (chunkLength > MAX_COMPRESSED_CHUNK_SIZE) {
-            throw new DecompressionException(
+            throw new CompressionException(
                 "Received COMPRESSED_DATA that contains"
                     + " chunk that exceeds "
                     + MAX_COMPRESSED_CHUNK_SIZE
                     + " bytes");
+          }
+          if (chunkLength < MIN_COMPRESSED_CHUNK_SIZE) {
+            throw new CompressionException(
+                "Received COMPRESSED_DATA shorter than "
+                    + MIN_COMPRESSED_CHUNK_SIZE
+                    + " bytes: "
+                    + chunkLength);
           }
 
           if (inSize < 4 + chunkLength) {
@@ -209,6 +234,12 @@ public abstract class SnappyFrameDecoder
   protected void throwUnprocessedDataException(final int dataLeft) throws CompressionException {
     throw new PayloadSmallerThanExpectedException(
         "Snappy stream complete, but unprocessed data left: " + dataLeft);
+  }
+
+  private void skipPendingBytes(final ByteBuf in) {
+    final int skipped = Math.min(bytesToSkip, in.readableBytes());
+    in.skipBytes(skipped);
+    bytesToSkip -= skipped;
   }
 
   private static void checkByte(final byte actual, final byte expect) throws CompressionException {
