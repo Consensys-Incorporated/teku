@@ -14,6 +14,7 @@
 package tech.pegasys.teku.spec.signatures;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -235,8 +236,8 @@ class LocalSlashingProtectorTest {
         .thenReturn(lastSignedAttestation.map(ValidatorSigningRecord::toBytes));
 
     assertThat(
-            slashingProtectionStorage.maySignAttestation(
-                validator, GENESIS_VALIDATORS_ROOT, sourceEpoch, targetEpoch))
+            getSlashingProtector()
+                .maySignAttestation(validator, GENESIS_VALIDATORS_ROOT, sourceEpoch, targetEpoch))
         .isCompletedWithValue(false);
     verify(dataWriter, never()).syncedWrite(any(), any());
   }
@@ -247,8 +248,7 @@ class LocalSlashingProtectorTest {
         .thenReturn(lastSignedBlockSlot.map(this::blockTestSigningRecord));
 
     assertThat(
-            slashingProtectionStorage.maySignBlock(
-                validator, GENESIS_VALIDATORS_ROOT, newBlockSlot))
+            getSlashingProtector().maySignBlock(validator, GENESIS_VALIDATORS_ROOT, newBlockSlot))
         .isCompletedWithValue(true);
 
     final Bytes updatedRecord =
@@ -278,10 +278,81 @@ class LocalSlashingProtectorTest {
         .thenReturn(lastSignedBlockSlot.map(this::blockTestSigningRecord));
 
     assertThat(
-            slashingProtectionStorage.maySignBlock(
-                validator, GENESIS_VALIDATORS_ROOT, newBlockSlot))
+            getSlashingProtector().maySignBlock(validator, GENESIS_VALIDATORS_ROOT, newBlockSlot))
         .isCompletedWithValue(false);
 
     verify(dataWriter, never()).syncedWrite(any(), any());
+  }
+
+  @Test
+  void maySignBlock_shouldFailAndRereadWhenRecordReadFails() throws Exception {
+    final ValidatorSigningRecord storedRecord =
+        new ValidatorSigningRecord(
+            Optional.of(GENESIS_VALIDATORS_ROOT),
+            UInt64.valueOf(5000),
+            UInt64.valueOf(905),
+            UInt64.valueOf(906));
+    when(dataWriter.read(signingRecordPath))
+        .thenThrow(new IOException("read failed"))
+        .thenReturn(Optional.of(storedRecord.toBytes()));
+
+    assertThat(
+            getSlashingProtector()
+                .maySignBlock(validator, GENESIS_VALIDATORS_ROOT, UInt64.valueOf(4999)))
+        .isCompletedExceptionally();
+    verify(dataWriter, never()).syncedWrite(any(), any());
+
+    // the failed read was not cached, so the retry uses the stored record
+    assertThat(
+            getSlashingProtector()
+                .maySignBlock(validator, GENESIS_VALIDATORS_ROOT, UInt64.valueOf(4999)))
+        .isCompletedWithValue(false);
+    verify(dataWriter, never()).syncedWrite(any(), any());
+    verify(dataWriter, times(2)).read(signingRecordPath);
+  }
+
+  @Test
+  void maySignAttestation_shouldFailAndRereadWhenRecordReadFails() throws Exception {
+    final ValidatorSigningRecord storedRecord =
+        new ValidatorSigningRecord(
+            Optional.of(GENESIS_VALIDATORS_ROOT),
+            UInt64.valueOf(5000),
+            UInt64.valueOf(905),
+            UInt64.valueOf(906));
+    when(dataWriter.read(signingRecordPath))
+        .thenThrow(new IOException("read failed"))
+        .thenReturn(Optional.of(storedRecord.toBytes()));
+
+    assertThat(
+            getSlashingProtector()
+                .maySignAttestation(
+                    validator, GENESIS_VALIDATORS_ROOT, UInt64.valueOf(4), UInt64.valueOf(8)))
+        .isCompletedExceptionally();
+    verify(dataWriter, never()).syncedWrite(any(), any());
+
+    // the failed read was not cached, so the retry uses the stored record
+    assertThat(
+            getSlashingProtector()
+                .maySignAttestation(
+                    validator, GENESIS_VALIDATORS_ROOT, UInt64.valueOf(4), UInt64.valueOf(8)))
+        .isCompletedWithValue(false);
+    verify(dataWriter, never()).syncedWrite(any(), any());
+    verify(dataWriter, times(2)).read(signingRecordPath);
+  }
+
+  @Test
+  void getSigningRecord_shouldFailWhenRecordReadFails() throws Exception {
+    when(dataWriter.read(signingRecordPath)).thenThrow(new IOException("read failed"));
+
+    assertThatThrownBy(() -> getSlashingProtector().getSigningRecord(validator))
+        .isInstanceOf(IOException.class)
+        .hasMessage("read failed");
+  }
+
+  @Test
+  void getSigningRecord_shouldReturnEmptyWhenRecordDoesNotExist() throws Exception {
+    when(dataWriter.read(signingRecordPath)).thenReturn(Optional.empty());
+
+    assertThat(getSlashingProtector().getSigningRecord(validator)).isEmpty();
   }
 }
