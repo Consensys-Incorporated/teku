@@ -15,6 +15,7 @@ package tech.pegasys.teku.storage.server.rocksdb;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -57,6 +58,7 @@ import org.rocksdb.TransactionDBOptions;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.storage.server.ShuttingDownException;
 import tech.pegasys.teku.storage.server.kvstore.ColumnEntry;
+import tech.pegasys.teku.storage.server.kvstore.KvStoreAccessor.DataFile;
 import tech.pegasys.teku.storage.server.kvstore.KvStoreAccessor.KvStoreTransaction;
 import tech.pegasys.teku.storage.server.kvstore.schema.KvStoreColumn;
 import tech.pegasys.teku.storage.server.kvstore.schema.Schema;
@@ -283,6 +285,66 @@ class RocksDbInstanceTest {
     instance.close();
 
     assertThatThrownBy(() -> instance.countTombstones(column, UInt64.ZERO, UInt64.MAX_VALUE))
+        .isInstanceOf(ShuttingDownException.class);
+  }
+
+  @Test
+  void getDataFiles_shouldListTheFilesHoldingTheRange() {
+    // The deletes are in a file of their own, below the file with the original puts
+    assertThat(instance.getDataFiles(column, UInt64.ZERO, UInt64.valueOf(100)))
+        .hasValueSatisfying(
+            files -> {
+              assertThat(files)
+                  .extracting(DataFile::smallestKey, DataFile::largestKey)
+                  .containsExactlyInAnyOrder(
+                      tuple(UInt64.ZERO, UInt64.valueOf(KEY_COUNT - 1)),
+                      tuple(UInt64.ZERO, UInt64.valueOf(FIRST_LIVE_KEY - 1)));
+              assertThat(files).allSatisfy(file -> assertThat(file.sizeBytes()).isPositive());
+            });
+    assertThat(
+            instance.getDataFiles(
+                column, UInt64.valueOf(FIRST_LIVE_KEY + 10), UInt64.valueOf(KEY_COUNT - 1)))
+        .hasValueSatisfying(
+            files ->
+                assertThat(files)
+                    .extracting(DataFile::smallestKey, DataFile::largestKey)
+                    .containsExactly(tuple(UInt64.ZERO, UInt64.valueOf(KEY_COUNT - 1))));
+  }
+
+  @Test
+  void getDataFiles_shouldBeEmptyWhenNoFileHoldsTheRange() {
+    assertThat(
+            instance.getDataFiles(
+                column, UInt64.valueOf(KEY_COUNT + 100), UInt64.valueOf(KEY_COUNT + 200)))
+        .contains(List.of());
+  }
+
+  @Test
+  void getDataFiles_shouldFlushDeletesStillInMemoryBeforeReportingTheRangeEmpty() {
+    // Deletes of keys that were never written, as pruning does for slots without proofs
+    try (final KvStoreTransaction transaction = instance.startTransaction()) {
+      for (int i = KEY_COUNT + 100; i <= KEY_COUNT + 200; i++) {
+        transaction.delete(column, UInt64.valueOf(i));
+      }
+      transaction.commit();
+    }
+
+    assertThat(
+            instance.getDataFiles(
+                column, UInt64.valueOf(KEY_COUNT + 150), UInt64.valueOf(KEY_COUNT + 300)))
+        .hasValueSatisfying(
+            files ->
+                assertThat(files)
+                    .extracting(DataFile::smallestKey, DataFile::largestKey)
+                    .containsExactly(
+                        tuple(UInt64.valueOf(KEY_COUNT + 100), UInt64.valueOf(KEY_COUNT + 200))));
+  }
+
+  @Test
+  void getDataFiles_shouldFailWhenClosed() throws Exception {
+    instance.close();
+
+    assertThatThrownBy(() -> instance.getDataFiles(column, UInt64.ZERO, UInt64.MAX_VALUE))
         .isInstanceOf(ShuttingDownException.class);
   }
 

@@ -492,6 +492,12 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
   }
 
   @Override
+  public Optional<List<SlotRangeDataFile>> getSlotRangeDataFiles(
+      final SlotKeyedColumn column, final UInt64 startSlot, final UInt64 endSlot) {
+    return finalizedDao.getSlotRangeDataFiles(column, startSlot, endSlot);
+  }
+
+  @Override
   @MustBeClosed
   @SuppressWarnings("MustBeClosedChecker")
   public CombinedUpdater combinedUpdater() {

@@ -25,6 +25,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
+import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
@@ -36,6 +38,7 @@ import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.SlotKeyedColumn;
+import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.SlotRangeDataFile;
 
 class PrunedSlotRangeCompactorTest {
 
@@ -43,6 +46,7 @@ class PrunedSlotRangeCompactorTest {
   private static final String LABEL = "data_column_sidecars";
   private static final String COMPACTION_TIME = "pruned_slots_compaction_time";
   private static final String TOMBSTONES = "pruned_slots_tombstones";
+  private static final long MAX_BYTES = 1_000;
 
   private final KvStoreCombinedDao dao = mock(KvStoreCombinedDao.class);
   private final StubTimeProvider timeProvider = StubTimeProvider.withTimeInMillis(1_000);
@@ -52,6 +56,7 @@ class PrunedSlotRangeCompactorTest {
           dao,
           COLUMN,
           10,
+          MAX_BYTES,
           timeProvider,
           SettableLabelledGauge.create(
               metricsSystem, TekuMetricCategory.STORAGE, COMPACTION_TIME, "help", "table"),
@@ -65,6 +70,73 @@ class PrunedSlotRangeCompactorTest {
 
     verify(dao, never()).compactSlotRange(any(), any(), any());
     assertThat(gaugeValue(COMPACTION_TIME)).isEmpty();
+  }
+
+  @Test
+  void shouldCompactTheWholeRangeWhenTheDatabaseCannotListItsDataFiles() {
+    when(dao.getSlotRangeDataFiles(any(), any(), any())).thenReturn(Optional.empty());
+
+    compactor.onPruned(UInt64.valueOf(100_000));
+
+    verify(dao).compactSlotRange(COLUMN, UInt64.ZERO, UInt64.valueOf(100_000));
+  }
+
+  @Test
+  void shouldSkipSlotsThatNoDataFileHolds() {
+    when(dao.getSlotRangeDataFiles(any(), any(), any())).thenReturn(Optional.of(List.of()));
+
+    compactor.onPruned(UInt64.valueOf(20));
+    compactor.onPruned(UInt64.valueOf(30));
+
+    verify(dao, never()).compactSlotRange(any(), any(), any());
+    // The second prune only looks at the slots pruned since the first
+    verify(dao).getSlotRangeDataFiles(COLUMN, UInt64.ZERO, UInt64.valueOf(20));
+    verify(dao).getSlotRangeDataFiles(COLUMN, UInt64.valueOf(21), UInt64.valueOf(30));
+    assertThat(gaugeValue(COMPACTION_TIME)).isEmpty();
+  }
+
+  @Test
+  void shouldStartAtTheFirstDataFileInTheRange() {
+    when(dao.getSlotRangeDataFiles(COLUMN, UInt64.ZERO, UInt64.valueOf(1_000)))
+        .thenReturn(Optional.of(List.of(file(600, 2_000, 100), file(500, 700, 100))));
+
+    compactor.onPruned(UInt64.valueOf(1_000));
+
+    verify(dao).compactSlotRange(COLUMN, UInt64.valueOf(500), UInt64.valueOf(1_000));
+  }
+
+  @Test
+  void shouldStopBeforeTheDataFileThatWouldTakeTheCompactionOverTheBudget() {
+    when(dao.getSlotRangeDataFiles(COLUMN, UInt64.ZERO, UInt64.valueOf(1_000)))
+        .thenReturn(
+            Optional.of(
+                List.of(
+                    file(300, 399, 400),
+                    file(100, 199, 400),
+                    file(200, 299, 400),
+                    file(400, 1_500, 10))));
+    when(dao.getSlotRangeDataFiles(COLUMN, UInt64.valueOf(300), UInt64.valueOf(1_010)))
+        .thenReturn(Optional.of(List.of(file(300, 399, 400), file(400, 1_500, 10))));
+
+    compactor.onPruned(UInt64.valueOf(1_000));
+    // The next prune carries on where the last compaction stopped
+    compactor.onPruned(UInt64.valueOf(1_010));
+
+    final InOrder inOrder = inOrder(dao);
+    inOrder.verify(dao).compactSlotRange(COLUMN, UInt64.valueOf(100), UInt64.valueOf(299));
+    inOrder.verify(dao).compactSlotRange(COLUMN, UInt64.valueOf(300), UInt64.valueOf(1_010));
+  }
+
+  @Test
+  void shouldAlwaysCompactTheDataFilesHoldingTheStartSlot() {
+    // A single file over the budget still has to be compacted for the range to make progress
+    when(dao.getSlotRangeDataFiles(COLUMN, UInt64.ZERO, UInt64.valueOf(1_000)))
+        .thenReturn(
+            Optional.of(List.of(file(100, 5_000, 5_000), file(100, 150, 10), file(200, 300, 10))));
+
+    compactor.onPruned(UInt64.valueOf(1_000));
+
+    verify(dao).compactSlotRange(COLUMN, UInt64.valueOf(100), UInt64.valueOf(199));
   }
 
   @Test
@@ -174,6 +246,11 @@ class PrunedSlotRangeCompactorTest {
 
     // The first compaction still counted, so the second starts after it
     verify(dao).compactSlotRange(COLUMN, UInt64.valueOf(10), UInt64.valueOf(19));
+  }
+
+  private static SlotRangeDataFile file(
+      final long firstSlot, final long lastSlot, final long sizeBytes) {
+    return new SlotRangeDataFile(UInt64.valueOf(firstSlot), UInt64.valueOf(lastSlot), sizeBytes);
   }
 
   private OptionalDouble gaugeValue(final String name) {

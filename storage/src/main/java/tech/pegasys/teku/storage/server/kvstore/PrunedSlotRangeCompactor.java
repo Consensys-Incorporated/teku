@@ -13,7 +13,10 @@
 
 package tech.pegasys.teku.storage.server.kvstore;
 
+import java.util.Comparator;
+import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.OptionalLong;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -22,6 +25,7 @@ import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.SlotKeyedColumn;
+import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.SlotRangeDataFile;
 
 /**
  * Compacts the slots pruned from a slot-keyed column once enough of them have accumulated.
@@ -34,7 +38,10 @@ import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.Sl
  * have been pruned since the last compaction.
  *
  * <p>The first compaction starts from slot 0, so it also clears tombstones left by pruning before
- * this node started. When the range is already clean, compacting it is cheap.
+ * this node started. Slots that no data file holds are skipped without compacting them, and each
+ * compaction stops before the data files it covers add up to more than {@code
+ * maxBytesPerCompaction}, so a large backlog is worked through a piece at a time, one piece per
+ * prune.
  *
  * <p>After each prune it reports how many tombstones are left in the pruned slots, where the
  * database can count them, so their build-up and removal can be watched.
@@ -45,6 +52,7 @@ class PrunedSlotRangeCompactor {
   private final KvStoreCombinedDao dao;
   private final SlotKeyedColumn column;
   private final int minSlotsPerCompaction;
+  private final long maxBytesPerCompaction;
   private final TimeProvider timeProvider;
   private final SettableLabelledGauge compactionTimeGauge;
   private final SettableLabelledGauge tombstonesGauge;
@@ -57,12 +65,14 @@ class PrunedSlotRangeCompactor {
       final KvStoreCombinedDao dao,
       final SlotKeyedColumn column,
       final int minSlotsPerCompaction,
+      final long maxBytesPerCompaction,
       final TimeProvider timeProvider,
       final SettableLabelledGauge compactionTimeGauge,
       final SettableLabelledGauge tombstonesGauge) {
     this.dao = dao;
     this.column = column;
     this.minSlotsPerCompaction = minSlotsPerCompaction;
+    this.maxBytesPerCompaction = maxBytesPerCompaction;
     this.timeProvider = timeProvider;
     this.compactionTimeGauge = compactionTimeGauge;
     this.tombstonesGauge = tombstonesGauge;
@@ -89,17 +99,59 @@ class PrunedSlotRangeCompactor {
         || lastPrunedSlot.minus(nextSlotToCompact).plus(1).isLessThan(minSlotsPerCompaction)) {
       return;
     }
+    final Optional<List<SlotRangeDataFile>> maybeFiles =
+        dao.getSlotRangeDataFiles(column, nextSlotToCompact, lastPrunedSlot);
+    if (maybeFiles.isEmpty()) {
+      // The database cannot list its data files, so there is nothing to size the work by
+      compact(nextSlotToCompact, lastPrunedSlot);
+      return;
+    }
+    final List<SlotRangeDataFile> files = maybeFiles.get();
+    if (files.isEmpty()) {
+      LOG.debug(
+          "No data files hold pruned {} slots {} to {}, nothing to compact",
+          column,
+          nextSlotToCompact,
+          lastPrunedSlot);
+      nextSlotToCompact = lastPrunedSlot.plus(1);
+      return;
+    }
+    // Slots before the first data file are not held anywhere, so skip them
+    final UInt64 startSlot =
+        files.stream()
+            .map(SlotRangeDataFile::firstSlot)
+            .min(Comparator.naturalOrder())
+            .orElseThrow()
+            .max(nextSlotToCompact);
+    compact(startSlot, getLastSlotWithinBudget(files, startSlot, lastPrunedSlot));
+  }
+
+  /**
+   * Compacting a range reads and rewrites every data file overlapping it, so the range ends just
+   * before the first data file that would take the total over the budget. The files holding the
+   * start slot are always included, so every compaction makes progress.
+   */
+  private UInt64 getLastSlotWithinBudget(
+      final List<SlotRangeDataFile> files, final UInt64 startSlot, final UInt64 lastPrunedSlot) {
+    long bytes = 0;
+    for (final SlotRangeDataFile file :
+        files.stream().sorted(Comparator.comparing(SlotRangeDataFile::firstSlot)).toList()) {
+      if (file.firstSlot().isGreaterThan(startSlot)
+          && bytes + file.sizeBytes() > maxBytesPerCompaction) {
+        return file.firstSlot().minus(1);
+      }
+      bytes += file.sizeBytes();
+    }
+    return lastPrunedSlot;
+  }
+
+  private void compact(final UInt64 startSlot, final UInt64 endSlot) {
     final UInt64 startTime = timeProvider.getTimeInMillis();
-    dao.compactSlotRange(column, nextSlotToCompact, lastPrunedSlot);
+    dao.compactSlotRange(column, startSlot, endSlot);
     final UInt64 duration = timeProvider.getTimeInMillis().minusMinZero(startTime);
     compactionTimeGauge.set(duration.longValue(), metricLabel);
-    LOG.debug(
-        "Compacted pruned {} slots {} to {} in {} ms",
-        column,
-        nextSlotToCompact,
-        lastPrunedSlot,
-        duration);
-    nextSlotToCompact = lastPrunedSlot.plus(1);
+    LOG.debug("Compacted pruned {} slots {} to {} in {} ms", column, startSlot, endSlot, duration);
+    nextSlotToCompact = endSlot.plus(1);
   }
 
   private void updateTombstoneCount(final UInt64 lastPrunedSlot) {

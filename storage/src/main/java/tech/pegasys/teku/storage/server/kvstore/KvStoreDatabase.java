@@ -123,6 +123,8 @@ public class KvStoreDatabase implements Database {
   // Compacting a pruned range rewrites the files at its edges, so it waits for this many pruned
   // slots: about 51 minutes on mainnet, or 32768 data column sidecar tombstones
   static final int MIN_PRUNED_SLOTS_PER_COMPACTION = 256;
+  // Bounds how long one compaction runs, and so how long it holds up the pruner
+  static final long MAX_BYTES_PER_COMPACTION = 256L * 1024 * 1024;
   private static final Logger LOG = LogManager.getLogger();
   protected final Spec spec;
   protected final boolean storeNonCanonicalBlocks;
@@ -179,6 +181,7 @@ public class KvStoreDatabase implements Database {
               dao,
               column,
               MIN_PRUNED_SLOTS_PER_COMPACTION,
+              MAX_BYTES_PER_COMPACTION,
               timeProvider,
               compactionTimeGauge,
               tombstonesGauge));

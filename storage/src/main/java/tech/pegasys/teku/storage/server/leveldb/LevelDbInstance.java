@@ -355,6 +355,14 @@ public class LevelDbInstance implements KvStoreAccessor {
   }
 
   @Override
+  public <K, V> Optional<List<DataFile<K>>> getDataFiles(
+      final KvStoreColumn<K, V> column, final K from, final K to) {
+    // LevelDB does not expose its data files
+    assertOpen();
+    return Optional.empty();
+  }
+
+  @Override
   public <K, V> OptionalLong countTombstones(
       final KvStoreColumn<K, V> column, final K from, final K to) {
     // LevelDB does not expose per-file deletion counts

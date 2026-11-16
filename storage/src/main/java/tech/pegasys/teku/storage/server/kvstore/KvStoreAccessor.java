@@ -14,6 +14,7 @@
 package tech.pegasys.teku.storage.server.kvstore;
 
 import com.google.errorprone.annotations.MustBeClosed;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -159,6 +160,34 @@ public interface KvStoreAccessor extends AutoCloseable {
    * @return the number of tombstones, or empty if the database cannot report it
    */
   <K, V> OptionalLong countTombstones(KvStoreColumn<K, V> column, K from, K to);
+
+  /**
+   * Lists the data files that hold keys of a column between from and to, with the range of keys and
+   * the size of each. Compacting the range reads and rewrites these files, so their size is an
+   * estimate of how much work that is.
+   *
+   * <p>If no data file overlaps the range, writes for the column that are still in memory are
+   * flushed to data files and the files are listed again, so a range reported empty has nothing
+   * waiting to be written there either. The listing itself does no I/O.
+   *
+   * @param column the column to list data files of
+   * @param from the first key of the range
+   * @param to the last key of the range
+   * @param <K> the key type of the column
+   * @param <V> the value type of the column
+   * @return the data files overlapping the range, or empty if the database cannot report them
+   */
+  <K, V> Optional<List<DataFile<K>>> getDataFiles(KvStoreColumn<K, V> column, K from, K to);
+
+  /**
+   * A data file of a column.
+   *
+   * @param smallestKey the smallest key in the file, which may be a deleted key
+   * @param largestKey the largest key in the file, which may be a deleted key
+   * @param sizeBytes the size of the file
+   * @param <K> the key type of the column
+   */
+  record DataFile<K>(K smallestKey, K largestKey, long sizeBytes) {}
 
   interface KvStoreTransaction extends AutoCloseable {
 

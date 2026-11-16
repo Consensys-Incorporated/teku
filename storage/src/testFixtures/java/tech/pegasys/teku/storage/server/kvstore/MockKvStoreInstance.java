@@ -19,6 +19,7 @@ import static com.google.common.base.Preconditions.checkState;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Optional;
@@ -241,6 +242,14 @@ public class MockKvStoreInstance implements KvStoreAccessor {
   @Override
   public void compact() {
     // No-op for the in-memory mock instance.
+  }
+
+  @Override
+  public <K, V> Optional<List<DataFile<K>>> getDataFiles(
+      final KvStoreColumn<K, V> column, final K from, final K to) {
+    // The in-memory mock has no data files
+    assertOpen();
+    return Optional.empty();
   }
 
   @Override

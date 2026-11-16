@@ -239,6 +239,23 @@ public interface KvStoreCombinedDao extends AutoCloseable {
    */
   OptionalLong countSlotRangeTombstones(SlotKeyedColumn column, UInt64 startSlot, UInt64 endSlot);
 
+  /**
+   * Lists the data files that hold the slots between startSlot and endSlot (inclusive) of a
+   * slot-keyed column, with the slots and size of each, or empty if the database cannot report
+   * them. A range reported empty has nothing waiting to be written to it either.
+   */
+  Optional<List<SlotRangeDataFile>> getSlotRangeDataFiles(
+      SlotKeyedColumn column, UInt64 startSlot, UInt64 endSlot);
+
+  /**
+   * A data file of a slot-keyed column.
+   *
+   * @param firstSlot the slot of the smallest key in the file, which may be a deleted key
+   * @param lastSlot the slot of the largest key in the file, which may be a deleted key
+   * @param sizeBytes the size of the file
+   */
+  record SlotRangeDataFile(UInt64 firstSlot, UInt64 lastSlot, long sizeBytes) {}
+
   /** Columns whose keys start with the slot, so a slot range is a contiguous key range. */
   enum SlotKeyedColumn {
     BLOB_SIDECARS,

@@ -40,6 +40,7 @@ import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.CompactRangeOptions;
 import org.rocksdb.CompactRangeOptions.BottommostLevelCompaction;
+import org.rocksdb.FlushOptions;
 import org.rocksdb.LevelMetaData;
 import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDBException;
@@ -366,7 +367,10 @@ public class RocksDbInstance implements KvStoreAccessor {
     try (final CompactRangeOptions options =
         new CompactRangeOptions()
             .setExclusiveManualCompaction(false)
-            .setBottommostLevelCompaction(BottommostLevelCompaction.kForceOptimized)) {
+            .setBottommostLevelCompaction(BottommostLevelCompaction.kForceOptimized)
+            // Use one background thread rather than all of them, so automatic compactions and
+            // flushes are not held up behind it
+            .setMaxSubcompactions(1)) {
       final ColumnFamilyHandle handle = getColumnHandle(column);
       if (handle == null) {
         return;
@@ -409,21 +413,67 @@ public class RocksDbInstance implements KvStoreAccessor {
       }
       final byte[] fromKey = column.getKeySerializer().serialize(from);
       final byte[] toKey = column.getKeySerializer().serialize(to);
-      // The file metadata is held in memory, so this does no I/O, unlike reading the table
-      // properties of every file
-      long tombstones = 0;
-      for (final LevelMetaData level : db.getColumnFamilyMetaData(handle).levels()) {
-        for (final SstFileMetaData file : level.files()) {
-          if (Arrays.compareUnsigned(file.largestKey(), fromKey) >= 0
-              && Arrays.compareUnsigned(file.smallestKey(), toKey) <= 0) {
-            tombstones += file.numDeletions();
-          }
-        }
-      }
-      return OptionalLong.of(tombstones);
+      return OptionalLong.of(
+          getOverlappingFiles(handle, fromKey, toKey).stream()
+              .mapToLong(SstFileMetaData::numDeletions)
+              .sum());
     } finally {
       compactionLock.readLock().unlock();
     }
+  }
+
+  @Override
+  public <K, V> Optional<List<DataFile<K>>> getDataFiles(
+      final KvStoreColumn<K, V> column, final K from, final K to) {
+    // Reads native file metadata, so it must not overlap close() either
+    compactionLock.readLock().lock();
+    try {
+      assertOpen();
+      final ColumnFamilyHandle handle = getColumnHandle(column);
+      if (handle == null) {
+        return Optional.of(List.of());
+      }
+      final byte[] fromKey = column.getKeySerializer().serialize(from);
+      final byte[] toKey = column.getKeySerializer().serialize(to);
+      List<SstFileMetaData> files = getOverlappingFiles(handle, fromKey, toKey);
+      if (files.isEmpty()) {
+        // Deletes of keys that never reached a data file can still be in memory. Once flushed they
+        // are tombstones in the range, so flush them before reporting the range as empty.
+        try (final FlushOptions flushOptions = new FlushOptions().setWaitForFlush(true)) {
+          db.flush(flushOptions, handle);
+        } catch (final RocksDBException e) {
+          throw RocksDbExceptionUtil.wrapException("Failed to flush RocksDB column", e);
+        }
+        files = getOverlappingFiles(handle, fromKey, toKey);
+      }
+      return Optional.of(
+          files.stream()
+              .map(
+                  file ->
+                      new DataFile<>(
+                          column.getKeySerializer().deserialize(file.smallestKey()),
+                          column.getKeySerializer().deserialize(file.largestKey()),
+                          file.size()))
+              .toList());
+    } finally {
+      compactionLock.readLock().unlock();
+    }
+  }
+
+  private List<SstFileMetaData> getOverlappingFiles(
+      final ColumnFamilyHandle handle, final byte[] fromKey, final byte[] toKey) {
+    // The file metadata is held in memory, so this does no I/O, unlike reading the table
+    // properties of every file
+    final List<SstFileMetaData> files = new ArrayList<>();
+    for (final LevelMetaData level : db.getColumnFamilyMetaData(handle).levels()) {
+      for (final SstFileMetaData file : level.files()) {
+        if (Arrays.compareUnsigned(file.largestKey(), fromKey) >= 0
+            && Arrays.compareUnsigned(file.smallestKey(), toKey) <= 0) {
+          files.add(file);
+        }
+      }
+    }
+    return files;
   }
 
   @Override
