@@ -70,7 +70,6 @@ public class SyncManagerTest {
   private final Eth2Peer peer = mock(Eth2Peer.class);
   private final SyncSubscriber syncSubscriber = mock(SyncSubscriber.class);
 
-  private final AtomicReference<UInt64> localSlot = new AtomicReference<>(peerHeadSlot);
   private final AtomicReference<UInt64> localHeadSlot = new AtomicReference<>(UInt64.ZERO);
   private final AtomicReference<UInt64> localFinalizedEpoch = new AtomicReference<>(UInt64.ZERO);
 
@@ -82,7 +81,6 @@ public class SyncManagerTest {
   public void setUp() {
     when(network.subscribeConnect(any())).thenReturn(SUBSCRIPTION_ID);
     when(recentChainData.getFinalizedEpoch()).thenAnswer((__) -> localFinalizedEpoch.get());
-    when(recentChainData.getCurrentSlot()).thenAnswer((__) -> Optional.ofNullable(localSlot.get()));
     when(recentChainData.getHeadSlot()).thenAnswer((__) -> localHeadSlot.get());
     when(peer.getStatus()).thenReturn(peerStatus);
   }
@@ -125,59 +123,7 @@ public class SyncManagerTest {
   }
 
   @Test
-  void sync_noSuitablePeers_remoteEpochInTheFuture() {
-    // Remote peer finalized epoch is too far ahead
-    final UInt64 headSlot = spec.computeStartSlotAtEpoch(PEER_FINALIZED_EPOCH).minus(1);
-    localSlot.set(headSlot);
-
-    when(network.streamPeers()).thenReturn(Stream.of(peer));
-    // Should be immediately completed as there is nothing to do.
-    assertThat(syncManager.start()).isCompleted();
-    assertThat(syncManager.isSyncActive()).isFalse();
-    assertThat(syncManager.isSyncQueued()).isFalse();
-    verifyNoInteractions(peerSync);
-  }
-
-  @Test
-  void sync_noSuitablePeers_remoteHeadSlotInTheFuture() {
-    // Remote peer head slot is too far ahead
-    final UInt64 headSlot = peerHeadSlot.minus(2);
-    localSlot.set(headSlot);
-
-    when(network.streamPeers()).thenReturn(Stream.of(peer));
-    // Should be immediately completed as there is nothing to do.
-    assertThat(syncManager.start()).isCompleted();
-    assertThat(syncManager.isSyncActive()).isFalse();
-    assertThat(syncManager.isSyncQueued()).isFalse();
-    verifyNoInteractions(peerSync);
-  }
-
-  @Test
   void sync_existingPeers() {
-    when(network.streamPeers()).thenReturn(Stream.of(peer));
-
-    final SafeFuture<PeerSyncResult> syncFuture = new SafeFuture<>();
-    when(peerSync.sync(peer)).thenReturn(syncFuture);
-
-    assertThat(syncManager.start()).isCompleted();
-    assertThat(syncManager.isSyncActive()).isTrue();
-    assertThat(syncManager.isSyncQueued()).isFalse();
-
-    verify(peerSync).sync(peer);
-
-    // Signal the peer sync is complete
-    syncFuture.complete(PeerSyncResult.SUCCESSFUL_SYNC);
-
-    // Check that the sync is done and the peer was not disconnected.
-    assertThat(syncManager.isSyncActive()).isFalse();
-    assertThat(syncManager.isSyncQueued()).isFalse();
-  }
-
-  @Test
-  void sync_existingPeers_remoteHeadSlotIsAheadButWithinErrorThreshold() {
-    final UInt64 headSlot = peerHeadSlot.minus(1);
-    localSlot.set(headSlot);
-
     when(network.streamPeers()).thenReturn(Stream.of(peer));
 
     final SafeFuture<PeerSyncResult> syncFuture = new SafeFuture<>();
