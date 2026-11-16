@@ -572,6 +572,7 @@ public class KvStoreDatabase implements Database {
           "Last slot to prune {} was lower than the earliest finalized block slot in the database {}",
           lastSlotToPrune,
           earliestFinalizedBlockSlot);
+      continuePrunedSlotCompaction(SlotKeyedColumn.FINALIZED_BLOCKS);
       return lastSlotToPrune;
     }
     try (final Stream<SignedBeaconBlock> stream =
@@ -584,6 +585,7 @@ public class KvStoreDatabase implements Database {
 
     if (blocksToPrune.isEmpty()) {
       LOG.debug("No finalized blocks to prune up to {} slot", lastSlotToPrune);
+      continuePrunedSlotCompaction(SlotKeyedColumn.FINALIZED_BLOCKS);
       return lastSlotToPrune;
     }
 
@@ -1258,12 +1260,14 @@ public class KvStoreDatabase implements Database {
       }
       updater.commit();
     }
-    if (!slots.isEmpty()) {
-      compactPrunedSlots(
-          nonCanonicalBlobSidecars
-              ? SlotKeyedColumn.NON_CANONICAL_BLOB_SIDECARS
-              : SlotKeyedColumn.BLOB_SIDECARS,
-          slots.getLast());
+    final SlotKeyedColumn blobColumn =
+        nonCanonicalBlobSidecars
+            ? SlotKeyedColumn.NON_CANONICAL_BLOB_SIDECARS
+            : SlotKeyedColumn.BLOB_SIDECARS;
+    if (slots.isEmpty()) {
+      continuePrunedSlotCompaction(blobColumn);
+    } else {
+      compactPrunedSlots(blobColumn, slots.getLast());
     }
     LOG.debug("Pruned {} BlobSidecars", pruned);
     // `pruned` will be greater when we reach pruneLimit not on the latest BlobSidecar in a slot
@@ -1757,6 +1761,14 @@ public class KvStoreDatabase implements Database {
 
     if (toPrune.keys().isEmpty()) {
       LOG.debug("No {} data column sidecars to prune", sidecarType.displayName());
+      switch (sidecarType) {
+        case CANONICAL -> {
+          continuePrunedSlotCompaction(SlotKeyedColumn.DATA_COLUMN_SIDECARS);
+          continuePrunedSlotCompaction(SlotKeyedColumn.DATA_COLUMN_SIDECARS_PROOFS);
+        }
+        case NON_CANONICAL ->
+            continuePrunedSlotCompaction(SlotKeyedColumn.NON_CANONICAL_DATA_COLUMN_SIDECARS);
+      }
       return;
     }
 
@@ -1851,6 +1863,10 @@ public class KvStoreDatabase implements Database {
 
   private void compactPrunedSlots(final SlotKeyedColumn column, final UInt64 lastPrunedSlot) {
     prunedSlotRangeCompactors.get(column).onPruned(lastPrunedSlot);
+  }
+
+  private void continuePrunedSlotCompaction(final SlotKeyedColumn column) {
+    prunedSlotRangeCompactors.get(column).onNothingPruned();
   }
 
   private record DataColumnSidecarsToPrune(

@@ -73,6 +73,7 @@ import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.FinalizedUpdater;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.HotUpdater;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.SlotKeyedColumn;
+import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.SlotRangeDataFile;
 import tech.pegasys.teku.storage.server.kvstore.schema.KvStoreColumn;
 import tech.pegasys.teku.storage.server.kvstore.schema.V6SchemaCombinedSnapshot;
 import tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreDeserializationException;
@@ -710,6 +711,74 @@ class KvStoreDatabaseTest {
     database.pruneFinalizedBlocks(UInt64.valueOf(2), 10, UInt64.valueOf(3));
 
     verify(database.dao, never()).compactSlotRange(any(), any(), any());
+  }
+
+  @Test
+  void canonicalPruningThatFindsNothingCarriesOnWithTheCompactionBacklog() {
+    // Leaves enough slots after the first compaction for another one
+    final long lastPrunedSlot = 3L * KvStoreDatabase.MIN_PRUNED_SLOTS_PER_COMPACTION;
+    final KvStoreDatabase database = database(UInt64.ZERO, 10, lastPrunedSlot);
+    // The second file would take the first compaction over the budget, so it stops before it
+    when(database.dao.getSlotRangeDataFiles(eq(SlotKeyedColumn.DATA_COLUMN_SIDECARS), any(), any()))
+        .thenReturn(
+            Optional.of(
+                List.of(
+                    dataFile(0, 9, KvStoreDatabase.MAX_BYTES_PER_COMPACTION),
+                    dataFile(200, 300, KvStoreDatabase.MAX_BYTES_PER_COMPACTION))));
+
+    database.pruneDataColumnSidecars(
+        2, UInt64.valueOf(lastPrunedSlot), DataColumnSidecarType.CANONICAL);
+    verify(database.dao)
+        .compactSlotRange(SlotKeyedColumn.DATA_COLUMN_SIDECARS, UInt64.ZERO, UInt64.valueOf(199));
+
+    // Everything up to the cutoff is already pruned
+    database.pruneDataColumnSidecars(
+        2, UInt64.valueOf(lastPrunedSlot), DataColumnSidecarType.CANONICAL);
+    verify(database.dao)
+        .compactSlotRange(
+            SlotKeyedColumn.DATA_COLUMN_SIDECARS,
+            UInt64.valueOf(200),
+            UInt64.valueOf(lastPrunedSlot));
+  }
+
+  @Test
+  void finalizedBlockPruningThatFindsNothingCarriesOnWithTheCompactionBacklog() {
+    // Leaves enough slots after the first compaction for another one
+    final long lastPrunedSlot = 3L * KvStoreDatabase.MIN_PRUNED_SLOTS_PER_COMPACTION;
+    final KvStoreDatabase database = finalizedBlocksDatabase(1, lastPrunedSlot, lastPrunedSlot + 1);
+    when(database.dao.getSlotRangeDataFiles(eq(SlotKeyedColumn.FINALIZED_BLOCKS), any(), any()))
+        .thenReturn(
+            Optional.of(
+                List.of(
+                    dataFile(0, 9, KvStoreDatabase.MAX_BYTES_PER_COMPACTION),
+                    dataFile(200, 300, KvStoreDatabase.MAX_BYTES_PER_COMPACTION))));
+
+    database.pruneFinalizedBlocks(
+        UInt64.valueOf(lastPrunedSlot), 10, UInt64.valueOf(lastPrunedSlot + 1));
+    verify(database.dao)
+        .compactSlotRange(SlotKeyedColumn.FINALIZED_BLOCKS, UInt64.ZERO, UInt64.valueOf(199));
+
+    // Nothing at or below slot 0 is left to prune
+    database.pruneFinalizedBlocks(UInt64.ZERO, 10, UInt64.valueOf(lastPrunedSlot + 1));
+    verify(database.dao)
+        .compactSlotRange(
+            SlotKeyedColumn.FINALIZED_BLOCKS, UInt64.valueOf(200), UInt64.valueOf(lastPrunedSlot));
+  }
+
+  @Test
+  void pruningThatFindsNothingDoesNotCompactWithoutABacklog() {
+    final KvStoreDatabase database = database(UInt64.valueOf(10));
+
+    database.pruneDataColumnSidecars(2, UInt64.valueOf(30), DataColumnSidecarType.CANONICAL);
+    database.pruneDataColumnSidecars(2, UInt64.valueOf(30), DataColumnSidecarType.NON_CANONICAL);
+
+    verify(database.dao, never()).getSlotRangeDataFiles(any(), any(), any());
+    verify(database.dao, never()).compactSlotRange(any(), any(), any());
+  }
+
+  private static SlotRangeDataFile dataFile(
+      final long firstSlot, final long lastSlot, final long sizeBytes) {
+    return new SlotRangeDataFile(UInt64.valueOf(firstSlot), UInt64.valueOf(lastSlot), sizeBytes);
   }
 
   @Test

@@ -40,8 +40,8 @@ import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.Sl
  * <p>The first compaction starts from slot 0, so it also clears tombstones left by pruning before
  * this node started. Slots that no data file holds are skipped without compacting them, and each
  * compaction stops before the data files it covers add up to more than {@code
- * maxBytesPerCompaction}, so a large backlog is worked through a piece at a time, one piece per
- * prune.
+ * maxBytesPerCompaction}, so a large backlog is worked through a piece at a time. Pruning often
+ * finds nothing new to delete, so those runs carry on with the backlog too.
  *
  * <p>After each prune it reports how many tombstones are left in the pruned slots, where the
  * database can count them, so their build-up and removal can be watched.
@@ -60,6 +60,8 @@ class PrunedSlotRangeCompactor {
 
   // Guarded by this
   private UInt64 nextSlotToCompact = UInt64.ZERO;
+  // Guarded by this
+  private Optional<UInt64> highestPrunedSlot = Optional.empty();
 
   PrunedSlotRangeCompactor(
       final KvStoreCombinedDao dao,
@@ -90,8 +92,26 @@ class PrunedSlotRangeCompactor {
    * deletions have been committed.
    */
   synchronized void onPruned(final UInt64 lastPrunedSlot) {
+    highestPrunedSlot =
+        Optional.of(highestPrunedSlot.map(lastPrunedSlot::max).orElse(lastPrunedSlot));
     compactIfEnoughSlotsPruned(lastPrunedSlot);
     updateTombstoneCount(lastPrunedSlot);
+  }
+
+  /**
+   * Records that a prune found nothing to delete. The slots pruned earlier are then compacted if
+   * enough of them are still waiting, which they are while a backlog is being worked through. Does
+   * nothing until something has been pruned since startup. Blocking: call it from the pruner.
+   */
+  synchronized void onNothingPruned() {
+    highestPrunedSlot.ifPresent(
+        lastPrunedSlot -> {
+          final UInt64 previousNextSlotToCompact = nextSlotToCompact;
+          compactIfEnoughSlotsPruned(lastPrunedSlot);
+          if (!nextSlotToCompact.equals(previousNextSlotToCompact)) {
+            updateTombstoneCount(lastPrunedSlot);
+          }
+        });
   }
 
   private void compactIfEnoughSlotsPruned(final UInt64 lastPrunedSlot) {

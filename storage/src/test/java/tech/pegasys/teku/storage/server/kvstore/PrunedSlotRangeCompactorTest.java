@@ -140,6 +140,58 @@ class PrunedSlotRangeCompactorTest {
   }
 
   @Test
+  void shouldDoNothingWhenNothingIsPrunedBeforeAnythingWasPruned() {
+    compactor.onNothingPruned();
+
+    verify(dao, never()).getSlotRangeDataFiles(any(), any(), any());
+    verify(dao, never()).compactSlotRange(any(), any(), any());
+    verify(dao, never()).countSlotRangeTombstones(any(), any(), any());
+  }
+
+  @Test
+  void shouldCarryOnWithTheBacklogWhenNothingIsPruned() {
+    when(dao.getSlotRangeDataFiles(COLUMN, UInt64.ZERO, UInt64.valueOf(1_000)))
+        .thenReturn(Optional.of(List.of(file(100, 199, 800), file(200, 299, 800))));
+    when(dao.getSlotRangeDataFiles(COLUMN, UInt64.valueOf(200), UInt64.valueOf(1_000)))
+        .thenReturn(Optional.of(List.of(file(200, 299, 800))));
+
+    compactor.onPruned(UInt64.valueOf(1_000));
+    compactor.onNothingPruned();
+
+    final InOrder inOrder = inOrder(dao);
+    inOrder.verify(dao).compactSlotRange(COLUMN, UInt64.valueOf(100), UInt64.valueOf(199));
+    inOrder.verify(dao).compactSlotRange(COLUMN, UInt64.valueOf(200), UInt64.valueOf(1_000));
+    // The tombstone count is refreshed after each compaction
+    verify(dao, times(2)).countSlotRangeTombstones(COLUMN, UInt64.ZERO, UInt64.valueOf(1_000));
+  }
+
+  @Test
+  void shouldNotCompactWhenNothingIsPrunedWithoutABacklog() {
+    compactor.onPruned(UInt64.valueOf(20));
+    compactor.onNothingPruned();
+
+    verify(dao, times(1)).compactSlotRange(any(), any(), any());
+    verify(dao, times(1)).countSlotRangeTombstones(any(), any(), any());
+  }
+
+  @Test
+  void shouldCarryOnUpToTheHighestPrunedSlotWhenNothingIsPruned() {
+    when(dao.getSlotRangeDataFiles(COLUMN, UInt64.ZERO, UInt64.valueOf(30)))
+        .thenReturn(Optional.of(List.of(file(0, 9, 800), file(10, 19, 800))));
+    when(dao.getSlotRangeDataFiles(COLUMN, UInt64.valueOf(10), UInt64.valueOf(30)))
+        .thenReturn(Optional.of(List.of(file(10, 19, 800))));
+
+    compactor.onPruned(UInt64.valueOf(30));
+    // A lower slot does not move the end of the backlog back
+    compactor.onPruned(UInt64.valueOf(5));
+    compactor.onNothingPruned();
+
+    final InOrder inOrder = inOrder(dao);
+    inOrder.verify(dao).compactSlotRange(COLUMN, UInt64.ZERO, UInt64.valueOf(9));
+    inOrder.verify(dao).compactSlotRange(COLUMN, UInt64.valueOf(10), UInt64.valueOf(30));
+  }
+
+  @Test
   void shouldCompactFromSlotZeroOnTheFirstCompaction() {
     // Also covers the tombstones left before this node started
     compactor.onPruned(UInt64.valueOf(1_000));
