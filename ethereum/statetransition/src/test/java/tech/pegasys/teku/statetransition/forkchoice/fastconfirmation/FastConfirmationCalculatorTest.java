@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.LongStream;
+import org.apache.logging.log4j.Level;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -1082,9 +1083,10 @@ class FastConfirmationCalculatorTest {
     final FastConfirmationCalculator calculator =
         new FastConfirmationCalculator(spec, fcrStore, states, UInt64.valueOf(16));
 
-    try (final LogCaptor logCaptor = LogCaptor.forClass(FastConfirmationCalculator.class)) {
+    try (final LogCaptor logCaptor =
+        LogCaptor.forClass(FastConfirmationCalculator.class, Level.DEBUG)) {
       assertThat(calculator.getLatestConfirmed()).isEqualTo(chain.get(8));
-      assertThat(logCaptor.getDebugLogs()).anyMatch(log -> log.contains("previous balance source"));
+      logCaptor.assertDebugLog("previous balance source");
     }
   }
 
