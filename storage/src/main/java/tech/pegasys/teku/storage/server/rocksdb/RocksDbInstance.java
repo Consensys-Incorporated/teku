@@ -39,6 +39,7 @@ import org.rocksdb.AbstractRocksIterator;
 import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.CompactRangeOptions;
+import org.rocksdb.CompactRangeOptions.BottommostLevelCompaction;
 import org.rocksdb.LevelMetaData;
 import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDBException;
@@ -357,9 +358,15 @@ public class RocksDbInstance implements KvStoreAccessor {
   @Override
   public <K, V> void compactRange(final KvStoreColumn<K, V> column, final K from, final K to) {
     compactionLock.readLock().lock();
-    // Not exclusive, so automatic compactions keep running alongside it
+    // Not exclusive, so automatic compactions keep running alongside it. By default a manual
+    // compaction skips the bottom level, but tombstones can sit there unprocessed: compaction
+    // moves a file that overlaps nothing below it down a level without rewriting it, so a file
+    // of deletes for keys that were never written reaches the bottom level intact. Forcing the
+    // bottom level drops them, and the optimized mode skips files this compaction just wrote.
     try (final CompactRangeOptions options =
-        new CompactRangeOptions().setExclusiveManualCompaction(false)) {
+        new CompactRangeOptions()
+            .setExclusiveManualCompaction(false)
+            .setBottommostLevelCompaction(BottommostLevelCompaction.kForceOptimized)) {
       final ColumnFamilyHandle handle = getColumnHandle(column);
       if (handle == null) {
         return;

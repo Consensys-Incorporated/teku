@@ -42,11 +42,16 @@ import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
 import org.rocksdb.DBOptions;
+import org.rocksdb.EnvOptions;
 import org.rocksdb.FlushOptions;
+import org.rocksdb.IngestExternalFileOptions;
+import org.rocksdb.Options;
 import org.rocksdb.PerfLevel;
 import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksIterator;
+import org.rocksdb.SstFileMetaData;
+import org.rocksdb.SstFileWriter;
 import org.rocksdb.TransactionDB;
 import org.rocksdb.TransactionDBOptions;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -217,6 +222,40 @@ class RocksDbInstanceTest {
 
     assertThatThrownBy(() -> instance.compactRange(column, UInt64.ZERO, UInt64.MAX_VALUE))
         .isInstanceOf(ShuttingDownException.class);
+  }
+
+  @Test
+  void compactRange_shouldDropTombstonesAlreadyOnTheBottomLevel() throws Exception {
+    // Deletes of keys that were never written, as pruning does for slots without proofs
+    final UInt64 first = UInt64.valueOf(KEY_COUNT + 10_000);
+    final UInt64 last = UInt64.valueOf(KEY_COUNT + 10_999);
+    // Ingest them as a file of their own: it overlaps nothing, so it goes straight to the bottom
+    // level, as tombstone-only files do when compaction moves them down without rewriting them
+    final Path sstFile = databaseDir.resolveSibling(databaseDir.getFileName() + "-tombstones.sst");
+    try (final EnvOptions envOptions = new EnvOptions();
+        final Options options = new Options();
+        final SstFileWriter writer = new SstFileWriter(envOptions, options)) {
+      writer.open(sstFile.toString());
+      for (long key = first.longValue(); key <= last.longValue(); key++) {
+        writer.delete(UINT64_SERIALIZER.serialize(UInt64.valueOf(key)));
+      }
+      writer.finish();
+    }
+    try (final IngestExternalFileOptions ingestOptions = new IngestExternalFileOptions()) {
+      db.ingestExternalFile(columnHandle, List.of(sstFile.toString()), ingestOptions);
+    }
+    assertThat(tombstonesOnTheBottomLevel()).isEqualTo(1_000);
+    assertThat(instance.countTombstones(column, first, last)).hasValue(1_000);
+
+    instance.compactRange(column, first, last);
+
+    assertThat(instance.countTombstones(column, first, last)).hasValue(0);
+  }
+
+  private long tombstonesOnTheBottomLevel() {
+    return db.getColumnFamilyMetaData(columnHandle).levels().getLast().files().stream()
+        .mapToLong(SstFileMetaData::numDeletions)
+        .sum();
   }
 
   @Test
