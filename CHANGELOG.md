@@ -20,6 +20,7 @@
  - Added the `GET /eth/v1/beacon/proposer_preferences` Gloas Beacon API endpoint, which returns the signed proposer preferences known by the node, optionally filtered by `slot` and `dependent_root`. [#11548](https://github.com/Consensys-Incorporated/teku/pull/11548)
 
 ### Bug Fixes
+ - Reject peer status messages with head slots more than one slot ahead of the local clock, preventing invalid peer heads from keeping a synced node in `SYNCING` and blocking validator duties. [#11615](https://github.com/Consensys-Incorporated/teku/pull/11615)
  - Limited validator client beacon node event stream frames to 8 MB by default to prevent oversized or unterminated events from exhausting the heap. The hidden `--Xvalidator-client-event-stream-max-event-size` option adjusts the limit or disables it when set to 0. [#11600](https://github.com/Consensys-Incorporated/teku/issues/11600)
  - Validator clients now reject Beacon Node REST API responses larger than 64 MB after decompression to prevent unbounded response buffering. The hidden `--Xvalidator-client-beacon-api-max-response-size=<MEGABYTES>` option adjusts this per-response limit or disables it when set to 0 (event streams are excluded). [#11602](https://github.com/Consensys-Incorporated/teku/issues/11602)
  - MEV-Boost bids exceeding the slot's blob commitment limit now trigger fallback to the local execution payload instead of failing block production. [#11614](https://github.com/Consensys-Incorporated/teku/pull/11614)
