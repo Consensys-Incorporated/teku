@@ -587,6 +587,62 @@ public class DatabaseTest {
   }
 
   @TestTemplate
+  public void pruneNonCanonicalBlobs_afterCanonicalPruneAdvancesEarliestSlot(
+      final DatabaseContext context) throws IOException {
+    initialize(context);
+
+    final BlobSidecar canonical1 =
+        dataStructureUtil.randomBlobSidecarForBlock(
+            dataStructureUtil.randomSignedBeaconBlock(1), 0);
+    final BlobSidecar canonical2 =
+        dataStructureUtil.randomBlobSidecarForBlock(
+            dataStructureUtil.randomSignedBeaconBlock(2), 0);
+    final BlobSidecar canonical3 =
+        dataStructureUtil.randomBlobSidecarForBlock(
+            dataStructureUtil.randomSignedBeaconBlock(3), 0);
+    final BlobSidecar nonCanonical2 =
+        dataStructureUtil.randomBlobSidecarForBlock(
+            dataStructureUtil.randomSignedBeaconBlock(2), 0);
+    final BlobSidecar nonCanonical3 =
+        dataStructureUtil.randomBlobSidecarForBlock(
+            dataStructureUtil.randomSignedBeaconBlock(3), 0);
+    final BlobSidecar nonCanonical5 =
+        dataStructureUtil.randomBlobSidecarForBlock(
+            dataStructureUtil.randomSignedBeaconBlock(5), 0);
+
+    database.storeBlobSidecar(canonical1);
+    database.storeBlobSidecar(canonical2);
+    database.storeBlobSidecar(canonical3);
+    database.storeNonCanonicalBlobSidecar(nonCanonical2);
+    database.storeNonCanonicalBlobSidecar(nonCanonical3);
+    database.storeNonCanonicalBlobSidecar(nonCanonical5);
+
+    // First pruning run, in the same order as BlobSidecarPruner: canonical then non-canonical.
+    // The canonical prune moves the earliest blob sidecar slot past the last pruned slot.
+    assertThat(database.pruneOldestBlobSidecars(UInt64.valueOf(2), 10, blobSidecarsArchiver))
+        .isFalse();
+    assertThat(database.getEarliestBlobSidecarSlot()).contains(UInt64.valueOf(3));
+    assertThat(
+            database.pruneOldestNonCanonicalBlobSidecars(
+                UInt64.valueOf(2), 10, blobSidecarsArchiver))
+        .isFalse();
+    assertNonCanonicalBlobSidecarKeys(
+        ZERO, UInt64.valueOf(10), blobSidecarToKey(nonCanonical3), blobSidecarToKey(nonCanonical5));
+
+    // Second run: the non-canonical blob at slot 3 sits below the new earliest slot (4)
+    assertThat(database.pruneOldestBlobSidecars(UInt64.valueOf(4), 10, blobSidecarsArchiver))
+        .isFalse();
+    assertThat(database.getEarliestBlobSidecarSlot()).contains(UInt64.valueOf(4));
+    assertThat(
+            database.pruneOldestNonCanonicalBlobSidecars(
+                UInt64.valueOf(4), 10, blobSidecarsArchiver))
+        .isFalse();
+    assertNonCanonicalBlobSidecarKeys(ZERO, UInt64.valueOf(10), blobSidecarToKey(nonCanonical5));
+    assertThat(database.getNonCanonicalBlobSidecarColumnCount()).isEqualTo(1L);
+    assertThat(database.getBlobSidecarColumnCount()).isZero();
+  }
+
+  @TestTemplate
   public void canGetAndUpdateCustodyGroupCount(final DatabaseContext context) throws IOException {
     initialize(context);
     assertThat(recentChainData.getCustodyGroupCount()).isEmpty();
