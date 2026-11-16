@@ -301,13 +301,17 @@ public class CombinedChainDataClient {
                     .filter(
                         identifier ->
                             identifier.blockRoot().equals(slotAndBlockRoot.getBlockRoot())))
-        .thenCompose(this::getDataColumnSidecars);
+        .thenCompose(identifiers -> historicalChainData.getSidecars(identifiers.toList()));
   }
 
   public SafeFuture<List<List<KZGProof>>> getDataColumnSidecarProofs(final UInt64 slot) {
     return historicalChainData
         .getDataColumnSidecarsProofs(slot)
         .thenApply(maybeProofs -> maybeProofs.orElseGet(List::of));
+  }
+
+  public SafeFuture<Optional<UInt64>> getLastDataColumnSidecarArchivedSlot() {
+    return historicalChainData.getLastDataColumnSidecarArchivedSlot();
   }
 
   private Stream<DataColumnSlotAndIdentifier> filterDataColumnSidecarKeys(

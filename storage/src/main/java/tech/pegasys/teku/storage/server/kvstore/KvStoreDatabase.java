@@ -855,6 +855,7 @@ public class KvStoreDatabase implements Database {
     final BeaconState finalizedState = dao.getLatestFinalizedState().orElseThrow();
     final Optional<Bytes32> latestCanonicalBlockRoot = dao.getLatestCanonicalBlockRoot();
     final Optional<UInt64> custodyGroupCount = dao.getCustodyGroupCount();
+    final Optional<Bytes32> fastConfirmedRoot = dao.getFastConfirmedRoot();
 
     final Map<UInt64, VoteTracker> votes = dao.getVotes();
 
@@ -904,7 +905,8 @@ public class KvStoreDatabase implements Database {
             blockInformation,
             votes,
             latestCanonicalBlockRoot,
-            custodyGroupCount));
+            custodyGroupCount,
+            fastConfirmedRoot));
   }
 
   private void enrichFinalizedGloasBlockMetadata(
@@ -1359,8 +1361,8 @@ public class KvStoreDatabase implements Database {
   }
 
   @Override
-  public Optional<UInt64> getLastDataColumnSidecarsProofsSlot() {
-    return dao.getLastDataColumnSidecarsProofsSlot();
+  public Optional<UInt64> getLastDataColumnSidecarArchivedSlot() {
+    return dao.getLastDataColumnSidecarArchivedSlot();
   }
 
   @Override
@@ -1525,6 +1527,7 @@ public class KvStoreDatabase implements Database {
         streamDataColumnIdentifiers(startSlot, tillSlotInclusive)) {
 
       int archivedSlots = 0;
+      Optional<UInt64> highestArchivedSlot = Optional.empty();
 
       final NavigableMap<UInt64, List<DataColumnSlotAndIdentifier>> archiveMap =
           dataColumnSidecars.collect(
@@ -1542,12 +1545,21 @@ public class KvStoreDatabase implements Database {
               if (archiveSidecarsProofsForSlot(
                   slot, archiveMap.get(slot), numberOfColumns, updater)) {
                 ++archivedSlots;
+                highestArchivedSlot = Optional.of(slot);
               }
             } catch (final SszDeserializeException | KvStoreDeserializationException error) {
               // All reads for a slot precede its writes, so a malformed slot is left untouched.
               LOG.warn("Skipping archival for slot {}: malformed stored data", slot, error);
             }
           }
+          // Read at startup to serve archives without seeking the proofs column. Never lowered:
+          // older ranges (e.g. backfilled history) can be archived after newer ones.
+          highestArchivedSlot.ifPresent(
+              highest ->
+                  updater.setLastDataColumnSidecarArchivedSlot(
+                      dao.getLastDataColumnSidecarArchivedSlot()
+                          .map(highest::max)
+                          .orElse(highest)));
           updater.commit();
         }
         LOG.debug("Archived data column sidecars to proofs across {} slots", archivedSlots);
@@ -1904,6 +1916,7 @@ public class KvStoreDatabase implements Database {
 
       update.getLatestCanonicalBlockRoot().ifPresent(updater::setLatestCanonicalBlockRoot);
       update.getCustodyGroupCount().ifPresent(updater::setCustodyGroupCount);
+      update.getFastConfirmedRoot().ifPresent(updater::setFastConfirmedRoot);
       update.getJustifiedCheckpoint().ifPresent(updater::setJustifiedCheckpoint);
       update.getBestJustifiedCheckpoint().ifPresent(updater::setBestJustifiedCheckpoint);
       latestFinalizedStateUpdateStartTime = System.currentTimeMillis();

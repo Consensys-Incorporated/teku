@@ -23,6 +23,7 @@ import static org.mockito.Mockito.when;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -36,6 +37,9 @@ import tech.pegasys.teku.validator.client.duties.SlotBasedScheduledDuties;
 class PtcDutySchedulerTest {
 
   private static final UInt64 SLOT = UInt64.valueOf(42);
+  private static final Bytes32 HEAD_BLOCK_ROOT = Bytes32.repeat((byte) 1);
+  private static final Bytes32 PREVIOUS_DUTY_DEPENDENT_ROOT = Bytes32.repeat((byte) 2);
+  private static final Bytes32 CURRENT_DUTY_DEPENDENT_ROOT = Bytes32.repeat((byte) 3);
 
   private final Map<UInt64, SafeFuture<Optional<SlotBasedScheduledDuties<?, ?>>>>
       requestedDutiesByEpoch = new HashMap<>();
@@ -110,16 +114,85 @@ class PtcDutySchedulerTest {
   }
 
   @Test
-  void shouldOnlyRequestGloasDutiesWhenLookaheadIncludesGloas() {
+  void shouldNotRequestGloasForkEpochDutiesBeforeTheFork() {
     final UInt64 gloasForkEpoch = UInt64.valueOf(3);
     final Spec transitionSpec = TestSpecFactory.createMinimalWithGloasForkEpoch(gloasForkEpoch);
     final PayloadTimelinessCommitteeDutyScheduler transitionDutyScheduler =
         createDutyScheduler(transitionSpec);
 
+    // the PTC of the fork epoch is only known once the state has been upgraded
     transitionDutyScheduler.onSlot(
-        transitionSpec.computeStartSlotAtEpoch(gloasForkEpoch.decrement()));
+        transitionSpec.computeStartSlotAtEpoch(gloasForkEpoch).decrement());
+    assertThat(requestedDutiesByEpoch).isEmpty();
 
-    assertThat(requestedDutiesByEpoch).containsOnlyKeys(gloasForkEpoch);
+    transitionDutyScheduler.onSlot(transitionSpec.computeStartSlotAtEpoch(gloasForkEpoch));
+    assertThat(requestedDutiesByEpoch).containsOnlyKeys(gloasForkEpoch, gloasForkEpoch.increment());
+  }
+
+  @Test
+  void shouldExpectNextEpochDependentRootForGloasForkEpochDuties() {
+    final UInt64 gloasForkEpoch = UInt64.valueOf(3);
+    final PayloadTimelinessCommitteeDutyScheduler transitionDutyScheduler =
+        createDutyScheduler(TestSpecFactory.createMinimalWithGloasForkEpoch(gloasForkEpoch));
+
+    // head in the fork epoch: next_epoch_dependent_root, the root at the last slot before the fork
+    assertThat(
+            transitionDutyScheduler.getExpectedDependentRoot(
+                HEAD_BLOCK_ROOT,
+                PREVIOUS_DUTY_DEPENDENT_ROOT,
+                CURRENT_DUTY_DEPENDENT_ROOT,
+                gloasForkEpoch,
+                gloasForkEpoch))
+        .isEqualTo(CURRENT_DUTY_DEPENDENT_ROOT);
+    // head before the fork: the head block is the last block before the fork
+    assertThat(
+            transitionDutyScheduler.getExpectedDependentRoot(
+                HEAD_BLOCK_ROOT,
+                PREVIOUS_DUTY_DEPENDENT_ROOT,
+                CURRENT_DUTY_DEPENDENT_ROOT,
+                gloasForkEpoch.decrement(),
+                gloasForkEpoch))
+        .isEqualTo(HEAD_BLOCK_ROOT);
+  }
+
+  @Test
+  void shouldExpectUsualDependentRootsForEpochsAfterGloasForkEpoch() {
+    final UInt64 gloasForkEpoch = UInt64.valueOf(3);
+    final UInt64 dutyEpoch = gloasForkEpoch.increment();
+    final PayloadTimelinessCommitteeDutyScheduler transitionDutyScheduler =
+        createDutyScheduler(TestSpecFactory.createMinimalWithGloasForkEpoch(gloasForkEpoch));
+
+    assertThat(
+            transitionDutyScheduler.getExpectedDependentRoot(
+                HEAD_BLOCK_ROOT,
+                PREVIOUS_DUTY_DEPENDENT_ROOT,
+                CURRENT_DUTY_DEPENDENT_ROOT,
+                dutyEpoch,
+                dutyEpoch))
+        .isEqualTo(PREVIOUS_DUTY_DEPENDENT_ROOT);
+    assertThat(
+            transitionDutyScheduler.getExpectedDependentRoot(
+                HEAD_BLOCK_ROOT,
+                PREVIOUS_DUTY_DEPENDENT_ROOT,
+                CURRENT_DUTY_DEPENDENT_ROOT,
+                gloasForkEpoch,
+                dutyEpoch))
+        .isEqualTo(CURRENT_DUTY_DEPENDENT_ROOT);
+  }
+
+  @Test
+  void shouldTreatGenesisEpochAsGloasForkEpochWhenGloasAtGenesis() {
+    dutyScheduler = createDutyScheduler(spec);
+
+    // both dependent roots of a genesis epoch head underflow to the genesis block root
+    assertThat(
+            dutyScheduler.getExpectedDependentRoot(
+                HEAD_BLOCK_ROOT,
+                PREVIOUS_DUTY_DEPENDENT_ROOT,
+                CURRENT_DUTY_DEPENDENT_ROOT,
+                UInt64.ZERO,
+                UInt64.ZERO))
+        .isEqualTo(CURRENT_DUTY_DEPENDENT_ROOT);
   }
 
   @Test
