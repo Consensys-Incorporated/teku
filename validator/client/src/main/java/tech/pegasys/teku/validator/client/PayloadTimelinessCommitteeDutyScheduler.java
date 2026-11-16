@@ -73,10 +73,13 @@ public class PayloadTimelinessCommitteeDutyScheduler extends AbstractDutySchedul
         "Attempting to calculate dependent root for duty epoch %s that is before the updated head epoch %s",
         dutyEpoch,
         headEpoch);
-    if (headEpoch.equals(dutyEpoch)) {
+    // The PTC of the Gloas fork epoch is computed at the fork from effective balances updated at
+    // the end of the previous epoch, so it depends on the chain one epoch later than other epochs
+    final UInt64 dependentEpoch = isGloasForkEpoch(dutyEpoch) ? dutyEpoch.increment() : dutyEpoch;
+    if (headEpoch.equals(dependentEpoch)) {
       LOG.debug("headEpoch {} - returning previousDutyDependentRoot", () -> headEpoch);
       return previousDutyDependentRoot;
-    } else if (headEpoch.increment().equals(dutyEpoch)) {
+    } else if (headEpoch.increment().equals(dependentEpoch)) {
       LOG.debug("dutyEpoch (next epoch) {} - returning currentDutyDependentRoot", () -> dutyEpoch);
       return currentDutyDependentRoot;
     } else {
@@ -93,6 +96,15 @@ public class PayloadTimelinessCommitteeDutyScheduler extends AbstractDutySchedul
 
   @Override
   protected boolean shouldScheduleDutiesAtEpoch(final UInt64 epochNumber) {
-    return spec.atEpoch(epochNumber).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS);
+    if (!spec.atEpoch(epochNumber).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS)) {
+      return false;
+    }
+    // Duties for the Gloas fork epoch are not available before the fork
+    return !isGloasForkEpoch(epochNumber)
+        || getCurrentEpoch().map(epochNumber::isLessThanOrEqualTo).orElse(false);
+  }
+
+  private boolean isGloasForkEpoch(final UInt64 epoch) {
+    return spec.isMilestoneActivationEpoch(SpecMilestone.GLOAS, epoch);
   }
 }

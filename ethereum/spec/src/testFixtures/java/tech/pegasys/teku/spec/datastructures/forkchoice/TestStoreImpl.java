@@ -58,6 +58,7 @@ public class TestStoreImpl implements MutableStore, VoteUpdater {
   protected Optional<UInt64> earliestBlobSidecarSlot;
   protected Optional<Bytes32> latestCanonicalBlockRoot;
   protected Optional<UInt64> custodyGroupCount;
+  protected Optional<Bytes32> fastConfirmedRootBeforeRestart = Optional.empty();
   protected Map<Bytes32, SignedExecutionPayloadEnvelope> executionPayloads;
   protected Optional<Bytes32> proposerBoostRoot = Optional.empty();
 
@@ -130,6 +131,11 @@ public class TestStoreImpl implements MutableStore, VoteUpdater {
   @Override
   public Optional<UInt64> getCustodyGroupCount() {
     return custodyGroupCount;
+  }
+
+  @Override
+  public Optional<Bytes32> getFastConfirmedRootBeforeRestart() {
+    return fastConfirmedRootBeforeRestart;
   }
 
   @Override
@@ -403,6 +409,11 @@ public class TestStoreImpl implements MutableStore, VoteUpdater {
   @Override
   public void setCustodyGroupCount(final UInt64 custodyGroupCount) {
     this.custodyGroupCount = Optional.of(custodyGroupCount);
+  }
+
+  @Override
+  public void setFastConfirmedRoot(final Bytes32 fastConfirmedRoot) {
+    // Only persisted by a real store, for the next start
   }
 
   @Override
