@@ -64,6 +64,38 @@ class SpecTest {
   }
 
   @Test
+  void isMilestoneActivationEpoch_shouldOnlyMatchTheForkEpoch() {
+    final UInt64 gloasForkEpoch = UInt64.valueOf(3);
+    final Spec gloasSpec = TestSpecFactory.createMinimalWithGloasForkEpoch(gloasForkEpoch);
+
+    assertThat(
+            gloasSpec.isMilestoneActivationEpoch(SpecMilestone.GLOAS, gloasForkEpoch.decrement()))
+        .isFalse();
+    assertThat(gloasSpec.isMilestoneActivationEpoch(SpecMilestone.GLOAS, gloasForkEpoch)).isTrue();
+    assertThat(
+            gloasSpec.isMilestoneActivationEpoch(SpecMilestone.GLOAS, gloasForkEpoch.increment()))
+        .isFalse();
+    assertThat(gloasSpec.isMilestoneActivationEpoch(SpecMilestone.GLOAS, UInt64.ZERO)).isFalse();
+  }
+
+  @Test
+  void isMilestoneActivationEpoch_shouldMatchGenesisWhenActiveFromGenesis() {
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+
+    assertThat(gloasSpec.isMilestoneActivationEpoch(SpecMilestone.GLOAS, UInt64.ZERO)).isTrue();
+    assertThat(gloasSpec.isMilestoneActivationEpoch(SpecMilestone.GLOAS, UInt64.ONE)).isFalse();
+  }
+
+  @Test
+  void isMilestoneActivationEpoch_shouldNeverMatchWhenMilestoneIsNotScheduled() {
+    final Spec fuluSpec = TestSpecFactory.createMinimalFulu();
+
+    assertThat(fuluSpec.isMilestoneActivationEpoch(SpecMilestone.GLOAS, UInt64.ZERO)).isFalse();
+    assertThat(fuluSpec.isMilestoneActivationEpoch(SpecMilestone.GLOAS, UInt64.valueOf(1000)))
+        .isFalse();
+  }
+
+  @Test
   void isTimeReached_shouldReturnFalseWhenTimeNotReached() {
     final UInt64 currentTimeMillis = UInt64.valueOf(1_000);
 
