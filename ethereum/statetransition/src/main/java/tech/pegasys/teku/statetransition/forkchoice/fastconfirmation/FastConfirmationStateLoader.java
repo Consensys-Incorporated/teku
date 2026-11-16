@@ -27,8 +27,10 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
  * Retrieves the source states the Fast Confirmation Rule needs for a slot.
  *
  * <p>The three retrievals run concurrently on the store's own runners and are composed
- * asynchronously, so no state load ever blocks the (single-thread) fast confirmation runner. If any
+ * asynchronously, so no state load ever blocks the (single-thread) fast confirmation runner. If a
  * required state is unavailable (e.g. pruned), the result is empty and the caller skips the slot.
+ * The previous balance source is not required: it is left empty when unavailable and only {@code
+ * is_confirmed_chain_safe} decides whether it needed it.
  */
 final class FastConfirmationStateLoader {
 
@@ -38,7 +40,10 @@ final class FastConfirmationStateLoader {
    * @param includePreviousBalanceSource whether to also retrieve {@code
    *     get_previous_balance_source}. It is only read by reconfirmation, which runs at epoch-start
    *     slots, so callers pass {@code is_start_slot_at_epoch(currentSlot)} to avoid an unnecessary
-   *     (and often uncached) fetch of the previous epoch's checkpoint state on other slots.
+   *     (and often uncached) fetch of the previous epoch's checkpoint state on other slots. Its
+   *     absence never empties the result: the previous observed justified checkpoint can already be
+   *     pruned (e.g. a stale checkpoint observed while catching up after a restart), and the rule
+   *     only reads that state once {@code is_confirmed_chain_safe} has passed its checkpoint check.
    */
   static SafeFuture<Optional<FastConfirmationStates>> load(
       final Spec spec,
@@ -64,9 +69,7 @@ final class FastConfirmationStateLoader {
         previous ->
             currentBalanceSource.thenCompose(
                 current ->
-                    pulledUpHeadState.thenApply(
-                        pulledUp ->
-                            combine(includePreviousBalanceSource, previous, current, pulledUp))));
+                    pulledUpHeadState.thenApply(pulledUp -> combine(previous, current, pulledUp))));
   }
 
   /**
@@ -93,14 +96,11 @@ final class FastConfirmationStateLoader {
   }
 
   private static Optional<FastConfirmationStates> combine(
-      final boolean includePreviousBalanceSource,
       final Optional<BeaconState> previousBalanceSource,
       final Optional<BeaconState> currentBalanceSource,
       final Optional<BeaconState> pulledUpHeadState) {
-    // The mandatory sources must be present; the previous balance source only when requested.
-    if (currentBalanceSource.isEmpty()
-        || pulledUpHeadState.isEmpty()
-        || (includePreviousBalanceSource && previousBalanceSource.isEmpty())) {
+    // Only the current balance source and the pulled-up head state are mandatory.
+    if (currentBalanceSource.isEmpty() || pulledUpHeadState.isEmpty()) {
       return Optional.empty();
     }
     return Optional.of(
