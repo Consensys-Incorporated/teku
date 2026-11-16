@@ -22,8 +22,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -35,10 +38,13 @@ import org.rocksdb.AbstractNativeReference;
 import org.rocksdb.AbstractRocksIterator;
 import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.CompactRangeOptions;
+import org.rocksdb.LevelMetaData;
 import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDBException;
 import org.rocksdb.RocksIterator;
 import org.rocksdb.Slice;
+import org.rocksdb.SstFileMetaData;
 import org.rocksdb.TransactionDB;
 import tech.pegasys.teku.storage.server.DatabaseStorageException;
 import tech.pegasys.teku.storage.server.ShuttingDownException;
@@ -57,6 +63,12 @@ public class RocksDbInstance implements KvStoreAccessor {
   private final Map<KvStoreColumn<?, ?>, ColumnFamilyDescriptor> columnDescriptors;
   private final List<AutoCloseable> resources;
   private final Set<RocksDbTransaction> openTransactions = new HashSet<>();
+
+  // A range compaction runs inside a native call that must not outlive the database handle, so
+  // closing cancels the running ones (guarded by the set's monitor), which stops them at the end
+  // of their current compaction job, and then waits for them to release the read lock
+  private final Set<CompactRangeOptions> runningCompactions = new HashSet<>();
+  private final ReadWriteLock compactionLock = new ReentrantReadWriteLock();
 
   private final AtomicBoolean closed = new AtomicBoolean(false);
 
@@ -343,14 +355,87 @@ public class RocksDbInstance implements KvStoreAccessor {
   }
 
   @Override
+  public <K, V> void compactRange(final KvStoreColumn<K, V> column, final K from, final K to) {
+    compactionLock.readLock().lock();
+    // Not exclusive, so automatic compactions keep running alongside it
+    try (final CompactRangeOptions options =
+        new CompactRangeOptions().setExclusiveManualCompaction(false)) {
+      final ColumnFamilyHandle handle = getColumnHandle(column);
+      if (handle == null) {
+        return;
+      }
+      synchronized (runningCompactions) {
+        assertOpen();
+        runningCompactions.add(options);
+      }
+      try {
+        db.compactRange(
+            handle,
+            column.getKeySerializer().serialize(from),
+            column.getKeySerializer().serialize(to),
+            options);
+      } catch (final RocksDBException e) {
+        if (closed.get()) {
+          throw new ShuttingDownException();
+        }
+        throw RocksDbExceptionUtil.wrapException("Failed to compact RocksDB column range", e);
+      } finally {
+        synchronized (runningCompactions) {
+          runningCompactions.remove(options);
+        }
+      }
+    } finally {
+      compactionLock.readLock().unlock();
+    }
+  }
+
+  @Override
+  public <K, V> OptionalLong countTombstones(
+      final KvStoreColumn<K, V> column, final K from, final K to) {
+    // Reads native file metadata, so it must not overlap close() either
+    compactionLock.readLock().lock();
+    try {
+      assertOpen();
+      final ColumnFamilyHandle handle = getColumnHandle(column);
+      if (handle == null) {
+        return OptionalLong.of(0);
+      }
+      final byte[] fromKey = column.getKeySerializer().serialize(from);
+      final byte[] toKey = column.getKeySerializer().serialize(to);
+      // The file metadata is held in memory, so this does no I/O, unlike reading the table
+      // properties of every file
+      long tombstones = 0;
+      for (final LevelMetaData level : db.getColumnFamilyMetaData(handle).levels()) {
+        for (final SstFileMetaData file : level.files()) {
+          if (Arrays.compareUnsigned(file.largestKey(), fromKey) >= 0
+              && Arrays.compareUnsigned(file.smallestKey(), toKey) <= 0) {
+            tombstones += file.numDeletions();
+          }
+        }
+      }
+      return OptionalLong.of(tombstones);
+    } finally {
+      compactionLock.readLock().unlock();
+    }
+  }
+
+  @Override
   public synchronized void close() throws Exception {
     if (closed.compareAndSet(false, true)) {
-      for (RocksDbTransaction openTransaction : openTransactions) {
-        openTransaction.closeViaDatabase();
+      synchronized (runningCompactions) {
+        runningCompactions.forEach(options -> options.setCanceled(true));
       }
-      db.syncWal();
-      for (final AutoCloseable resource : resources) {
-        resource.close();
+      compactionLock.writeLock().lock();
+      try {
+        for (RocksDbTransaction openTransaction : openTransactions) {
+          openTransaction.closeViaDatabase();
+        }
+        db.syncWal();
+        for (final AutoCloseable resource : resources) {
+          resource.close();
+        }
+      } finally {
+        compactionLock.writeLock().unlock();
       }
     }
   }

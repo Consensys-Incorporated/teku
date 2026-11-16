@@ -27,6 +27,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -50,7 +51,11 @@ import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.ethereum.pow.api.DepositTreeSnapshot;
 import tech.pegasys.teku.ethereum.pow.api.DepositsFromBlockEvent;
 import tech.pegasys.teku.ethereum.pow.api.MinGenesisTimeBlockEvent;
+import tech.pegasys.teku.infrastructure.metrics.SettableLabelledGauge;
+import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
+import tech.pegasys.teku.infrastructure.time.SystemTimeProvider;
+import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.kzg.KZGProof;
 import tech.pegasys.teku.spec.Spec;
@@ -96,6 +101,7 @@ import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.CombinedUpdater;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.FinalizedUpdater;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.HotUpdater;
+import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.SlotKeyedColumn;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDaoAdapter;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.V4FinalizedKvStoreDao;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.V4FinalizedStateSnapshotStorageLogic;
@@ -114,11 +120,15 @@ public class KvStoreDatabase implements Database {
 
   protected static final int TX_BATCH_SIZE = 500;
   protected static final int BLOBS_TX_BATCH_SIZE = 100;
+  // Compacting a pruned range rewrites the files at its edges, so it waits for this many pruned
+  // slots: about 51 minutes on mainnet, or 32768 data column sidecar tombstones
+  static final int MIN_PRUNED_SLOTS_PER_COMPACTION = 256;
   private static final Logger LOG = LogManager.getLogger();
   protected final Spec spec;
   protected final boolean storeNonCanonicalBlocks;
   @VisibleForTesting final KvStoreCombinedDao dao;
   private final StateStorageMode stateStorageMode;
+  private final Map<SlotKeyedColumn, PrunedSlotRangeCompactor> prunedSlotRangeCompactors;
 
   enum DataColumnSidecarType {
     CANONICAL("canonical"),
@@ -139,12 +149,40 @@ public class KvStoreDatabase implements Database {
       final KvStoreCombinedDao dao,
       final StateStorageMode stateStorageMode,
       final boolean storeNonCanonicalBlocks,
-      final Spec spec) {
+      final Spec spec,
+      final MetricsSystem metricsSystem) {
     this.dao = dao;
     checkNotNull(spec);
     this.stateStorageMode = stateStorageMode;
     this.storeNonCanonicalBlocks = storeNonCanonicalBlocks;
     this.spec = spec;
+    final SettableLabelledGauge compactionTimeGauge =
+        SettableLabelledGauge.create(
+            metricsSystem,
+            TekuMetricCategory.STORAGE,
+            "pruned_slots_compaction_time",
+            "Duration in milliseconds of the last compaction of pruned slots",
+            "table");
+    final SettableLabelledGauge tombstonesGauge =
+        SettableLabelledGauge.create(
+            metricsSystem,
+            TekuMetricCategory.STORAGE,
+            "pruned_slots_tombstones",
+            "Deletion tombstones not yet dropped by compaction in the data files holding pruned slots",
+            "table");
+    final TimeProvider timeProvider = new SystemTimeProvider();
+    this.prunedSlotRangeCompactors = new EnumMap<>(SlotKeyedColumn.class);
+    for (final SlotKeyedColumn column : SlotKeyedColumn.values()) {
+      prunedSlotRangeCompactors.put(
+          column,
+          new PrunedSlotRangeCompactor(
+              dao,
+              column,
+              MIN_PRUNED_SLOTS_PER_COMPACTION,
+              timeProvider,
+              compactionTimeGauge,
+              tombstonesGauge));
+    }
   }
 
   public static Database createV4(
@@ -166,7 +204,7 @@ public class KvStoreDatabase implements Database {
             hotDao,
             new V4FinalizedKvStoreDao(
                 metricsSystem, finalizedDb, schemaFinalized, finalizedStateStorageLogic));
-    return new KvStoreDatabase(dao, stateStorageMode, storeNonCanonicalBlocks, spec);
+    return new KvStoreDatabase(dao, stateStorageMode, storeNonCanonicalBlocks, spec, metricsSystem);
   }
 
   public static Database createWithStateSnapshots(
@@ -220,7 +258,7 @@ public class KvStoreDatabase implements Database {
       final MetricsSystem metricsSystem) {
     final CombinedKvStoreDao<S> dao =
         new CombinedKvStoreDao<>(db, schema, finalizedStateStorageLogic, metricsSystem);
-    return new KvStoreDatabase(dao, stateStorageMode, storeNonCanonicalBlocks, spec);
+    return new KvStoreDatabase(dao, stateStorageMode, storeNonCanonicalBlocks, spec, metricsSystem);
   }
 
   @MustBeClosed
@@ -1216,6 +1254,13 @@ public class KvStoreDatabase implements Database {
       }
       updater.commit();
     }
+    if (!slots.isEmpty()) {
+      compactPrunedSlots(
+          nonCanonicalBlobSidecars
+              ? SlotKeyedColumn.NON_CANONICAL_BLOB_SIDECARS
+              : SlotKeyedColumn.BLOB_SIDECARS,
+          slots.getLast());
+    }
     LOG.debug("Pruned {} BlobSidecars", pruned);
     // `pruned` will be greater when we reach pruneLimit not on the latest BlobSidecar in a slot
     return pruned >= pruneLimit;
@@ -1733,6 +1778,16 @@ public class KvStoreDatabase implements Database {
       updater.commit();
     }
 
+    final UInt64 lastPrunedSlot = toPrune.keys().getLast().slot();
+    switch (sidecarType) {
+      case CANONICAL -> {
+        compactPrunedSlots(SlotKeyedColumn.DATA_COLUMN_SIDECARS, lastPrunedSlot);
+        compactPrunedSlots(SlotKeyedColumn.DATA_COLUMN_SIDECARS_PROOFS, lastPrunedSlot);
+      }
+      case NON_CANONICAL ->
+          compactPrunedSlots(SlotKeyedColumn.NON_CANONICAL_DATA_COLUMN_SIDECARS, lastPrunedSlot);
+    }
+
     if (toPrune.distinctSlots() >= pruneSlotLimit) {
       LOG.debug(
           "{} data column sidecars pruning reached the limit of {}",
@@ -1788,6 +1843,10 @@ public class KvStoreDatabase implements Database {
       return streamDataColumnIdentifiers(fromSlot, toSlot);
     }
     return streamNonCanonicalDataColumnIdentifiers(fromSlot, toSlot);
+  }
+
+  private void compactPrunedSlots(final SlotKeyedColumn column, final UInt64 lastPrunedSlot) {
+    prunedSlotRangeCompactors.get(column).onPruned(lastPrunedSlot);
   }
 
   private record DataColumnSidecarsToPrune(

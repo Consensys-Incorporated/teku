@@ -22,6 +22,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
@@ -239,6 +240,20 @@ public class MockKvStoreInstance implements KvStoreAccessor {
 
   @Override
   public void compact() {
+    // No-op for the in-memory mock instance.
+  }
+
+  @Override
+  public <K, V> OptionalLong countTombstones(
+      final KvStoreColumn<K, V> column, final K from, final K to) {
+    assertOpen();
+    // The in-memory mock removes deleted keys straight away
+    return OptionalLong.empty();
+  }
+
+  @Override
+  public <K, V> void compactRange(final KvStoreColumn<K, V> column, final K from, final K to) {
+    assertOpen();
     // No-op for the in-memory mock instance.
   }
 

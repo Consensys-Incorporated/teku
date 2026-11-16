@@ -71,6 +71,7 @@ import tech.pegasys.teku.storage.server.kvstore.KvStoreDatabase.DataColumnSideca
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.FinalizedUpdater;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.HotUpdater;
+import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.SlotKeyedColumn;
 import tech.pegasys.teku.storage.server.kvstore.schema.KvStoreColumn;
 import tech.pegasys.teku.storage.server.kvstore.schema.V6SchemaCombinedSnapshot;
 import tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreDeserializationException;
@@ -84,7 +85,8 @@ class KvStoreDatabaseTest {
     final int halfColumns = spec.getNumberOfDataColumns().orElseThrow() / 2;
     final KvStoreCombinedDao dao = mock(KvStoreCombinedDao.class);
     final FinalizedUpdater updater = mock(FinalizedUpdater.class);
-    final KvStoreDatabase database = new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec);
+    final KvStoreDatabase database =
+        new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec, new StubMetricsSystem());
     when(dao.streamDataColumnIdentifiers(slot, slot))
         .thenReturn(
             IntStream.range(0, halfColumns)
@@ -110,7 +112,8 @@ class KvStoreDatabaseTest {
     final int columns = spec.getNumberOfDataColumns().orElseThrow();
     final KvStoreCombinedDao dao = mock(KvStoreCombinedDao.class);
     final FinalizedUpdater updater = mock(FinalizedUpdater.class);
-    final KvStoreDatabase database = new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec);
+    final KvStoreDatabase database =
+        new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec, new StubMetricsSystem());
     when(dao.streamDataColumnIdentifiers(slot, slot))
         .thenReturn(
             IntStream.range(0, columns)
@@ -144,7 +147,8 @@ class KvStoreDatabaseTest {
             .toList();
     final KvStoreCombinedDao dao = mock(KvStoreCombinedDao.class);
     final FinalizedUpdater updater = mock(FinalizedUpdater.class);
-    final KvStoreDatabase database = new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec);
+    final KvStoreDatabase database =
+        new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec, new StubMetricsSystem());
     when(dao.streamDataColumnIdentifiers(slot, slot))
         .thenAnswer(__ -> sidecars.stream().map(DataColumnSlotAndIdentifier::fromDataColumn));
     when(dao.getSlotForFinalizedBlockRoot(block.getRoot())).thenReturn(Optional.of(slot));
@@ -184,7 +188,8 @@ class KvStoreDatabaseTest {
     final int columns = spec.getNumberOfDataColumns().orElseThrow();
     final KvStoreCombinedDao dao = mock(KvStoreCombinedDao.class);
     final FinalizedUpdater updater = mock(FinalizedUpdater.class);
-    final KvStoreDatabase database = new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec);
+    final KvStoreDatabase database =
+        new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec, new StubMetricsSystem());
     final List<DataColumnSlotAndIdentifier> identifiers = new ArrayList<>();
     final UInt64 corruptSlot = UInt64.valueOf(2);
     final KvStoreDeserializationException corruption =
@@ -283,7 +288,9 @@ class KvStoreDatabaseTest {
             when(dao.getSidecar(DataColumnSlotAndIdentifier.fromDataColumn(sidecar)))
                 .thenReturn(Optional.of(sidecar.sszSerialize())));
     return new ArchiveSlotFixture(
-        new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec), updater, sidecars);
+        new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec, new StubMetricsSystem()),
+        updater,
+        sidecars);
   }
 
   private record ArchiveSlotFixture(
@@ -315,7 +322,8 @@ class KvStoreDatabaseTest {
       new DataStructureUtil(gloasScheduledSpec);
   private final KvStoreCombinedDao gloasDao = mock(KvStoreCombinedDao.class);
   private final KvStoreDatabase gloasDatabase =
-      new KvStoreDatabase(gloasDao, StateStorageMode.PRUNE, false, gloasScheduledSpec);
+      new KvStoreDatabase(
+          gloasDao, StateStorageMode.PRUNE, false, gloasScheduledSpec, new StubMetricsSystem());
 
   @Test
   void findOrphanedExecutionPayloadRoots_shouldNotReadBlocksWhenFinalizedEpochIsBeforeGloas() {
@@ -368,7 +376,7 @@ class KvStoreDatabaseTest {
     when(dao.getHotBlock(any()))
         .thenAnswer(invocation -> chainBuilder.getBlock(invocation.getArgument(0)));
     final KvStoreDatabase database =
-        new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, gloasSpec);
+        new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, gloasSpec, new StubMetricsSystem());
     final Map<Bytes32, Bytes32> finalizedChildToParent = new HashMap<>();
     chainBuilder
         .streamBlocksAndStates(1, 4)
@@ -428,7 +436,7 @@ class KvStoreDatabaseTest {
     final FinalizedUpdater finalizedUpdater = mock(FinalizedUpdater.class);
     final HotUpdater hotUpdater = mock(HotUpdater.class);
     final KvStoreDatabase database =
-        new KvStoreDatabase(dao, storageMode, false, gloasSpec) {
+        new KvStoreDatabase(dao, storageMode, false, gloasSpec, new StubMetricsSystem()) {
           @Override
           protected FinalizedUpdater finalizedUpdater() {
             return finalizedUpdater;
@@ -625,6 +633,57 @@ class KvStoreDatabaseTest {
     assertThat(prunedWatermark).isEmpty();
   }
 
+  @Test
+  void canonicalPruningCompactsPrunedColumnAndProofSlots() {
+    final long lastPrunedSlot = KvStoreDatabase.MIN_PRUNED_SLOTS_PER_COMPACTION;
+    final KvStoreDatabase database = database(UInt64.ZERO, 10, lastPrunedSlot, lastPrunedSlot + 1);
+
+    database.pruneDataColumnSidecars(
+        2, UInt64.valueOf(lastPrunedSlot + 1), DataColumnSidecarType.CANONICAL);
+
+    // The first compaction also covers the slots pruned before this node started
+    verify(database.dao)
+        .compactSlotRange(
+            SlotKeyedColumn.DATA_COLUMN_SIDECARS, UInt64.ZERO, UInt64.valueOf(lastPrunedSlot));
+    verify(database.dao)
+        .compactSlotRange(
+            SlotKeyedColumn.DATA_COLUMN_SIDECARS_PROOFS,
+            UInt64.ZERO,
+            UInt64.valueOf(lastPrunedSlot));
+    verify(database.dao, never())
+        .compactSlotRange(eq(SlotKeyedColumn.NON_CANONICAL_DATA_COLUMN_SIDECARS), any(), any());
+  }
+
+  @Test
+  void nonCanonicalPruningCompactsOnlyNonCanonicalSlots() {
+    final long lastPrunedSlot = KvStoreDatabase.MIN_PRUNED_SLOTS_PER_COMPACTION;
+    final KvStoreDatabase database = database(UInt64.ZERO, 10, lastPrunedSlot);
+
+    database.pruneDataColumnSidecars(
+        2, UInt64.valueOf(lastPrunedSlot), DataColumnSidecarType.NON_CANONICAL);
+
+    verify(database.dao)
+        .compactSlotRange(
+            SlotKeyedColumn.NON_CANONICAL_DATA_COLUMN_SIDECARS,
+            UInt64.ZERO,
+            UInt64.valueOf(lastPrunedSlot));
+    verify(database.dao, never())
+        .compactSlotRange(eq(SlotKeyedColumn.DATA_COLUMN_SIDECARS), any(), any());
+    verify(database.dao, never())
+        .compactSlotRange(eq(SlotKeyedColumn.DATA_COLUMN_SIDECARS_PROOFS), any(), any());
+  }
+
+  @Test
+  void pruningDoesNotCompactUntilEnoughSlotsArePruned() {
+    final KvStoreDatabase database = database(UInt64.ZERO, 10, 11, 12);
+
+    database.pruneDataColumnSidecars(2, UInt64.valueOf(12), DataColumnSidecarType.CANONICAL);
+    database.pruneDataColumnSidecars(2, UInt64.valueOf(12), DataColumnSidecarType.NON_CANONICAL);
+
+    assertThat(removedSlots).isNotEmpty();
+    verify(database.dao, never()).compactSlotRange(any(), any(), any());
+  }
+
   @ParameterizedTest(name = "{0}")
   @MethodSource("pruneWatermarkClampCases")
   void streamDataColumnIdentifiers_shouldStartAbovePruneWatermark(
@@ -722,7 +781,7 @@ class KvStoreDatabaseTest {
     when(dao.streamNonCanonicalDataColumnIdentifiers(any(), any()))
         .thenAnswer(
             invocation -> streamPopulated(invocation.getArgument(0), invocation.getArgument(1)));
-    return new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec) {
+    return new KvStoreDatabase(dao, StateStorageMode.PRUNE, false, spec, new StubMetricsSystem()) {
 
       @Override
       protected FinalizedUpdater finalizedUpdater() {

@@ -19,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -476,6 +477,18 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
   public void compact() {
     hotDao.compact();
     finalizedDao.compact();
+  }
+
+  @Override
+  public void compactSlotRange(
+      final SlotKeyedColumn column, final UInt64 startSlot, final UInt64 endSlot) {
+    finalizedDao.compactSlotRange(column, startSlot, endSlot);
+  }
+
+  @Override
+  public OptionalLong countSlotRangeTombstones(
+      final SlotKeyedColumn column, final UInt64 startSlot, final UInt64 endSlot) {
+    return finalizedDao.countSlotRangeTombstones(column, startSlot, endSlot);
   }
 
   @Override

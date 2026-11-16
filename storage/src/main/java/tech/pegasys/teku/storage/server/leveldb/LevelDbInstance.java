@@ -30,8 +30,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
 import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
@@ -68,6 +71,9 @@ public class LevelDbInstance implements KvStoreAccessor {
   private final Set<LevelDbTransaction> openTransactions = new HashSet<>();
   private final Set<DBIterator> openIterators = new HashSet<>();
   private final AtomicBoolean closed = new AtomicBoolean(false);
+  // A range compaction runs inside a native call that must not outlive the database handle, and
+  // LevelDB cannot cancel one, so closing waits for running compactions to release the read lock
+  private final ReadWriteLock compactionLock = new ReentrantReadWriteLock();
   private final DB db;
   private final Counter openedTransactionsCounter;
   private final Counter closedTransactionsCounter;
@@ -336,10 +342,40 @@ public class LevelDbInstance implements KvStoreAccessor {
   }
 
   @Override
+  public <K, V> void compactRange(final KvStoreColumn<K, V> column, final K from, final K to) {
+    compactionLock.readLock().lock();
+    try {
+      assertOpen();
+      db.compactRange(getColumnKey(column, from), getColumnKey(column, to));
+    } catch (final DBException e) {
+      throw DatabaseStorageException.unrecoverable("Failed to compact LevelDB range", e);
+    } finally {
+      compactionLock.readLock().unlock();
+    }
+  }
+
+  @Override
+  public <K, V> OptionalLong countTombstones(
+      final KvStoreColumn<K, V> column, final K from, final K to) {
+    // LevelDB does not expose per-file deletion counts
+    assertOpen();
+    return OptionalLong.empty();
+  }
+
+  @Override
   public void close() throws Exception {
     if (!closed.compareAndSet(false, true)) {
       return;
     }
+    compactionLock.writeLock().lock();
+    try {
+      closeDatabase();
+    } finally {
+      compactionLock.writeLock().unlock();
+    }
+  }
+
+  private void closeDatabase() throws IOException {
     List<DBIterator> openIteratorsSnapshot;
     List<LevelDbTransaction> openTransactionsSnapshot;
     synchronized (this) {

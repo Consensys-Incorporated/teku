@@ -26,6 +26,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -317,6 +318,64 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
   @Override
   public void compact() {
     db.compact();
+  }
+
+  @Override
+  public void compactSlotRange(
+      final SlotKeyedColumn column, final UInt64 startSlot, final UInt64 endSlot) {
+    switch (column) {
+      case BLOB_SIDECARS ->
+          db.compactRange(
+              schema.getColumnBlobSidecarBySlotRootBlobIndex(),
+              new SlotAndBlockRootAndBlobIndex(startSlot, MIN_BLOCK_ROOT, UInt64.ZERO),
+              new SlotAndBlockRootAndBlobIndex(endSlot, MAX_BLOCK_ROOT, UInt64.MAX_VALUE));
+      case NON_CANONICAL_BLOB_SIDECARS ->
+          db.compactRange(
+              schema.getColumnNonCanonicalBlobSidecarBySlotRootBlobIndex(),
+              new SlotAndBlockRootAndBlobIndex(startSlot, MIN_BLOCK_ROOT, UInt64.ZERO),
+              new SlotAndBlockRootAndBlobIndex(endSlot, MAX_BLOCK_ROOT, UInt64.MAX_VALUE));
+      case DATA_COLUMN_SIDECARS ->
+          db.compactRange(
+              schema.getColumnSidecarByColumnSlotAndIdentifier(),
+              new DataColumnSlotAndIdentifier(startSlot, MIN_BLOCK_ROOT, UInt64.ZERO),
+              new DataColumnSlotAndIdentifier(endSlot, MAX_BLOCK_ROOT, UInt64.MAX_VALUE));
+      case NON_CANONICAL_DATA_COLUMN_SIDECARS ->
+          db.compactRange(
+              schema.getColumnNonCanonicalSidecarByColumnSlotAndIdentifier(),
+              new DataColumnSlotAndIdentifier(startSlot, MIN_BLOCK_ROOT, UInt64.ZERO),
+              new DataColumnSlotAndIdentifier(endSlot, MAX_BLOCK_ROOT, UInt64.MAX_VALUE));
+      case DATA_COLUMN_SIDECARS_PROOFS ->
+          db.compactRange(schema.getColumnDataColumnSidecarsProofsBySlot(), startSlot, endSlot);
+    }
+  }
+
+  @Override
+  public OptionalLong countSlotRangeTombstones(
+      final SlotKeyedColumn column, final UInt64 startSlot, final UInt64 endSlot) {
+    return switch (column) {
+      case BLOB_SIDECARS ->
+          db.countTombstones(
+              schema.getColumnBlobSidecarBySlotRootBlobIndex(),
+              new SlotAndBlockRootAndBlobIndex(startSlot, MIN_BLOCK_ROOT, UInt64.ZERO),
+              new SlotAndBlockRootAndBlobIndex(endSlot, MAX_BLOCK_ROOT, UInt64.MAX_VALUE));
+      case NON_CANONICAL_BLOB_SIDECARS ->
+          db.countTombstones(
+              schema.getColumnNonCanonicalBlobSidecarBySlotRootBlobIndex(),
+              new SlotAndBlockRootAndBlobIndex(startSlot, MIN_BLOCK_ROOT, UInt64.ZERO),
+              new SlotAndBlockRootAndBlobIndex(endSlot, MAX_BLOCK_ROOT, UInt64.MAX_VALUE));
+      case DATA_COLUMN_SIDECARS ->
+          db.countTombstones(
+              schema.getColumnSidecarByColumnSlotAndIdentifier(),
+              new DataColumnSlotAndIdentifier(startSlot, MIN_BLOCK_ROOT, UInt64.ZERO),
+              new DataColumnSlotAndIdentifier(endSlot, MAX_BLOCK_ROOT, UInt64.MAX_VALUE));
+      case NON_CANONICAL_DATA_COLUMN_SIDECARS ->
+          db.countTombstones(
+              schema.getColumnNonCanonicalSidecarByColumnSlotAndIdentifier(),
+              new DataColumnSlotAndIdentifier(startSlot, MIN_BLOCK_ROOT, UInt64.ZERO),
+              new DataColumnSlotAndIdentifier(endSlot, MAX_BLOCK_ROOT, UInt64.MAX_VALUE));
+      case DATA_COLUMN_SIDECARS_PROOFS ->
+          db.countTombstones(schema.getColumnDataColumnSidecarsProofsBySlot(), startSlot, endSlot);
+    };
   }
 
   @Override

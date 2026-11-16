@@ -16,6 +16,7 @@ package tech.pegasys.teku.storage.server.kvstore;
 import com.google.errorprone.annotations.MustBeClosed;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.storage.server.kvstore.schema.KvStoreColumn;
@@ -122,6 +123,42 @@ public interface KvStoreAccessor extends AutoCloseable {
    * operation and is intended to be run offline (e.g. from the debug CLI), not on a running node.
    */
   void compact();
+
+  /**
+   * Compacts the keys of a column between from and to fully inclusive, physically dropping deleted
+   * keys and their tombstones in that range.
+   *
+   * <p>Pruning deletes keys one at a time and each delete leaves a tombstone until compaction
+   * removes it. A seek that lands among them has to step over every tombstone before it reaches a
+   * live key, so compacting a range once it has been pruned keeps later reads of it cheap. This is
+   * a blocking, I/O-heavy call: run it off the storage thread. If the database is closed while it
+   * runs, it stops early and throws {@code ShuttingDownException}.
+   *
+   * @param column the column to compact
+   * @param from the first key to compact
+   * @param to the last key to compact
+   * @param <K> the key type of the column
+   * @param <V> the value type of the column
+   */
+  <K, V> void compactRange(KvStoreColumn<K, V> column, K from, K to);
+
+  /**
+   * Counts the deletion tombstones that compaction has not dropped yet, in the data files that hold
+   * keys of a column between from and to.
+   *
+   * <p>Counts every tombstone in each data file that overlaps the range, so it can include a few
+   * from just outside it. Deletes that have not been flushed to a data file yet are not counted.
+   * RocksDB loads the counts for files written before the database was opened a few at a time, so
+   * it can undercount for a while after startup.
+   *
+   * @param column the column to count tombstones in
+   * @param from the first key of the range
+   * @param to the last key of the range
+   * @param <K> the key type of the column
+   * @param <V> the value type of the column
+   * @return the number of tombstones, or empty if the database cannot report it
+   */
+  <K, V> OptionalLong countTombstones(KvStoreColumn<K, V> column, K from, K to);
 
   interface KvStoreTransaction extends AutoCloseable {
 

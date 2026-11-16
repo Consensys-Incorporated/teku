@@ -50,6 +50,7 @@ import org.rocksdb.RocksIterator;
 import org.rocksdb.TransactionDB;
 import org.rocksdb.TransactionDBOptions;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.storage.server.ShuttingDownException;
 import tech.pegasys.teku.storage.server.kvstore.ColumnEntry;
 import tech.pegasys.teku.storage.server.kvstore.KvStoreAccessor.KvStoreTransaction;
 import tech.pegasys.teku.storage.server.kvstore.schema.KvStoreColumn;
@@ -187,6 +188,63 @@ class RocksDbInstanceTest {
         instance.streamKeys(column, UInt64.valueOf(KEY_COUNT - 3), UInt64.MAX_VALUE)) {
       assertThat(keys).containsExactlyElementsOf(range(KEY_COUNT - 3, KEY_COUNT - 1));
     }
+  }
+
+  @Test
+  void compactRange_shouldDropTombstonesAndKeepLiveKeys() {
+    // The range straddles the deleted block and the first live keys
+    instance.compactRange(column, UInt64.ZERO, UInt64.valueOf(FIRST_LIVE_KEY + 49));
+
+    db.setPerfLevel(PerfLevel.ENABLE_COUNT);
+    db.getPerfContext().reset();
+    try (final Stream<UInt64> keys = instance.streamKeys(column)) {
+      assertThat(keys.findFirst()).contains(UInt64.valueOf(FIRST_LIVE_KEY));
+    }
+    assertThat(db.getPerfContext().getInternalDeleteSkippedCount()).isZero();
+
+    try (final Stream<ColumnEntry<UInt64, UInt64>> entries = instance.stream(column)) {
+      assertThat(entries)
+          .containsExactlyElementsOf(
+              range(FIRST_LIVE_KEY, KEY_COUNT - 1).stream()
+                  .map(key -> ColumnEntry.create(key, key.times(2)))
+                  .toList());
+    }
+  }
+
+  @Test
+  void compactRange_shouldFailWhenClosed() throws Exception {
+    instance.close();
+
+    assertThatThrownBy(() -> instance.compactRange(column, UInt64.ZERO, UInt64.MAX_VALUE))
+        .isInstanceOf(ShuttingDownException.class);
+  }
+
+  @Test
+  void countTombstones_shouldCountTheDeletesInFilesHoldingTheRange() {
+    // Every delete is in the file flushed after them, which holds keys 0 to FIRST_LIVE_KEY - 1
+    assertThat(instance.countTombstones(column, UInt64.ZERO, UInt64.valueOf(100)))
+        .hasValue(FIRST_LIVE_KEY);
+    // Only the file with the original puts holds these keys
+    assertThat(
+            instance.countTombstones(
+                column, UInt64.valueOf(FIRST_LIVE_KEY + 10), UInt64.valueOf(KEY_COUNT - 1)))
+        .hasValue(0);
+  }
+
+  @Test
+  void countTombstones_shouldBeZeroOnceTheRangeIsCompacted() {
+    instance.compactRange(column, UInt64.ZERO, UInt64.valueOf(FIRST_LIVE_KEY + 49));
+
+    assertThat(instance.countTombstones(column, UInt64.ZERO, UInt64.valueOf(KEY_COUNT - 1)))
+        .hasValue(0);
+  }
+
+  @Test
+  void countTombstones_shouldFailWhenClosed() throws Exception {
+    instance.close();
+
+    assertThatThrownBy(() -> instance.countTombstones(column, UInt64.ZERO, UInt64.MAX_VALUE))
+        .isInstanceOf(ShuttingDownException.class);
   }
 
   @Test

@@ -17,6 +17,7 @@ import com.google.errorprone.annotations.MustBeClosed;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -224,6 +225,28 @@ public interface KvStoreCombinedDao extends AutoCloseable {
 
   /** Triggers a full, blocking compaction of the underlying storage to reclaim freed space. */
   void compact();
+
+  /**
+   * Compacts the slots between startSlot and endSlot (inclusive) of a slot-keyed column, dropping
+   * the deletion tombstones that pruning leaves behind there. Blocking and I/O heavy.
+   */
+  void compactSlotRange(SlotKeyedColumn column, UInt64 startSlot, UInt64 endSlot);
+
+  /**
+   * Counts the deletion tombstones not yet dropped by compaction in the data files that hold the
+   * slots between startSlot and endSlot (inclusive) of a slot-keyed column, or empty if the
+   * database cannot report it.
+   */
+  OptionalLong countSlotRangeTombstones(SlotKeyedColumn column, UInt64 startSlot, UInt64 endSlot);
+
+  /** Columns whose keys start with the slot, so a slot range is a contiguous key range. */
+  enum SlotKeyedColumn {
+    BLOB_SIDECARS,
+    NON_CANONICAL_BLOB_SIDECARS,
+    DATA_COLUMN_SIDECARS,
+    NON_CANONICAL_DATA_COLUMN_SIDECARS,
+    DATA_COLUMN_SIDECARS_PROOFS
+  }
 
   interface CombinedUpdater extends HotUpdater, FinalizedUpdater {}
 
