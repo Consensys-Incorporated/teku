@@ -2885,6 +2885,28 @@ public class DatabaseTest {
   }
 
   @TestTemplate
+  public void pruneFinalizedBlocks_compactsPrunedSlotsAndKeepsLiveBlocks(
+      final DatabaseContext context) throws Exception {
+    initialize(context, StateStorageMode.ARCHIVE);
+    // Skipped slots take the pruned range to the first compaction, which starts at slot 0
+    final UInt64 lastPrunedSlot = UInt64.valueOf(KvStoreDatabase.MIN_PRUNED_SLOTS_PER_COMPACTION);
+    addBlocks(chainBuilder.generateBlocksUpToSlot(2));
+    addBlocks(chainBuilder.generateBlockAtSlot(lastPrunedSlot));
+    final SignedBlockAndState liveBlock = chainBuilder.generateBlockAtSlot(lastPrunedSlot.plus(10));
+    addBlocks(liveBlock);
+    justifyAndFinalizeEpoch(spec.computeEpochAtSlot(liveBlock.getSlot()).plus(1), liveBlock);
+
+    assertThat(database.pruneFinalizedBlocks(lastPrunedSlot, 100, liveBlock.getSlot()))
+        .isEqualTo(lastPrunedSlot);
+
+    assertThat(database.getFinalizedBlockAtSlot(ONE)).isEmpty();
+    assertThat(database.getFinalizedBlockAtSlot(lastPrunedSlot)).isEmpty();
+    assertThat(database.getFinalizedBlockAtSlot(liveBlock.getSlot()))
+        .contains(liveBlock.getBlock());
+    assertThat(database.getEarliestAvailableBlockSlot()).contains(liveBlock.getSlot());
+  }
+
+  @TestTemplate
   public void pruneFinalizedBlocks_UpdatesEarliestAvailableBlockSlot(final DatabaseContext context)
       throws Exception {
     initialize(context, StateStorageMode.ARCHIVE);

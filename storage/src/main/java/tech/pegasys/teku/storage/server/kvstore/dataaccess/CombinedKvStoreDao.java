@@ -346,6 +346,8 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
               new DataColumnSlotAndIdentifier(endSlot, MAX_BLOCK_ROOT, UInt64.MAX_VALUE));
       case DATA_COLUMN_SIDECARS_PROOFS ->
           db.compactRange(schema.getColumnDataColumnSidecarsProofsBySlot(), startSlot, endSlot);
+      case FINALIZED_BLOCKS ->
+          db.compactRange(schema.getColumnFinalizedBlocksBySlot(), startSlot, endSlot);
     }
   }
 
@@ -375,6 +377,8 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
               new DataColumnSlotAndIdentifier(endSlot, MAX_BLOCK_ROOT, UInt64.MAX_VALUE));
       case DATA_COLUMN_SIDECARS_PROOFS ->
           db.countTombstones(schema.getColumnDataColumnSidecarsProofsBySlot(), startSlot, endSlot);
+      case FINALIZED_BLOCKS ->
+          db.countTombstones(schema.getColumnFinalizedBlocksBySlot(), startSlot, endSlot);
     };
   }
 

@@ -600,6 +600,7 @@ public class KvStoreDatabase implements Database {
         blocksToPrune.size(),
         lastPrunedBlockSlot);
     deleteFinalizedBlocks(blocksToPrune, earliestSlotAvailableAfterPrune);
+    compactPrunedSlots(SlotKeyedColumn.FINALIZED_BLOCKS, lastPrunedBlockSlot);
 
     return blocksToPrune.size() < pruneLimit ? lastSlotToPrune : lastPrunedBlockSlot;
   }

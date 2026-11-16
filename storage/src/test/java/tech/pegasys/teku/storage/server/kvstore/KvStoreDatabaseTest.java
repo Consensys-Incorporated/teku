@@ -37,6 +37,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
+import java.util.stream.LongStream;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -674,6 +675,44 @@ class KvStoreDatabaseTest {
   }
 
   @Test
+  void finalizedBlockPruningCompactsPrunedBlockSlots() {
+    final long lastPrunedSlot = KvStoreDatabase.MIN_PRUNED_SLOTS_PER_COMPACTION;
+    final KvStoreDatabase database = finalizedBlocksDatabase(1, lastPrunedSlot, lastPrunedSlot + 1);
+
+    database.pruneFinalizedBlocks(
+        UInt64.valueOf(lastPrunedSlot), 10, UInt64.valueOf(lastPrunedSlot + 1));
+
+    // The first compaction also covers the blocks pruned before this node started
+    verify(database.dao)
+        .compactSlotRange(
+            SlotKeyedColumn.FINALIZED_BLOCKS, UInt64.ZERO, UInt64.valueOf(lastPrunedSlot));
+  }
+
+  @Test
+  void finalizedBlockPruningCompactsOnlyUpToTheLastPrunedBlock() {
+    final long lastPrunedSlot = KvStoreDatabase.MIN_PRUNED_SLOTS_PER_COMPACTION;
+    // The prune limit stops at the block at lastPrunedSlot, before the requested slot
+    final KvStoreDatabase database =
+        finalizedBlocksDatabase(1, lastPrunedSlot, lastPrunedSlot + 1, lastPrunedSlot + 2);
+
+    database.pruneFinalizedBlocks(
+        UInt64.valueOf(lastPrunedSlot + 1), 2, UInt64.valueOf(lastPrunedSlot + 2));
+
+    verify(database.dao)
+        .compactSlotRange(
+            SlotKeyedColumn.FINALIZED_BLOCKS, UInt64.ZERO, UInt64.valueOf(lastPrunedSlot));
+  }
+
+  @Test
+  void finalizedBlockPruningDoesNotCompactUntilEnoughSlotsArePruned() {
+    final KvStoreDatabase database = finalizedBlocksDatabase(1, 2, 3);
+
+    database.pruneFinalizedBlocks(UInt64.valueOf(2), 10, UInt64.valueOf(3));
+
+    verify(database.dao, never()).compactSlotRange(any(), any(), any());
+  }
+
+  @Test
   void pruningDoesNotCompactUntilEnoughSlotsArePruned() {
     final KvStoreDatabase database = database(UInt64.ZERO, 10, 11, 12);
 
@@ -788,6 +827,28 @@ class KvStoreDatabaseTest {
         return countingUpdater();
       }
     };
+  }
+
+  private KvStoreDatabase finalizedBlocksDatabase(final long... blockSlots) {
+    final DataStructureUtil dataStructureUtil =
+        new DataStructureUtil(TestSpecFactory.createMinimalPhase0());
+    final List<SignedBeaconBlock> blocks =
+        LongStream.of(blockSlots).mapToObj(dataStructureUtil::randomSignedBeaconBlock).toList();
+    final KvStoreDatabase database = database(UInt64.ZERO);
+    when(database.dao.getEarliestFinalizedBlockSlot())
+        .thenReturn(Optional.of(blocks.getFirst().getSlot()));
+    when(database.dao.streamFinalizedBlocks(any(), any()))
+        .thenAnswer(
+            invocation -> {
+              final UInt64 startSlot = invocation.getArgument(0);
+              final UInt64 endSlot = invocation.getArgument(1);
+              return blocks.stream()
+                  .filter(
+                      block ->
+                          block.getSlot().isGreaterThanOrEqualTo(startSlot)
+                              && block.getSlot().isLessThanOrEqualTo(endSlot));
+            });
+    return database;
   }
 
   private Stream<DataColumnSlotAndIdentifier> streamPopulated(

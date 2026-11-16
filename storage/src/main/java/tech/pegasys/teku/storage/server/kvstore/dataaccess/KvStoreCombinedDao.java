@@ -245,7 +245,8 @@ public interface KvStoreCombinedDao extends AutoCloseable {
     NON_CANONICAL_BLOB_SIDECARS,
     DATA_COLUMN_SIDECARS,
     NON_CANONICAL_DATA_COLUMN_SIDECARS,
-    DATA_COLUMN_SIDECARS_PROOFS
+    DATA_COLUMN_SIDECARS_PROOFS,
+    FINALIZED_BLOCKS
   }
 
   interface CombinedUpdater extends HotUpdater, FinalizedUpdater {}
