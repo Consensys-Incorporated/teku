@@ -260,6 +260,12 @@ public class ThrottlingStorageQueryChannel implements StorageQueryChannel {
   }
 
   @Override
+  public SafeFuture<List<DataColumnSidecar>> getSidecars(
+      final List<DataColumnSlotAndIdentifier> identifiers) {
+    return taskQueue.queueTask(() -> delegate.getSidecars(identifiers));
+  }
+
+  @Override
   public SafeFuture<List<DataColumnSlotAndIdentifier>> getDataColumnIdentifiers(final UInt64 slot) {
     return taskQueue.queueTask(() -> delegate.getDataColumnIdentifiers(slot));
   }
@@ -296,6 +302,11 @@ public class ThrottlingStorageQueryChannel implements StorageQueryChannel {
   @Override
   public SafeFuture<Optional<List<List<KZGProof>>>> getDataColumnSidecarsProofs(final UInt64 slot) {
     return taskQueue.queueTask(() -> delegate.getDataColumnSidecarsProofs(slot));
+  }
+
+  @Override
+  public SafeFuture<Optional<UInt64>> getLastDataColumnSidecarArchivedSlot() {
+    return taskQueue.queueTask(delegate::getLastDataColumnSidecarArchivedSlot);
   }
 
   @Override
