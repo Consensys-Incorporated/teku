@@ -38,17 +38,7 @@ class GetEventsTest {
 
   private final Spec spec = TestSpecFactory.createDefault();
 
-  private final GetEvents handler =
-      new GetEvents(
-          spec,
-          mock(NodeDataProvider.class),
-          mock(ChainDataProvider.class),
-          mock(SyncDataProvider.class),
-          mock(ConfigProvider.class),
-          mock(EventChannels.class),
-          new StubAsyncRunner(),
-          StubTimeProvider.withTimeInMillis(1000),
-          10);
+  private final GetEvents handler = createHandler(true);
 
   @Test
   void shouldRejectAnUnknownTopic() throws Exception {
@@ -104,6 +94,49 @@ class GetEventsTest {
     // the stub cannot serve an event stream, so reaching it is what proves the topics were accepted
     assertThatThrownBy(() -> handler.handleRequest(request))
         .isInstanceOf(UnsupportedOperationException.class);
+  }
+
+  @Test
+  void shouldRejectLightClientTopicsWhenLightClientIsDisabled() throws Exception {
+    final GetEvents disabledHandler = createHandler(false);
+    final StubRestApiRequest request =
+        StubRestApiRequest.builder()
+            .metadata(disabledHandler.getMetadata())
+            .listQueryParameter(
+                TOPICS,
+                List.of(EventType.head.name(), EventType.light_client_finality_update.name()))
+            .build();
+
+    disabledHandler.handleRequest(request);
+
+    assertThat(request.getResponseCode()).isEqualTo(SC_BAD_REQUEST);
+    assertThat(((HttpErrorResponse) request.getResponseBody()).getMessage())
+        .isEqualTo("Invalid topic: light_client_finality_update");
+  }
+
+  @Test
+  void shouldStartTheEventStreamForLightClientTopicsWhenLightClientIsEnabled() {
+    final StubRestApiRequest request =
+        requestWithTopics(
+            EventType.light_client_finality_update.name(),
+            EventType.light_client_optimistic_update.name());
+
+    assertThatThrownBy(() -> handler.handleRequest(request))
+        .isInstanceOf(UnsupportedOperationException.class);
+  }
+
+  private GetEvents createHandler(final boolean lightClientEnabled) {
+    return new GetEvents(
+        spec,
+        mock(NodeDataProvider.class),
+        mock(ChainDataProvider.class),
+        mock(SyncDataProvider.class),
+        mock(ConfigProvider.class),
+        mock(EventChannels.class),
+        new StubAsyncRunner(),
+        StubTimeProvider.withTimeInMillis(1000),
+        10,
+        lightClientEnabled);
   }
 
   private StubRestApiRequest requestWithTopics(final String... topics) {

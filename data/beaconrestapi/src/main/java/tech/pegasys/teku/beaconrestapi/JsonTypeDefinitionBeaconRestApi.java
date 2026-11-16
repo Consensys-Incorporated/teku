@@ -281,7 +281,8 @@ public class JsonTypeDefinitionBeaconRestApi implements BeaconRestApi {
                     eventChannels,
                     asyncRunner,
                     timeProvider,
-                    config.getMaxPendingEvents()))
+                    config.getMaxPendingEvents(),
+                    config.isRestApiLightClientEnabled()))
             // Node Handlers
             .endpoint(new GetHealth(dataProvider))
             .endpoint(new GetIdentity(dataProvider, spec.getNetworkingConfig()))
