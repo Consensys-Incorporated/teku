@@ -900,9 +900,10 @@ class ForkChoiceTest {
 
     // Add 2 AttesterSlashing on betterBlock chain, so it will become finally better
     final BlockOptions options2 = BlockOptions.create();
-    forkAttestations.forEach(attestation ->
-        options2.addAttesterSlashing(
-            chainBuilder.createAttesterSlashingForAttestation(attestation, forkBlock)));
+    forkAttestations.forEach(
+        attestation ->
+            options2.addAttesterSlashing(
+                chainBuilder.createAttesterSlashingForAttestation(attestation, forkBlock)));
     final SignedBlockAndState blockWithAttesterSlashings = chainBuilder.generateNextBlock(options2);
     importBlock(blockWithAttesterSlashings);
 
@@ -935,21 +936,22 @@ class ForkChoiceTest {
         chainBuilder
             .streamValidAttestationsWithTargetBlock(forkBlock)
             .findFirst()
-            .orElseThrow(() ->
-                new IllegalStateException(
-                    "Failed to create attestation for block "
-                        + forkBlock.getRoot()
-                        + " genesis root: "
-                        + genesis.getRoot()
-                        + " chain head: "
-                        + chainBuilder.getLatestBlockAndState().getRoot()
-                        + " fork block: "
-                        + forkBlock.getRoot()
-                        + " validators: "
-                        + chainBuilder.getValidatorKeys().stream()
-                            .map(BLSKeyPair::getPublicKey)
-                            .map(BLSPublicKey::toString)
-                            .collect(Collectors.joining(", "))));
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "Failed to create attestation for block "
+                            + forkBlock.getRoot()
+                            + " genesis root: "
+                            + genesis.getRoot()
+                            + " chain head: "
+                            + chainBuilder.getLatestBlockAndState().getRoot()
+                            + " fork block: "
+                            + forkBlock.getRoot()
+                            + " validators: "
+                            + chainBuilder.getValidatorKeys().stream()
+                                .map(BLSKeyPair::getPublicKey)
+                                .map(BLSPublicKey::toString)
+                                .collect(Collectors.joining(", "))));
     options.addAttestation(attestation);
     final SignedBlockAndState blockWithAttestations =
         chainBuilder.generateBlockAtSlot(UInt64.valueOf(4), options);
@@ -2825,13 +2827,14 @@ class ForkChoiceTest {
   private Answer<Void> getOnForkChoiceUpdatedResultAnswer(
       final Optional<ForkChoiceUpdatedResult> result) {
     return invocation -> {
-      result.ifPresent(forkChoiceUpdatedResult ->
-          forkChoice.onForkChoiceUpdatedResult(
-              new ForkChoiceUpdatedResultNotification(
-                  invocation.getArgument(0),
-                  Optional.empty(),
-                  false,
-                  SafeFuture.completedFuture(forkChoiceUpdatedResult))));
+      result.ifPresent(
+          forkChoiceUpdatedResult ->
+              forkChoice.onForkChoiceUpdatedResult(
+                  new ForkChoiceUpdatedResultNotification(
+                      invocation.getArgument(0),
+                      Optional.empty(),
+                      false,
+                      SafeFuture.completedFuture(forkChoiceUpdatedResult))));
       return null;
     };
   }
