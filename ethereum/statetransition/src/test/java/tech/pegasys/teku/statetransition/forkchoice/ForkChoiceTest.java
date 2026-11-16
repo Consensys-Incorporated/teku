@@ -193,7 +193,7 @@ class ForkChoiceTest {
   private void setupWithSpec(
       final Spec unmockedSpec, final StoreConfig storeConfig, final boolean initializeGenesis) {
     unmockedSpec.reinitializeForTesting(
-        (block) -> blobSidecarsAvailabilityChecker,
+        block -> blobSidecarsAvailabilityChecker,
         AvailabilityCheckerFactory.NOOP_DATACOLUMN_SIDECAR,
         KZG.DISABLED);
     // Setting up spec and all dependants
@@ -900,10 +900,9 @@ class ForkChoiceTest {
 
     // Add 2 AttesterSlashing on betterBlock chain, so it will become finally better
     final BlockOptions options2 = BlockOptions.create();
-    forkAttestations.forEach(
-        attestation ->
-            options2.addAttesterSlashing(
-                chainBuilder.createAttesterSlashingForAttestation(attestation, forkBlock)));
+    forkAttestations.forEach(attestation ->
+        options2.addAttesterSlashing(
+            chainBuilder.createAttesterSlashingForAttestation(attestation, forkBlock)));
     final SignedBlockAndState blockWithAttesterSlashings = chainBuilder.generateNextBlock(options2);
     importBlock(blockWithAttesterSlashings);
 
@@ -936,22 +935,21 @@ class ForkChoiceTest {
         chainBuilder
             .streamValidAttestationsWithTargetBlock(forkBlock)
             .findFirst()
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "Failed to create attestation for block "
-                            + forkBlock.getRoot()
-                            + " genesis root: "
-                            + genesis.getRoot()
-                            + " chain head: "
-                            + chainBuilder.getLatestBlockAndState().getRoot()
-                            + " fork block: "
-                            + forkBlock.getRoot()
-                            + " validators: "
-                            + chainBuilder.getValidatorKeys().stream()
-                                .map(BLSKeyPair::getPublicKey)
-                                .map(BLSPublicKey::toString)
-                                .collect(Collectors.joining(", "))));
+            .orElseThrow(() ->
+                new IllegalStateException(
+                    "Failed to create attestation for block "
+                        + forkBlock.getRoot()
+                        + " genesis root: "
+                        + genesis.getRoot()
+                        + " chain head: "
+                        + chainBuilder.getLatestBlockAndState().getRoot()
+                        + " fork block: "
+                        + forkBlock.getRoot()
+                        + " validators: "
+                        + chainBuilder.getValidatorKeys().stream()
+                            .map(BLSKeyPair::getPublicKey)
+                            .map(BLSPublicKey::toString)
+                            .collect(Collectors.joining(", "))));
     options.addAttestation(attestation);
     final SignedBlockAndState blockWithAttestations =
         chainBuilder.generateBlockAtSlot(UInt64.valueOf(4), options);
@@ -2404,6 +2402,61 @@ class ForkChoiceTest {
         .isEqualTo(ZERO);
   }
 
+  @Test
+  void onExecutionPayloadEnvelope_invalidChildPayloadShouldInvalidateOptimisticParentPayload() {
+    setupWithSpec(
+        TestSpecFactory.createMinimalGloas(
+            builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy =
+        recentChainData.getForkChoiceStrategy().orElseThrow();
+
+    final SignedBlockAndState grandparent = chainBuilder.generateBlockAtSlot(ONE);
+    importBlock(grandparent);
+    importPayload(grandparent);
+    final SignedBlockAndState parent = chainBuilder.generateBlockAtSlot(2);
+    importBlock(parent);
+    importPayloadOptimistically(parent);
+    // The child builds on FULL(parent)
+    final SignedBlockAndState child = chainBuilder.generateBlockAtSlot(3);
+    importBlock(child);
+
+    // The execution layer finds the parent payload invalid while validating the child's payload
+    importPayloadWithStatus(child, invalidWithLatestValidPayloadOf(grandparent));
+
+    assertThat(
+            forkChoiceStrategy.getBlockData(
+                parent.getRoot(), ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL))
+        .isEmpty();
+    assertThat(forkChoiceStrategy.getBlockData(child.getRoot())).isEmpty();
+    assertThat(
+            forkChoiceStrategy
+                .getBlockData(parent.getRoot(), ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY)
+                .map(ProtoNodeData::isOptimistic))
+        .contains(false);
+  }
+
+  private PayloadStatus invalidWithLatestValidPayloadOf(final SignedBlockAndState block) {
+    final Bytes32 latestValidHash =
+        chainBuilder
+            .getExecutionPayloadAtSlot(block.getSlot())
+            .orElseThrow()
+            .getMessage()
+            .getPayload()
+            .getBlockHash();
+    return PayloadStatus.invalid(Optional.of(latestValidHash), Optional.of("bad payload"));
+  }
+
+  private void importPayloadWithStatus(
+      final SignedBlockAndState block, final PayloadStatus payloadStatus) {
+    executionLayer.setPayloadStatus(payloadStatus);
+    assertThat(
+            forkChoice.onExecutionPayloadEnvelope(
+                chainBuilder.getExecutionPayloadAtSlot(block.getSlot()).orElseThrow(),
+                executionLayer,
+                Optional.of(mock(ReceivedExecutionPayloadEventsChannel.class))))
+        .isCompletedWithValueMatching(result -> !result.isSuccessful());
+  }
+
   /** Imports the block's execution payload while the execution layer is still syncing. */
   private SignedExecutionPayloadEnvelope importPayloadOptimistically(
       final SignedBlockAndState block) {
@@ -2772,14 +2825,13 @@ class ForkChoiceTest {
   private Answer<Void> getOnForkChoiceUpdatedResultAnswer(
       final Optional<ForkChoiceUpdatedResult> result) {
     return invocation -> {
-      result.ifPresent(
-          forkChoiceUpdatedResult ->
-              forkChoice.onForkChoiceUpdatedResult(
-                  new ForkChoiceUpdatedResultNotification(
-                      invocation.getArgument(0),
-                      Optional.empty(),
-                      false,
-                      SafeFuture.completedFuture(forkChoiceUpdatedResult))));
+      result.ifPresent(forkChoiceUpdatedResult ->
+          forkChoice.onForkChoiceUpdatedResult(
+              new ForkChoiceUpdatedResultNotification(
+                  invocation.getArgument(0),
+                  Optional.empty(),
+                  false,
+                  SafeFuture.completedFuture(forkChoiceUpdatedResult))));
       return null;
     };
   }
