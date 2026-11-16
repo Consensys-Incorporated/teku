@@ -13,13 +13,14 @@
 
 package tech.pegasys.teku.infrastructure.io;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.infrastructure.io.SecretFiles.OWNER_READ_WRITE;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
@@ -39,30 +40,24 @@ class SecretFilesTest {
 
     assertThat(Files.readString(file)).isEqualTo("secret-value");
     assertThat(Files.getPosixFilePermissions(file)).isEqualTo(OWNER_READ_WRITE);
+    assertThat(tempDir).isDirectoryNotContaining(path -> !path.equals(file));
   }
 
   @Test
-  void writeStringOwnerOnly_shouldRestrictAndOverwriteExistingWorldReadableFile()
-      throws IOException {
+  void writeStringOwnerOnly_shouldReplaceExistingWorldReadableFile() throws IOException {
     final Path file = tempDir.resolve("secret");
-    Files.writeString(file, "a much longer previous value");
+    Files.writeString(file, "previous-value");
     Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-rw-rw-"));
 
-    SecretFiles.writeStringOwnerOnly(file, "new-value");
+    try (final InputStream openedBeforeWrite = Files.newInputStream(file)) {
+      SecretFiles.writeStringOwnerOnly(file, "new-value");
 
+      // The new secret goes to a new file, not through a descriptor on the world-readable one
+      assertThat(new String(openedBeforeWrite.readAllBytes(), UTF_8)).isEqualTo("previous-value");
+    }
     assertThat(Files.readString(file)).isEqualTo("new-value");
     assertThat(Files.getPosixFilePermissions(file)).isEqualTo(OWNER_READ_WRITE);
-  }
-
-  @Test
-  void writeOwnerOnly_shouldApplyOpenOptions() throws IOException {
-    final Path file = tempDir.resolve("secret");
-    Files.writeString(file, "a");
-
-    SecretFiles.writeOwnerOnly(file, new byte[] {'b'}, StandardOpenOption.APPEND);
-
-    assertThat(Files.readString(file)).isEqualTo("ab");
-    assertThat(Files.getPosixFilePermissions(file)).isEqualTo(OWNER_READ_WRITE);
+    assertThat(tempDir).isDirectoryNotContaining(path -> !path.equals(file));
   }
 
   @Test

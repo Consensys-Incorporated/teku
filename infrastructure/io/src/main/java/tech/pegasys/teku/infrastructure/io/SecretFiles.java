@@ -18,8 +18,8 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
-import java.nio.file.OpenOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Set;
@@ -27,11 +27,12 @@ import java.util.Set;
 /**
  * Writes files holding secrets (JWT secrets, private keys, API tokens, keystore passwords).
  *
- * <p>On file systems supporting POSIX permissions the file is restricted to owner read/write
- * ({@code rw-------}) before any content is written, so the secret is never exposed through
- * permissions derived from the process umask, including when an existing file is overwritten. On
- * other file systems (e.g. Windows) the file is written with the default permissions inherited from
- * its parent directory.
+ * <p>On file systems supporting POSIX permissions the secret is only ever written to a new file
+ * restricted to owner read/write ({@code rw-------}). An existing file is replaced, never rewritten
+ * in place, so the secret is exposed neither through permissions derived from the process umask nor
+ * to a process that opened the previous file while it had wider permissions. On other file systems
+ * (e.g. Windows) the file is written with the default permissions inherited from its parent
+ * directory.
  */
 public final class SecretFiles {
 
@@ -41,16 +42,34 @@ public final class SecretFiles {
   private SecretFiles() {}
 
   /**
-   * Writes {@code content} to {@code path}, creating or overwriting it, after restricting the file
-   * to its owner.
+   * Writes {@code content} to {@code path}, creating it or replacing an existing file.
    *
-   * @param options open options passed to {@link Files#write(Path, byte[], OpenOption...)}; when
-   *     none are given the file is created or truncated
+   * <p>On POSIX file systems the content is written to a temporary file in the same directory,
+   * readable only by its owner, which is then atomically moved over {@code path}. Readers see
+   * either the previous file or the complete new one, never a partially written file.
    */
-  public static void writeOwnerOnly(
-      final Path path, final byte[] content, final OpenOption... options) throws IOException {
-    restrictToOwner(path);
-    Files.write(path, content, options);
+  public static void writeOwnerOnly(final Path path, final byte[] content) throws IOException {
+    if (!supportsPosixPermissions(path)) {
+      Files.write(path, content);
+      return;
+    }
+    final Path target = path.toAbsolutePath();
+    final Path tmpFile =
+        Files.createTempFile(
+            target.getParent(),
+            target.getFileName() + ".",
+            ".tmp",
+            PosixFilePermissions.asFileAttribute(OWNER_READ_WRITE));
+    try {
+      // Set explicitly: permissions requested at creation are still masked by the umask.
+      Files.setPosixFilePermissions(tmpFile, OWNER_READ_WRITE);
+      Files.write(tmpFile, content);
+      Files.move(
+          tmpFile, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+    } finally {
+      // Only left behind if writing or moving failed
+      Files.deleteIfExists(tmpFile);
+    }
   }
 
   /** Writes {@code content} encoded as UTF-8, see {@link #writeOwnerOnly}. */
