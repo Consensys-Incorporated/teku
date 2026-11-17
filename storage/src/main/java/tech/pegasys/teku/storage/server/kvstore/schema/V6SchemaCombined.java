@@ -105,6 +105,7 @@ public abstract class V6SchemaCombined implements SchemaCombined {
   private final KvStoreVariable<UInt64> firstCustodyIncompleteSlot;
   private final KvStoreVariable<UInt64> earliestAvailableDataColumnSlot;
   private final KvStoreVariable<UInt64> lastDataColumnSidecarPrunedSlot;
+  private final KvStoreVariable<UInt64> lastDataColumnSidecarArchivedSlot;
 
   private final List<Bytes> deletedVariableIds;
 
@@ -138,6 +139,8 @@ public abstract class V6SchemaCombined implements SchemaCombined {
         KvStoreVariable.create(finalizedOffset + 6, UINT64_SERIALIZER);
     lastDataColumnSidecarPrunedSlot =
         KvStoreVariable.create(finalizedOffset + 7, UINT64_SERIALIZER);
+    lastDataColumnSidecarArchivedSlot =
+        KvStoreVariable.create(finalizedOffset + 8, UINT64_SERIALIZER);
 
     deletedVariableIds = List.of(asVariableId(finalizedOffset + 5));
   }
@@ -263,6 +266,11 @@ public abstract class V6SchemaCombined implements SchemaCombined {
   }
 
   @Override
+  public KvStoreVariable<UInt64> getVariableLastDataColumnSidecarArchivedSlot() {
+    return lastDataColumnSidecarArchivedSlot;
+  }
+
+  @Override
   public KvStoreVariable<Bytes32> getVariableLatestCanonicalBlockRoot() {
     return LATEST_CANONICAL_BLOCK_ROOT;
   }
@@ -338,6 +346,7 @@ public abstract class V6SchemaCombined implements SchemaCombined {
         .put("FIRST_CUSTODY_INCOMPLETE_SLOT", getVariableFirstCustodyIncompleteSlot())
         .put("EARLIEST_AVAILABLE_DATA_COLUMN_SLOT", getVariableEarliestAvailableDataColumnSlot())
         .put("LAST_DATA_COLUMN_SLOT_PRUNED", getVariableLastDataColumnSidecarPrunedSlot())
+        .put("LAST_DATA_COLUMN_SLOT_ARCHIVED", getVariableLastDataColumnSidecarArchivedSlot())
         .build();
   }
 

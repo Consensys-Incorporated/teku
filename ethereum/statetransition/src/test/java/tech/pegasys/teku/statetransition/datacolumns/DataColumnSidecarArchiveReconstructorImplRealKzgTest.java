@@ -40,6 +40,7 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.execution.BlobAndCellProofs;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGProof;
 import tech.pegasys.teku.spec.logic.versions.fulu.helpers.MiscHelpersFulu;
@@ -110,9 +111,9 @@ public class DataColumnSidecarArchiveReconstructorImplRealKzgTest {
             .map(sidecar -> sidecar.getKzgProofs().stream().map(SszKZGProof::getKZGProof).toList())
             .toList();
 
-    when(chainDataClient.getBlockByBlockRoot(block.getRoot()))
+    when(chainDataClient.getFinalizedBlockAtSlotExact(block.getSlot()))
         .thenReturn(SafeFuture.completedFuture(Optional.of(block)));
-    when(chainDataClient.getDataColumnSidecars(any(UInt64.class), anyList()))
+    when(chainDataClient.getDataColumnSidecars(any(SlotAndBlockRoot.class), anyList()))
         .thenReturn(SafeFuture.completedFuture(firstHalfSidecars));
     when(chainDataClient.getDataColumnSidecarProofs(any()))
         .thenReturn(SafeFuture.completedFuture(extensionProofs));
