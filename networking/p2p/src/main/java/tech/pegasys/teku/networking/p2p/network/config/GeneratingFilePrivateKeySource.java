@@ -25,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Objects;
 import org.apache.tuweni.bytes.Bytes;
+import tech.pegasys.teku.infrastructure.io.SecretFiles;
 
 public class GeneratingFilePrivateKeySource implements PrivateKeySource {
   private final String fileName;
@@ -42,7 +43,7 @@ public class GeneratingFilePrivateKeySource implements PrivateKeySource {
       }
       final PrivKey privKey = KeyKt.generateKeyPair(KeyType.SECP256K1).component1();
       final Bytes privateKeyBytes = Bytes.wrap(KeyKt.marshalPrivateKey(privKey));
-      Files.writeString(file.toPath(), privateKeyBytes.toHexString());
+      SecretFiles.writeStringOwnerOnly(file.toPath(), privateKeyBytes.toHexString());
       STATUS_LOG.usingGeneratedP2pPrivateKey(fileName, true);
       return privateKeyBytes;
 

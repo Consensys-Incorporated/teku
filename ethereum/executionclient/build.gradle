@@ -1,6 +1,7 @@
 dependencies {
 	implementation project(':infrastructure:time')
 	implementation project(':infrastructure:exceptions')
+	implementation project(':infrastructure:io')
 	implementation project(':infrastructure:metrics')
 	implementation project(':infrastructure:unsigned')
 	implementation project(':infrastructure:logging')
@@ -24,6 +25,7 @@ dependencies {
 	implementation 'io.jsonwebtoken:jjwt-jackson'
 
 	testImplementation testFixtures(project(':infrastructure:async'))
+	testImplementation testFixtures(project(':infrastructure:logging'))
 	testImplementation testFixtures(project(':infrastructure:time'))
 	testImplementation testFixtures(project(':infrastructure:metrics'))
 	testImplementation testFixtures(project(':ethereum:spec'))
