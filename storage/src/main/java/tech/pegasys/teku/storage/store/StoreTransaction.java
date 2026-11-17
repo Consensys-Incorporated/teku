@@ -80,6 +80,7 @@ class StoreTransaction implements UpdatableStore.StoreTransaction {
   Optional<UInt64> maybeEarliestBlobSidecarTransactionSlot = Optional.empty();
   Optional<Bytes32> maybeLatestCanonicalBlockRoot = Optional.empty();
   Optional<UInt64> maybeCustodyGroupCount = Optional.empty();
+  Optional<Bytes32> maybeFastConfirmedRoot = Optional.empty();
   Map<Bytes32, ExecutionPayloadUpdate> executionPayloadData = new HashMap<>();
 
   private final UpdatableStore.StoreUpdateHandler updateHandler;
@@ -196,6 +197,11 @@ class StoreTransaction implements UpdatableStore.StoreTransaction {
   }
 
   @Override
+  public void setFastConfirmedRoot(final Bytes32 fastConfirmedRoot) {
+    maybeFastConfirmedRoot = Optional.of(fastConfirmedRoot);
+  }
+
+  @Override
   public void removeProposerBoostRoot() {
     proposerBoostRoot = Optional.empty();
     proposerBoostRootSet = true;
@@ -290,6 +296,11 @@ class StoreTransaction implements UpdatableStore.StoreTransaction {
   @Override
   public Optional<UInt64> getCustodyGroupCount() {
     return maybeCustodyGroupCount;
+  }
+
+  @Override
+  public Optional<Bytes32> getFastConfirmedRootBeforeRestart() {
+    return store.getFastConfirmedRootBeforeRestart();
   }
 
   @Override

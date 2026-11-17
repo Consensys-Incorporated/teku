@@ -68,7 +68,12 @@ public class PostPayloadTimelinessCommitteeDuties extends RestApiEndpoint {
                     + "- event.current_epoch_dependent_root when `compute_epoch_at_slot(event.slot) == epoch`\n"
                     + "- event.next_epoch_dependent_root when `compute_epoch_at_slot(event.slot) + 1 == epoch`\n\n"
                     + "The dependent_root value is `get_block_root_at_slot(state, compute_start_slot_at_epoch(epoch - 1) - 1)` "
-                    + "or the genesis block root in the case of underflow.")
+                    + "or the genesis block root in the case of underflow.\n\n"
+                    + "The PTC of `GLOAS_FORK_EPOCH` is computed at the fork from effective balances that are updated at the end of the "
+                    + "previous epoch, so its duties can change until the last slot before the fork. For `epoch == GLOAS_FORK_EPOCH`, the "
+                    + "dependent_root value is `get_block_root_at_slot(state, compute_start_slot_at_epoch(epoch) - 1)` or the genesis "
+                    + "block root in the case of underflow, and matches event.next_epoch_dependent_root when "
+                    + "`compute_epoch_at_slot(event.slot) == epoch`. Duties for this epoch are not available before the fork.")
             .tags(TAG_VALIDATOR, TAG_VALIDATOR_REQUIRED)
             .requestBodyType(BODY_INTEGER_LIST)
             .pathParam(EPOCH_PARAMETER)

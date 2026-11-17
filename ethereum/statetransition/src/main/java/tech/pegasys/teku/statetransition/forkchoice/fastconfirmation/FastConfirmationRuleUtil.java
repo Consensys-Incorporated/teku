@@ -47,6 +47,20 @@ public final class FastConfirmationRuleUtil {
     return spec.computeStartSlotAtEpoch(spec.computeEpochAtSlot(slot)).equals(slot);
   }
 
+  /**
+   * Implements {@code block_should_be_finalized} from the Fast Confirmation spec: whether, at
+   * {@code currentSlot}, the block at {@code blockSlot} is old enough to have been finalized
+   * already, i.e. the start of the second epoch after the first checkpoint at or after it has been
+   * reached.
+   */
+  static boolean blockShouldBeFinalized(
+      final Spec spec, final UInt64 blockSlot, final UInt64 currentSlot) {
+    final UInt64 nextCheckpointEpoch =
+        spec.computeEpochAtSlot(blockSlot.plus(spec.getSlotsPerEpoch(blockSlot) - 1));
+    final UInt64 earliestFinalitySlot = spec.computeStartSlotAtEpoch(nextCheckpointEpoch.plus(2));
+    return earliestFinalitySlot.isLessThanOrEqualTo(currentSlot);
+  }
+
   /** Implements {@code compute_slots_since_epoch_start} from the Consensus Spec. */
   static UInt64 computeSlotsSinceEpochStart(final Spec spec, final UInt64 slot) {
     return slot.minus(spec.computeStartSlotAtEpoch(spec.computeEpochAtSlot(slot)));

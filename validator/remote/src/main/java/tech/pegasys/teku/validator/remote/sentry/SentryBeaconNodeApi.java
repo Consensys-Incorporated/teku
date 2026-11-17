@@ -73,7 +73,8 @@ public class SentryBeaconNodeApi implements BeaconNodeApi {
     final BeaconNodesSentryConfig beaconNodesSentryConfig =
         sentryNodesConfig.getBeaconNodesSentryConfig();
     final OkHttpClient sentryNodesHttpClient =
-        beaconNodesSentryConfig.createOkHttpClientForSentryNodes();
+        beaconNodesSentryConfig.createOkHttpClientForSentryNodes(
+            validatorConfig.getBeaconApiMaxResponseSizeMegabytes());
 
     final BeaconNodeRoleConfig dutiesProviderNodeConfig =
         beaconNodesSentryConfig.getDutiesProviderNodeConfig();
@@ -181,7 +182,8 @@ public class SentryBeaconNodeApi implements BeaconNodeApi {
             beaconNodeReadinessManager,
             dutiesProviderPrimaryValidatorApiChannel,
             dutiesProviderFailoverValidatorApiChannel,
-            createOkHttpClientForStreamFromClient(sentryNodesHttpClient),
+            createOkHttpClientForStreamFromClient(
+                sentryNodesHttpClient, validatorConfig.getEventStreamMaxEventSizeMegabytes()),
             ValidatorLogger.VALIDATOR_LOGGER,
             new ForkAwareTimeBasedEventAdapter(
                 new GenesisDataProvider(asyncRunner, dutiesProviderValidatorApi),
