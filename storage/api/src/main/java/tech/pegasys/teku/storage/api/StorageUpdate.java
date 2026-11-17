@@ -50,6 +50,7 @@ public class StorageUpdate {
   private final Optional<Bytes32> optimisticTransitionBlockRoot;
   private final Optional<Bytes32> latestCanonicalBlockRoot;
   private final Optional<UInt64> custodyGroupCount;
+  private final Optional<Bytes32> fastConfirmedRoot;
   private final boolean blobSidecarsEnabled;
   private final boolean sidecarsEnabled;
   private final boolean executionPayloadEnvelopesEnabled;
@@ -71,6 +72,7 @@ public class StorageUpdate {
       final Optional<Bytes32> optimisticTransitionBlockRoot,
       final Optional<Bytes32> latestCanonicalBlockRoot,
       final Optional<UInt64> custodyGroupCount,
+      final Optional<Bytes32> fastConfirmedRoot,
       @NonUpdating final boolean blobSidecarsEnabled,
       @NonUpdating final boolean sidecarsEnabled,
       @NonUpdating final boolean executionPayloadEnvelopesEnabled) {
@@ -89,6 +91,7 @@ public class StorageUpdate {
     this.optimisticTransitionBlockRoot = optimisticTransitionBlockRoot;
     this.latestCanonicalBlockRoot = latestCanonicalBlockRoot;
     this.custodyGroupCount = custodyGroupCount;
+    this.fastConfirmedRoot = fastConfirmedRoot;
     this.blobSidecarsEnabled = blobSidecarsEnabled;
     this.sidecarsEnabled = sidecarsEnabled;
     this.executionPayloadEnvelopesEnabled = executionPayloadEnvelopesEnabled;
@@ -110,6 +113,7 @@ public class StorageUpdate {
             && maybeEarliestBlobSidecarSlot.isEmpty()
             && latestCanonicalBlockRoot.isEmpty()
             && custodyGroupCount.isEmpty()
+            && fastConfirmedRoot.isEmpty()
             && !optimisticTransitionBlockRootSet;
   }
 
@@ -189,6 +193,10 @@ public class StorageUpdate {
 
   public Optional<UInt64> getCustodyGroupCount() {
     return custodyGroupCount;
+  }
+
+  public Optional<Bytes32> getFastConfirmedRoot() {
+    return fastConfirmedRoot;
   }
 
   public Map<Bytes32, SlotAndBlockRoot> getStateRoots() {

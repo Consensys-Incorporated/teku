@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.spec.signatures;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -20,6 +21,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -140,6 +142,83 @@ class LocalSlashingProtectorTest {
         .isCompletedWithValue(false);
     // only the first signature was written, the imported record was not overwritten
     verify(dataWriter, times(1)).syncedWrite(any(), any());
+  }
+
+  @Test
+  void shouldRefuseToSignWhenRecordCannotBeRead() throws Exception {
+    when(dataWriter.read(signingRecordPath))
+        .thenReturn(Optional.of(Bytes.wrap("garbage: [".getBytes(UTF_8))));
+
+    assertThat(getSlashingProtector().maySignBlock(validator, GENESIS_VALIDATORS_ROOT, ONE))
+        .isCompletedExceptionally();
+    assertThat(
+            getSlashingProtector()
+                .maySignAttestation(validator, GENESIS_VALIDATORS_ROOT, ONE, UInt64.valueOf(2)))
+        .isCompletedExceptionally();
+    verify(dataWriter, never()).syncedWrite(any(), any());
+  }
+
+  @Test
+  void shouldAddGenesisValidatorsRootWhenSigningWithRecordWithoutIt() throws Exception {
+    final ValidatorSigningRecord repairedRecord =
+        new ValidatorSigningRecord(
+            Optional.empty(), UInt64.valueOf(3), UInt64.valueOf(4), UInt64.valueOf(4));
+    when(dataWriter.read(signingRecordPath)).thenReturn(Optional.of(repairedRecord.toBytes()));
+
+    assertThat(
+            getSlashingProtector()
+                .maySignBlock(validator, GENESIS_VALIDATORS_ROOT, UInt64.valueOf(4)))
+        .isCompletedWithValue(true);
+
+    verify(dataWriter)
+        .syncedWrite(
+            signingRecordPath,
+            new ValidatorSigningRecord(
+                    Optional.of(GENESIS_VALIDATORS_ROOT),
+                    UInt64.valueOf(4),
+                    UInt64.valueOf(4),
+                    UInt64.valueOf(4))
+                .toBytes());
+  }
+
+  @Test
+  void shouldOverwriteRecordRaisedInStorageAfterSigning() throws Exception {
+    final ValidatorSigningRecord initialRecord =
+        new ValidatorSigningRecord(
+            Optional.of(GENESIS_VALIDATORS_ROOT),
+            UInt64.valueOf(3),
+            UInt64.valueOf(4),
+            UInt64.valueOf(6));
+    when(dataWriter.read(signingRecordPath)).thenReturn(Optional.of(initialRecord.toBytes()));
+    assertThat(
+            getSlashingProtector()
+                .maySignBlock(validator, GENESIS_VALIDATORS_ROOT, UInt64.valueOf(4)))
+        .isCompletedWithValue(true);
+
+    // a repair raises the record in storage while the validator client is running
+    final ValidatorSigningRecord repairedRecord =
+        new ValidatorSigningRecord(
+            Optional.of(GENESIS_VALIDATORS_ROOT),
+            UInt64.valueOf(5000),
+            UInt64.valueOf(625),
+            UInt64.valueOf(625));
+    when(dataWriter.read(signingRecordPath)).thenReturn(Optional.of(repairedRecord.toBytes()));
+
+    // the cached record is used, so signing below the repaired slot is still allowed and the
+    // repaired file is overwritten
+    assertThat(
+            getSlashingProtector()
+                .maySignBlock(validator, GENESIS_VALIDATORS_ROOT, UInt64.valueOf(5)))
+        .isCompletedWithValue(true);
+    verify(dataWriter)
+        .syncedWrite(
+            signingRecordPath,
+            new ValidatorSigningRecord(
+                    Optional.of(GENESIS_VALIDATORS_ROOT),
+                    UInt64.valueOf(5),
+                    UInt64.valueOf(4),
+                    UInt64.valueOf(6))
+                .toBytes());
   }
 
   static List<Arguments> blockCases() {

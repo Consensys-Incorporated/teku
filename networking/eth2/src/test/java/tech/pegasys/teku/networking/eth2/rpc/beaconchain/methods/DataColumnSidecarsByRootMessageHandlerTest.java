@@ -167,6 +167,34 @@ public class DataColumnSidecarsByRootMessageHandlerTest {
   }
 
   @TestTemplate
+  public void shouldIgnoreOutOfRangeColumnsAndServeTheRest() {
+    final UInt64 outOfRange = UInt64.valueOf(spec.getNumberOfDataColumns().orElseThrow());
+    final DataColumnsByRootIdentifier identifier =
+        identifierSchema.create(
+            dataStructureUtil.randomBytes32(), List.of(ZERO, outOfRange, UInt64.MAX_VALUE));
+    final DataColumnSidecarsByRootRequestMessage request = messageSchema.of(identifier);
+    // even a custody set holding an out-of-range index only makes it a storage miss
+    when(custodyGroupCountManager.getCustodyColumnIndices()).thenReturn(Set.of(ZERO, outOfRange));
+    final DataColumnSidecar sidecar = dataStructureUtil.randomDataColumnSidecar();
+    when(combinedChainDataClient.getSidecar(any()))
+        .thenAnswer(
+            invocation ->
+                SafeFuture.completedFuture(
+                    invocation.<DataColumnSlotAndIdentifier>getArgument(0).columnIndex().isZero()
+                        ? Optional.of(sidecar)
+                        : Optional.empty()));
+
+    assertThat(handler.validateRequest(protocolId, request)).isEmpty();
+    handler.onIncomingMessage(protocolId, peer, request, callback);
+
+    verify(callback).respond(sidecar);
+    verify(callback, times(1)).respond(any());
+    verify(callback).completeSuccessfully();
+    verify(dataColumnSidecarArchiveReconstructor, never())
+        .reconstructDataColumnSidecar(any(), any(), anyInt());
+  }
+
+  @TestTemplate
   public void shouldNotSendDataColumnSidecarsIfPeerIsRateLimited() {
 
     when(peer.approveDataColumnSidecarsRequest(any(), anyLong())).thenReturn(Optional.empty());
@@ -453,6 +481,8 @@ public class DataColumnSidecarsByRootMessageHandlerTest {
 
     assertThat(respondedDataColumnSidecarBlockRoots)
         .containsExactlyElementsOf(expectedDataColumnIdentifiersBlockRoots);
+    assertThat(sentSidecars(DataColumnSidecarSource.STORED)).isEqualTo(4);
+    assertThat(sentSidecars(DataColumnSidecarSource.RECONSTRUCTED)).isZero();
   }
 
   @TestTemplate
@@ -497,7 +527,7 @@ public class DataColumnSidecarsByRootMessageHandlerTest {
 
     when(combinedChainDataClient.getSidecar(any(DataColumnSlotAndIdentifier.class)))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
-    when(dataColumnSidecarArchiveReconstructor.isSidecarPruned(any(), any())).thenReturn(true);
+    when(dataColumnSidecarArchiveReconstructor.isSidecarArchived(any(), any())).thenReturn(true);
     when(dataColumnSidecarArchiveReconstructor.reconstructDataColumnSidecar(any(), any(), anyInt()))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
     handler.onIncomingMessage(
@@ -534,7 +564,7 @@ public class DataColumnSidecarsByRootMessageHandlerTest {
 
     when(combinedChainDataClient.getSidecar(any(DataColumnSlotAndIdentifier.class)))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
-    when(dataColumnSidecarArchiveReconstructor.isSidecarPruned(any(), any())).thenReturn(true);
+    when(dataColumnSidecarArchiveReconstructor.isSidecarArchived(any(), any())).thenReturn(true);
     when(dataColumnSidecarArchiveReconstructor.reconstructDataColumnSidecar(any(), any(), anyInt()))
         .thenAnswer(
             invocation -> {
@@ -570,6 +600,15 @@ public class DataColumnSidecarsByRootMessageHandlerTest {
     assertThat(datacolumnSidecarCaptor.getAllValues())
         .hasSize(4)
         .allSatisfy(sidecar -> assertThat(sidecar.getIndex()).isEqualTo(ZERO));
+    assertThat(sentSidecars(DataColumnSidecarSource.RECONSTRUCTED)).isEqualTo(4);
+    assertThat(sentSidecars(DataColumnSidecarSource.STORED)).isZero();
+  }
+
+  private long sentSidecars(final DataColumnSidecarSource source) {
+    return metricsSystem.getLabelledCounterValue(
+        TekuMetricCategory.NETWORK,
+        "rpc_data_column_sidecars_by_root_sent_sidecars_total",
+        source.metricLabel());
   }
 
   @TestTemplate
@@ -580,7 +619,7 @@ public class DataColumnSidecarsByRootMessageHandlerTest {
 
     when(combinedChainDataClient.getSidecar(any(DataColumnSlotAndIdentifier.class)))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
-    when(dataColumnSidecarArchiveReconstructor.isSidecarPruned(any(), any())).thenReturn(true);
+    when(dataColumnSidecarArchiveReconstructor.isSidecarArchived(any(), any())).thenReturn(true);
     when(dataColumnSidecarArchiveReconstructor.reconstructDataColumnSidecar(any(), any(), anyInt()))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
 

@@ -18,6 +18,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -32,12 +33,16 @@ import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.kzg.KZGProof;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
+import tech.pegasys.teku.storage.api.StorageQueryChannel;
+import tech.pegasys.teku.storage.api.ThrottlingStorageQueryChannel;
 import tech.pegasys.teku.storage.archive.BlobSidecarsArchiver;
 import tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreDeserializationException;
 
@@ -67,6 +72,37 @@ class ChainStorageCustodyTest {
         .thenReturn(
             Optional.of(
                 IntStream.range(0, columns / 2).mapToObj(__ -> List.<KZGProof>of()).toList()));
+  }
+
+  @Test
+  void batchReadsPreserveOrderAndOmitMissingColumns() {
+    final DataColumnSidecar first = mock(DataColumnSidecar.class);
+    final DataColumnSidecar third = mock(DataColumnSidecar.class);
+    when(database.getSidecar(firstHalf.get(0))).thenReturn(Optional.of(first));
+    when(database.getSidecar(firstHalf.get(1))).thenReturn(Optional.empty());
+    when(database.getSidecar(firstHalf.get(2))).thenReturn(Optional.of(third));
+
+    assertThat(storage.getSidecars(firstHalf.subList(0, 3)))
+        .isCompletedWithValue(List.of(first, third));
+    verify(database, never()).streamDataColumnIdentifiers(any(UInt64.class));
+  }
+
+  @Test
+  void concurrentReconstructionBatchesUseOneThrottleEntryEach() {
+    final StorageQueryChannel delegate = mock(StorageQueryChannel.class);
+    final SafeFuture<List<DataColumnSidecar>> pending = new SafeFuture<>();
+    when(delegate.getSidecars(firstHalf)).thenReturn(pending);
+    final ThrottlingStorageQueryChannel channel =
+        new ThrottlingStorageQueryChannel(delegate, 3, 500, new StubMetricsSystem());
+    final List<SafeFuture<List<DataColumnSidecar>>> requests =
+        IntStream.range(0, 32).mapToObj(__ -> channel.getSidecars(firstHalf)).toList();
+
+    verify(delegate, times(3)).getSidecars(firstHalf);
+    requests.forEach(request -> assertThat(request).isNotDone());
+    pending.complete(List.of());
+    requests.forEach(request -> assertThat(request).isCompletedWithValue(List.of()));
+    verify(delegate, times(32)).getSidecars(firstHalf);
+    verify(delegate, never()).getSidecar(any());
   }
 
   @Test

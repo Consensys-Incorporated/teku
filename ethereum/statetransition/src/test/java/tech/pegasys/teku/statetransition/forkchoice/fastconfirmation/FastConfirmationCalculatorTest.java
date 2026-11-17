@@ -28,9 +28,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.LongStream;
+import org.apache.logging.log4j.Level;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -937,6 +939,39 @@ class FastConfirmationCalculatorTest {
   }
 
   @Test
+  void shouldNotReconfirmWhenPreviousBalanceSourceIsUnavailable() {
+    buildLinearChain(11);
+    final BeaconState genesis = genesisState();
+    when(forkChoice.isFullyValidated(any())).thenReturn(true);
+    when(store.getVoteSnapshot())
+        .thenReturn(voteSnapshot(allValidatorsVotingFor(genesis, chain.get(3))));
+    // Would reconfirm chain[1..3], but there is no state to score them against.
+    final Checkpoint observed = new Checkpoint(UInt64.ZERO, chain.get(0));
+    final FastConfirmationStates states =
+        new FastConfirmationStates(Optional.empty(), mock(BeaconState.class), genesis);
+    final FastConfirmationCalculator calculator =
+        new FastConfirmationCalculator(
+            spec, fcrStore(chain.get(3), observed), states, UInt64.valueOf(5));
+
+    assertThat(calculator.isConfirmedChainSafe(chain.get(3))).isFalse();
+  }
+
+  @Test
+  void shouldReconfirmWithoutPreviousBalanceSourceWhenThereAreNoBlocksToScore() {
+    buildLinearChain(11);
+    // The confirmed root is the observed justified checkpoint block itself, which is excluded.
+    final Checkpoint observed = new Checkpoint(UInt64.ZERO, chain.get(0));
+    final FastConfirmationStates states =
+        new FastConfirmationStates(
+            Optional.empty(), mock(BeaconState.class), mock(BeaconState.class));
+    final FastConfirmationCalculator calculator =
+        new FastConfirmationCalculator(
+            spec, fcrStore(chain.get(3), observed), states, UInt64.valueOf(5));
+
+    assertThat(calculator.isConfirmedChainSafe(chain.get(0))).isTrue();
+  }
+
+  @Test
   void shouldNotReconfirmWhenAChainBlockIsNotOneConfirmed() {
     buildLinearChain(11);
     final BeaconState genesis = genesisState();
@@ -1015,6 +1050,44 @@ class FastConfirmationCalculatorTest {
         new FastConfirmationCalculator(spec, fcrStore, states, UInt64.valueOf(17));
 
     assertThat(calculator.getLatestConfirmed()).isEqualTo(chain.get(8));
+  }
+
+  @Test
+  void shouldRestartFromObservedJustifiedAtEpochStartWithoutPreviousBalanceSource() {
+    buildLinearChain(17);
+    final Checkpoint zero = new Checkpoint(UInt64.ZERO, Bytes32.ZERO);
+    final Checkpoint observedJustified = new Checkpoint(UInt64.ONE, chain.get(8));
+    // The head's (and every epoch-1+ block's) unrealized justification matches the observed
+    // justified checkpoint.
+    for (int i = 8; i <= 16; i++) {
+      setCheckpoints(chain.get(i), observedJustified, observedJustified);
+    }
+    when(store.getFinalizedCheckpoint()).thenReturn(new Checkpoint(UInt64.ZERO, chain.get(0)));
+    // Confirmed root is a previous-epoch block, so reconfirmation has blocks 9..10 to score. The
+    // previous observed justified checkpoint is stale and its state has been pruned, so there is no
+    // previous balance source to score them against.
+    final FastConfirmationStore fcrStore =
+        new FastConfirmationStore(
+            store,
+            chain.get(10),
+            new Checkpoint(UInt64.ZERO, Bytes32.random()),
+            observedJustified,
+            zero,
+            chain.get(15),
+            chain.get(16));
+    final BeaconState state = genesisState();
+    final FastConfirmationStates states =
+        new FastConfirmationStates(Optional.empty(), state, state);
+    // currentSlot 16 = epoch 2 start: reconfirmation fails without the previous balance source, so
+    // the rule reverts to finalized and restarts from the observed justified checkpoint block.
+    final FastConfirmationCalculator calculator =
+        new FastConfirmationCalculator(spec, fcrStore, states, UInt64.valueOf(16));
+
+    try (final LogCaptor logCaptor =
+        LogCaptor.forClass(FastConfirmationCalculator.class, Level.DEBUG)) {
+      assertThat(calculator.getLatestConfirmed()).isEqualTo(chain.get(8));
+      logCaptor.assertDebugLog("previous balance source");
+    }
   }
 
   @Test
