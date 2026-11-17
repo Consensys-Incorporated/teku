@@ -123,6 +123,14 @@ public class ValidatorKeysOptions {
                     convertToPath(validatorExternalSignerTruststorePasswordFile)));
   }
 
+  public List<String> getValidatorKeys() {
+    return validatorKeys;
+  }
+
+  public List<String> getValidatorExternalSignerPublicKeySources() {
+    return parseValidatorExternalKeys();
+  }
+
   private List<String> parseValidatorExternalKeys() {
     return validatorExternalSignerPublicKeys.stream().filter(StringUtils::isNotBlank).toList();
   }

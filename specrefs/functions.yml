@@ -325,7 +325,9 @@
     </spec>
 
 - name: block_should_be_finalized#phase0
-  sources: []
+  sources:
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/fastconfirmation/FastConfirmationRuleUtil.java
+      search: static boolean blockShouldBeFinalized(
   spec: |
     <spec fn="block_should_be_finalized" fork="phase0" hash="d10c5a16">
     def block_should_be_finalized(store: Store, block_root: Root) -> bool:
@@ -5736,7 +5738,9 @@
     </spec>
 
 - name: get_restart_resilient_confirmed_root#phase0
-  sources: []
+  sources:
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/fastconfirmation/FastConfirmationTracker.java
+      search: Bytes32 getRestartResilientConfirmedRoot(
   spec: |
     <spec fn="get_restart_resilient_confirmed_root" fork="phase0" hash="1e5cb5a6">
     def get_restart_resilient_confirmed_root(fcr_store: FastConfirmationStore) -> Root:

@@ -90,6 +90,8 @@ public interface KvStoreCombinedDao extends AutoCloseable {
 
   Optional<UInt64> getCustodyGroupCount();
 
+  Optional<Bytes32> getFastConfirmedRoot();
+
   Optional<SignedBeaconBlock> getNonCanonicalBlock(Bytes32 root);
 
   void ingest(KvStoreCombinedDao dao, int batchSize, Consumer<String> logger);
@@ -198,7 +200,7 @@ public interface KvStoreCombinedDao extends AutoCloseable {
 
   Optional<UInt64> getLastDataColumnSidecarPrunedSlot();
 
-  Optional<UInt64> getLastDataColumnSidecarsProofsSlot();
+  Optional<UInt64> getLastDataColumnSidecarArchivedSlot();
 
   Optional<List<List<KZGProof>>> getDataColumnSidecarsProofs(UInt64 slot);
 
@@ -249,6 +251,8 @@ public interface KvStoreCombinedDao extends AutoCloseable {
     void setLatestCanonicalBlockRoot(Bytes32 canonicalBlockRoot);
 
     void setCustodyGroupCount(UInt64 custodyGroupCount);
+
+    void setFastConfirmedRoot(Bytes32 fastConfirmedRoot);
 
     void addBestLightClientUpdate(
         UInt64 period, LightClientUpdate update, Bytes32 signatureBlockRoot);
@@ -346,6 +350,8 @@ public interface KvStoreCombinedDao extends AutoCloseable {
     void setEarliestAvailableDataColumnSlot(UInt64 slot);
 
     void setLastDataColumnSidecarPrunedSlot(UInt64 slot);
+
+    void setLastDataColumnSidecarArchivedSlot(UInt64 slot);
 
     void deleteEarliestBlockSlot();
 

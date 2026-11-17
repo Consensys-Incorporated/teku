@@ -406,6 +406,11 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
   }
 
   @Override
+  public Optional<Bytes32> getFastConfirmedRoot() {
+    return db.get(schema.getVariableFastConfirmedRoot());
+  }
+
+  @Override
   public Optional<SlotAndBlockRoot> getSlotAndBlockRootForFinalizedStateRoot(
       final Bytes32 stateRoot) {
     Optional<UInt64> maybeSlot = db.get(schema.getColumnSlotsByFinalizedStateRoot(), stateRoot);
@@ -511,6 +516,11 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
   }
 
   @Override
+  public Optional<UInt64> getLastDataColumnSidecarArchivedSlot() {
+    return db.get(schema.getVariableLastDataColumnSidecarArchivedSlot());
+  }
+
+  @Override
   public Map<String, Long> getColumnCounts(final Optional<String> maybeColumnFilter) {
     final Map<String, Long> columnCounts = new LinkedHashMap<>();
     schema
@@ -554,12 +564,16 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
             "OPTIMISTIC_TRANSITION_BLOCK_SLOT",
             getOptimisticTransitionBlockSlot().map(Objects::toString))
         .put("CUSTODY_GROUP_COUNT", getCustodyGroupCount().map(Objects::toString))
+        .put("FAST_CONFIRMED_ROOT", getFastConfirmedRoot().map(Bytes32::toString))
         .put(
             "EARLIEST_AVAILABLE_DATA_COLUMN_SLOT",
             getEarliestAvailableDataColumnSlot().map(Objects::toString))
         .put(
             "LAST_DATA_COLUMN_SLOT_PRUNED",
-            getLastDataColumnSidecarPrunedSlot().map(Objects::toString));
+            getLastDataColumnSidecarPrunedSlot().map(Objects::toString))
+        .put(
+            "LAST_DATA_COLUMN_SLOT_ARCHIVED",
+            getLastDataColumnSidecarArchivedSlot().map(Objects::toString));
 
     // get a list of the known keys, so that we can add missing variables
     final Map<String, Optional<String>> knownVariables = knownVariablesBuilder.build();
@@ -741,11 +755,6 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
   }
 
   @Override
-  public Optional<UInt64> getLastDataColumnSidecarsProofsSlot() {
-    return db.getLastKey(schema.getColumnDataColumnSidecarsProofsBySlot());
-  }
-
-  @Override
   public Optional<List<List<KZGProof>>> getDataColumnSidecarsProofs(final UInt64 slot) {
     try (final OperationTimer.TimingContext ignored =
         getDataColumnSidecarsProofsTimer.labels().startTimer()) {
@@ -843,6 +852,11 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
     @Override
     public void setCustodyGroupCount(final UInt64 custodyGroupCount) {
       transaction.put(schema.getVariableCustodyGroupCount(), custodyGroupCount);
+    }
+
+    @Override
+    public void setFastConfirmedRoot(final Bytes32 fastConfirmedRoot) {
+      transaction.put(schema.getVariableFastConfirmedRoot(), fastConfirmedRoot);
     }
 
     @Override
@@ -944,6 +958,11 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
     @Override
     public void setLastDataColumnSidecarPrunedSlot(final UInt64 slot) {
       transaction.put(schema.getVariableLastDataColumnSidecarPrunedSlot(), slot);
+    }
+
+    @Override
+    public void setLastDataColumnSidecarArchivedSlot(final UInt64 slot) {
+      transaction.put(schema.getVariableLastDataColumnSidecarArchivedSlot(), slot);
     }
 
     @Override
