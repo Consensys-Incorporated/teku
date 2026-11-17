@@ -888,9 +888,10 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
                   "Invalid ExecutionPayload: "
                       + payloadStatus.getValidationError().orElse("No reason provided")));
       reportInvalidExecutionPayload(signedEnvelope, result);
+      // Use the block's own root, so the parent's payload is also invalidated when the latest
+      // valid hash is from before it
       getForkChoiceStrategy()
-          .onExecutionPayloadResult(
-              signedEnvelope.getParentBeaconBlockRoot(), payloadStatus, false);
+          .onExecutionPayloadResult(signedEnvelope.getBeaconBlockRoot(), payloadStatus, false);
       return result;
     }
 

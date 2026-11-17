@@ -15,28 +15,32 @@ package tech.pegasys.teku.data;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.api.exceptions.PublicKeyException;
 import tech.pegasys.teku.bls.BLSPublicKey;
-import tech.pegasys.teku.data.slashinginterchange.SigningHistory;
 import tech.pegasys.teku.ethereum.signingrecord.ValidatorSigningRecord;
 import tech.pegasys.teku.infrastructure.io.SyncDataAccessor;
 import tech.pegasys.teku.infrastructure.logging.SubCommandLogger;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 
 public class SlashingProtectionRepairer {
-  private final List<SigningHistory> signingHistoryList = new ArrayList<>();
+  private final Map<BLSPublicKey, ValidatorSigningRecord> validRecords = new LinkedHashMap<>();
   private final Set<String> invalidRecords = new HashSet<>();
   private final SyncDataAccessor syncDataAccessor;
   private final List<String> errorList = new ArrayList<>();
+  private final List<BLSPublicKey> keysWithoutRecords = new ArrayList<>();
   private final SubCommandLogger log;
   private Path slashingProtectionPath;
   private final boolean updateAllEnabled;
@@ -52,18 +56,64 @@ public class SlashingProtectionRepairer {
       final SubCommandLogger subCommandLog,
       final Path slashProtectionPath,
       final boolean updateAllEnabled) {
+    return create(subCommandLog, slashProtectionPath, updateAllEnabled, List.of());
+  }
+
+  /**
+   * Reads the slashing protection records, and finds known validator keys that have no record.
+   *
+   * <p>A key without a record file is treated by the validator client as never having signed, so it
+   * is unprotected. When update all is enabled, a record is created for each of these keys.
+   * Otherwise they are only reported, because a key that has not signed yet has no file either.
+   *
+   * @param knownValidatorKeys the validator keys to check for missing records
+   */
+  public static SlashingProtectionRepairer create(
+      final SubCommandLogger subCommandLog,
+      final Path slashProtectionPath,
+      final boolean updateAllEnabled,
+      final Collection<BLSPublicKey> knownValidatorKeys) {
     final SlashingProtectionRepairer repairer =
         new SlashingProtectionRepairer(subCommandLog, updateAllEnabled, slashProtectionPath);
     repairer.initialise(slashProtectionPath);
+    repairer.findKeysWithoutRecords(knownValidatorKeys);
     return repairer;
   }
 
   private void initialise(final Path slashProtectionPath) {
     this.slashingProtectionPath = slashProtectionPath;
-    final File slashingProtectionRecords = slashProtectionPath.toFile();
-    Arrays.stream(slashingProtectionRecords.listFiles())
+    final File[] slashingProtectionRecords = slashProtectionPath.toFile().listFiles();
+    if (slashingProtectionRecords == null) {
+      return;
+    }
+    Arrays.stream(slashingProtectionRecords)
         .filter(file -> file.isFile() && file.getName().endsWith(".yml"))
         .forEach(this::readSlashProtectionFile);
+  }
+
+  private void findKeysWithoutRecords(final Collection<BLSPublicKey> knownValidatorKeys) {
+    knownValidatorKeys.stream()
+        .distinct()
+        .filter(pubkey -> !Files.exists(recordPath(toDisplayString(pubkey))))
+        .forEach(keysWithoutRecords::add);
+    if (keysWithoutRecords.isEmpty()) {
+      return;
+    }
+    keysWithoutRecords.forEach(
+        pubkey -> log.display(toDisplayString(pubkey) + ": no slashing protection record"));
+    final boolean single = keysWithoutRecords.size() == 1;
+    log.display(
+        keysWithoutRecords.size()
+            + " validator "
+            + (single ? "key has" : "keys have")
+            + " no slashing protection record, so the validator client will treat"
+            + (single ? " it" : " them")
+            + " as never having signed. "
+            + (updateAllEnabled
+                ? "--update-all-enabled will create the missing "
+                    + (single ? "record." : "records.")
+                : "--update-all-enabled would create the missing "
+                    + (single ? "record." : "records.")));
   }
 
   private void readSlashProtectionFile(final File file) {
@@ -83,7 +133,7 @@ public class SlashingProtectionRepairer {
         log.display(filePrefix + ": looks valid");
       }
       final ValidatorSigningRecord validatorSigningRecord = maybeRecord.get();
-      signingHistoryList.add(SigningHistory.createSigningHistory(pubkey, validatorSigningRecord));
+      validRecords.put(pubkey, validatorSigningRecord);
 
     } catch (PublicKeyException e) {
       log.display(" --- " + file.getName() + " - invalid public key - ignoring file");
@@ -104,37 +154,49 @@ public class SlashingProtectionRepairer {
   }
 
   public void updateRecords(final UInt64 slot, final UInt64 epoch) {
+    if (updateAllEnabled) {
+      keysWithoutRecords.forEach(
+          pubkey ->
+              writeValidatorSigningRecord(
+                  updateSigningRecord(slot, epoch, Optional.empty()), toDisplayString(pubkey)));
+    }
     invalidRecords.forEach(
         pubkey ->
             writeValidatorSigningRecord(
                 new ValidatorSigningRecord(Optional.empty(), slot, epoch, epoch), pubkey));
     if (updateAllEnabled) {
-      signingHistoryList.forEach(
-          (historyRecord) -> updateValidatorSigningRecord(slot, epoch, historyRecord));
+      validRecords.forEach(
+          (pubkey, currentRecord) ->
+              updateValidatorSigningRecord(slot, epoch, pubkey, currentRecord));
     }
     displayUpdateErrors();
   }
 
   private void updateValidatorSigningRecord(
-      final UInt64 slot, final UInt64 epoch, final SigningHistory historyRecord) {
-    final ValidatorSigningRecord currentRecord =
-        historyRecord.toValidatorSigningRecord(Optional.empty(), null);
+      final UInt64 slot,
+      final UInt64 epoch,
+      final BLSPublicKey pubkey,
+      final ValidatorSigningRecord currentRecord) {
     final ValidatorSigningRecord updatedRecord =
         updateSigningRecord(slot, epoch, Optional.of(currentRecord));
     if (!currentRecord.equals(updatedRecord)) {
-      writeValidatorSigningRecord(updatedRecord, toDisplayString(historyRecord.pubkey()));
+      writeValidatorSigningRecord(updatedRecord, toDisplayString(pubkey));
     }
   }
 
   private void writeValidatorSigningRecord(
       final ValidatorSigningRecord updatedRecord, final String pubkey) {
     log.display(pubkey + ": updating");
-    Path outputFile = slashingProtectionPath.resolve(pubkey + ".yml");
+    final Path outputFile = recordPath(pubkey);
     try {
       syncDataAccessor.syncedWrite(outputFile, updatedRecord.toBytes());
     } catch (IOException e) {
       errorList.add(pubkey + ": update failed, " + e.getMessage());
     }
+  }
+
+  private Path recordPath(final String pubkey) {
+    return slashingProtectionPath.resolve(pubkey + ".yml");
   }
 
   private String toDisplayString(final BLSPublicKey pubkey) {
@@ -153,11 +215,62 @@ public class SlashingProtectionRepairer {
     }
   }
 
+  /**
+   * Finds valid records that were written for a different network.
+   *
+   * <p>Records without a genesis validators root can't be checked and are not returned.
+   *
+   * @param genesisValidatorsRoot the genesis validators root of the network being repaired
+   * @return public keys of records whose genesis validators root differs
+   */
+  public List<String> getPubkeysWithDifferentGenesisValidatorsRoot(
+      final Bytes32 genesisValidatorsRoot) {
+    return validRecords.entrySet().stream()
+        .filter(
+            entry ->
+                entry
+                    .getValue()
+                    .genesisValidatorsRoot()
+                    .map(root -> !root.equals(genesisValidatorsRoot))
+                    .orElse(false))
+        .map(entry -> toDisplayString(entry.getKey()))
+        .toList();
+  }
+
+  public boolean hasValidRecords() {
+    return !validRecords.isEmpty();
+  }
+
+  public boolean hasRecordsWithGenesisValidatorsRoot() {
+    return validRecords.values().stream()
+        .anyMatch(record -> record.genesisValidatorsRoot().isPresent());
+  }
+
   public boolean hasUpdates() {
+    if (getRecordsToCreateCount() > 0) {
+      return true;
+    }
     if (updateAllEnabled) {
-      return signingHistoryList.size() + invalidRecords.size() > 0;
+      return validRecords.size() + invalidRecords.size() > 0;
     }
     return !invalidRecords.isEmpty();
+  }
+
+  /**
+   * @return the number of record files that {@link #updateRecords} will create
+   */
+  public int getRecordsToCreateCount() {
+    return updateAllEnabled ? keysWithoutRecords.size() : 0;
+  }
+
+  /**
+   * @return the confirmation line stating how many record files will be created
+   */
+  public static String describeRecordsToCreate(final int count) {
+    return count
+        + " new slashing protection "
+        + (count == 1 ? "record" : "records")
+        + " will be created for validator keys that don't have one.";
   }
 
   static ValidatorSigningRecord updateSigningRecord(
