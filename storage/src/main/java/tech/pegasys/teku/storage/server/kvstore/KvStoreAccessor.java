@@ -149,8 +149,8 @@ public interface KvStoreAccessor extends AutoCloseable {
    *
    * <p>Counts every tombstone in each data file that overlaps the range, so it can include a few
    * from just outside it. Deletes that have not been flushed to a data file yet are not counted.
-   * RocksDB loads the counts for files written before the database was opened a few at a time, so
-   * it can undercount for a while after startup.
+   * RocksDB loads the counts of only a few of the files written before the database was opened, so
+   * tombstones in older files are mostly not counted until compaction rewrites those files.
    *
    * @param column the column to count tombstones in
    * @param from the first key of the range

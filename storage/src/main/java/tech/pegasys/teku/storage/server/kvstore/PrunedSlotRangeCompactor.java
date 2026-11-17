@@ -20,7 +20,9 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.infrastructure.metrics.SettableLabelledGauge;
+import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao;
@@ -43,8 +45,9 @@ import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.Sl
  * maxBytesPerCompaction}, so a large backlog is worked through a piece at a time. Pruning often
  * finds nothing new to delete, so those runs carry on with the backlog too.
  *
- * <p>After each prune it reports how many tombstones are left in the pruned slots, where the
- * database can count them, so their build-up and removal can be watched.
+ * <p>After each compaction it reports how many bytes of data files holding pruned slots are still
+ * to be compacted, so working through a backlog can be watched. After each prune it reports how
+ * many tombstones are left in the pruned slots, where the database can count them.
  */
 class PrunedSlotRangeCompactor {
   private static final Logger LOG = LogManager.getLogger();
@@ -54,8 +57,7 @@ class PrunedSlotRangeCompactor {
   private final int minSlotsPerCompaction;
   private final long maxBytesPerCompaction;
   private final TimeProvider timeProvider;
-  private final SettableLabelledGauge compactionTimeGauge;
-  private final SettableLabelledGauge tombstonesGauge;
+  private final Gauges gauges;
   private final String metricLabel;
 
   // Guarded by this
@@ -69,15 +71,13 @@ class PrunedSlotRangeCompactor {
       final int minSlotsPerCompaction,
       final long maxBytesPerCompaction,
       final TimeProvider timeProvider,
-      final SettableLabelledGauge compactionTimeGauge,
-      final SettableLabelledGauge tombstonesGauge) {
+      final Gauges gauges) {
     this.dao = dao;
     this.column = column;
     this.minSlotsPerCompaction = minSlotsPerCompaction;
     this.maxBytesPerCompaction = maxBytesPerCompaction;
     this.timeProvider = timeProvider;
-    this.compactionTimeGauge = compactionTimeGauge;
-    this.tombstonesGauge = tombstonesGauge;
+    this.gauges = gauges;
     this.metricLabel = metricLabel(column);
   }
 
@@ -134,6 +134,7 @@ class PrunedSlotRangeCompactor {
           nextSlotToCompact,
           lastPrunedSlot);
       nextSlotToCompact = lastPrunedSlot.plus(1);
+      gauges.backlogBytes().set(0, metricLabel);
       return;
     }
     // Slots before the first data file are not held anywhere, so skip them
@@ -143,7 +144,17 @@ class PrunedSlotRangeCompactor {
             .min(Comparator.naturalOrder())
             .orElseThrow()
             .max(nextSlotToCompact);
-    compact(startSlot, getLastSlotWithinBudget(files, startSlot, lastPrunedSlot));
+    final UInt64 endSlot = getLastSlotWithinBudget(files, startSlot, lastPrunedSlot);
+    compact(startSlot, endSlot);
+    // The files reaching past this compaction hold the slots still to compact
+    final long backlogBytes =
+        endSlot.equals(lastPrunedSlot)
+            ? 0
+            : files.stream()
+                .filter(file -> file.lastSlot().isGreaterThan(endSlot))
+                .mapToLong(SlotRangeDataFile::sizeBytes)
+                .sum();
+    gauges.backlogBytes().set(backlogBytes, metricLabel);
   }
 
   /**
@@ -169,7 +180,7 @@ class PrunedSlotRangeCompactor {
     final UInt64 startTime = timeProvider.getTimeInMillis();
     dao.compactSlotRange(column, startSlot, endSlot);
     final UInt64 duration = timeProvider.getTimeInMillis().minusMinZero(startTime);
-    compactionTimeGauge.set(duration.longValue(), metricLabel);
+    gauges.compactionTime().set(duration.longValue(), metricLabel);
     LOG.debug("Compacted pruned {} slots {} to {} in {} ms", column, startSlot, endSlot, duration);
     nextSlotToCompact = endSlot.plus(1);
   }
@@ -179,9 +190,41 @@ class PrunedSlotRangeCompactor {
     try {
       final OptionalLong tombstones =
           dao.countSlotRangeTombstones(column, UInt64.ZERO, lastPrunedSlot);
-      tombstones.ifPresent(count -> tombstonesGauge.set(count, metricLabel));
+      tombstones.ifPresent(count -> gauges.tombstones().set(count, metricLabel));
     } catch (final RuntimeException e) {
       LOG.debug("Failed to count tombstones in pruned {} slots", column, e);
+    }
+  }
+
+  /** The gauges every compactor reports to, each labelled with the table. */
+  record Gauges(
+      SettableLabelledGauge compactionTime,
+      SettableLabelledGauge backlogBytes,
+      SettableLabelledGauge tombstones) {
+
+    static Gauges create(final MetricsSystem metricsSystem) {
+      return new Gauges(
+          SettableLabelledGauge.create(
+              metricsSystem,
+              TekuMetricCategory.STORAGE,
+              "pruned_slots_compaction_time",
+              "Duration in milliseconds of the last compaction of pruned slots",
+              "table"),
+          SettableLabelledGauge.create(
+              metricsSystem,
+              TekuMetricCategory.STORAGE,
+              "pruned_slots_compaction_backlog_bytes",
+              "Size in bytes of the data files holding pruned slots still to be compacted, as of"
+                  + " the last compaction",
+              "table"),
+          SettableLabelledGauge.create(
+              metricsSystem,
+              TekuMetricCategory.STORAGE,
+              "pruned_slots_tombstones",
+              "Deletion tombstones not yet dropped by compaction in the data files holding pruned"
+                  + " slots. Files written before startup are mostly not counted until compaction"
+                  + " rewrites them",
+              "table"));
     }
   }
 }

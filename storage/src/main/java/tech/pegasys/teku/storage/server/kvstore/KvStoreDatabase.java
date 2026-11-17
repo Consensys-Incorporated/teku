@@ -51,8 +51,6 @@ import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.ethereum.pow.api.DepositTreeSnapshot;
 import tech.pegasys.teku.ethereum.pow.api.DepositsFromBlockEvent;
 import tech.pegasys.teku.ethereum.pow.api.MinGenesisTimeBlockEvent;
-import tech.pegasys.teku.infrastructure.metrics.SettableLabelledGauge;
-import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszDeserializeException;
 import tech.pegasys.teku.infrastructure.time.SystemTimeProvider;
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
@@ -158,20 +156,8 @@ public class KvStoreDatabase implements Database {
     this.stateStorageMode = stateStorageMode;
     this.storeNonCanonicalBlocks = storeNonCanonicalBlocks;
     this.spec = spec;
-    final SettableLabelledGauge compactionTimeGauge =
-        SettableLabelledGauge.create(
-            metricsSystem,
-            TekuMetricCategory.STORAGE,
-            "pruned_slots_compaction_time",
-            "Duration in milliseconds of the last compaction of pruned slots",
-            "table");
-    final SettableLabelledGauge tombstonesGauge =
-        SettableLabelledGauge.create(
-            metricsSystem,
-            TekuMetricCategory.STORAGE,
-            "pruned_slots_tombstones",
-            "Deletion tombstones not yet dropped by compaction in the data files holding pruned slots",
-            "table");
+    final PrunedSlotRangeCompactor.Gauges compactorGauges =
+        PrunedSlotRangeCompactor.Gauges.create(metricsSystem);
     final TimeProvider timeProvider = new SystemTimeProvider();
     this.prunedSlotRangeCompactors = new EnumMap<>(SlotKeyedColumn.class);
     for (final SlotKeyedColumn column : SlotKeyedColumn.values()) {
@@ -183,8 +169,7 @@ public class KvStoreDatabase implements Database {
               MIN_PRUNED_SLOTS_PER_COMPACTION,
               MAX_BYTES_PER_COMPACTION,
               timeProvider,
-              compactionTimeGauge,
-              tombstonesGauge));
+              compactorGauges));
     }
   }
 

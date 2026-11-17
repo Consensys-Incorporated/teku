@@ -31,7 +31,6 @@ import java.util.OptionalDouble;
 import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
-import tech.pegasys.teku.infrastructure.metrics.SettableLabelledGauge;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
@@ -46,6 +45,7 @@ class PrunedSlotRangeCompactorTest {
   private static final String LABEL = "data_column_sidecars";
   private static final String COMPACTION_TIME = "pruned_slots_compaction_time";
   private static final String TOMBSTONES = "pruned_slots_tombstones";
+  private static final String BACKLOG_BYTES = "pruned_slots_compaction_backlog_bytes";
   private static final long MAX_BYTES = 1_000;
 
   private final KvStoreCombinedDao dao = mock(KvStoreCombinedDao.class);
@@ -58,10 +58,7 @@ class PrunedSlotRangeCompactorTest {
           10,
           MAX_BYTES,
           timeProvider,
-          SettableLabelledGauge.create(
-              metricsSystem, TekuMetricCategory.STORAGE, COMPACTION_TIME, "help", "table"),
-          SettableLabelledGauge.create(
-              metricsSystem, TekuMetricCategory.STORAGE, TOMBSTONES, "help", "table"));
+          PrunedSlotRangeCompactor.Gauges.create(metricsSystem));
 
   @Test
   void shouldNotCompactUntilEnoughSlotsArePruned() {
@@ -125,6 +122,44 @@ class PrunedSlotRangeCompactorTest {
     final InOrder inOrder = inOrder(dao);
     inOrder.verify(dao).compactSlotRange(COLUMN, UInt64.valueOf(100), UInt64.valueOf(299));
     inOrder.verify(dao).compactSlotRange(COLUMN, UInt64.valueOf(300), UInt64.valueOf(1_010));
+  }
+
+  @Test
+  void shouldReportTheBytesOfDataFilesStillToCompact() {
+    when(dao.getSlotRangeDataFiles(COLUMN, UInt64.ZERO, UInt64.valueOf(1_000)))
+        .thenReturn(
+            Optional.of(
+                List.of(
+                    file(100, 199, 400),
+                    file(200, 299, 400),
+                    file(300, 399, 400),
+                    file(400, 1_500, 10))));
+    when(dao.getSlotRangeDataFiles(COLUMN, UInt64.valueOf(300), UInt64.valueOf(1_000)))
+        .thenReturn(Optional.of(List.of(file(300, 399, 400), file(400, 1_500, 10))));
+
+    compactor.onPruned(UInt64.valueOf(1_000));
+    // Slots 300 onwards are still to compact
+    assertThat(gaugeValue(BACKLOG_BYTES)).hasValue(410);
+
+    compactor.onNothingPruned();
+    assertThat(gaugeValue(BACKLOG_BYTES)).hasValue(0);
+  }
+
+  @Test
+  void shouldReportNoBacklogWhenNoDataFileHoldsThePrunedSlots() {
+    when(dao.getSlotRangeDataFiles(any(), any(), any())).thenReturn(Optional.of(List.of()));
+
+    compactor.onPruned(UInt64.valueOf(20));
+
+    assertThat(gaugeValue(BACKLOG_BYTES)).hasValue(0);
+  }
+
+  @Test
+  void shouldNotReportABacklogWhenTheDatabaseCannotListItsDataFiles() {
+    compactor.onPruned(UInt64.valueOf(20));
+
+    verify(dao).compactSlotRange(COLUMN, UInt64.ZERO, UInt64.valueOf(20));
+    assertThat(gaugeValue(BACKLOG_BYTES)).isEmpty();
   }
 
   @Test
