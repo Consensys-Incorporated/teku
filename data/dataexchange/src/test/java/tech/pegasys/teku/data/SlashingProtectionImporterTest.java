@@ -31,6 +31,7 @@ import java.util.Optional;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.bytes.Bytes48;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -39,9 +40,13 @@ import tech.pegasys.teku.data.slashinginterchange.Metadata;
 import tech.pegasys.teku.ethereum.signingrecord.ValidatorSigningRecord;
 import tech.pegasys.teku.infrastructure.logging.SubCommandLogger;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 public class SlashingProtectionImporterTest {
   private static final Logger LOG = LogManager.getLogger();
+  private static final Bytes32 GENESIS_ROOT =
+      Bytes32.fromHexString("0x0000000000000000000000000000000000000000000000000000000000123456");
   private final String pubkey =
       "b845089a1457f811bfc000588fbb4e713669be8ce060ea6be3c6ece09afc3794106c91ca73acda5e5457122d58723bed";
   private final BLSPublicKey publicKey =
@@ -183,6 +188,90 @@ public class SlashingProtectionImporterTest {
     assertThat(errors)
         .hasSize(1)
         .containsEntry(publicKey, "Genesis validators root did not match what was expected.");
+  }
+
+  @Test
+  void shouldRejectValidatorWithMaxValueAttestationEpoch(@TempDir final Path tempDir)
+      throws IOException {
+    // A stored UInt64.MAX_VALUE reads back as "never signed", so importing it would silently drop
+    // protection - see https://github.com/Consensys-Incorporated/teku-internal/issues/383
+    final BLSPublicKey otherPublicKey =
+        new DataStructureUtil(TestSpecFactory.createDefault()).randomPublicKey();
+    final Path importFile = tempDir.resolve("import.json");
+    Files.writeString(
+        importFile,
+        interchangeJson(
+            signingHistoryJson(publicKey, "0", "18446744073709551615"),
+            signingHistoryJson(otherPublicKey, "3", "4")));
+    final Path recordFile = tempDir.resolve(pubkey + ".yml");
+    final ValidatorSigningRecord existingRecord =
+        new ValidatorSigningRecord(
+            Optional.of(GENESIS_ROOT), UInt64.valueOf(5), UInt64.ONE, UInt64.valueOf(2));
+    Files.write(recordFile, existingRecord.toBytes().toArrayUnsafe());
+
+    final SlashingProtectionImporter importer = new SlashingProtectionImporter(tempDir);
+    assertThat(importer.initialise(importFile.toFile())).isEmpty();
+    final Map<BLSPublicKey, String> errors = importer.updateLocalRecords(__ -> {});
+
+    assertThat(errors)
+        .containsExactly(
+            Map.entry(
+                publicKey,
+                "Slashing protection data could not be imported: "
+                    + "signed attestation epoch 18446744073709551615 is not supported"));
+    // The rejected validator's existing record is left untouched
+    assertThat(loadSigningRecord(recordFile.toFile())).isEqualTo(existingRecord);
+    // Other validators in the same file are still imported
+    final File otherRecordFile =
+        tempDir
+            .resolve(otherPublicKey.toBytesCompressed().toUnprefixedHexString() + ".yml")
+            .toFile();
+    assertThat(loadSigningRecord(otherRecordFile))
+        .isEqualTo(
+            new ValidatorSigningRecord(
+                Optional.of(GENESIS_ROOT), UInt64.ZERO, UInt64.valueOf(3), UInt64.valueOf(4)));
+  }
+
+  @Test
+  void shouldRejectSingleValidatorUpdateWithMaxValueBlockSlot(@TempDir final Path tempDir)
+      throws IOException {
+    final Path importFile = tempDir.resolve("import.json");
+    Files.writeString(
+        importFile,
+        interchangeJson(
+            "{\"pubkey\":\""
+                + publicKey.toHexString()
+                + "\",\"signed_blocks\":[{\"slot\":\"18446744073709551615\"}],"
+                + "\"signed_attestations\":[]}"));
+
+    final SlashingProtectionImporter importer = new SlashingProtectionImporter(tempDir);
+    assertThat(importer.initialise(importFile.toFile())).isEmpty();
+
+    assertThat(importer.updateSigningRecord(publicKey, __ -> {}))
+        .contains(
+            "Slashing protection data could not be imported: "
+                + "signed block slot 18446744073709551615 is not supported");
+    assertThat(tempDir.resolve(pubkey + ".yml")).doesNotExist();
+  }
+
+  private static String interchangeJson(final String... signingHistories) {
+    return "{\"metadata\":{\"interchange_format_version\":\"5\","
+        + "\"genesis_validators_root\":\""
+        + GENESIS_ROOT
+        + "\"},\"data\":["
+        + String.join(",", signingHistories)
+        + "]}";
+  }
+
+  private static String signingHistoryJson(
+      final BLSPublicKey publicKey, final String sourceEpoch, final String targetEpoch) {
+    return "{\"pubkey\":\""
+        + publicKey.toHexString()
+        + "\",\"signed_blocks\":[],\"signed_attestations\":[{\"source_epoch\":\""
+        + sourceEpoch
+        + "\",\"target_epoch\":\""
+        + targetEpoch
+        + "\"}]}";
   }
 
   private ValidatorSigningRecord loadSigningRecord(final File repairedRuleFile) throws IOException {
