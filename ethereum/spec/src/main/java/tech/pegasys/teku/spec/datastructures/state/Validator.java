@@ -88,83 +88,20 @@ public class Validator
 
     @Override
     public Validator createFromPackedBytes(final Bytes packed, final int offset) {
-      return new Validator(this, packed, offset);
+      return new PackedValidator(this, packed, offset);
     }
   }
 
   public static final ValidatorSchema SSZ_SCHEMA = new ValidatorSchema();
 
-  // The byte offsets of the fields in a serialized validator, read by the views created from the
-  // packed bytes of the registry
-  private static final int PUBKEY_OFFSET = fieldOffset(ValidatorFields.PUBKEY);
-  private static final int WITHDRAWAL_CREDENTIALS_OFFSET =
-      fieldOffset(ValidatorFields.WITHDRAWAL_CREDENTIALS);
-  private static final int EFFECTIVE_BALANCE_OFFSET =
-      fieldOffset(ValidatorFields.EFFECTIVE_BALANCE);
-  private static final int SLASHED_OFFSET = fieldOffset(ValidatorFields.SLASHED);
-  private static final int ACTIVATION_ELIGIBILITY_EPOCH_OFFSET =
-      fieldOffset(ValidatorFields.ACTIVATION_ELIGIBILITY_EPOCH);
-  private static final int ACTIVATION_EPOCH_OFFSET = fieldOffset(ValidatorFields.ACTIVATION_EPOCH);
-  private static final int EXIT_EPOCH_OFFSET = fieldOffset(ValidatorFields.EXIT_EPOCH);
-  private static final int WITHDRAWABLE_EPOCH_OFFSET =
-      fieldOffset(ValidatorFields.WITHDRAWABLE_EPOCH);
-
-  private static final int SSZ_SIZE = SSZ_SCHEMA.getSszFixedPartSize();
-  private static final SszNodeTemplate NODE_TEMPLATE = SszNodeTemplate.createFromType(SSZ_SCHEMA);
-
-  // Set on a view created from the content of a supernode of the registry: the fields are read
-  // from these bytes and the backing node is only created when it is asked for
-  private final Bytes packed;
-  private final int packedOffset;
-
   private Validator(final ValidatorSchema type, final TreeNode backingNode) {
     super(type, backingNode);
-    this.packed = null;
-    this.packedOffset = 0;
-  }
-
-  private Validator(final ValidatorSchema type, final Bytes packed, final int packedOffset) {
-    // Set before the super constructor runs, which asks createCache() for the cache of child views
-    this.packed = packed;
-    this.packedOffset = packedOffset;
-    // No backing node: createLazyBackingNode() creates it when it is asked for
-    super(type, (TreeNode) null);
-  }
-
-  /** The getters of a view over packed bytes read the bytes, so it caches no child views. */
-  @Override
-  protected IntCache<SszData> createCache() {
-    return packed != null ? IntCache.noop() : super.createCache();
   }
 
   /** True for a view that reads its fields from the packed bytes of the registry. */
   @VisibleForTesting
   boolean isPackedView() {
-    return packed != null;
-  }
-
-  @Override
-  protected TreeNode createLazyBackingNode() {
-    return new SszSuperNode(0, NODE_TEMPLATE, packed.slice(packedOffset, SSZ_SIZE));
-  }
-
-  // The sum of the fixed sizes of the fields before it
-  private static int fieldOffset(final ValidatorFields field) {
-    final int fieldIndex = SSZ_SCHEMA.getFieldIndex(field);
-    int offset = 0;
-    for (int i = 0; i < fieldIndex; i++) {
-      offset += SSZ_SCHEMA.getChildSchema(i).getSszFixedPartSize();
-    }
-    return offset;
-  }
-
-  private UInt64 packedUInt64(final int fieldOffset) {
-    return UInt64.fromLongBits(packed.getLong(packedOffset + fieldOffset, ByteOrder.LITTLE_ENDIAN));
-  }
-
-  // Copies, so a value that outlives the view never keeps the supernode's bytes alive
-  private byte[] packedBytes(final int fieldOffset, final int length) {
-    return packed.slice(packedOffset + fieldOffset, length).toArray();
+    return false;
   }
 
   public Validator(
@@ -186,8 +123,6 @@ public class Validator
         SszUInt64.of(activationEpoch),
         SszUInt64.of(exitEpoch),
         SszUInt64.of(withdrawableEpoch));
-    this.packed = null;
-    this.packedOffset = 0;
   }
 
   public Validator(
@@ -209,8 +144,6 @@ public class Validator
         SszUInt64.of(activationEpoch),
         SszUInt64.of(exitEpoch),
         SszUInt64.of(withdrawableEpoch));
-    this.packed = null;
-    this.packedOffset = 0;
   }
 
   /**
@@ -222,45 +155,39 @@ public class Validator
    * the {@link BeaconState} instance and validator index is available
    */
   public Bytes48 getPubkeyBytes() {
-    return packed != null
-        ? Bytes48.wrap(packedBytes(PUBKEY_OFFSET, Bytes48.SIZE))
-        : getField0().getBytes();
+    return getField0().getBytes();
   }
 
   public BLSPublicKey getPublicKey() {
-    return packed != null
-        ? BLSPublicKey.fromBytesCompressed(getPubkeyBytes())
-        : getField0().getBLSPublicKey();
+    return getField0().getBLSPublicKey();
   }
 
   public Bytes32 getWithdrawalCredentials() {
-    return packed != null
-        ? Bytes32.wrap(packedBytes(WITHDRAWAL_CREDENTIALS_OFFSET, Bytes32.SIZE))
-        : getField1().get();
+    return getField1().get();
   }
 
   public UInt64 getEffectiveBalance() {
-    return packed != null ? packedUInt64(EFFECTIVE_BALANCE_OFFSET) : getField2().get();
+    return getField2().get();
   }
 
   public boolean isSlashed() {
-    return packed != null ? packed.get(packedOffset + SLASHED_OFFSET) != 0 : getField3().get();
+    return getField3().get();
   }
 
   public UInt64 getActivationEligibilityEpoch() {
-    return packed != null ? packedUInt64(ACTIVATION_ELIGIBILITY_EPOCH_OFFSET) : getField4().get();
+    return getField4().get();
   }
 
   public UInt64 getActivationEpoch() {
-    return packed != null ? packedUInt64(ACTIVATION_EPOCH_OFFSET) : getField5().get();
+    return getField5().get();
   }
 
   public UInt64 getExitEpoch() {
-    return packed != null ? packedUInt64(EXIT_EPOCH_OFFSET) : getField6().get();
+    return getField6().get();
   }
 
   public UInt64 getWithdrawableEpoch() {
-    return packed != null ? packedUInt64(WITHDRAWABLE_EPOCH_OFFSET) : getField7().get();
+    return getField7().get();
   }
 
   public Validator withEffectiveBalance(final UInt64 effectiveBalance) {
@@ -345,5 +272,125 @@ public class Validator
         getActivationEpoch(),
         getExitEpoch(),
         getWithdrawableEpoch());
+  }
+
+  /**
+   * A validator read from the content of a supernode of the registry: the getters read the packed
+   * bytes, and the backing node is only created when it is asked for.
+   */
+  private static final class PackedValidator extends Validator {
+    // The byte offsets of the fields in a serialized validator
+    private static final int PUBKEY_OFFSET = fieldOffset(ValidatorFields.PUBKEY);
+    private static final int WITHDRAWAL_CREDENTIALS_OFFSET =
+        fieldOffset(ValidatorFields.WITHDRAWAL_CREDENTIALS);
+    private static final int EFFECTIVE_BALANCE_OFFSET =
+        fieldOffset(ValidatorFields.EFFECTIVE_BALANCE);
+    private static final int SLASHED_OFFSET = fieldOffset(ValidatorFields.SLASHED);
+    private static final int ACTIVATION_ELIGIBILITY_EPOCH_OFFSET =
+        fieldOffset(ValidatorFields.ACTIVATION_ELIGIBILITY_EPOCH);
+    private static final int ACTIVATION_EPOCH_OFFSET =
+        fieldOffset(ValidatorFields.ACTIVATION_EPOCH);
+    private static final int EXIT_EPOCH_OFFSET = fieldOffset(ValidatorFields.EXIT_EPOCH);
+    private static final int WITHDRAWABLE_EPOCH_OFFSET =
+        fieldOffset(ValidatorFields.WITHDRAWABLE_EPOCH);
+
+    private static final int SSZ_SIZE = SSZ_SCHEMA.getSszFixedPartSize();
+    private static final SszNodeTemplate NODE_TEMPLATE = SszNodeTemplate.createFromType(SSZ_SCHEMA);
+
+    private final Bytes packed;
+    private final int packedOffset;
+
+    private PackedValidator(
+        final ValidatorSchema type, final Bytes packed, final int packedOffset) {
+      // No backing node: createLazyBackingNode() creates it when it is asked for
+      super(type, null);
+      this.packed = packed;
+      this.packedOffset = packedOffset;
+    }
+
+    // The sum of the fixed sizes of the fields before it
+    private static int fieldOffset(final ValidatorFields field) {
+      final int fieldIndex = SSZ_SCHEMA.getFieldIndex(field);
+      int offset = 0;
+      for (int i = 0; i < fieldIndex; i++) {
+        offset += SSZ_SCHEMA.getChildSchema(i).getSszFixedPartSize();
+      }
+      return offset;
+    }
+
+    /**
+     * The getters read the packed bytes, so the view caches no child views. Called by the super
+     * constructor, before the fields of this class are set.
+     */
+    @Override
+    protected IntCache<SszData> createCache() {
+      return IntCache.noop();
+    }
+
+    @Override
+    boolean isPackedView() {
+      return true;
+    }
+
+    @Override
+    protected TreeNode createLazyBackingNode() {
+      // Copies, so a node stored outside the registry never keeps the supernode's bytes alive
+      return new SszSuperNode(0, NODE_TEMPLATE, packed.slice(packedOffset, SSZ_SIZE).copy());
+    }
+
+    private UInt64 packedUInt64(final int fieldOffset) {
+      return UInt64.fromLongBits(
+          packed.getLong(packedOffset + fieldOffset, ByteOrder.LITTLE_ENDIAN));
+    }
+
+    // Copies, so a value that outlives the view never keeps the supernode's bytes alive
+    private byte[] packedBytes(final int fieldOffset, final int length) {
+      return packed.slice(packedOffset + fieldOffset, length).toArray();
+    }
+
+    @Override
+    public Bytes48 getPubkeyBytes() {
+      return Bytes48.wrap(packedBytes(PUBKEY_OFFSET, Bytes48.SIZE));
+    }
+
+    @Override
+    public BLSPublicKey getPublicKey() {
+      return BLSPublicKey.fromBytesCompressed(getPubkeyBytes());
+    }
+
+    @Override
+    public Bytes32 getWithdrawalCredentials() {
+      return Bytes32.wrap(packedBytes(WITHDRAWAL_CREDENTIALS_OFFSET, Bytes32.SIZE));
+    }
+
+    @Override
+    public UInt64 getEffectiveBalance() {
+      return packedUInt64(EFFECTIVE_BALANCE_OFFSET);
+    }
+
+    @Override
+    public boolean isSlashed() {
+      return packed.get(packedOffset + SLASHED_OFFSET) != 0;
+    }
+
+    @Override
+    public UInt64 getActivationEligibilityEpoch() {
+      return packedUInt64(ACTIVATION_ELIGIBILITY_EPOCH_OFFSET);
+    }
+
+    @Override
+    public UInt64 getActivationEpoch() {
+      return packedUInt64(ACTIVATION_EPOCH_OFFSET);
+    }
+
+    @Override
+    public UInt64 getExitEpoch() {
+      return packedUInt64(EXIT_EPOCH_OFFSET);
+    }
+
+    @Override
+    public UInt64 getWithdrawableEpoch() {
+      return packedUInt64(WITHDRAWABLE_EPOCH_OFFSET);
+    }
   }
 }

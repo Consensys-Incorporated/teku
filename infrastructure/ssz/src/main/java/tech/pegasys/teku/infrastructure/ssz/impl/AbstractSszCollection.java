@@ -31,7 +31,8 @@ public abstract class AbstractSszCollection<SszElementT extends SszData>
     extends AbstractSszComposite<SszElementT> implements SszCollection<SszElementT> {
 
   // The element schema when the collection schema packs the elements in supernodes and their
-  // views can read the packed bytes, else null
+  // views can read the packed bytes, else null. Set before the super constructor runs, which asks
+  // createCache() for the cache
   private final SszPackedViewSchema<SszElementT> packedViewSchema;
 
   // Created on the first read of an element. Not volatile: all its fields are final, so a reader
@@ -40,21 +41,21 @@ public abstract class AbstractSszCollection<SszElementT extends SszData>
 
   protected AbstractSszCollection(
       final SszCompositeSchema<?> schema, final Supplier<TreeNode> lazyBackingNode) {
-    super(schema, lazyBackingNode);
     this.packedViewSchema = packedViewSchemaOf(schema);
+    super(schema, lazyBackingNode);
   }
 
   protected AbstractSszCollection(final SszCompositeSchema<?> schema, final TreeNode backingNode) {
-    super(schema, backingNode);
     this.packedViewSchema = packedViewSchemaOf(schema);
+    super(schema, backingNode);
   }
 
   protected AbstractSszCollection(
       final SszCompositeSchema<?> schema,
       final TreeNode backingNode,
       final IntCache<SszElementT> cache) {
-    super(schema, backingNode, cache);
     this.packedViewSchema = packedViewSchemaOf(schema);
+    super(schema, backingNode, cache);
   }
 
   @SuppressWarnings("unchecked")
@@ -82,8 +83,7 @@ public abstract class AbstractSszCollection<SszElementT extends SszData>
    */
   @Override
   protected IntCache<SszElementT> createCache() {
-    // Called by the super constructor, before the field of this class is set
-    return packedViewSchemaOf(getSchema()) != null ? IntCache.noop() : super.createCache();
+    return packedViewSchema != null ? IntCache.noop() : super.createCache();
   }
 
   /**
@@ -214,9 +214,11 @@ public abstract class AbstractSszCollection<SszElementT extends SszData>
         groupData[superNode] = data;
       }
       final int offset = (position & ((1 << depth) - 1)) * elementSize;
-      // No bytes when the node is not a supernode, nor for a zero element past the supernode's
-      // content, which is reachable on a tree loaded from storage, where an all-zero chunk inside
-      // the list is restored as an empty supernode
+      // No view when the node is not a supernode: the element is then created from its tree node.
+      // An element past the content of its supernode gets none either. Only an all-zero element
+      // can be there, on a tree loaded from storage, where an all-zero chunk is restored as an
+      // empty supernode. The tree does not serve it: SszSuperNode.get rejects the index, as it
+      // did before the packed views
       return offset + elementSize <= data.size()
           ? packedViewSchema.createFromPackedBytes(data, offset)
           : null;
