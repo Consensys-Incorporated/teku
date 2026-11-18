@@ -24,7 +24,8 @@ import tech.pegasys.teku.infrastructure.io.SyncDataAccessor;
 
 /**
  * The key-value store implementation with String keys and Bytes values which stores each entry in a
- * separate file named {@code <key>.dat} in the specified directory
+ * separate file named {@code <key>.dat} in the specified directory. Entries may hold secrets (e.g.
+ * the generated p2p private key), so the files are readable and writable only by their owner.
  *
  * <p>This implementation is thread-safe
  */
@@ -36,7 +37,7 @@ public class FileKeyValueStore implements KeyValueStore<String, Bytes> {
 
   public FileKeyValueStore(final Path dataDir) {
     this.dataDir = dataDir;
-    this.syncDataAccessor = SyncDataAccessor.create(dataDir);
+    this.syncDataAccessor = SyncDataAccessor.createOwnerOnly(dataDir);
   }
 
   private Object keyMutex(final String key) {
