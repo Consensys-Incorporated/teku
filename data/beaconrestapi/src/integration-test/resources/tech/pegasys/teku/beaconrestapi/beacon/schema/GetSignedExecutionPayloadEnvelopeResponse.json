@@ -5,7 +5,7 @@
   "properties" : {
     "version" : {
       "type" : "string",
-      "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze" ]
+      "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "eip8483", "heze" ]
     },
     "execution_optimistic" : {
       "type" : "boolean"
@@ -18,6 +18,8 @@
       "type" : "object",
       "oneOf" : [ {
         "$ref" : "#/components/schemas/SignedExecutionPayloadEnvelope"
+      }, {
+        "$ref" : "#/components/schemas/SignedExecutionPayloadEnvelopeEip8483"
       } ]
     }
   }

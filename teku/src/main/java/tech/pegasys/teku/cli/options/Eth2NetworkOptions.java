@@ -32,6 +32,7 @@ import tech.pegasys.teku.cli.converter.OptionalIntConverter;
 import tech.pegasys.teku.cli.converter.OptionalLongConverter;
 import tech.pegasys.teku.cli.converter.UInt256Converter;
 import tech.pegasys.teku.config.TekuConfiguration;
+import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.p2p.network.config.NetworkConfig;
@@ -255,6 +256,23 @@ public class Eth2NetworkOptions {
       description = "Override the Gloas fork activation epoch.",
       arity = "1")
   private UInt64 gloasForkEpoch;
+
+  @Option(
+      names = {"--Xnetwork-eip8483-fork-epoch"},
+      hidden = true,
+      paramLabel = "<epoch>",
+      description = "Override the EIP-8483 fork activation epoch.",
+      arity = "1")
+  private UInt64 eip8483ForkEpoch;
+
+  @Option(
+      names = {"--Xnetwork-eip8483-fork-version"},
+      hidden = true,
+      paramLabel = "<version>",
+      description =
+          "Override the EIP-8483 fork version (4 bytes hex). Needed when the network config has no EIP8483_FORK_VERSION.",
+      arity = "1")
+  private String eip8483ForkVersion;
 
   @Option(
       names = {"--Xnetwork-heze-fork-epoch"},
@@ -550,6 +568,21 @@ public class Eth2NetworkOptions {
         implicitEpochDefault(fuluForkEpoch, builder::fuluForkEpoch);
       }
     }
+    if (eip8483ForkVersion != null) {
+      builder.eip8483ForkVersion(Bytes4.fromHexString(eip8483ForkVersion));
+    }
+    if (eip8483ForkEpoch != null) {
+      builder.eip8483ForkEpoch(eip8483ForkEpoch);
+      if (eip8483ForkEpoch.isZero()) {
+        implicitEpochDefault(altairForkEpoch, builder::altairForkEpoch);
+        implicitEpochDefault(bellatrixForkEpoch, builder::bellatrixForkEpoch);
+        implicitEpochDefault(capellaForkEpoch, builder::capellaForkEpoch);
+        implicitEpochDefault(denebForkEpoch, builder::denebForkEpoch);
+        implicitEpochDefault(electraForkEpoch, builder::electraForkEpoch);
+        implicitEpochDefault(fuluForkEpoch, builder::fuluForkEpoch);
+        implicitEpochDefault(gloasForkEpoch, builder::gloasForkEpoch);
+      }
+    }
     if (hezeForkEpoch != null) {
       builder.hezeForkEpoch(hezeForkEpoch);
       if (hezeForkEpoch.isZero()) {
@@ -560,6 +593,7 @@ public class Eth2NetworkOptions {
         implicitEpochDefault(electraForkEpoch, builder::electraForkEpoch);
         implicitEpochDefault(fuluForkEpoch, builder::fuluForkEpoch);
         implicitEpochDefault(gloasForkEpoch, builder::gloasForkEpoch);
+        implicitEpochDefault(eip8483ForkEpoch, builder::eip8483ForkEpoch);
       }
     }
     if (totalTerminalDifficultyOverride != null) {

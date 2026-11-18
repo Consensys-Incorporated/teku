@@ -75,6 +75,10 @@ import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequestsSchema;
 import tech.pegasys.teku.spec.datastructures.execution.Transaction;
 import tech.pegasys.teku.spec.datastructures.execution.versions.capella.WithdrawalSchema;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.BuilderPqRegistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.BuilderPqRegistrationRequestSchema;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.ValidatorPqRegistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.ValidatorPqRegistrationRequestSchema;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.ConsolidationRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.ConsolidationRequestSchema;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.DepositRequest;
@@ -115,6 +119,10 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateSchema;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
 import tech.pegasys.teku.spec.datastructures.state.versions.capella.HistoricalSummary;
+import tech.pegasys.teku.spec.datastructures.state.versions.eip8483.BuilderPqRegistration;
+import tech.pegasys.teku.spec.datastructures.state.versions.eip8483.BuilderPqRegistrationSchema;
+import tech.pegasys.teku.spec.datastructures.state.versions.eip8483.ValidatorPqRegistration;
+import tech.pegasys.teku.spec.datastructures.state.versions.eip8483.ValidatorPqRegistrationSchema;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingConsolidation;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDeposit;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingPartialWithdrawal;
@@ -333,6 +341,25 @@ public class SchemaTypes {
       create("BUILDER_EXIT_REQUESTS_SCHEMA");
   public static final SchemaId<SszByteListSchema<SszByteList>> BLOCK_ACCESS_LIST_SCHEMA =
       create("BLOCK_ACCESS_LIST_SCHEMA");
+
+  // EIP-8483
+  public static final SchemaId<ValidatorPqRegistrationRequestSchema>
+      VALIDATOR_PQ_REGISTRATION_REQUEST_SCHEMA = create("VALIDATOR_PQ_REGISTRATION_REQUEST_SCHEMA");
+  public static final SchemaId<SszListSchema<ValidatorPqRegistrationRequest, ?>>
+      VALIDATOR_PQ_REGISTRATION_REQUESTS_SCHEMA =
+          create("VALIDATOR_PQ_REGISTRATION_REQUESTS_SCHEMA");
+  public static final SchemaId<BuilderPqRegistrationRequestSchema>
+      BUILDER_PQ_REGISTRATION_REQUEST_SCHEMA = create("BUILDER_PQ_REGISTRATION_REQUEST_SCHEMA");
+  public static final SchemaId<SszListSchema<BuilderPqRegistrationRequest, ?>>
+      BUILDER_PQ_REGISTRATION_REQUESTS_SCHEMA = create("BUILDER_PQ_REGISTRATION_REQUESTS_SCHEMA");
+  public static final SchemaId<ValidatorPqRegistrationSchema> VALIDATOR_PQ_REGISTRATION_SCHEMA =
+      create("VALIDATOR_PQ_REGISTRATION_SCHEMA");
+  public static final SchemaId<SszListSchema<ValidatorPqRegistration, ?>>
+      VALIDATOR_PQ_REGISTRATIONS_SCHEMA = create("VALIDATOR_PQ_REGISTRATIONS_SCHEMA");
+  public static final SchemaId<BuilderPqRegistrationSchema> BUILDER_PQ_REGISTRATION_SCHEMA =
+      create("BUILDER_PQ_REGISTRATION_SCHEMA");
+  public static final SchemaId<SszListSchema<BuilderPqRegistration, ?>>
+      BUILDER_PQ_REGISTRATIONS_SCHEMA = create("BUILDER_PQ_REGISTRATIONS_SCHEMA");
 
   // Heze
   public static final SchemaId<InclusionListSchema> INCLUSION_LIST_SCHEMA =

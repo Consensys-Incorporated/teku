@@ -18,6 +18,7 @@ import static tech.pegasys.teku.spec.SpecMilestone.ALTAIR;
 import static tech.pegasys.teku.spec.SpecMilestone.BELLATRIX;
 import static tech.pegasys.teku.spec.SpecMilestone.CAPELLA;
 import static tech.pegasys.teku.spec.SpecMilestone.DENEB;
+import static tech.pegasys.teku.spec.SpecMilestone.EIP8483;
 import static tech.pegasys.teku.spec.SpecMilestone.ELECTRA;
 import static tech.pegasys.teku.spec.SpecMilestone.FULU;
 import static tech.pegasys.teku.spec.SpecMilestone.GLOAS;
@@ -55,6 +56,10 @@ import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.BUILDER_PENDIN
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.BUILDER_PENDING_PAYMENT_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.BUILDER_PENDING_WITHDRAWALS_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.BUILDER_PENDING_WITHDRAWAL_SCHEMA;
+import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.BUILDER_PQ_REGISTRATIONS_SCHEMA;
+import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.BUILDER_PQ_REGISTRATION_REQUESTS_SCHEMA;
+import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.BUILDER_PQ_REGISTRATION_REQUEST_SCHEMA;
+import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.BUILDER_PQ_REGISTRATION_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.CELL_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.CONSOLIDATION_REQUESTS_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.CONSOLIDATION_REQUEST_SCHEMA;
@@ -112,6 +117,10 @@ import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.STATUS_MESSAGE
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.SYNCNETS_ENR_FIELD_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.TRANSACTIONS_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.TRANSACTION_SCHEMA;
+import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.VALIDATOR_PQ_REGISTRATIONS_SCHEMA;
+import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.VALIDATOR_PQ_REGISTRATION_REQUESTS_SCHEMA;
+import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.VALIDATOR_PQ_REGISTRATION_REQUEST_SCHEMA;
+import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.VALIDATOR_PQ_REGISTRATION_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.WITHDRAWAL_REQUESTS_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.WITHDRAWAL_REQUEST_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.WITHDRAWAL_SCHEMA;
@@ -137,6 +146,7 @@ import tech.pegasys.teku.spec.config.SpecConfigAltair;
 import tech.pegasys.teku.spec.config.SpecConfigBellatrix;
 import tech.pegasys.teku.spec.config.SpecConfigCapella;
 import tech.pegasys.teku.spec.config.SpecConfigDeneb;
+import tech.pegasys.teku.spec.config.SpecConfigEip8483;
 import tech.pegasys.teku.spec.config.SpecConfigElectra;
 import tech.pegasys.teku.spec.config.SpecConfigFulu;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
@@ -200,6 +210,9 @@ import tech.pegasys.teku.spec.datastructures.execution.versions.capella.Executio
 import tech.pegasys.teku.spec.datastructures.execution.versions.capella.WithdrawalSchema;
 import tech.pegasys.teku.spec.datastructures.execution.versions.deneb.ExecutionPayloadHeaderSchemaDeneb;
 import tech.pegasys.teku.spec.datastructures.execution.versions.deneb.ExecutionPayloadSchemaDeneb;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.BuilderPqRegistrationRequestSchema;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.ExecutionRequestsSchemaEip8483;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.ValidatorPqRegistrationRequestSchema;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.ConsolidationRequestSchema;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.DepositRequestSchema;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.ExecutionRequestsSchemaElectra;
@@ -251,11 +264,14 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.altair.B
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.bellatrix.BeaconStateSchemaBellatrix;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.capella.BeaconStateSchemaCapella;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.deneb.BeaconStateSchemaDeneb;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.eip8483.BeaconStateSchemaEip8483;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.BeaconStateSchemaElectra;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.fulu.BeaconStateSchemaFulu;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateSchemaGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.phase0.BeaconStateSchemaPhase0;
 import tech.pegasys.teku.spec.datastructures.state.versions.capella.HistoricalSummary.HistoricalSummarySchema;
+import tech.pegasys.teku.spec.datastructures.state.versions.eip8483.BuilderPqRegistrationSchema;
+import tech.pegasys.teku.spec.datastructures.state.versions.eip8483.ValidatorPqRegistrationSchema;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingConsolidation.PendingConsolidationSchema;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDeposit.PendingDepositSchema;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingPartialWithdrawal.PendingPartialWithdrawalSchema;
@@ -379,6 +395,16 @@ public class SchemaRegistryBuilder {
         .addProvider(createBuilderPendingWithdrawalsSchemaProvider())
         .addProvider(createPtcWindowSchemaProvider())
         .addProvider(createExecutionPayloadEnvelopesByRootRequestMessageSchemaProvider())
+
+        // EIP8483
+        .addProvider(createValidatorPqRegistrationRequestSchemaProvider())
+        .addProvider(createValidatorPqRegistrationRequestsSchemaProvider())
+        .addProvider(createBuilderPqRegistrationRequestSchemaProvider())
+        .addProvider(createBuilderPqRegistrationRequestsSchemaProvider())
+        .addProvider(createValidatorPqRegistrationSchemaProvider())
+        .addProvider(createValidatorPqRegistrationsSchemaProvider())
+        .addProvider(createBuilderPqRegistrationSchemaProvider())
+        .addProvider(createBuilderPqRegistrationsSchemaProvider())
 
         // HEZE
         .addProvider(createInclusionListSchemaProvider())
@@ -665,6 +691,10 @@ public class SchemaRegistryBuilder {
             GLOAS,
             (registry, specConfig, schemaName) ->
                 BeaconStateSchemaGloas.create(SpecConfigGloas.required(specConfig), registry))
+        .withCreator(
+            EIP8483,
+            (registry, specConfig, schemaName) ->
+                BeaconStateSchemaEip8483.create(SpecConfigEip8483.required(specConfig), registry))
         .build();
   }
 
@@ -714,6 +744,9 @@ public class SchemaRegistryBuilder {
         .withCreator(
             GLOAS,
             (registry, _, schemaName) -> new ExecutionRequestsSchemaGloas(registry, schemaName))
+        .withCreator(
+            EIP8483,
+            (registry, _, schemaName) -> new ExecutionRequestsSchemaEip8483(registry, schemaName))
         .build();
   }
 
@@ -1351,6 +1384,10 @@ public class SchemaRegistryBuilder {
         .withCreator(
             GLOAS,
             (registry, specConfig, schemaName) -> new ExecutionPayloadEnvelopeSchema(registry))
+        .withCreator(
+            EIP8483,
+            (registry, specConfig, schemaName) ->
+                new ExecutionPayloadEnvelopeSchema(registry, schemaName))
         .build();
   }
 
@@ -1360,6 +1397,10 @@ public class SchemaRegistryBuilder {
             GLOAS,
             (registry, specConfig, schemaName) ->
                 new BlindedExecutionPayloadEnvelopeSchema(registry))
+        .withCreator(
+            EIP8483,
+            (registry, specConfig, schemaName) ->
+                new BlindedExecutionPayloadEnvelopeSchema(registry, schemaName))
         .build();
   }
 
@@ -1369,6 +1410,10 @@ public class SchemaRegistryBuilder {
             GLOAS,
             (registry, specConfig, schemaName) ->
                 new SignedExecutionPayloadEnvelopeSchema(registry))
+        .withCreator(
+            EIP8483,
+            (registry, specConfig, schemaName) ->
+                new SignedExecutionPayloadEnvelopeSchema(registry, schemaName))
         .build();
   }
 
@@ -1378,6 +1423,10 @@ public class SchemaRegistryBuilder {
             GLOAS,
             (registry, specConfig, schemaName) ->
                 new SignedBlindedExecutionPayloadEnvelopeSchema(registry))
+        .withCreator(
+            EIP8483,
+            (registry, specConfig, schemaName) ->
+                new SignedBlindedExecutionPayloadEnvelopeSchema(registry, schemaName))
         .build();
   }
 
@@ -1388,6 +1437,11 @@ public class SchemaRegistryBuilder {
             (registry, specConfig, schemaName) ->
                 new SignedExecutionPayloadEnvelopeContentsSchema(
                     SpecConfigFulu.required(specConfig), registry))
+        .withCreator(
+            EIP8483,
+            (registry, specConfig, schemaName) ->
+                new SignedExecutionPayloadEnvelopeContentsSchema(
+                    SpecConfigFulu.required(specConfig), registry, schemaName))
         .build();
   }
 
@@ -1437,6 +1491,72 @@ public class SchemaRegistryBuilder {
             (registry, specConfig, schemaName) ->
                 new ExecutionPayloadEnvelopesByRootRequestMessageSchema(
                     SpecConfigGloas.required(specConfig)))
+        .build();
+  }
+
+  private static SchemaProvider<?> createValidatorPqRegistrationRequestSchemaProvider() {
+    return providerBuilder(VALIDATOR_PQ_REGISTRATION_REQUEST_SCHEMA)
+        .withCreator(EIP8483, (_, _, _) -> new ValidatorPqRegistrationRequestSchema())
+        .build();
+  }
+
+  private static SchemaProvider<?> createValidatorPqRegistrationRequestsSchemaProvider() {
+    return providerBuilder(VALIDATOR_PQ_REGISTRATION_REQUESTS_SCHEMA)
+        .withCreator(
+            EIP8483,
+            (registry, specConfig, _) ->
+                SszProgressiveListSchema.create(
+                    registry.get(VALIDATOR_PQ_REGISTRATION_REQUEST_SCHEMA),
+                    SpecConfigEip8483.required(specConfig)
+                        .getMaxValidatorPqRegistrationRequestsPerPayload()))
+        .build();
+  }
+
+  private static SchemaProvider<?> createBuilderPqRegistrationRequestSchemaProvider() {
+    return providerBuilder(BUILDER_PQ_REGISTRATION_REQUEST_SCHEMA)
+        .withCreator(EIP8483, (_, _, _) -> new BuilderPqRegistrationRequestSchema())
+        .build();
+  }
+
+  private static SchemaProvider<?> createBuilderPqRegistrationRequestsSchemaProvider() {
+    return providerBuilder(BUILDER_PQ_REGISTRATION_REQUESTS_SCHEMA)
+        .withCreator(
+            EIP8483,
+            (registry, specConfig, _) ->
+                SszProgressiveListSchema.create(
+                    registry.get(BUILDER_PQ_REGISTRATION_REQUEST_SCHEMA),
+                    SpecConfigEip8483.required(specConfig)
+                        .getMaxBuilderPqRegistrationRequestsPerPayload()))
+        .build();
+  }
+
+  private static SchemaProvider<?> createValidatorPqRegistrationSchemaProvider() {
+    return providerBuilder(VALIDATOR_PQ_REGISTRATION_SCHEMA)
+        .withCreator(EIP8483, (_, _, _) -> new ValidatorPqRegistrationSchema())
+        .build();
+  }
+
+  private static SchemaProvider<?> createValidatorPqRegistrationsSchemaProvider() {
+    return providerBuilder(VALIDATOR_PQ_REGISTRATIONS_SCHEMA)
+        .withCreator(
+            EIP8483,
+            (registry, _, _) ->
+                SszProgressiveListSchema.create(registry.get(VALIDATOR_PQ_REGISTRATION_SCHEMA)))
+        .build();
+  }
+
+  private static SchemaProvider<?> createBuilderPqRegistrationSchemaProvider() {
+    return providerBuilder(BUILDER_PQ_REGISTRATION_SCHEMA)
+        .withCreator(EIP8483, (_, _, _) -> new BuilderPqRegistrationSchema())
+        .build();
+  }
+
+  private static SchemaProvider<?> createBuilderPqRegistrationsSchemaProvider() {
+    return providerBuilder(BUILDER_PQ_REGISTRATIONS_SCHEMA)
+        .withCreator(
+            EIP8483,
+            (registry, _, _) ->
+                SszProgressiveListSchema.create(registry.get(BUILDER_PQ_REGISTRATION_SCHEMA)))
         .build();
   }
 

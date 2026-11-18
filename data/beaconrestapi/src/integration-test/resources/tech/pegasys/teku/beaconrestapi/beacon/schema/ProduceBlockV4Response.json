@@ -5,7 +5,7 @@
   "properties" : {
     "version" : {
       "type" : "string",
-      "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze" ]
+      "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "eip8483", "heze" ]
     },
     "consensus_block_value" : {
       "type" : "string",
@@ -29,6 +29,10 @@
         "$ref" : "#/components/schemas/BlockContentsGloas"
       }, {
         "$ref" : "#/components/schemas/BeaconBlockGloas"
+      }, {
+        "$ref" : "#/components/schemas/BlockContentsEip8483"
+      }, {
+        "$ref" : "#/components/schemas/BeaconBlockEip8483"
       } ]
     }
   }

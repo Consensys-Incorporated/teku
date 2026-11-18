@@ -1,0 +1,31 @@
+{
+  "title" : "BlockContentsEip8483",
+  "type" : "object",
+  "required" : [ "block", "execution_payload_envelope", "kzg_proofs", "blobs" ],
+  "properties" : {
+    "block" : {
+      "$ref" : "#/components/schemas/BeaconBlockEip8483"
+    },
+    "execution_payload_envelope" : {
+      "$ref" : "#/components/schemas/ExecutionPayloadEnvelopeEip8483"
+    },
+    "kzg_proofs" : {
+      "type" : "array",
+      "items" : {
+        "type" : "string",
+        "pattern" : "^0x[a-fA-F0-9]{2,}$",
+        "description" : "Bytes48 hexadecimal",
+        "format" : "bytes"
+      }
+    },
+    "blobs" : {
+      "type" : "array",
+      "items" : {
+        "type" : "string",
+        "pattern" : "^0x[a-fA-F0-9]{2,}$",
+        "description" : "SSZ hexadecimal",
+        "format" : "bytes"
+      }
+    }
+  }
+}

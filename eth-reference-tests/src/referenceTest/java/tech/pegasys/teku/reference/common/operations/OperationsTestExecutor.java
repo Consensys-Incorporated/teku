@@ -47,12 +47,13 @@ import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.altair.Sy
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadSummary;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.BuilderPqRegistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.ValidatorPqRegistrationRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.ConsolidationRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.DepositRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.WithdrawalRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderDepositRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderExitRequest;
-import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsSchemaGloas;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.Deposit;
@@ -69,6 +70,7 @@ import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.EpochProce
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.SlotProcessingException;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsCapella;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsEip8483;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsElectra;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.statetransition.attestation.PooledAttestation;
@@ -106,7 +108,9 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
     EXECUTION_PAYLOAD_BID,
     PAYLOAD_ATTESTATION,
     BUILDER_DEPOSIT_REQUEST,
-    BUILDER_EXIT_REQUEST;
+    BUILDER_EXIT_REQUEST,
+    VALIDATOR_PQ_REGISTRATION_REQUEST,
+    BUILDER_PQ_REGISTRATION_REQUEST;
   }
 
   public static final ImmutableMap<String, TestExecutor> OPERATIONS_TEST_TYPES =
@@ -180,6 +184,16 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
               "operations/builder_exit_request",
               new OperationsTestExecutor<>(
                   "builder_exit_request.ssz_snappy", Operation.BUILDER_EXIT_REQUEST))
+          .put(
+              "operations/validator_pq_registration_request",
+              new OperationsTestExecutor<>(
+                  "validator_pq_registration_request.ssz_snappy",
+                  Operation.VALIDATOR_PQ_REGISTRATION_REQUEST))
+          .put(
+              "operations/builder_pq_registration_request",
+              new OperationsTestExecutor<>(
+                  "builder_pq_registration_request.ssz_snappy",
+                  Operation.BUILDER_PQ_REGISTRATION_REQUEST))
           .build();
 
   private final String dataFileName;
@@ -413,6 +427,24 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
       case BUILDER_DEPOSIT_REQUEST ->
           processBuilderDepositRequest(testDefinition, state, processor);
       case BUILDER_EXIT_REQUEST -> processBuilderExitRequest(testDefinition, state, processor);
+      case VALIDATOR_PQ_REGISTRATION_REQUEST -> {
+        final ValidatorPqRegistrationRequest request =
+            loadSsz(
+                testDefinition,
+                dataFileName,
+                SchemaDefinitionsEip8483.required(schemaDefinitions(testDefinition))
+                    .getValidatorPqRegistrationRequestSchema());
+        processor.processValidatorPqRegistrationRequest(state, request);
+      }
+      case BUILDER_PQ_REGISTRATION_REQUEST -> {
+        final BuilderPqRegistrationRequest request =
+            loadSsz(
+                testDefinition,
+                dataFileName,
+                SchemaDefinitionsEip8483.required(schemaDefinitions(testDefinition))
+                    .getBuilderPqRegistrationRequestSchema());
+        processor.processBuilderPqRegistrationRequest(state, request);
+      }
       default ->
           throw new UnsupportedOperationException(
               "Operation " + operation + " not implemented in OperationTestExecutor");
@@ -498,9 +530,8 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
       final MutableBeaconState state,
       final OperationProcessor processor) {
     final SszListSchema<BuilderDepositRequest, ?> builderDepositRequestsSchema =
-        ExecutionRequestsSchemaGloas.required(
-                SchemaDefinitionsGloas.required(schemaDefinitions(testDefinition))
-                    .getExecutionRequestsSchema())
+        SchemaDefinitionsGloas.required(schemaDefinitions(testDefinition))
+            .getExecutionRequestsSchema()
             .getBuilderDepositRequestsSchema();
     final SszList<BuilderDepositRequest> builderDepositRequests =
         loadSsz(testDefinition, dataFileName, builderDepositRequestsSchema);
@@ -512,9 +543,8 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
       final MutableBeaconState state,
       final OperationProcessor processor) {
     final SszListSchema<BuilderExitRequest, ?> builderExitRequestsSchema =
-        ExecutionRequestsSchemaGloas.required(
-                SchemaDefinitionsGloas.required(schemaDefinitions(testDefinition))
-                    .getExecutionRequestsSchema())
+        SchemaDefinitionsGloas.required(schemaDefinitions(testDefinition))
+            .getExecutionRequestsSchema()
             .getBuilderExitRequestsSchema();
     final SszList<BuilderExitRequest> builderExitRequests =
         loadSsz(testDefinition, dataFileName, builderExitRequestsSchema);
@@ -597,7 +627,9 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
           EXECUTION_PAYLOAD_BID,
           PAYLOAD_ATTESTATION,
           BUILDER_DEPOSIT_REQUEST,
-          BUILDER_EXIT_REQUEST -> {}
+          BUILDER_EXIT_REQUEST,
+          VALIDATOR_PQ_REGISTRATION_REQUEST,
+          BUILDER_PQ_REGISTRATION_REQUEST -> {}
     }
   }
 

@@ -84,6 +84,16 @@ class SpecFactoryTest {
                         .electraForkEpoch(UInt64.ZERO)
                         .fuluForkEpoch(UInt64.ZERO)
                         .gloasForkEpoch(forkEpoch);
+                case EIP8483 ->
+                    builder
+                        .altairForkEpoch(UInt64.ZERO)
+                        .bellatrixForkEpoch(UInt64.ZERO)
+                        .capellaForkEpoch(UInt64.ZERO)
+                        .denebForkEpoch(UInt64.ZERO)
+                        .electraForkEpoch(UInt64.ZERO)
+                        .fuluForkEpoch(UInt64.ZERO)
+                        .gloasForkEpoch(UInt64.ZERO)
+                        .eip8483ForkEpoch(forkEpoch);
                 case HEZE ->
                     builder
                         .altairForkEpoch(UInt64.ZERO)
@@ -93,6 +103,7 @@ class SpecFactoryTest {
                         .electraForkEpoch(UInt64.ZERO)
                         .fuluForkEpoch(UInt64.ZERO)
                         .gloasForkEpoch(UInt64.ZERO)
+                        .eip8483ForkEpoch(UInt64.ZERO)
                         .hezeForkEpoch(forkEpoch);
                 default ->
                     throw new IllegalStateException(

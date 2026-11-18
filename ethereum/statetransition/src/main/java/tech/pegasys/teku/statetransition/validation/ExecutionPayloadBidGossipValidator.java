@@ -42,7 +42,6 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloa
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
-import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
@@ -356,8 +355,10 @@ public class ExecutionPayloadBidGossipValidator {
                         "parent execution payload is unavailable. Saving for future processing");
                   }
                   final boolean parentPayloadMayExitBuilder =
-                      ExecutionRequestsGloas.required(
-                              maybeParentPayload.get().getMessage().getExecutionRequests())
+                      maybeParentPayload
+                          .get()
+                          .getMessage()
+                          .getExecutionRequests()
                           .getBuilderExits()
                           .stream()
                           .anyMatch(

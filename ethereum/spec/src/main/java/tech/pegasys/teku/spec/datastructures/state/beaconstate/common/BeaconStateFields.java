@@ -97,7 +97,10 @@ public enum BeaconStateFields implements SszFieldName {
   BUILDER_PENDING_WITHDRAWALS,
   LATEST_BLOCK_HASH,
   PAYLOAD_EXPECTED_WITHDRAWALS,
-  PTC_WINDOW;
+  PTC_WINDOW,
+  // EIP-8483 fields
+  VALIDATOR_PQ_REGISTRATIONS,
+  BUILDER_PQ_REGISTRATIONS;
 
   private final String sszFieldName;
 

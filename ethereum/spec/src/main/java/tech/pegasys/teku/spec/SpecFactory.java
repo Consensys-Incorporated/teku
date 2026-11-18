@@ -17,6 +17,7 @@ import static tech.pegasys.teku.spec.SpecMilestone.ALTAIR;
 import static tech.pegasys.teku.spec.SpecMilestone.BELLATRIX;
 import static tech.pegasys.teku.spec.SpecMilestone.CAPELLA;
 import static tech.pegasys.teku.spec.SpecMilestone.DENEB;
+import static tech.pegasys.teku.spec.SpecMilestone.EIP8483;
 import static tech.pegasys.teku.spec.SpecMilestone.ELECTRA;
 import static tech.pegasys.teku.spec.SpecMilestone.FULU;
 import static tech.pegasys.teku.spec.SpecMilestone.GLOAS;
@@ -49,6 +50,8 @@ public class SpecFactory {
     final SpecConfig specConfig = config.specConfig();
     if (!specConfig.getHezeForkEpoch().equals(FAR_FUTURE_EPOCH)) {
       return Spec.create(config, HEZE);
+    } else if (!specConfig.getEip8483ForkEpoch().equals(FAR_FUTURE_EPOCH)) {
+      return Spec.create(config, EIP8483);
     } else if (!specConfig.getGloasForkEpoch().equals(FAR_FUTURE_EPOCH)) {
       return Spec.create(config, GLOAS);
     } else if (!specConfig.getFuluForkEpoch().equals(FAR_FUTURE_EPOCH)) {

@@ -401,7 +401,9 @@
             "source_address": "0x4e7a3e46b68dc1b093e7eac2de62df5e0d90c714",
             "pubkey": "0xa2c93c9d113608bd1d6af9993b4de9579fb695111cbb894cf2c36d3de421f2c3f78ab5a3f36f0fc02dd8bdc3f3ff8523"
           }
-        ]
+        ],
+        "validator_pq_registrations": [],
+        "builder_pq_registrations": []
       }
     }
   }

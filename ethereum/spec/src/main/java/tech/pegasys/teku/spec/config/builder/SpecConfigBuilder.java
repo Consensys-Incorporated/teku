@@ -146,6 +146,7 @@ public class SpecConfigBuilder {
   private final ElectraBuilder electraBuilder = new ElectraBuilder();
   private final FuluBuilder fuluBuilder = new FuluBuilder();
   private final GloasBuilder gloasBuilder = new GloasBuilder();
+  private final Eip8483Builder eip8483Builder = new Eip8483Builder();
   private final HezeBuilder hezeBuilder = new HezeBuilder();
 
   // Forks
@@ -156,6 +157,7 @@ public class SpecConfigBuilder {
   private Bytes4 electraForkVersion;
   private Bytes4 fuluForkVersion;
   private Bytes4 gloasForkVersion;
+  private Bytes4 eip8483ForkVersion;
   private Bytes4 hezeForkVersion;
   private UInt64 altairForkEpoch = FAR_FUTURE_EPOCH;
   private UInt64 bellatrixForkEpoch = FAR_FUTURE_EPOCH;
@@ -164,6 +166,7 @@ public class SpecConfigBuilder {
   private UInt64 electraForkEpoch = FAR_FUTURE_EPOCH;
   private UInt64 fuluForkEpoch = FAR_FUTURE_EPOCH;
   private UInt64 gloasForkEpoch = FAR_FUTURE_EPOCH;
+  private UInt64 eip8483ForkEpoch = FAR_FUTURE_EPOCH;
   private UInt64 hezeForkEpoch = FAR_FUTURE_EPOCH;
 
   private BLSSignatureVerifier blsSignatureVerifier = BLSSignatureVerifier.SIMPLE;
@@ -183,6 +186,7 @@ public class SpecConfigBuilder {
           .appendBuilder(electraBuilder)
           .appendBuilder(fuluBuilder)
           .appendBuilder(gloasBuilder)
+          .appendBuilder(eip8483Builder)
           .appendBuilder(hezeBuilder);
 
   public SpecConfigAndParent<SpecConfigHeze> build() {
@@ -347,6 +351,8 @@ public class SpecConfigBuilder {
                 fuluForkEpoch,
                 gloasForkVersion,
                 gloasForkEpoch,
+                eip8483ForkVersion,
+                eip8483ForkEpoch,
                 hezeForkVersion,
                 hezeForkEpoch,
                 Optional.ofNullable(ephemeryResetPeriod)));
@@ -437,12 +443,25 @@ public class SpecConfigBuilder {
     constants.put("fuluForkEpoch", fuluForkEpoch);
     constants.put("gloasForkVersion", gloasForkVersion);
     constants.put("gloasForkEpoch", gloasForkEpoch);
+    constants.put("eip8483ForkVersion", eip8483ForkVersion);
+    constants.put("eip8483ForkEpoch", eip8483ForkEpoch);
     constants.put("hezeForkVersion", hezeForkVersion);
     constants.put("hezeForkEpoch", hezeForkEpoch);
     return constants;
   }
 
   private void applyForkVersions() {
+    // EIP-8483 precedes Heze, so a config that schedules Heze without EIP-8483 would put the
+    // milestones
+    // out of order. Heze already includes the EIP-8483 changes, so activate EIP-8483 together with
+    // Heze
+    // (where it is immediately overshadowed).
+    if (eip8483ForkEpoch.equals(FAR_FUTURE_EPOCH) && !hezeForkEpoch.equals(FAR_FUTURE_EPOCH)) {
+      eip8483ForkEpoch = hezeForkEpoch;
+      if (eip8483ForkVersion == null) {
+        eip8483ForkVersion = SpecBuilderUtil.PLACEHOLDER_FORK_VERSION;
+      }
+    }
     // update raw config if epochs and fork versions are known
     // if they're not known, they'll result in a validation error (expected)
     if (altairForkEpoch.equals(FAR_FUTURE_EPOCH) && altairForkVersion == null) {
@@ -466,6 +485,9 @@ public class SpecConfigBuilder {
     if (gloasForkEpoch.equals(FAR_FUTURE_EPOCH) && gloasForkVersion == null) {
       gloasForkVersion = SpecBuilderUtil.PLACEHOLDER_FORK_VERSION;
     }
+    if (eip8483ForkEpoch.equals(FAR_FUTURE_EPOCH) && eip8483ForkVersion == null) {
+      eip8483ForkVersion = SpecBuilderUtil.PLACEHOLDER_FORK_VERSION;
+    }
     if (hezeForkEpoch.equals(FAR_FUTURE_EPOCH) && hezeForkVersion == null) {
       hezeForkVersion = SpecBuilderUtil.PLACEHOLDER_FORK_VERSION;
     }
@@ -478,6 +500,7 @@ public class SpecConfigBuilder {
     rawConfig.put("ELECTRA_FORK_EPOCH", electraForkEpoch);
     rawConfig.put("FULU_FORK_EPOCH", fuluForkEpoch);
     rawConfig.put("GLOAS_FORK_EPOCH", gloasForkEpoch);
+    rawConfig.put("EIP8483_FORK_EPOCH", eip8483ForkEpoch);
     rawConfig.put("HEZE_FORK_EPOCH", hezeForkEpoch);
 
     rawConfig.put("ALTAIR_FORK_VERSION", altairForkVersion);
@@ -487,6 +510,7 @@ public class SpecConfigBuilder {
     rawConfig.put("ELECTRA_FORK_VERSION", electraForkVersion);
     rawConfig.put("FULU_FORK_VERSION", fuluForkVersion);
     rawConfig.put("GLOAS_FORK_VERSION", gloasForkVersion);
+    rawConfig.put("EIP8483_FORK_VERSION", eip8483ForkVersion);
     rawConfig.put("HEZE_FORK_VERSION", hezeForkVersion);
 
     // tell the fork builders their fork epoch
@@ -497,6 +521,7 @@ public class SpecConfigBuilder {
     electraBuilder.setForkEpoch(electraForkEpoch);
     fuluBuilder.setForkEpoch(fuluForkEpoch);
     gloasBuilder.setForkEpoch(gloasForkEpoch);
+    eip8483Builder.setForkEpoch(eip8483ForkEpoch);
     hezeBuilder.setForkEpoch(hezeForkEpoch);
   }
 
@@ -716,6 +741,18 @@ public class SpecConfigBuilder {
   public SpecConfigBuilder gloasForkEpoch(final UInt64 gloasForkEpoch) {
     checkNotNull(gloasForkEpoch);
     this.gloasForkEpoch = gloasForkEpoch;
+    return this;
+  }
+
+  public SpecConfigBuilder eip8483ForkVersion(final Bytes4 eip8483ForkVersion) {
+    checkNotNull(eip8483ForkVersion);
+    this.eip8483ForkVersion = eip8483ForkVersion;
+    return this;
+  }
+
+  public SpecConfigBuilder eip8483ForkEpoch(final UInt64 eip8483ForkEpoch) {
+    checkNotNull(eip8483ForkEpoch);
+    this.eip8483ForkEpoch = eip8483ForkEpoch;
     return this;
   }
 
@@ -1073,6 +1110,11 @@ public class SpecConfigBuilder {
 
   public SpecConfigBuilder gloasBuilder(final Consumer<GloasBuilder> consumer) {
     builderChain.withBuilder(GloasBuilder.class, consumer);
+    return this;
+  }
+
+  public SpecConfigBuilder eip8483Builder(final Consumer<Eip8483Builder> consumer) {
+    builderChain.withBuilder(Eip8483Builder.class, consumer);
     return this;
   }
 

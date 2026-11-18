@@ -35,7 +35,6 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadSummary;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequestsDataCodec;
-import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsGloas;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.IndexedPayloadAttestationLight;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
@@ -151,7 +150,8 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
     }
 
     // Parent was FULL -- verify the bid commitment and apply the payload
-    if (!miscHelpersGloas.isExecutionRequestsRootMatchingLatestBid(stateGloas, requests)) {
+    if (!miscHelpersGloas.isExecutionRequestsRootMatchingLatestBid(stateGloas, requests)
+        && !isMatchingPreForkExecutionRequestsRoot(stateGloas, requests)) {
       throw new BlockProcessingException(
           "The execution requests root in the latest committed bid does not match the parent execution requests in the block");
     }
@@ -159,13 +159,42 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
         () -> applyParentExecutionPayload(stateGloas, requests, validatorExitContextSupplier));
   }
 
+  /**
+   * [EIP-8483 fork boundary, Teku-defined] EIP-8483 extends ExecutionRequests, which changes its
+   * root even for identical content. A FULL parent from before the EIP-8483 fork committed to the
+   * Gloas-typed root, which the EIP-8483-typed parent requests can never match. The spec leaves
+   * this to the coordinated upgrade (eip8483/fork.md); here such a parent is accepted when the
+   * requests, which must not carry any PQ registrations, match the bid as Gloas-typed requests.
+   */
+  private boolean isMatchingPreForkExecutionRequestsRoot(
+      final BeaconStateGloas state, final ExecutionRequests requests) {
+    final UInt64 parentEpoch =
+        miscHelpersGloas.computeEpochAtSlot(state.getLatestBlockHeader().getSlot());
+    if (!parentEpoch.isLessThan(specConfig.getEip8483ForkEpoch())) {
+      return false;
+    }
+    return schemaDefinitionsGloas
+        .toVersionEip8483()
+        .map(
+            schemaDefinitionsEip8483 -> {
+              try {
+                return schemaDefinitionsEip8483
+                    .getPreForkExecutionRequestsSchema()
+                    .convertFrom(requests)
+                    .hashTreeRoot()
+                    .equals(state.getLatestExecutionPayloadBid().getExecutionRequestsRoot());
+              } catch (final IllegalArgumentException e) {
+                return false;
+              }
+            })
+        .orElse(false);
+  }
+
   // apply_parent_execution_payload
   public void applyParentExecutionPayload(
       final MutableBeaconStateGloas state,
       final ExecutionRequests requests,
       final Supplier<ValidatorExitContext> validatorExitContextSupplier) {
-    final ExecutionRequestsGloas requestsGloas = ExecutionRequestsGloas.required(requests);
-
     final ExecutionPayloadBid parentBid = state.getLatestExecutionPayloadBid();
     final UInt64 parentSlot = state.getLatestBlockHeader().getSlot();
     final UInt64 parentEpoch = miscHelpers.computeEpochAtSlot(parentSlot);
@@ -209,9 +238,13 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
     executionRequestsProcessorGloas.processConsolidationRequests(
         state, requests.getConsolidations());
     executionRequestsProcessorGloas.processBuilderDepositRequests(
-        state, requestsGloas.getBuilderDeposits());
-    executionRequestsProcessorGloas.processBuilderExitRequests(
-        state, requestsGloas.getBuilderExits());
+        state, requests.getBuilderDeposits());
+    executionRequestsProcessorGloas.processBuilderExitRequests(state, requests.getBuilderExits());
+    // [New in EIP-8483] (no-op before EIP-8483, where the request lists are always empty)
+    executionRequestsProcessorGloas.processValidatorPqRegistrationRequests(
+        state, requests.getValidatorPqRegistrations());
+    executionRequestsProcessorGloas.processBuilderPqRegistrationRequests(
+        state, requests.getBuilderPqRegistrations());
 
     // Update parent payload availability and latest block hash
     state.setExecutionPayloadAvailability(

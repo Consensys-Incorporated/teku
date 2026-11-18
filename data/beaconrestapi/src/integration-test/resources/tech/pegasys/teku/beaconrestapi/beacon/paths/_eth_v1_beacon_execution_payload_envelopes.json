@@ -47,6 +47,7 @@
             "electra",
             "fulu",
             "gloas",
+            "eip8483",
             "heze"
           ],
           "description": "The active consensus version to which the execution payload envelope being submitted belongs."

@@ -90,6 +90,9 @@ class Eth2GossipTopicFilterTest {
           case GLOAS ->
               TestSpecFactory.createMinimalGloas(
                   b -> b.fuluBuilder(fuluBuilder).gloasForkEpoch(nextMilestoneForkEpoch));
+          case EIP8483 ->
+              TestSpecFactory.createMinimalEip8483(
+                  b -> b.fuluBuilder(fuluBuilder).eip8483ForkEpoch(nextMilestoneForkEpoch));
           case HEZE ->
               TestSpecFactory.createMinimalHeze(
                   b -> b.fuluBuilder(fuluBuilder).hezeForkEpoch(nextMilestoneForkEpoch));

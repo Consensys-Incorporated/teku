@@ -18,12 +18,14 @@ import tech.pegasys.teku.spec.config.SpecConfigHeze;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.common.BeaconStateFields;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.eip8483.BeaconStateEip8483;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.eip8483.BeaconStateSchemaEip8483;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.logic.common.forktransition.StateUpgrade;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.BeaconStateAccessorsGloas;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsHeze;
 
-public class HezeStateUpgrade implements StateUpgrade<BeaconStateGloas> {
+public class HezeStateUpgrade implements StateUpgrade<BeaconStateEip8483> {
 
   private final SpecConfigHeze specConfig;
   private final SchemaDefinitionsHeze schemaDefinitions;
@@ -39,12 +41,18 @@ public class HezeStateUpgrade implements StateUpgrade<BeaconStateGloas> {
   }
 
   @Override
-  public BeaconStateGloas upgrade(final BeaconState preState) {
+  public BeaconStateEip8483 upgrade(final BeaconState preState) {
     final UInt64 epoch = beaconStateAccessors.getCurrentEpoch(preState);
+    // On this branch Heze builds on EIP-8483. The pre-state is a Gloas state when EIP-8483 is
+    // scheduled
+    // at
+    // the same epoch as Heze (and so overshadowed by it).
     final BeaconStateGloas preStateGloas = BeaconStateGloas.required(preState);
+    final BeaconStateSchemaEip8483 stateSchema =
+        BeaconStateSchemaEip8483.required(schemaDefinitions.getBeaconStateSchema());
 
-    return BeaconStateGloas.required(schemaDefinitions.getBeaconStateSchema().createEmpty())
-        .updatedGloas(
+    return BeaconStateEip8483.required(stateSchema.createEmpty())
+        .updatedEip8483(
             state -> {
               BeaconStateFields.copyCommonFieldsFromSource(state, preState);
 
@@ -85,6 +93,21 @@ public class HezeStateUpgrade implements StateUpgrade<BeaconStateGloas> {
               state.setLatestExecutionPayloadBid(preStateGloas.getLatestExecutionPayloadBid());
               state.setPayloadExpectedWithdrawals(preStateGloas.getPayloadExpectedWithdrawals());
               state.setPtcWindow(preStateGloas.getPtcWindow());
+              preState
+                  .toVersionEip8483()
+                  .ifPresentOrElse(
+                      preStateEip8483 -> {
+                        state.setValidatorPqRegistrations(
+                            preStateEip8483.getValidatorPqRegistrations());
+                        state.setBuilderPqRegistrations(
+                            preStateEip8483.getBuilderPqRegistrations());
+                      },
+                      () -> {
+                        state.setValidatorPqRegistrations(
+                            stateSchema.getValidatorPqRegistrationsSchema().of());
+                        state.setBuilderPqRegistrations(
+                            stateSchema.getBuilderPqRegistrationsSchema().of());
+                      });
             });
   }
 }

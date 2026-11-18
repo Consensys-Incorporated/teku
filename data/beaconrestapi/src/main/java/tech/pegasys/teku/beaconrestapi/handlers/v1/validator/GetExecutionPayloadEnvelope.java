@@ -15,6 +15,7 @@ package tech.pegasys.teku.beaconrestapi.handlers.v1.validator;
 
 import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.BEACON_BLOCK_ROOT_PARAMETER;
 import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.SLOT_PARAMETER;
+import static tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.MilestoneDependentTypesUtil.getMultipleSchemaDefinitionFromMilestone;
 import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.ETH_CONSENSUS_HEADER_TYPE;
 import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.MILESTONE_TYPE;
 import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.sszResponseType;
@@ -24,10 +25,12 @@ import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_VALIDAT
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_VALIDATOR_REQUIRED;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import java.util.List;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.api.DataProvider;
 import tech.pegasys.teku.api.ValidatorDataProvider;
+import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.MilestoneDependentTypesUtil;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.json.types.SerializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.AsyncApiResponse;
@@ -38,7 +41,6 @@ import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelopeSchema;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
@@ -125,15 +127,24 @@ public class GetExecutionPayloadEnvelope extends RestApiEndpoint {
 
   private static SerializableTypeDefinition<ObjectAndMetaData<ExecutionPayloadEnvelope>>
       getResponseType(final SchemaDefinitionCache schemaDefinitionCache) {
-    final ExecutionPayloadEnvelopeSchema envelopeSchema =
-        SchemaDefinitionsGloas.required(
-                schemaDefinitionCache.getSchemaDefinition(SpecMilestone.GLOAS))
-            .getExecutionPayloadEnvelopeSchema();
+    // The envelope embeds ExecutionRequests, whose type changes in later milestones (EIP-8483)
+    final SerializableTypeDefinition<ExecutionPayloadEnvelope> envelopeType =
+        getMultipleSchemaDefinitionFromMilestone(
+            schemaDefinitionCache,
+            "ExecutionPayloadEnvelope",
+            List.of(
+                new MilestoneDependentTypesUtil.ConditionalSchemaGetter<>(
+                    (envelope, milestone) ->
+                        schemaDefinitionCache.milestoneAtSlot(envelope.getSlot()).equals(milestone),
+                    SpecMilestone.GLOAS,
+                    schemaDefinitions ->
+                        SchemaDefinitionsGloas.required(schemaDefinitions)
+                            .getExecutionPayloadEnvelopeSchema())));
 
     return SerializableTypeDefinition.<ObjectAndMetaData<ExecutionPayloadEnvelope>>object()
         .name("GetExecutionPayloadEnvelopeResponse")
         .withField("version", MILESTONE_TYPE, ObjectAndMetaData::getMilestone)
-        .withField("data", envelopeSchema.getJsonTypeDefinition(), ObjectAndMetaData::getData)
+        .withField("data", envelopeType, ObjectAndMetaData::getData)
         .build();
   }
 }

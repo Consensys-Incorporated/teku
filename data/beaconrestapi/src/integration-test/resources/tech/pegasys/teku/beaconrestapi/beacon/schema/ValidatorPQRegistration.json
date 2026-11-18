@@ -1,0 +1,19 @@
+{
+  "title" : "ValidatorPQRegistration",
+  "type" : "object",
+  "required" : [ "validator_index", "pq_data" ],
+  "properties" : {
+    "validator_index" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "pq_data" : {
+      "type" : "string",
+      "pattern" : "^0x[a-fA-F0-9]{2,}$",
+      "description" : "SSZ hexadecimal",
+      "format" : "bytes"
+    }
+  }
+}

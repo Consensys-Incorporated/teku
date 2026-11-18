@@ -24,6 +24,7 @@ on:
       - master
       - '**prototype**'
       - '**devnet**'
+      - pq
   workflow_dispatch:
     inputs:
       include_hash_in_docker:

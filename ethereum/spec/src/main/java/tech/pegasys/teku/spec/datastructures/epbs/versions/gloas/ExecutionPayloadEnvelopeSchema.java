@@ -41,8 +41,16 @@ public class ExecutionPayloadEnvelopeSchema
   private static final boolean[] ACTIVE_FIELDS = ProgressiveSchemaUtils.allActive(5);
 
   public ExecutionPayloadEnvelopeSchema(final SchemaRegistry schemaRegistry) {
+    this(schemaRegistry, "ExecutionPayloadEnvelope");
+  }
+
+  /**
+   * Later milestones (e.g. EIP-8483) use a milestone-specific name as the embedded types differ.
+   */
+  public ExecutionPayloadEnvelopeSchema(
+      final SchemaRegistry schemaRegistry, final String containerName) {
     super(
-        "ExecutionPayloadEnvelope",
+        containerName,
         ACTIVE_FIELDS,
         namedSchema(
             "payload",

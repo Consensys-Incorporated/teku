@@ -60,6 +60,7 @@
                 "electra",
                 "fulu",
                 "gloas",
+                "eip8483",
                 "heze"
               ],
               "example": "phase0"

@@ -5,7 +5,7 @@
   "properties" : {
     "version" : {
       "type" : "string",
-      "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze" ]
+      "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "eip8483", "heze" ]
     },
     "execution_optimistic" : {
       "type" : "boolean"
@@ -32,6 +32,8 @@
         "$ref" : "#/components/schemas/BeaconStateFulu"
       }, {
         "$ref" : "#/components/schemas/BeaconStateGloas"
+      }, {
+        "$ref" : "#/components/schemas/BeaconStateEip8483"
       } ]
     }
   }
