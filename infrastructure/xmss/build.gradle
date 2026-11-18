@@ -1,0 +1,9 @@
+dependencies {
+	implementation 'com.google.guava:guava'
+	implementation 'io.consensys.tuweni:tuweni-bytes'
+	implementation 'io.github.crate-crypto:lean-pq'
+	implementation 'org.apache.logging.log4j:log4j-api'
+
+	testImplementation 'com.fasterxml.jackson.core:jackson-databind'
+	testImplementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml'
+}
