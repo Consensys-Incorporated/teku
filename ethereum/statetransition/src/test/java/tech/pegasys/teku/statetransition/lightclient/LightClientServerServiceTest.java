@@ -380,6 +380,40 @@ public class LightClientServerServiceTest {
   }
 
   @TestTemplate
+  public void onBlockImported_shouldKeepPendingBootstrapWhenBlockLookupFails() {
+    final Chain chain = generateChain();
+    final LightClientUpdateChannel channel =
+        mock(LightClientUpdateChannel.class, invocation -> SafeFuture.COMPLETE);
+    final AtomicBoolean failLookup = new AtomicBoolean(false);
+    final LightClientServerService bootstrapService =
+        new LightClientServerService(
+            spec,
+            new LightClientUpdateStore(spec, channel),
+            root ->
+                failLookup.get()
+                    ? SafeFuture.failedFuture(new RuntimeException("lookup failed"))
+                    : lookUpBlock(root),
+            this::lookUpState,
+            CANONICAL,
+            asyncRunner,
+            timeProvider);
+    final SignedBlockAndState anchor = chain.attested();
+    blocksByRoot.remove(anchor.getRoot());
+
+    bootstrapService.onNewFinalizedCheckpoint(checkpointAt(anchor), false);
+    failLookup.set(true);
+    bootstrapService.onBlockImported(chain.signature().getBlock(), false);
+    failLookup.set(false);
+    blocksByRoot.put(anchor.getRoot(), anchor.getBlock());
+    bootstrapService.onBlockImported(chain.signature().getBlock(), false);
+
+    verify(channel)
+        .onNewLightClientBootstrap(
+            spec.getLightClientUtilRequired(anchor.getSlot())
+                .createLightClientBootstrap(anchor.getState(), anchor.getBlock()));
+  }
+
+  @TestTemplate
   public void onNewFinalizedCheckpoint_shouldSkipBootstrapWhenStateIsNotBlockPostState() {
     final Chain chain = generateChain();
     final LightClientUpdateChannel channel =

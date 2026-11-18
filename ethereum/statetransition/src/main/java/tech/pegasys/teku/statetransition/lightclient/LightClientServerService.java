@@ -335,6 +335,14 @@ public class LightClientServerService
   private void retryPendingBootstrap(final PendingBootstrap pending) {
     retrieveBlockByRoot
         .apply(pending.blockRoot())
+        .exceptionally(
+            error -> {
+              LOG.warn(
+                  "Failed to look up block {} for pending light client bootstrap",
+                  pending.blockRoot(),
+                  error);
+              return Optional.empty();
+            })
         .thenAccept(
             maybeBlock -> {
               if (maybeBlock.isEmpty()) {
