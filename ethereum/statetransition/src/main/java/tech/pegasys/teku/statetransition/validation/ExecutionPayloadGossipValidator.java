@@ -51,9 +51,8 @@ public class ExecutionPayloadGossipValidator {
   private final BlockGossipValidator blockGossipValidator;
   private final SigningRootUtil signingRootUtil;
 
-  // isPayloadSeen iterates while envelope validation may add entries
   private final Set<BlockRootAndBuilderIndex> seenPayloads =
-      LimitedSet.createSynchronizedIterable(VALID_EXECUTION_PAYLOAD_SET_SIZE);
+      LimitedSet.createSynchronizedNatural(VALID_EXECUTION_PAYLOAD_SET_SIZE);
 
   private final Map<Bytes32, BlockImportResult> invalidBlockRoots;
 
@@ -130,13 +129,6 @@ public class ExecutionPayloadGossipValidator {
               }
               return markAsSeen(ACCEPT, envelope);
             });
-  }
-
-  public boolean isPayloadSeen(final Bytes32 beaconBlockRoot) {
-    return seenPayloads.stream()
-        .anyMatch(
-            blockRootAndBuilderIndex ->
-                blockRootAndBuilderIndex.blockRoot().equals(beaconBlockRoot));
   }
 
   private SafeFuture<Optional<InternalValidationResult>> performWithBlockValidation(
@@ -307,8 +299,32 @@ public class ExecutionPayloadGossipValidator {
                 LOG.trace("Invalid signed execution payload envelope signature. Rejecting");
                 return reject("Invalid signed execution payload envelope signature");
               }
-              return ACCEPT;
+              /*
+               * [REJECT] The payload's block hash is computed correctly from its content
+               * (proposed in consensus-specs PR 5770). A forged envelope carrying the bid's block
+               * hash must not be marked as seen, as that would shadow the builder's real envelope.
+               */
+              return validateBlockHashMatchesContent(envelope.getMessage());
             });
+  }
+
+  private InternalValidationResult validateBlockHashMatchesContent(
+      final ExecutionPayloadEnvelope envelope) {
+    final Bytes32 declaredBlockHash = envelope.getPayload().getBlockHash();
+    final Bytes32 computedBlockHash =
+        gossipValidationHelper.computeExecutionPayloadBlockHash(envelope);
+    if (!computedBlockHash.equals(declaredBlockHash)) {
+      LOG.debug(
+          "Execution payload envelope for block root {} from builder {} declares block hash {} but its content hashes to {}. Rejecting the execution payload envelope",
+          envelope.getBeaconBlockRoot(),
+          envelope.getBuilderIndex(),
+          declaredBlockHash,
+          computedBlockHash);
+      return reject(
+          "Execution payload envelope block hash %s does not match the block hash %s computed from its content",
+          declaredBlockHash, computedBlockHash);
+    }
+    return ACCEPT;
   }
 
   private boolean isSignatureValid(
