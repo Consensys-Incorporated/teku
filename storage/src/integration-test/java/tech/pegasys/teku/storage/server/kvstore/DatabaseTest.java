@@ -628,6 +628,62 @@ public class DatabaseTest {
   }
 
   @TestTemplate
+  public void pruneNonCanonicalBlobs_afterCanonicalPruneAdvancesEarliestSlot(
+      final DatabaseContext context) throws IOException {
+    initialize(context);
+
+    final BlobSidecar canonical1 =
+        dataStructureUtil.randomBlobSidecarForBlock(
+            dataStructureUtil.randomSignedBeaconBlock(1), 0);
+    final BlobSidecar canonical2 =
+        dataStructureUtil.randomBlobSidecarForBlock(
+            dataStructureUtil.randomSignedBeaconBlock(2), 0);
+    final BlobSidecar canonical3 =
+        dataStructureUtil.randomBlobSidecarForBlock(
+            dataStructureUtil.randomSignedBeaconBlock(3), 0);
+    final BlobSidecar nonCanonical2 =
+        dataStructureUtil.randomBlobSidecarForBlock(
+            dataStructureUtil.randomSignedBeaconBlock(2), 0);
+    final BlobSidecar nonCanonical3 =
+        dataStructureUtil.randomBlobSidecarForBlock(
+            dataStructureUtil.randomSignedBeaconBlock(3), 0);
+    final BlobSidecar nonCanonical5 =
+        dataStructureUtil.randomBlobSidecarForBlock(
+            dataStructureUtil.randomSignedBeaconBlock(5), 0);
+
+    database.storeBlobSidecar(canonical1);
+    database.storeBlobSidecar(canonical2);
+    database.storeBlobSidecar(canonical3);
+    database.storeNonCanonicalBlobSidecar(nonCanonical2);
+    database.storeNonCanonicalBlobSidecar(nonCanonical3);
+    database.storeNonCanonicalBlobSidecar(nonCanonical5);
+
+    // First pruning run, in the same order as BlobSidecarPruner: canonical then non-canonical.
+    // The canonical prune moves the earliest blob sidecar slot past the last pruned slot.
+    assertThat(database.pruneOldestBlobSidecars(UInt64.valueOf(2), 10, blobSidecarsArchiver))
+        .isFalse();
+    assertThat(database.getEarliestBlobSidecarSlot()).contains(UInt64.valueOf(3));
+    assertThat(
+            database.pruneOldestNonCanonicalBlobSidecars(
+                UInt64.valueOf(2), 10, blobSidecarsArchiver))
+        .isFalse();
+    assertNonCanonicalBlobSidecarKeys(
+        ZERO, UInt64.valueOf(10), blobSidecarToKey(nonCanonical3), blobSidecarToKey(nonCanonical5));
+
+    // Second run: the non-canonical blob at slot 3 sits below the new earliest slot (4)
+    assertThat(database.pruneOldestBlobSidecars(UInt64.valueOf(4), 10, blobSidecarsArchiver))
+        .isFalse();
+    assertThat(database.getEarliestBlobSidecarSlot()).contains(UInt64.valueOf(4));
+    assertThat(
+            database.pruneOldestNonCanonicalBlobSidecars(
+                UInt64.valueOf(4), 10, blobSidecarsArchiver))
+        .isFalse();
+    assertNonCanonicalBlobSidecarKeys(ZERO, UInt64.valueOf(10), blobSidecarToKey(nonCanonical5));
+    assertThat(database.getNonCanonicalBlobSidecarColumnCount()).isEqualTo(1L);
+    assertThat(database.getBlobSidecarColumnCount()).isZero();
+  }
+
+  @TestTemplate
   public void canGetAndUpdateCustodyGroupCount(final DatabaseContext context) throws IOException {
     initialize(context);
     assertThat(recentChainData.getCustodyGroupCount()).isEmpty();
@@ -3431,8 +3487,6 @@ public class DatabaseTest {
       updater.commit();
     }
 
-    assertThat(database.getLastDataColumnSidecarsProofsSlot())
-        .contains(header.getMessage().getSlot());
     assertThat(database.getDataColumnSidecarsProofs(header.getMessage().getSlot()))
         .contains(expectedProofs);
 
@@ -3442,7 +3496,6 @@ public class DatabaseTest {
       updater.commit();
     }
 
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
     assertThat(database.getDataColumnSidecarsProofs(header.getMessage().getSlot())).isEmpty();
   }
 
@@ -3466,7 +3519,7 @@ public class DatabaseTest {
             Stream.iterate(ZERO, UInt64::increment).limit(halfColumns).toList());
     // the proofs of the dropped extension columns are archived for reconstruction
     assertThat(database.getDataColumnSidecarsProofs(slot)).contains(expectedExtensionProofs);
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).contains(slot);
+    assertThat(database.getLastDataColumnSidecarArchivedSlot()).contains(slot);
   }
 
   @TestTemplate
@@ -3485,7 +3538,7 @@ public class DatabaseTest {
 
     // nothing archived and no column dropped: reconstruction from a partial half is impossible
     assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    assertThat(database.getLastDataColumnSidecarArchivedSlot()).isEmpty();
     assertThat(getStoredColumnIndices(slot)).hasSize(numberOfColumns - 1);
   }
 
@@ -3505,7 +3558,7 @@ public class DatabaseTest {
 
     // archiving must be skipped: a missing first-half column makes extension data irrecoverable
     assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    assertThat(database.getLastDataColumnSidecarArchivedSlot()).isEmpty();
     assertThat(getStoredColumnIndices(slot)).hasSize(numberOfColumns - 1);
   }
 
@@ -3559,7 +3612,7 @@ public class DatabaseTest {
     database.archiveSidecarsProofs(ZERO, slot);
 
     assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    assertThat(database.getLastDataColumnSidecarArchivedSlot()).isEmpty();
     assertThat(getStoredColumnIndices(slot)).hasSize(numberOfColumns);
   }
 
@@ -3579,7 +3632,7 @@ public class DatabaseTest {
     database.archiveSidecarsProofs(ZERO, slot);
 
     assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    assertThat(database.getLastDataColumnSidecarArchivedSlot()).isEmpty();
     assertThat(getStoredColumnIndices(slot)).hasSize(2 * numberOfColumns);
   }
 
@@ -3591,7 +3644,7 @@ public class DatabaseTest {
 
     assertThatCode(() -> database.archiveSidecarsProofs(ZERO, UInt64.valueOf(3)))
         .doesNotThrowAnyException();
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    assertThat(database.getLastDataColumnSidecarArchivedSlot()).isEmpty();
   }
 
   @TestTemplate
@@ -3698,7 +3751,27 @@ public class DatabaseTest {
     assertThat(getStoredColumnIndices(incompleteSlot)).hasSize(numberOfColumns - 1);
     assertThat(database.getDataColumnSidecarsProofs(lastSlot)).contains(lastProofs);
     assertThat(getStoredColumnIndices(lastSlot)).hasSize(halfColumns);
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).contains(lastSlot);
+    assertThat(database.getLastDataColumnSidecarArchivedSlot()).contains(lastSlot);
+  }
+
+  @TestTemplate
+  public void archiveSidecarsProofs_olderRangeKeepsLastArchivedSlot(final DatabaseContext context)
+      throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    final int numberOfColumns = spec.getNumberOfDataColumns().orElseThrow();
+    final UInt64 olderSlot = UInt64.valueOf(2);
+    final UInt64 newerSlot = UInt64.valueOf(5);
+    storeFullColumnSet(olderSlot, numberOfColumns);
+    storeFullColumnSet(newerSlot, numberOfColumns);
+
+    // the archiver takes the highest range first; older history (e.g. backfill) comes later
+    database.archiveSidecarsProofs(UInt64.valueOf(3), newerSlot);
+    database.archiveSidecarsProofs(ZERO, olderSlot);
+
+    assertThat(database.getDataColumnSidecarsProofs(olderSlot)).isPresent();
+    assertThat(database.getLastDataColumnSidecarArchivedSlot()).contains(newerSlot);
   }
 
   @TestTemplate
@@ -3767,14 +3840,14 @@ public class DatabaseTest {
     storeFullColumnSet(slot, numberOfColumns);
     database.archiveSidecarsProofs(ZERO, slot);
     assertThat(database.getDataColumnSidecarsProofs(slot)).isPresent();
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).contains(slot);
 
     // pruning the slot must drop the retained proofs alongside the sidecars
     database.pruneAllSidecars(slot, 10);
 
     assertThat(getStoredColumnIndices(slot)).isEmpty();
     assertThat(database.getDataColumnSidecarsProofs(slot)).isEmpty();
-    assertThat(database.getLastDataColumnSidecarsProofsSlot()).isEmpty();
+    // never lowered: readers exclude slots pruned with the DA window themselves
+    assertThat(database.getLastDataColumnSidecarArchivedSlot()).contains(slot);
   }
 
   private List<List<KZGProof>> storeFullColumnSet(final UInt64 slot, final int numberOfColumns) {

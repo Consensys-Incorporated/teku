@@ -200,6 +200,7 @@ public class Eth2P2PNetworkFactory {
     protected Integer eth2RpcOutstandingPingThreshold;
     protected Duration eth2StatusUpdateInterval;
     protected Spec spec = TestSpecFactory.createMinimalPhase0();
+    protected TimeProvider timeProvider = StubTimeProvider.withTimeInSeconds(1000);
     protected DebugDataDumper debugDataDumper;
     protected Supplier<Boolean> isSuperNodeSupplier;
 
@@ -276,7 +277,6 @@ public class Eth2P2PNetworkFactory {
     protected Eth2P2PNetwork buildNetwork(final P2PConfig config) {
       {
         // Setup eth2 handlers
-        final TimeProvider timeProvider = StubTimeProvider.withTimeInSeconds(1000);
         final SubnetSubscriptionService attestationSubnetService = new SubnetSubscriptionService();
         final SubnetSubscriptionService syncCommitteeSubnetService =
             new SubnetSubscriptionService();
@@ -794,6 +794,12 @@ public class Eth2P2PNetworkFactory {
     public Eth2P2PNetworkBuilder spec(final Spec spec) {
       checkNotNull(spec);
       this.spec = spec;
+      return this;
+    }
+
+    public Eth2P2PNetworkBuilder timeProvider(final TimeProvider timeProvider) {
+      checkNotNull(timeProvider);
+      this.timeProvider = timeProvider;
       return this;
     }
 

@@ -1173,14 +1173,12 @@ public class KvStoreDatabase implements Database {
       final UInt64 lastSlotToPrune,
       final int pruneLimit,
       final BlobSidecarsArchiver blobSidecarsArchiver) {
-    final Optional<UInt64> earliestBlobSidecarSlot = getEarliestBlobSidecarSlot();
-    if (earliestBlobSidecarSlot.isPresent()
-        && earliestBlobSidecarSlot.get().isGreaterThan(lastSlotToPrune)) {
-      return false;
-    }
+    // Scan from slot zero rather than the earliest blob sidecar slot: that slot tracks canonical
+    // blob sidecars only, and the canonical prune advances it before this runs, so starting there
+    // would skip non-canonical blob sidecars at slots the canonical prune has already passed.
+    // Non-canonical blob sidecars are rare, so the seek only crosses a few deletion tombstones.
     try (final Stream<SlotAndBlockRootAndBlobIndex> prunableNoncanonicalBlobKeys =
-        streamNonCanonicalBlobSidecarKeys(
-            earliestBlobSidecarSlot.orElse(UInt64.ZERO), lastSlotToPrune)) {
+        streamNonCanonicalBlobSidecarKeys(UInt64.ZERO, lastSlotToPrune)) {
       return pruneBlobSidecars(
           pruneLimit, prunableNoncanonicalBlobKeys, blobSidecarsArchiver, true);
     }
@@ -1399,8 +1397,8 @@ public class KvStoreDatabase implements Database {
   }
 
   @Override
-  public Optional<UInt64> getLastDataColumnSidecarsProofsSlot() {
-    return dao.getLastDataColumnSidecarsProofsSlot();
+  public Optional<UInt64> getLastDataColumnSidecarArchivedSlot() {
+    return dao.getLastDataColumnSidecarArchivedSlot();
   }
 
   @Override
@@ -1565,6 +1563,7 @@ public class KvStoreDatabase implements Database {
         streamDataColumnIdentifiers(startSlot, tillSlotInclusive)) {
 
       int archivedSlots = 0;
+      Optional<UInt64> highestArchivedSlot = Optional.empty();
 
       final NavigableMap<UInt64, List<DataColumnSlotAndIdentifier>> archiveMap =
           dataColumnSidecars.collect(
@@ -1582,12 +1581,21 @@ public class KvStoreDatabase implements Database {
               if (archiveSidecarsProofsForSlot(
                   slot, archiveMap.get(slot), numberOfColumns, updater)) {
                 ++archivedSlots;
+                highestArchivedSlot = Optional.of(slot);
               }
             } catch (final SszDeserializeException | KvStoreDeserializationException error) {
               // All reads for a slot precede its writes, so a malformed slot is left untouched.
               LOG.warn("Skipping archival for slot {}: malformed stored data", slot, error);
             }
           }
+          // Read at startup to serve archives without seeking the proofs column. Never lowered:
+          // older ranges (e.g. backfilled history) can be archived after newer ones.
+          highestArchivedSlot.ifPresent(
+              highest ->
+                  updater.setLastDataColumnSidecarArchivedSlot(
+                      dao.getLastDataColumnSidecarArchivedSlot()
+                          .map(highest::max)
+                          .orElse(highest)));
           updater.commit();
         }
         LOG.debug("Archived data column sidecars to proofs across {} slots", archivedSlots);

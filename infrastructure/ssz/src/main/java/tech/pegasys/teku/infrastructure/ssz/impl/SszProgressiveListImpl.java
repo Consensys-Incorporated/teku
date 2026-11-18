@@ -65,6 +65,10 @@ public class SszProgressiveListImpl<SszElementT extends SszData>
   @SuppressWarnings("unchecked")
   @Override
   protected SszElementT getImpl(final int index) {
+    final SszElementT packedView = packedView(index);
+    if (packedView != null) {
+      return packedView;
+    }
     final SszSchema<?> elementType = getSchema().getElementSchema();
     if (elementType.isPrimitive()) {
       final int elementsPerChunk = getSchema().getElementsPerChunk();

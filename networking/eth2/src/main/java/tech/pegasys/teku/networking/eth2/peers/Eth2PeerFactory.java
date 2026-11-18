@@ -81,7 +81,8 @@ public class Eth2PeerFactory {
         rpcMethods,
         statusMessageFactory,
         metadataMessagesFactory,
-        PeerChainValidator.create(spec, metricsSystem, chainDataClient, requiredCheckpoint),
+        PeerChainValidator.create(
+            spec, metricsSystem, chainDataClient, timeProvider, requiredCheckpoint),
         dataColumnSidecarSignatureValidator,
         RateTracker.create(peerBlocksRateLimit, TIME_OUT, timeProvider, "blocks"),
         RateTracker.create(peerBlobSidecarsRateLimit, TIME_OUT, timeProvider, "blob_sidecars"),
