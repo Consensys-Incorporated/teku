@@ -26,8 +26,10 @@ import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
@@ -254,6 +256,127 @@ public class SlashingProtectionImporterTest {
     assertThat(tempDir.resolve(pubkey + ".yml")).doesNotExist();
   }
 
+  @Test
+  void shouldRejectValidatorWithAttestationSourceAfterTarget(@TempDir final Path tempDir)
+      throws IOException {
+    // A source epoch far above the target would block every honest attestation - see
+    // https://github.com/Consensys-Incorporated/teku/issues/11606
+    final BLSPublicKey otherPublicKey =
+        new DataStructureUtil(TestSpecFactory.createDefault()).randomPublicKey();
+    final Path importFile = tempDir.resolve("import.json");
+    Files.writeString(
+        importFile,
+        interchangeJson(
+            signingHistoryJson(publicKey, "999999999", "1"),
+            signingHistoryJson(otherPublicKey, "3", "4")));
+    final Path recordFile = tempDir.resolve(pubkey + ".yml");
+    final ValidatorSigningRecord existingRecord =
+        new ValidatorSigningRecord(
+            Optional.of(GENESIS_ROOT), UInt64.valueOf(5), UInt64.ONE, UInt64.valueOf(2));
+    Files.write(recordFile, existingRecord.toBytes().toArrayUnsafe());
+
+    final SlashingProtectionImporter importer = new SlashingProtectionImporter(tempDir);
+    assertThat(importer.initialise(importFile.toFile())).isEmpty();
+    final Map<BLSPublicKey, String> errors = importer.updateLocalRecords(__ -> {});
+
+    assertThat(errors)
+        .containsExactly(
+            Map.entry(
+                publicKey,
+                "Slashing protection data could not be imported: "
+                    + "signed attestation source epoch 999999999 is after its target epoch 1"));
+    assertThat(loadSigningRecord(recordFile.toFile())).isEqualTo(existingRecord);
+    final File otherRecordFile =
+        tempDir
+            .resolve(otherPublicKey.toBytesCompressed().toUnprefixedHexString() + ".yml")
+            .toFile();
+    assertThat(loadSigningRecord(otherRecordFile))
+        .isEqualTo(
+            new ValidatorSigningRecord(
+                Optional.of(GENESIS_ROOT), UInt64.ZERO, UInt64.valueOf(3), UInt64.valueOf(4)));
+  }
+
+  @Test
+  void shouldRejectSourceAfterTargetHiddenByLaterAttestation(@TempDir final Path tempDir)
+      throws IOException {
+    // The max source and max target (9, 10) look valid, so the check must use each attestation
+    final Path importFile = tempDir.resolve("import.json");
+    Files.writeString(
+        importFile,
+        interchangeJson(
+            signingHistoryJson(publicKey, List.of(Map.entry("8", "7"), Map.entry("9", "10")))));
+
+    final SlashingProtectionImporter importer = new SlashingProtectionImporter(tempDir);
+    assertThat(importer.initialise(importFile.toFile())).isEmpty();
+
+    assertThat(importer.updateSigningRecord(publicKey, __ -> {}))
+        .contains(
+            "Slashing protection data could not be imported: "
+                + "signed attestation source epoch 8 is after its target epoch 7");
+    assertThat(tempDir.resolve(pubkey + ".yml")).doesNotExist();
+  }
+
+  @Test
+  void shouldRejectValidatorWhenAnyDuplicateEntryIsInvalid(@TempDir final Path tempDir)
+      throws IOException {
+    final Path importFile = tempDir.resolve("import.json");
+    Files.writeString(
+        importFile,
+        interchangeJson(
+            signingHistoryJson(publicKey, "3", "4"), signingHistoryJson(publicKey, "8", "7")));
+
+    final SlashingProtectionImporter importer = new SlashingProtectionImporter(tempDir);
+    assertThat(importer.initialise(importFile.toFile())).isEmpty();
+
+    assertThat(importer.updateLocalRecords(__ -> {})).containsOnlyKeys(publicKey);
+    assertThat(tempDir.resolve(pubkey + ".yml")).doesNotExist();
+  }
+
+  @Test
+  void shouldClearRejectionsWhenInitialisedAgain(@TempDir final Path tempDir) throws IOException {
+    final Path invalidFile = tempDir.resolve("invalid.json");
+    Files.writeString(invalidFile, interchangeJson(signingHistoryJson(publicKey, "8", "7")));
+    final Path validFile = tempDir.resolve("valid.json");
+    Files.writeString(validFile, interchangeJson(signingHistoryJson(publicKey, "3", "4")));
+
+    final SlashingProtectionImporter importer = new SlashingProtectionImporter(tempDir);
+    assertThat(importer.initialise(invalidFile.toFile())).isEmpty();
+    assertThat(importer.updateLocalRecords(__ -> {})).containsOnlyKeys(publicKey);
+
+    assertThat(importer.initialise(validFile.toFile())).isEmpty();
+    assertThat(importer.updateLocalRecords(__ -> {})).isEmpty();
+  }
+
+  @Test
+  void shouldKeepExistingGenesisValidatorsRootWhenImportDataHasNone(@TempDir final Path tempDir)
+      throws IOException {
+    final Path importFile = tempDir.resolve("import.json");
+    Files.writeString(
+        importFile,
+        "{\"metadata\":{\"interchange_format_version\":\"5\"},\"data\":["
+            + signingHistoryJson(publicKey, "3", "4")
+            + "]}");
+    final Path recordFile = tempDir.resolve(pubkey + ".yml");
+    Files.write(
+        recordFile,
+        new ValidatorSigningRecord(
+                Optional.of(GENESIS_ROOT), UInt64.valueOf(5), UInt64.ONE, UInt64.valueOf(2))
+            .toBytes()
+            .toArrayUnsafe());
+
+    final SlashingProtectionImporter importer = new SlashingProtectionImporter(tempDir);
+    assertThat(importer.initialise(importFile.toFile())).isEmpty();
+    assertThat(importer.updateLocalRecords(__ -> {})).isEmpty();
+
+    assertThat(loadSigningRecord(recordFile.toFile()))
+        .isEqualTo(
+            new ValidatorSigningRecord(
+                Optional.of(GENESIS_ROOT),
+                UInt64.valueOf(5),
+                UInt64.valueOf(3),
+                UInt64.valueOf(4)));
+  }
+
   private static String interchangeJson(final String... signingHistories) {
     return "{\"metadata\":{\"interchange_format_version\":\"5\","
         + "\"genesis_validators_root\":\""
@@ -265,13 +388,29 @@ public class SlashingProtectionImporterTest {
 
   private static String signingHistoryJson(
       final BLSPublicKey publicKey, final String sourceEpoch, final String targetEpoch) {
+    return signingHistoryJson(publicKey, List.of(Map.entry(sourceEpoch, targetEpoch)));
+  }
+
+  /**
+   * @param attestations each as a source epoch to target epoch entry
+   */
+  private static String signingHistoryJson(
+      final BLSPublicKey publicKey, final List<Map.Entry<String, String>> attestations) {
+    final String attestationsJson =
+        attestations.stream()
+            .map(
+                attestation ->
+                    "{\"source_epoch\":\""
+                        + attestation.getKey()
+                        + "\",\"target_epoch\":\""
+                        + attestation.getValue()
+                        + "\"}")
+            .collect(Collectors.joining(","));
     return "{\"pubkey\":\""
         + publicKey.toHexString()
-        + "\",\"signed_blocks\":[],\"signed_attestations\":[{\"source_epoch\":\""
-        + sourceEpoch
-        + "\",\"target_epoch\":\""
-        + targetEpoch
-        + "\"}]}";
+        + "\",\"signed_blocks\":[],\"signed_attestations\":["
+        + attestationsJson
+        + "]}";
   }
 
   private ValidatorSigningRecord loadSigningRecord(final File repairedRuleFile) throws IOException {

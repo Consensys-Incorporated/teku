@@ -103,7 +103,47 @@ public record SigningHistory(
   }
 
   /**
+   * Finds a signed attestation whose source epoch is after its target epoch.
+   *
+   * <p>No real attestation looks like this: its source is a justified checkpoint from before its
+   * target. Importing one would set the stored source epoch above every attestation the validator
+   * can honestly make, so it would never be able to attest again. EIP-3076 test vectors mark such
+   * data as slashable, which lets an importer refuse it.
+   *
+   * @return a description of the invalid attestation, or empty if every attestation is valid
+   */
+  public Optional<String> findAttestationWithSourceAfterTarget() {
+    return signedAttestations.stream()
+        .filter(
+            attestation ->
+                attestation.sourceEpoch() != null
+                    && attestation.targetEpoch() != null
+                    && attestation.sourceEpoch().isGreaterThan(attestation.targetEpoch()))
+        .findFirst()
+        .map(
+            attestation ->
+                "signed attestation source epoch "
+                    + attestation.sourceEpoch()
+                    + " is after its target epoch "
+                    + attestation.targetEpoch());
+  }
+
+  /**
+   * Finds anything in this history that prevents it from being imported.
+   *
+   * @return a description of the problem, or empty if the history can be imported
+   * @see #findUnsupportedValue()
+   * @see #findAttestationWithSourceAfterTarget()
+   */
+  public Optional<String> findImportError() {
+    return findUnsupportedValue().or(this::findAttestationWithSourceAfterTarget);
+  }
+
+  /**
    * Summarises this history as a {@link ValidatorSigningRecord}, merged with any existing record.
+   *
+   * <p>An attestation with its source after its target is not rejected here, so existing records
+   * holding one can still be raised. Importers check {@link #findImportError()} first.
    *
    * @throws IllegalArgumentException if the history contains a value reported by {@link
    *     #findUnsupportedValue()}
