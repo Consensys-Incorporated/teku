@@ -35,7 +35,8 @@ public class ReferenceTestFinder {
           TestFork.DENEB,
           TestFork.ELECTRA,
           TestFork.FULU,
-          TestFork.GLOAS);
+          TestFork.GLOAS,
+          TestFork.EIP8483);
 
   /** Finds every reference test in the location configured by system properties. */
   @MustBeClosed

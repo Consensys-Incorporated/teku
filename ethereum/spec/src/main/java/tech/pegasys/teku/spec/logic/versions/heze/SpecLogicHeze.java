@@ -35,12 +35,12 @@ import tech.pegasys.teku.spec.logic.common.withdrawals.WithdrawalsHelpers;
 import tech.pegasys.teku.spec.logic.versions.altair.statetransition.epoch.ValidatorStatusFactoryAltair;
 import tech.pegasys.teku.spec.logic.versions.bellatrix.helpers.BellatrixTransitionHelpers;
 import tech.pegasys.teku.spec.logic.versions.capella.operations.validation.OperationValidatorCapella;
+import tech.pegasys.teku.spec.logic.versions.eip8483.execution.ExecutionRequestsProcessorEip8483;
 import tech.pegasys.teku.spec.logic.versions.electra.operations.validation.VoluntaryExitValidatorElectra;
 import tech.pegasys.teku.spec.logic.versions.fulu.util.BlindBlockUtilFulu;
 import tech.pegasys.teku.spec.logic.versions.fulu.util.BlockProposalUtilFulu;
 import tech.pegasys.teku.spec.logic.versions.gloas.block.BlockProcessorGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.execution.ExecutionPayloadVerifierGloas;
-import tech.pegasys.teku.spec.logic.versions.gloas.execution.ExecutionRequestsProcessorGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.BeaconStateAccessorsGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.BeaconStateMutatorsGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas;
@@ -83,7 +83,7 @@ public class SpecLogicHeze extends AbstractSpecLogic {
       final ValidatorStatusFactoryAltair validatorStatusFactory,
       final EpochProcessorHeze epochProcessor,
       final WithdrawalsHelpersGloas withdrawalsHelpers,
-      final ExecutionRequestsProcessorGloas executionRequestsProcessor,
+      final ExecutionRequestsProcessorEip8483 executionRequestsProcessor,
       final ExecutionRequestsDataCodec executionRequestsDataCodec,
       final BlockProcessorGloas blockProcessor,
       final ExecutionPayloadVerifierGloas executionPayloadVerifier,
@@ -194,8 +194,8 @@ public class SpecLogicHeze extends AbstractSpecLogic {
     final WithdrawalsHelpersGloas withdrawalsHelpers =
         new WithdrawalsHelpersGloas(
             schemaDefinitions, miscHelpers, config, predicates, beaconStateMutators);
-    final ExecutionRequestsProcessorGloas executionRequestsProcessor =
-        new ExecutionRequestsProcessorGloas(
+    final ExecutionRequestsProcessorEip8483 executionRequestsProcessor =
+        new ExecutionRequestsProcessorEip8483(
             schemaDefinitions,
             miscHelpers,
             config,

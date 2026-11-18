@@ -27,8 +27,16 @@ public class SignedBlindedExecutionPayloadEnvelopeSchema
         SignedBlindedExecutionPayloadEnvelope, BlindedExecutionPayloadEnvelope, SszSignature> {
 
   public SignedBlindedExecutionPayloadEnvelopeSchema(final SchemaRegistry schemaRegistry) {
+    this(schemaRegistry, "SignedBlindedExecutionPayloadEnvelope");
+  }
+
+  /**
+   * Later milestones (e.g. EIP-8483) use a milestone-specific name as the embedded types differ.
+   */
+  public SignedBlindedExecutionPayloadEnvelopeSchema(
+      final SchemaRegistry schemaRegistry, final String containerName) {
     super(
-        "SignedBlindedExecutionPayloadEnvelope",
+        containerName,
         namedSchema("message", schemaRegistry.get(BLINDED_EXECUTION_PAYLOAD_ENVELOPE_SCHEMA)),
         namedSchema("signature", SszSignatureSchema.INSTANCE));
   }

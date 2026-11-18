@@ -5,10 +5,16 @@
   "properties" : {
     "version" : {
       "type" : "string",
-      "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze" ]
+      "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "eip8483", "heze" ]
     },
     "data" : {
-      "$ref" : "#/components/schemas/ExecutionPayloadEnvelope"
+      "title" : "ExecutionPayloadEnvelope",
+      "type" : "object",
+      "oneOf" : [ {
+        "$ref" : "#/components/schemas/ExecutionPayloadEnvelope"
+      }, {
+        "$ref" : "#/components/schemas/ExecutionPayloadEnvelopeEip8483"
+      } ]
     }
   }
 }

@@ -73,6 +73,10 @@ public interface SpecConfig extends NetworkingSpecConfig {
 
   UInt64 getGloasForkEpoch();
 
+  Bytes4 getEip8483ForkVersion();
+
+  UInt64 getEip8483ForkEpoch();
+
   Bytes4 getHezeForkVersion();
 
   UInt64 getHezeForkEpoch();
@@ -240,6 +244,10 @@ public interface SpecConfig extends NetworkingSpecConfig {
   }
 
   default Optional<SpecConfigGloas> toVersionGloas() {
+    return Optional.empty();
+  }
+
+  default Optional<SpecConfigEip8483> toVersionEip8483() {
     return Optional.empty();
   }
 

@@ -15,6 +15,8 @@ package tech.pegasys.teku.spec.datastructures.execution;
 
 import java.util.List;
 import java.util.function.Supplier;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.BuilderPqRegistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.ValidatorPqRegistrationRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.ConsolidationRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.DepositRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.WithdrawalRequest;
@@ -38,6 +40,18 @@ public interface ExecutionRequestsBuilder {
   default ExecutionRequestsBuilder builderExits(
       final Supplier<List<BuilderExitRequest>> builderExits) {
     // NO-OP (until Gloas)
+    return this;
+  }
+
+  default ExecutionRequestsBuilder validatorPqRegistrations(
+      final Supplier<List<ValidatorPqRegistrationRequest>> validatorPqRegistrations) {
+    // NO-OP (until EIP-8483)
+    return this;
+  }
+
+  default ExecutionRequestsBuilder builderPqRegistrations(
+      final Supplier<List<BuilderPqRegistrationRequest>> builderPqRegistrations) {
+    // NO-OP (until EIP-8483)
     return this;
   }
 

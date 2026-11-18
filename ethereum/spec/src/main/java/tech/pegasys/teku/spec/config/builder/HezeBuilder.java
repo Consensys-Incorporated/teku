@@ -19,12 +19,12 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.BiConsumer;
 import tech.pegasys.teku.spec.config.SpecConfigAndParent;
-import tech.pegasys.teku.spec.config.SpecConfigGloas;
+import tech.pegasys.teku.spec.config.SpecConfigEip8483;
 import tech.pegasys.teku.spec.config.SpecConfigHeze;
 import tech.pegasys.teku.spec.config.SpecConfigHezeImpl;
 
 public class HezeBuilder extends BaseForkBuilder
-    implements ForkConfigBuilder<SpecConfigGloas, SpecConfigHeze> {
+    implements ForkConfigBuilder<SpecConfigEip8483, SpecConfigHeze> {
 
   private Integer inclusionListDueBps;
   private Integer maxRequestInclusionList;
@@ -37,7 +37,7 @@ public class HezeBuilder extends BaseForkBuilder
 
   @Override
   public SpecConfigAndParent<SpecConfigHeze> build(
-      final SpecConfigAndParent<SpecConfigGloas> specConfigAndParent) {
+      final SpecConfigAndParent<SpecConfigEip8483> specConfigAndParent) {
     return SpecConfigAndParent.of(
         new SpecConfigHezeImpl(
             specConfigAndParent.specConfig(),

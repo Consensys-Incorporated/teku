@@ -402,7 +402,9 @@
               "source_address": "0x4e7a3e46b68dc1b093e7eac2de62df5e0d90c714",
               "pubkey": "0xa2c93c9d113608bd1d6af9993b4de9579fb695111cbb894cf2c36d3de421f2c3f78ab5a3f36f0fc02dd8bdc3f3ff8523"
             }
-          ]
+          ],
+          "validator_pq_registrations": [],
+          "builder_pq_registrations": []
         }
       }
     },
@@ -499,7 +501,9 @@
             "source_address": "0xf2f9334452d862a2d52ed1d971f402ab399d6fd6",
             "pubkey": "0xb9546c91cbd47bcfa488a983fd877aca4c8291f35064c6df05213232a4e5794f32a0dd52deb6d3c060fbcd823872340f"
           }
-        ]
+        ],
+        "validator_pq_registrations": [],
+        "builder_pq_registrations": []
       },
       "builder_index": "974258",
       "beacon_block_root": "0x78e10a44b2e97d848903a4093ab2924665b268d484a68e61874738bd2e79f5e7",

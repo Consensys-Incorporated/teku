@@ -122,7 +122,7 @@ public class ForkAwareTimeBasedEventAdapter implements BeaconChainEventAdapter {
     switch (currentMilestone) {
       case PHASE0 -> activatePhase0();
       case ALTAIR, BELLATRIX, CAPELLA, DENEB, ELECTRA, FULU -> activateAltair();
-      case GLOAS, HEZE -> activateGloas();
+      case GLOAS, EIP8483, HEZE -> activateGloas();
     }
   }
 

@@ -16,6 +16,8 @@ package tech.pegasys.teku.spec.logic.common.execution;
 import java.util.List;
 import java.util.function.Supplier;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.BuilderPqRegistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.ValidatorPqRegistrationRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.ConsolidationRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.DepositRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.WithdrawalRequest;
@@ -42,4 +44,16 @@ public interface ExecutionRequestsProcessor {
 
   void processBuilderExitRequests(
       MutableBeaconState state, List<BuilderExitRequest> builderExitRequests);
+
+  default void processValidatorPqRegistrationRequests(
+      final MutableBeaconState state,
+      final List<ValidatorPqRegistrationRequest> validatorPqRegistrationRequests) {
+    // NO-OP (until EIP-8483)
+  }
+
+  default void processBuilderPqRegistrationRequests(
+      final MutableBeaconState state,
+      final List<BuilderPqRegistrationRequest> builderPqRegistrationRequests) {
+    // NO-OP (until EIP-8483)
+  }
 }

@@ -146,6 +146,6 @@ class GetPayloadAttestationDataTest extends AbstractMigratedBeaconHandlerTest {
 
     assertThat(schema)
         .contains(
-            "\"enum\":[\"phase0\",\"altair\",\"bellatrix\",\"capella\",\"deneb\",\"electra\",\"fulu\",\"gloas\",\"heze\"]");
+            "\"enum\":[\"phase0\",\"altair\",\"bellatrix\",\"capella\",\"deneb\",\"electra\",\"fulu\",\"gloas\",\"eip8483\",\"heze\"]");
   }
 }

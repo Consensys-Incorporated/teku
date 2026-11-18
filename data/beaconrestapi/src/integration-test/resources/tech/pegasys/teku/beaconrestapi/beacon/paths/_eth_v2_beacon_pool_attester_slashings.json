@@ -22,6 +22,7 @@
                 "electra",
                 "fulu",
                 "gloas",
+                "eip8483",
                 "heze"
               ],
               "example": "phase0"
@@ -69,7 +70,7 @@
       "in" : "header",
       "schema" : {
         "type" : "string",
-        "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze" ],
+        "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "eip8483", "heze" ],
         "description" : "Version of the attester slashing being submitted."
       }
     } ],

@@ -104,6 +104,10 @@ public abstract class AbstractRpcMethodIntegrationTest {
         nextSpec = Optional.of(TestSpecFactory.createMinimalWithGloasForkEpoch(nextSpecEpoch));
       }
       case GLOAS -> {
+        checkState(nextSpecMilestone.equals(SpecMilestone.EIP8483), "next spec should be eip8483");
+        nextSpec = Optional.of(TestSpecFactory.createMinimalWithEip8483ForkEpoch(nextSpecEpoch));
+      }
+      case EIP8483 -> {
         checkState(nextSpecMilestone.equals(SpecMilestone.HEZE), "next spec should be heze");
         nextSpec = Optional.of(TestSpecFactory.createMinimalWithHezeForkEpoch(nextSpecEpoch));
       }
@@ -336,7 +340,7 @@ public abstract class AbstractRpcMethodIntegrationTest {
       case CAPELLA -> BeaconBlockBodyCapella.class;
       case DENEB -> BeaconBlockBodyDeneb.class;
       case ELECTRA, FULU -> BeaconBlockBodyElectra.class;
-      case GLOAS, HEZE -> BeaconBlockBodyGloas.class;
+      case GLOAS, EIP8483, HEZE -> BeaconBlockBodyGloas.class;
     };
   }
 }

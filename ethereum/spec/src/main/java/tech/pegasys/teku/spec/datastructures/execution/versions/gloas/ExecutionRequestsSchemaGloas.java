@@ -124,12 +124,14 @@ public class ExecutionRequestsSchemaGloas
     return (SszListSchema<ConsolidationRequest, ?>) getChildSchema(getFieldIndex(CONSOLIDATIONS));
   }
 
+  @Override
   @SuppressWarnings("unchecked")
   public SszListSchema<BuilderDepositRequest, ?> getBuilderDepositRequestsSchema() {
     return (SszListSchema<BuilderDepositRequest, ?>)
         getChildSchema(getFieldIndex(BUILDER_DEPOSITS));
   }
 
+  @Override
   @SuppressWarnings("unchecked")
   public SszListSchema<BuilderExitRequest, ?> getBuilderExitRequestsSchema() {
     return (SszListSchema<BuilderExitRequest, ?>) getChildSchema(getFieldIndex(BUILDER_EXITS));

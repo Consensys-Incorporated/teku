@@ -67,7 +67,7 @@ class TimeBasedEventAdapterTest {
           new Phase0TimeBasedEventAdapter(taskScheduler, validatorTimingChannel, onLastSlot, spec);
       case ALTAIR, BELLATRIX, CAPELLA, DENEB, ELECTRA, FULU ->
           new AltairTimeBasedEventAdapter(taskScheduler, validatorTimingChannel, onLastSlot, spec);
-      case GLOAS, HEZE ->
+      case GLOAS, EIP8483, HEZE ->
           new GloasTimeBasedEventAdapter(taskScheduler, validatorTimingChannel, onLastSlot, spec);
     };
   }

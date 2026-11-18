@@ -133,6 +133,8 @@ public class BeaconBlockBodyBuilderGloas extends BeaconBlockBodyBuilderElectra {
         getBlsToExecutionChanges(),
         signedExecutionPayloadBid,
         payloadAttestations,
-        parentExecutionRequests);
+        // The parent may be from an earlier milestone with a different ExecutionRequests type
+        // (EIP-8483 fork boundary)
+        schema.getParentExecutionRequestsSchema().convertFrom(parentExecutionRequests));
   }
 }

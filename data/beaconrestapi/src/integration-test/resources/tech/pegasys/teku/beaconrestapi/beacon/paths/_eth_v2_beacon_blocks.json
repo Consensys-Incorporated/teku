@@ -20,7 +20,7 @@
       "in" : "header",
       "schema" : {
         "type" : "string",
-        "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze" ],
+        "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "eip8483", "heze" ],
         "description" : "Version of the block being submitted."
       }
     }, {
@@ -59,6 +59,8 @@
               "$ref" : "#/components/schemas/SignedBlockContentsFulu"
             }, {
               "$ref" : "#/components/schemas/SignedBeaconBlockGloas"
+            }, {
+              "$ref" : "#/components/schemas/SignedBeaconBlockEip8483"
             } ]
           }
         }

@@ -226,6 +226,16 @@ public class DelegatingSpecConfig implements SpecConfig {
   }
 
   @Override
+  public Bytes4 getEip8483ForkVersion() {
+    return specConfig.getEip8483ForkVersion();
+  }
+
+  @Override
+  public UInt64 getEip8483ForkEpoch() {
+    return specConfig.getEip8483ForkEpoch();
+  }
+
+  @Override
   public Bytes4 getHezeForkVersion() {
     return specConfig.getHezeForkVersion();
   }

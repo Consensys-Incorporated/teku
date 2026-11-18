@@ -120,6 +120,8 @@ public abstract class Eth2ReferenceTestCase {
           .putAll(NetworkingTests.NETWORKING_TEST_TYPES)
           .build();
 
+  private static final ImmutableMap<String, TestExecutor> EIP8483_TEST_TYPES = GLOAS_TEST_TYPES;
+
   protected void runReferenceTest(final TestDefinition testDefinition) throws Throwable {
     SszMaxLengthFixtures.REJECTED_BY_SSZ_LIMITS.run(testDefinition, getExecutorFor(testDefinition));
   }
@@ -136,6 +138,7 @@ public abstract class Eth2ReferenceTestCase {
           case TestFork.ELECTRA -> ELECTRA_TEST_TYPES.get(testDefinition.getTestType());
           case TestFork.FULU -> FULU_TEST_TYPES.get(testDefinition.getTestType());
           case TestFork.GLOAS -> GLOAS_TEST_TYPES.get(testDefinition.getTestType());
+          case TestFork.EIP8483 -> EIP8483_TEST_TYPES.get(testDefinition.getTestType());
           default -> null;
         };
 

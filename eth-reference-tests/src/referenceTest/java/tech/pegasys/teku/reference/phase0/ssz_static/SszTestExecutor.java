@@ -48,6 +48,7 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsBellatrix;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsCapella;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsDeneb;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsEip8483;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsElectra;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsFulu;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
@@ -355,6 +356,30 @@ public class SszTestExecutor<T extends SszData> implements TestExecutor {
               new SszTestExecutor<>(
                   schemas ->
                       SchemaDefinitionsGloas.required(schemas).getBuilderExitRequestSchema()))
+          // EIP-8483 types
+          .put(
+              "ssz_static/ValidatorPQRegistrationRequest",
+              new SszTestExecutor<>(
+                  schemas ->
+                      SchemaDefinitionsEip8483.required(schemas)
+                          .getValidatorPqRegistrationRequestSchema()))
+          .put(
+              "ssz_static/BuilderPQRegistrationRequest",
+              new SszTestExecutor<>(
+                  schemas ->
+                      SchemaDefinitionsEip8483.required(schemas)
+                          .getBuilderPqRegistrationRequestSchema()))
+          .put(
+              "ssz_static/ValidatorPQRegistration",
+              new SszTestExecutor<>(
+                  schemas ->
+                      SchemaDefinitionsEip8483.required(schemas)
+                          .getValidatorPqRegistrationSchema()))
+          .put(
+              "ssz_static/BuilderPQRegistration",
+              new SszTestExecutor<>(
+                  schemas ->
+                      SchemaDefinitionsEip8483.required(schemas).getBuilderPqRegistrationSchema()))
           .put("ssz_static/ForkChoiceNode", IGNORE_TESTS)
 
           // Legacy Schemas (Not yet migrated to SchemaDefinitions)

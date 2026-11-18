@@ -27,8 +27,16 @@ public class SignedExecutionPayloadEnvelopeSchema
         SignedExecutionPayloadEnvelope, ExecutionPayloadEnvelope, SszSignature> {
 
   public SignedExecutionPayloadEnvelopeSchema(final SchemaRegistry schemaRegistry) {
+    this(schemaRegistry, "SignedExecutionPayloadEnvelope");
+  }
+
+  /**
+   * Later milestones (e.g. EIP-8483) use a milestone-specific name as the embedded types differ.
+   */
+  public SignedExecutionPayloadEnvelopeSchema(
+      final SchemaRegistry schemaRegistry, final String containerName) {
     super(
-        "SignedExecutionPayloadEnvelope",
+        containerName,
         namedSchema("message", schemaRegistry.get(EXECUTION_PAYLOAD_ENVELOPE_SCHEMA)),
         namedSchema("signature", SszSignatureSchema.INSTANCE));
   }

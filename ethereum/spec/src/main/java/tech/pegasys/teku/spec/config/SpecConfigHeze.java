@@ -15,7 +15,7 @@ package tech.pegasys.teku.spec.config;
 
 import java.util.Optional;
 
-public interface SpecConfigHeze extends SpecConfigGloas, NetworkingSpecConfigHeze {
+public interface SpecConfigHeze extends SpecConfigEip8483, NetworkingSpecConfigHeze {
 
   static SpecConfigHeze required(final SpecConfig specConfig) {
     return specConfig

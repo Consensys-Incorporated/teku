@@ -42,8 +42,18 @@ public class SignedExecutionPayloadEnvelopeContentsSchema
 
   public SignedExecutionPayloadEnvelopeContentsSchema(
       final SpecConfigFulu specConfig, final SchemaRegistry schemaRegistry) {
+    this(specConfig, schemaRegistry, "SignedExecutionPayloadEnvelopeContents");
+  }
+
+  /**
+   * Later milestones (e.g. EIP-8483) use a milestone-specific name as the embedded types differ.
+   */
+  public SignedExecutionPayloadEnvelopeContentsSchema(
+      final SpecConfigFulu specConfig,
+      final SchemaRegistry schemaRegistry,
+      final String containerName) {
     super(
-        "SignedExecutionPayloadEnvelopeContents",
+        containerName,
         namedSchema(
             "signed_execution_payload_envelope",
             schemaRegistry.get(SIGNED_EXECUTION_PAYLOAD_ENVELOPE_SCHEMA)),

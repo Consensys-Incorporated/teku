@@ -41,8 +41,16 @@ public class BlindedExecutionPayloadEnvelopeSchema
   private static final boolean[] ACTIVE_FIELDS = ProgressiveSchemaUtils.allActive(5);
 
   public BlindedExecutionPayloadEnvelopeSchema(final SchemaRegistry schemaRegistry) {
+    this(schemaRegistry, "BlindedExecutionPayloadEnvelope");
+  }
+
+  /**
+   * Later milestones (e.g. EIP-8483) use a milestone-specific name as the embedded types differ.
+   */
+  public BlindedExecutionPayloadEnvelopeSchema(
+      final SchemaRegistry schemaRegistry, final String containerName) {
     super(
-        "BlindedExecutionPayloadEnvelope",
+        containerName,
         ACTIVE_FIELDS,
         namedSchema(
             "payload_header",

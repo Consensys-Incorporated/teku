@@ -78,10 +78,12 @@ public class ExecutionRequestsGloas
     return getField2().stream().toList();
   }
 
+  @Override
   public List<BuilderDepositRequest> getBuilderDeposits() {
     return getField3().stream().toList();
   }
 
+  @Override
   public List<BuilderExitRequest> getBuilderExits() {
     return getField4().stream().toList();
   }

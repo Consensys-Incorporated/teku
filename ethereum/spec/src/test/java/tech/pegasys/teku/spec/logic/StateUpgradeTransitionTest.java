@@ -37,6 +37,7 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.altair.B
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.bellatrix.BeaconStateBellatrix;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.capella.BeaconStateCapella;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.deneb.BeaconStateDeneb;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.eip8483.BeaconStateEip8483;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.BeaconStateElectra;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.fulu.BeaconStateFulu;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
@@ -107,6 +108,11 @@ public class StateUpgradeTransitionTest {
             beforeBeaconStateClass = BeaconStateFulu.class;
             afterBeaconStateClass = BeaconStateGloas.class;
             yield TestSpecFactory.createMinimalWithGloasForkEpoch(milestoneTransitionEpoch);
+          }
+          case EIP8483 -> {
+            beforeBeaconStateClass = BeaconStateGloas.class;
+            afterBeaconStateClass = BeaconStateEip8483.class;
+            yield TestSpecFactory.createMinimalWithEip8483ForkEpoch(milestoneTransitionEpoch);
           }
           case HEZE -> {
             beforeBeaconStateClass = BeaconStateGloas.class;

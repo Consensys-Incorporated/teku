@@ -42,6 +42,7 @@ import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
+import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
 import tech.pegasys.teku.infrastructure.http.UrlSanitizer;
 import tech.pegasys.teku.infrastructure.io.MultilineEntriesReader;
@@ -134,6 +135,8 @@ public class Eth2NetworkConfiguration {
   private final Optional<UInt64> electraForkEpoch;
   private final Optional<UInt64> fuluForkEpoch;
   private final Optional<UInt64> gloasForkEpoch;
+  private final Optional<UInt64> eip8483ForkEpoch;
+  private final Optional<Bytes4> eip8483ForkVersion;
   private final Optional<UInt64> hezeForkEpoch;
   private final Eth1Address eth1DepositContractAddress;
   private final Optional<UInt64> eth1DepositContractDeployBlock;
@@ -179,6 +182,8 @@ public class Eth2NetworkConfiguration {
       final Optional<UInt64> electraForkEpoch,
       final Optional<UInt64> fuluForkEpoch,
       final Optional<UInt64> gloasForkEpoch,
+      final Optional<UInt64> eip8483ForkEpoch,
+      final Optional<Bytes4> eip8483ForkVersion,
       final Optional<UInt64> hezeForkEpoch,
       final Optional<Bytes32> terminalBlockHashOverride,
       final Optional<UInt256> totalTerminalDifficultyOverride,
@@ -216,6 +221,8 @@ public class Eth2NetworkConfiguration {
     this.electraForkEpoch = electraForkEpoch;
     this.fuluForkEpoch = fuluForkEpoch;
     this.gloasForkEpoch = gloasForkEpoch;
+    this.eip8483ForkEpoch = eip8483ForkEpoch;
+    this.eip8483ForkVersion = eip8483ForkVersion;
     this.hezeForkEpoch = hezeForkEpoch;
     this.eth1DepositContractAddress =
         eth1DepositContractAddress == null
@@ -318,6 +325,7 @@ public class Eth2NetworkConfiguration {
       case ELECTRA -> electraForkEpoch;
       case FULU -> fuluForkEpoch;
       case GLOAS -> gloasForkEpoch;
+      case EIP8483 -> eip8483ForkEpoch;
       case HEZE -> hezeForkEpoch;
       default -> Optional.empty();
     };
@@ -455,6 +463,8 @@ public class Eth2NetworkConfiguration {
         && Objects.equals(electraForkEpoch, that.electraForkEpoch)
         && Objects.equals(fuluForkEpoch, that.fuluForkEpoch)
         && Objects.equals(gloasForkEpoch, that.gloasForkEpoch)
+        && Objects.equals(eip8483ForkEpoch, that.eip8483ForkEpoch)
+        && Objects.equals(eip8483ForkVersion, that.eip8483ForkVersion)
         && Objects.equals(hezeForkEpoch, that.hezeForkEpoch)
         && Objects.equals(eth1DepositContractAddress, that.eth1DepositContractAddress)
         && Objects.equals(eth1DepositContractDeployBlock, that.eth1DepositContractDeployBlock)
@@ -481,6 +491,8 @@ public class Eth2NetworkConfiguration {
         electraForkEpoch,
         fuluForkEpoch,
         gloasForkEpoch,
+        eip8483ForkEpoch,
+        eip8483ForkVersion,
         hezeForkEpoch,
         eth1DepositContractAddress,
         eth1DepositContractDeployBlock,
@@ -529,6 +541,8 @@ public class Eth2NetworkConfiguration {
     private Optional<UInt64> electraForkEpoch = Optional.empty();
     private Optional<UInt64> fuluForkEpoch = Optional.empty();
     private Optional<UInt64> gloasForkEpoch = Optional.empty();
+    private Optional<UInt64> eip8483ForkEpoch = Optional.empty();
+    private Optional<Bytes4> eip8483ForkVersion = Optional.empty();
     private Optional<UInt64> hezeForkEpoch = Optional.empty();
     private Optional<Bytes32> terminalBlockHashOverride = Optional.empty();
     private Optional<UInt256> totalTerminalDifficultyOverride = Optional.empty();
@@ -581,6 +595,8 @@ public class Eth2NetworkConfiguration {
                   electraForkEpoch.ifPresent(builder::electraForkEpoch);
                   fuluForkEpoch.ifPresent(builder::fuluForkEpoch);
                   gloasForkEpoch.ifPresent(builder::gloasForkEpoch);
+                  eip8483ForkEpoch.ifPresent(builder::eip8483ForkEpoch);
+                  eip8483ForkVersion.ifPresent(builder::eip8483ForkVersion);
                   hezeForkEpoch.ifPresent(builder::hezeForkEpoch);
                   builder.bellatrixBuilder(
                       bellatrixBuilder -> {
@@ -636,6 +652,8 @@ public class Eth2NetworkConfiguration {
           electraForkEpoch,
           fuluForkEpoch,
           gloasForkEpoch,
+          eip8483ForkEpoch,
+          eip8483ForkVersion,
           hezeForkEpoch,
           terminalBlockHashOverride,
           totalTerminalDifficultyOverride,
@@ -935,6 +953,19 @@ public class Eth2NetworkConfiguration {
     public Builder gloasForkEpoch(final UInt64 gloasForkEpoch) {
       checkNotNull(gloasForkEpoch);
       this.gloasForkEpoch = Optional.of(gloasForkEpoch);
+      return this;
+    }
+
+    public Builder eip8483ForkEpoch(final UInt64 eip8483ForkEpoch) {
+      checkNotNull(eip8483ForkEpoch);
+      this.eip8483ForkEpoch = Optional.of(eip8483ForkEpoch);
+      return this;
+    }
+
+    /** Needed for networks whose config predates EIP-8483 and so has no EIP8483_FORK_VERSION. */
+    public Builder eip8483ForkVersion(final Bytes4 eip8483ForkVersion) {
+      checkNotNull(eip8483ForkVersion);
+      this.eip8483ForkVersion = Optional.of(eip8483ForkVersion);
       return this;
     }
 

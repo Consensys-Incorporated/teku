@@ -81,7 +81,7 @@ public class ForkUpgradeTestExecutor implements TestExecutor {
               BeaconStateSchemaFulu.create(
                   previousMilestoneSpecVersion.getConfig(),
                   previousMilestoneSpecVersion.getSchemaDefinitions().getSchemaRegistry());
-          case HEZE ->
+          case EIP8483, HEZE ->
               BeaconStateSchemaGloas.create(
                   previousMilestoneSpecVersion.getConfig(),
                   previousMilestoneSpecVersion.getSchemaDefinitions().getSchemaRegistry());

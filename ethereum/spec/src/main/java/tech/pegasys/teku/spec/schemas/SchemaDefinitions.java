@@ -134,6 +134,11 @@ public interface SchemaDefinitions {
   }
 
   @NonSchema
+  default Optional<SchemaDefinitionsEip8483> toVersionEip8483() {
+    return Optional.empty();
+  }
+
+  @NonSchema
   default Optional<SchemaDefinitionsHeze> toVersionHeze() {
     return Optional.empty();
   }

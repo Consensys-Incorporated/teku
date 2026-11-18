@@ -22,6 +22,8 @@ import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.altair.Sy
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadSummary;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.BuilderPqRegistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.ValidatorPqRegistrationRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.ConsolidationRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.DepositRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.WithdrawalRequest;
@@ -95,4 +97,10 @@ public interface OperationProcessor {
       MutableBeaconState state, List<BuilderDepositRequest> depositRequest);
 
   void processBuilderExitRequest(MutableBeaconState state, List<BuilderExitRequest> depositRequest);
+
+  void processValidatorPqRegistrationRequest(
+      MutableBeaconState state, ValidatorPqRegistrationRequest request);
+
+  void processBuilderPqRegistrationRequest(
+      MutableBeaconState state, BuilderPqRegistrationRequest request);
 }

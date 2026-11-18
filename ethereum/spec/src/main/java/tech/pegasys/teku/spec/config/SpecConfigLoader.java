@@ -38,7 +38,16 @@ public class SpecConfigLoader {
       "https://ephemery.dev/latest/metadata/config.yaml";
   private static final List<String> AVAILABLE_PRESETS =
       List.of(
-          "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "heze");
+          "phase0",
+          "altair",
+          "bellatrix",
+          "capella",
+          "deneb",
+          "electra",
+          "fulu",
+          "gloas",
+          "eip8483",
+          "heze");
   private static final List<String> BUILTIN_NETWORKS =
       List.of(
           "chiado",

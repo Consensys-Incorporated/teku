@@ -80,7 +80,7 @@ public class SpecConfigHezeTest {
   private SpecConfigHeze createRandomHezeConfig(final SpecConfigGloas gloasConfig, final int seed) {
     final DataStructureUtil dataStructureUtil = new DataStructureUtil(seed, spec);
     return new SpecConfigHezeImpl(
-        gloasConfig,
+        new SpecConfigEip8483Impl(gloasConfig, 1024, 16),
         dataStructureUtil.randomPositiveInt(),
         dataStructureUtil.randomPositiveInt(),
         dataStructureUtil.randomPositiveInt(),

@@ -107,10 +107,7 @@ public class PostExecutionPayloadEnvelope extends RestApiEndpoint {
                 "When true, the body is SignedExecutionPayloadEnvelopeContents. When false, the body is SignedExecutionPayloadEnvelope."))
         .requestBodyType(
             requestType,
-            context ->
-                isBlobDataIncluded(context.getHeaders())
-                    ? signedExecutionPayloadEnvelopeContentsType
-                    : signedExecutionPayloadEnvelopeType,
+            context -> selectJsonRequestBodyType(context.getHeaders(), schemaCache),
             HeaderBasedOctetStreamRequestContentTypeDefinition.parseBytes(
                 (bytes, headers) -> deserializeRequestBody(bytes, headers, schemaCache)))
         .response(
@@ -165,6 +162,24 @@ public class PostExecutionPayloadEnvelope extends RestApiEndpoint {
           signedExecutionPayloadEnvelope, broadcastValidationLevel);
     }
     throw new BadRequestException("Invalid signed execution payload envelope request body");
+  }
+
+  // The envelope embeds ExecutionRequests, whose type changes in later milestones (EIP-8483), so
+  // the
+  // JSON type must follow the consensus version rather than always using Gloas.
+  private static DeserializableTypeDefinition<? extends SszData> selectJsonRequestBodyType(
+      final Map<String, String> headers, final SchemaDefinitionCache schemaCache) {
+    final SchemaDefinitionsGloas schemaDefinitionsGloas =
+        headerBasedSelector(
+            schemaCache,
+            Optional.ofNullable(headers.get(HEADER_CONSENSUS_VERSION)),
+            (__, schemaDefinitions) -> SchemaDefinitionsGloas.required(schemaDefinitions));
+    if (isBlobDataIncluded(headers)) {
+      return schemaDefinitionsGloas
+          .getSignedExecutionPayloadEnvelopeContentsSchema()
+          .getJsonTypeDefinition();
+    }
+    return schemaDefinitionsGloas.getSignedExecutionPayloadEnvelopeSchema().getJsonTypeDefinition();
   }
 
   private static SszData deserializeRequestBody(

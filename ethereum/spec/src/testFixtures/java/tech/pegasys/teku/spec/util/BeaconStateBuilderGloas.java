@@ -93,8 +93,8 @@ public class BeaconStateBuilderGloas
 
   @Override
   protected BeaconStateGloas getEmptyState() {
-    return BeaconStateSchemaGloas.create(
-            spec.getConfig(), spec.getSchemaDefinitions().getSchemaRegistry())
+    // EIP-8483 (and later) states extend the Gloas state, so use the spec's own state schema
+    return BeaconStateSchemaGloas.required(spec.getSchemaDefinitions().getBeaconStateSchema())
         .createEmpty();
   }
 
@@ -135,8 +135,15 @@ public class BeaconStateBuilderGloas
       final int defaultValidatorCount,
       final int defaultBuilderCount,
       final int defaultItemsInSSZLists) {
+    // Later milestones (EIP-8483+) extend the Gloas state, so build with the genesis milestone if
+    // it
+    // is Gloas or later
+    final SpecVersion specVersion =
+        spec.getGenesisSpec().getMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS)
+            ? spec.getGenesisSpec()
+            : spec.forMilestone(SpecMilestone.GLOAS);
     return new BeaconStateBuilderGloas(
-        spec.forMilestone(SpecMilestone.GLOAS),
+        specVersion,
         dataStructureUtil,
         defaultValidatorCount,
         defaultBuilderCount,

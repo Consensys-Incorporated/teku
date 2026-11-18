@@ -76,6 +76,8 @@ public class MiscHelpers {
   public Bytes4 computeForkVersion(final UInt64 epoch) {
     if (epoch.isGreaterThanOrEqualTo(specConfig.getHezeForkEpoch())) {
       return specConfig.getHezeForkVersion();
+    } else if (epoch.isGreaterThanOrEqualTo(specConfig.getEip8483ForkEpoch())) {
+      return specConfig.getEip8483ForkVersion();
     } else if (epoch.isGreaterThanOrEqualTo(specConfig.getGloasForkEpoch())) {
       return specConfig.getGloasForkVersion();
     } else if (epoch.isGreaterThanOrEqualTo(specConfig.getFuluForkEpoch())) {

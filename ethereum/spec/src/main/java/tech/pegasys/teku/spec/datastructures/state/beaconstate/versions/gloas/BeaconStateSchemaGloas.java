@@ -94,6 +94,15 @@ public class BeaconStateSchemaGloas
         "BeaconStateGloas", ACTIVE_FIELDS, getUniqueFields(specConfig, schemaRegistry), specConfig);
   }
 
+  /** For later milestones whose state extends the Gloas state with additional fields. */
+  protected BeaconStateSchemaGloas(
+      final String containerName,
+      final boolean[] activeFields,
+      final List<SszField> uniqueFields,
+      final SpecConfig specConfig) {
+    super(containerName, activeFields, uniqueFields, specConfig);
+  }
+
   private static SszField toProgressiveListFieldIfListed(final SszField field) {
     if (!PROGRESSIVE_INLINE_LIST_FIELD_NAMES.contains(field.getName())) {
       return field;
@@ -103,7 +112,7 @@ public class BeaconStateSchemaGloas
     return new SszField(field.getIndex(), field.getName(), () -> progressiveSchema);
   }
 
-  private static List<SszField> getUniqueFields(
+  public static List<SszField> getUniqueFields(
       final SpecConfig specConfig, final SchemaRegistry schemaRegistry) {
     final List<SszField> newFields =
         List.of(
@@ -271,7 +280,7 @@ public class BeaconStateSchemaGloas
   }
 
   @Override
-  public BeaconStateGloasImpl createFromBackingNode(final TreeNode node) {
+  public BeaconStateGloas createFromBackingNode(final TreeNode node) {
     return new BeaconStateGloasImpl(this, node);
   }
 }

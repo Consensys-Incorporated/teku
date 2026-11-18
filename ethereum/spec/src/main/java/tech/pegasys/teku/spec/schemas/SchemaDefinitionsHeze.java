@@ -22,7 +22,7 @@ import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionLi
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.SignedInclusionListSchema;
 import tech.pegasys.teku.spec.schemas.registry.SchemaRegistry;
 
-public class SchemaDefinitionsHeze extends SchemaDefinitionsGloas {
+public class SchemaDefinitionsHeze extends SchemaDefinitionsEip8483 {
 
   private final InclusionListSchema inclusionListSchema;
   private final SignedInclusionListSchema signedInclusionListSchema;

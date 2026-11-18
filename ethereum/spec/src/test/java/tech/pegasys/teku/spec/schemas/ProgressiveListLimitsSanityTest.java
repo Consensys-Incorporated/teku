@@ -15,8 +15,10 @@ package tech.pegasys.teku.spec.schemas;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.IntStream;
 import org.assertj.core.api.SoftAssertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,8 +29,10 @@ import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
+import tech.pegasys.teku.spec.config.SpecConfigEip8483;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.common.BlockBodyFields;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.ExecutionRequestsFieldsEip8483;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.ExecutionRequestsFields;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsFieldsGloas;
 
@@ -42,7 +46,7 @@ import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionR
  * <p>Each container is also checked to have no list field beyond the ones listed here, so that a
  * list added by a later milestone can't silently arrive without a declared limit.
  */
-@TestSpecContext(milestone = {SpecMilestone.GLOAS, SpecMilestone.HEZE})
+@TestSpecContext(milestone = {SpecMilestone.GLOAS, SpecMilestone.EIP8483, SpecMilestone.HEZE})
 class ProgressiveListLimitsSanityTest {
 
   /**
@@ -52,11 +56,15 @@ class ProgressiveListLimitsSanityTest {
   private static final long NO_LIMIT = Long.MAX_VALUE;
 
   private SpecConfigGloas config;
+  private Optional<SpecConfigEip8483> eip8483Config;
   private SchemaDefinitionsGloas schemaDefinitions;
 
   @BeforeEach
   void setUp(final SpecContext specContext) {
     config = SpecConfigGloas.required(specContext.getSpec().getGenesisSpecConfig());
+    // SpecConfigGloas.required unwraps to the inner Gloas config, so read EIP-8483 from the
+    // original
+    eip8483Config = specContext.getSpec().getGenesisSpecConfig().toVersionEip8483();
     schemaDefinitions = SchemaDefinitionsGloas.required(specContext.getSchemaDefinitions());
   }
 
@@ -98,6 +106,20 @@ class ProgressiveListLimitsSanityTest {
   }
 
   private Map<SszFieldName, Long> expectedExecutionRequestsLimits() {
+    final Map<SszFieldName, Long> limits = new HashMap<>(expectedGloasExecutionRequestsLimits());
+    eip8483Config.ifPresent(
+        eip8483 -> {
+          limits.put(
+              ExecutionRequestsFieldsEip8483.VALIDATOR_PQ_REGISTRATIONS,
+              (long) eip8483.getMaxValidatorPqRegistrationRequestsPerPayload());
+          limits.put(
+              ExecutionRequestsFieldsEip8483.BUILDER_PQ_REGISTRATIONS,
+              (long) eip8483.getMaxBuilderPqRegistrationRequestsPerPayload());
+        });
+    return limits;
+  }
+
+  private Map<SszFieldName, Long> expectedGloasExecutionRequestsLimits() {
     return Map.ofEntries(
         // deposit requests are not covered by `verify_execution_requests_limits`
         Map.entry(ExecutionRequestsFields.DEPOSITS, NO_LIMIT),

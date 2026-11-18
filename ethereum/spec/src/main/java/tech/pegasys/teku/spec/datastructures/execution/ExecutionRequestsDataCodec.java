@@ -16,12 +16,13 @@ package tech.pegasys.teku.spec.datastructures.execution;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.tuweni.bytes.Bytes;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.BuilderPqRegistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.ValidatorPqRegistrationRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.ConsolidationRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.DepositRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.WithdrawalRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderDepositRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderExitRequest;
-import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsSchemaGloas;
 
 /*
  Implement the rules for decoding and hashing execution requests according to https://eips.ethereum.org/EIPS/eip-7685
@@ -83,15 +84,29 @@ public class ExecutionRequestsDataCodec {
         case BuilderDepositRequest.REQUEST_TYPE ->
             executionRequestsBuilder.builderDeposits(
                 () ->
-                    ExecutionRequestsSchemaGloas.required(executionRequestsSchema)
+                    executionRequestsSchema
                         .getBuilderDepositRequestsSchema()
                         .sszDeserialize(requestData)
                         .asList());
         case BuilderExitRequest.REQUEST_TYPE ->
             executionRequestsBuilder.builderExits(
                 () ->
-                    ExecutionRequestsSchemaGloas.required(executionRequestsSchema)
+                    executionRequestsSchema
                         .getBuilderExitRequestsSchema()
+                        .sszDeserialize(requestData)
+                        .asList());
+        case ValidatorPqRegistrationRequest.REQUEST_TYPE ->
+            executionRequestsBuilder.validatorPqRegistrations(
+                () ->
+                    executionRequestsSchema
+                        .getValidatorPqRegistrationRequestsSchema()
+                        .sszDeserialize(requestData)
+                        .asList());
+        case BuilderPqRegistrationRequest.REQUEST_TYPE ->
+            executionRequestsBuilder.builderPqRegistrations(
+                () ->
+                    executionRequestsSchema
+                        .getBuilderPqRegistrationRequestsSchema()
                         .sszDeserialize(requestData)
                         .asList());
         default ->
@@ -141,37 +156,51 @@ public class ExecutionRequestsDataCodec {
       executionRequestsData.add(
           Bytes.concatenate(ConsolidationRequest.REQUEST_TYPE_PREFIX, consolidationRequestsData));
     }
-    executionRequests
-        .toVersionGloas()
-        .ifPresent(
-            executionRequestsGloas -> {
-              final ExecutionRequestsSchemaGloas executionRequestsSchemaGloas =
-                  ExecutionRequestsSchemaGloas.required(executionRequestsSchema);
-              final List<BuilderDepositRequest> builderDeposits =
-                  executionRequestsGloas.getBuilderDeposits();
-              if (!builderDeposits.isEmpty()) {
-                final Bytes builderDepositRequestsData =
-                    executionRequestsSchemaGloas
-                        .getBuilderDepositRequestsSchema()
-                        .createFromElements(builderDeposits)
-                        .sszSerialize();
-                executionRequestsData.add(
-                    Bytes.concatenate(
-                        BuilderDepositRequest.REQUEST_TYPE_PREFIX, builderDepositRequestsData));
-              }
-              final List<BuilderExitRequest> builderExits =
-                  executionRequestsGloas.getBuilderExits();
-              if (!builderExits.isEmpty()) {
-                final Bytes builderExitRequestsData =
-                    executionRequestsSchemaGloas
-                        .getBuilderExitRequestsSchema()
-                        .createFromElements(builderExits)
-                        .sszSerialize();
-                executionRequestsData.add(
-                    Bytes.concatenate(
-                        BuilderExitRequest.REQUEST_TYPE_PREFIX, builderExitRequestsData));
-              }
-            });
+    final List<BuilderDepositRequest> builderDeposits = executionRequests.getBuilderDeposits();
+    if (!builderDeposits.isEmpty()) {
+      final Bytes builderDepositRequestsData =
+          executionRequestsSchema
+              .getBuilderDepositRequestsSchema()
+              .createFromElements(builderDeposits)
+              .sszSerialize();
+      executionRequestsData.add(
+          Bytes.concatenate(BuilderDepositRequest.REQUEST_TYPE_PREFIX, builderDepositRequestsData));
+    }
+    final List<BuilderExitRequest> builderExits = executionRequests.getBuilderExits();
+    if (!builderExits.isEmpty()) {
+      final Bytes builderExitRequestsData =
+          executionRequestsSchema
+              .getBuilderExitRequestsSchema()
+              .createFromElements(builderExits)
+              .sszSerialize();
+      executionRequestsData.add(
+          Bytes.concatenate(BuilderExitRequest.REQUEST_TYPE_PREFIX, builderExitRequestsData));
+    }
+    final List<ValidatorPqRegistrationRequest> validatorPqRegistrations =
+        executionRequests.getValidatorPqRegistrations();
+    if (!validatorPqRegistrations.isEmpty()) {
+      final Bytes validatorPqRegistrationRequestsData =
+          executionRequestsSchema
+              .getValidatorPqRegistrationRequestsSchema()
+              .createFromElements(validatorPqRegistrations)
+              .sszSerialize();
+      executionRequestsData.add(
+          Bytes.concatenate(
+              ValidatorPqRegistrationRequest.REQUEST_TYPE_PREFIX,
+              validatorPqRegistrationRequestsData));
+    }
+    final List<BuilderPqRegistrationRequest> builderPqRegistrations =
+        executionRequests.getBuilderPqRegistrations();
+    if (!builderPqRegistrations.isEmpty()) {
+      final Bytes builderPqRegistrationRequestsData =
+          executionRequestsSchema
+              .getBuilderPqRegistrationRequestsSchema()
+              .createFromElements(builderPqRegistrations)
+              .sszSerialize();
+      executionRequestsData.add(
+          Bytes.concatenate(
+              BuilderPqRegistrationRequest.REQUEST_TYPE_PREFIX, builderPqRegistrationRequestsData));
+    }
     return executionRequestsData;
   }
 }

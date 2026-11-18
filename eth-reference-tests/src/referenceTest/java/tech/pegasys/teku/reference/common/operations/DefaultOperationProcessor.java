@@ -29,6 +29,8 @@ import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.Bea
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadSummary;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.BuilderPqRegistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.ValidatorPqRegistrationRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.ConsolidationRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.DepositRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.WithdrawalRequest;
@@ -218,5 +220,19 @@ public class DefaultOperationProcessor implements OperationProcessor {
       final MutableBeaconState state, final List<BuilderExitRequest> builderExitRequests) {
     spec.getExecutionRequestsProcessor(state.getSlot())
         .processBuilderExitRequests(state, builderExitRequests);
+  }
+
+  @Override
+  public void processValidatorPqRegistrationRequest(
+      final MutableBeaconState state, final ValidatorPqRegistrationRequest request) {
+    spec.getExecutionRequestsProcessor(state.getSlot())
+        .processValidatorPqRegistrationRequests(state, List.of(request));
+  }
+
+  @Override
+  public void processBuilderPqRegistrationRequest(
+      final MutableBeaconState state, final BuilderPqRegistrationRequest request) {
+    spec.getExecutionRequestsProcessor(state.getSlot())
+        .processBuilderPqRegistrationRequests(state, List.of(request));
   }
 }

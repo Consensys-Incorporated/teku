@@ -1,0 +1,16 @@
+{
+  "title" : "SignedBeaconBlockEip8483",
+  "type" : "object",
+  "required" : [ "message", "signature" ],
+  "properties" : {
+    "message" : {
+      "$ref" : "#/components/schemas/BeaconBlockEip8483"
+    },
+    "signature" : {
+      "type" : "string",
+      "pattern" : "^0x[a-fA-F0-9]{2,}$",
+      "description" : "SSZ hexadecimal",
+      "format" : "bytes"
+    }
+  }
+}

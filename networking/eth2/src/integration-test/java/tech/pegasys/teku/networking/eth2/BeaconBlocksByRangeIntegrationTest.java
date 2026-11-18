@@ -262,7 +262,9 @@ public class BeaconBlocksByRangeIntegrationTest extends AbstractRpcMethodIntegra
           .hasRootCauseInstanceOf(UnrecognizedContextBytesException.class)
           .hasMessageContaining("Must request blocks with compatible fork.");
     } else if (milestoneToBeaconBlockBodyClass(baseMilestone)
-        .equals(milestoneToBeaconBlockBodyClass(nextMilestone))) {
+            .equals(milestoneToBeaconBlockBodyClass(nextMilestone))
+        // EIP-8483 keeps the Gloas body class but changes the parent_execution_requests type
+        && nextMilestone != SpecMilestone.EIP8483) {
       // no changes in BeaconBlockBody, so we should receive a successful response
       assertThat(res).isCompleted();
       assertThat(blocks).containsExactly(block1.getBlock(), block2.getBlock());
