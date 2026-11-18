@@ -264,13 +264,13 @@ public class DatabaseTest {
     database.storeNonCanonicalBlobSidecar(lastPrunedSidecar);
     database.storeNonCanonicalBlobSidecar(liveSidecar);
 
-    // Non-canonical pruning scans from the earliest canonical blob sidecar slot, so prune it first
+    // Same order as BlobSidecarPruner
     assertThat(
-            database.pruneOldestNonCanonicalBlobSidecars(
+            database.pruneOldestBlobSidecars(
                 UInt64.valueOf(lastPrunedSlot), 10, blobSidecarsArchiver))
         .isFalse();
     assertThat(
-            database.pruneOldestBlobSidecars(
+            database.pruneOldestNonCanonicalBlobSidecars(
                 UInt64.valueOf(lastPrunedSlot), 10, blobSidecarsArchiver))
         .isFalse();
 
