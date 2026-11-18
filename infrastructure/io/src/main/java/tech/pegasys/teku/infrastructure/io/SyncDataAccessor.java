@@ -15,6 +15,7 @@ package tech.pegasys.teku.infrastructure.io;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,20 +32,35 @@ import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException
 /**
  * A wrapper class for reading and writing files, ensuring that the contents is immediately flushed
  * to disk.
+ *
+ * <p>Creating or renaming a file changes its parent directory, and on POSIX filesystems that change
+ * is only durable once the directory itself is synced. Where the platform allows it, the parent
+ * directory is synced after each write that creates or replaces a file, so a host crash or power
+ * loss cannot roll the file back to its previous version or remove it.
  */
 public class SyncDataAccessor {
 
   private static final Logger LOG = LogManager.getLogger();
+
+  static final DirectorySync FSYNC_DIRECTORY =
+      directory -> {
+        try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {
+          channel.force(true);
+        }
+      };
+  static final DirectorySync NO_DIRECTORY_SYNC = directory -> {};
+
   private final boolean atomicFileMoveSupport;
   private final boolean ownerOnly;
+  private final DirectorySync directorySync;
 
-  SyncDataAccessor(final boolean atomicFileMoveSupport) {
-    this(atomicFileMoveSupport, false);
-  }
-
-  SyncDataAccessor(final boolean atomicFileMoveSupport, final boolean ownerOnly) {
+  SyncDataAccessor(
+      final boolean atomicFileMoveSupport,
+      final boolean ownerOnly,
+      final DirectorySync directorySync) {
     this.atomicFileMoveSupport = atomicFileMoveSupport;
     this.ownerOnly = ownerOnly;
+    this.directorySync = directorySync;
   }
 
   public static SyncDataAccessor create(final Path path) {
@@ -62,12 +78,13 @@ public class SyncDataAccessor {
   private static SyncDataAccessor create(final Path path, final boolean ownerOnly) {
 
     boolean atomicFileMoveSupport;
-    final Path tmpFile;
+    final Path directory;
     if (Files.isDirectory(path.toAbsolutePath())) {
-      tmpFile = path.toAbsolutePath().resolve("syncWriteTest.tmp");
+      directory = path.toAbsolutePath();
     } else {
-      tmpFile = path.toAbsolutePath().getParent().resolve("syncWriteTest.tmp");
+      directory = path.toAbsolutePath().getParent();
     }
+    final Path tmpFile = directory.resolve("syncWriteTest.tmp");
 
     try {
       ensurePathExists(path);
@@ -76,7 +93,7 @@ public class SyncDataAccessor {
     }
 
     try {
-      atomicSyncedWrite(tmpFile, Bytes32.ZERO, false);
+      writeAndMove(tmpFile, Bytes32.ZERO, false);
 
       atomicFileMoveSupport = true;
     } catch (AtomicMoveNotSupportedException e) {
@@ -92,7 +109,22 @@ public class SyncDataAccessor {
         LOG.debug("Failed to delete the temporary file ", e);
       }
     }
-    return new SyncDataAccessor(atomicFileMoveSupport, ownerOnly);
+    return new SyncDataAccessor(
+        atomicFileMoveSupport, ownerOnly, probeDirectorySync(directory, FSYNC_DIRECTORY));
+  }
+
+  /**
+   * Checks that {@code directorySync} works on {@code directory}. Some platforms, such as Windows,
+   * cannot open a directory to sync it; there the parent directory is not synced.
+   */
+  static DirectorySync probeDirectorySync(final Path directory, final DirectorySync directorySync) {
+    try {
+      directorySync.sync(directory);
+      return directorySync;
+    } catch (IOException | UnsupportedOperationException e) {
+      LOG.debug("File system doesn't support syncing directory {}", directory, e);
+      return NO_DIRECTORY_SYNC;
+    }
   }
 
   /**
@@ -116,7 +148,8 @@ public class SyncDataAccessor {
    * flushed to hardware storage. If the filesystem support atomic operation it creates a temporary
    * file before writing the actual file. If the file exists it is overwritten, otherwise it is
    * created. If this accessor was created with {@link #createOwnerOnly(Path)} the file is
-   * restricted to its owner before any data is written.
+   * restricted to its owner before any data is written. Where supported, the parent directory is
+   * then synced so the new or replaced file survives a host crash.
    *
    * @param path the path to write to
    * @param data the data to write
@@ -130,8 +163,27 @@ public class SyncDataAccessor {
     }
   }
 
-  private static void nonAtomicSyncedWrite(
-      final Path path, final Bytes data, final boolean ownerOnly) throws IOException {
+  private void nonAtomicSyncedWrite(final Path path, final Bytes data, final boolean ownerOnly)
+      throws IOException {
+    final boolean created = !Files.exists(path);
+    writeSynced(path, data, ownerOnly);
+    if (created) {
+      syncParentDirectory(path);
+    }
+  }
+
+  private void atomicSyncedWrite(final Path path, final Bytes data, final boolean ownerOnly)
+      throws IOException {
+    writeAndMove(path, data, ownerOnly);
+    syncParentDirectory(path);
+  }
+
+  private void syncParentDirectory(final Path path) throws IOException {
+    directorySync.sync(path.toAbsolutePath().getParent());
+  }
+
+  private static void writeSynced(final Path path, final Bytes data, final boolean ownerOnly)
+      throws IOException {
     if (ownerOnly) {
       SecretFiles.restrictToOwner(path);
     }
@@ -143,14 +195,19 @@ public class SyncDataAccessor {
         StandardOpenOption.TRUNCATE_EXISTING);
   }
 
-  private static void atomicSyncedWrite(final Path path, final Bytes data, final boolean ownerOnly)
+  private static void writeAndMove(final Path path, final Bytes data, final boolean ownerOnly)
       throws IOException {
     final Path absolutePath = path.toAbsolutePath();
     final Path tmpFile = Paths.get(path + ".tmp");
     // The move keeps the temporary file's permissions
-    nonAtomicSyncedWrite(tmpFile, data, ownerOnly);
+    writeSynced(tmpFile, data, ownerOnly);
     Files.move(
         tmpFile, absolutePath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+  }
+
+  @FunctionalInterface
+  interface DirectorySync {
+    void sync(Path directory) throws IOException;
   }
 
   private static void ensurePathExists(final Path absolutePath) throws IOException {

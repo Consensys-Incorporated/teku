@@ -22,6 +22,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.ArrayList;
+import java.util.List;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
@@ -47,11 +49,13 @@ public class SyncDataAccessorTest {
 
   @ParameterizedTest
   @ValueSource(booleans = {true, false})
+  @DisabledOnOs(OS.WINDOWS)
   public void shouldWriteAndOverwriteFileContent(
       final boolean useAtomicMove, @TempDir final Path tempDir) throws IOException {
     final Path filePath = Paths.get(tempDir.toString() + "/myfile.tmp");
     assertThat(Files.exists(filePath)).isFalse();
-    final SyncDataAccessor syncDataAccessor = new SyncDataAccessor(useAtomicMove);
+    final SyncDataAccessor syncDataAccessor =
+        new SyncDataAccessor(useAtomicMove, false, SyncDataAccessor.FSYNC_DIRECTORY);
     syncDataAccessor.syncedWrite(filePath, Bytes.fromHexString("0x41"));
     assertThat(Files.exists(filePath)).isTrue();
 
@@ -73,7 +77,8 @@ public class SyncDataAccessorTest {
     final Path filePath = tempDir.resolve("myfile.dat");
     Files.writeString(filePath, "old");
     Files.setPosixFilePermissions(filePath, PosixFilePermissions.fromString("rw-r--r--"));
-    final SyncDataAccessor syncDataAccessor = new SyncDataAccessor(useAtomicMove, true);
+    final SyncDataAccessor syncDataAccessor =
+        new SyncDataAccessor(useAtomicMove, true, SyncDataAccessor.FSYNC_DIRECTORY);
 
     syncDataAccessor.syncedWrite(filePath, Bytes.fromHexString("0x41"));
 
@@ -92,5 +97,92 @@ public class SyncDataAccessorTest {
 
     assertThat(Files.readString(filePath)).isEqualTo("A");
     assertThat(Files.getPosixFilePermissions(filePath)).isEqualTo(SecretFiles.OWNER_READ_WRITE);
+  }
+
+  @Test
+  public void atomicWrite_shouldSyncParentDirectoryAfterEveryWrite(@TempDir final Path tempDir)
+      throws IOException {
+    final Path filePath = tempDir.resolve("myfile.dat");
+    final RecordingDirectorySync directorySync = new RecordingDirectorySync();
+    final SyncDataAccessor syncDataAccessor = new SyncDataAccessor(true, false, directorySync);
+
+    syncDataAccessor.syncedWrite(filePath, Bytes.fromHexString("0x41"));
+    assertThat(directorySync.syncedDirectories).containsExactly(tempDir.toAbsolutePath());
+
+    // Replacing the file renames over it, which also has to be made durable
+    syncDataAccessor.syncedWrite(filePath, Bytes.fromHexString("0x42"));
+    assertThat(directorySync.syncedDirectories)
+        .containsExactly(tempDir.toAbsolutePath(), tempDir.toAbsolutePath());
+    assertThat(Files.readString(filePath)).isEqualTo("B");
+  }
+
+  @Test
+  public void nonAtomicWrite_shouldSyncParentDirectoryOnlyWhenFileIsCreated(
+      @TempDir final Path tempDir) throws IOException {
+    final Path filePath = tempDir.resolve("myfile.dat");
+    final RecordingDirectorySync directorySync = new RecordingDirectorySync();
+    final SyncDataAccessor syncDataAccessor = new SyncDataAccessor(false, false, directorySync);
+
+    syncDataAccessor.syncedWrite(filePath, Bytes.fromHexString("0x41"));
+    assertThat(directorySync.syncedDirectories).containsExactly(tempDir.toAbsolutePath());
+
+    // Overwriting in place doesn't change the directory
+    syncDataAccessor.syncedWrite(filePath, Bytes.fromHexString("0x42"));
+    assertThat(directorySync.syncedDirectories).containsExactly(tempDir.toAbsolutePath());
+    assertThat(Files.readString(filePath)).isEqualTo("B");
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  public void shouldFailWriteWhenDirectorySyncFails(
+      final boolean useAtomicMove, @TempDir final Path tempDir) {
+    final Path filePath = tempDir.resolve("myfile.dat");
+    final SyncDataAccessor syncDataAccessor =
+        new SyncDataAccessor(
+            useAtomicMove,
+            false,
+            directory -> {
+              throw new IOException("sync failed");
+            });
+
+    assertThatThrownBy(() -> syncDataAccessor.syncedWrite(filePath, Bytes.fromHexString("0x41")))
+        .isInstanceOf(IOException.class)
+        .hasMessage("sync failed");
+  }
+
+  @Test
+  public void probeDirectorySync_shouldKeepDirectorySyncWhenItWorks(@TempDir final Path tempDir) {
+    final RecordingDirectorySync directorySync = new RecordingDirectorySync();
+
+    assertThat(SyncDataAccessor.probeDirectorySync(tempDir, directorySync)).isSameAs(directorySync);
+    assertThat(directorySync.syncedDirectories).containsExactly(tempDir);
+  }
+
+  @Test
+  public void probeDirectorySync_shouldSkipDirectorySyncWhenUnsupported(
+      @TempDir final Path tempDir) {
+    final SyncDataAccessor.DirectorySync failingSync =
+        directory -> {
+          throw new IOException("Access is denied");
+        };
+
+    assertThat(SyncDataAccessor.probeDirectorySync(tempDir, failingSync))
+        .isSameAs(SyncDataAccessor.NO_DIRECTORY_SYNC);
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  public void probeDirectorySync_shouldSupportFsyncOfDirectoryOnPosix(@TempDir final Path tempDir) {
+    assertThat(SyncDataAccessor.probeDirectorySync(tempDir, SyncDataAccessor.FSYNC_DIRECTORY))
+        .isSameAs(SyncDataAccessor.FSYNC_DIRECTORY);
+  }
+
+  private static class RecordingDirectorySync implements SyncDataAccessor.DirectorySync {
+    private final List<Path> syncedDirectories = new ArrayList<>();
+
+    @Override
+    public void sync(final Path directory) {
+      syncedDirectories.add(directory);
+    }
   }
 }
