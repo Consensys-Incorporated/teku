@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 
@@ -73,5 +74,41 @@ class XmssValueTypesTest {
     final XmssSignature signature = XmssSignature.fromBytes(Bytes.wrap(raw));
     raw[0] = 7;
     assertThat(signature.getLeafIndex()).isEqualTo(UInt64.ZERO);
+  }
+
+  @Test
+  void publicKeyShouldHaveValueSemantics() {
+    final Bytes32 bytes = Bytes32.fromHexString("0x" + "01".repeat(32));
+    final XmssPublicKey publicKey = XmssPublicKey.fromBytes(bytes);
+    assertValueSemantics(
+        publicKey, XmssPublicKey.fromBytes(bytes), XmssPublicKey.fromBytes(Bytes32.ZERO));
+    assertThat(publicKey).hasToString(bytes.toHexString());
+  }
+
+  @Test
+  void signatureShouldHaveValueSemantics() {
+    final XmssSignature signature = XmssSignature.stub(UInt64.valueOf(5));
+    assertValueSemantics(
+        signature, XmssSignature.stub(UInt64.valueOf(5)), XmssSignature.stub(UInt64.valueOf(6)));
+    assertThat(signature.toString()).contains("leafIndex=5");
+  }
+
+  @Test
+  void secretKeyShouldHaveValueSemantics() {
+    final Bytes32 seed = Bytes32.fromHexString("0x" + "02".repeat(32));
+    assertValueSemantics(
+        XmssSecretKey.fromBytes(seed),
+        XmssSecretKey.fromBytes(seed),
+        XmssSecretKey.fromBytes(Bytes32.ZERO));
+  }
+
+  private static void assertValueSemantics(
+      final Object value, final Object equalValue, final Object differentValue) {
+    final Object sameInstance = value;
+    assertThat(value.equals(sameInstance)).isTrue();
+    assertThat(value.equals(equalValue)).isTrue();
+    assertThat(value.hashCode()).isEqualTo(equalValue.hashCode());
+    assertThat(value.equals(differentValue)).isFalse();
+    assertThat(value.equals(new Object())).isFalse();
   }
 }
