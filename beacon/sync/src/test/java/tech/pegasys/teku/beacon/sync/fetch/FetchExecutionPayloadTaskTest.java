@@ -48,6 +48,27 @@ public class FetchExecutionPayloadTaskTest extends AbstractFetchTaskTest {
   }
 
   @Test
+  public void run_failsWhenPeerReturnsExecutionPayloadForAnotherBeaconBlockRoot() {
+    final Bytes32 requestedBeaconBlockRoot = dataStructureUtil.randomBytes32();
+    final SignedExecutionPayloadEnvelope otherExecutionPayload =
+        dataStructureUtil.randomSignedExecutionPayloadEnvelope(10);
+    final FetchExecutionPayloadTask task =
+        new FetchExecutionPayloadTask(eth2P2PNetwork, requestedBeaconBlockRoot);
+
+    final Eth2Peer peer = registerNewPeer(1);
+    when(peer.requestExecutionPayloadEnvelopeByRoot(requestedBeaconBlockRoot))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(otherExecutionPayload)));
+
+    final SafeFuture<FetchResult<SignedExecutionPayloadEnvelope>> result = task.run();
+    assertThat(result).isDone();
+    final FetchResult<SignedExecutionPayloadEnvelope> fetchResult = result.getNow(null);
+    assertThat(fetchResult.getPeer()).hasValue(peer);
+    assertThat(fetchResult.isSuccessful()).isFalse();
+    // FETCH_FAILED makes the fetch service retry the task with another peer
+    assertThat(fetchResult.getStatus()).isEqualTo(Status.FETCH_FAILED);
+  }
+
+  @Test
   public void run_noPeers() {
     final SignedExecutionPayloadEnvelope executionPayload =
         dataStructureUtil.randomSignedExecutionPayloadEnvelope(10);
