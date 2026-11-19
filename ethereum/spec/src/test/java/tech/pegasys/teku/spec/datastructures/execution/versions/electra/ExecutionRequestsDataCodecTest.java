@@ -95,7 +95,8 @@ class ExecutionRequestsDataCodecTest {
 
   @Test
   public void decodeExecutionRequestsDataWithInvalidRequestType() {
-    final Bytes invalidRequestType = Bytes.of(9);
+    // A type no fork defines (later forks' types are ignored, not rejected)
+    final Bytes invalidRequestType = Bytes.of(0x7f);
     final Bytes invalidTypeEncodedList = Bytes.concatenate(invalidRequestType, Bytes.random(10));
     final List<Bytes> invalidExecutionRequestsData =
         List.of(depositRequestListEncoded, withdrawalRequestsListEncoded, invalidTypeEncodedList);

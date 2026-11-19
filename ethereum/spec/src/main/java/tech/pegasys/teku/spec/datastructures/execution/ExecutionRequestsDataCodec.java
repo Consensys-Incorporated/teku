@@ -23,6 +23,9 @@ import tech.pegasys.teku.spec.datastructures.execution.versions.electra.DepositR
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.WithdrawalRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderDepositRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderExitRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.BuilderPreregistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.ValidatorPreregistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.VoluntaryExitRequest;
 
 /*
  Implement the rules for decoding and hashing execution requests according to https://eips.ethereum.org/EIPS/eip-7685
@@ -107,6 +110,27 @@ public class ExecutionRequestsDataCodec {
                 () ->
                     executionRequestsSchema
                         .getBuilderPqRegistrationRequestsSchema()
+                        .sszDeserialize(requestData)
+                        .asList());
+        case ValidatorPreregistrationRequest.REQUEST_TYPE ->
+            executionRequestsBuilder.validatorPreregistrations(
+                () ->
+                    executionRequestsSchema
+                        .getValidatorPreregistrationRequestsSchema()
+                        .sszDeserialize(requestData)
+                        .asList());
+        case BuilderPreregistrationRequest.REQUEST_TYPE ->
+            executionRequestsBuilder.builderPreregistrations(
+                () ->
+                    executionRequestsSchema
+                        .getBuilderPreregistrationRequestsSchema()
+                        .sszDeserialize(requestData)
+                        .asList());
+        case VoluntaryExitRequest.REQUEST_TYPE ->
+            executionRequestsBuilder.voluntaryExits(
+                () ->
+                    executionRequestsSchema
+                        .getVoluntaryExitRequestsSchema()
                         .sszDeserialize(requestData)
                         .asList());
         default ->
@@ -200,6 +224,38 @@ public class ExecutionRequestsDataCodec {
       executionRequestsData.add(
           Bytes.concatenate(
               BuilderPqRegistrationRequest.REQUEST_TYPE_PREFIX, builderPqRegistrationRequestsData));
+    }
+    final List<ValidatorPreregistrationRequest> validatorPreregistrations =
+        executionRequests.getValidatorPreregistrations();
+    if (!validatorPreregistrations.isEmpty()) {
+      executionRequestsData.add(
+          Bytes.concatenate(
+              ValidatorPreregistrationRequest.REQUEST_TYPE_PREFIX,
+              executionRequestsSchema
+                  .getValidatorPreregistrationRequestsSchema()
+                  .createFromElements(validatorPreregistrations)
+                  .sszSerialize()));
+    }
+    final List<BuilderPreregistrationRequest> builderPreregistrations =
+        executionRequests.getBuilderPreregistrations();
+    if (!builderPreregistrations.isEmpty()) {
+      executionRequestsData.add(
+          Bytes.concatenate(
+              BuilderPreregistrationRequest.REQUEST_TYPE_PREFIX,
+              executionRequestsSchema
+                  .getBuilderPreregistrationRequestsSchema()
+                  .createFromElements(builderPreregistrations)
+                  .sszSerialize()));
+    }
+    final List<VoluntaryExitRequest> voluntaryExits = executionRequests.getVoluntaryExits();
+    if (!voluntaryExits.isEmpty()) {
+      executionRequestsData.add(
+          Bytes.concatenate(
+              VoluntaryExitRequest.REQUEST_TYPE_PREFIX,
+              executionRequestsSchema
+                  .getVoluntaryExitRequestsSchema()
+                  .createFromElements(voluntaryExits)
+                  .sszSerialize()));
     }
     return executionRequestsData;
   }

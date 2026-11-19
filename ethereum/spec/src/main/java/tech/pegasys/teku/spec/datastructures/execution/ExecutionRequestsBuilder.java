@@ -22,6 +22,9 @@ import tech.pegasys.teku.spec.datastructures.execution.versions.electra.DepositR
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.WithdrawalRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderDepositRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderExitRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.BuilderPreregistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.ValidatorPreregistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.VoluntaryExitRequest;
 
 public interface ExecutionRequestsBuilder {
 
@@ -52,6 +55,24 @@ public interface ExecutionRequestsBuilder {
   default ExecutionRequestsBuilder builderPqRegistrations(
       final Supplier<List<BuilderPqRegistrationRequest>> builderPqRegistrations) {
     // NO-OP (until EIP-8483)
+    return this;
+  }
+
+  default ExecutionRequestsBuilder validatorPreregistrations(
+      final Supplier<List<ValidatorPreregistrationRequest>> validatorPreregistrations) {
+    // NO-OP (until PQ)
+    return this;
+  }
+
+  default ExecutionRequestsBuilder builderPreregistrations(
+      final Supplier<List<BuilderPreregistrationRequest>> builderPreregistrations) {
+    // NO-OP (until PQ)
+    return this;
+  }
+
+  default ExecutionRequestsBuilder voluntaryExits(
+      final Supplier<List<VoluntaryExitRequest>> voluntaryExits) {
+    // NO-OP (until PQ)
     return this;
   }
 
