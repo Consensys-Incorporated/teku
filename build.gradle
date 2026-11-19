@@ -6,7 +6,6 @@ import com.github.jk1.license.render.ReportRenderer
 import groovy.json.JsonBuilder
 import groovy.json.JsonSlurper
 import groovy.xml.XmlSlurper
-import org.gradle.jvm.toolchain.JavaLanguageVersion
 import io.consensys.protocols.license.reporter.GroupedLicenseHtmlRenderer
 import tech.pegasys.teku.depcheck.DepCheckPlugin
 
@@ -286,8 +285,7 @@ spotless {
 		allprojects.collect { project -> project.file('build.gradle') }.findAll { it.isFile() })
 		trimTrailingWhitespace()
 		endWithNewline()
-		// greclipse() temporarily disabled: it provisions Eclipse jars via P2 from download.eclipse.org,
-		// which is down for maintenance and fails every CI run. Re-enable once the site is back.
+		greclipse()
 	}
 }
 
