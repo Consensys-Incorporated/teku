@@ -61,10 +61,12 @@ import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGProof;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
+import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.storage.api.FinalizedChainData;
 import tech.pegasys.teku.storage.api.StorageUpdate;
+import tech.pegasys.teku.storage.archive.BlobSidecarsArchiver;
 import tech.pegasys.teku.storage.server.Database;
 import tech.pegasys.teku.storage.server.StateStorageMode;
 import tech.pegasys.teku.storage.server.kvstore.KvStoreAccessor.KvStoreTransaction;
@@ -763,6 +765,39 @@ class KvStoreDatabaseTest {
     verify(database.dao)
         .compactSlotRange(
             SlotKeyedColumn.FINALIZED_BLOCKS, UInt64.valueOf(200), UInt64.valueOf(lastPrunedSlot));
+  }
+
+  @Test
+  void blobPruningThatFindsNothingCarriesOnWithTheCompactionBacklog() {
+    // Leaves enough slots after the first compaction for another one
+    final long lastPrunedSlot = 3L * KvStoreDatabase.MIN_PRUNED_SLOTS_PER_COMPACTION;
+    final KvStoreDatabase database = database(UInt64.ZERO);
+    // Pruning moves the earliest blob sidecar slot past the last pruned slot
+    when(database.dao.getEarliestBlobSidecarSlot())
+        .thenReturn(Optional.of(UInt64.ZERO))
+        .thenReturn(Optional.of(UInt64.valueOf(lastPrunedSlot + 1)));
+    when(database.dao.streamBlobSidecarKeys(any(), any()))
+        .thenAnswer(__ -> Stream.of(blobSidecarKey(1), blobSidecarKey(lastPrunedSlot)));
+    when(database.dao.getSlotRangeDataFiles(eq(SlotKeyedColumn.BLOB_SIDECARS), any(), any()))
+        .thenReturn(
+            Optional.of(
+                List.of(
+                    dataFile(0, 9, KvStoreDatabase.MAX_BYTES_PER_COMPACTION),
+                    dataFile(200, 300, KvStoreDatabase.MAX_BYTES_PER_COMPACTION))));
+
+    database.pruneOldestBlobSidecars(UInt64.valueOf(lastPrunedSlot), 10, BlobSidecarsArchiver.NOOP);
+    verify(database.dao)
+        .compactSlotRange(SlotKeyedColumn.BLOB_SIDECARS, UInt64.ZERO, UInt64.valueOf(199));
+
+    // The earliest blob sidecar slot is now past the prune point, so nothing is left to prune
+    database.pruneOldestBlobSidecars(UInt64.valueOf(lastPrunedSlot), 10, BlobSidecarsArchiver.NOOP);
+    verify(database.dao)
+        .compactSlotRange(
+            SlotKeyedColumn.BLOB_SIDECARS, UInt64.valueOf(200), UInt64.valueOf(lastPrunedSlot));
+  }
+
+  private static SlotAndBlockRootAndBlobIndex blobSidecarKey(final long slot) {
+    return new SlotAndBlockRootAndBlobIndex(UInt64.valueOf(slot), Bytes32.ZERO, UInt64.ZERO);
   }
 
   @Test

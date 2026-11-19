@@ -1160,6 +1160,7 @@ public class KvStoreDatabase implements Database {
     final Optional<UInt64> earliestBlobSidecarSlot = getEarliestBlobSidecarSlot();
     if (earliestBlobSidecarSlot.isPresent()
         && earliestBlobSidecarSlot.get().isGreaterThan(lastSlotToPrune)) {
+      continuePrunedSlotCompaction(SlotKeyedColumn.BLOB_SIDECARS);
       return false;
     }
     try (final Stream<SlotAndBlockRootAndBlobIndex> prunableBlobKeys =
