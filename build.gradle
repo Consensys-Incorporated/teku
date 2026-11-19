@@ -285,7 +285,7 @@ spotless {
 		allprojects.collect { project -> project.file('build.gradle') }.findAll { it.isFile() })
 		trimTrailingWhitespace()
 		endWithNewline()
-		greclipse()
+		greclipse('4.3.1')
 	}
 }
 
