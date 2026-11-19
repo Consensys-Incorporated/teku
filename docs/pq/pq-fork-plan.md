@@ -38,7 +38,7 @@ Teku-side, the hardest parts are not the state transition. They are:
 **Crypto recommendation** (revised 2026-11-18 after finding `ethereum/lean-pq-bindings`, §2.2):
 - Use **`io.github.crate-crypto:lean-pq`** (Maven Central, Java 25 FFM, natives bundled) for leanXMSS keygen, sign and verify. It is the same publisher and release model as `java-eth-kzg`. A pure-Java port is no longer needed for the first devnet; keep it as a fallback only.
 - Hide it behind a small `infrastructure/xmss` API with an `XmssConstants.verificationDisabled` switch, which the reference tests require.
-- Keep STARK as the spec's concatenation stand-in for consensus, behind an interface. lean-pq's `Aggregate` is a real leanVM proof but **does not prove leaf indices** and embeds its claims, so it cannot implement the spec's `VerifyAggregates` as written (§2.2, §5.17).
+- Keep STARK as the spec's concatenation stand-in for consensus, behind an interface. lean-pq's `Aggregate` is a real leanVM proof but **does not prove leaf indices**, so it cannot implement the spec's `VerifyAggregates` as written (§2.2, §5.17). From lean-pq 0.13.0, proving and verifying aggregates need a `leanvm-sidecar` process (§2.2).
 
 ---
 
@@ -392,13 +392,25 @@ PQ is an emergency fork for when elliptic-curve cryptography can no longer be tr
   - 0.10.1 already used every core inside each signature, so extra caller threads didn't help it. In 0.11.0 the caller parallelizes instead.
   - Aggregate throughput is therefore close: about 156 vs 115 signatures per second on this machine.
   - Either way, 1,000 keys take about 6–9 s of signing per round. A large validator client cannot sign every key at a single deadline on one host, so PQ duties must be spread through the slot, or keys spread across hosts. This feeds §3.15.10.
+- **Update 2026-11-20, v0.13.0** (released 2026-11-19; see the bindings [README](https://github.com/leanEthereum/leanVM/tree/main/bindings#readme) and `CHANGELOG.md`):
+  - **The bindings moved into leanVM** (`bindings/`, 0.12.0) and are released from there with tags `bindings-vX.Y.Z`. The Maven coordinates are unchanged. Aggregates from 0.11.x and 0.12.0 reject each other.
+  - **Aggregation left the JVM** (0.13.0, leanVM #804). `LeanPq.aggregate`, `LeanPq.setup` and `Aggregate.fromBytes` are gone. Proving and verifying aggregates both go through a `Sidecar`, a client for the `leanvm-sidecar` process (below):
+    - `Sidecar.connect(socket)` or `Sidecar.start(binary, socket, threads)`;
+    - `sidecar.aggregate(children ≤ 16, xmss, sphincs)`;
+    - `sidecar.verify(proofBytes, xmssClaims, sphincsClaims)`, which throws `LeanPqException` unless the proof covers exactly those claims.
+  - **Sidecar limits:**
+    - Linux and macOS only.
+    - The sidecar must be built from the same release as the bindings; a mismatched one is rejected.
+    - The socket's directory must be private (mode 0700).
+    - A sidecar serves at most 16 connections, so share one `Sidecar` per process. Its calls run one at a time.
+  - **leanXMSS signing and single-signature verification still run in-process,** and they are all Teku uses today. The EthLib vectors and the spec KAT still pass through `infrastructure/xmss` on 0.13.0.
 - **Packaging (as of v0.10.1):** on Maven Central as `io.github.crate-crypto:lean-pq`, versions 0.6.1 to 0.11.0, jar SHA-1 `3b098870…`. The jar is 7.5 MB and bundles natives for linux-x86_64 and linux-aarch64 (glibc ≥ 2.17; x86_64 needs AVX2 and PCLMULQDQ), macOS universal, and windows-x86_64. There is no musl or Windows arm64 build. The library is the named module `org.ethereum.leanpq`.
 - **FFM, not JNI:** the JVM needs `--enable-native-access=ALL-UNNAMED`, because Teku runs on the class path. Add it to the start scripts, the Docker image and test JVM args, the same way `java-eth-kzg` is handled. On Linux and macOS the native library is copied into `java.io.tmpdir`, which must allow executable mappings. `-Dlean.pq.native.path` overrides it.
 - **API:**
   - `XmssSecretKey.fromSeed(32 B)`, `generate()`, `toBytes()` (32-byte seed), `publicKey()` (32 B), `prepare(leaf)`, `sign(msg32, leaf)` (2404 B); it is `AutoCloseable`;
   - `LeanPq.xmssVerify(pk, msg, sig)` (static);
   - leanSPHINCS (stateless, 7740 B signatures), which the spec does not use;
-  - `LeanPq.aggregate(children ≤ 16, xmss SignedMessages, sphincs SignedMessages) → Aggregate`, with `Aggregate.fromBytes` (verifies on decode; from 0.11.0 it takes the expected claims), `toBytes()`, and `xmssClaims()`.
+  - up to 0.12.0: `LeanPq.aggregate(children ≤ 16, xmss SignedMessages, sphincs SignedMessages) → Aggregate`, with `Aggregate.fromBytes` (verifies on decode; from 0.11.0 it takes the expected claims), `toBytes()`, and `xmssClaims()`. From 0.13.0 these are `Sidecar.aggregate` and `Sidecar.verify` (above).
 - **Spec compatibility: confirmed 2026-11-18.** v0.10.1 pins leanVM `5e3ade21`, which hashes with Keccak-256 and vendors EthLib's leanXMSS vectors from commit `03b7e4dd`. Those 37 vectors are byte-identical to EthLib v0.3.0, which the pyspec pins; v0.3.0 only adds 4 more verify cases. A local run against the spec's `utils/xmss_kat.json` matched: the derived public key matches, the signature at leaf 1 is **byte-for-byte identical**, and the KAT signature verifies.
 - **Measured** (Apple Silicon, JDK 25, single run; the Java test is not committed):
   - verify: about 62 µs average over 100 (the first call costs about 740 ms to load the native library);
@@ -429,17 +441,20 @@ PQ is an emergency fork for when elliptic-curve cryptography can no longer be tr
   - Verify is answered without waiting for proofs in progress.
   - It doesn't verify children it is given, so a caller must verify untrusted children first.
 - **Claims are still `(pubkey, message)`,** plus an optional DA commitment. The leaf-index gap (§5.17) is unchanged.
-- **Clients:** only Rust and Go. Teku would implement the protocol itself: a few hundred lines on `java.nio` Unix-domain sockets (`UnixDomainSocketAddress`, Java 16+).
-- **Maturity:** one day old. It isn't published (`publish = false`), so operators would build it from source with `cargo`. leanVM has 5 releases, none including the sidecar.
-- **Versus lean-pq in-process aggregation:**
+- **Clients:** since lean-pq 0.13.0, every binding has one, including Java's `Sidecar`. Teku no longer needs to implement the protocol itself.
+- **Maturity:** two days old. Operators build it from source with `cargo install`, at the bindings' release tag with the `experimental_prover` feature. The README recommends building it on the target machine, because proving is performance-critical.
+- **Versus lean-pq in-process aggregation** (written for 0.11.0; from 0.13.0 there is no in-process option):
   - The sidecar moves the heavy proving work out of the JVM: about 1.6 GB of native memory and seconds of CPU per proof, plus any native crash.
   - It can run the faster experimental prover.
   - It can be shared, for example by a beacon node and a validator client on one host.
   - The cost is another process for operators to run, version-match and secure (the socket must be private), plus a new failure mode when the socket is down.
 - **Fit for Teku:**
   - Proving is only needed by aggregators and proposers, so a sidecar `StarkAggregator` backend is a good option for production proving.
-  - Verifying aggregates is consensus-critical on every node, so it should not depend on an external process. Keep it in-process through lean-pq, which also verifies an aggregate in about 8 ms.
-  - That requires lean-pq's leanVM and the sidecar's to produce compatible proofs. lean-pq 0.11.0 pins leanVM `28368657`, the same commit as the sidecar's README, so the two should agree. Still check the verifier tag (`leanvm-v1`) at runtime.
+  - **Superseded by 0.13.0:** the plan was to keep verifying aggregates in-process through lean-pq, because verification is consensus-critical on every node and shouldn't depend on an external process. lean-pq 0.13.0 removed in-process verification, so a real `StarkProofVerifier` needs a sidecar on every PQ node, not just aggregators and proposers. That raises questions to settle before replacing the concatenation stand-in:
+    - **Operations:** every beacon node needs a sidecar built from the release matching Teku's lean-pq, on Linux or macOS only. Teku could launch it itself with `Sidecar.start` from a configured binary, or connect to one the operator runs.
+    - **Throughput:** one shared `Sidecar` handles one call at a time, and verifies share it with proving. Each block and each gossiped aggregate needs a verify, so measure verify latency through the socket while a proof is in progress. The sidecar protocol says verify does not wait for proofs, but the Java client serializes its own calls, so verifies may need their own connection.
+    - **Failure mode:** with the sidecar down, Teku can't validate blocks with attestations. That needs a clear startup check and a health metric, and should not be treated as an invalid proof (no peer penalties, no invalid-block marking).
+    - **Alternatives:** ask upstream to keep an in-process verify (verification needs no prover and was about 8 ms), or verify through the Rust `lean_vm` crate behind Teku's own native wrapper.
   - Either way, this waits for the spec to define a real `AttestationProof`.
 
 **Performance** (go-leanxmss, M2 Max):
@@ -857,7 +872,7 @@ Sizes: S ≈ <1 eng-week, M ≈ 1–2, L ≈ 2–4, XL ≈ 4+ (rough, for one en
 | 7 | **Networking:** `GossipForkSubscriptionsPq`, 16 subnets (subscriptions, stable subnets, scoring), metadata/ENR syncnets zero, LC RPC off, PQ size bounds, gossip rate limits | M | 3 (schemas), 6 (validators) | 6, 8 | `networking:eth2` tests; local 2-node sync across the fork |
 | 8 | **REST and beacon-APIs:** XMSS/VRF JSON types, validator pubkey types, removed endpoints, aggregate+proof and aggregator-duty endpoints (draft upstream beacon-APIs PR), OpenAPI regeneration | M–L | 3; API design from 0 | 6, 7, 9 | `beaconrestapi` unit and integration tests; VC↔BN contract agreed |
 | 9 | **Validator client:** (9a) identity refactor (index-first `ValidatorIdentity`) can start after 1; (9b) `XmssSigner` stack, `XmssLeafProtector` store, reserved-leaf allocator, VRF provider and cache; (9c) duties (attestation, aggregation without selection proof, block with VRF, PTC, preferences once per slot, envelope; sync disabled); (9d) keystore format, key/VRF/`pq_data` generation CLI, keymanager import, pre-fork "unregistered" warnings; (9e) external-signer stance | XL | 1 (9a), 2 and 8 (9b–c) | 3–8 | VC unit tests; acceptance test with stubbed XMSS across the fork |
-| 10 | **Real crypto:** `LeanPqXmss` on `io.github.crate-crypto:lean-pq` (keygen, sign, verify plus Teku's own leaf-prefix check); `--enable-native-access` in scripts, Docker and tests; key cache with `prepare`; performance benchmarks (BN verify throughput, VC sign latency at N keys); leanVM STARK via `LeanPq.aggregate` once the spec defines `AttestationProof` | M | 2 (API) | 3–9 | KATs (`xmss_kat.json`, EthLib vectors) pass through the binding; JMH benchmarks within budget |
+| 10 | **Real crypto:** `LeanPqXmss` on `io.github.crate-crypto:lean-pq` (keygen, sign, verify plus Teku's own leaf-prefix check); `--enable-native-access` in scripts, Docker and tests; key cache with `prepare`; performance benchmarks (BN verify throughput, VC sign latency at N keys); leanVM STARK through the `leanvm-sidecar` (`Sidecar.aggregate` / `Sidecar.verify` since lean-pq 0.13.0) once the spec defines `AttestationProof` | M | 2 (API) | 3–9 | KATs (`xmss_kat.json`, EthLib vectors) pass through the binding; JMH benchmarks within budget |
 | 11 | **Reference tests and devnet:** local PQ vector generation and full ref-test run; Kurtosis config (Gloas → EIP8483 → PQ with real XMSS on minimal, validator count under the proof-size cap); multi-client interop when available | M–L | 4–10 | — | all PQ ref tests green; devnet finalises across the PQ fork with real signatures |
 
 **Critical path:** 0 → 1 → 3 → 4 → 5 → 6 → 11.
@@ -878,7 +893,7 @@ Sizes: S ≈ <1 eng-week, M ≈ 1–2, L ≈ 2–4, XL ≈ 4+ (rough, for one en
    - The leanXMSS hash function changed on 2026-10-28.
    - The STARK encoding is a placeholder.
    - Pin to a commit, keep a spec-diff log, and avoid polishing `AttestationProof` handling beyond the stand-in.
-3. **Crypto backend.** Resolved for signatures: use `io.github.crate-crypto:lean-pq` (§2.2, §2.4). Remaining risks: upstream API churn (breaking releases 0.7, 0.9 and 0.10 within a month), KAT drift as EthLib moves, the `--enable-native-access` requirement, and no musl build.
+3. **Crypto backend.** Resolved for signatures: use `io.github.crate-crypto:lean-pq` (§2.2, §2.4). Remaining risks: upstream API churn (breaking releases 0.7, 0.9, 0.10, 0.11, 0.12 and 0.13 within a month), KAT drift as EthLib moves, the `--enable-native-access` requirement, and no musl build. From 0.13.0, real STARK verification needs a sidecar process on every node (§2.2).
 4. **Leaf-index safety** (worse than slashing, because a reused leaf can be forged).
    - The VC must record before signing (durable fsync), and survive crash or restore.
    - A restored backup with an old leaf DB, or two VCs running one key, is catastrophic.
