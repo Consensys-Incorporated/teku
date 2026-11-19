@@ -21,12 +21,14 @@ import org.apache.tuweni.bytes.Bytes48;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.SszMutableList;
+import tech.pegasys.teku.infrastructure.ssz.primitive.SszByte;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBytes32;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.config.SpecConfigPq;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.altair.MutableBeaconStateAltair;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.MutableBeaconStateElectra;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.pq.MutableBeaconStatePq;
@@ -87,6 +89,39 @@ public class BeaconStateMutatorsPq extends BeaconStateMutatorsGloas {
                 new SszSignature(EMPTY_DEPOSIT_SIGNATURE),
                 SszUInt64.of(SpecConfig.GENESIS_SLOT));
     state.getPendingDeposits().append(deposit);
+  }
+
+  /**
+   * add_validator_to_registry, modified in PQ: the validator is keyed by its XMSS public key and
+   * carries its VRF root. Validators are appended (get_index_for_new_validator is the list size).
+   */
+  public void addValidatorToRegistry(
+      final MutableBeaconState state,
+      final Bytes32 pubkey,
+      final Bytes32 vrfRoot,
+      final Bytes32 withdrawalCredentials,
+      final UInt64 amount) {
+    final ValidatorPq withoutBalance =
+        new ValidatorPq(
+            pubkey,
+            vrfRoot,
+            withdrawalCredentials,
+            UInt64.ZERO,
+            false,
+            SpecConfig.FAR_FUTURE_EPOCH,
+            SpecConfig.FAR_FUTURE_EPOCH,
+            SpecConfig.FAR_FUTURE_EPOCH,
+            SpecConfig.FAR_FUTURE_EPOCH);
+    final UInt64 effectiveBalance =
+        amount
+            .minusMinZero(amount.mod(specConfigPq.getEffectiveBalanceIncrement()))
+            .min(miscHelpers.getMaxEffectiveBalance(withoutBalance));
+    final MutableBeaconStateAltair stateAltair = MutableBeaconStateAltair.required(state);
+    stateAltair.getValidators().append(withoutBalance.withEffectiveBalance(effectiveBalance));
+    stateAltair.getBalances().appendElement(amount);
+    stateAltair.getPreviousEpochParticipation().append(SszByte.ZERO);
+    stateAltair.getCurrentEpochParticipation().append(SszByte.ZERO);
+    stateAltair.getInactivityScores().append(SszUInt64.ZERO);
   }
 
   /** add_builder_to_registry, modified in PQ: the builder is keyed by its XMSS public key. */
