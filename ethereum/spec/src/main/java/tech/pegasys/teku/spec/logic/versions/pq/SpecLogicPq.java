@@ -57,6 +57,9 @@ import tech.pegasys.teku.spec.logic.versions.gloas.util.ValidatorsUtilGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.weaksubjectivity.WeakSubjectivityCalculatorGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.withdrawals.WithdrawalsHelpersGloas;
 import tech.pegasys.teku.spec.logic.versions.pq.forktransition.PqStateUpgrade;
+import tech.pegasys.teku.spec.logic.versions.pq.helpers.BeaconStateAccessorsPq;
+import tech.pegasys.teku.spec.logic.versions.pq.helpers.MiscHelpersPq;
+import tech.pegasys.teku.spec.logic.versions.pq.helpers.PredicatesPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 
 public class SpecLogicPq extends AbstractSpecLogic {
@@ -242,9 +245,15 @@ public class SpecLogicPq extends AbstractSpecLogic {
     final ExecutionPayloadProposalUtil executionPayloadProposalUtil =
         new ExecutionPayloadProposalUtil(schemaDefinitions);
 
-    // State upgrade
+    // State upgrade. The PQ helpers are used only for the standalone upgrade into the PQ state.
+    final PredicatesPq predicatesPq = new PredicatesPq(config);
+    final MiscHelpersPq miscHelpersPq = new MiscHelpersPq(config, predicatesPq, schemaDefinitions);
     final PqStateUpgrade stateUpgrade =
-        new PqStateUpgrade(config, schemaDefinitions, beaconStateAccessors);
+        new PqStateUpgrade(
+            config,
+            schemaDefinitions,
+            new BeaconStateAccessorsPq(config, schemaDefinitions, predicatesPq, miscHelpersPq),
+            miscHelpersPq);
 
     // Data column sidecar util
     final DataColumnSidecarUtil dataColumnSidecarUtil = new DataColumnSidecarUtilGloas(miscHelpers);
