@@ -71,7 +71,8 @@ public class DataColumnSidecarSubnetSubscriptionsTest {
               builder
                   .gloasForkEpoch(UInt64.valueOf(2))
                   .eip8483ForkEpoch(UInt64.valueOf(3))
-                  .hezeForkEpoch(UInt64.valueOf(4)));
+                  .pqForkEpoch(UInt64.valueOf(4))
+                  .hezeForkEpoch(UInt64.valueOf(5)));
 
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(SPEC);
   private final StorageSystem storageSystem = InMemoryStorageSystemBuilder.buildDefault(SPEC);

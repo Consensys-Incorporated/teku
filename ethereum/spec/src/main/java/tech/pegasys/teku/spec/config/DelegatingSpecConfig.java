@@ -236,6 +236,16 @@ public class DelegatingSpecConfig implements SpecConfig {
   }
 
   @Override
+  public Bytes4 getPqForkVersion() {
+    return specConfig.getPqForkVersion();
+  }
+
+  @Override
+  public UInt64 getPqForkEpoch() {
+    return specConfig.getPqForkEpoch();
+  }
+
+  @Override
   public Bytes4 getHezeForkVersion() {
     return specConfig.getHezeForkVersion();
   }

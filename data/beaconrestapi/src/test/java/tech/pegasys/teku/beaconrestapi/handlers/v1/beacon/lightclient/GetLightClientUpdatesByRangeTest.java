@@ -147,7 +147,7 @@ public class GetLightClientUpdatesByRangeTest
   private static Set<String> expectedHeaderFields(final SpecMilestone milestone) {
     return switch (milestone) {
       case ALTAIR, BELLATRIX -> Set.of("beacon");
-      case GLOAS, EIP8483, HEZE -> Set.of("beacon", "execution_block_hash", "execution_branch");
+      case GLOAS, EIP8483, PQ, HEZE -> Set.of("beacon", "execution_block_hash", "execution_branch");
       default -> Set.of("beacon", "execution", "execution_branch");
     };
   }
@@ -155,7 +155,7 @@ public class GetLightClientUpdatesByRangeTest
   private static int expectedSyncCommitteeBranchLength(final SpecMilestone milestone) {
     return switch (milestone) {
       case ELECTRA, FULU -> 6;
-      case GLOAS, EIP8483, HEZE -> 11;
+      case GLOAS, EIP8483, PQ, HEZE -> 11;
       default -> 5;
     };
   }
@@ -163,7 +163,7 @@ public class GetLightClientUpdatesByRangeTest
   private static int expectedFinalityBranchLength(final SpecMilestone milestone) {
     return switch (milestone) {
       case ELECTRA, FULU -> 7;
-      case GLOAS, EIP8483, HEZE -> 9;
+      case GLOAS, EIP8483, PQ, HEZE -> 9;
       default -> 6;
     };
   }

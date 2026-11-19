@@ -71,6 +71,7 @@ public class BlobSidecarsByRootListenerValidatingProxyTest {
           case FULU -> TestSpecFactory.createMinimalWithFuluForkEpoch(currentForkEpoch);
           case GLOAS -> TestSpecFactory.createMinimalWithGloasForkEpoch(currentForkEpoch);
           case EIP8483 -> TestSpecFactory.createMinimalWithEip8483ForkEpoch(currentForkEpoch);
+          case PQ -> TestSpecFactory.createMinimalWithPqForkEpoch(currentForkEpoch);
           case HEZE -> TestSpecFactory.createMinimalWithHezeForkEpoch(currentForkEpoch);
         };
     dataStructureUtil = new DataStructureUtil(spec);

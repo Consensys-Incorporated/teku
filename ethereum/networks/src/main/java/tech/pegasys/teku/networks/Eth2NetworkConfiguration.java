@@ -137,6 +137,8 @@ public class Eth2NetworkConfiguration {
   private final Optional<UInt64> gloasForkEpoch;
   private final Optional<UInt64> eip8483ForkEpoch;
   private final Optional<Bytes4> eip8483ForkVersion;
+  private final Optional<UInt64> pqForkEpoch;
+  private final Optional<Bytes4> pqForkVersion;
   private final Optional<UInt64> hezeForkEpoch;
   private final Eth1Address eth1DepositContractAddress;
   private final Optional<UInt64> eth1DepositContractDeployBlock;
@@ -184,6 +186,8 @@ public class Eth2NetworkConfiguration {
       final Optional<UInt64> gloasForkEpoch,
       final Optional<UInt64> eip8483ForkEpoch,
       final Optional<Bytes4> eip8483ForkVersion,
+      final Optional<UInt64> pqForkEpoch,
+      final Optional<Bytes4> pqForkVersion,
       final Optional<UInt64> hezeForkEpoch,
       final Optional<Bytes32> terminalBlockHashOverride,
       final Optional<UInt256> totalTerminalDifficultyOverride,
@@ -223,6 +227,8 @@ public class Eth2NetworkConfiguration {
     this.gloasForkEpoch = gloasForkEpoch;
     this.eip8483ForkEpoch = eip8483ForkEpoch;
     this.eip8483ForkVersion = eip8483ForkVersion;
+    this.pqForkEpoch = pqForkEpoch;
+    this.pqForkVersion = pqForkVersion;
     this.hezeForkEpoch = hezeForkEpoch;
     this.eth1DepositContractAddress =
         eth1DepositContractAddress == null
@@ -326,6 +332,7 @@ public class Eth2NetworkConfiguration {
       case FULU -> fuluForkEpoch;
       case GLOAS -> gloasForkEpoch;
       case EIP8483 -> eip8483ForkEpoch;
+      case PQ -> pqForkEpoch;
       case HEZE -> hezeForkEpoch;
       default -> Optional.empty();
     };
@@ -465,6 +472,8 @@ public class Eth2NetworkConfiguration {
         && Objects.equals(gloasForkEpoch, that.gloasForkEpoch)
         && Objects.equals(eip8483ForkEpoch, that.eip8483ForkEpoch)
         && Objects.equals(eip8483ForkVersion, that.eip8483ForkVersion)
+        && Objects.equals(pqForkEpoch, that.pqForkEpoch)
+        && Objects.equals(pqForkVersion, that.pqForkVersion)
         && Objects.equals(hezeForkEpoch, that.hezeForkEpoch)
         && Objects.equals(eth1DepositContractAddress, that.eth1DepositContractAddress)
         && Objects.equals(eth1DepositContractDeployBlock, that.eth1DepositContractDeployBlock)
@@ -493,6 +502,8 @@ public class Eth2NetworkConfiguration {
         gloasForkEpoch,
         eip8483ForkEpoch,
         eip8483ForkVersion,
+        pqForkEpoch,
+        pqForkVersion,
         hezeForkEpoch,
         eth1DepositContractAddress,
         eth1DepositContractDeployBlock,
@@ -543,6 +554,8 @@ public class Eth2NetworkConfiguration {
     private Optional<UInt64> gloasForkEpoch = Optional.empty();
     private Optional<UInt64> eip8483ForkEpoch = Optional.empty();
     private Optional<Bytes4> eip8483ForkVersion = Optional.empty();
+    private Optional<UInt64> pqForkEpoch = Optional.empty();
+    private Optional<Bytes4> pqForkVersion = Optional.empty();
     private Optional<UInt64> hezeForkEpoch = Optional.empty();
     private Optional<Bytes32> terminalBlockHashOverride = Optional.empty();
     private Optional<UInt256> totalTerminalDifficultyOverride = Optional.empty();
@@ -597,6 +610,8 @@ public class Eth2NetworkConfiguration {
                   gloasForkEpoch.ifPresent(builder::gloasForkEpoch);
                   eip8483ForkEpoch.ifPresent(builder::eip8483ForkEpoch);
                   eip8483ForkVersion.ifPresent(builder::eip8483ForkVersion);
+                  pqForkEpoch.ifPresent(builder::pqForkEpoch);
+                  pqForkVersion.ifPresent(builder::pqForkVersion);
                   hezeForkEpoch.ifPresent(builder::hezeForkEpoch);
                   builder.bellatrixBuilder(
                       bellatrixBuilder -> {
@@ -654,6 +669,8 @@ public class Eth2NetworkConfiguration {
           gloasForkEpoch,
           eip8483ForkEpoch,
           eip8483ForkVersion,
+          pqForkEpoch,
+          pqForkVersion,
           hezeForkEpoch,
           terminalBlockHashOverride,
           totalTerminalDifficultyOverride,
@@ -966,6 +983,19 @@ public class Eth2NetworkConfiguration {
     public Builder eip8483ForkVersion(final Bytes4 eip8483ForkVersion) {
       checkNotNull(eip8483ForkVersion);
       this.eip8483ForkVersion = Optional.of(eip8483ForkVersion);
+      return this;
+    }
+
+    public Builder pqForkEpoch(final UInt64 pqForkEpoch) {
+      checkNotNull(pqForkEpoch);
+      this.pqForkEpoch = Optional.of(pqForkEpoch);
+      return this;
+    }
+
+    /** Needed for networks whose config predates PQ and so has no PQ_FORK_VERSION. */
+    public Builder pqForkVersion(final Bytes4 pqForkVersion) {
+      checkNotNull(pqForkVersion);
+      this.pqForkVersion = Optional.of(pqForkVersion);
       return this;
     }
 

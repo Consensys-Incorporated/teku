@@ -53,6 +53,7 @@ import tech.pegasys.teku.spec.config.builder.ElectraBuilder;
 import tech.pegasys.teku.spec.config.builder.FuluBuilder;
 import tech.pegasys.teku.spec.config.builder.GloasBuilder;
 import tech.pegasys.teku.spec.config.builder.HezeBuilder;
+import tech.pegasys.teku.spec.config.builder.PqBuilder;
 import tech.pegasys.teku.spec.config.builder.SpecConfigBuilder;
 
 public class SpecConfigReader {
@@ -248,6 +249,16 @@ public class SpecConfigReader {
               final String constantKey = camelToSnakeCase(setter.getName());
               final Object rawValue = unprocessedConfig.get(constantKey);
               invokeSetter(setter, configBuilder::eip8483Builder, constantKey, rawValue);
+              unprocessedConfig.remove(constantKey);
+            });
+
+    // Process pq config
+    streamConfigSetters(PqBuilder.class)
+        .forEach(
+            setter -> {
+              final String constantKey = camelToSnakeCase(setter.getName());
+              final Object rawValue = unprocessedConfig.get(constantKey);
+              invokeSetter(setter, configBuilder::pqBuilder, constantKey, rawValue);
               unprocessedConfig.remove(constantKey);
             });
 

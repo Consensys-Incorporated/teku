@@ -29,6 +29,7 @@ import tech.pegasys.teku.spec.config.SpecConfigFulu;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.config.SpecConfigHeze;
 import tech.pegasys.teku.spec.config.SpecConfigLoader;
+import tech.pegasys.teku.spec.config.SpecConfigPq;
 import tech.pegasys.teku.spec.networks.Eth2Network;
 import tech.pegasys.teku.spec.schemas.registry.SchemaRegistryBuilder;
 
@@ -109,6 +110,13 @@ class SpecVersionTest {
         actualVersion =
             SpecVersion.create(
                 SpecMilestone.EIP8483, minimalConfig, SchemaRegistryBuilder.create());
+      }
+      case PQ -> {
+        expectedVersion =
+            SpecVersion.createPq(
+                SpecConfigPq.required(minimalConfig), SchemaRegistryBuilder.create());
+        actualVersion =
+            SpecVersion.create(SpecMilestone.PQ, minimalConfig, SchemaRegistryBuilder.create());
       }
       case HEZE -> {
         expectedVersion =
