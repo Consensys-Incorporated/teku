@@ -78,8 +78,43 @@ public record SigningHistory(
         .toString();
   }
 
+  /**
+   * Finds a slot or epoch that can't be stored in a {@link ValidatorSigningRecord}.
+   *
+   * <p>{@link UInt64#MAX_VALUE} is never a legitimate slot or epoch, and a stored record reads it
+   * back as "never signed", so importing it would silently remove the validator's protection. We
+   * can't tell whether such an entry means "nothing signed" or records a real signature, so the
+   * only safe option is to refuse it.
+   *
+   * @return a description of the unsupported value, or empty if every value can be stored
+   */
+  public Optional<String> findUnsupportedValue() {
+    if (signedBlocks.stream().map(SignedBlock::slot).anyMatch(UInt64.MAX_VALUE::equals)) {
+      return Optional.of("signed block slot " + UInt64.MAX_VALUE + " is not supported");
+    }
+    if (signedAttestations.stream()
+        .anyMatch(
+            attestation ->
+                UInt64.MAX_VALUE.equals(attestation.sourceEpoch())
+                    || UInt64.MAX_VALUE.equals(attestation.targetEpoch()))) {
+      return Optional.of("signed attestation epoch " + UInt64.MAX_VALUE + " is not supported");
+    }
+    return Optional.empty();
+  }
+
+  /**
+   * Summarises this history as a {@link ValidatorSigningRecord}, merged with any existing record.
+   *
+   * @throws IllegalArgumentException if the history contains a value reported by {@link
+   *     #findUnsupportedValue()}
+   */
   public ValidatorSigningRecord toValidatorSigningRecord(
       final Optional<ValidatorSigningRecord> maybeRecord, final Bytes32 genesisValidatorsRoot) {
+    findUnsupportedValue()
+        .ifPresent(
+            error -> {
+              throw new IllegalArgumentException(error);
+            });
 
     final UInt64 lastSignedBlockSlot =
         signedBlocks.stream()
@@ -91,14 +126,12 @@ public record SigningHistory(
         signedAttestations.stream()
             .map(SignedAttestation::sourceEpoch)
             .filter(Objects::nonNull)
-            .filter(epoch -> !epoch.equals(UInt64.MAX_VALUE))
             .max(UInt64::compareTo)
             .orElse(null);
     final UInt64 lastSignedAttestationTargetEpoch =
         signedAttestations.stream()
             .map(SignedAttestation::targetEpoch)
             .filter(Objects::nonNull)
-            .filter(epoch -> !epoch.equals(UInt64.MAX_VALUE))
             .max(UInt64::compareTo)
             .orElse(null);
 

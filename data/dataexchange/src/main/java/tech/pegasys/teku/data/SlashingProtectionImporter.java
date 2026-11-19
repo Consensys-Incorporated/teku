@@ -104,13 +104,11 @@ public class SlashingProtectionImporter {
         signingHistory.signedAttestations().stream()
             .map(SignedAttestation::sourceEpoch)
             .filter(Objects::nonNull)
-            .filter(epoch -> !epoch.equals(UInt64.MAX_VALUE))
             .max(UInt64::compareTo);
     final Optional<UInt64> targetEpoch =
         signingHistory.signedAttestations().stream()
             .map(SignedAttestation::targetEpoch)
             .filter(Objects::nonNull)
-            .filter(epoch -> !epoch.equals(UInt64.MAX_VALUE))
             .max(UInt64::compareTo);
     final ValidatorSigningRecord record =
         new ValidatorSigningRecord(
@@ -170,6 +168,17 @@ public class SlashingProtectionImporter {
     final String hexValidatorPubkey = signingHistory.pubkey().toHexString();
 
     statusConsumer.accept("Importing " + validatorString);
+    final Optional<String> unsupportedValue = signingHistory.findUnsupportedValue();
+    if (unsupportedValue.isPresent()) {
+      statusConsumer.accept(
+          "Validator "
+              + hexValidatorPubkey
+              + " was not imported: "
+              + unsupportedValue.get()
+              + " by Teku's slashing protection");
+      return Optional.of(
+          "Slashing protection data could not be imported: " + unsupportedValue.get());
+    }
     final Path outputFile = slashingProtectionPath.resolve(validatorString + ".yml");
     Optional<ValidatorSigningRecord> existingRecord = Optional.empty();
     if (outputFile.toFile().exists()) {
