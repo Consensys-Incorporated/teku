@@ -16,6 +16,8 @@ package tech.pegasys.teku.spec.datastructures.operations;
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.INDEXED_ATTESTATION_SCHEMA;
 
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema2;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszContainerSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszSchema;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 import tech.pegasys.teku.spec.schemas.registry.SchemaRegistry;
 
@@ -23,10 +25,28 @@ public class AttesterSlashingSchema
     extends ContainerSchema2<AttesterSlashing, IndexedAttestation, IndexedAttestation> {
 
   public AttesterSlashingSchema(final String containerName, final SchemaRegistry schemaRegistry) {
+    this(containerName, schemaRegistry.get(INDEXED_ATTESTATION_SCHEMA));
+  }
+
+  /** For a fork whose indexed attestations have their own schema, such as PQ's. */
+  public AttesterSlashingSchema(
+      final String containerName,
+      final SszContainerSchema<? extends IndexedAttestation> indexedAttestationSchema) {
     super(
         containerName,
-        namedSchema("attestation_1", schemaRegistry.get(INDEXED_ATTESTATION_SCHEMA)),
-        namedSchema("attestation_2", schemaRegistry.get(INDEXED_ATTESTATION_SCHEMA)));
+        namedSchema("attestation_1", asIndexedAttestationSchema(indexedAttestationSchema)),
+        namedSchema("attestation_2", asIndexedAttestationSchema(indexedAttestationSchema)));
+  }
+
+  @SuppressWarnings("unchecked")
+  private static SszSchema<IndexedAttestation> asIndexedAttestationSchema(
+      final SszContainerSchema<? extends IndexedAttestation> schema) {
+    return (SszSchema<IndexedAttestation>) schema;
+  }
+
+  @SuppressWarnings("unchecked")
+  public SszContainerSchema<IndexedAttestation> getIndexedAttestationSchema() {
+    return (SszContainerSchema<IndexedAttestation>) getFieldSchema0();
   }
 
   @Override

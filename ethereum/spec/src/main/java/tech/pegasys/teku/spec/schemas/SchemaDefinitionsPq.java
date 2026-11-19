@@ -21,6 +21,7 @@ import java.util.Optional;
 import java.util.function.Supplier;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.execution.versions.pq.ExecutionRequestsSchemaPq;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.PqAttestationSchemas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.pq.BeaconStateSchemaPq;
 import tech.pegasys.teku.spec.schemas.registry.SchemaRegistry;
 
@@ -32,6 +33,7 @@ public class SchemaDefinitionsPq extends SchemaDefinitionsEip8483 {
 
   private final Supplier<BeaconStateSchemaPq> pqBeaconStateSchema;
   private final Supplier<ExecutionRequestsSchemaPq> pqExecutionRequestsSchema;
+  private final Supplier<PqAttestationSchemas> pqAttestationSchemas;
 
   public SchemaDefinitionsPq(final SchemaRegistry schemaRegistry) {
     super(schemaRegistry);
@@ -43,6 +45,7 @@ public class SchemaDefinitionsPq extends SchemaDefinitionsEip8483 {
             () ->
                 new ExecutionRequestsSchemaPq(
                     schemaRegistry, EXECUTION_REQUESTS_SCHEMA.getSchemaName(SpecMilestone.PQ)));
+    this.pqAttestationSchemas = Suppliers.memoize(() -> new PqAttestationSchemas(schemaRegistry));
   }
 
   public static SchemaDefinitionsPq required(final SchemaDefinitions schemaDefinitions) {
@@ -52,6 +55,15 @@ public class SchemaDefinitionsPq extends SchemaDefinitionsEip8483 {
         SchemaDefinitionsPq.class,
         schemaDefinitions.getClass());
     return (SchemaDefinitionsPq) schemaDefinitions;
+  }
+
+  /**
+   * The PQ attestation, indexed attestation, attester slashing, aggregate and payload attestation
+   * message schemas. Not yet the milestone's: they switch over with PQ's state transition.
+   */
+  @NonSchema
+  public PqAttestationSchemas getPqAttestationSchemas() {
+    return pqAttestationSchemas.get();
   }
 
   /**
