@@ -13,7 +13,9 @@
 
 package tech.pegasys.teku.spec.datastructures.state.versions.electra;
 
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import org.apache.tuweni.bytes.Bytes48;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.ssz.containers.Container5;
@@ -79,6 +81,11 @@ public class PendingDeposit
     return ((SszPublicKey) get(0)).getBLSPublicKey();
   }
 
+  /** The raw pubkey bytes: a BLS key, or from PQ {@code 0^16 ‖ xmss_pubkey}. */
+  public Bytes48 getPubkeyBytes() {
+    return ((SszPublicKey) get(0)).getBytes();
+  }
+
   public Bytes32 getWithdrawalCredentials() {
     return ((SszBytes32) get(1)).get();
   }
@@ -89,6 +96,11 @@ public class PendingDeposit
 
   public BLSSignature getSignature() {
     return ((SszSignature) get(3)).getSignature();
+  }
+
+  /** The raw signature bytes: from PQ, the VRF root followed by zeros. */
+  public Bytes getSignatureBytes() {
+    return ((SszSignature) get(3)).getBytes();
   }
 
   public UInt64 getSlot() {

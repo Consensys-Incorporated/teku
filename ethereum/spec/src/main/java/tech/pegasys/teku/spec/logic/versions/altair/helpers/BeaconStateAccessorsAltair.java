@@ -218,11 +218,15 @@ public class BeaconStateAccessorsAltair extends BeaconStateAccessors {
     if (shouldSetTargetTimelinessFlag(isMatchingTarget, inclusionDelay)) {
       participationFlagIndices.add(ParticipationFlags.TIMELY_TARGET_FLAG_INDEX);
     }
-    if (isMatchingHead
-        && inclusionDelay.equals(UInt64.valueOf(config.getMinAttestationInclusionDelay()))) {
+    if (isMatchingHead && inclusionDelay.equals(getTimelyHeadInclusionDelay())) {
       participationFlagIndices.add(ParticipationFlags.TIMELY_HEAD_FLAG_INDEX);
     }
     return participationFlagIndices;
+  }
+
+  /** The inclusion delay at which an attestation earns the timely head flag. */
+  protected UInt64 getTimelyHeadInclusionDelay() {
+    return UInt64.valueOf(config.getMinAttestationInclusionDelay());
   }
 
   protected boolean computeIsMatchingHead(
