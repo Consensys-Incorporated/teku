@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
+import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.data.slashinginterchange.Metadata;
 import tech.pegasys.teku.data.slashinginterchange.SignedAttestation;
@@ -46,6 +47,8 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 public class SlashingProtectionImporter {
   private final Path slashingProtectionPath;
   private List<SigningHistory> data = new ArrayList<>();
+  // Problems found in the complete history, which summarising it into max values can hide
+  private Map<BLSPublicKey, String> importErrors = new HashMap<>();
   private Metadata metadata;
   private final SyncDataAccessor syncDataAccessor;
 
@@ -76,6 +79,7 @@ public class SlashingProtectionImporter {
                 metadata.interchangeFormat(), INTERCHANGE_VERSION));
       }
 
+      importErrors = findImportErrors(interchangeFormat.data());
       data = summariseCompleteInterchangeFormat(interchangeFormat.data());
 
     } catch (JsonMappingException | MissingRequiredFieldException e) {
@@ -87,6 +91,17 @@ public class SlashingProtectionImporter {
       return Optional.of(String.format("Json does not appear valid. %s", cause));
     }
     return Optional.empty();
+  }
+
+  private static Map<BLSPublicKey, String> findImportErrors(
+      final List<SigningHistory> completeSigningData) {
+    final Map<BLSPublicKey, String> errors = new HashMap<>();
+    completeSigningData.forEach(
+        signingHistory ->
+            signingHistory
+                .findImportError()
+                .ifPresent(error -> errors.putIfAbsent(signingHistory.pubkey(), error)));
+    return errors;
   }
 
   private List<SigningHistory> summariseCompleteInterchangeFormat(
@@ -168,16 +183,12 @@ public class SlashingProtectionImporter {
     final String hexValidatorPubkey = signingHistory.pubkey().toHexString();
 
     statusConsumer.accept("Importing " + validatorString);
-    final Optional<String> unsupportedValue = signingHistory.findUnsupportedValue();
-    if (unsupportedValue.isPresent()) {
+    final Optional<String> importError =
+        Optional.ofNullable(importErrors.get(signingHistory.pubkey()));
+    if (importError.isPresent()) {
       statusConsumer.accept(
-          "Validator "
-              + hexValidatorPubkey
-              + " was not imported: "
-              + unsupportedValue.get()
-              + " by Teku's slashing protection");
-      return Optional.of(
-          "Slashing protection data could not be imported: " + unsupportedValue.get());
+          "Validator " + hexValidatorPubkey + " was not imported: " + importError.get());
+      return Optional.of("Slashing protection data could not be imported: " + importError.get());
     }
     final Path outputFile = slashingProtectionPath.resolve(validatorString + ".yml");
     Optional<ValidatorSigningRecord> existingRecord = Optional.empty();
@@ -204,12 +215,16 @@ public class SlashingProtectionImporter {
       return Optional.of("Genesis validators root did not match what was expected.");
     }
 
+    // Keep the existing root if the import data has none, or the wrong chain check would be lost
+    final Optional<Bytes32> existingGenesisValidatorsRoot =
+        existingRecord.flatMap(ValidatorSigningRecord::genesisValidatorsRoot);
+    final Optional<Bytes32> genesisValidatorsRoot =
+        metadata.genesisValidatorsRoot().or(() -> existingGenesisValidatorsRoot);
     try {
       syncDataAccessor.syncedWrite(
           outputFile,
           signingHistory
-              .toValidatorSigningRecord(
-                  existingRecord, metadata.genesisValidatorsRoot().orElse(null))
+              .toValidatorSigningRecord(existingRecord, genesisValidatorsRoot.orElse(null))
               .toBytes());
     } catch (IOException e) {
       statusConsumer.accept("Validator " + hexValidatorPubkey + " was not updated.");

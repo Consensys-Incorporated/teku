@@ -70,14 +70,28 @@ public class SlashingProtectionInterchangeTestExecutor implements TestExecutor {
     final LocalSlashingProtector slashingProtector =
         new LocalSlashingProtector(
             SyncDataAccessor.create(slashingProtectionPath), slashingProtectionPath);
-    testData.steps().forEach(step -> runStep(step, importer, slashingProtector));
+    for (final Step step : testData.steps()) {
+      if (!runStep(step, importer, slashingProtector)) {
+        LOG.info("Skipping remaining steps of {} as slashable data was rejected", testData.name());
+        return;
+      }
+    }
   }
 
-  private void runStep(
+  /**
+   * Runs a step of the test.
+   *
+   * @return false if the import was rejected for containing slashable data, in which case the test
+   *     format says the step's checks and all later steps must be ignored
+   */
+  private boolean runStep(
       final Step step,
       final SlashingProtectionImporter importer,
       final LocalSlashingProtector slashingProtector) {
     final Map<BLSPublicKey, String> importErrors = importInterchange(importer, step.interchange());
+    if (step.shouldSucceed() && step.containsSlashableData() && !importErrors.isEmpty()) {
+      return false;
+    }
     if (step.shouldSucceed()) {
       assertThat(importErrors).isEmpty();
     } else {
@@ -102,6 +116,7 @@ public class SlashingProtectionInterchangeTestExecutor implements TestExecutor {
                             attestation.sourceEpoch(),
                             attestation.targetEpoch()))
                     .isCompletedWithValue(attestation.shouldSucceed()));
+    return true;
   }
 
   private Map<BLSPublicKey, String> importInterchange(

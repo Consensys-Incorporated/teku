@@ -128,9 +128,11 @@ public class SigningHistoryTest {
         new SigningHistory(
             blsPubKey,
             List.of(new SignedBlock(UInt64.valueOf(12), Optional.empty())),
-            List.of(attestation(ONE, UInt64.valueOf(3)), attestation(UInt64.valueOf(2), ONE)));
+            List.of(
+                attestation(ONE, UInt64.valueOf(3)),
+                attestation(UInt64.valueOf(2), UInt64.valueOf(2))));
 
-    assertThat(signingHistory.findUnsupportedValue()).isEmpty();
+    assertThat(signingHistory.findImportError()).isEmpty();
     assertThat(signingHistory.toValidatorSigningRecord(Optional.empty(), GENESIS_ROOT))
         .isEqualTo(
             new ValidatorSigningRecord(
@@ -138,6 +140,59 @@ public class SigningHistoryTest {
                 UInt64.valueOf(12),
                 UInt64.valueOf(2),
                 UInt64.valueOf(3)));
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("historiesWithSourceAfterTarget")
+  void shouldRejectAttestationWithSourceAfterTarget(
+      final String description,
+      final List<SignedAttestation> signedAttestations,
+      final String expectedError) {
+    // Importing a source epoch above the target sets a floor no honest attestation can pass - see
+    // https://github.com/Consensys-Incorporated/teku/issues/11606
+    final SigningHistory signingHistory =
+        new SigningHistory(blsPubKey, List.of(), signedAttestations);
+
+    assertThat(signingHistory.findAttestationWithSourceAfterTarget()).contains(expectedError);
+    assertThat(signingHistory.findImportError()).contains(expectedError);
+  }
+
+  static Stream<Arguments> historiesWithSourceAfterTarget() {
+    return Stream.of(
+        Arguments.of(
+            "source one after target",
+            List.of(attestation(UInt64.valueOf(8), UInt64.valueOf(7))),
+            "signed attestation source epoch 8 is after its target epoch 7"),
+        Arguments.of(
+            "far future source",
+            List.of(attestation(UInt64.valueOf(999999999), ONE)),
+            "signed attestation source epoch 999999999 is after its target epoch 1"),
+        Arguments.of(
+            "invalid attestation hidden by a later valid one",
+            List.of(
+                attestation(UInt64.valueOf(8), UInt64.valueOf(7)),
+                attestation(UInt64.valueOf(9), UInt64.valueOf(10))),
+            "signed attestation source epoch 8 is after its target epoch 7"));
+  }
+
+  @Test
+  void shouldAcceptAttestationWithSourceEqualToTarget() {
+    final SigningHistory signingHistory =
+        new SigningHistory(blsPubKey, List.of(), List.of(attestation(ZERO, ZERO)));
+
+    assertThat(signingHistory.findImportError()).isEmpty();
+  }
+
+  @Test
+  void shouldReportMaxValueBeforeSourceAfterTarget() {
+    final SigningHistory signingHistory =
+        new SigningHistory(
+            blsPubKey,
+            List.of(new SignedBlock(UInt64.MAX_VALUE, Optional.empty())),
+            List.of(attestation(UInt64.valueOf(8), UInt64.valueOf(7))));
+
+    assertThat(signingHistory.findImportError())
+        .contains("signed block slot 18446744073709551615 is not supported");
   }
 
   private static SignedAttestation attestation(final UInt64 source, final UInt64 target) {
