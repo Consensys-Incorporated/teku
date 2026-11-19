@@ -15,6 +15,7 @@ package tech.pegasys.teku.spec.datastructures.type;
 
 import com.google.common.base.Supplier;
 import com.google.common.base.Suppliers;
+import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.ssz.collections.impl.SszByteVectorImpl;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
@@ -26,6 +27,15 @@ public class SszSignature extends SszByteVectorImpl {
   public SszSignature(final BLSSignature signature) {
     super(SszSignatureSchema.INSTANCE, signature.toBytesCompressed());
     this.signature = () -> signature;
+  }
+
+  /**
+   * Raw signature bytes, parsed as a BLS signature only when asked for. PQ deposits carry bytes
+   * that are not a BLS signature (a VRF root, or zeros).
+   */
+  public SszSignature(final Bytes signatureBytes) {
+    super(SszSignatureSchema.INSTANCE, signatureBytes);
+    signature = Suppliers.memoize(this::createBLSSignature);
   }
 
   SszSignature(final TreeNode backingNode) {

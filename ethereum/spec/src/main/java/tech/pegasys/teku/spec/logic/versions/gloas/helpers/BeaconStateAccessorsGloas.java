@@ -348,10 +348,19 @@ public class BeaconStateAccessorsGloas extends BeaconStateAccessorsFulu {
       return true;
     }
 
-    final int slotIndex = parentSlot.mod(config.getSlotsPerHistoricalRoot()).intValue();
+    final int slotIndex =
+        getPayloadAvailabilitySlot(state, data, parentSlot)
+            .mod(config.getSlotsPerHistoricalRoot())
+            .intValue();
     final boolean payloadIndex =
         BeaconStateGloas.required(state).getExecutionPayloadAvailability().get(slotIndex).get();
     return data.getIndex().intValue() == (payloadIndex ? 1 : 0);
+  }
+
+  /** The slot whose payload availability an attestation's payload vote is matched against. */
+  protected UInt64 getPayloadAvailabilitySlot(
+      final BeaconState state, final AttestationData data, final UInt64 parentSlot) {
+    return parentSlot;
   }
 
   /**
