@@ -150,8 +150,8 @@ class PqHelpersTest {
       branch.add(sibling);
       node =
           ((1234 >> depth) & 1) == 1
-              ? Hash.sha256(Bytes.concatenate(sibling, node))
-              : Hash.sha256(Bytes.concatenate(node, sibling));
+              ? Hash.keccak256(Bytes.concatenate(sibling, node))
+              : Hash.keccak256(Bytes.concatenate(node, sibling));
     }
     final Bytes32 vrfRoot = node;
     final BeaconStatePq state = stateWithValidator(validator(vrfRoot), UInt64.ZERO);
@@ -161,6 +161,11 @@ class PqHelpersTest {
 
     assertThat(predicates.isValidVrfProof(state, 0, slot, proof)).isTrue();
     assertThat(predicates.isValidVrfProof(state, 0, slot.plus(1), proof)).isFalse();
+    // Only the low VRF_TREE_DEPTH bits of the slot select the leaf
+    assertThat(
+            predicates.isValidVrfProof(
+                state, 0, slot.plus(1L << PqConstants.VRF_TREE_DEPTH), proof))
+        .isTrue();
     proof.set(0, dataStructureUtil.randomBytes32());
     assertThat(predicates.isValidVrfProof(state, 0, slot, proof)).isFalse();
   }

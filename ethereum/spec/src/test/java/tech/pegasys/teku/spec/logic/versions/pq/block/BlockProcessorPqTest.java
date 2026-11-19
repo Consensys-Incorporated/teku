@@ -505,8 +505,8 @@ class BlockProcessorPqTest {
       final Bytes32 sibling = proof.get(depth + 1);
       node =
           ((index >> depth) & 1) == 1
-              ? Hash.sha256(Bytes.concatenate(sibling, node))
-              : Hash.sha256(Bytes.concatenate(node, sibling));
+              ? Hash.keccak256(Bytes.concatenate(sibling, node))
+              : Hash.keccak256(Bytes.concatenate(node, sibling));
     }
     return node;
   }

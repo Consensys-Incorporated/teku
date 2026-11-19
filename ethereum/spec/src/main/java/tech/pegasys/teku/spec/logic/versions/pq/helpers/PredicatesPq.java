@@ -21,9 +21,10 @@ import static tech.pegasys.teku.spec.constants.PqConstants.XMSS_DEPOSIT_PREFIX;
 import static tech.pegasys.teku.spec.constants.PqConstants.XMSS_RESERVED_LEAVES;
 
 import java.util.List;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.bytes.Bytes48;
-import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszBytes32VectorSchema;
+import tech.pegasys.teku.infrastructure.crypto.Hash;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
@@ -34,11 +35,6 @@ import tech.pegasys.teku.spec.datastructures.state.versions.pq.ValidatorPreregis
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.PredicatesGloas;
 
 public class PredicatesPq extends PredicatesGloas {
-
-  private static final SszBytes32VectorSchema<?> VRF_BRANCH_SCHEMA =
-      SszBytes32VectorSchema.create(VRF_TREE_DEPTH);
-
-  private static final UInt64 VRF_LEAF_COUNT = UInt64.valueOf(1L << VRF_TREE_DEPTH);
 
   public PredicatesPq(final SpecConfig specConfig) {
     super(specConfig);
@@ -61,7 +57,8 @@ public class PredicatesPq extends PredicatesGloas {
 
   /**
    * is_valid_vrf_proof: {@code proof} opens the leaf at index {@code slot} of the tree under the
-   * validator's VRF root. Only the low {@code VRF_TREE_DEPTH} bits of the slot select the leaf.
+   * validator's VRF root, a Keccak-256 Merkle tree. Only the low {@code VRF_TREE_DEPTH} bits of the
+   * slot select the leaf.
    */
   public boolean isValidVrfProof(
       final BeaconState state,
@@ -71,12 +68,16 @@ public class PredicatesPq extends PredicatesGloas {
     checkArgument(
         proof.size() == VRF_TREE_DEPTH + 1, "A VRF proof has %s elements", VRF_TREE_DEPTH + 1);
     final Bytes32 vrfRoot = ((ValidatorPq) state.getValidators().get(validatorIndex)).getVrfRoot();
-    return isValidMerkleBranch(
-        proof.getFirst(),
-        VRF_BRANCH_SCHEMA.of(proof.subList(1, proof.size())),
-        VRF_TREE_DEPTH,
-        slot.mod(VRF_LEAF_COUNT).intValue(),
-        vrfRoot);
+    Bytes32 value = proof.getFirst();
+    for (int height = 0; height < VRF_TREE_DEPTH; height++) {
+      final Bytes32 sibling = proof.get(height + 1);
+      // UInt64 holds the slot's unsigned bits, so an unsigned shift reads them
+      value =
+          ((slot.longValue() >>> height) & 1) == 1
+              ? Hash.keccak256(Bytes.concatenate(sibling, value))
+              : Hash.keccak256(Bytes.concatenate(value, sibling));
+    }
+    return value.equals(vrfRoot);
   }
 
   /**
