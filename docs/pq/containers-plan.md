@@ -12,8 +12,8 @@ The first slice is the state side, which we can check byte for byte against a re
 | --- | --- |
 | 1. State | Merged ([#11656](https://github.com/Consensys-Incorporated/teku/pull/11656)) |
 | 2. Execution requests | Merged ([#11657](https://github.com/Consensys-Incorporated/teku/pull/11657)) |
-| 3. Attestations | Not started |
-| 4. Block body and signed wrappers | Not started |
+| 3. Attestations | Merged ([#11659](https://github.com/Consensys-Incorporated/teku/pull/11659)) |
+| 4. Block body and signed wrappers | In review |
 
 ## Where we are
 
@@ -21,6 +21,8 @@ The PQ milestone exists in Teku and runs, but it still uses EIP-8483's container
 
 | PR into `pq-devnet-0` | What it added |
 | --- | --- |
+| [#11659](https://github.com/Consensys-Incorporated/teku/pull/11659) | PQ attestation containers; `IndexedAttestation` becomes an interface (slice 3) |
+| [#11658](https://github.com/Consensys-Incorporated/teku/pull/11658) | These plans |
 | [#11657](https://github.com/Consensys-Incorporated/teku/pull/11657) | PQ execution requests (slice 2) |
 | [#11656](https://github.com/Consensys-Incorporated/teku/pull/11656) | PQ state containers; `Validator` and `Builder` become interfaces (slice 1) |
 | [#11654](https://github.com/Consensys-Incorporated/teku/pull/11654) | PQ milestone skeleton: config, presets, fork plumbing; behaves as EIP-8483 |
@@ -57,7 +59,7 @@ Removed containers (sync committee and light client, `VoluntaryExit`, `BLSToExec
 
 ## Approach
 
-Build the containers standalone, then wire them in with the state transition. If PQ's state schema changed before the transition logic, every PQ run would break: Teku would still process sync committees and sign with BLS against a state that has neither. Building standalone keeps `pq-devnet-0` runnable between PRs. Until the switch, `SchemaDefinitionsPq` exposes the new schemas through their own getters (`getPqBeaconStateSchema()`, `getPqExecutionRequestsSchema()`).
+Build the containers standalone, then wire them in with the state transition. If PQ's state schema changed before the transition logic, every PQ run would break: Teku would still process sync committees and sign with BLS against a state that has neither. Building standalone keeps `pq-devnet-0` runnable between PRs. Until the switch, `SchemaDefinitionsPq` exposes the new schemas through their own getters (`getPqBeaconStateSchema()`, `getPqExecutionRequestsSchema()`, `getPqAttestationSchemas()`, `getPqBlockSchemas()`).
 
 The slices land in order, each as a PR into `pq-devnet-0` with its tests:
 
@@ -72,8 +74,8 @@ The slices land in order, each as a PR into `pq-devnet-0` with its tests:
    - SSZ wrappers for `XMSSSignature` and `AttestationProof`.
    - `Attestation`, `IndexedAttestation`, `AttesterSlashing`, `SingleAttestation`, `AggregateAndProof` and its signed wrapper, `PayloadAttestationMessage`.
 4. **Block body and signed wrappers.**
-   - The `VRFProof` wrapper, `BeaconBlockBodyPq` and the XMSS-signed block, header, bid, envelope and proposer-preference wrappers.
-   - Move today's shared static schemas into per-fork registry schemas: `SignedBeaconBlockHeader`, `ProposerSlashing` and `AggregateAndProof`.
+   - `BeaconBlockBodyPq`, with the `VRFProof` as a 32-element `Bytes32` vector, and the PQ block and signed block.
+   - The signed block, header, bid, envelope and proposer preferences keep one class each. Their signature field holds either a BLS or an XMSS signature, and the schema decides which. `SignedBeaconBlockHeader` and `ProposerSlashing` get a second static schema for PQ.
 
 After slice 4, the state-transition phase points `SchemaDefinitionsPq` at the new schemas. From then on PQ is the real PQ fork rather than an EIP-8483 copy.
 
@@ -104,7 +106,7 @@ Each slice is checked against two independent sources of truth, plus unit tests.
   - It is a Go implementation, independent of the Python spec, so agreement is a real cross-check.
   - Slice 1: Teku deserializes it, re-serializes it byte for byte, and matches its `genesis_validators_root` and aggregation committees.
   - Slice 2: the empty PQ `ExecutionRequests` matches its bid's `execution_requests_root` (`0xe885a70c…d6a7`).
-  - Slice 4: its `latest_block_header.body_root` (`0x36a7c9d1…304d`) is the hash tree root of a default PQ `BeaconBlockBody`.
+  - Slice 4: its `latest_block_header.body_root` (`0x36a7c9d1…304d`) is the root of the PQ genesis body, which (as in Gloas) is an empty body carrying the state's latest bid with an all-zero XMSS signature. Teku builds the same body from the fixture state.
 - **Spec `ssz_static` vectors.**
   - No release carries PQ vectors yet, so they must be generated from consensus-specs `a4d16c5be`.
   - Teku's runner can already read a local vector directory (`-Dteku.ref-test.root-dir`). The `pq` ref-test fork is wired but not yet in `SUPPORTED_FORKS`; it is added once vectors exist.
@@ -113,7 +115,7 @@ Each slice is checked against two independent sources of truth, plus unit tests.
 ## Risks and open questions
 
 - **Merge pressure.** The `Validator` refactor touched shared files across modules on a long-lived branch. Master changes to the same files will conflict when `pq-devnet-0` is synced.
-- **Shared static schemas.** `SignedBeaconBlockHeader`, `ProposerSlashing` and `AggregateAndProof` each have one schema instance used by every fork. Moving them to per-fork schemas in slice 4 touches pre-PQ code paths, so it needs the full test suite.
+- **Shared signed types.** Slice 4 widens the signature field of `SignedBeaconBlock` and the other signed wrappers, which every fork uses. BLS-signed objects behave exactly as before, but the change touches pre-PQ code paths, so it needs the full test suite.
 - **Spec drift.** The `pq` branch is still moving. We pin `a4d16c5be`, and the genesis generator may track a different commit. A mismatch between the two shows up as a failed cross-check, not a silent bug.
 - **Placeholder proof size.** `MAX_STARK_PROOF_SIZE` (1 MiB) is a stand-in until a real STARK proof format is specified. Schemas take it from config, so a change needs no code.
 - **Vector generation.** Generating PQ `ssz_static` vectors means running the spec's test generator locally.

@@ -33,7 +33,8 @@ public enum BlockBodyFields implements SszFieldName {
   EXECUTION_REQUESTS,
   SIGNED_EXECUTION_PAYLOAD_BID,
   PAYLOAD_ATTESTATIONS,
-  PARENT_EXECUTION_REQUESTS;
+  PARENT_EXECUTION_REQUESTS,
+  PROOF;
 
   private final String sszFieldName;
 

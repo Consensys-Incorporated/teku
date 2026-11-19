@@ -13,19 +13,27 @@
 
 package tech.pegasys.teku.spec.datastructures.blocks;
 
+import tech.pegasys.teku.infrastructure.ssz.collections.SszByteVector;
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema2;
+import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszByteVectorSchema;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
-import tech.pegasys.teku.spec.datastructures.type.SszSignature;
 import tech.pegasys.teku.spec.datastructures.type.SszSignatureSchema;
+import tech.pegasys.teku.spec.datastructures.type.SszSignatures;
 
 public class SignedBeaconBlockHeaderSchema
-    extends ContainerSchema2<SignedBeaconBlockHeader, BeaconBlockHeader, SszSignature> {
+    extends ContainerSchema2<SignedBeaconBlockHeader, BeaconBlockHeader, SszByteVector> {
 
+  /** The BLS-signed header of every fork up to PQ. */
   public SignedBeaconBlockHeaderSchema() {
+    this("SignedBeaconBlockHeader", SszSignatureSchema.INSTANCE);
+  }
+
+  public SignedBeaconBlockHeaderSchema(
+      final String containerName, final SszByteVectorSchema<?> signatureSchema) {
     super(
-        "SignedBeaconBlockHeader",
+        containerName,
         namedSchema("message", BeaconBlockHeader.SSZ_SCHEMA),
-        namedSchema("signature", SszSignatureSchema.INSTANCE));
+        namedSchema("signature", SszSignatures.asSignatureFieldSchema(signatureSchema)));
   }
 
   @Override

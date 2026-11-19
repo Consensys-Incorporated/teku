@@ -15,9 +15,11 @@ package tech.pegasys.teku.spec.datastructures.epbs.versions.gloas;
 
 import static com.google.common.base.Preconditions.checkState;
 
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.logging.LogFormatter;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszByteVector;
 import tech.pegasys.teku.infrastructure.ssz.containers.Container2;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -25,16 +27,25 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.BlockRootAndBuilderIndex;
 import tech.pegasys.teku.spec.datastructures.type.SszSignature;
+import tech.pegasys.teku.spec.datastructures.type.SszSignatures;
+import tech.pegasys.teku.spec.datastructures.type.SszXmssSignature;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 
 public class SignedExecutionPayloadEnvelope
-    extends Container2<SignedExecutionPayloadEnvelope, ExecutionPayloadEnvelope, SszSignature> {
+    extends Container2<SignedExecutionPayloadEnvelope, ExecutionPayloadEnvelope, SszByteVector> {
 
   SignedExecutionPayloadEnvelope(
       final SignedExecutionPayloadEnvelopeSchema schema,
       final ExecutionPayloadEnvelope message,
       final BLSSignature signature) {
     super(schema, message, new SszSignature(signature));
+  }
+
+  SignedExecutionPayloadEnvelope(
+      final SignedExecutionPayloadEnvelopeSchema schema,
+      final ExecutionPayloadEnvelope message,
+      final SszXmssSignature signature) {
+    super(schema, message, signature);
   }
 
   SignedExecutionPayloadEnvelope(
@@ -46,8 +57,22 @@ public class SignedExecutionPayloadEnvelope
     return getField0();
   }
 
+  /**
+   * @throws UnsupportedOperationException if signed with leanXMSS (PQ)
+   */
   public BLSSignature getSignature() {
-    return getField1().getSignature();
+    return SszSignatures.blsSignature(getField1());
+  }
+
+  public boolean isXmssSigned() {
+    return SszSignatures.isXmss(getField1());
+  }
+
+  /**
+   * @throws UnsupportedOperationException if signed with BLS
+   */
+  public Bytes getXmssSignature() {
+    return SszSignatures.xmssSignature(getField1());
   }
 
   @Override
