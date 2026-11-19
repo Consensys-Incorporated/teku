@@ -20,6 +20,7 @@ import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
+import tech.pegasys.teku.spec.datastructures.state.ValidatorPhase0;
 
 public class ValidatorBuilder {
 
@@ -96,7 +97,7 @@ public class ValidatorBuilder {
   }
 
   public Validator build() {
-    return new Validator(
+    return new ValidatorPhase0(
         publicKey,
         withdrawalCredentials,
         effectiveBalance,

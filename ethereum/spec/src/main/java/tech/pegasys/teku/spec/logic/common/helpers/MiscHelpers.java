@@ -50,6 +50,7 @@ import tech.pegasys.teku.spec.datastructures.operations.DepositMessage;
 import tech.pegasys.teku.spec.datastructures.state.ForkData;
 import tech.pegasys.teku.spec.datastructures.state.SigningData;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
+import tech.pegasys.teku.spec.datastructures.state.ValidatorPhase0;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
 import tech.pegasys.teku.spec.logic.versions.altair.helpers.MiscHelpersAltair;
@@ -463,7 +464,7 @@ public class MiscHelpers {
         amount
             .minus(amount.mod(specConfig.getEffectiveBalanceIncrement()))
             .min(specConfig.getMaxEffectiveBalance());
-    return new Validator(
+    return new ValidatorPhase0(
         pubkey,
         withdrawalCredentials,
         effectiveBalance,

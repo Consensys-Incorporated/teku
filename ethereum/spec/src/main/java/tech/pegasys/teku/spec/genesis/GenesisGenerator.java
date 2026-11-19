@@ -43,6 +43,7 @@ import tech.pegasys.teku.spec.datastructures.operations.Deposit;
 import tech.pegasys.teku.spec.datastructures.operations.DepositData;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
+import tech.pegasys.teku.spec.datastructures.state.ValidatorPhase0;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.BeaconStateElectra;
@@ -277,7 +278,7 @@ public class GenesisGenerator {
     }
 
     final Validator modifiedValidator =
-        new Validator(
+        new ValidatorPhase0(
             validator.getPubkeyBytes(),
             validator.getWithdrawalCredentials(),
             effectiveBalance,

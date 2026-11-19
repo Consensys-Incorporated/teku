@@ -43,6 +43,7 @@ import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.PendingAttestation;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
+import tech.pegasys.teku.spec.datastructures.state.ValidatorPhase0;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState.Mutator;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.phase0.BeaconStateSchemaPhase0;
@@ -571,7 +572,7 @@ class BeaconChainMetricsTest {
 
   private Validator validator(
       final long activationEpoch, final long exitEpoch, final boolean slashed) {
-    return new Validator(
+    return new ValidatorPhase0(
         dataStructureUtil.randomPublicKeyBytes(),
         dataStructureUtil.randomBytes32(),
         dataStructureUtil.randomUInt64(),

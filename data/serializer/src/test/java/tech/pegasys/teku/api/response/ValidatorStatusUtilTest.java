@@ -25,6 +25,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
+import tech.pegasys.teku.spec.datastructures.state.ValidatorPhase0;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 public class ValidatorStatusUtilTest {
@@ -135,7 +136,7 @@ public class ValidatorStatusUtilTest {
       final UInt64 activationEpoch,
       final UInt64 exitEpoch,
       final UInt64 withdrawableEpoch) {
-    return new Validator(
+    return new ValidatorPhase0(
         key,
         creds,
         balance,

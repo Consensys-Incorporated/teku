@@ -13,7 +13,7 @@
 
 package tech.pegasys.teku.cli.subcommand.debug;
 
-import static tech.pegasys.teku.spec.datastructures.state.Validator.SSZ_SCHEMA;
+import static tech.pegasys.teku.spec.datastructures.state.ValidatorPhase0.SSZ_SCHEMA;
 
 import java.util.function.Function;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszSchema;

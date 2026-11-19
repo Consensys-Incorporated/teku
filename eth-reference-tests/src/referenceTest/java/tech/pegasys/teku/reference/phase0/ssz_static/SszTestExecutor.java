@@ -40,9 +40,9 @@ import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.ForkData;
 import tech.pegasys.teku.spec.datastructures.state.SigningData;
-import tech.pegasys.teku.spec.datastructures.state.Validator;
+import tech.pegasys.teku.spec.datastructures.state.ValidatorPhase0;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.phase0.BeaconStateSchemaPhase0;
-import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderGloas;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsBellatrix;
@@ -280,7 +280,7 @@ public class SszTestExecutor<T extends SszData> implements TestExecutor {
                   schemas -> SchemaDefinitionsFulu.required(schemas).getMatrixEntrySchema()))
 
           // Gloas types
-          .put("ssz_static/Builder", new SszTestExecutor<>(__ -> Builder.SSZ_SCHEMA))
+          .put("ssz_static/Builder", new SszTestExecutor<>(__ -> BuilderGloas.SSZ_SCHEMA))
           .put(
               "ssz_static/BuilderPendingPayment",
               new SszTestExecutor<>(
@@ -406,7 +406,7 @@ public class SszTestExecutor<T extends SszData> implements TestExecutor {
               "ssz_static/SignedVoluntaryExit",
               new SszTestExecutor<>(__ -> SignedVoluntaryExit.SSZ_SCHEMA))
           .put("ssz_static/SigningData", new SszTestExecutor<>(__ -> SigningData.SSZ_SCHEMA))
-          .put("ssz_static/Validator", new SszTestExecutor<>(__ -> Validator.SSZ_SCHEMA))
+          .put("ssz_static/Validator", new SszTestExecutor<>(__ -> ValidatorPhase0.SSZ_SCHEMA))
           .put("ssz_static/VoluntaryExit", new SszTestExecutor<>(__ -> VoluntaryExit.SSZ_SCHEMA))
           .build();
 

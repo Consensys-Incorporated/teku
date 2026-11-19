@@ -53,6 +53,7 @@ import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingConso
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDeposit;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingPartialWithdrawal;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPayment;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingWithdrawal;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.PayloadTimelinessCommitteeWindowSchema;
@@ -103,6 +104,12 @@ public class BeaconStateSchemaGloas
     super(containerName, activeFields, uniqueFields, specConfig);
   }
 
+  /** For a fork that replaces common fields, such as PQ's validators: takes every field. */
+  protected BeaconStateSchemaGloas(
+      final String containerName, final boolean[] activeFields, final List<SszField> allFields) {
+    super(containerName, activeFields, allFields);
+  }
+
   private static SszField toProgressiveListFieldIfListed(final SszField field) {
     if (!PROGRESSIVE_INLINE_LIST_FIELD_NAMES.contains(field.getName())) {
       return field;
@@ -121,7 +128,7 @@ public class BeaconStateSchemaGloas
                 BeaconStateFields.BUILDERS,
                 () ->
                     SszListSchema.create(
-                        Builder.SSZ_SCHEMA,
+                        BuilderGloas.SSZ_SCHEMA,
                         SpecConfigGloas.required(specConfig).getBuilderRegistryLimit())),
             new SszField(
                 NEXT_WITHDRAWAL_BUILDER_INDEX_FIELD_INDEX,

@@ -37,7 +37,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.Eth1Data;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
-import tech.pegasys.teku.spec.datastructures.state.Validator;
+import tech.pegasys.teku.spec.datastructures.state.ValidatorPhase0;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateSchema;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
@@ -100,7 +100,11 @@ public enum BeaconStateFields implements SszFieldName {
   PTC_WINDOW,
   // EIP-8483 fields
   VALIDATOR_PQ_REGISTRATIONS,
-  BUILDER_PQ_REGISTRATIONS;
+  BUILDER_PQ_REGISTRATIONS,
+  // PQ fields
+  VALIDATOR_PREREGISTRATIONS,
+  BUILDER_PREREGISTRATIONS,
+  AGGREGATION_COMMITTEE_WINDOW;
 
   private final String sszFieldName;
 
@@ -214,7 +218,7 @@ public enum BeaconStateFields implements SszFieldName {
         : SszSchemaHints.none();
   }
 
-  static List<SszField> getCommonFields(final SpecConfig specConfig) {
+  public static List<SszField> getCommonFields(final SpecConfig specConfig) {
     SszField forkField = new SszField(3, BeaconStateFields.FORK, Fork.SSZ_SCHEMA);
     final BeaconBlockHeader.BeaconBlockHeaderSchema blockHeaderSchema =
         BeaconBlockHeader.SSZ_SCHEMA;
@@ -263,7 +267,7 @@ public enum BeaconStateFields implements SszFieldName {
                 listSchemaForState(
                     specConfig,
                     SszListSchema.create(
-                        Validator.SSZ_SCHEMA,
+                        ValidatorPhase0.SSZ_SCHEMA,
                         specConfig.getValidatorRegistryLimit(),
                         SszSchemaHints.sszSuperNode(8))));
     SszField balancesField =

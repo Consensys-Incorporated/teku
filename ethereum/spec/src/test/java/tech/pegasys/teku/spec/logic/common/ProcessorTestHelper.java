@@ -23,6 +23,7 @@ import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
+import tech.pegasys.teku.spec.datastructures.state.ValidatorPhase0;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
@@ -93,7 +94,7 @@ public abstract class ProcessorTestHelper {
       final Bytes32 withdrawalCredentials,
       final UInt64 exitEpoch,
       final UInt64 withdrawableEpoch) {
-    return new Validator(
+    return new ValidatorPhase0(
         pubkey,
         withdrawalCredentials,
         specConfig.getMaxEffectiveBalance(),

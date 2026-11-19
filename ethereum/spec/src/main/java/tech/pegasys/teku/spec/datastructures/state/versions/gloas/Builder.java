@@ -15,114 +15,32 @@ package tech.pegasys.teku.spec.datastructures.state.versions.gloas;
 
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
-import tech.pegasys.teku.infrastructure.bytes.Bytes20;
-import tech.pegasys.teku.infrastructure.ssz.collections.SszByteVector;
-import tech.pegasys.teku.infrastructure.ssz.containers.Container6;
-import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema6;
-import tech.pegasys.teku.infrastructure.ssz.primitive.SszByte;
-import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
-import tech.pegasys.teku.infrastructure.ssz.schema.SszPrimitiveSchemas;
-import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszByteVectorSchema;
-import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
-import tech.pegasys.teku.infrastructure.unsigned.ByteUtil;
+import tech.pegasys.teku.infrastructure.ssz.SszContainer;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
-import tech.pegasys.teku.spec.datastructures.type.SszPublicKey;
-import tech.pegasys.teku.spec.datastructures.type.SszPublicKeySchema;
 
-public class Builder
-    extends Container6<
-        Builder, SszPublicKey, SszByte, SszByteVector, SszUInt64, SszUInt64, SszUInt64> {
+/**
+ * A builder in the registry. {@link BuilderGloas} is the BLS-keyed builder from Gloas up to PQ;
+ * {@link tech.pegasys.teku.spec.datastructures.state.versions.pq.BuilderPq} is keyed by a leanXMSS
+ * public key and has no BLS key, so {@link #getPublicKey()} throws.
+ */
+public interface Builder extends SszContainer {
 
-  public static class BuilderSchema
-      extends ContainerSchema6<
-          Builder, SszPublicKey, SszByte, SszByteVector, SszUInt64, SszUInt64, SszUInt64> {
+  /**
+   * @throws UnsupportedOperationException for a PQ builder, which has no BLS key
+   */
+  BLSPublicKey getPublicKey();
 
-    public BuilderSchema() {
-      super(
-          "Builder",
-          namedSchema("pubkey", SszPublicKeySchema.INSTANCE),
-          namedSchema("version", SszPrimitiveSchemas.UINT8_SCHEMA),
-          namedSchema("execution_address", SszByteVectorSchema.create(Bytes20.SIZE)),
-          namedSchema("balance", SszPrimitiveSchemas.UINT64_SCHEMA),
-          namedSchema("deposit_epoch", SszPrimitiveSchemas.UINT64_SCHEMA),
-          namedSchema("withdrawable_epoch", SszPrimitiveSchemas.UINT64_SCHEMA));
-    }
+  int getVersion();
 
-    @Override
-    public Builder createFromBackingNode(final TreeNode node) {
-      return new Builder(this, node);
-    }
-  }
+  Eth1Address getExecutionAddress();
 
-  public static final BuilderSchema SSZ_SCHEMA = new BuilderSchema();
+  UInt64 getBalance();
 
-  private Builder(final BuilderSchema type, final TreeNode backingNode) {
-    super(type, backingNode);
-  }
+  UInt64 getDepositEpoch();
 
-  public Builder(
-      final BLSPublicKey pubkey,
-      final int version,
-      final Eth1Address executionAddress,
-      final UInt64 balance,
-      final UInt64 depositEpoch,
-      final UInt64 withdrawableEpoch) {
-    super(
-        SSZ_SCHEMA,
-        new SszPublicKey(pubkey),
-        SszByte.asUInt8(version),
-        SszByteVector.fromBytes(executionAddress.getWrappedBytes()),
-        SszUInt64.of(balance),
-        SszUInt64.of(depositEpoch),
-        SszUInt64.of(withdrawableEpoch));
-  }
+  UInt64 getWithdrawableEpoch();
 
-  public BLSPublicKey getPublicKey() {
-    return getField0().getBLSPublicKey();
-  }
+  Builder copyWithNewWithdrawableEpoch(UInt64 withdrawableEpoch);
 
-  public int getVersion() {
-    return ByteUtil.toUnsignedInt(getField1().get());
-  }
-
-  public Eth1Address getExecutionAddress() {
-    return Eth1Address.fromBytes(getField2().getBytes());
-  }
-
-  public UInt64 getBalance() {
-    return getField3().get();
-  }
-
-  public UInt64 getDepositEpoch() {
-    return getField4().get();
-  }
-
-  public UInt64 getWithdrawableEpoch() {
-    return getField5().get();
-  }
-
-  public Builder copyWithNewWithdrawableEpoch(final UInt64 withdrawableEpoch) {
-    return new Builder(
-        getPublicKey(),
-        getVersion(),
-        getExecutionAddress(),
-        getBalance(),
-        getDepositEpoch(),
-        withdrawableEpoch);
-  }
-
-  public Builder copyWithNewBalance(final UInt64 balance) {
-    return new Builder(
-        getPublicKey(),
-        getVersion(),
-        getExecutionAddress(),
-        balance,
-        getDepositEpoch(),
-        getWithdrawableEpoch());
-  }
-
-  @Override
-  public BuilderSchema getSchema() {
-    return (BuilderSchema) super.getSchema();
-  }
+  Builder copyWithNewBalance(UInt64 balance);
 }

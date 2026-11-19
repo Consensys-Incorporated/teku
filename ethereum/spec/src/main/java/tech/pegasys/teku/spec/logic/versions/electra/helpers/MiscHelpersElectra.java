@@ -30,6 +30,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfigDeneb;
 import tech.pegasys.teku.spec.config.SpecConfigElectra;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
+import tech.pegasys.teku.spec.datastructures.state.ValidatorPhase0;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.BeaconStateElectra;
 import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
@@ -117,7 +118,7 @@ public class MiscHelpersElectra extends MiscHelpersDeneb {
   public Validator getValidatorFromDeposit(
       final BLSPublicKey pubkey, final Bytes32 withdrawalCredentials, final UInt64 amount) {
     final Validator validator =
-        new Validator(
+        new ValidatorPhase0(
             pubkey,
             withdrawalCredentials,
             ZERO,

@@ -42,6 +42,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
+import tech.pegasys.teku.spec.datastructures.state.ValidatorPhase0;
 import tech.pegasys.teku.spec.networks.Eth2Network;
 import tech.pegasys.teku.validator.remote.apiclient.ValidatorApiMethod;
 import tech.pegasys.teku.validator.remote.typedef.AbstractTypeDefRequestTestBase;
@@ -115,7 +116,7 @@ public class GetStateValidatorsRequestTest extends AbstractTypeDefRequestTestBas
   private StateValidatorData generateStateValidatorData() {
     final long index = dataStructureUtil.randomLong();
     final Validator validator =
-        new Validator(
+        new ValidatorPhase0(
             dataStructureUtil.randomPublicKey(),
             dataStructureUtil.randomBytes32(),
             dataStructureUtil.randomUInt64(),
