@@ -31,6 +31,7 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.common.Transition
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.MutableBeaconStateElectra;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderPendingPayment;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateMutators;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateMutators.ValidatorExitContext;
@@ -164,7 +165,7 @@ public class BeaconStateMutatorsGloas extends BeaconStateMutatorsElectra {
       final UInt64 slot) {
     final UInt64 index = beaconStateAccessorsGloas.getIndexForNewBuilder(state);
     final Builder builder =
-        new Builder(
+        new BuilderGloas(
             pubkey,
             version,
             executionAddress,

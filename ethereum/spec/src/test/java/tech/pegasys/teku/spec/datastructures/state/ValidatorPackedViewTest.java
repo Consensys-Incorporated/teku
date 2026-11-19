@@ -157,7 +157,7 @@ class ValidatorPackedViewTest {
     final int firstPacked =
         specContext.getSpecMilestone().isGreaterThanOrEqualTo(SpecMilestone.GLOAS) ? 1 : 0;
     for (int i = 0; i < COUNT; i++) {
-      assertThat(packedRegistry.get(i).isPackedView())
+      assertThat(((ValidatorPhase0) packedRegistry.get(i)).isPackedView())
           .describedAs("validator %s", i)
           .isEqualTo(i >= firstPacked);
     }
@@ -168,7 +168,9 @@ class ValidatorPackedViewTest {
       final SpecContext specContext) {
     specContext.assumeMilestoneActive(SpecMilestone.GLOAS);
     for (int i = 0; i < COUNT; i++) {
-      assertThat(treeRegistry.get(i).isPackedView()).describedAs("validator %s", i).isFalse();
+      assertThat(((ValidatorPhase0) treeRegistry.get(i)).isPackedView())
+          .describedAs("validator %s", i)
+          .isFalse();
     }
   }
 

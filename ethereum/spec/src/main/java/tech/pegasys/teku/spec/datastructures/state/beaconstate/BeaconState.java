@@ -44,6 +44,7 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.fulu.BeaconStateFulu;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.phase0.BeaconStatePhase0;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.pq.BeaconStatePq;
 
 public interface BeaconState extends SszContainer, ValidatorStats {
 
@@ -205,6 +206,10 @@ public interface BeaconState extends SszContainer, ValidatorStats {
   }
 
   default Optional<BeaconStateEip8483> toVersionEip8483() {
+    return Optional.empty();
+  }
+
+  default Optional<BeaconStatePq> toVersionPq() {
     return Optional.empty();
   }
 }

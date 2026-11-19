@@ -15,14 +15,25 @@ package tech.pegasys.teku.spec.schemas;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
+import com.google.common.base.Suppliers;
 import java.util.Optional;
+import java.util.function.Supplier;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.pq.BeaconStateSchemaPq;
 import tech.pegasys.teku.spec.schemas.registry.SchemaRegistry;
 
-/** Schemas for the PQ fork. Until PQ's own containers land, these are EIP-8483's. */
+/**
+ * Schemas for the PQ fork. Until PQ's own containers are all in place and its state transition uses
+ * them, the milestone's schemas are EIP-8483's; PQ's own are built alongside them.
+ */
 public class SchemaDefinitionsPq extends SchemaDefinitionsEip8483 {
+
+  private final Supplier<BeaconStateSchemaPq> pqBeaconStateSchema;
 
   public SchemaDefinitionsPq(final SchemaRegistry schemaRegistry) {
     super(schemaRegistry);
+    this.pqBeaconStateSchema =
+        Suppliers.memoize(
+            () -> BeaconStateSchemaPq.create(schemaRegistry.getSpecConfig(), schemaRegistry));
   }
 
   public static SchemaDefinitionsPq required(final SchemaDefinitions schemaDefinitions) {
@@ -32,6 +43,15 @@ public class SchemaDefinitionsPq extends SchemaDefinitionsEip8483 {
         SchemaDefinitionsPq.class,
         schemaDefinitions.getClass());
     return (SchemaDefinitionsPq) schemaDefinitions;
+  }
+
+  /**
+   * The PQ state schema. Not yet the milestone's {@link #getBeaconStateSchema()}: that switches
+   * over with PQ's state transition.
+   */
+  @NonSchema
+  public BeaconStateSchemaPq getPqBeaconStateSchema() {
+    return pqBeaconStateSchema.get();
   }
 
   @Override

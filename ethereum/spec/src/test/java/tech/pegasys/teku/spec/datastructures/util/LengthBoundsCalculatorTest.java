@@ -38,7 +38,7 @@ import tech.pegasys.teku.spec.datastructures.operations.VoluntaryExit;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.ForkData;
-import tech.pegasys.teku.spec.datastructures.state.Validator;
+import tech.pegasys.teku.spec.datastructures.state.ValidatorPhase0;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.phase0.BeaconStateSchemaPhase0;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
 
@@ -111,7 +111,7 @@ public class LengthBoundsCalculatorTest {
             getProvider(SignedBeaconBlockHeader.SSZ_SCHEMA), SszLengthBounds.ofBytes(208, 208)),
         Arguments.of(
             getProvider(SignedVoluntaryExit.SSZ_SCHEMA), SszLengthBounds.ofBytes(112, 112)),
-        Arguments.of(getProvider(Validator.SSZ_SCHEMA), SszLengthBounds.ofBytes(121, 121)),
+        Arguments.of(getProvider(ValidatorPhase0.SSZ_SCHEMA), SszLengthBounds.ofBytes(121, 121)),
         Arguments.of(getProvider(VoluntaryExit.SSZ_SCHEMA), SszLengthBounds.ofBytes(16, 16)),
         Arguments.of(
             (SchemaProvider) SchemaDefinitions::getMetadataMessageSchema,

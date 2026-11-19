@@ -42,18 +42,24 @@ import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderGloas;
 
 public class PostStateBuilders extends RestApiEndpoint {
   public static final String ROUTE = "/eth/v1/beacon/states/{state_id}/builders";
   private final ChainDataProvider chainDataProvider;
+
+  // The BLS-keyed builder's JSON shape. PQ builders get their own when the REST API supports PQ.
+  @SuppressWarnings("unchecked")
+  private static final SerializableTypeDefinition<Builder> BUILDER_TYPE =
+      (SerializableTypeDefinition<Builder>)
+          (SerializableTypeDefinition<?>) BuilderGloas.SSZ_SCHEMA.getJsonTypeDefinition();
 
   static final SerializableTypeDefinition<StateBuilderData> STATE_BUILDER_DATA_TYPE =
       SerializableTypeDefinition.<StateBuilderData>object()
           .name("BuilderResponse")
           .withField("index", UINT64_TYPE, StateBuilderData::index)
           .withField("status", STRING_TYPE, StateBuilderData::getStatusName)
-          .withField(
-              "builder", Builder.SSZ_SCHEMA.getJsonTypeDefinition(), StateBuilderData::builder)
+          .withField("builder", BUILDER_TYPE, StateBuilderData::builder)
           .build();
 
   static final SerializableTypeDefinition<ObjectAndMetaData<List<StateBuilderData>>> RESPONSE_TYPE =

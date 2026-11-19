@@ -84,6 +84,7 @@ import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
+import tech.pegasys.teku.spec.datastructures.state.ValidatorPhase0;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.datastructures.validator.SubnetSubscription;
 import tech.pegasys.teku.spec.schemas.ApiSchemas;
@@ -996,7 +997,7 @@ class RemoteValidatorApiHandlerTest {
 
   private StateValidatorData stateValidatorData(final long index, final BLSPublicKey publicKey) {
     final Validator validator =
-        new Validator(
+        new ValidatorPhase0(
             publicKey,
             dataStructureUtil.randomBytes32(),
             dataStructureUtil.randomUInt64(),

@@ -40,7 +40,7 @@ class ValidatorTest {
   private final UInt64 effectiveBalance = dataStructureUtil.randomUInt64();
 
   private final Validator validator =
-      new Validator(
+      new ValidatorPhase0(
           pubkey,
           withdrawalCredentials,
           effectiveBalance,
@@ -60,7 +60,7 @@ class ValidatorTest {
   @Test
   void equalsReturnsTrueWhenObjectFieldsAreEqual() {
     Validator testValidator =
-        new Validator(
+        new ValidatorPhase0(
             pubkey,
             withdrawalCredentials,
             effectiveBalance,
@@ -77,7 +77,7 @@ class ValidatorTest {
   void equalsReturnsFalseWhenPubkeysAreDifferent() {
     Bytes48 differentPublicKey = BLSTestUtil.randomPublicKey(99).toBytesCompressed();
     Validator testValidator =
-        new Validator(
+        new ValidatorPhase0(
             differentPublicKey,
             withdrawalCredentials,
             effectiveBalance,
@@ -94,7 +94,7 @@ class ValidatorTest {
   @Test
   void equalsReturnsFalseWhenWithdrawalCredentialsAreDifferent() {
     Validator testValidator =
-        new Validator(
+        new ValidatorPhase0(
             pubkey,
             withdrawalCredentials.not(),
             effectiveBalance,
@@ -110,7 +110,7 @@ class ValidatorTest {
   @Test
   void equalsReturnsFalseWhenActivationEpochsAreDifferent() {
     Validator testValidator =
-        new Validator(
+        new ValidatorPhase0(
             pubkey,
             withdrawalCredentials,
             effectiveBalance,
@@ -126,7 +126,7 @@ class ValidatorTest {
   @Test
   void equalsReturnsFalseWhenExitEpochsAreDifferent() {
     Validator testValidator =
-        new Validator(
+        new ValidatorPhase0(
             pubkey,
             withdrawalCredentials,
             effectiveBalance,
@@ -142,7 +142,7 @@ class ValidatorTest {
   @Test
   void equalsReturnsFalseWhenWithdrawalEpochsAreDifferent() {
     Validator testValidator =
-        new Validator(
+        new ValidatorPhase0(
             pubkey,
             withdrawalCredentials,
             effectiveBalance,
@@ -158,7 +158,7 @@ class ValidatorTest {
   @Test
   void equalsReturnsFalseWhenInitiatedExitIsDifferent() {
     Validator testValidator =
-        new Validator(
+        new ValidatorPhase0(
             pubkey,
             withdrawalCredentials,
             effectiveBalance,
@@ -174,6 +174,6 @@ class ValidatorTest {
   @Test
   void roundtripSSZ() {
     Bytes sszValidatorBytes = validator.sszSerialize();
-    assertEquals(validator, Validator.SSZ_SCHEMA.sszDeserialize(sszValidatorBytes));
+    assertEquals(validator, ValidatorPhase0.SSZ_SCHEMA.sszDeserialize(sszValidatorBytes));
   }
 }

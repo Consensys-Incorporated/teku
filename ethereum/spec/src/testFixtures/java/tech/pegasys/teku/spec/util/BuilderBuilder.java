@@ -20,6 +20,7 @@ import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderGloas;
 
 public class BuilderBuilder {
 
@@ -68,7 +69,7 @@ public class BuilderBuilder {
   }
 
   public Builder build() {
-    return new Builder(
+    return new BuilderGloas(
         publicKey, version, executionAddress, balance, depositEpoch, withdrawableEpoch);
   }
 }

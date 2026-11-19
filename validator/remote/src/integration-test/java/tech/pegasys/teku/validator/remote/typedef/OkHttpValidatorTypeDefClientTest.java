@@ -96,6 +96,7 @@ import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncComm
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeMessage;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeMessageSchema;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
+import tech.pegasys.teku.spec.datastructures.state.ValidatorPhase0;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.datastructures.validator.SubnetSubscription;
 import tech.pegasys.teku.spec.networks.Eth2Network;
@@ -498,7 +499,7 @@ class OkHttpValidatorTypeDefClientTest extends AbstractTypeDefRequestTestBase {
   private StateValidatorData generateStateValidatorData() {
     final long index = dataStructureUtil.randomLong();
     final Validator validator =
-        new Validator(
+        new ValidatorPhase0(
             dataStructureUtil.randomPublicKey(),
             dataStructureUtil.randomBytes32(),
             dataStructureUtil.randomUInt64(),
