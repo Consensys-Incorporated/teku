@@ -25,6 +25,10 @@ import tech.pegasys.teku.spec.datastructures.execution.versions.electra.Withdraw
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderDepositRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderExitRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsGloas;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.BuilderPreregistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.ExecutionRequestsPq;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.ValidatorPreregistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.VoluntaryExitRequest;
 
 public interface ExecutionRequests extends SszContainer {
 
@@ -54,11 +58,30 @@ public interface ExecutionRequests extends SszContainer {
     return List.of();
   }
 
+  /** Validator preregistration requests (PQ+). Empty for earlier milestones. */
+  default List<ValidatorPreregistrationRequest> getValidatorPreregistrations() {
+    return List.of();
+  }
+
+  /** Builder preregistration requests (PQ+). Empty for earlier milestones. */
+  default List<BuilderPreregistrationRequest> getBuilderPreregistrations() {
+    return List.of();
+  }
+
+  /** Voluntary exit requests (PQ+). Empty for earlier milestones. */
+  default List<VoluntaryExitRequest> getVoluntaryExits() {
+    return List.of();
+  }
+
   default Optional<ExecutionRequestsGloas> toVersionGloas() {
     return Optional.empty();
   }
 
   default Optional<ExecutionRequestsEip8483> toVersionEip8483() {
+    return Optional.empty();
+  }
+
+  default Optional<ExecutionRequestsPq> toVersionPq() {
     return Optional.empty();
   }
 }

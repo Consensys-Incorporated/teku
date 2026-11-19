@@ -24,6 +24,9 @@ import tech.pegasys.teku.spec.datastructures.execution.versions.electra.DepositR
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.WithdrawalRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderDepositRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderExitRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.BuilderPreregistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.ValidatorPreregistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.VoluntaryExitRequest;
 
 public interface ExecutionRequestsSchema<T extends ExecutionRequests>
     extends SszContainerSchema<T> {
@@ -55,6 +58,23 @@ public interface ExecutionRequestsSchema<T extends ExecutionRequests>
         "Builder PQ registration requests are not supported by " + getClass().getSimpleName());
   }
 
+  default SszListSchema<ValidatorPreregistrationRequest, ?>
+      getValidatorPreregistrationRequestsSchema() {
+    throw new UnsupportedOperationException(
+        "Validator preregistration requests are not supported by " + getClass().getSimpleName());
+  }
+
+  default SszListSchema<BuilderPreregistrationRequest, ?>
+      getBuilderPreregistrationRequestsSchema() {
+    throw new UnsupportedOperationException(
+        "Builder preregistration requests are not supported by " + getClass().getSimpleName());
+  }
+
+  default SszListSchema<VoluntaryExitRequest, ?> getVoluntaryExitRequestsSchema() {
+    throw new UnsupportedOperationException(
+        "Voluntary exit requests are not supported by " + getClass().getSimpleName());
+  }
+
   ExecutionRequestsBuilder createBuilder();
 
   /**
@@ -76,6 +96,9 @@ public interface ExecutionRequestsSchema<T extends ExecutionRequests>
             .builderExits(source::getBuilderExits)
             .validatorPqRegistrations(source::getValidatorPqRegistrations)
             .builderPqRegistrations(source::getBuilderPqRegistrations)
+            .validatorPreregistrations(source::getValidatorPreregistrations)
+            .builderPreregistrations(source::getBuilderPreregistrations)
+            .voluntaryExits(source::getVoluntaryExits)
             .build();
     checkArgument(
         converted.getBuilderDeposits().size() == source.getBuilderDeposits().size()
@@ -83,7 +106,12 @@ public interface ExecutionRequestsSchema<T extends ExecutionRequests>
             && converted.getValidatorPqRegistrations().size()
                 == source.getValidatorPqRegistrations().size()
             && converted.getBuilderPqRegistrations().size()
-                == source.getBuilderPqRegistrations().size(),
+                == source.getBuilderPqRegistrations().size()
+            && converted.getValidatorPreregistrations().size()
+                == source.getValidatorPreregistrations().size()
+            && converted.getBuilderPreregistrations().size()
+                == source.getBuilderPreregistrations().size()
+            && converted.getVoluntaryExits().size() == source.getVoluntaryExits().size(),
         "Execution requests cannot be represented by %s",
         getClass().getSimpleName());
     return converted;
