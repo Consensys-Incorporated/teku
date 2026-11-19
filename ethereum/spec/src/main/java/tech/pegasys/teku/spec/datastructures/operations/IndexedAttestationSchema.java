@@ -25,7 +25,8 @@ import tech.pegasys.teku.spec.datastructures.type.SszSignatureSchema;
 import tech.pegasys.teku.spec.schemas.registry.SchemaRegistry;
 
 public class IndexedAttestationSchema
-    extends ContainerSchema3<IndexedAttestation, SszUInt64List, AttestationData, SszSignature> {
+    extends ContainerSchema3<
+        IndexedAttestationPhase0, SszUInt64List, AttestationData, SszSignature> {
 
   public IndexedAttestationSchema(final String containerName, final SchemaRegistry schemaRegistry) {
     super(
@@ -49,14 +50,14 @@ public class IndexedAttestationSchema
   }
 
   @Override
-  public IndexedAttestation createFromBackingNode(final TreeNode node) {
-    return new IndexedAttestation(this, node);
+  public IndexedAttestationPhase0 createFromBackingNode(final TreeNode node) {
+    return new IndexedAttestationPhase0(this, node);
   }
 
-  public IndexedAttestation create(
+  public IndexedAttestationPhase0 create(
       final SszUInt64List attestingIndices,
       final AttestationData data,
       final BLSSignature signature) {
-    return new IndexedAttestation(this, attestingIndices, data, signature);
+    return new IndexedAttestationPhase0(this, attestingIndices, data, signature);
   }
 }

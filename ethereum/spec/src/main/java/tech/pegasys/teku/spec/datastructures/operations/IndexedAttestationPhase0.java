@@ -1,0 +1,58 @@
+/*
+ * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ */
+
+package tech.pegasys.teku.spec.datastructures.operations;
+
+import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszUInt64List;
+import tech.pegasys.teku.infrastructure.ssz.containers.Container3;
+import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
+import tech.pegasys.teku.spec.datastructures.type.SszSignature;
+
+/** A BLS-signed indexed attestation, used by every fork up to PQ. */
+public class IndexedAttestationPhase0
+    extends Container3<IndexedAttestationPhase0, SszUInt64List, AttestationData, SszSignature>
+    implements IndexedAttestation {
+
+  IndexedAttestationPhase0(final IndexedAttestationSchema type, final TreeNode backingNode) {
+    super(type, backingNode);
+  }
+
+  IndexedAttestationPhase0(
+      final IndexedAttestationSchema schema,
+      final SszUInt64List attestingIndices,
+      final AttestationData data,
+      final BLSSignature signature) {
+    super(schema, attestingIndices, data, new SszSignature(signature));
+  }
+
+  @Override
+  public IndexedAttestationSchema getSchema() {
+    return (IndexedAttestationSchema) super.getSchema();
+  }
+
+  @Override
+  public SszUInt64List getAttestingIndices() {
+    return getField0();
+  }
+
+  @Override
+  public AttestationData getData() {
+    return getField1();
+  }
+
+  @Override
+  public BLSSignature getSignature() {
+    return getField2().getSignature();
+  }
+}

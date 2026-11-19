@@ -14,40 +14,27 @@
 package tech.pegasys.teku.spec.datastructures.operations;
 
 import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.infrastructure.ssz.SszContainer;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszUInt64List;
-import tech.pegasys.teku.infrastructure.ssz.containers.Container3;
-import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
-import tech.pegasys.teku.spec.datastructures.type.SszSignature;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszContainerSchema;
 
-public class IndexedAttestation
-    extends Container3<IndexedAttestation, SszUInt64List, AttestationData, SszSignature> {
-
-  IndexedAttestation(final IndexedAttestationSchema type, final TreeNode backingNode) {
-    super(type, backingNode);
-  }
-
-  IndexedAttestation(
-      final IndexedAttestationSchema schema,
-      final SszUInt64List attestingIndices,
-      final AttestationData data,
-      final BLSSignature signature) {
-    super(schema, attestingIndices, data, new SszSignature(signature));
-  }
+/**
+ * An attestation by validator indices. {@link IndexedAttestationPhase0} is BLS-signed, as in every
+ * fork up to PQ; {@link
+ * tech.pegasys.teku.spec.datastructures.operations.versions.pq.IndexedAttestationPq} carries an
+ * attestation proof instead, so its {@link #getSignature()} throws.
+ */
+public interface IndexedAttestation extends SszContainer {
 
   @Override
-  public IndexedAttestationSchema getSchema() {
-    return (IndexedAttestationSchema) super.getSchema();
-  }
+  SszContainerSchema<? extends IndexedAttestation> getSchema();
 
-  public SszUInt64List getAttestingIndices() {
-    return getField0();
-  }
+  SszUInt64List getAttestingIndices();
 
-  public AttestationData getData() {
-    return getField1();
-  }
+  AttestationData getData();
 
-  public BLSSignature getSignature() {
-    return getField2().getSignature();
-  }
+  /**
+   * @throws UnsupportedOperationException for a PQ indexed attestation, which has a proof instead
+   */
+  BLSSignature getSignature();
 }
