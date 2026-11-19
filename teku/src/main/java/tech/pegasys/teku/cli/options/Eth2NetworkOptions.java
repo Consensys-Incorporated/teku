@@ -275,6 +275,23 @@ public class Eth2NetworkOptions {
   private String eip8483ForkVersion;
 
   @Option(
+      names = {"--Xnetwork-pq-fork-epoch"},
+      hidden = true,
+      paramLabel = "<epoch>",
+      description = "Override the PQ fork activation epoch.",
+      arity = "1")
+  private UInt64 pqForkEpoch;
+
+  @Option(
+      names = {"--Xnetwork-pq-fork-version"},
+      hidden = true,
+      paramLabel = "<version>",
+      description =
+          "Override the PQ fork version (4 bytes hex). Needed when the network config has no PQ_FORK_VERSION.",
+      arity = "1")
+  private String pqForkVersion;
+
+  @Option(
       names = {"--Xnetwork-heze-fork-epoch"},
       hidden = true,
       paramLabel = "<epoch>",
@@ -583,6 +600,22 @@ public class Eth2NetworkOptions {
         implicitEpochDefault(gloasForkEpoch, builder::gloasForkEpoch);
       }
     }
+    if (pqForkVersion != null) {
+      builder.pqForkVersion(Bytes4.fromHexString(pqForkVersion));
+    }
+    if (pqForkEpoch != null) {
+      builder.pqForkEpoch(pqForkEpoch);
+      if (pqForkEpoch.isZero()) {
+        implicitEpochDefault(altairForkEpoch, builder::altairForkEpoch);
+        implicitEpochDefault(bellatrixForkEpoch, builder::bellatrixForkEpoch);
+        implicitEpochDefault(capellaForkEpoch, builder::capellaForkEpoch);
+        implicitEpochDefault(denebForkEpoch, builder::denebForkEpoch);
+        implicitEpochDefault(electraForkEpoch, builder::electraForkEpoch);
+        implicitEpochDefault(fuluForkEpoch, builder::fuluForkEpoch);
+        implicitEpochDefault(gloasForkEpoch, builder::gloasForkEpoch);
+        implicitEpochDefault(eip8483ForkEpoch, builder::eip8483ForkEpoch);
+      }
+    }
     if (hezeForkEpoch != null) {
       builder.hezeForkEpoch(hezeForkEpoch);
       if (hezeForkEpoch.isZero()) {
@@ -594,6 +627,7 @@ public class Eth2NetworkOptions {
         implicitEpochDefault(fuluForkEpoch, builder::fuluForkEpoch);
         implicitEpochDefault(gloasForkEpoch, builder::gloasForkEpoch);
         implicitEpochDefault(eip8483ForkEpoch, builder::eip8483ForkEpoch);
+        implicitEpochDefault(pqForkEpoch, builder::pqForkEpoch);
       }
     }
     if (totalTerminalDifficultyOverride != null) {

@@ -23,6 +23,7 @@ import static tech.pegasys.teku.spec.SpecMilestone.FULU;
 import static tech.pegasys.teku.spec.SpecMilestone.GLOAS;
 import static tech.pegasys.teku.spec.SpecMilestone.HEZE;
 import static tech.pegasys.teku.spec.SpecMilestone.PHASE0;
+import static tech.pegasys.teku.spec.SpecMilestone.PQ;
 import static tech.pegasys.teku.spec.config.SpecConfig.FAR_FUTURE_EPOCH;
 
 import java.util.function.Consumer;
@@ -50,6 +51,8 @@ public class SpecFactory {
     final SpecConfig specConfig = config.specConfig();
     if (!specConfig.getHezeForkEpoch().equals(FAR_FUTURE_EPOCH)) {
       return Spec.create(config, HEZE);
+    } else if (!specConfig.getPqForkEpoch().equals(FAR_FUTURE_EPOCH)) {
+      return Spec.create(config, PQ);
     } else if (!specConfig.getEip8483ForkEpoch().equals(FAR_FUTURE_EPOCH)) {
       return Spec.create(config, EIP8483);
     } else if (!specConfig.getGloasForkEpoch().equals(FAR_FUTURE_EPOCH)) {

@@ -162,6 +162,10 @@ public class SpecConfigPhase0 implements SpecConfig {
   private final Bytes4 eip8483ForkVersion;
   private final UInt64 eip8483ForkEpoch;
 
+  // pq fork
+  private final Bytes4 pqForkVersion;
+  private final UInt64 pqForkEpoch;
+
   // heze fork
   private final Bytes4 hezeForkVersion;
   private final UInt64 hezeForkEpoch;
@@ -257,6 +261,8 @@ public class SpecConfigPhase0 implements SpecConfig {
       final UInt64 gloasForkEpoch,
       final Bytes4 eip8483ForkVersion,
       final UInt64 eip8483ForkEpoch,
+      final Bytes4 pqForkVersion,
+      final UInt64 pqForkEpoch,
       final Bytes4 hezeForkVersion,
       final UInt64 hezeForkEpoch,
       final Optional<UInt64> ephemeryResetPeriod) {
@@ -346,6 +352,8 @@ public class SpecConfigPhase0 implements SpecConfig {
     this.gloasForkEpoch = gloasForkEpoch;
     this.eip8483ForkVersion = eip8483ForkVersion;
     this.eip8483ForkEpoch = eip8483ForkEpoch;
+    this.pqForkVersion = pqForkVersion;
+    this.pqForkEpoch = pqForkEpoch;
     this.hezeForkVersion = hezeForkVersion;
     this.hezeForkEpoch = hezeForkEpoch;
     this.ephemeryResetPeriod = ephemeryResetPeriod;
@@ -556,6 +564,16 @@ public class SpecConfigPhase0 implements SpecConfig {
   @Override
   public UInt64 getEip8483ForkEpoch() {
     return eip8483ForkEpoch;
+  }
+
+  @Override
+  public Bytes4 getPqForkVersion() {
+    return pqForkVersion;
+  }
+
+  @Override
+  public UInt64 getPqForkEpoch() {
+    return pqForkEpoch;
   }
 
   @Override
@@ -910,6 +928,8 @@ public class SpecConfigPhase0 implements SpecConfig {
         && Objects.equals(gloasForkEpoch, that.gloasForkEpoch)
         && Objects.equals(eip8483ForkVersion, that.eip8483ForkVersion)
         && Objects.equals(eip8483ForkEpoch, that.eip8483ForkEpoch)
+        && Objects.equals(pqForkVersion, that.pqForkVersion)
+        && Objects.equals(pqForkEpoch, that.pqForkEpoch)
         && Objects.equals(hezeForkVersion, that.hezeForkVersion)
         && Objects.equals(hezeForkEpoch, that.hezeForkEpoch)
         && Objects.equals(genesisDelay, that.genesisDelay)
@@ -1001,6 +1021,8 @@ public class SpecConfigPhase0 implements SpecConfig {
         gloasForkEpoch,
         eip8483ForkVersion,
         eip8483ForkEpoch,
+        pqForkVersion,
+        pqForkEpoch,
         hezeForkVersion,
         hezeForkEpoch,
         attestationSubnetPrefixBits,

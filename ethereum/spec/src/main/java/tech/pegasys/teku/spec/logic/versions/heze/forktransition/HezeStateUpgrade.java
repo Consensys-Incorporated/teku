@@ -43,9 +43,8 @@ public class HezeStateUpgrade implements StateUpgrade<BeaconStateEip8483> {
   @Override
   public BeaconStateEip8483 upgrade(final BeaconState preState) {
     final UInt64 epoch = beaconStateAccessors.getCurrentEpoch(preState);
-    // On this branch Heze builds on EIP-8483. The pre-state is a Gloas state when EIP-8483 is
-    // scheduled
-    // at
+    // On this branch Heze builds on PQ, which builds on EIP-8483 and so far keeps its state
+    // layout. The pre-state is a PQ or EIP-8483 state, or a Gloas state when both are scheduled at
     // the same epoch as Heze (and so overshadowed by it).
     final BeaconStateGloas preStateGloas = BeaconStateGloas.required(preState);
     final BeaconStateSchemaEip8483 stateSchema =

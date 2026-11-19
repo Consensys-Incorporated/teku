@@ -34,6 +34,7 @@ public enum SpecMilestone {
   FULU,
   GLOAS,
   EIP8483,
+  PQ,
   HEZE;
 
   /**
@@ -144,6 +145,7 @@ public enum SpecMilestone {
       case FULU -> specConfig.toVersionFulu().map(SpecConfig::getFuluForkVersion);
       case GLOAS -> specConfig.toVersionGloas().map(SpecConfig::getGloasForkVersion);
       case EIP8483 -> specConfig.toVersionEip8483().map(SpecConfig::getEip8483ForkVersion);
+      case PQ -> specConfig.toVersionPq().map(SpecConfig::getPqForkVersion);
       case HEZE -> specConfig.toVersionHeze().map(SpecConfig::getHezeForkVersion);
     };
   }
@@ -162,6 +164,7 @@ public enum SpecMilestone {
       case FULU -> specConfig.toVersionFulu().map(SpecConfig::getFuluForkEpoch);
       case GLOAS -> specConfig.toVersionGloas().map(SpecConfig::getGloasForkEpoch);
       case EIP8483 -> specConfig.toVersionEip8483().map(SpecConfig::getEip8483ForkEpoch);
+      case PQ -> specConfig.toVersionPq().map(SpecConfig::getPqForkEpoch);
       case HEZE -> specConfig.toVersionHeze().map(SpecConfig::getHezeForkEpoch);
     };
   }

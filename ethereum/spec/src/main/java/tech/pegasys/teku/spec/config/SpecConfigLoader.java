@@ -47,6 +47,7 @@ public class SpecConfigLoader {
           "fulu",
           "gloas",
           "eip8483",
+          "pq",
           "heze");
   private static final List<String> BUILTIN_NETWORKS =
       List.of(

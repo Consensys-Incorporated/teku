@@ -48,6 +48,7 @@
             "fulu",
             "gloas",
             "eip8483",
+            "pq",
             "heze"
           ],
           "description": "The active consensus version to which the execution payload envelope being submitted belongs."

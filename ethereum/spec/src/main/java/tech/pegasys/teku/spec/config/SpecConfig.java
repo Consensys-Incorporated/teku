@@ -77,6 +77,10 @@ public interface SpecConfig extends NetworkingSpecConfig {
 
   UInt64 getEip8483ForkEpoch();
 
+  Bytes4 getPqForkVersion();
+
+  UInt64 getPqForkEpoch();
+
   Bytes4 getHezeForkVersion();
 
   UInt64 getHezeForkEpoch();
@@ -248,6 +252,10 @@ public interface SpecConfig extends NetworkingSpecConfig {
   }
 
   default Optional<SpecConfigEip8483> toVersionEip8483() {
+    return Optional.empty();
+  }
+
+  default Optional<SpecConfigPq> toVersionPq() {
     return Optional.empty();
   }
 

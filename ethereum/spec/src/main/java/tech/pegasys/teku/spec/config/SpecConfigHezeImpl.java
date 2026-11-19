@@ -17,7 +17,7 @@ import java.util.Objects;
 import java.util.Optional;
 import tech.pegasys.teku.spec.SpecMilestone;
 
-public class SpecConfigHezeImpl extends DelegatingSpecConfigEip8483 implements SpecConfigHeze {
+public class SpecConfigHezeImpl extends DelegatingSpecConfigPq implements SpecConfigHeze {
 
   private final int inclusionListDueBps;
   private final int maxRequestInclusionList;
@@ -25,7 +25,7 @@ public class SpecConfigHezeImpl extends DelegatingSpecConfigEip8483 implements S
   private final int inclusionListCommitteeSize;
 
   public SpecConfigHezeImpl(
-      final SpecConfigEip8483 specConfig,
+      final SpecConfigPq specConfig,
       final int inclusionListDueBps,
       final int maxRequestInclusionList,
       final int maxTransactionsBytesPerInclusionList,

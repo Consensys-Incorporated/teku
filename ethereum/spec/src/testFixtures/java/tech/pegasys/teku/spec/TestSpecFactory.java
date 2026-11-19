@@ -52,6 +52,7 @@ public class TestSpecFactory {
       case FULU -> createMinimalFulu();
       case GLOAS -> createMinimalGloas();
       case EIP8483 -> createMinimalEip8483();
+      case PQ -> createMinimalPq();
       case HEZE -> createMinimalHeze();
     };
   }
@@ -67,6 +68,7 @@ public class TestSpecFactory {
       case FULU -> createMainnetFulu();
       case GLOAS -> createMainnetGloas();
       case EIP8483 -> createMainnetEip8483();
+      case PQ -> createMainnetPq();
       case HEZE -> createMainnetHeze();
     };
   }
@@ -165,6 +167,18 @@ public class TestSpecFactory {
     final SpecConfigAndParent<? extends SpecConfig> specConfig =
         getEip8483SpecConfig(Eth2Network.MINIMAL, configAdapter);
     return create(specConfig, SpecMilestone.EIP8483);
+  }
+
+  public static Spec createMinimalPq() {
+    final SpecConfigAndParent<? extends SpecConfig> specConfig =
+        getPqSpecConfig(Eth2Network.MINIMAL, __ -> {});
+    return create(specConfig, SpecMilestone.PQ);
+  }
+
+  public static Spec createMinimalPq(final Consumer<SpecConfigBuilder> configAdapter) {
+    final SpecConfigAndParent<? extends SpecConfig> specConfig =
+        getPqSpecConfig(Eth2Network.MINIMAL, configAdapter);
+    return create(specConfig, SpecMilestone.PQ);
   }
 
   public static Spec createMinimalHeze() {
@@ -292,6 +306,20 @@ public class TestSpecFactory {
   }
 
   /**
+   * Create a spec that forks to PQ at the provided epoch (all earlier forks at genesis)
+   *
+   * @param pqForkEpoch The PQ fork epoch
+   * @return A spec with PQ enabled, forking to PQ at the given epoch
+   */
+  public static Spec createMinimalWithPqForkEpoch(final UInt64 pqForkEpoch) {
+    final SpecConfigAndParent<? extends SpecConfig> config =
+        getPqSpecConfig(
+            Eth2Network.MINIMAL,
+            builder -> builder.eip8483ForkEpoch(ZERO).pqForkEpoch(pqForkEpoch));
+    return create(config, SpecMilestone.PQ);
+  }
+
+  /**
    * Create a spec that forks to Heze at the provided epoch
    *
    * @param hezeForkEpoch The Heze fork epoch
@@ -382,6 +410,12 @@ public class TestSpecFactory {
     return create(specConfig, SpecMilestone.EIP8483);
   }
 
+  public static Spec createMainnetPq() {
+    final SpecConfigAndParent<? extends SpecConfig> specConfig =
+        getPqSpecConfig(Eth2Network.MAINNET, __ -> {});
+    return create(specConfig, SpecMilestone.PQ);
+  }
+
   public static Spec createMainnetHeze() {
     final SpecConfigAndParent<? extends SpecConfig> specConfig =
         getHezeSpecConfig(Eth2Network.MAINNET);
@@ -441,6 +475,9 @@ public class TestSpecFactory {
     }
     if (specMilestone.isGreaterThanOrEqualTo(SpecMilestone.EIP8483)) {
       defaultModifier = defaultModifier.andThen(builder -> builder.eip8483ForkEpoch(UInt64.ZERO));
+    }
+    if (specMilestone.isGreaterThanOrEqualTo(SpecMilestone.PQ)) {
+      defaultModifier = defaultModifier.andThen(builder -> builder.pqForkEpoch(UInt64.ZERO));
     }
     if (specMilestone.isGreaterThanOrEqualTo(SpecMilestone.HEZE)) {
       defaultModifier = defaultModifier.andThen(builder -> builder.hezeForkEpoch(UInt64.ZERO));
@@ -703,6 +740,26 @@ public class TestSpecFactory {
             }));
   }
 
+  private static SpecConfigAndParent<? extends SpecConfig> getPqSpecConfig(
+      final Eth2Network network, final Consumer<SpecConfigBuilder> configAdapter) {
+    return requirePq(
+        SpecConfigLoader.loadConfig(
+            network.configName(),
+            builder -> {
+              builder
+                  .altairForkEpoch(ZERO)
+                  .bellatrixForkEpoch(UInt64.ZERO)
+                  .capellaForkEpoch(UInt64.ZERO)
+                  .denebForkEpoch(UInt64.ZERO)
+                  .electraForkEpoch(UInt64.ZERO)
+                  .fuluForkEpoch(UInt64.ZERO)
+                  .gloasForkEpoch(UInt64.ZERO)
+                  .eip8483ForkEpoch(ZERO)
+                  .pqForkEpoch(ZERO);
+              configAdapter.accept(builder);
+            }));
+  }
+
   private static SpecConfigAndParent<? extends SpecConfig> getHezeSpecConfig(
       final Eth2Network network) {
     return getHezeSpecConfig(
@@ -728,9 +785,10 @@ public class TestSpecFactory {
                 .electraForkEpoch(electraForkEpoch)
                 .fuluForkEpoch(fuluForkEpoch)
                 .gloasForkEpoch(gloasForkEpoch)
-                // EIP-8483 precedes Heze on this branch: activate it with Gloas like other prior
-                // forks
+                // EIP-8483 and PQ precede Heze on this branch: activate them with Gloas like
+                // other prior forks
                 .eip8483ForkEpoch(gloasForkEpoch)
+                .pqForkEpoch(gloasForkEpoch)
                 .hezeForkEpoch(hezeForkEpoch));
   }
 
@@ -833,6 +891,12 @@ public class TestSpecFactory {
   private static SpecConfigAndParent<? extends SpecConfig> requireEip8483(
       final SpecConfigAndParent<? extends SpecConfig> specConfigAndParent) {
     checkArgument(specConfigAndParent.specConfig().toVersionEip8483().isPresent());
+    return specConfigAndParent;
+  }
+
+  private static SpecConfigAndParent<? extends SpecConfig> requirePq(
+      final SpecConfigAndParent<? extends SpecConfig> specConfigAndParent) {
+    checkArgument(specConfigAndParent.specConfig().toVersionPq().isPresent());
     return specConfigAndParent;
   }
 

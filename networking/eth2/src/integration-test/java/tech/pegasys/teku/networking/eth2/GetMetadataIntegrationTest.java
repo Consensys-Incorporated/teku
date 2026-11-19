@@ -147,7 +147,7 @@ public class GetMetadataIntegrationTest extends AbstractRpcMethodIntegrationTest
     return switch (milestone) {
       case PHASE0 -> MetadataMessagePhase0.class;
       case ALTAIR, BELLATRIX, CAPELLA, DENEB, ELECTRA -> MetadataMessageAltair.class;
-      case FULU, GLOAS, EIP8483, HEZE -> MetadataMessageFulu.class;
+      case FULU, GLOAS, EIP8483, PQ, HEZE -> MetadataMessageFulu.class;
     };
   }
 }
