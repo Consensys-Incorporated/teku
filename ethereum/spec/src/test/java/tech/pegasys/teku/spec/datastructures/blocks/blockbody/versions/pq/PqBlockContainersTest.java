@@ -26,6 +26,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.constants.PqConstants;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
@@ -90,7 +91,7 @@ class PqBlockContainersTest {
 
     final BeaconBlockBodyPq body = BeaconBlockBodyPq.required(schema.createEmpty());
 
-    assertThat(body.getVrfProof()).hasSize(BeaconBlockBodySchemaPq.VRF_TREE_DEPTH + 1);
+    assertThat(body.getVrfProof()).hasSize(PqConstants.VRF_TREE_DEPTH + 1);
     assertThat(body.getProof()).isEqualTo(Bytes.EMPTY);
     assertThat(body.getOptionalSignedExecutionPayloadBid()).isPresent();
     assertThat(body.getOptionalSyncAggregate()).isEmpty();
