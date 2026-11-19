@@ -87,10 +87,17 @@ public class AttestationUtilGloas extends AttestationUtilElectra {
     if (indices.isEmpty() || !Comparators.isInOrder(indices, UInt64::compareTo)) {
       return false;
     }
-    // Verify aggregate signature
+    // Verify aggregate signature, taking the public keys from the pubkey cache, which keeps them
+    // decoded between calls
     final List<BLSPublicKey> pubKeys =
         indices.stream()
-            .map(index -> state.getValidators().get(index.intValue()).getPublicKey())
+            .map(
+                index ->
+                    beaconStateAccessors
+                        .getValidatorPubKey(state, index)
+                        .orElseThrow(
+                            () ->
+                                new IndexOutOfBoundsException("Invalid validator index " + index)))
             .toList();
     final Bytes32 domain =
         beaconStateAccessors.getDomain(

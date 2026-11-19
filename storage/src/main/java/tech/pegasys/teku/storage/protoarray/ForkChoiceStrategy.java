@@ -1145,8 +1145,10 @@ public class ForkChoiceStrategy implements BlockMetadataStore, ReadOnlyForkChoic
               forkChoiceModel -> {
                 if (status.isInvalid()) {
                   LOG.warn(
-                      "Payload for {} block root {} marked as invalid by Execution Client",
-                      verifiedInvalidTransition ? "" : "child of",
+                      "Payload marked as invalid by Execution Client{} block root {}",
+                      verifiedInvalidTransition
+                          ? " for"
+                          : ", invalidating ancestors up to the latest valid hash from",
                       blockRoot);
                 }
                 forkChoiceModel.onExecutionPayloadResult(
