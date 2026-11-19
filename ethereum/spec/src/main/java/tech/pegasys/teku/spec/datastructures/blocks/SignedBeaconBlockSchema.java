@@ -16,14 +16,17 @@ package tech.pegasys.teku.spec.datastructures.blocks;
 import it.unimi.dsi.fastutil.longs.LongList;
 import java.util.OptionalLong;
 import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszByteVector;
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema2;
+import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszByteVectorSchema;
 import tech.pegasys.teku.infrastructure.ssz.tree.GIndexUtil;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
-import tech.pegasys.teku.spec.datastructures.type.SszSignature;
 import tech.pegasys.teku.spec.datastructures.type.SszSignatureSchema;
+import tech.pegasys.teku.spec.datastructures.type.SszSignatures;
+import tech.pegasys.teku.spec.datastructures.type.SszXmssSignature;
 
 public class SignedBeaconBlockSchema
-    extends ContainerSchema2<SignedBeaconBlock, BeaconBlock, SszSignature>
+    extends ContainerSchema2<SignedBeaconBlock, BeaconBlock, SszByteVector>
     implements SignedBlockContainerSchema<SignedBeaconBlock> {
 
   private final OptionalLong networkSszLengthBytesUpperBound;
@@ -37,10 +40,25 @@ public class SignedBeaconBlockSchema
       final BeaconBlockSchema beaconBlockSchema,
       final String containerName,
       final OptionalLong networkSszLengthBytesUpperBound) {
+    this(
+        beaconBlockSchema,
+        containerName,
+        SszSignatureSchema.INSTANCE,
+        networkSszLengthBytesUpperBound);
+  }
+
+  /** For a fork whose blocks are signed with leanXMSS, such as PQ. */
+  public SignedBeaconBlockSchema(
+      final BeaconBlockSchema beaconBlockSchema,
+      final String containerName,
+      final SszByteVectorSchema<?> signatureSchema,
+      final OptionalLong networkSszLengthBytesUpperBound) {
     super(
         containerName,
         namedSchema(SignedBeaconBlockFields.MESSAGE, beaconBlockSchema),
-        namedSchema(SignedBeaconBlockFields.SIGNATURE, SszSignatureSchema.INSTANCE));
+        namedSchema(
+            SignedBeaconBlockFields.SIGNATURE,
+            SszSignatures.asSignatureFieldSchema(signatureSchema)));
     this.networkSszLengthBytesUpperBound = networkSszLengthBytesUpperBound;
     validateNetworkSszLengthBytesUpperBound();
   }
@@ -51,6 +69,11 @@ public class SignedBeaconBlockSchema
   }
 
   public SignedBeaconBlock create(final BeaconBlock message, final BLSSignature signature) {
+    return new SignedBeaconBlock(this, message, signature);
+  }
+
+  /** A block signed with leanXMSS, for a schema that takes one. */
+  public SignedBeaconBlock create(final BeaconBlock message, final SszXmssSignature signature) {
     return new SignedBeaconBlock(this, message, signature);
   }
 

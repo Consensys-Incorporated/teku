@@ -19,8 +19,10 @@ import it.unimi.dsi.fastutil.longs.LongList;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszByteVector;
 import tech.pegasys.teku.infrastructure.ssz.containers.Container2;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBytes32;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
@@ -29,9 +31,15 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
 import tech.pegasys.teku.spec.datastructures.type.SszSignature;
+import tech.pegasys.teku.spec.datastructures.type.SszSignatures;
+import tech.pegasys.teku.spec.datastructures.type.SszXmssSignature;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
 
-public class SignedBeaconBlock extends Container2<SignedBeaconBlock, BeaconBlock, SszSignature>
+/**
+ * A signed block. Up to PQ it is BLS-signed; from PQ its schema takes a leanXMSS signature, and
+ * {@link #getSignature()} throws.
+ */
+public class SignedBeaconBlock extends Container2<SignedBeaconBlock, BeaconBlock, SszByteVector>
     implements BeaconBlockSummary, SignedBlockContainer {
 
   SignedBeaconBlock(final SignedBeaconBlockSchema type, final TreeNode backingNode) {
@@ -41,6 +49,13 @@ public class SignedBeaconBlock extends Container2<SignedBeaconBlock, BeaconBlock
   SignedBeaconBlock(
       final SignedBeaconBlockSchema type, final BeaconBlock message, final BLSSignature signature) {
     super(type, message, new SszSignature(signature));
+  }
+
+  SignedBeaconBlock(
+      final SignedBeaconBlockSchema type,
+      final BeaconBlock message,
+      final SszXmssSignature signature) {
+    super(type, message, signature);
   }
 
   public static SignedBeaconBlock create(
@@ -55,10 +70,13 @@ public class SignedBeaconBlock extends Container2<SignedBeaconBlock, BeaconBlock
   }
 
   public SignedBeaconBlockHeader asHeader() {
-    return new SignedBeaconBlockHeader(
+    final BeaconBlockHeader header =
         new BeaconBlockHeader(
-            getSlot(), getProposerIndex(), getParentRoot(), getStateRoot(), getBodyRoot()),
-        getSignature());
+            getSlot(), getProposerIndex(), getParentRoot(), getStateRoot(), getBodyRoot());
+    if (getField1() instanceof SszXmssSignature xmssSignature) {
+      return new SignedBeaconBlockHeader(header, xmssSignature);
+    }
+    return new SignedBeaconBlockHeader(header, getSignature());
   }
 
   public SignedBeaconBlock blind(final SchemaDefinitions schemaDefinitions) {
@@ -127,8 +145,22 @@ public class SignedBeaconBlock extends Container2<SignedBeaconBlock, BeaconBlock
     return getField0();
   }
 
+  /**
+   * @throws UnsupportedOperationException for a PQ block, which is signed with leanXMSS
+   */
   public BLSSignature getSignature() {
-    return getField1().getSignature();
+    return SszSignatures.blsSignature(getField1());
+  }
+
+  public boolean isXmssSigned() {
+    return SszSignatures.isXmss(getField1());
+  }
+
+  /**
+   * @throws UnsupportedOperationException for a block signed with BLS
+   */
+  public Bytes getXmssSignature() {
+    return SszSignatures.xmssSignature(getField1());
   }
 
   @Override
