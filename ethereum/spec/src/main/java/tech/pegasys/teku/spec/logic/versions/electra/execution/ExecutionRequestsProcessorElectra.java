@@ -22,6 +22,7 @@ import java.util.Optional;
 import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.infrastructure.bytes.Bytes20;
 import tech.pegasys.teku.infrastructure.ssz.SszMutableList;
@@ -108,6 +109,15 @@ public class ExecutionRequestsProcessorElectra implements ExecutionRequestsProce
     }
   }
 
+  /**
+   * The validator a withdrawal or consolidation request names. From PQ, requests name {@code 0^16 ‖
+   * xmss_pubkey} and requests naming a BLS key are ignored.
+   */
+  protected Optional<Integer> getRequestValidatorIndex(
+      final BeaconState state, final BLSPublicKey pubkey) {
+    return validatorsUtil.getValidatorIndex(state, pubkey);
+  }
+
   /** Implements process_withdrawal_request from consensus-specs (EIP-7002 &amp; EIP-7251). */
   @Override
   public void processWithdrawalRequests(
@@ -139,7 +149,7 @@ public class ExecutionRequestsProcessorElectra implements ExecutionRequestsProce
           }
 
           final Optional<Integer> maybeValidatorIndex =
-              validatorsUtil.getValidatorIndex(state, withdrawalRequest.getValidatorPubkey());
+              getRequestValidatorIndex(state, withdrawalRequest.getValidatorPubkey());
           if (maybeValidatorIndex.isEmpty()) {
             LOG.debug(
                 "process_withdrawal_request: no matching validator for public key {}",
@@ -287,8 +297,7 @@ public class ExecutionRequestsProcessorElectra implements ExecutionRequestsProce
       LOG.debug(
           "process_consolidation_request: switching validator {} to compounding address",
           consolidationRequest.getSourcePubkey().toAbbreviatedString());
-      validatorsUtil
-          .getValidatorIndex(state, consolidationRequest.getSourcePubkey())
+      getRequestValidatorIndex(state, consolidationRequest.getSourcePubkey())
           .ifPresent(
               sourceValidatorIndex ->
                   beaconStateMutators.switchToCompoundingValidator(state, sourceValidatorIndex));
@@ -320,7 +329,7 @@ public class ExecutionRequestsProcessorElectra implements ExecutionRequestsProce
 
     // Verify source_pubkey exists
     final Optional<Integer> maybeSourceValidatorIndex =
-        validatorsUtil.getValidatorIndex(state, consolidationRequest.getSourcePubkey());
+        getRequestValidatorIndex(state, consolidationRequest.getSourcePubkey());
     if (maybeSourceValidatorIndex.isEmpty()) {
       LOG.debug(
           "process_consolidation_request: source_pubkey {} not found",
@@ -330,7 +339,7 @@ public class ExecutionRequestsProcessorElectra implements ExecutionRequestsProce
 
     // Verify target_pubkey exists
     final Optional<Integer> maybeTargetValidatorIndex =
-        validatorsUtil.getValidatorIndex(state, consolidationRequest.getTargetPubkey());
+        getRequestValidatorIndex(state, consolidationRequest.getTargetPubkey());
     if (maybeTargetValidatorIndex.isEmpty()) {
       LOG.debug(
           "process_consolidation_request: target_pubkey {} not found",
@@ -445,7 +454,7 @@ public class ExecutionRequestsProcessorElectra implements ExecutionRequestsProce
 
     // Verify source_pubkey exists
     final Optional<Integer> maybeSourceValidatorIndex =
-        validatorsUtil.getValidatorIndex(state, consolidationRequest.getSourcePubkey());
+        getRequestValidatorIndex(state, consolidationRequest.getSourcePubkey());
     if (maybeSourceValidatorIndex.isEmpty()) {
       return false;
     }

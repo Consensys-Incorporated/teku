@@ -18,15 +18,21 @@ import static tech.pegasys.teku.spec.constants.PqConstants.XMSS_DEPOSIT_PREFIX;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.bytes.Bytes48;
+import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
+import tech.pegasys.teku.infrastructure.ssz.SszMutableList;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBytes32;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.config.SpecConfigPq;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.MutableBeaconStateElectra;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.pq.MutableBeaconStatePq;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDeposit;
+import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
+import tech.pegasys.teku.spec.datastructures.state.versions.pq.BuilderPq;
 import tech.pegasys.teku.spec.datastructures.state.versions.pq.BuilderPreregistration;
 import tech.pegasys.teku.spec.datastructures.state.versions.pq.ValidatorPq;
 import tech.pegasys.teku.spec.datastructures.state.versions.pq.ValidatorPreregistration;
@@ -41,6 +47,7 @@ public class BeaconStateMutatorsPq extends BeaconStateMutatorsGloas {
 
   private final SpecConfigPq specConfigPq;
   private final SchemaDefinitionsPq schemaDefinitionsPq;
+  private final BeaconStateAccessorsPq beaconStateAccessorsPq;
 
   public BeaconStateMutatorsPq(
       final SpecConfigPq specConfig,
@@ -50,6 +57,7 @@ public class BeaconStateMutatorsPq extends BeaconStateMutatorsGloas {
     super(specConfig, miscHelpers, beaconStateAccessors, schemaDefinitions);
     this.specConfigPq = specConfig;
     this.schemaDefinitionsPq = schemaDefinitions;
+    this.beaconStateAccessorsPq = beaconStateAccessors;
   }
 
   /**
@@ -79,6 +87,31 @@ public class BeaconStateMutatorsPq extends BeaconStateMutatorsGloas {
                 new SszSignature(EMPTY_DEPOSIT_SIGNATURE),
                 SszUInt64.of(SpecConfig.GENESIS_SLOT));
     state.getPendingDeposits().append(deposit);
+  }
+
+  /** add_builder_to_registry, modified in PQ: the builder is keyed by its XMSS public key. */
+  public void addBuilderToRegistry(
+      final MutableBeaconState state,
+      final Bytes32 pubkey,
+      final int version,
+      final Eth1Address executionAddress,
+      final UInt64 amount,
+      final UInt64 slot) {
+    final int index = beaconStateAccessorsPq.getIndexForNewBuilder(state).intValue();
+    final BuilderPq builder =
+        new BuilderPq(
+            pubkey,
+            version,
+            executionAddress,
+            amount,
+            miscHelpers.computeEpochAtSlot(slot),
+            SpecConfig.FAR_FUTURE_EPOCH);
+    final SszMutableList<Builder> builders = MutableBeaconStateGloas.required(state).getBuilders();
+    if (index >= builders.size()) {
+      builders.append(builder);
+    } else {
+      builders.set(index, builder);
+    }
   }
 
   /** remove_validator_preregistration: keeps the order of the remaining records. */
