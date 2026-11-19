@@ -505,6 +505,17 @@ public class StatusLogger {
             Color.YELLOW));
   }
 
+  public void warnJwtSecretFileReadableByOthers(final Path jwtSecretFile) {
+    log.warn(
+        print(
+            "Execution engine JWT secret file "
+                + jwtSecretFile.toAbsolutePath()
+                + " is readable by all local users, who could use it to call the execution client's "
+                + "Engine API. Restrict its permissions, e.g. chmod 600, or chmod 640 with a group "
+                + "shared with the execution client.",
+            Color.YELLOW));
+  }
+
   public void warnUsageOfImplicitPruneDataStorageMode() {
     log.warn(
         print(
