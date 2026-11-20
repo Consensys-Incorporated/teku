@@ -29,7 +29,8 @@ import tech.pegasys.teku.bls.keystore.model.ChecksumFunction;
 import tech.pegasys.teku.bls.keystore.model.CipherFunction;
 import tech.pegasys.teku.bls.keystore.model.Pbkdf2PseudoRandomFunction;
 
-class KeyStoreBytesModule extends SimpleModule {
+/** Jackson bindings for the byte and enum fields of EIP-2335 keystores. */
+public class KeyStoreBytesModule extends SimpleModule {
   public KeyStoreBytesModule() {
     super("KeystoreBytes");
     addSerializer(Bytes.class, new BytesSerializer());

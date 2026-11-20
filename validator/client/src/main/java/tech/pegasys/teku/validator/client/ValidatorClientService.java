@@ -52,6 +52,8 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.signatures.LocalSlashingProtector;
 import tech.pegasys.teku.spec.signatures.LocalSlashingProtectorConcurrentAccess;
 import tech.pegasys.teku.spec.signatures.SlashingProtector;
+import tech.pegasys.teku.spec.signatures.xmss.LocalXmssLeafProtector;
+import tech.pegasys.teku.spec.signatures.xmss.XmssLeafProtector;
 import tech.pegasys.teku.validator.api.GraffitiManager;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 import tech.pegasys.teku.validator.api.ValidatorConfig;
@@ -429,6 +431,13 @@ public class ValidatorClientService extends Service {
                 SyncDataAccessor.create(slashingProtectionPath), slashingProtectionPath)
             : new LocalSlashingProtectorConcurrentAccess(
                 SyncDataAccessor.create(slashingProtectionPath), slashingProtectionPath);
+    // PQ keys sign with leanXMSS, whose leaves are recorded next to the slashing protection data
+    final Optional<XmssLeafProtector> xmssLeafProtector =
+        config.getSpec().isMilestoneSupported(SpecMilestone.PQ)
+            ? Optional.of(
+                new LocalXmssLeafProtector(
+                    SyncDataAccessor.create(slashingProtectionPath), slashingProtectionPath))
+            : Optional.empty();
     final SlashingProtectionLogger slashingProtectionLogger =
         new SlashingProtectionLogger(
             slashingProtector, config.getSpec(), asyncRunner, VALIDATOR_LOGGER);
@@ -440,6 +449,7 @@ public class ValidatorClientService extends Service {
         config.getInteropConfig(),
         externalSignerHttpClientFactory,
         slashingProtector,
+        xmssLeafProtector,
         slashingProtectionLogger,
         new PublicKeyLoader(
             externalSignerHttpClientFactory,
