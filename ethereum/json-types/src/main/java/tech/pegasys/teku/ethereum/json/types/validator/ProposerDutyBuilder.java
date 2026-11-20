@@ -13,10 +13,11 @@
 
 package tech.pegasys.teku.ethereum.json.types.validator;
 
-import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.PUBLIC_KEY_TYPE;
+import static tech.pegasys.teku.ethereum.json.types.beacon.ValidatorTypeDefinition.VALIDATOR_PUBKEY_TYPE;
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.INTEGER_TYPE;
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.UINT64_TYPE;
 
+import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -27,7 +28,10 @@ public class ProposerDutyBuilder {
           .initializer(ProposerDutyBuilder::new)
           .finisher(ProposerDutyBuilder::build)
           .withField(
-              "pubkey", PUBLIC_KEY_TYPE, ProposerDuty::getPublicKey, ProposerDutyBuilder::publicKey)
+              "pubkey",
+              VALIDATOR_PUBKEY_TYPE,
+              ProposerDuty::getPublicKeyBytes,
+              ProposerDutyBuilder::publicKey)
           .withField(
               "validator_index",
               INTEGER_TYPE,
@@ -36,11 +40,15 @@ public class ProposerDutyBuilder {
           .withField("slot", UINT64_TYPE, ProposerDuty::getSlot, ProposerDutyBuilder::slot)
           .build();
 
-  private BLSPublicKey publicKey;
+  private Bytes publicKey;
   private int validatorIndex;
   private UInt64 slot;
 
   public ProposerDutyBuilder publicKey(final BLSPublicKey publicKey) {
+    return publicKey(publicKey.toBytesCompressed());
+  }
+
+  public ProposerDutyBuilder publicKey(final Bytes publicKey) {
     this.publicKey = publicKey;
     return this;
   }

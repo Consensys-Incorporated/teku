@@ -15,21 +15,40 @@ package tech.pegasys.teku.ethereum.json.types.validator;
 
 import com.google.common.base.MoreObjects;
 import java.util.Objects;
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes48;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 
+/** A proposer duty. From PQ the validator is named by its 32-byte XMSS public key. */
 public class ProposerDuty {
-  private final BLSPublicKey publicKey;
+  private final Bytes publicKey;
   private final int validatorIndex;
   private final UInt64 slot;
 
   public ProposerDuty(final BLSPublicKey publicKey, final int validatorIndex, final UInt64 slot) {
+    this(publicKey.toBytesCompressed(), validatorIndex, slot);
+  }
+
+  /**
+   * @param publicKey the validator's signing key: a 48-byte BLS key, or from PQ its 32-byte XMSS
+   *     key
+   */
+  public ProposerDuty(final Bytes publicKey, final int validatorIndex, final UInt64 slot) {
     this.publicKey = publicKey;
     this.validatorIndex = validatorIndex;
     this.slot = slot;
   }
 
+  /**
+   * @throws IllegalArgumentException for a PQ validator, which is named by its XMSS key
+   */
   public BLSPublicKey getPublicKey() {
+    return BLSPublicKey.fromBytesCompressed(Bytes48.wrap(publicKey));
+  }
+
+  /** The validator's signing key: a BLS key, or from PQ an XMSS key. */
+  public Bytes getPublicKeyBytes() {
     return publicKey;
   }
 

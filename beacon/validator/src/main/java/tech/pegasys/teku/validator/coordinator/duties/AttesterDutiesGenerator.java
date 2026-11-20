@@ -18,6 +18,7 @@ import it.unimi.dsi.fastutil.ints.IntCollection;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuty;
@@ -26,6 +27,7 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.state.CommitteeAssignment;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateAccessors;
+import tech.pegasys.teku.spec.logic.versions.pq.util.AttestationUtilPq;
 
 public class AttesterDutiesGenerator {
   private final Spec spec;
@@ -72,16 +74,43 @@ public class AttesterDutiesGenerator {
       final int validatorIndex,
       final UInt64 committeeCountPerSlot,
       final BeaconState state) {
-    return spec.getValidatorPubKey(state, UInt64.valueOf(validatorIndex))
-        .map(
-            publicKey ->
-                new AttesterDuty(
-                    publicKey,
-                    validatorIndex,
-                    committeeAssignment.committee().size(),
-                    committeeAssignment.committeeIndex().intValue(),
-                    committeeCountPerSlot.intValue(),
-                    committeeAssignment.committee().indexOf(validatorIndex),
-                    committeeAssignment.slot()));
+    if (validatorIndex >= state.getValidators().size()) {
+      return Optional.empty();
+    }
+    // The signing key: a BLS key, or from PQ an XMSS key
+    final Bytes publicKey = state.getValidators().get(validatorIndex).getSigningKeyBytes();
+    return Optional.of(
+        new AttesterDuty(
+            publicKey,
+            validatorIndex,
+            committeeAssignment.committee().size(),
+            committeeAssignment.committeeIndex().intValue(),
+            committeeCountPerSlot.intValue(),
+            committeeAssignment.committee().indexOf(validatorIndex),
+            committeeAssignment.slot(),
+            isAggregator(state, committeeAssignment, validatorIndex)));
+  }
+
+  /**
+   * From PQ, aggregators are the aggregation committee's members (is_aggregator), which a PQ state
+   * holds for the previous epoch through the seed lookahead. Before PQ, aggregators select
+   * themselves with a selection proof, so the duty doesn't say.
+   */
+  private Optional<Boolean> isAggregator(
+      final BeaconState state,
+      final CommitteeAssignment committeeAssignment,
+      final int validatorIndex) {
+    if (state.toVersionPq().isEmpty()) {
+      return Optional.empty();
+    }
+    return spec.atSlot(committeeAssignment.slot()).getAttestationUtil()
+            instanceof AttestationUtilPq attestationUtil
+        ? Optional.of(
+            attestationUtil.isAggregator(
+                state,
+                committeeAssignment.slot(),
+                committeeAssignment.committeeIndex(),
+                UInt64.valueOf(validatorIndex)))
+        : Optional.empty();
   }
 }
