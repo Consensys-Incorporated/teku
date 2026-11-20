@@ -97,12 +97,18 @@ public abstract class AbstractSszComposite<SszChildT extends SszData>
     return childrenViewCache.transfer();
   }
 
-  /**
-   * Creates a new empty children cache. Could be overridden by subclasses for fine tuning of the
-   * initial cache size
-   */
+  /** Creates a new empty children cache using {@link #createCacheFactory()}. */
   protected IntCache<SszChildT> createCache() {
-    return new ArrayIntCache<>();
+    return createCacheFactory().get();
+  }
+
+  /**
+   * Returns a factory creating independent, empty children caches.
+   *
+   * <p>The factory may be retained by derived composites and must not retain this composite.
+   */
+  protected Supplier<IntCache<SszChildT>> createCacheFactory() {
+    return ArrayIntCache::new;
   }
 
   @Override
