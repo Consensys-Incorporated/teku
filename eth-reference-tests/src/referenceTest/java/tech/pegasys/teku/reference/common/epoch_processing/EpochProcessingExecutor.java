@@ -50,6 +50,8 @@ public class EpochProcessingExecutor {
       case PROPOSER_LOOKAHEAD -> epochProcessor.processProposerLookahead(state);
       case BUILDER_PENDING_PAYMENTS -> epochProcessor.processBuilderPendingPayments(state);
       case PTC_WINDOW -> epochProcessor.processPtcWindow(state);
+      case AGGREGATION_COMMITTEE_WINDOW -> epochProcessor.processAggregationCommitteeWindow(state);
+      case PREREGISTRATION_EXPIRY -> epochProcessor.processPreregistrationExpiry(state);
       default ->
           throw new UnsupportedOperationException(
               "Attempted to execute unknown operation type: " + operation);

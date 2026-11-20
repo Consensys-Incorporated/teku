@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assumptions.assumeThat;
 
 import com.google.common.collect.ImmutableMap;
+import java.util.function.Function;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
@@ -28,6 +29,9 @@ import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.Eth1Data;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.altair.BeaconBlockBodySchemaAltair;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.BuilderPreregistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.ValidatorPreregistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.VoluntaryExitRequest;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.BlobIdentifier;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.Deposit;
@@ -36,6 +40,7 @@ import tech.pegasys.teku.spec.datastructures.operations.DepositMessage;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
 import tech.pegasys.teku.spec.datastructures.operations.VoluntaryExit;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SingleAttestationPq;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.ForkData;
@@ -43,6 +48,10 @@ import tech.pegasys.teku.spec.datastructures.state.SigningData;
 import tech.pegasys.teku.spec.datastructures.state.ValidatorPhase0;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.phase0.BeaconStateSchemaPhase0;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderGloas;
+import tech.pegasys.teku.spec.datastructures.state.versions.pq.BuilderPq;
+import tech.pegasys.teku.spec.datastructures.state.versions.pq.BuilderPreregistration;
+import tech.pegasys.teku.spec.datastructures.state.versions.pq.ValidatorPq;
+import tech.pegasys.teku.spec.datastructures.state.versions.pq.ValidatorPreregistration;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsBellatrix;
@@ -52,6 +61,7 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsEip8483;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsElectra;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsFulu;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 
 public class SszTestExecutor<T extends SszData> implements TestExecutor {
 
@@ -62,7 +72,10 @@ public class SszTestExecutor<T extends SszData> implements TestExecutor {
           // SSZ Static
           .put(
               "ssz_static/AggregateAndProof",
-              new SszTestExecutor<>(SchemaDefinitions::getAggregateAndProofSchema))
+              new SszTestExecutor<>(
+                  pqOr(
+                      pq -> pq.getPqAttestationSchemas().getAggregateAndProofSchema(),
+                      SchemaDefinitions::getAggregateAndProofSchema)))
           .put(
               "ssz_static/Attestation",
               new SszTestExecutor<>(SchemaDefinitions::getAttestationSchema))
@@ -71,7 +84,10 @@ public class SszTestExecutor<T extends SszData> implements TestExecutor {
               new SszTestExecutor<>(SchemaDefinitions::getAttesterSlashingSchema))
           .put(
               "ssz_static/SignedAggregateAndProof",
-              new SszTestExecutor<>(SchemaDefinitions::getSignedAggregateAndProofSchema))
+              new SszTestExecutor<>(
+                  pqOr(
+                      pq -> pq.getPqAttestationSchemas().getSignedAggregateAndProofSchema(),
+                      SchemaDefinitions::getSignedAggregateAndProofSchema)))
           .put(
               "ssz_static/BeaconState",
               new SszTestExecutor<>(SchemaDefinitions::getBeaconStateSchema))
@@ -94,7 +110,10 @@ public class SszTestExecutor<T extends SszData> implements TestExecutor {
                       SchemaDefinitionsCapella.required(schemas).getHistoricalSummarySchema()))
           .put(
               "ssz_static/IndexedAttestation",
-              new SszTestExecutor<>(SchemaDefinitions::getIndexedAttestationSchema))
+              new SszTestExecutor<>(
+                  pqOr(
+                      pq -> pq.getPqAttestationSchemas().getIndexedAttestationSchema(),
+                      SchemaDefinitions::getIndexedAttestationSchema)))
           .put(
               "ssz_static/PendingAttestation",
               new SszTestExecutor<>(
@@ -260,8 +279,10 @@ public class SszTestExecutor<T extends SszData> implements TestExecutor {
           .put(
               "ssz_static/SingleAttestation",
               new SszTestExecutor<>(
-                  schemas ->
-                      SchemaDefinitionsElectra.required(schemas).getSingleAttestationSchema()))
+                  pqOr(
+                      __ -> SingleAttestationPq.SSZ_SCHEMA,
+                      schemas ->
+                          SchemaDefinitionsElectra.required(schemas).getSingleAttestationSchema())))
 
           // Fulu types
           .put(
@@ -280,7 +301,10 @@ public class SszTestExecutor<T extends SszData> implements TestExecutor {
                   schemas -> SchemaDefinitionsFulu.required(schemas).getMatrixEntrySchema()))
 
           // Gloas types
-          .put("ssz_static/Builder", new SszTestExecutor<>(__ -> BuilderGloas.SSZ_SCHEMA))
+          .put(
+              "ssz_static/Builder",
+              new SszTestExecutor<>(
+                  pqOr(__ -> BuilderPq.SSZ_SCHEMA, __ -> BuilderGloas.SSZ_SCHEMA)))
           .put(
               "ssz_static/BuilderPendingPayment",
               new SszTestExecutor<>(
@@ -304,9 +328,11 @@ public class SszTestExecutor<T extends SszData> implements TestExecutor {
           .put(
               "ssz_static/PayloadAttestationMessage",
               new SszTestExecutor<>(
-                  schemas ->
-                      SchemaDefinitionsGloas.required(schemas)
-                          .getPayloadAttestationMessageSchema()))
+                  pqOr(
+                      pq -> pq.getPqAttestationSchemas().getPayloadAttestationMessageSchema(),
+                      schemas ->
+                          SchemaDefinitionsGloas.required(schemas)
+                              .getPayloadAttestationMessageSchema())))
           .put(
               "ssz_static/IndexedPayloadAttestation",
               new SszTestExecutor<>(
@@ -380,6 +406,22 @@ public class SszTestExecutor<T extends SszData> implements TestExecutor {
               new SszTestExecutor<>(
                   schemas ->
                       SchemaDefinitionsEip8483.required(schemas).getBuilderPqRegistrationSchema()))
+          // PQ types
+          .put(
+              "ssz_static/ValidatorPreregistrationRequest",
+              new SszTestExecutor<>(__ -> ValidatorPreregistrationRequest.SSZ_SCHEMA))
+          .put(
+              "ssz_static/BuilderPreregistrationRequest",
+              new SszTestExecutor<>(__ -> BuilderPreregistrationRequest.SSZ_SCHEMA))
+          .put(
+              "ssz_static/VoluntaryExitRequest",
+              new SszTestExecutor<>(__ -> VoluntaryExitRequest.SSZ_SCHEMA))
+          .put(
+              "ssz_static/ValidatorPreregistration",
+              new SszTestExecutor<>(__ -> ValidatorPreregistration.SSZ_SCHEMA))
+          .put(
+              "ssz_static/BuilderPreregistration",
+              new SszTestExecutor<>(__ -> BuilderPreregistration.SSZ_SCHEMA))
           .put("ssz_static/ForkChoiceNode", IGNORE_TESTS)
 
           // Legacy Schemas (Not yet migrated to SchemaDefinitions)
@@ -398,15 +440,22 @@ public class SszTestExecutor<T extends SszData> implements TestExecutor {
           .put("ssz_static/ForkData", new SszTestExecutor<>(__ -> ForkData.SSZ_SCHEMA))
           .put(
               "ssz_static/ProposerSlashing",
-              new SszTestExecutor<>(__ -> ProposerSlashing.SSZ_SCHEMA))
+              new SszTestExecutor<>(
+                  pqOr(__ -> ProposerSlashing.SSZ_SCHEMA_PQ, __ -> ProposerSlashing.SSZ_SCHEMA)))
           .put(
               "ssz_static/SignedBeaconBlockHeader",
-              new SszTestExecutor<>(__ -> SignedBeaconBlockHeader.SSZ_SCHEMA))
+              new SszTestExecutor<>(
+                  pqOr(
+                      __ -> SignedBeaconBlockHeader.SSZ_SCHEMA_PQ,
+                      __ -> SignedBeaconBlockHeader.SSZ_SCHEMA)))
           .put(
               "ssz_static/SignedVoluntaryExit",
               new SszTestExecutor<>(__ -> SignedVoluntaryExit.SSZ_SCHEMA))
           .put("ssz_static/SigningData", new SszTestExecutor<>(__ -> SigningData.SSZ_SCHEMA))
-          .put("ssz_static/Validator", new SszTestExecutor<>(__ -> ValidatorPhase0.SSZ_SCHEMA))
+          .put(
+              "ssz_static/Validator",
+              new SszTestExecutor<>(
+                  pqOr(__ -> ValidatorPq.SSZ_SCHEMA, __ -> ValidatorPhase0.SSZ_SCHEMA)))
           .put("ssz_static/VoluntaryExit", new SszTestExecutor<>(__ -> VoluntaryExit.SSZ_SCHEMA))
           .build();
 
@@ -434,6 +483,22 @@ public class SszTestExecutor<T extends SszData> implements TestExecutor {
     final T yamlResult =
         TestDataUtils.loadYaml(testDefinition, "value.yaml", sszSchema.getJsonTypeDefinition());
     assertThat(yamlResult.hashTreeRoot()).isEqualTo(expectedRoot);
+  }
+
+  /**
+   * From PQ on, the schemas whose type isn't the one the milestone-independent getters return (the
+   * XMSS-keyed and STARK-proved containers).
+   */
+  @SuppressWarnings("unchecked")
+  private static <T extends SszData> SchemaProvider<T> pqOr(
+      final Function<SchemaDefinitionsPq, SszSchema<? extends SszData>> pq,
+      final Function<SchemaDefinitions, SszSchema<? extends SszData>> other) {
+    return schemas ->
+        (SszSchema<T>)
+            schemas
+                .toVersionPq()
+                .<SszSchema<? extends SszData>>map(pq)
+                .orElseGet(() -> other.apply(schemas));
   }
 
   private interface SchemaProvider<T extends SszData> {

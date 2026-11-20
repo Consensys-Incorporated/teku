@@ -54,12 +54,17 @@ import tech.pegasys.teku.spec.datastructures.execution.versions.electra.DepositR
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.WithdrawalRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderDepositRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderExitRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.BuilderPreregistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.ExecutionRequestsSchemaPq;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.ValidatorPreregistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.VoluntaryExitRequest;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.Deposit;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.SignedBlsToExecutionChange;
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationPq;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
@@ -73,6 +78,7 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsCapella;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsEip8483;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsElectra;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.statetransition.attestation.PooledAttestation;
 import tech.pegasys.teku.statetransition.attestation.PooledAttestationWithData;
 import tech.pegasys.teku.statetransition.attestation.utils.RewardBasedAttestationSorter;
@@ -110,7 +116,11 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
     BUILDER_DEPOSIT_REQUEST,
     BUILDER_EXIT_REQUEST,
     VALIDATOR_PQ_REGISTRATION_REQUEST,
-    BUILDER_PQ_REGISTRATION_REQUEST;
+    BUILDER_PQ_REGISTRATION_REQUEST,
+    RANDAO,
+    VALIDATOR_PREREGISTRATION_REQUEST,
+    BUILDER_PREREGISTRATION_REQUEST,
+    VOLUNTARY_EXIT_REQUEST;
   }
 
   public static final ImmutableMap<String, TestExecutor> OPERATIONS_TEST_TYPES =
@@ -194,6 +204,23 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
               new OperationsTestExecutor<>(
                   "builder_pq_registration_request.ssz_snappy",
                   Operation.BUILDER_PQ_REGISTRATION_REQUEST))
+          .put(
+              "operations/randao",
+              new OperationsTestExecutor<>("body.ssz_snappy", Operation.RANDAO))
+          .put(
+              "operations/validator_preregistration_request",
+              new OperationsTestExecutor<>(
+                  "validator_preregistration_request.ssz_snappy",
+                  Operation.VALIDATOR_PREREGISTRATION_REQUEST))
+          .put(
+              "operations/builder_preregistration_request",
+              new OperationsTestExecutor<>(
+                  "builder_preregistration_request.ssz_snappy",
+                  Operation.BUILDER_PREREGISTRATION_REQUEST))
+          .put(
+              "operations/voluntary_exit_request",
+              new OperationsTestExecutor<>(
+                  "voluntary_exit_request.ssz_snappy", Operation.VOLUNTARY_EXIT_REQUEST))
           .build();
 
   private final String dataFileName;
@@ -368,7 +395,12 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
         final BeaconState preState = state.commitChanges();
         processor.processAttestation(state, attestation);
 
-        verifyRewardBasedAttestationSorter(testDefinition.getSpec(), preState, state, attestation);
+        // The attestation pool's sorter reads BLS signatures: PQ's pool comes with its block
+        // production
+        if (!(attestation instanceof AttestationPq)) {
+          verifyRewardBasedAttestationSorter(
+              testDefinition.getSpec(), preState, state, attestation);
+        }
       }
       case SYNC_AGGREGATE -> {
         final SyncAggregate syncAggregate =
@@ -444,6 +476,44 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
                 SchemaDefinitionsEip8483.required(schemaDefinitions(testDefinition))
                     .getBuilderPqRegistrationRequestSchema());
         processor.processBuilderPqRegistrationRequest(state, request);
+      }
+      case RANDAO -> {
+        final BeaconBlockBody body =
+            loadSsz(
+                testDefinition,
+                dataFileName,
+                schemaDefinitions(testDefinition).getBeaconBlockBodySchema());
+        processor.processRandao(state, body);
+      }
+      case VALIDATOR_PREREGISTRATION_REQUEST -> {
+        final ValidatorPreregistrationRequest request =
+            loadSsz(
+                testDefinition,
+                dataFileName,
+                pqRequestsSchema(testDefinition)
+                    .getValidatorPreregistrationRequestsSchema()
+                    .getElementSchema());
+        processor.processValidatorPreregistrationRequest(state, request);
+      }
+      case BUILDER_PREREGISTRATION_REQUEST -> {
+        final BuilderPreregistrationRequest request =
+            loadSsz(
+                testDefinition,
+                dataFileName,
+                pqRequestsSchema(testDefinition)
+                    .getBuilderPreregistrationRequestsSchema()
+                    .getElementSchema());
+        processor.processBuilderPreregistrationRequest(state, request);
+      }
+      case VOLUNTARY_EXIT_REQUEST -> {
+        final VoluntaryExitRequest request =
+            loadSsz(
+                testDefinition,
+                dataFileName,
+                pqRequestsSchema(testDefinition)
+                    .getVoluntaryExitRequestsSchema()
+                    .getElementSchema());
+        processor.processVoluntaryExitRequest(state, request);
       }
       default ->
           throw new UnsupportedOperationException(
@@ -556,7 +626,19 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
   }
 
   private ProposerSlashing loadProposerSlashing(final TestDefinition testDefinition) {
-    return loadSsz(testDefinition, dataFileName, ProposerSlashing.SSZ_SCHEMA);
+    // From PQ on, the headers are XMSS-signed
+    return loadSsz(
+        testDefinition,
+        dataFileName,
+        schemaDefinitions(testDefinition)
+            .getBeaconBlockBodySchema()
+            .getProposerSlashingsSchema()
+            .getElementSchema());
+  }
+
+  private ExecutionRequestsSchemaPq pqRequestsSchema(final TestDefinition testDefinition) {
+    return SchemaDefinitionsPq.required(schemaDefinitions(testDefinition))
+        .getPqExecutionRequestsSchema();
   }
 
   private AttesterSlashing loadAttesterSlashing(final TestDefinition testDefinition) {
@@ -586,6 +668,10 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
         checkValidationForBlockInclusion(validator, state, attesterSlashing, expectInclusion);
       }
       case PROPOSER_SLASHING -> {
+        if (testDefinition.getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ)) {
+          // ProposerSlashingValidator still checks BLS signatures: PQ's comes with its networking
+          return;
+        }
         final ProposerSlashing proposerSlashing = loadProposerSlashing(testDefinition);
         final ProposerSlashingValidator proposerValidator =
             new ProposerSlashingValidator(spec, null);
@@ -629,7 +715,11 @@ public class OperationsTestExecutor<T extends SszData> implements TestExecutor {
           BUILDER_DEPOSIT_REQUEST,
           BUILDER_EXIT_REQUEST,
           VALIDATOR_PQ_REGISTRATION_REQUEST,
-          BUILDER_PQ_REGISTRATION_REQUEST -> {}
+          BUILDER_PQ_REGISTRATION_REQUEST,
+          RANDAO,
+          VALIDATOR_PREREGISTRATION_REQUEST,
+          BUILDER_PREREGISTRATION_REQUEST,
+          VOLUNTARY_EXIT_REQUEST -> {}
     }
   }
 

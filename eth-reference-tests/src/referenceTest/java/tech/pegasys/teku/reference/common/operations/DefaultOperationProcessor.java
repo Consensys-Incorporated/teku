@@ -36,6 +36,9 @@ import tech.pegasys.teku.spec.datastructures.execution.versions.electra.DepositR
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.WithdrawalRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderDepositRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderExitRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.BuilderPreregistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.ValidatorPreregistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.VoluntaryExitRequest;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.Deposit;
@@ -46,6 +49,7 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconStat
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateMutators.ValidatorExitContext;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.BlockProcessingException;
 import tech.pegasys.teku.spec.logic.versions.bellatrix.block.OptimisticExecutionPayloadExecutor;
+import tech.pegasys.teku.spec.logic.versions.pq.block.BlockProcessorPq;
 
 public class DefaultOperationProcessor implements OperationProcessor {
 
@@ -234,5 +238,33 @@ public class DefaultOperationProcessor implements OperationProcessor {
       final MutableBeaconState state, final BuilderPqRegistrationRequest request) {
     spec.getExecutionRequestsProcessor(state.getSlot())
         .processBuilderPqRegistrationRequests(state, List.of(request));
+  }
+
+  @Override
+  public void processRandao(final MutableBeaconState state, final BeaconBlockBody body)
+      throws BlockProcessingException {
+    // Only PQ has randao operation tests: its process_randao checks the VRF proof
+    ((BlockProcessorPq) spec.getBlockProcessor(state.getSlot())).processRandao(state, body);
+  }
+
+  @Override
+  public void processValidatorPreregistrationRequest(
+      final MutableBeaconState state, final ValidatorPreregistrationRequest request) {
+    spec.getExecutionRequestsProcessor(state.getSlot())
+        .processValidatorPreregistrationRequests(state, List.of(request));
+  }
+
+  @Override
+  public void processBuilderPreregistrationRequest(
+      final MutableBeaconState state, final BuilderPreregistrationRequest request) {
+    spec.getExecutionRequestsProcessor(state.getSlot())
+        .processBuilderPreregistrationRequests(state, List.of(request));
+  }
+
+  @Override
+  public void processVoluntaryExitRequest(
+      final MutableBeaconState state, final VoluntaryExitRequest request) {
+    spec.getExecutionRequestsProcessor(state.getSlot())
+        .processVoluntaryExitRequests(state, List.of(request));
   }
 }

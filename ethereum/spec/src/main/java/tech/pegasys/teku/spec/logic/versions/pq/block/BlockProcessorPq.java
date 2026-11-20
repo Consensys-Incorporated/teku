@@ -290,6 +290,12 @@ public class BlockProcessorPq extends BlockProcessorGloas {
     return BlockValidationResult.SUCCESSFUL;
   }
 
+  /** process_randao, modified in PQ: the VRF proof check is part of processing. */
+  public void processRandao(final MutableBeaconState state, final BeaconBlockBody body)
+      throws BlockProcessingException {
+    processRandaoNoValidation(state, body);
+  }
+
   // process_randao, modified in PQ
   @Override
   protected void processRandaoNoValidation(

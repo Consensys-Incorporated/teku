@@ -112,4 +112,10 @@ public interface EpochProcessor {
   void processBuilderPendingPayments(MutableBeaconState state);
 
   void processPtcWindow(final MutableBeaconState state);
+
+  /** process_aggregation_committee_window, new in PQ. */
+  default void processAggregationCommitteeWindow(final MutableBeaconState state) {}
+
+  /** process_preregistration_expiry, new in PQ. */
+  default void processPreregistrationExpiry(final MutableBeaconState state) {}
 }

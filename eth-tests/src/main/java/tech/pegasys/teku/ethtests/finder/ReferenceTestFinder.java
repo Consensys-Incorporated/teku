@@ -36,7 +36,8 @@ public class ReferenceTestFinder {
           TestFork.ELECTRA,
           TestFork.FULU,
           TestFork.GLOAS,
-          TestFork.EIP8483);
+          TestFork.EIP8483,
+          TestFork.PQ);
 
   /** Finds every reference test in the location configured by system properties. */
   @MustBeClosed

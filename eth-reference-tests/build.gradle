@@ -18,6 +18,7 @@ dependencies {
 	referenceTestImplementation project(':networking:eth2')
 	referenceTestImplementation project(':eth-tests')
 	referenceTestImplementation project(':infrastructure:bls')
+	referenceTestImplementation project(':infrastructure:xmss')
 	referenceTestImplementation project(':infrastructure:serviceutils')
 	referenceTestImplementation project(':infrastructure:ssz')
 	referenceTestImplementation testFixtures(project(':infrastructure:ssz'))

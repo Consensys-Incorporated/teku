@@ -14,7 +14,7 @@ XMSS and STARK verification sit behind interfaces with a disabled mode, as the r
 | 2. Execution requests | Done (`pq-st-requests`) |
 | 3. Epoch processing | Done (`pq-st-epoch`) |
 | 4. Block processing | Done (`pq-st-block`) |
-| 5. Switch-over and fork upgrade | Upgrade done (`pq-st-upgrade`); switch-over done (`pq-st-switch`) except the reference-test fork |
+| 5. Switch-over and fork upgrade | Done: upgrade (`pq-st-upgrade`), switch-over (`pq-st-switch`), reference tests (`pq-st-reftests`) |
 
 ## Approach
 
@@ -51,14 +51,19 @@ Build standalone, switch last. Each standalone class extends its Gloas or EIP-84
    - `PqStateUpgrade` implements `upgrade_to_pq`: registered and unregistered validators and builders, pending deposits, unregistered builders' payments, and the initial aggregation-committee window. **Done.**
    - Caches keyed by BLS public keys (`ValidatorIndexCache`, the pubkey caches, `BuilderIndexCache`) are reset at the fork and keyed by `Bytes32` from PQ. **Partly done**: the upgrade builds an empty state, so the caches start empty; PQ lookups by XMSS key are linear scans, still to be cached.
    - The fork-boundary bridge for parent execution requests extends to EIP-8483 → PQ. **Done**, in `BlockProcessorPq`: a pre-PQ parent is matched as EIP-8483 requests, or Gloas requests when it predates EIP-8483 too.
-   - The `pq` reference-test fork joins `SUPPORTED_FORKS` and its executors are wired. **Not started**: consensus-specs `2f43bc0f9` adds PQ to `TESTGEN_FORKS`, so vectors can now be generated.
+   - The `pq` reference-test fork joins `SUPPORTED_FORKS` and its executors are wired. **Done** (`pq-st-reftests`): the new operations (`randao`, the preregistration and voluntary exit requests), the epoch steps (`aggregation_committee_window`, `preregistration_expiry`), the PQ SSZ types and the PQ fork upgrade. All 8,604 minimal PQ tests pass. Fork choice, fast confirmation and gossip tests are ignored for PQ: they build BLS-signed blocks and attestations, and wait for PQ's fork choice and networking.
    - **Spec bump to `2f43bc0f9`** (`pq-spec-keccak-vrf`): `is_valid_vrf_proof` walks a Keccak-256 tree. The VRF tree derivation it adds is validator-client work (phase 9).
    - **Heze** builds on PQ on this branch, so it switches too: `SpecLogicHeze` uses the PQ logic with EIP-8365's deposit rule on `EpochProcessorPq`, and `HezeStateUpgrade` only changes the fork, running `upgrade_to_pq` first when PQ shares Heze's epoch.
 
 ## Testing
 
 - **Unit tests** for every helper and processor, against PQ states built from the PQ schema, including the generator's PQ genesis (test resource `pq_genesis_minimal.ssz`), whose aggregation-committee window gives a cross-check for `compute_aggregation_committees`.
-- **Reference tests** (`operations`, `epoch_processing`, `sanity`, `fork`, `transition`): the vectors must be generated locally from consensus-specs `2f43bc0f9` (which has PQ in `TESTGEN_FORKS`) until a release carries them. Generating them is a prerequisite for slice 5.
+- **Reference tests**: no release carries PQ vectors yet, so they are generated locally and the PQ suites run only against a local directory. The vectors are generated with XMSS inactive, so every XMSS signature and STARK proof is accepted; Teku runs the `pq` fork with XMSS verification disabled to match. From a consensus-specs checkout at `2f43bc0f9` (about 15 minutes, 283 MB):
+
+  ```bash
+  make test reftests=true fork=pq preset=minimal
+  ./gradlew :eth-reference-tests:referenceTest -Dteku.ref-test.root-dir=<consensus-specs>/reftests --tests 'tech.pegasys.teku.reference.pq.*'
+  ``` Generating them is a prerequisite for slice 5.
 - **Interop** after the switch needs the validator client's XMSS signing (phase 9).
 
 ## Risks and open questions
@@ -67,4 +72,6 @@ Build standalone, switch last. Each standalone class extends its Gloas or EIP-84
 - **Committee cap.** Capping at 16 committees changes shuffling, committee sizes and indices. Any cache that bypasses the per-fork accessor gives wrong committees only in PQ.
 - **Spec gaps.** The fork-boundary execution-requests root, and registrations taking pending new-validator deposits, are open in the spec ([PQ fork plan §1.6](pq-fork-plan.md)).
 - **Runnable devnets.** See Approach: the switch stops PQ devnets until phase 9.
+- **Preregistration presets.** `PREREGISTRATIONS_LIMIT` and `PREREGISTRATION_EXPIRY_SLOTS` are in the spec's preset tables, but its `pq.yaml` presets omit them: the pyspec build takes them from `eip8205.yaml`, whose minimal values are 64 and 64. Teku's PQ presets now carry them (minimal 64, mainnet 2^19 and 2^18). Worth raising upstream.
+- **Operation validators.** `ProposerSlashingValidator` (gossip and the operation pool) still verifies BLS signatures, and fails on PQ states. To be done with PQ's networking; the reference tests skip its inclusion check for PQ.
 - **Validator client event size.** A maximum PQ attester slashing (two 1 MiB STARK proofs) is an 8,389,454-byte `attester_slashing` event, over the validator client's 8 MB default limit. To settle with the validator client work (`EventStreamDefaultSizeLimitTest` leaves PQ out until then).

@@ -59,6 +59,16 @@ public class DelegatingSpecConfigPq extends DelegatingSpecConfigEip8483 implemen
   }
 
   @Override
+  public int getPreregistrationsLimit() {
+    return delegate.getPreregistrationsLimit();
+  }
+
+  @Override
+  public int getPreregistrationExpirySlots() {
+    return delegate.getPreregistrationExpirySlots();
+  }
+
+  @Override
   public int getMaxSignedAggregateAndProofSizePq() {
     return delegate.getMaxSignedAggregateAndProofSizePq();
   }

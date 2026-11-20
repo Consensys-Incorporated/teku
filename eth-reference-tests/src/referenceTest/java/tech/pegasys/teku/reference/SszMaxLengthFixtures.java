@@ -62,6 +62,18 @@ public class SszMaxLengthFixtures {
               "gloas - minimal - sanity/blocks - invalid_too_many_voluntary_exits",
               "gloas - minimal - sanity/blocks - invalid_too_many_attester_slashings",
               "gloas - minimal - sanity/blocks - invalid_too_many_attestations",
+              // pq (vectors generated locally from consensus-specs 2f43bc0f9)
+              "pq - minimal - operations/attester_slashing - invalid_too_many_attesting_indices",
+              "pq - minimal - operations/parent_execution_payload - invalid_too_many_builder_deposit_requests",
+              "pq - minimal - operations/parent_execution_payload - invalid_too_many_builder_exit_requests",
+              "pq - minimal - operations/parent_execution_payload - invalid_too_many_builder_preregistration_requests",
+              "pq - minimal - operations/parent_execution_payload - invalid_too_many_consolidation_requests",
+              "pq - minimal - operations/parent_execution_payload - invalid_too_many_validator_preregistration_requests",
+              "pq - minimal - operations/parent_execution_payload - invalid_too_many_voluntary_exit_requests",
+              "pq - minimal - operations/parent_execution_payload - invalid_too_many_withdrawal_requests",
+              "pq - minimal - sanity/blocks - invalid_too_many_attestations",
+              "pq - minimal - sanity/blocks - invalid_too_many_attester_slashings",
+              "pq - minimal - sanity/blocks - invalid_too_many_proposer_slashings",
               // mainnet
               "gloas - mainnet - networking/gossip_beacon_block - gossip_beacon_block__reject_contains_deposits",
               "gloas - mainnet - networking/gossip_beacon_block - gossip_beacon_block__reject_too_many_attestations",

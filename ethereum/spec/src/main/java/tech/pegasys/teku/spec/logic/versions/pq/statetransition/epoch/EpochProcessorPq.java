@@ -87,17 +87,10 @@ public class EpochProcessorPq extends EpochProcessorGloas {
   public void processSyncCommitteeUpdates(final MutableBeaconState state) {}
 
   /**
-   * process_epoch, modified in PQ: process_aggregation_committee_window and
-   * process_preregistration_expiry run after process_ptc_window, the last Gloas step.
+   * process_aggregation_committee_window: shift by an epoch and fill the last epoch. In
+   * process_epoch it runs after process_ptc_window, as does process_preregistration_expiry.
    */
   @Override
-  public void processPtcWindow(final MutableBeaconState state) {
-    super.processPtcWindow(state);
-    processAggregationCommitteeWindow(state);
-    processPreregistrationExpiry(state);
-  }
-
-  /** process_aggregation_committee_window: shift by an epoch and fill the last epoch. */
   public void processAggregationCommitteeWindow(final MutableBeaconState state) {
     final MutableBeaconStatePq statePq = MutableBeaconStatePq.required(state);
     final int slotsPerEpoch = specConfigPq.getSlotsPerEpoch();
@@ -126,6 +119,7 @@ public class EpochProcessorPq extends EpochProcessorGloas {
    * process_preregistration_expiry: garbage collection only, since bindings are enforced through
    * the activity checks.
    */
+  @Override
   public void processPreregistrationExpiry(final MutableBeaconState state) {
     final MutableBeaconStatePq statePq = MutableBeaconStatePq.required(state);
     statePq.setValidatorPreregistrations(

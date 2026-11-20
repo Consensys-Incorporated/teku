@@ -33,6 +33,8 @@ public class PqBuilder extends BaseForkBuilder
   private Integer maxValidatorPreregistrationRequestsPerPayload;
   private Integer maxBuilderPreregistrationRequestsPerPayload;
   private Integer maxVoluntaryExitRequestsPerPayload;
+  private Integer preregistrationsLimit;
+  private Integer preregistrationExpirySlots;
   private Integer maxSignedAggregateAndProofSizePq;
   private Integer maxAttesterSlashingSizePq;
   private Integer maxSignedExecutionPayloadBidSizePq;
@@ -54,6 +56,8 @@ public class PqBuilder extends BaseForkBuilder
             maxValidatorPreregistrationRequestsPerPayload,
             maxBuilderPreregistrationRequestsPerPayload,
             maxVoluntaryExitRequestsPerPayload,
+            preregistrationsLimit,
+            preregistrationExpirySlots,
             maxSignedAggregateAndProofSizePq,
             maxAttesterSlashingSizePq,
             maxSignedExecutionPayloadBidSizePq,
@@ -105,6 +109,18 @@ public class PqBuilder extends BaseForkBuilder
       final Integer maxVoluntaryExitRequestsPerPayload) {
     checkNotNull(maxVoluntaryExitRequestsPerPayload);
     this.maxVoluntaryExitRequestsPerPayload = maxVoluntaryExitRequestsPerPayload;
+    return this;
+  }
+
+  public PqBuilder preregistrationsLimit(final Integer preregistrationsLimit) {
+    checkNotNull(preregistrationsLimit);
+    this.preregistrationsLimit = preregistrationsLimit;
+    return this;
+  }
+
+  public PqBuilder preregistrationExpirySlots(final Integer preregistrationExpirySlots) {
+    checkNotNull(preregistrationExpirySlots);
+    this.preregistrationExpirySlots = preregistrationExpirySlots;
     return this;
   }
 
@@ -160,6 +176,8 @@ public class PqBuilder extends BaseForkBuilder
     constants.put(
         "maxBuilderPreregistrationRequestsPerPayload", maxBuilderPreregistrationRequestsPerPayload);
     constants.put("maxVoluntaryExitRequestsPerPayload", maxVoluntaryExitRequestsPerPayload);
+    constants.put("preregistrationsLimit", preregistrationsLimit);
+    constants.put("preregistrationExpirySlots", preregistrationExpirySlots);
     constants.put("maxSignedAggregateAndProofSizePq", maxSignedAggregateAndProofSizePq);
     constants.put("maxAttesterSlashingSizePq", maxAttesterSlashingSizePq);
     constants.put("maxSignedExecutionPayloadBidSizePq", maxSignedExecutionPayloadBidSizePq);

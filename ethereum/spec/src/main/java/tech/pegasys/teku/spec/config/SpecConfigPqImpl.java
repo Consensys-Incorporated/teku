@@ -26,6 +26,8 @@ public class SpecConfigPqImpl extends DelegatingSpecConfigEip8483 implements Spe
   private final int maxValidatorPreregistrationRequestsPerPayload;
   private final int maxBuilderPreregistrationRequestsPerPayload;
   private final int maxVoluntaryExitRequestsPerPayload;
+  private final int preregistrationsLimit;
+  private final int preregistrationExpirySlots;
   private final int maxSignedAggregateAndProofSizePq;
   private final int maxAttesterSlashingSizePq;
   private final int maxSignedExecutionPayloadBidSizePq;
@@ -41,6 +43,8 @@ public class SpecConfigPqImpl extends DelegatingSpecConfigEip8483 implements Spe
       final int maxValidatorPreregistrationRequestsPerPayload,
       final int maxBuilderPreregistrationRequestsPerPayload,
       final int maxVoluntaryExitRequestsPerPayload,
+      final int preregistrationsLimit,
+      final int preregistrationExpirySlots,
       final int maxSignedAggregateAndProofSizePq,
       final int maxAttesterSlashingSizePq,
       final int maxSignedExecutionPayloadBidSizePq,
@@ -55,6 +59,8 @@ public class SpecConfigPqImpl extends DelegatingSpecConfigEip8483 implements Spe
         maxValidatorPreregistrationRequestsPerPayload;
     this.maxBuilderPreregistrationRequestsPerPayload = maxBuilderPreregistrationRequestsPerPayload;
     this.maxVoluntaryExitRequestsPerPayload = maxVoluntaryExitRequestsPerPayload;
+    this.preregistrationsLimit = preregistrationsLimit;
+    this.preregistrationExpirySlots = preregistrationExpirySlots;
     this.maxSignedAggregateAndProofSizePq = maxSignedAggregateAndProofSizePq;
     this.maxAttesterSlashingSizePq = maxAttesterSlashingSizePq;
     this.maxSignedExecutionPayloadBidSizePq = maxSignedExecutionPayloadBidSizePq;
@@ -100,6 +106,16 @@ public class SpecConfigPqImpl extends DelegatingSpecConfigEip8483 implements Spe
   @Override
   public int getMaxVoluntaryExitRequestsPerPayload() {
     return maxVoluntaryExitRequestsPerPayload;
+  }
+
+  @Override
+  public int getPreregistrationsLimit() {
+    return preregistrationsLimit;
+  }
+
+  @Override
+  public int getPreregistrationExpirySlots() {
+    return preregistrationExpirySlots;
   }
 
   @Override
@@ -150,6 +166,8 @@ public class SpecConfigPqImpl extends DelegatingSpecConfigEip8483 implements Spe
         && maxBuilderPreregistrationRequestsPerPayload
             == that.maxBuilderPreregistrationRequestsPerPayload
         && maxVoluntaryExitRequestsPerPayload == that.maxVoluntaryExitRequestsPerPayload
+        && preregistrationsLimit == that.preregistrationsLimit
+        && preregistrationExpirySlots == that.preregistrationExpirySlots
         && maxSignedAggregateAndProofSizePq == that.maxSignedAggregateAndProofSizePq
         && maxAttesterSlashingSizePq == that.maxAttesterSlashingSizePq
         && maxSignedExecutionPayloadBidSizePq == that.maxSignedExecutionPayloadBidSizePq
@@ -169,6 +187,8 @@ public class SpecConfigPqImpl extends DelegatingSpecConfigEip8483 implements Spe
         maxValidatorPreregistrationRequestsPerPayload,
         maxBuilderPreregistrationRequestsPerPayload,
         maxVoluntaryExitRequestsPerPayload,
+        preregistrationsLimit,
+        preregistrationExpirySlots,
         maxSignedAggregateAndProofSizePq,
         maxAttesterSlashingSizePq,
         maxSignedExecutionPayloadBidSizePq,

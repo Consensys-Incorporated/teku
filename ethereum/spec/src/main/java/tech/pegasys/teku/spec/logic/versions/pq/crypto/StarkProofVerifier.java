@@ -19,6 +19,7 @@ import java.util.List;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.XmssAggregateStatement;
+import tech.pegasys.teku.xmss.XmssConstants;
 
 /**
  * {@code stark.VerifyAggregates}: whether a proof proves, for each statement and each of its public
@@ -33,10 +34,15 @@ public interface StarkProofVerifier {
 
   /**
    * The specification's reference stand-in for a recursive STARK: the proof is the concatenation of
-   * the signatures, checked one by one with {@code xmssVerifier}.
+   * the signatures, checked one by one with {@code xmssVerifier}. Like the specification's, it
+   * accepts every proof (the reference tests' stub proof is empty) while XMSS verification is
+   * disabled.
    */
   static StarkProofVerifier concatenated(final XmssSignatureVerifier xmssVerifier) {
     return (statements, proof) -> {
+      if (XmssConstants.verificationDisabled) {
+        return true;
+      }
       int offset = 0;
       for (final XmssAggregateStatement statement : statements) {
         for (final Bytes32 pubkey : statement.pubkeys()) {

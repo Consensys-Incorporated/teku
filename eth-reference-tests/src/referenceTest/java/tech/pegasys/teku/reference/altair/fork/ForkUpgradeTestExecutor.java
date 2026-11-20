@@ -81,10 +81,12 @@ public class ForkUpgradeTestExecutor implements TestExecutor {
               BeaconStateSchemaFulu.create(
                   previousMilestoneSpecVersion.getConfig(),
                   previousMilestoneSpecVersion.getSchemaDefinitions().getSchemaRegistry());
-          case EIP8483, PQ, HEZE ->
+          case EIP8483, HEZE ->
               BeaconStateSchemaGloas.create(
                   previousMilestoneSpecVersion.getConfig(),
                   previousMilestoneSpecVersion.getSchemaDefinitions().getSchemaRegistry());
+          // PQ upgrades an EIP-8483 state
+          case PQ -> previousMilestoneSpecVersion.getSchemaDefinitions().getBeaconStateSchema();
           default ->
               throw new IllegalStateException(
                   "Unhandled fork upgrade for test "
