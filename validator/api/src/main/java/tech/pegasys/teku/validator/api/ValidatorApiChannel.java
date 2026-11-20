@@ -326,6 +326,20 @@ public interface ValidatorApiChannel extends BuilderApiChannel, ChannelInterface
       boolean includePayload,
       Optional<BuilderConfig> builderConfig);
 
+  /**
+   * From PQ, the RANDAO reveal is the proposer's VRF proof for the slot, {@code compute_vrf_proof},
+   * rather than a BLS signature.
+   */
+  default SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlockWithVrfReveal(
+      final UInt64 slot,
+      final List<Bytes32> vrfRandaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final Optional<BuilderConfig> builderConfig) {
+    return SafeFuture.failedFuture(
+        new UnsupportedOperationException("Producing blocks with a VRF reveal is not supported"));
+  }
+
   SafeFuture<Optional<AttestationData>> createAttestationData(UInt64 slot, int committeeIndex);
 
   SafeFuture<Optional<Attestation>> createAggregate(

@@ -645,6 +645,29 @@ class ValidatorApiHandlerTest {
   }
 
   @Test
+  public void createUnsignedBlockWithVrfReveal_shouldPassTheVrfProofToTheBlockFactory() {
+    final UInt64 newSlot = UInt64.valueOf(25);
+    final BeaconState blockSlotState = dataStructureUtil.randomBeaconState(newSlot);
+    final List<Bytes32> vrfProof =
+        List.of(dataStructureUtil.randomBytes32(), dataStructureUtil.randomBytes32());
+    final BlockContainerAndMetaData blockContainerAndMetaData =
+        dataStructureUtil.randomBlockContainerAndMetaData(newSlot);
+    mockRequiredMethodsForBlockProduction(blockSlotState, newSlot);
+    when(blockFactory.createUnsignedBlock(any()))
+        .thenReturn(SafeFuture.completedFuture(blockContainerAndMetaData));
+
+    final SafeFuture<Optional<BlockContainerAndMetaData>> result =
+        validatorApiHandler.createUnsignedBlockWithVrfReveal(
+            newSlot, vrfProof, Optional.empty(), false, Optional.empty());
+
+    assertThat(result).isCompletedWithValue(Optional.of(blockContainerAndMetaData));
+    final ArgumentCaptor<BlockProductionContext> blockProductionContextCaptor =
+        ArgumentCaptor.forClass(BlockProductionContext.class);
+    verify(blockFactory).createUnsignedBlock(blockProductionContextCaptor.capture());
+    assertThat(blockProductionContextCaptor.getValue().vrfRandaoReveal()).contains(vrfProof);
+  }
+
+  @Test
   public void createUnsignedBlock_shouldAllowProducingBlockTwiceIfFirstAttemptFailed() {
     final UInt64 newSlot = UInt64.valueOf(25);
     final BeaconState blockSlotState = dataStructureUtil.randomBeaconState(newSlot);

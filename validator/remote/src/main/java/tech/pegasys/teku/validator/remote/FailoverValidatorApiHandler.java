@@ -188,10 +188,31 @@ public class FailoverValidatorApiHandler implements ValidatorApiChannel {
       final Optional<Bytes32> graffiti,
       final boolean includePayload,
       final Optional<BuilderConfig> builderConfig) {
+    return createUnsignedBlock(
+        apiChannel ->
+            apiChannel.createUnsignedBlock(
+                slot, randaoReveal, graffiti, includePayload, builderConfig));
+  }
+
+  @Override
+  public SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlockWithVrfReveal(
+      final UInt64 slot,
+      final List<Bytes32> vrfRandaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final Optional<BuilderConfig> builderConfig) {
+    return createUnsignedBlock(
+        apiChannel ->
+            apiChannel.createUnsignedBlockWithVrfReveal(
+                slot, vrfRandaoReveal, graffiti, includePayload, builderConfig));
+  }
+
+  private SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlock(
+      final ValidatorApiChannelRequest<Optional<BlockContainerAndMetaData>> createBlock) {
     final ValidatorApiChannelRequest<Optional<BlockContainerAndMetaData>> request =
         apiChannel ->
-            apiChannel
-                .createUnsignedBlock(slot, randaoReveal, graffiti, includePayload, builderConfig)
+            createBlock
+                .run(apiChannel)
                 .thenPeek(
                     maybeBlockContainerAndMetaData -> {
                       if (failoverDelegates.isEmpty()) {

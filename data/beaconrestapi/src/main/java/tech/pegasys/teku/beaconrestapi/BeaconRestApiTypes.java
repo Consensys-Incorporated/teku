@@ -72,6 +72,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.api.response.EventType;
 import tech.pegasys.teku.bls.BLSSignature;
@@ -166,6 +167,27 @@ public class BeaconRestApiTypes {
           RestApiConstants.RANDAO_REVEAL,
           SIGNATURE_TYPE.withDescription(
               "`BLSSignature Hex` BLS12-381 signature for the current epoch."));
+
+  /**
+   * produceBlockV4's {@code randao_reveal}: the BLS signature of the epoch, or from PQ the
+   * proposer's VRF proof for the slot, its {@code VRF_TREE_DEPTH + 1} roots concatenated.
+   */
+  public static final ParameterMetadata<Bytes> RANDAO_OR_VRF_REVEAL_PARAMETER =
+      new ParameterMetadata<>(
+          RestApiConstants.RANDAO_REVEAL,
+          DeserializableTypeDefinition.string(Bytes.class)
+              .formatter(Bytes::toHexString)
+              .parser(Bytes::fromHexString)
+              .example(
+                  "0x1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505"
+                      + "cc411d61252fb6cb3fa0017b679f8bb2305b26a285fa2737f175668d0dff91cc"
+                      + "1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505")
+              .description(
+                  "Before PQ, the BLS12-381 signature of the current epoch (96 bytes, hex). From"
+                      + " PQ, the proposer's VRF proof for the slot, compute_vrf_proof: 32"
+                      + " 32-byte roots concatenated (1,024 bytes, hex).")
+              .format("byte")
+              .build());
 
   public static final ParameterMetadata<String> SKIP_RANDAO_VERIFICATION_PARAMETER =
       new ParameterMetadata<>(

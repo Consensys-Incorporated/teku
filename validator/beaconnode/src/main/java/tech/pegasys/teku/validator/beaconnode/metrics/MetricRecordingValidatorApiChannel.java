@@ -167,6 +167,19 @@ public class MetricRecordingValidatorApiChannel implements ValidatorApiChannel {
   }
 
   @Override
+  public SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlockWithVrfReveal(
+      final UInt64 slot,
+      final List<Bytes32> vrfRandaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final Optional<BuilderConfig> builderConfig) {
+    return countOptionalDataRequest(
+        delegate.createUnsignedBlockWithVrfReveal(
+            slot, vrfRandaoReveal, graffiti, includePayload, builderConfig),
+        BeaconNodeRequestLabels.CREATE_UNSIGNED_BLOCK_METHOD);
+  }
+
+  @Override
   public SafeFuture<Optional<AttestationData>> createAttestationData(
       final UInt64 slot, final int committeeIndex) {
     return countOptionalDataRequest(
