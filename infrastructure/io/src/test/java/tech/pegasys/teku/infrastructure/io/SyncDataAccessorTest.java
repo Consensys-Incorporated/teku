@@ -24,6 +24,7 @@ import java.nio.file.Paths;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
@@ -117,8 +118,8 @@ public class SyncDataAccessorTest {
   }
 
   @Test
-  public void nonAtomicWrite_shouldSyncParentDirectoryOnlyWhenFileIsCreated(
-      @TempDir final Path tempDir) throws IOException {
+  public void nonAtomicWrite_shouldSyncParentDirectoryAfterEveryWrite(@TempDir final Path tempDir)
+      throws IOException {
     final Path filePath = tempDir.resolve("myfile.dat");
     final RecordingDirectorySync directorySync = new RecordingDirectorySync();
     final SyncDataAccessor syncDataAccessor = new SyncDataAccessor(false, false, directorySync);
@@ -126,10 +127,38 @@ public class SyncDataAccessorTest {
     syncDataAccessor.syncedWrite(filePath, Bytes.fromHexString("0x41"));
     assertThat(directorySync.syncedDirectories).containsExactly(tempDir.toAbsolutePath());
 
-    // Overwriting in place doesn't change the directory
     syncDataAccessor.syncedWrite(filePath, Bytes.fromHexString("0x42"));
-    assertThat(directorySync.syncedDirectories).containsExactly(tempDir.toAbsolutePath());
+    assertThat(directorySync.syncedDirectories)
+        .containsExactly(tempDir.toAbsolutePath(), tempDir.toAbsolutePath());
     assertThat(Files.readString(filePath)).isEqualTo("B");
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  public void shouldSyncParentDirectoryOnRetryAfterFailedSync(
+      final boolean useAtomicMove, @TempDir final Path tempDir) throws IOException {
+    final Path filePath = tempDir.resolve("myfile.dat");
+    final RecordingDirectorySync recordingSync = new RecordingDirectorySync();
+    final AtomicBoolean failNextSync = new AtomicBoolean(true);
+    final SyncDataAccessor syncDataAccessor =
+        new SyncDataAccessor(
+            useAtomicMove,
+            false,
+            directory -> {
+              if (failNextSync.getAndSet(false)) {
+                throw new IOException("sync failed");
+              }
+              recordingSync.sync(directory);
+            });
+
+    // The file is written but its directory entry is not known to be durable
+    assertThatThrownBy(() -> syncDataAccessor.syncedWrite(filePath, Bytes.fromHexString("0x41")))
+        .isInstanceOf(IOException.class);
+    assertThat(Files.exists(filePath)).isTrue();
+
+    // Retrying must still sync the directory even though the file already exists
+    syncDataAccessor.syncedWrite(filePath, Bytes.fromHexString("0x41"));
+    assertThat(recordingSync.syncedDirectories).containsExactly(tempDir.toAbsolutePath());
   }
 
   @ParameterizedTest

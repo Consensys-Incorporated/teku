@@ -35,8 +35,8 @@ import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException
  *
  * <p>Creating or renaming a file changes its parent directory, and on POSIX filesystems that change
  * is only durable once the directory itself is synced. Where the platform allows it, the parent
- * directory is synced after each write that creates or replaces a file, so a host crash or power
- * loss cannot roll the file back to its previous version or remove it.
+ * directory is synced after each write, so a host crash or power loss cannot roll the file back
+ * to its previous version or remove it.
  */
 public class SyncDataAccessor {
 
@@ -165,11 +165,10 @@ public class SyncDataAccessor {
 
   private void nonAtomicSyncedWrite(final Path path, final Bytes data, final boolean ownerOnly)
       throws IOException {
-    final boolean created = !Files.exists(path);
     writeSynced(path, data, ownerOnly);
-    if (created) {
-      syncParentDirectory(path);
-    }
+    // Synced on every write, not only when the file is created: if an earlier sync failed, the
+    // file now exists but its directory entry may still not be durable.
+    syncParentDirectory(path);
   }
 
   private void atomicSyncedWrite(final Path path, final Bytes data, final boolean ownerOnly)
