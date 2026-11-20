@@ -30,7 +30,6 @@ import tech.pegasys.teku.spec.config.SpecConfigPq;
 import tech.pegasys.teku.spec.constants.Domain;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
-import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBody;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.altair.SyncAggregate;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.pq.BeaconBlockBodyPq;
@@ -39,7 +38,6 @@ import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequestsDataCodec;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequestsSchema;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
-import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.XmssAggregateStatement;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
@@ -228,45 +226,6 @@ public class BlockProcessorPq extends BlockProcessorGloas {
       return BlockValidationResult.failed("Invalid block signature: " + block);
     }
     return BlockValidationResult.SUCCESSFUL;
-  }
-
-  // The signature checks of process_proposer_slashing, modified in PQ
-  @Override
-  protected BlockValidationResult verifyProposerSlashings(
-      final BeaconState state,
-      final SszList<ProposerSlashing> proposerSlashings,
-      final BLSSignatureVerifier signatureVerifier) {
-    for (final ProposerSlashing proposerSlashing : proposerSlashings) {
-      final Bytes32 pubkey =
-          getValidatorXmssPublicKey(
-              state, proposerSlashing.getHeader1().getMessage().getProposerIndex().intValue());
-      for (final SignedBeaconBlockHeader signedHeader :
-          List.of(proposerSlashing.getHeader1(), proposerSlashing.getHeader2())) {
-        if (!isValidProposerSlashingHeaderSignature(state, pubkey, signedHeader)) {
-          return BlockValidationResult.failed(
-              "Proposer slashing signature is invalid " + proposerSlashing);
-        }
-      }
-    }
-    return BlockValidationResult.SUCCESSFUL;
-  }
-
-  private boolean isValidProposerSlashingHeaderSignature(
-      final BeaconState state, final Bytes32 pubkey, final SignedBeaconBlockHeader signedHeader) {
-    if (!signedHeader.isXmssSigned()) {
-      return false;
-    }
-    final UInt64 slot = signedHeader.getMessage().getSlot();
-    final Bytes32 domain =
-        beaconStateAccessorsPq.getDomain(
-            state.getForkInfo(), Domain.BEACON_PROPOSER, miscHelpersPq.computeEpochAtSlot(slot));
-    final Bytes32 signingRoot =
-        Bytes32.wrap(miscHelpersPq.computeSigningRoot(signedHeader.getMessage(), domain));
-    return xmssSignatureVerifier.verify(
-        pubkey,
-        miscHelpersPq.computeXmssLeafIndex(slot, LEAF_OFFSET_BEACON_PROPOSER),
-        signingRoot,
-        signedHeader.getXmssSignature());
   }
 
   // process_stark

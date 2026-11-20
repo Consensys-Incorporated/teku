@@ -81,6 +81,7 @@ import tech.pegasys.teku.spec.logic.versions.pq.helpers.BeaconStateAccessorsPq;
 import tech.pegasys.teku.spec.logic.versions.pq.helpers.BeaconStateMutatorsPq;
 import tech.pegasys.teku.spec.logic.versions.pq.helpers.MiscHelpersPq;
 import tech.pegasys.teku.spec.logic.versions.pq.helpers.PredicatesPq;
+import tech.pegasys.teku.spec.logic.versions.pq.operations.OperationSignatureVerifierPq;
 import tech.pegasys.teku.spec.logic.versions.pq.util.AttestationUtilPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
@@ -109,6 +110,8 @@ class BlockProcessorPqTest {
         xmssCalls.add(new XmssCall(pubkey, leafIndex, message, signature));
         return xmssResult;
       };
+  private final OperationSignatureVerifierPq operationSignatureVerifier =
+      new OperationSignatureVerifierPq(miscHelpers, accessors, predicates, xmssVerifier);
 
   private final List<StarkCall> starkCalls = new ArrayList<>();
   private boolean starkResult = true;
@@ -134,7 +137,7 @@ class BlockProcessorPqTest {
           miscHelpers,
           accessors,
           mutators,
-          specVersion.operationSignatureVerifier(),
+          operationSignatureVerifier,
           specVersion.getBeaconStateUtil(),
           attestationUtil,
           specVersion.getValidatorsUtil(),
@@ -242,13 +245,10 @@ class BlockProcessorPqTest {
             new SignedBeaconBlockHeader(message1, xmssSignature(1)),
             new SignedBeaconBlockHeader(message2, xmssSignature(2)));
 
-    final BlockValidationResult result =
-        blockProcessor.verifyProposerSlashings(
-            state,
-            blockSchemas.getBeaconBlockBodySchema().getProposerSlashingsSchema().of(slashing),
-            BLSSignatureVerifier.NOOP);
-
-    assertThat(result.isValid()).isTrue();
+    assertThat(
+            operationSignatureVerifier.verifyProposerSlashingSignature(
+                state.getFork(), state, slashing, BLSSignatureVerifier.NOOP))
+        .isTrue();
     final Bytes32 domain =
         accessors.getDomain(state.getForkInfo(), Domain.BEACON_PROPOSER, UInt64.ONE);
     final UInt64 leafIndex =
@@ -268,15 +268,8 @@ class BlockProcessorPqTest {
 
     xmssResult = false;
     assertThat(
-            blockProcessor
-                .verifyProposerSlashings(
-                    state,
-                    blockSchemas
-                        .getBeaconBlockBodySchema()
-                        .getProposerSlashingsSchema()
-                        .of(slashing),
-                    BLSSignatureVerifier.NOOP)
-                .isValid())
+            operationSignatureVerifier.verifyProposerSlashingSignature(
+                state.getFork(), state, slashing, BLSSignatureVerifier.NOOP))
         .isFalse();
   }
 
