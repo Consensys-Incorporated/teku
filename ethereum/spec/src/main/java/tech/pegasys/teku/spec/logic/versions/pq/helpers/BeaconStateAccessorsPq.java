@@ -126,7 +126,9 @@ public class BeaconStateAccessorsPq extends BeaconStateAccessorsGloas {
                 getSeed(state, epoch, Domain.SELECTION_PROOF),
                 uint64ToBytes(slot),
                 uint64ToBytes(index)));
-    IntList candidates = new IntArrayList(getBeaconCommittee(state, slot, index));
+    // No validation (state within range): the window is filled during epoch processing, before the
+    // next slot is set but after the randao mix is reset, as for compute_ptc
+    IntList candidates = new IntArrayList(getBeaconCommitteeNoValidation(state, slot, index));
     final IntList aggregators = new IntArrayList();
     while (aggregators.size() < AGGREGATORS_PER_COMMITTEE && !candidates.isEmpty()) {
       final int aggregator =

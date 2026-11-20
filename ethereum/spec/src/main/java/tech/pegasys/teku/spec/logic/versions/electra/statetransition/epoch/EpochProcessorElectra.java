@@ -30,6 +30,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.config.SpecConfigElectra;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.BeaconStateElectra;
@@ -218,6 +219,17 @@ public class EpochProcessorElectra extends EpochProcessorCapella {
     return stateAccessorsElectra.getActivationExitChurnLimit(state);
   }
 
+  /** The validator a pending deposit is for. From PQ, deposits are matched by XMSS key. */
+  protected Optional<Integer> getPendingDepositValidatorIndex(
+      final BeaconState state, final PendingDeposit deposit) {
+    return validatorsUtil.getValidatorIndex(state, deposit.getPublicKey());
+  }
+
+  /** Whether a deposit is applied without consuming churn. From PQ, legacy deposits are. */
+  protected boolean appliesWithoutChurn(final PendingDeposit deposit) {
+    return false;
+  }
+
   /** process_pending_deposits */
   @Override
   public void processPendingDeposits(final MutableBeaconState state) {
@@ -250,8 +262,7 @@ public class EpochProcessorElectra extends EpochProcessorCapella {
         break;
       }
 
-      final Optional<Integer> maybeValidatorIndex =
-          validatorsUtil.getValidatorIndex(state, deposit.getPublicKey());
+      final Optional<Integer> maybeValidatorIndex = getPendingDepositValidatorIndex(state, deposit);
       boolean isValidatorExited = false;
       boolean isValidatorWithdrawn = false;
       if (maybeValidatorIndex.isPresent()) {
@@ -260,7 +271,7 @@ public class EpochProcessorElectra extends EpochProcessorCapella {
         isValidatorWithdrawn = validator.getWithdrawableEpoch().isLessThan(nextEpoch);
       }
 
-      if (isValidatorWithdrawn) {
+      if (isValidatorWithdrawn || appliesWithoutChurn(deposit)) {
         // Deposited balance will never become active. Increase balance but do not consume churn
         applyPendingDeposits(state, deposit);
       } else if (isValidatorExited) {
