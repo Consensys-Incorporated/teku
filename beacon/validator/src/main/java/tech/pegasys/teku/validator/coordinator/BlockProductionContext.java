@@ -15,6 +15,7 @@ package tech.pegasys.teku.validator.coordinator;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
+import java.util.List;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSSignature;
@@ -36,7 +37,32 @@ public record BlockProductionContext(
     Optional<Bytes32> graffiti,
     boolean includePayload,
     Optional<BuilderConfig> builderConfig,
-    BlockProductionPerformance blockProductionPerformance) {
+    BlockProductionPerformance blockProductionPerformance,
+    Optional<List<Bytes32>> vrfRandaoReveal) {
+
+  /** A context for a block whose RANDAO reveal is a BLS signature, before PQ. */
+  public BlockProductionContext(
+      final UInt64 proposalSlot,
+      final BeaconState blockSlotState,
+      final ForkChoiceNode parentForkChoiceNode,
+      final Bytes32 parentExecutionBlockHash,
+      final BLSSignature randaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final Optional<BuilderConfig> builderConfig,
+      final BlockProductionPerformance blockProductionPerformance) {
+    this(
+        proposalSlot,
+        blockSlotState,
+        parentForkChoiceNode,
+        parentExecutionBlockHash,
+        randaoReveal,
+        graffiti,
+        includePayload,
+        builderConfig,
+        blockProductionPerformance,
+        Optional.empty());
+  }
 
   public static BlockProductionContext create(
       final Spec spec,
@@ -69,6 +95,21 @@ public record BlockProductionContext(
         includePayload,
         builderConfig,
         blockProductionPerformance);
+  }
+
+  /** From PQ, the RANDAO reveal is the proposer's VRF proof for the slot. */
+  public BlockProductionContext withVrfRandaoReveal(final List<Bytes32> vrfProof) {
+    return new BlockProductionContext(
+        proposalSlot,
+        blockSlotState,
+        parentForkChoiceNode,
+        parentExecutionBlockHash,
+        randaoReveal,
+        graffiti,
+        includePayload,
+        builderConfig,
+        blockProductionPerformance,
+        Optional.of(vrfProof));
   }
 
   public Bytes32 parentRoot() {

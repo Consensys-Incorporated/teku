@@ -23,6 +23,7 @@ import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 import tech.pegasys.teku.spec.datastructures.type.SszSignatureSchema;
 import tech.pegasys.teku.spec.datastructures.type.SszSignatures;
 import tech.pegasys.teku.spec.datastructures.type.SszXmssSignature;
+import tech.pegasys.teku.spec.datastructures.type.SszXmssSignatureSchema;
 import tech.pegasys.teku.spec.schemas.registry.SchemaRegistry;
 
 public class SignedExecutionPayloadBidSchema
@@ -55,6 +56,16 @@ public class SignedExecutionPayloadBidSchema
   public SignedExecutionPayloadBid create(
       final ExecutionPayloadBid message, final SszXmssSignature signature) {
     return new SignedExecutionPayloadBid(this, message, signature);
+  }
+
+  /**
+   * A self-built bid, with the empty signature of this schema's kind: G2_POINT_AT_INFINITY for BLS,
+   * the empty XMSSSignature (all zero bytes) from PQ.
+   */
+  public SignedExecutionPayloadBid createSelfBuilt(final ExecutionPayloadBid message) {
+    return getChildSchema(1) instanceof SszXmssSignatureSchema
+        ? create(message, SszXmssSignature.empty())
+        : create(message, BLSSignature.infinity());
   }
 
   @Override
