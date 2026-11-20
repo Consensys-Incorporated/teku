@@ -350,6 +350,18 @@ class ValidatorApiHandlerTest {
   }
 
   @Test
+  public void getValidatorIndicesByXmssKey_shouldFindPqValidators() {
+    setUp(TestSpecFactory.createMinimalPq());
+    final BeaconState state = createStateWithActiveValidators();
+    when(chainDataClient.getBestState()).thenReturn(Optional.of(completedFuture(state)));
+    final Bytes32 validator3Key = ((ValidatorPq) state.getValidators().get(3)).getXmssPublicKey();
+    final Bytes32 unknownKey = dataStructureUtil.randomBytes32();
+
+    assertThat(validatorApiHandler.getValidatorIndicesByXmssKey(List.of(validator3Key, unknownKey)))
+        .isCompletedWithValue(Optional.of(Map.of(validator3Key, 3)));
+  }
+
+  @Test
   public void getAttestationDuties_shouldFailWhenNodeIsSyncing() {
     nodeIsSyncing();
     final SafeFuture<Optional<AttesterDuties>> duties =

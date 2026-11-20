@@ -291,6 +291,15 @@ public interface ValidatorApiChannel extends BuilderApiChannel, ChannelInterface
   SafeFuture<Optional<Map<BLSPublicKey, Integer>>> getValidatorIndices(
       Collection<BLSPublicKey> publicKeys);
 
+  /**
+   * PQ: the indices of validators by their XMSS public keys. A PQ state has no BLS keys, so a
+   * validator client finds its PQ validators by the XMSS keys of their signers.
+   */
+  default SafeFuture<Optional<Map<Bytes32, Integer>>> getValidatorIndicesByXmssKey(
+      final Collection<Bytes32> xmssPublicKeys) {
+    return SafeFuture.completedFuture(Optional.of(Map.of()));
+  }
+
   SafeFuture<Optional<Map<BLSPublicKey, StateValidatorData>>> getValidatorStatuses(
       Collection<BLSPublicKey> validatorIdentifiers);
 

@@ -92,6 +92,12 @@ public class SentryValidatorApiChannel implements ValidatorApiChannel {
   }
 
   @Override
+  public SafeFuture<Optional<Map<Bytes32, Integer>>> getValidatorIndicesByXmssKey(
+      final Collection<Bytes32> xmssPublicKeys) {
+    return dutiesProviderChannel.getValidatorIndicesByXmssKey(xmssPublicKeys);
+  }
+
+  @Override
   public SafeFuture<Optional<Map<BLSPublicKey, StateValidatorData>>> getValidatorStatuses(
       final Collection<BLSPublicKey> validatorIdentifiers) {
     return dutiesProviderChannel.getValidatorStatuses(validatorIdentifiers);

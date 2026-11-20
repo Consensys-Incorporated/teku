@@ -293,6 +293,29 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
   }
 
   @Override
+  public SafeFuture<Optional<Map<Bytes32, Integer>>> getValidatorIndicesByXmssKey(
+      final Collection<Bytes32> xmssPublicKeys) {
+    if (xmssPublicKeys.isEmpty()) {
+      return SafeFuture.completedFuture(Optional.of(Map.of()));
+    }
+    return combinedChainDataClient
+        .getBestState()
+        .map(
+            beaconStateSafeFuture ->
+                beaconStateSafeFuture.thenApply(
+                    state -> {
+                      @SuppressWarnings("UseFastutil")
+                      final Map<Bytes32, Integer> results = new HashMap<>();
+                      xmssPublicKeys.forEach(
+                          xmssPublicKey ->
+                              spec.getValidatorIndexByXmssKey(state, xmssPublicKey)
+                                  .ifPresent(index -> results.put(xmssPublicKey, index)));
+                      return Optional.of(results);
+                    }))
+        .orElseGet(() -> SafeFuture.completedFuture(Optional.empty()));
+  }
+
+  @Override
   public SafeFuture<Optional<AttesterDuties>> getAttestationDuties(
       final UInt64 epoch, final IntCollection validatorIndices) {
 

@@ -81,7 +81,8 @@ abstract class AbstractAttestationDutySchedulingStrategy
       final SlotBasedScheduledDuties<AttestationProductionDuty, AggregationDuty> scheduledDuties,
       final AttesterDuty duty,
       final Optional<DvtAttestationAggregations> dvtAttestationAggregations) {
-    final Optional<Validator> maybeValidator = validators.getValidator(duty.getPublicKey());
+    final Optional<Validator> maybeValidator =
+        validators.getValidatorBySigningKey(duty.getPublicKeyBytes());
     if (maybeValidator.isEmpty()) {
       return SafeFuture.COMPLETE;
     }

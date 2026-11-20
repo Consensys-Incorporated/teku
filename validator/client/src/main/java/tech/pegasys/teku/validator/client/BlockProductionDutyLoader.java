@@ -72,7 +72,7 @@ public class BlockProductionDutyLoader
       final SlotBasedScheduledDuties<BlockProductionDuty, Duty> scheduledDuties,
       final ProposerDuty duty) {
     validators
-        .getValidator(duty.getPublicKey())
+        .getValidatorBySigningKey(duty.getPublicKeyBytes())
         .ifPresent(validator -> scheduledDuties.scheduleProduction(duty.getSlot(), validator));
   }
 
