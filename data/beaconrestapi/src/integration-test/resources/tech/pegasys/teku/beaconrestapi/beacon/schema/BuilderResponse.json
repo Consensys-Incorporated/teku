@@ -13,7 +13,13 @@
       "type" : "string"
     },
     "builder" : {
-      "$ref" : "#/components/schemas/Builder"
+      "title" : "Builder",
+      "type" : "object",
+      "oneOf" : [ {
+        "$ref" : "#/components/schemas/BuilderPq"
+      }, {
+        "$ref" : "#/components/schemas/Builder"
+      } ]
     }
   }
 }

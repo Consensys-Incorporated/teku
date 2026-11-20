@@ -166,6 +166,11 @@ public class ValidatorPhase0
   }
 
   @Override
+  public Bytes getSigningKeyBytes() {
+    return getPubkeyBytes();
+  }
+
+  @Override
   public Bytes32 getWithdrawalCredentials() {
     return getField1().get();
   }

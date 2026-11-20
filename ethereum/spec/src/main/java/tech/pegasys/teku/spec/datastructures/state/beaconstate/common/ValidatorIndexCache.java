@@ -16,6 +16,7 @@ package tech.pegasys.teku.spec.datastructures.state.beaconstate.common;
 import com.google.common.annotations.VisibleForTesting;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.collections.cache.Cache;
 import tech.pegasys.teku.infrastructure.collections.cache.LRUCache;
@@ -23,10 +24,15 @@ import tech.pegasys.teku.infrastructure.collections.cache.NoOpCache;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.versions.pq.ValidatorPq;
 
 public class ValidatorIndexCache {
   private final Cache<BLSPublicKey, Integer> validatorIndices;
   private final AtomicInteger lastCachedIndex;
+  // PQ validators are keyed by XMSS public keys instead
+  private final Cache<Bytes32, Integer> xmssValidatorIndices;
+  private final AtomicInteger lastCachedXmssIndex = new AtomicInteger(INDEX_NONE);
+  private final boolean cachingEnabled;
 
   private static final int INDEX_NONE = -1;
   public static final ValidatorIndexCache NO_OP_INSTANCE =
@@ -37,15 +43,21 @@ public class ValidatorIndexCache {
       final Cache<BLSPublicKey, Integer> validatorIndices, final int lastCachedIndex) {
     this.validatorIndices = validatorIndices;
     this.lastCachedIndex = new AtomicInteger(lastCachedIndex);
+    this.cachingEnabled = !(validatorIndices instanceof NoOpCache);
+    this.xmssValidatorIndices =
+        cachingEnabled ? LRUCache.create(Integer.MAX_VALUE - 1) : NoOpCache.getNoOpCache();
   }
 
   public ValidatorIndexCache() {
-    this.validatorIndices = LRUCache.create(Integer.MAX_VALUE - 1);
-    this.lastCachedIndex = new AtomicInteger(INDEX_NONE);
+    this(LRUCache.create(Integer.MAX_VALUE - 1), INDEX_NONE);
   }
 
+  /** The index of the validator with BLS key {@code publicKey}. PQ validators have none. */
   public Optional<Integer> getValidatorIndex(
       final BeaconState state, final BLSPublicKey publicKey) {
+    if (state.toVersionPq().isPresent()) {
+      return Optional.empty();
+    }
     final SszList<Validator> validators = state.getValidators();
     final Optional<Integer> validatorIndex = validatorIndices.getCached(publicKey);
     if (validatorIndex.isPresent()) {
@@ -54,6 +66,47 @@ public class ValidatorIndexCache {
       return validatorIndex.filter(index -> index < validators.size());
     }
     return findIndexFromState(validators, publicKey);
+  }
+
+  /**
+   * PQ: the index of the validator with XMSS public key {@code xmssPublicKey}.
+   *
+   * <p>The cache is shared by the states of every branch, so a cached index is only used once the
+   * key at that index in {@code state} is checked to match.
+   */
+  public Optional<Integer> getValidatorIndexByXmssKey(
+      final BeaconState state, final Bytes32 xmssPublicKey) {
+    final SszList<Validator> validators = state.getValidators();
+    final Optional<Integer> cachedIndex = xmssValidatorIndices.getCached(xmssPublicKey);
+    if (cachedIndex.isPresent()) {
+      final int index = cachedIndex.get();
+      if (index < validators.size() && xmssKeyAt(validators, index).equals(xmssPublicKey)) {
+        return cachedIndex;
+      }
+      // Cached from another branch
+      return scanForXmssKey(validators, xmssPublicKey, 0);
+    }
+    return scanForXmssKey(validators, xmssPublicKey, lastCachedXmssIndex.get() + 1);
+  }
+
+  private Optional<Integer> scanForXmssKey(
+      final SszList<Validator> validators, final Bytes32 xmssPublicKey, final int fromIndex) {
+    for (int i = fromIndex; i < validators.size(); i++) {
+      final Bytes32 key = xmssKeyAt(validators, i);
+      xmssValidatorIndices.invalidateWithNewValue(key, i);
+      if (cachingEnabled) {
+        final int cachedIndex = i;
+        lastCachedXmssIndex.updateAndGet(current -> Math.max(current, cachedIndex));
+      }
+      if (key.equals(xmssPublicKey)) {
+        return Optional.of(i);
+      }
+    }
+    return Optional.empty();
+  }
+
+  private static Bytes32 xmssKeyAt(final SszList<Validator> validators, final int index) {
+    return ((ValidatorPq) validators.get(index)).getXmssPublicKey();
   }
 
   public void invalidateWithNewValue(final BLSPublicKey pubKey, final int updatedIndex) {

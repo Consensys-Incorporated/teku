@@ -35,6 +35,7 @@ import tech.pegasys.teku.api.migrated.BuilderStatus;
 import tech.pegasys.teku.api.migrated.StateBuilderData;
 import tech.pegasys.teku.ethereum.json.types.beacon.StateBuilderRequestBodyType;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.json.types.SerializableOneOfTypeDefinitionBuilder;
 import tech.pegasys.teku.infrastructure.json.types.SerializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.AsyncApiResponse;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.EndpointMetadata;
@@ -43,16 +44,22 @@ import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderGloas;
+import tech.pegasys.teku.spec.datastructures.state.versions.pq.BuilderPq;
 
 public class PostStateBuilders extends RestApiEndpoint {
   public static final String ROUTE = "/eth/v1/beacon/states/{state_id}/builders";
   private final ChainDataProvider chainDataProvider;
 
-  // The BLS-keyed builder's JSON shape. PQ builders get their own when the REST API supports PQ.
-  @SuppressWarnings("unchecked")
+  // BLS-keyed builders, and from PQ builders keyed by a 32-byte XMSS public key
   private static final SerializableTypeDefinition<Builder> BUILDER_TYPE =
-      (SerializableTypeDefinition<Builder>)
-          (SerializableTypeDefinition<?>) BuilderGloas.SSZ_SCHEMA.getJsonTypeDefinition();
+      new SerializableOneOfTypeDefinitionBuilder<Builder>()
+          .title("Builder")
+          .withType(
+              builder -> builder instanceof BuilderPq, BuilderPq.SSZ_SCHEMA.getJsonTypeDefinition())
+          .withType(
+              builder -> !(builder instanceof BuilderPq),
+              BuilderGloas.SSZ_SCHEMA.getJsonTypeDefinition())
+          .build();
 
   static final SerializableTypeDefinition<StateBuilderData> STATE_BUILDER_DATA_TYPE =
       SerializableTypeDefinition.<StateBuilderData>object()

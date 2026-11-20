@@ -1,0 +1,79 @@
+# PQ phase 8: REST and the beacon-APIs
+
+Phase 8 of `pq-fork-plan.md`: make the REST API work at PQ slots, and give the validator client the endpoints its PQ duties need (phase 9c).
+
+## Where things stand
+
+Most of Teku's REST JSON comes from the SSZ schemas of each milestone. So blocks, states, pool attestations, envelopes and anything read by index already work at PQ slots. What breaks falls into five groups:
+
+1. **Validator keys.** Lookups by public key assume a 48-byte BLS key, and `ValidatorPq` throws on its BLS getters. The validators, balances, identities and builders endpoints, duties, `register_validator` and rewards by id all depend on this.
+2. **BLS-pinned JSON types.** Some endpoints serialize with a fixed phase 0, Electra or Gloas type instead of the milestone's schema:
+   - validators and identities;
+   - block attestations, attester and proposer slashings, headers, and Teku's all-blocks-at-slot;
+   - proposer preferences, bids, payload attestations, and the event payloads.
+3. **Operations PQ removed.** These are sync committee messages, contributions and duties, the light client, voluntary exits and BLS changes. Some of their endpoints still accept requests or return 500 at PQ slots.
+4. **The validator contract.** PQ changes what the VC and the BN exchange:
+   - single attestations and aggregates carry XMSS signatures and a STARK proof;
+   - aggregators come from the aggregation committee, so there's no selection proof;
+   - the block's RANDAO reveal is a VRF proof (32 × 32 bytes);
+   - payload attestation messages, preferences and envelopes are XMSS-signed.
+5. **OpenAPI.** Every PQ-typed component needs a name that doesn't clash with an earlier milestone's. The EIP-8483 work shows how: pass `SchemaTypes.getSchemaName(milestone)` to the schema creators.
+
+No beacon-APIs work for PQ exists upstream yet. Until a cross-client draft does, the validator-facing endpoints in 8c are Teku's own devnet contract, kept as close to the existing endpoints as possible.
+
+## Slices
+
+### 8a: validator keys (this PR)
+
+- `ValidatorIndexCache` looks validators up by XMSS public key, with its own cache. The cache is shared by every branch's states, so a cached index is only used once the key at that index is checked. A BLS-key lookup in a PQ state finds nothing instead of throwing.
+- `BeaconStateAccessors.getValidatorPubKey` returns empty for PQ validators. `BeaconStateAccessorsPq.getValidatorIndexByXmssKey`, used by deposit and preregistration processing, goes through the cache instead of scanning.
+- `Spec.getValidatorIndexByXmssKey` and `getBuilderIndexByXmssKey`.
+- `Validator.getSigningKeyBytes()`: the BLS key, or a PQ validator's XMSS key.
+- REST:
+  - validator ids accept a 32-byte XMSS key as well as a 48-byte BLS key (validators, balances, rewards), and so do builder ids;
+  - the `validator` JSON (`StateValidator`) carries either key in `pubkey`, plus `vrf_root` for PQ validators, and parses back to the right class;
+  - the builders endpoint serializes `BuilderPq` with its own type.
+
+### 8b: read endpoints and removed operations
+
+- **Identities:** a PQ `StateValidatorIdentity` with a 32-byte key, and a response type per milestone.
+- **Per-milestone types** in place of BLS-pinned ones:
+  - block attestations (`electraAttestationTypeDef`);
+  - attester slashings V2 (the PQ `proof`);
+  - proposer slashings (`ProposerSlashing.SSZ_SCHEMA_PQ`);
+  - headers;
+  - Teku's all-blocks-at-slot, which calls `getSignature`.
+- **Events:**
+  - `SingleAttestationPq` should go out on `single_attestation`;
+  - bid, preferences and payload attestation events need the right version;
+  - PQ payload attestation messages should reach the event stream.
+- **Removed operations at PQ slots:** reject them with a 400 that names the fork, instead of 500s or silent acceptance. That covers:
+  - voluntary exits and BLS changes (POST);
+  - sync committee messages, contributions and subscriptions;
+  - sync rewards, and block rewards (which read the sync aggregate).
+
+### 8c: the validator contract
+
+- **Attestations:**
+  - `POST pool/attestations` takes `SingleAttestationPq`, through a `SchemaDefinitionsPq` getter.
+  - `GET aggregate_attestation` returns the aggregate with its proof.
+  - `POST aggregate_and_proofs` takes `SignedAggregateAndProofPq`.
+  - `ValidatorApiChannel` carries the PQ types.
+- **Duties:**
+  - attester duties say whether the validator is in the aggregation committee for its slot;
+  - duty pubkeys are XMSS keys for PQ.
+- **Blocks:** `POST v4 blocks` accepts a VRF proof as `randao_reveal` for PQ slots, and `BlockFactory` uses it.
+- **ePBS:** payload attestation messages, proposer preferences, bids and envelopes take their XMSS-signed PQ types.
+
+This needs the most care, because the VC (9c) builds on it. A short contract note, with request and response shapes and the headers that select PQ, goes with it for other clients.
+
+### 8d: OpenAPI and docs
+
+- Regenerate the snapshots that 8b and 8c change, renaming components that clash.
+- Note the PQ contract in the REST API docs.
+
+## Testing
+
+- Unit tests per handler or provider, against a PQ state or spec (`TestSpecFactory.createMinimalPq`).
+- `OpenApiIntegrationTest` snapshots.
+- Once 8c and 9c are both in, a VC talking to a BN over REST across the PQ fork.
