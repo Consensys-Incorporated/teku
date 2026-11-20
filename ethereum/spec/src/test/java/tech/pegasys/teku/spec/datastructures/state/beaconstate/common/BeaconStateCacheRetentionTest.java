@@ -14,56 +14,41 @@
 package tech.pegasys.teku.spec.datastructures.state.beaconstate.common;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockConstruction;
+import static org.mockito.Mockito.verifyNoInteractions;
 
-import java.lang.ref.Reference;
-import java.lang.ref.WeakReference;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.TestTemplate;
-import tech.pegasys.teku.spec.TestSpecContext;
-import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
-import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
-import tech.pegasys.teku.spec.util.DataStructureUtil;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
+import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.infrastructure.ssz.cache.IntCache;
+import tech.pegasys.teku.infrastructure.ssz.cache.SoftRefIntCache;
 
-@TestSpecContext(allMilestones = true)
 class BeaconStateCacheRetentionTest {
 
-  private DataStructureUtil dataStructureUtil;
-
-  @BeforeEach
-  void setUp(final SpecContext specContext) {
-    dataStructureUtil = specContext.getDataStructureUtil();
-  }
-
-  @TestTemplate
-  void shouldNotRetainAncestorStatesThroughViewCache() throws InterruptedException {
-    final StateLineage lineage = createStateLineage();
-    try {
-      for (int attempt = 0;
-          attempt < 20 && (!lineage.root().refersTo(null) || !lineage.middle().refersTo(null));
-          attempt++) {
-        System.gc();
-        Thread.sleep(50);
-      }
-
-      assertThat(lineage.middle().refersTo(null))
-          .as("intermediate state should be collected")
-          .isTrue();
-      assertThat(lineage.root().refersTo(null)).as("lineage root should be collected").isTrue();
-    } finally {
-      Reference.reachabilityFence(lineage.last());
+  @Test
+  void shouldRecreateViewCacheWithoutConsultingOriginatingState() {
+    final AbstractBeaconState<?> state = mock(AbstractBeaconState.class, CALLS_REAL_METHODS);
+    doReturn(1).when(state).size();
+    final AtomicReference<Supplier<?>> factory = new AtomicReference<>();
+    try (final var construction =
+        mockConstruction(
+            SoftRefIntCache.class,
+            (cache, context) -> factory.set((Supplier<?>) context.arguments().getFirst()))) {
+      final var cache = state.createCache();
+      assertThat(cache).isSameAs(construction.constructed().getFirst());
     }
-  }
 
-  private StateLineage createStateLineage() {
-    final BeaconState randomState = dataStructureUtil.randomBeaconState(64);
-    final BeaconState root =
-        randomState.getBeaconStateSchema().createFromBackingNode(randomState.getBackingNode());
-    final BeaconState middle = root.updated(state -> state.setSlot(state.getSlot().plus(1)));
-    final BeaconState last = middle.updated(state -> state.setSlot(state.getSlot().plus(1)));
-    // Keep ancestor locals outside the GC loop's stack frame.
-    return new StateLineage(new WeakReference<>(root), new WeakReference<>(middle), last);
+    // Creating the factory may read the state; using it after cache transfer must not.
+    clearInvocations((Object) state);
+    final IntCache<?> first = (IntCache<?>) factory.get().get();
+    final IntCache<?> second = (IntCache<?>) factory.get().get();
+    verifyNoInteractions(state);
+    assertThat(second).isNotSameAs(first);
+    assertThat(first.getCached(0)).isEmpty();
+    assertThat(second.getCached(0)).isEmpty();
   }
-
-  private record StateLineage(
-      WeakReference<BeaconState> root, WeakReference<BeaconState> middle, BeaconState last) {}
 }
