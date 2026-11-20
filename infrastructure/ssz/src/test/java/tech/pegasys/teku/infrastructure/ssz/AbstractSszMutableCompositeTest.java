@@ -152,4 +152,55 @@ public class AbstractSszMutableCompositeTest {
       assertThat(committed.get(i).getElement(1)).isEqualTo(expectedValue);
     }
   }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void childAcquiredByRefAfterBeingSetByValueShouldKeepBothChanges() {
+    final SszBytes32VectorSchema<SszBytes32Vector> childSchema = SszBytes32VectorSchema.create(2);
+    final SszVectorSchema<SszBytes32Vector, ?> compositeSchema =
+        SszVectorSchema.create(childSchema, 2);
+    final Bytes32 byValueValue = Bytes32.fromHexStringLenient("0x1111");
+    final Bytes32 byRefValue = Bytes32.fromHexStringLenient("0x2222");
+
+    final SszMutableRefVector<SszBytes32Vector, SszMutableBytes32Vector> mutableComposite =
+        (SszMutableRefVector<SszBytes32Vector, SszMutableBytes32Vector>)
+            compositeSchema.getDefault().createWritableCopy();
+    mutableComposite.set(1, childSchema.of(byValueValue, byValueValue));
+    mutableComposite.getByRef(1).setElement(0, byRefValue);
+
+    assertThat(mutableComposite.get(1).getElement(0)).isEqualTo(byRefValue);
+    assertThat(mutableComposite.get(1).getElement(1)).isEqualTo(byValueValue);
+
+    final SszVector<SszBytes32Vector> committed = mutableComposite.commitChanges();
+
+    assertThat(committed.get(1).getElement(0)).isEqualTo(byRefValue);
+    assertThat(committed.get(1).getElement(1)).isEqualTo(byValueValue);
+    assertThat(committed.get(0)).isEqualTo(childSchema.getDefault());
+    assertThat(committed.hashTreeRoot())
+        .isEqualTo(
+            compositeSchema
+                .createFromElements(
+                    List.of(childSchema.getDefault(), childSchema.of(byRefValue, byValueValue)))
+                .hashTreeRoot());
+  }
+
+  @Test
+  void singleChangeAtHighIndexShouldBeReadBackAndCommitted() {
+    final int size = 100_000;
+    final SszUInt64ListSchema<SszUInt64List> schema = SszUInt64ListSchema.create(1 << 20);
+    final List<UInt64> expected =
+        new ArrayList<>(LongStream.range(0, size).mapToObj(UInt64::valueOf).toList());
+    final SszMutableUInt64List mutableList = schema.of(expected).createWritableCopy();
+
+    mutableList.setElement(size - 1, UInt64.valueOf(7));
+    expected.set(size - 1, UInt64.valueOf(7));
+
+    assertThat(mutableList.getElement(size - 1)).isEqualTo(UInt64.valueOf(7));
+    assertThat(mutableList.getElement(0)).isEqualTo(UInt64.ZERO);
+
+    final SszUInt64List committed = mutableList.commitChanges();
+
+    assertThat(committed.asListUnboxed()).isEqualTo(expected);
+    assertThat(committed.hashTreeRoot()).isEqualTo(schema.of(expected).hashTreeRoot());
+  }
 }

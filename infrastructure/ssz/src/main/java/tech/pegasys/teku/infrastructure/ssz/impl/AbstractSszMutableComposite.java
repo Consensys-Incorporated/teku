@@ -15,9 +15,7 @@ package tech.pegasys.teku.infrastructure.ssz.impl;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.ObjIntConsumer;
@@ -147,18 +145,22 @@ public abstract class AbstractSszMutableComposite<
     if (childrenChanges.isEmpty()) {
       return backingImmutableData;
     } else {
-      IntCache<SszChildT> cache = backingImmutableData.transferCache();
-      final List<Map.Entry<Integer, SszChildT>> newChildValues =
-          new ArrayList<>(childrenChanges.size());
-      childrenChanges.forEach(
-          (change, childIndex) -> {
-            final SszChildT newValue = immutable(change);
-            // pre-fill the read cache with changed values
-            cache.invalidateWithNewValueInt(childIndex, newValue);
-            newChildValues.add(Map.entry(childIndex, newValue));
-          });
-      TreeNode originalBackingTree = backingImmutableData.getBackingNode();
-      TreeNode finalBackingTree = applyTreeChanges(newChildValues.stream(), originalBackingTree);
+      final IntCache<SszChildT> cache = backingImmutableData.transferCache();
+      // A lazy stream: a change is committed and handed over when the stream reaches it, so the
+      // entries of a large set of changes are not all alive at once
+      final Stream<Map.Entry<Integer, SszChildT>> newChildValues =
+          Stream.of(childrenChanges)
+              .mapMulti(
+                  (changes, sink) ->
+                      changes.forEach(
+                          (change, childIndex) -> {
+                            final SszChildT newValue = immutable(change);
+                            // pre-fill the read cache with changed values
+                            cache.invalidateWithNewValueInt(childIndex, newValue);
+                            sink.accept(Map.entry(childIndex, newValue));
+                          }));
+      final TreeNode originalBackingTree = backingImmutableData.getBackingNode();
+      final TreeNode finalBackingTree = applyTreeChanges(newChildValues, originalBackingTree);
       return createImmutableSszComposite(finalBackingTree, cache);
     }
   }
@@ -230,42 +232,50 @@ public abstract class AbstractSszMutableComposite<
   protected abstract void checkIndex(int index, boolean set);
 
   /**
-   * The changed children by index, in a sparse list of pages: reads and writes take constant time,
-   * whatever the number of changes, and the changes are visited in index order. A child handed out
-   * by reference is held as its mutable view, a child set by value as its immutable value.
+   * The changed children by index, in a sparse array of pages: reads and writes take constant time,
+   * whatever the number of changes, and the changes are visited in index order. The array of pages
+   * reaches up to the highest changed index, so a visit costs one step per {@value #PAGE_SIZE}
+   * indices below it on top of the changes themselves.
+   *
+   * <p>A child handed out by reference is held as its mutable view, a child set by value as its
+   * immutable value. The two are told apart by their type alone: a change is by reference exactly
+   * when it is an {@link SszMutableData}. That relies on {@link SszMutableData#commitChanges()}
+   * never returning a mutable view, since a mutable value passed to {@link
+   * AbstractSszMutableComposite#set} is committed first.
    */
   private static final class ChildChanges<T> {
     private static final int PAGE_BITS = 6;
     private static final int PAGE_SIZE = 1 << PAGE_BITS;
     private static final int PAGE_MASK = PAGE_SIZE - 1;
+    private static final Object[][] NO_PAGES = new Object[0][];
 
-    // A page is created, filled with nulls, on the first change that falls in it
-    private final List<List<T>> pages = new ArrayList<>();
+    // A page is created on the first change that falls in it
+    private Object[][] pages = NO_PAGES;
     private int size;
 
+    @SuppressWarnings("unchecked")
     T get(final int index) {
       final int pageIndex = index >>> PAGE_BITS;
-      final List<T> page = pageIndex < pages.size() ? pages.get(pageIndex) : null;
-      return page == null ? null : page.get(index & PAGE_MASK);
+      final Object[] page = pageIndex < pages.length ? pages[pageIndex] : null;
+      return page == null ? null : (T) page[index & PAGE_MASK];
     }
 
     void put(final int index, final T change) {
       final int pageIndex = index >>> PAGE_BITS;
-      if (pageIndex >= pages.size()) {
-        pages.addAll(Collections.nCopies(pageIndex + 1 - pages.size(), null));
+      if (pageIndex >= pages.length) {
+        // At least doubled, so that appends don't copy the array on every new page
+        pages = Arrays.copyOf(pages, Math.max(pageIndex + 1, pages.length * 2));
       }
-      List<T> page = pages.get(pageIndex);
+      Object[] page = pages[pageIndex];
       if (page == null) {
-        page = new ArrayList<>(Collections.nCopies(PAGE_SIZE, null));
-        pages.set(pageIndex, page);
+        page = new Object[PAGE_SIZE];
+        pages[pageIndex] = page;
       }
-      if (page.set(index & PAGE_MASK, change) == null) {
+      final int slot = index & PAGE_MASK;
+      if (page[slot] == null) {
         size++;
       }
-    }
-
-    int size() {
-      return size;
+      page[slot] = change;
     }
 
     boolean isEmpty() {
@@ -273,19 +283,20 @@ public abstract class AbstractSszMutableComposite<
     }
 
     void clear() {
-      pages.clear();
+      pages = NO_PAGES;
       size = 0;
     }
 
     /** Visits the changes in index order. */
+    @SuppressWarnings("unchecked")
     void forEach(final ObjIntConsumer<T> action) {
-      for (int pageIndex = 0; pageIndex < pages.size(); pageIndex++) {
-        final List<T> page = pages.get(pageIndex);
+      for (int pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+        final Object[] page = pages[pageIndex];
         if (page != null) {
           for (int slot = 0; slot < PAGE_SIZE; slot++) {
-            final T change = page.get(slot);
+            final Object change = page[slot];
             if (change != null) {
-              action.accept(change, (pageIndex << PAGE_BITS) | slot);
+              action.accept((T) change, (pageIndex << PAGE_BITS) | slot);
             }
           }
         }
