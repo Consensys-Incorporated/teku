@@ -79,6 +79,10 @@ class PayloadAttestationMessagePqTest {
   private final OperationAddedSubscriber<PayloadAttestationMessage> subscriber =
       mock(OperationAddedSubscriber.class);
 
+  @SuppressWarnings("unchecked")
+  private final OperationAddedSubscriber<PayloadAttestationMessagePq> pqSubscriber =
+      mock(OperationAddedSubscriber.class);
+
   private StorageSystem storageSystem;
   private RecentChainData recentChainData;
   private PayloadAttestationMessageGossipValidator validator;
@@ -104,6 +108,7 @@ class PayloadAttestationMessagePqTest {
             metricsSystem);
     pool.subscribeValidatedOperationAdded(validatedSubscriber);
     pool.subscribeOperationAdded(subscriber);
+    pool.subscribePqOperationAdded(pqSubscriber);
     // Run the chain into the PQ fork, with the current slot at its head
     storageSystem
         .chainUpdater()
@@ -158,9 +163,37 @@ class PayloadAttestationMessagePqTest {
     assertThat(captor.getValue().getData()).isEqualTo(message.getData());
     assertThat(captor.getValue().getValidatorIndex()).isEqualTo(message.getValidatorIndex());
     assertThat(captor.getValue().getXmssSignature()).contains(message.getSignature());
-    // Neither published again nor kept for block production
+    // Not kept for block production; PQ subscribers see it as from the network
+    verifyNoInteractions(subscriber);
+    verify(pqSubscriber).onOperationAdded(eq(message), any(), eq(true));
+    assertThat(pool.getPayloadAttestations(headState())).isEmpty();
+  }
+
+  @Test
+  void addLocalPqSendsValidMessageToForkChoiceAndPqSubscribersAsLocal() {
+    final PayloadAttestationMessagePq message = message(headData(), ptcAttesterLeaf());
+
+    assertThat(pool.addLocalPq(message))
+        .isCompletedWithValueMatching(InternalValidationResult::isAccept);
+
+    verify(validatedSubscriber).onOperationAdded(any(), any(), eq(false));
+    // From a local validator, so it is published
+    verify(pqSubscriber).onOperationAdded(eq(message), any(), eq(false));
     verifyNoInteractions(subscriber);
     assertThat(pool.getPayloadAttestations(headState())).isEmpty();
+  }
+
+  @Test
+  void addLocalPqDoesNotNotifyForInvalidMessage() {
+    // Signed at the wrong leaf
+    final PayloadAttestationMessagePq message =
+        message(headData(), ptcAttesterLeaf().plus(UInt64.ONE));
+
+    assertThat(pool.addLocalPq(message))
+        .isCompletedWithValueMatching(InternalValidationResult::isReject);
+
+    verify(validatedSubscriber, never()).onOperationAdded(any(), any(), anyBoolean());
+    verifyNoInteractions(pqSubscriber);
   }
 
   @Test

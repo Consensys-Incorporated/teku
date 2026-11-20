@@ -64,6 +64,7 @@ public class GossipForkSubscriptionsGloas extends GossipForkSubscriptionsFulu {
 
   private ExecutionPayloadGossipManager executionPayloadGossipManager;
   private PayloadAttestationMessageGossipManager payloadAttestationMessageGossipManager;
+  private PqPayloadAttestationMessageGossipManager pqPayloadAttestationMessageGossipManager;
   private ExecutionPayloadBidGossipManager executionPayloadBidGossipManager;
   private ProposerPreferencesGossipManager proposerPreferencesGossipManager;
 
@@ -212,7 +213,7 @@ public class GossipForkSubscriptionsGloas extends GossipForkSubscriptionsFulu {
 
   void addPqPayloadAttestationMessageGossipManager(
       final ForkInfo forkInfo, final Bytes4 forkDigest) {
-    addGossipManager(
+    this.pqPayloadAttestationMessageGossipManager =
         new PqPayloadAttestationMessageGossipManager(
             spec,
             recentChainData,
@@ -222,7 +223,8 @@ public class GossipForkSubscriptionsGloas extends GossipForkSubscriptionsFulu {
             forkInfo,
             forkDigest,
             payloadAttestationMessagePqProcessor,
-            debugDataDumper));
+            debugDataDumper);
+    addGossipManager(pqPayloadAttestationMessageGossipManager);
   }
 
   void addExecutionPayloadBidGossipManager(final ForkInfo forkInfo, final Bytes4 forkDigest) {
@@ -264,9 +266,16 @@ public class GossipForkSubscriptionsGloas extends GossipForkSubscriptionsFulu {
 
   @Override
   public void publishPayloadAttestationMessage(final PayloadAttestationMessage message) {
-    // PQ forks gossip PQ payload attestation messages, which local validators don't publish yet
+    // PQ forks gossip PQ payload attestation messages instead
     if (payloadAttestationMessageGossipManager != null) {
       payloadAttestationMessageGossipManager.publish(message);
+    }
+  }
+
+  @Override
+  public void publishPqPayloadAttestationMessage(final PayloadAttestationMessagePq message) {
+    if (pqPayloadAttestationMessageGossipManager != null) {
+      pqPayloadAttestationMessageGossipManager.publish(message);
     }
   }
 

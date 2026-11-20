@@ -61,4 +61,8 @@ public class PqPayloadAttestationMessageGossipManager
             GossipTopicName.PAYLOAD_ATTESTATION_MESSAGE.toString()),
         debugDataDumper);
   }
+
+  public void publish(final PayloadAttestationMessagePq message) {
+    publishMessage(message);
+  }
 }

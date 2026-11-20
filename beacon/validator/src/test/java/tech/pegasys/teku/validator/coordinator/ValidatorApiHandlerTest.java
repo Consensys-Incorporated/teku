@@ -112,6 +112,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloa
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
@@ -2077,6 +2078,21 @@ class ValidatorApiHandlerTest {
     final SafeFuture<List<SubmitDataError>> result =
         validatorApiHandler.sendPayloadAttestationMessages(List.of(payloadAttestationMessage));
     assertThat(result).isCompletedWithValue(List.of());
+  }
+
+  @Test
+  void sendPqPayloadAttestationMessages_shouldAddThemToPoolAsLocal() {
+    final PayloadAttestationMessagePq accepted = mock(PayloadAttestationMessagePq.class);
+    final PayloadAttestationMessagePq rejected = mock(PayloadAttestationMessagePq.class);
+    when(payloadAttestationPool.addLocalPq(accepted))
+        .thenReturn(SafeFuture.completedFuture(InternalValidationResult.ACCEPT));
+    when(payloadAttestationPool.addLocalPq(rejected))
+        .thenReturn(SafeFuture.completedFuture(InternalValidationResult.reject("bad leaf")));
+
+    final SafeFuture<List<SubmitDataError>> result =
+        validatorApiHandler.sendPqPayloadAttestationMessages(List.of(accepted, rejected));
+
+    assertThat(result).isCompletedWithValue(List.of(new SubmitDataError(UInt64.ONE, "bad leaf")));
   }
 
   private void mockRequiredMethodsForBlockProduction(

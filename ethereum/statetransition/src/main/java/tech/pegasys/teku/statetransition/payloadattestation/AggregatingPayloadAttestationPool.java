@@ -65,6 +65,8 @@ public class AggregatingPayloadAttestationPool
       Subscribers.create(true);
   private final Subscribers<OperationAddedSubscriber<ValidatablePayloadAttestationMessage>>
       validatedSubscribers = Subscribers.create(true);
+  private final Subscribers<OperationAddedSubscriber<PayloadAttestationMessagePq>> pqSubscribers =
+      Subscribers.create(true);
 
   private final ConcurrentMap<Bytes, MatchingDataPayloadAttestationGroup>
       payloadAttestationGroupByDataHash = new ConcurrentHashMap<>();
@@ -178,6 +180,23 @@ public class AggregatingPayloadAttestationPool
   public SafeFuture<InternalValidationResult> addRemotePq(
       final PayloadAttestationMessagePq payloadAttestationMessage,
       final Optional<UInt64> arrivalTimestamp) {
+    return addPq(payloadAttestationMessage, true);
+  }
+
+  @Override
+  public SafeFuture<InternalValidationResult> addLocalPq(
+      final PayloadAttestationMessagePq payloadAttestationMessage) {
+    return addPq(payloadAttestationMessage, false);
+  }
+
+  @Override
+  public void subscribePqOperationAdded(
+      final OperationAddedSubscriber<PayloadAttestationMessagePq> subscriber) {
+    pqSubscribers.subscribe(subscriber);
+  }
+
+  private SafeFuture<InternalValidationResult> addPq(
+      final PayloadAttestationMessagePq payloadAttestationMessage, final boolean fromNetwork) {
     final ValidatablePayloadAttestationMessage validatablePayloadAttestationMessage =
         ValidatablePayloadAttestationMessage.fromNetworkPq(spec, payloadAttestationMessage);
     return validator
@@ -188,7 +207,11 @@ public class AggregatingPayloadAttestationPool
                 validatedSubscribers.forEach(
                     subscriber ->
                         subscriber.onOperationAdded(
-                            validatablePayloadAttestationMessage, result, true));
+                            validatablePayloadAttestationMessage, result, fromNetwork));
+                pqSubscribers.forEach(
+                    subscriber ->
+                        subscriber.onOperationAdded(
+                            payloadAttestationMessage, result, fromNetwork));
               }
               if (result.isSaveForFuture()) {
                 return InternalValidationResult.ignore(

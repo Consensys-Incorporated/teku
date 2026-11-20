@@ -28,10 +28,15 @@ import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuty;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferencesSchema;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
+import tech.pegasys.teku.spec.datastructures.type.SszXmssSignature;
 import tech.pegasys.teku.spec.logic.common.util.ProposerPreferencesUtil;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
 import tech.pegasys.teku.validator.api.SubmitDataError;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 import tech.pegasys.teku.validator.client.loader.OwnedValidators;
@@ -143,16 +148,42 @@ public class ProposerPreferencesPublisher extends AbstractPreferencesPublisher {
     }
     final ProposerPreferences preferences = maybePreferences.get();
 
-    return validator
-        .get()
-        .getSigner()
-        .signProposerPreferences(preferences, forkInfo)
-        .thenApply(
-            signature -> preferencesUtil.createSignedProposerPreferences(preferences, signature))
+    return signProposerPreferences(
+            validator.get(), duty.getSlot(), preferences, forkInfo, preferencesUtil)
         .exceptionally(
             error -> {
               LOG.warn("Failed to sign proposer preferences for validator {}", publicKey, error);
               return Optional.empty();
             });
+  }
+
+  private SafeFuture<Optional<SignedProposerPreferences>> signProposerPreferences(
+      final Validator validator,
+      final UInt64 proposalSlot,
+      final ProposerPreferences preferences,
+      final ForkInfo forkInfo,
+      final ProposerPreferencesUtil preferencesUtil) {
+    if (spec.atSlot(proposalSlot).getMilestone().isLessThan(SpecMilestone.PQ)) {
+      return validator
+          .getSigner()
+          .signProposerPreferences(preferences, forkInfo)
+          .thenApply(
+              signature -> preferencesUtil.createSignedProposerPreferences(preferences, signature));
+    }
+    // PQ: signed with leanXMSS at the preferences leaf of the proposal slot
+    final Optional<XmssSigner> xmssSigner = validator.getXmssSigner();
+    if (xmssSigner.isEmpty()) {
+      return SafeFuture.failedFuture(
+          new IllegalStateException("Validator has no PQ keys to sign proposer preferences"));
+    }
+    final SignedProposerPreferencesSchema schema =
+        SchemaDefinitionsGloas.required(spec.atSlot(proposalSlot).getSchemaDefinitions())
+            .getSignedProposerPreferencesSchema();
+    return xmssSigner
+        .get()
+        .signProposerPreferences(preferences, forkInfo)
+        .thenApply(
+            signature ->
+                Optional.of(schema.create(preferences, new SszXmssSignature(signature.toBytes()))));
   }
 }
