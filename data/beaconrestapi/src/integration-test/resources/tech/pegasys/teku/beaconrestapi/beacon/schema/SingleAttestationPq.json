@@ -1,0 +1,28 @@
+{
+  "title" : "SingleAttestationPq",
+  "type" : "object",
+  "required" : [ "committee_index", "attester_index", "data", "signature" ],
+  "properties" : {
+    "committee_index" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "attester_index" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "data" : {
+      "$ref" : "#/components/schemas/AttestationData"
+    },
+    "signature" : {
+      "type" : "string",
+      "pattern" : "^0x[a-fA-F0-9]{2,}$",
+      "description" : "SSZ hexadecimal",
+      "format" : "bytes"
+    }
+  }
+}

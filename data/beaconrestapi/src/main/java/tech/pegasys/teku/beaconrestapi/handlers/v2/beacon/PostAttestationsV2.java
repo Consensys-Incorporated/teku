@@ -48,9 +48,11 @@ import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationSchema;
 import tech.pegasys.teku.spec.datastructures.operations.SingleAttestationSchema;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SingleAttestationPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsElectra;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.validator.api.SubmitDataError;
 
 public class PostAttestationsV2 extends RestApiEndpoint {
@@ -109,6 +111,12 @@ public class PostAttestationsV2 extends RestApiEndpoint {
     builder.withType(
         value -> attestationSchemaPredicate.test(value, SpecMilestone.ELECTRA),
         getElectraAttestationSchema(schemaDefinitionCache).getJsonTypeDefinition());
+    // PQ single attestations carry XMSS signatures
+    if (schemaDefinitionCache.getSupportedMilestones().contains(SpecMilestone.PQ)) {
+      builder.withType(
+          value -> value instanceof SingleAttestationPq,
+          SingleAttestationPq.SSZ_SCHEMA.getJsonTypeDefinition());
+    }
     final SerializableOneOfTypeDefinition<Attestation> attestationSchemaDefinition =
         builder.build();
 
@@ -167,6 +175,9 @@ public class PostAttestationsV2 extends RestApiEndpoint {
 
   private static SszSchema<Attestation> getAttestationSchema(
       final SchemaDefinitions schemaDefinitions) {
+    if (schemaDefinitions instanceof SchemaDefinitionsPq) {
+      return SingleAttestationPq.SSZ_SCHEMA.castTypeToAttestationSchema();
+    }
     return schemaDefinitions
         .toVersionElectra()
         .map(

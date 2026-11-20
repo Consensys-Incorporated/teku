@@ -59,7 +59,7 @@ No beacon-APIs work for PQ exists upstream yet. Until a cross-client draft does,
 ### 8c: the validator contract
 
 - **Attestations:**
-  - `POST pool/attestations` takes `SingleAttestationPq`, through a `SchemaDefinitionsPq` getter.
+  - `POST pool/attestations` takes `SingleAttestationPq` for PQ (8c-1, done). The performance tracker converts PQ single attestations with `AttestationUtilPq`, since the BLS conversion throws for them.
   - `GET aggregate_attestation` returns the aggregate with its proof.
   - `POST aggregate_and_proofs` takes `SignedAggregateAndProofPq`.
   - `ValidatorApiChannel` carries the PQ types.
