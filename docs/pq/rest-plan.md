@@ -23,7 +23,7 @@ No beacon-APIs work for PQ exists upstream yet. Until a cross-client draft does,
 
 ## Slices
 
-### 8a: validator keys (this PR)
+### 8a: validator keys (#11682)
 
 - `ValidatorIndexCache` looks validators up by XMSS public key, with its own cache. The cache is shared by every branch's states, so a cached index is only used once the key at that index is checked. A BLS-key lookup in a PQ state finds nothing instead of throwing.
 - `BeaconStateAccessors.getValidatorPubKey` returns empty for PQ validators. `BeaconStateAccessorsPq.getValidatorIndexByXmssKey`, used by deposit and preregistration processing, goes through the cache instead of scanning.
@@ -34,15 +34,18 @@ No beacon-APIs work for PQ exists upstream yet. Until a cross-client draft does,
   - the `validator` JSON (`StateValidator`) carries either key in `pubkey`, plus `vrf_root` for PQ validators, and parses back to the right class;
   - the builders endpoint serializes `BuilderPq` with its own type.
 
-### 8b: read endpoints and removed operations
+### 8b-1: read endpoints
 
-- **Identities:** a PQ `StateValidatorIdentity` with a 32-byte key, and a response type per milestone.
-- **Per-milestone types** in place of BLS-pinned ones:
-  - block attestations (`electraAttestationTypeDef`);
-  - attester slashings V2 (the PQ `proof`);
-  - proposer slashings (`ProposerSlashing.SSZ_SCHEMA_PQ`);
-  - headers;
-  - Teku's all-blocks-at-slot, which calls `getSignature`.
+- **Identities:** `StateValidatorIdentityPq` with a 32-byte key. The provider builds whichever list matches the state, and the response is a one-of on the list's schema, for JSON and SSZ alike.
+- **PQ types beside the BLS-pinned ones**, added only where the network schedules PQ:
+  - block attestations: `AttestationPq`, which has no signature;
+  - attester slashings V2, GET and POST: the PQ indexed attestations with their `proof`;
+  - proposer slashings, GET and POST: `ProposerSlashing.SSZ_SCHEMA_PQ`. The v1 POST carries no consensus version, so the type is picked by the length of the first header's signature;
+  - headers: the XMSS-signed header type;
+  - Teku's all-blocks-at-slot: the block's signature as hex, whichever kind it is.
+
+### 8b-2: events and removed operations
+
 - **Events:**
   - `SingleAttestationPq` should go out on `single_attestation`;
   - bid, preferences and payload attestation events need the right version;

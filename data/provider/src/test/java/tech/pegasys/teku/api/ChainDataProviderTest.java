@@ -59,6 +59,7 @@ import tech.pegasys.teku.api.migrated.BuilderStatus;
 import tech.pegasys.teku.api.migrated.StateBuilderData;
 import tech.pegasys.teku.api.migrated.StateSyncCommitteesData;
 import tech.pegasys.teku.api.migrated.StateValidatorIdentity;
+import tech.pegasys.teku.api.migrated.StateValidatorIdentityPq;
 import tech.pegasys.teku.api.migrated.SyncCommitteeRewardData;
 import tech.pegasys.teku.api.provider.GenesisData;
 import tech.pegasys.teku.api.response.ValidatorStatus;
@@ -67,6 +68,7 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.SafeFutureAssert;
 import tech.pegasys.teku.infrastructure.bytes.Bytes20;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
+import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -470,31 +472,7 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
     final DataStructureUtil pqData = new DataStructureUtil(pqSpec);
     final List<Bytes32> keys =
         List.of(pqData.randomBytes32(), pqData.randomBytes32(), pqData.randomBytes32());
-    final BeaconState pqState =
-        BeaconStatePq.required(
-                SchemaDefinitionsPq.required(
-                        pqSpec.forMilestone(SpecMilestone.PQ).getSchemaDefinitions())
-                    .getPqBeaconStateSchema()
-                    .createEmpty())
-            .updatedPq(
-                mutable ->
-                    keys.forEach(
-                        key -> {
-                          mutable
-                              .getValidators()
-                              .append(
-                                  new ValidatorPq(
-                                      key,
-                                      pqData.randomBytes32(),
-                                      pqData.randomBytes32(),
-                                      UInt64.valueOf(32_000_000_000L),
-                                      false,
-                                      ZERO,
-                                      ZERO,
-                                      FAR_FUTURE_EPOCH,
-                                      FAR_FUTURE_EPOCH));
-                          mutable.getBalances().appendElement(UInt64.valueOf(32_000_000_000L));
-                        }));
+    final BeaconState pqState = pqStateWithValidators(pqSpec, pqData, keys);
     final ChainDataProvider provider =
         new ChainDataProvider(
             pqSpec,
@@ -967,10 +945,36 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
     assertThat(provider.getValidatorIdentitiesFromState(internalState, emptyList()).size())
         .isEqualTo(8);
 
-    final SszList<StateValidatorIdentity> validatorIdentitiesFromState =
+    final SszList<? extends SszData> validatorIdentitiesFromState =
         provider.getValidatorIdentitiesFromState(internalState, List.of("0"));
     assertThat(validatorIdentitiesFromState.size()).isEqualTo(1);
     assertThat(validatorIdentitiesFromState.get(0)).isEqualTo(identity);
+  }
+
+  @Test
+  public void getValidatorIdentitiesFromState_shouldGetPqIdentitiesByXmssKey() {
+    final Spec pqSpec = TestSpecFactory.createMinimalPq();
+    final DataStructureUtil pqData = new DataStructureUtil(pqSpec);
+    final Bytes32 key0 = pqData.randomBytes32();
+    final Bytes32 key1 = pqData.randomBytes32();
+    final BeaconState pqState = pqStateWithValidators(pqSpec, pqData, List.of(key0, key1));
+    final ChainDataProvider provider =
+        new ChainDataProvider(
+            pqSpec,
+            recentChainData,
+            combinedChainDataClient,
+            rewardCalculatorMock,
+            mockBlobSidecarReconstructionProvider,
+            mockBlobReconstructionProvider,
+            new LightClientUpdateStore(pqSpec));
+
+    final SszList<? extends SszData> identities =
+        provider.getValidatorIdentitiesFromState(pqState, List.of(key1.toHexString()));
+
+    assertThat(identities.getSchema()).isEqualTo(StateValidatorIdentityPq.SSZ_LIST_SCHEMA);
+    assertThat(identities.size()).isEqualTo(1);
+    assertThat(identities.get(0))
+        .isEqualTo(StateValidatorIdentityPq.create(UInt64.ONE, key1, ZERO));
   }
 
   @Test
@@ -1542,5 +1546,33 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
 
   private BeaconState getHeadState() {
     return safeJoin(mockCombinedChainDataClient.getChainHead().orElseThrow().getState());
+  }
+
+  private static BeaconState pqStateWithValidators(
+      final Spec pqSpec, final DataStructureUtil pqData, final List<Bytes32> keys) {
+    return BeaconStatePq.required(
+            SchemaDefinitionsPq.required(
+                    pqSpec.forMilestone(SpecMilestone.PQ).getSchemaDefinitions())
+                .getPqBeaconStateSchema()
+                .createEmpty())
+        .updatedPq(
+            mutable ->
+                keys.forEach(
+                    key -> {
+                      mutable
+                          .getValidators()
+                          .append(
+                              new ValidatorPq(
+                                  key,
+                                  pqData.randomBytes32(),
+                                  pqData.randomBytes32(),
+                                  UInt64.valueOf(32_000_000_000L),
+                                  false,
+                                  ZERO,
+                                  ZERO,
+                                  FAR_FUTURE_EPOCH,
+                                  FAR_FUTURE_EPOCH));
+                      mutable.getBalances().appendElement(UInt64.valueOf(32_000_000_000L));
+                    }));
   }
 }

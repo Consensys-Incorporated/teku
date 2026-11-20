@@ -37,6 +37,7 @@ import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.IndexedAttestationPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
 
 public class GetAttesterSlashingsV2 extends RestApiEndpoint {
@@ -90,8 +91,20 @@ public class GetAttesterSlashingsV2 extends RestApiEndpoint {
             .getAttesterSlashingSchema()
             .getJsonTypeDefinition();
 
+    final SerializableOneOfTypeDefinitionBuilder<List<AttesterSlashing>> oneOfBuilder =
+        new SerializableOneOfTypeDefinitionBuilder<List<AttesterSlashing>>();
+    // PQ's slashings carry indexed attestations with a proof instead of a signature
+    if (schemaDefinitionCache.getSupportedMilestones().contains(SpecMilestone.PQ)) {
+      oneOfBuilder.withType(
+          slashings -> !slashings.isEmpty() && isPq(slashings.get(0)),
+          listOf(
+              schemaDefinitionCache
+                  .getSchemaDefinition(SpecMilestone.PQ)
+                  .getAttesterSlashingSchema()
+                  .getJsonTypeDefinition()));
+    }
     final SerializableOneOfTypeDefinition<List<AttesterSlashing>> oneOfTypeDefinition =
-        new SerializableOneOfTypeDefinitionBuilder<List<AttesterSlashing>>()
+        oneOfBuilder
             .withType(
                 electraAttesterSlashingsPredicate(schemaDefinitionCache),
                 listOf(attesterSlashingElectraSchema))
@@ -111,9 +124,14 @@ public class GetAttesterSlashingsV2 extends RestApiEndpoint {
       final SchemaDefinitionCache schemaDefinitionCache) {
     return attesterSlashings ->
         !attesterSlashings.isEmpty()
+            && !isPq(attesterSlashings.get(0))
             && schemaDefinitionCache
                 .milestoneAtSlot(attesterSlashings.get(0).getAttestation1().getData().getSlot())
                 .isGreaterThanOrEqualTo(SpecMilestone.ELECTRA);
+  }
+
+  private static boolean isPq(final AttesterSlashing attesterSlashing) {
+    return attesterSlashing.getAttestation1() instanceof IndexedAttestationPq;
   }
 
   private static Predicate<List<AttesterSlashing>> phase0AttesterSlashingsPredicate(

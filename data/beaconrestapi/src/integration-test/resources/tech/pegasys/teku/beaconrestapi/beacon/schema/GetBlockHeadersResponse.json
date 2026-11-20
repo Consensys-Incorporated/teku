@@ -25,7 +25,13 @@
             "type" : "boolean"
           },
           "header" : {
-            "$ref" : "#/components/schemas/SignedBeaconBlockHeader"
+            "title" : "SignedBeaconBlockHeader",
+            "type" : "object",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/SignedBeaconBlockHeader"
+            }, {
+              "$ref" : "#/components/schemas/SignedBeaconBlockHeaderPq"
+            } ]
           }
         }
       }

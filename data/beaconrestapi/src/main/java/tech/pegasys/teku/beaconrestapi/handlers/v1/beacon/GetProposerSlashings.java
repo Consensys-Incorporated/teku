@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.beaconrestapi.handlers.v1.beacon;
 
+import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.PROPOSER_SLASHING_TYPE;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.CACHE_NONE;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_BEACON;
@@ -37,10 +38,7 @@ public class GetProposerSlashings extends RestApiEndpoint {
   private static final SerializableTypeDefinition<List<ProposerSlashing>> RESPONSE_TYPE =
       SerializableTypeDefinition.<List<ProposerSlashing>>object()
           .name("GetPoolProposerSlashingsResponse")
-          .withField(
-              "data",
-              listOf(ProposerSlashing.SSZ_SCHEMA.getJsonTypeDefinition()),
-              Function.identity())
+          .withField("data", listOf(PROPOSER_SLASHING_TYPE), Function.identity())
           .build();
 
   public GetProposerSlashings(final DataProvider dataProvider) {

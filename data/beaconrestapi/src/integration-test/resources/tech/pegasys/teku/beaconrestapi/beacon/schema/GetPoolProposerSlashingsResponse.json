@@ -6,7 +6,13 @@
     "data" : {
       "type" : "array",
       "items" : {
-        "$ref" : "#/components/schemas/ProposerSlashing"
+        "title" : "ProposerSlashing",
+        "type" : "object",
+        "oneOf" : [ {
+          "$ref" : "#/components/schemas/ProposerSlashing"
+        }, {
+          "$ref" : "#/components/schemas/ProposerSlashingPq"
+        } ]
       }
     }
   }

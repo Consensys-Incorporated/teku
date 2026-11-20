@@ -8,25 +8,13 @@
       "200" : {
         "description" : "Request successful",
         "headers" : {
-          "Eth-Consensus-Version": {
-            "description": "Required in response so client can deserialize returned json or ssz data more effectively.",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "phase0",
-                "altair",
-                "bellatrix",
-                "capella",
-                "deneb",
-                "electra",
-                "fulu",
-                "gloas",
-                "eip8483",
-                "pq",
-                "heze"
-              ],
-              "example": "phase0"
+          "Eth-Consensus-Version" : {
+            "description" : "Required in response so client can deserialize returned json or ssz data more effectively.",
+            "required" : true,
+            "schema" : {
+              "type" : "string",
+              "enum" : [ "phase0", "altair", "bellatrix", "capella", "deneb", "electra", "fulu", "gloas", "eip8483", "pq", "heze" ],
+              "example" : "phase0"
             }
           }
         },
@@ -81,6 +69,8 @@
           "schema" : {
             "type" : "object",
             "oneOf" : [ {
+              "$ref" : "#/components/schemas/AttesterSlashingPq"
+            }, {
               "$ref" : "#/components/schemas/AttesterSlashingElectra"
             }, {
               "$ref" : "#/components/schemas/AttesterSlashingPhase0"

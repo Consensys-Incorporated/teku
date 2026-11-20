@@ -16,7 +16,6 @@ package tech.pegasys.teku.beaconrestapi.handlers.tekuv1.beacon;
 import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.SLOT_PARAMETER;
 import static tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.MilestoneDependentTypesUtil.getSchemaDefinitionForAllSupportedMilestones;
 import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.MILESTONE_TYPE;
-import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.SIGNATURE_TYPE;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NO_CONTENT;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
@@ -28,10 +27,12 @@ import static tech.pegasys.teku.infrastructure.json.types.SerializableTypeDefini
 import com.fasterxml.jackson.core.JsonProcessingException;
 import io.javalin.http.Header;
 import java.util.List;
+import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.api.ChainDataProvider;
 import tech.pegasys.teku.api.DataProvider;
 import tech.pegasys.teku.api.migrated.AllBlocksAtSlotData;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.json.types.SerializableOneOfTypeDefinition;
 import tech.pegasys.teku.infrastructure.json.types.SerializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.AsyncApiResponse;
@@ -91,6 +92,23 @@ public class GetAllBlocksAtSlot extends RestApiEndpoint {
             }));
   }
 
+  // A BLS signature, or from PQ an XMSS signature
+  private static final SerializableTypeDefinition<Bytes> BLOCK_SIGNATURE_TYPE =
+      DeserializableTypeDefinition.string(Bytes.class)
+          .formatter(Bytes::toHexString)
+          .parser(Bytes::fromHexString)
+          .description(
+              "The block's signature: a 96-byte BLS signature, or from the PQ fork a 2404-byte XMSS"
+                  + " signature. Hex encoded with 0x prefix.")
+          .format("byte")
+          .build();
+
+  private static Bytes getSignatureBytes(final SignedBeaconBlock block) {
+    return block.isXmssSigned()
+        ? block.getXmssSignature()
+        : block.getSignature().toBytesCompressed();
+  }
+
   public static SerializableTypeDefinition<AllBlocksAtSlotData> getResponseType(
       final SchemaDefinitionCache schemaDefinitionCache) {
     final SerializableOneOfTypeDefinition<BeaconBlock> messageType =
@@ -104,7 +122,7 @@ public class GetAllBlocksAtSlot extends RestApiEndpoint {
     final SerializableTypeDefinition<SignedBeaconBlock> dataType =
         SerializableTypeDefinition.object(SignedBeaconBlock.class)
             .withField("message", messageType, SignedBeaconBlock::getMessage)
-            .withField("signature", SIGNATURE_TYPE, SignedBeaconBlock::getSignature)
+            .withField("signature", BLOCK_SIGNATURE_TYPE, GetAllBlocksAtSlot::getSignatureBytes)
             .withField("root", BYTES32_TYPE, SignedBeaconBlock::getRoot)
             .build();
 

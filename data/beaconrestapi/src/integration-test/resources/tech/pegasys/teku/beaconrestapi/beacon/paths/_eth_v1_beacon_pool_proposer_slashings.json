@@ -46,7 +46,13 @@
       "content" : {
         "application/json" : {
           "schema" : {
-            "$ref" : "#/components/schemas/ProposerSlashing"
+            "title" : "ProposerSlashing",
+            "type" : "object",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/ProposerSlashing"
+            }, {
+              "$ref" : "#/components/schemas/ProposerSlashingPq"
+            } ]
           }
         }
       }
