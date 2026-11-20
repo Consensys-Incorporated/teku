@@ -85,6 +85,20 @@ public class ValidatableAttestation {
     return attestation;
   }
 
+  /** PQ: an aggregate from this node's validator client, which is gossiped once valid. */
+  public static ValidatableAttestation pqAggregateFromValidator(
+      final Spec spec, final SignedAggregateAndProofPq signedAggregate) {
+    final ValidatableAttestation attestation =
+        new ValidatableAttestation(
+            spec,
+            signedAggregate.getMessage().getAggregate(),
+            Optional.empty(),
+            OptionalInt.empty(),
+            true);
+    attestation.pqAggregate = Optional.of(signedAggregate);
+    return attestation;
+  }
+
   public Optional<SignedAggregateAndProofPq> getPqAggregate() {
     return pqAggregate;
   }

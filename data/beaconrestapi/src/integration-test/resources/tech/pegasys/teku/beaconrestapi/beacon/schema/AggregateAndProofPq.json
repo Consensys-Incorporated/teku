@@ -1,0 +1,22 @@
+{
+  "title" : "AggregateAndProofPq",
+  "type" : "object",
+  "required" : [ "aggregator_index", "aggregate", "proof" ],
+  "properties" : {
+    "aggregator_index" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "aggregate" : {
+      "$ref" : "#/components/schemas/AttestationPq"
+    },
+    "proof" : {
+      "type" : "string",
+      "pattern" : "^0x[a-fA-F0-9]{2,}$",
+      "description" : "SSZ encoded byte list",
+      "format" : "bytes"
+    }
+  }
+}

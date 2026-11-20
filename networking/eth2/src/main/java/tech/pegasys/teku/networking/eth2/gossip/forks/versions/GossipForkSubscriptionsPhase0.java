@@ -67,6 +67,7 @@ public class GossipForkSubscriptionsPhase0 implements GossipForkSubscriptions {
 
   private AttestationGossipManager attestationGossipManager;
   private AggregateGossipManager aggregateGossipManager;
+  private PqAggregateGossipManager pqAggregateGossipManager;
   private BlockGossipManager blockGossipManager;
   private VoluntaryExitGossipManager voluntaryExitGossipManager;
   private ProposerSlashingGossipManager proposerSlashingGossipManager;
@@ -173,7 +174,7 @@ public class GossipForkSubscriptionsPhase0 implements GossipForkSubscriptions {
 
   /** PQ's aggregates (SignedAggregateAndProofPq), to the same aggregate processor. */
   void addPqAggregateGossipManager(final ForkInfo forkInfo, final Bytes4 forkDigest) {
-    addGossipManager(
+    pqAggregateGossipManager =
         new PqAggregateGossipManager(
             spec,
             recentChainData,
@@ -183,7 +184,8 @@ public class GossipForkSubscriptionsPhase0 implements GossipForkSubscriptions {
             forkInfo,
             forkDigest,
             aggregateProcessor,
-            debugDataDumper));
+            debugDataDumper);
+    addGossipManager(pqAggregateGossipManager);
   }
 
   void addVoluntaryExitGossipManager(final ForkInfo forkInfo, final Bytes4 forkDigest) {
@@ -267,6 +269,9 @@ public class GossipForkSubscriptionsPhase0 implements GossipForkSubscriptions {
     // PQ has its own aggregate type, so its forks have no BLS aggregate topic
     if (aggregateGossipManager != null) {
       aggregateGossipManager.onNewAggregate(attestation);
+    }
+    if (pqAggregateGossipManager != null) {
+      pqAggregateGossipManager.onNewAggregate(attestation);
     }
   }
 

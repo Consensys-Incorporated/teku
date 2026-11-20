@@ -64,6 +64,8 @@ import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SignedContributionAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeContribution;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeMessage;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationAndProofPq;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.datastructures.validator.SubnetSubscription;
@@ -253,6 +255,22 @@ public class MetricRecordingValidatorApiChannel implements ValidatorApiChannel {
       final List<SignedAggregateAndProof> aggregateAndProofs) {
     return countSendRequest(
         delegate.sendAggregateAndProofs(aggregateAndProofs),
+        BeaconNodeRequestLabels.PUBLISH_AGGREGATE_AND_PROOFS_METHOD);
+  }
+
+  @Override
+  public SafeFuture<Optional<AttestationAndProofPq>> createPqAggregate(
+      final UInt64 slot, final Bytes32 attestationHashTreeRoot, final UInt64 committeeIndex) {
+    return countOptionalDataRequest(
+        delegate.createPqAggregate(slot, attestationHashTreeRoot, committeeIndex),
+        BeaconNodeRequestLabels.CREATE_AGGREGATE_METHOD);
+  }
+
+  @Override
+  public SafeFuture<List<SubmitDataError>> sendPqAggregateAndProofs(
+      final List<SignedAggregateAndProofPq> aggregateAndProofs) {
+    return countSendRequest(
+        delegate.sendPqAggregateAndProofs(aggregateAndProofs),
         BeaconNodeRequestLabels.PUBLISH_AGGREGATE_AND_PROOFS_METHOD);
   }
 

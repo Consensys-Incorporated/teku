@@ -241,8 +241,11 @@ import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SignedCo
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncAggregatorSelectionData;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeContribution;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeMessage;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationPq;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationPqSchema;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.IndexedAttestationPqSchema;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.PqAttestationSchemas;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
@@ -3913,6 +3916,20 @@ public final class DataStructureUtil {
         schema.getFieldIndex(BlockBodyFields.PROOF),
         schema.getAttestationProofSchema().fromBytes(randomBytes(64)));
     return BeaconBlockBodyPq.required(schema.createFromFieldValues(fieldValues));
+  }
+
+  /** A PQ aggregate signed by its aggregator, with a random proof. */
+  public SignedAggregateAndProofPq randomSignedAggregateAndProofPq() {
+    final PqAttestationSchemas schemas =
+        SchemaDefinitionsPq.required(spec.getGenesisSchemaDefinitions()).getPqAttestationSchemas();
+    final AttestationPq aggregate = (AttestationPq) randomAttestation();
+    return schemas
+        .getSignedAggregateAndProofSchema()
+        .create(
+            schemas
+                .getAggregateAndProofSchema()
+                .create(randomValidatorIndex(), aggregate, randomBytes(64)),
+            randomXmssSignature().getBytes());
   }
 
   /** A random leanXMSS signature, as PQ signs blocks, bids and envelopes. */
