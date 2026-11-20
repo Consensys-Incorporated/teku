@@ -26,6 +26,7 @@ import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
@@ -40,12 +41,17 @@ import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.versions.pq.BuilderPq;
+import tech.pegasys.teku.spec.datastructures.state.versions.pq.ValidatorPq;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateAccessors;
 import tech.pegasys.teku.spec.logic.common.util.AttestationUtil;
 import tech.pegasys.teku.spec.logic.common.util.AttestationValidationResult;
 import tech.pegasys.teku.spec.logic.common.util.DataColumnSidecarUtil;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.BeaconStateAccessorsGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.PredicatesGloas;
+import tech.pegasys.teku.spec.logic.versions.pq.crypto.XmssSignatureVerifier;
+import tech.pegasys.teku.spec.logic.versions.pq.helpers.MiscHelpersPq;
+import tech.pegasys.teku.spec.logic.versions.pq.helpers.PredicatesPq;
 import tech.pegasys.teku.statetransition.util.ShufflingDependentRootUtil;
 import tech.pegasys.teku.storage.client.ChainHead;
 import tech.pegasys.teku.storage.client.RecentChainData;
@@ -56,11 +62,21 @@ public class GossipValidationHelper {
   private final RecentChainData recentChainData;
   private final int maxOffsetTimeInMillis;
   private final AttestationStateSelector attestationStateSelector;
+  private final XmssSignatureVerifier xmssSignatureVerifier;
 
   public GossipValidationHelper(
       final Spec spec, final RecentChainData recentChainData, final MetricsSystem metricsSystem) {
+    this(spec, recentChainData, metricsSystem, XmssSignatureVerifier.LEAN_XMSS);
+  }
+
+  public GossipValidationHelper(
+      final Spec spec,
+      final RecentChainData recentChainData,
+      final MetricsSystem metricsSystem,
+      final XmssSignatureVerifier xmssSignatureVerifier) {
     this.spec = spec;
     this.recentChainData = recentChainData;
+    this.xmssSignatureVerifier = xmssSignatureVerifier;
     this.maxOffsetTimeInMillis = spec.getNetworkingConfig().getMaximumGossipClockDisparity();
     this.attestationStateSelector =
         new AttestationStateSelector(spec, recentChainData, metricsSystem);
@@ -162,6 +178,88 @@ public class GossipValidationHelper {
     return spec.getValidatorPubKey(state, proposerIndex)
         .map(publicKey -> BLS.verify(publicKey, signingRoot, signature))
         .orElse(false);
+  }
+
+  /**
+   * PQ: whether {@code xmssSignature} signs {@code signingRoot} at {@code leafIndex} under the XMSS
+   * key of the validator at {@code validatorIndex} in {@code state} (xmss.Verify).
+   */
+  public boolean isXmssSignatureValidWithRespectToValidatorIndex(
+      final Bytes signingRoot,
+      final UInt64 validatorIndex,
+      final UInt64 leafIndex,
+      final Bytes xmssSignature,
+      final BeaconState state) {
+    return getValidatorXmssPublicKey(state, validatorIndex)
+        .map(
+            publicKey ->
+                xmssSignatureVerifier.verify(
+                    publicKey, leafIndex, Bytes32.wrap(signingRoot), xmssSignature))
+        .orElse(false);
+  }
+
+  /**
+   * PQ: as {@link #isXmssSignatureValidWithRespectToValidatorIndex}, for a builder. A self-built
+   * message is signed by the proposer of the state's latest block.
+   */
+  public boolean isXmssSignatureValidWithRespectToBuilderIndex(
+      final Bytes signingRoot,
+      final UInt64 builderIndex,
+      final UInt64 leafIndex,
+      final Bytes xmssSignature,
+      final BeaconState state) {
+    if (builderIndex.equals(BUILDER_INDEX_SELF_BUILD)) {
+      return isXmssSignatureValidWithRespectToValidatorIndex(
+          signingRoot,
+          state.getLatestBlockHeader().getProposerIndex(),
+          leafIndex,
+          xmssSignature,
+          state);
+    }
+    return getBuilderXmssPublicKey(state, builderIndex)
+        .map(
+            publicKey ->
+                xmssSignatureVerifier.verify(
+                    publicKey, leafIndex, Bytes32.wrap(signingRoot), xmssSignature))
+        .orElse(false);
+  }
+
+  /**
+   * PQ: the XMSS public key of the validator at {@code validatorIndex}, if {@code state} has one.
+   */
+  public Optional<Bytes32> getValidatorXmssPublicKey(
+      final BeaconState state, final UInt64 validatorIndex) {
+    if (validatorIndex.isGreaterThanOrEqualTo(state.getValidators().size())) {
+      return Optional.empty();
+    }
+    return state.getValidators().get(validatorIndex.intValue()) instanceof ValidatorPq validator
+        ? Optional.of(validator.getXmssPublicKey())
+        : Optional.empty();
+  }
+
+  private Optional<Bytes32> getBuilderXmssPublicKey(
+      final BeaconState state, final UInt64 builderIndex) {
+    return state
+        .toVersionGloas()
+        .filter(gloasState -> builderIndex.isLessThan(gloasState.getBuilders().size()))
+        .map(gloasState -> gloasState.getBuilders().get(builderIndex.intValue()))
+        .filter(BuilderPq.class::isInstance)
+        .map(builder -> ((BuilderPq) builder).getXmssPublicKey());
+  }
+
+  /** PQ: compute_xmss_leaf_index, the leaf of a message of the type given by the offset. */
+  public UInt64 computeXmssLeafIndex(final UInt64 slot, final UInt64 leafOffset) {
+    return MiscHelpersPq.required(spec.atSlot(slot).miscHelpers())
+        .computeXmssLeafIndex(slot, leafOffset);
+  }
+
+  /** PQ: is_builder_bid_leaf_index, whether builders may sign bids at {@code leafIndex}. */
+  public boolean isBuilderBidLeafIndex(final UInt64 slot, final UInt64 leafIndex) {
+    return ((PredicatesPq) spec.atSlot(slot).predicates()).isBuilderBidLeafIndex(leafIndex);
+  }
+
+  public boolean isPq(final UInt64 slot) {
+    return spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ);
   }
 
   public boolean isSignatureValidWithRespectToProposerIndex(

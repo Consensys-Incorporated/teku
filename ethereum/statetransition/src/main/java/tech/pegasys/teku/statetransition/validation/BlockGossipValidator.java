@@ -15,6 +15,7 @@ package tech.pegasys.teku.statetransition.validation;
 
 import static tech.pegasys.teku.infrastructure.async.SafeFuture.completedFuture;
 import static tech.pegasys.teku.spec.config.Constants.VALID_BLOCK_SET_SIZE;
+import static tech.pegasys.teku.spec.constants.PqConstants.LEAF_OFFSET_BEACON_PROPOSER;
 import static tech.pegasys.teku.statetransition.validation.BlockGossipValidator.EquivocationCheckResult.BLOCK_ALREADY_SEEN_FOR_SLOT_PROPOSER;
 import static tech.pegasys.teku.statetransition.validation.BlockGossipValidator.EquivocationCheckResult.EQUIVOCATING_BLOCK_FOR_SLOT_PROPOSER;
 import static tech.pegasys.teku.statetransition.validation.BlockGossipValidator.EquivocationCheckResult.FIRST_BLOCK_FOR_SLOT_PROPOSER;
@@ -397,6 +398,9 @@ public class BlockGossipValidator {
     if (maybeForkInfo.isEmpty()) {
       return completedFuture(InternalValidationResult.SAVE_FOR_FUTURE);
     }
+    if (block.isXmssSigned()) {
+      return checkXmssSignatureBeforeSavingForFuture(block, maybeForkInfo.get());
+    }
     final Optional<BLSPublicKey> maybeFinalizedProposerPublicKey =
         spec.getValidatorPubKey(
             gossipValidationHelper.getLatestFinalizedState(), block.getProposerIndex());
@@ -423,6 +427,56 @@ public class BlockGossipValidator {
                                 block.getProposerIndex())));
   }
 
+  /**
+   * PQ: as {@link #checkSignatureBeforeSavingForFuture}, with the proposer's XMSS key at the
+   * block's proposer leaf. The finalized state may be from before the PQ fork, without XMSS keys,
+   * so the head state is the fallback.
+   */
+  private SafeFuture<InternalValidationResult> checkXmssSignatureBeforeSavingForFuture(
+      final SignedBeaconBlock block, final ForkInfo forkInfo) {
+    final BeaconState finalizedState = gossipValidationHelper.getLatestFinalizedState();
+    if (gossipValidationHelper
+        .getValidatorXmssPublicKey(finalizedState, block.getProposerIndex())
+        .isPresent()) {
+      return completedFuture(checkXmssProposerSignature(block, finalizedState, forkInfo));
+    }
+    return gossipValidationHelper
+        .getHeadState()
+        .thenApply(
+            maybeHeadState ->
+                maybeHeadState
+                    .filter(
+                        headState ->
+                            gossipValidationHelper
+                                .getValidatorXmssPublicKey(headState, block.getProposerIndex())
+                                .isPresent())
+                    .map(headState -> checkXmssProposerSignature(block, headState, forkInfo))
+                    .orElseGet(
+                        () ->
+                            ignore(
+                                "Block proposer index %s is not a known validator",
+                                block.getProposerIndex())));
+  }
+
+  private InternalValidationResult checkXmssProposerSignature(
+      final SignedBeaconBlock block, final BeaconState state, final ForkInfo forkInfo) {
+    if (!xmssBlockSignatureIsValid(block, state, forkInfo)) {
+      return reject("Block signature is invalid");
+    }
+    return InternalValidationResult.SAVE_FOR_FUTURE;
+  }
+
+  private boolean xmssBlockSignatureIsValid(
+      final SignedBeaconBlock block, final BeaconState state, final ForkInfo forkInfo) {
+    final Bytes signingRoot = signingRootUtil.signingRootForSignBlock(block.getMessage(), forkInfo);
+    return gossipValidationHelper.isXmssSignatureValidWithRespectToValidatorIndex(
+        signingRoot,
+        block.getProposerIndex(),
+        gossipValidationHelper.computeXmssLeafIndex(block.getSlot(), LEAF_OFFSET_BEACON_PROPOSER),
+        block.getXmssSignature(),
+        state);
+  }
+
   private InternalValidationResult checkProposerSignature(
       final SignedBeaconBlock block,
       final BLSPublicKey proposerPublicKey,
@@ -436,6 +490,9 @@ public class BlockGossipValidator {
 
   private boolean blockSignatureIsValidWithRespectToProposerIndex(
       final SignedBeaconBlock block, final BeaconState postState) {
+    if (block.isXmssSigned()) {
+      return xmssBlockSignatureIsValid(block, postState, postState.getForkInfo());
+    }
     final Bytes signingRoot =
         signingRootUtil.signingRootForSignBlock(block.getMessage(), postState.getForkInfo());
     return gossipValidationHelper.isSignatureValidWithRespectToProposerIndex(

@@ -9,8 +9,8 @@ Phase 6 of [pq-fork-plan.md](pq-fork-plan.md): taking the merged PQ state transi
 | Slice | What | State |
 |---|---|---|
 | 6a | Block production at the spec level, and test chains through the PQ fork | In review (#11674) |
-| 6b | Block import and fork choice over PQ chains | Done (`pq-bn-import`, stacked on 6a) |
-| 6c | Gossip validation of PQ messages | Not started |
+| 6b | Block import and fork choice over PQ chains | In review (#11676, stacked on #11674) |
+| 6c | Gossip validation of PQ messages | In progress (`pq-bn-gossip`): 6c-1 done |
 | 6d | Attestation pool, proofs and packing | Not started |
 | 6e | Beacon-node block production | Not started |
 
@@ -43,16 +43,23 @@ Phase 6 of [pq-fork-plan.md](pq-fork-plan.md): taking the merged PQ state transi
 
 ### 6c: gossip validation
 
-- **An async XMSS verification service** for gossip. Each verify is independent (about 30 µs to 70 µs), so there's no batching gain, but it must not run on the network threads.
-- **Blocks** (`BlockGossipValidator`, `GossipValidationHelper`): the proposer's XMSS signature at offset 0.
-- **Single attestations:** XMSS at the target epoch's attestation leaf; the subnet is modulo 16.
-- **Aggregates:**
+**6c-1: signed objects (done).**
+- **`GossipValidationHelper`** verifies XMSS signatures against the validator's, or a builder's, XMSS key in the state, at the leaf a message's type uses. A self-built message is signed by the latest block's proposer. The verifier is injectable (default: leanXMSS), so tests can exercise rejections without real keys.
+- **Blocks:** the proposer's signature at offset 0, both before a future block is saved and after its state is built. The finalized state may be from before the fork, without XMSS keys, so the head state is the fallback.
+- **Envelopes** at offset 4, **preferences** at offset 3 of the proposal slot, and **bids** at the leaf the signature carries, which must be in the builders' bid range (`verify_execution_payload_bid_signature`).
+
+**6c-2: attestations.**
+- Single attestations: XMSS at the target epoch's attestation leaf; the subnet is modulo 16.
+- Aggregates:
   - no selection proof; the aggregator must be in the aggregation committee;
   - verify the proof against the aggregate's statements;
   - apply the best-aggregate (balance) seen rule.
-- **Envelopes, bids, proposer preferences and payload attestation messages:** XMSS at offsets 4, the bid range, 3 and 2.
+- Payload attestation messages: these have their own PQ type (`PayloadAttestationMessagePq`), so they come with the PQ topic decoders. XMSS at offset 2.
+
+**6c-3: the rest.**
 - **Slashings:** `ProposerSlashingValidator` and `AttesterSlashingValidator`, still BLS today.
 - **Removed messages are rejected:** voluntary exits, BLS changes, sync committee messages and contributions.
+- **An async XMSS verification service:** about 30 µs to 70 µs per verify, kept off the network threads.
 
 ### 6d: attestation pool, proofs and packing
 

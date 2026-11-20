@@ -45,6 +45,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
+import tech.pegasys.teku.spec.logic.versions.pq.crypto.XmssSignatureVerifier;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
 import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
 
@@ -527,6 +528,19 @@ public class ExecutionPayloadBidGossipValidator {
     final Bytes signingRoot =
         signingRootUtil.signingRootForSignExecutionPayloadBid(
             signedExecutionPayloadBid.getMessage(), state.getForkInfo());
+    if (signedExecutionPayloadBid.isXmssSigned()) {
+      // PQ (verify_execution_payload_bid_signature): at the leaf the signature carries, which
+      // must be in the builders' bid range
+      final UInt64 leafIndex =
+          XmssSignatureVerifier.getLeafIndex(signedExecutionPayloadBid.getXmssSignature());
+      return gossipValidationHelper.isBuilderBidLeafIndex(state.getSlot(), leafIndex)
+          && gossipValidationHelper.isXmssSignatureValidWithRespectToBuilderIndex(
+              signingRoot,
+              signedExecutionPayloadBid.getMessage().getBuilderIndex(),
+              leafIndex,
+              signedExecutionPayloadBid.getXmssSignature(),
+              state);
+    }
     return gossipValidationHelper.isSignatureValidWithRespectToBuilderIndex(
         signingRoot,
         signedExecutionPayloadBid.getMessage().getBuilderIndex(),
