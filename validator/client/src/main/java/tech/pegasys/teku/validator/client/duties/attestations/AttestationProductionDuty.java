@@ -39,8 +39,10 @@ import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationSchema;
 import tech.pegasys.teku.spec.datastructures.operations.SingleAttestationSchema;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SingleAttestationPq;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
+import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 import tech.pegasys.teku.validator.client.ForkProvider;
 import tech.pegasys.teku.validator.client.Validator;
@@ -226,11 +228,16 @@ public class AttestationProductionDuty implements Duty {
                           validateAttestationData(slot, attestationData);
                           return validatorDutyMetrics.record(
                               () ->
-                                  signAttestationForValidator(
-                                      signedAttestationProducer,
-                                      forkInfo,
-                                      attestationData,
-                                      validator),
+                                  spec.atSlot(slot)
+                                          .getMilestone()
+                                          .isGreaterThanOrEqualTo(SpecMilestone.PQ)
+                                      ? signPqAttestationForValidator(
+                                          forkInfo, attestationData, validator)
+                                      : signAttestationForValidator(
+                                          signedAttestationProducer,
+                                          forkInfo,
+                                          attestationData,
+                                          validator),
                               this,
                               ValidatorDutyMetricsSteps.SIGN);
                         })
@@ -292,6 +299,36 @@ public class AttestationProductionDuty implements Duty {
             attestation ->
                 ProductionResult.success(
                     validator.publicKey(), attestationData.getBeaconBlockRoot(), attestation));
+  }
+
+  /**
+   * PQ: a single attestation signed with leanXMSS at the target epoch's attestation leaf. The
+   * signer's leaf protection refuses a second, different attestation for the target epoch.
+   */
+  private SafeFuture<ProductionResult<Attestation>> signPqAttestationForValidator(
+      final ForkInfo forkInfo,
+      final AttestationData attestationData,
+      final ValidatorWithAttestationDutyInfo validator) {
+    final Optional<XmssSigner> maybeXmssSigner = validator.validator().getXmssSigner();
+    if (maybeXmssSigner.isEmpty()) {
+      return SafeFuture.completedFuture(
+          ProductionResult.failure(
+              validator.publicKey(),
+              new IllegalStateException("Validator has no PQ keys to attest with")));
+    }
+    return maybeXmssSigner
+        .get()
+        .signAttestationData(attestationData, forkInfo)
+        .thenApply(
+            signature ->
+                ProductionResult.<Attestation>success(
+                    validator.publicKey(),
+                    attestationData.getBeaconBlockRoot(),
+                    new SingleAttestationPq(
+                        UInt64.valueOf(validator.committeeIndex()),
+                        UInt64.valueOf(validator.validatorIndex()),
+                        attestationData,
+                        signature.toBytes())));
   }
 
   private Attestation createSignedAttestation(
