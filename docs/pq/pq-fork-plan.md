@@ -404,6 +404,9 @@ PQ is an emergency fork for when elliptic-curve cryptography can no longer be tr
     - The socket's directory must be private (mode 0700).
     - A sidecar serves at most 16 connections, so share one `Sidecar` per process. Its calls run one at a time.
   - **leanXMSS signing and single-signature verification still run in-process,** and they are all Teku uses today. The EthLib vectors and the spec KAT still pass through `infrastructure/xmss` on 0.13.0.
+- **Update 2026-11-21, v0.14.0** (released 2026-11-20, leanVM #802). Teku uses it.
+  - **Smaller keys.** A loaded key stores 2^10 nodes per tree instead of every node: 16 KiB instead of 2 MiB for the top tree and for each cached bottom tree. Signing recomputes 2^6 leaves per path, at most about 3 ms more per signature. Signatures are unchanged byte for byte.
+  - **Saved tree caches.** `XmssSecretKey.cacheToBytes()` and `XmssSecretKey.fromCacheBytes(seed, publicKey, cache)` save and reload a key's trees (16 KiB plus 17 KiB per bottom tree, no secret in them), so a validator client can skip building them at startup. `fromCacheBytes` throws unless the cache matches the public key. Teku doesn't use these yet.
 - **Packaging (as of v0.10.1):** on Maven Central as `io.github.crate-crypto:lean-pq`, versions 0.6.1 to 0.11.0, jar SHA-1 `3b098870…`. The jar is 7.5 MB and bundles natives for linux-x86_64 and linux-aarch64 (glibc ≥ 2.17; x86_64 needs AVX2 and PCLMULQDQ), macOS universal, and windows-x86_64. There is no musl or Windows arm64 build. The library is the named module `org.ethereum.leanpq`.
 - **FFM, not JNI:** the JVM needs `--enable-native-access=ALL-UNNAMED`, because Teku runs on the class path. Add it to the start scripts, the Docker image and test JVM args, the same way `java-eth-kzg` is handled. On Linux and macOS the native library is copied into `java.io.tmpdir`, which must allow executable mappings. `-Dlean.pq.native.path` overrides it.
 - **API:**
