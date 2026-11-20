@@ -62,8 +62,8 @@ public class BlockFactoryGloas extends BlockFactoryPhase0 {
               final BeaconState state = blockAndState.getState();
               final SignedExecutionPayloadBid bid =
                   BeaconBlockBodyGloas.required(block.getBody()).getSignedExecutionPayloadBid();
-              // G2-point-at-infinity signature means we self-built the payload
-              final boolean selfBuilt = bid.getSignature().isInfinity();
+              // The empty signature (G2-point-at-infinity, or empty XMSS) means we self-built
+              final boolean selfBuilt = bid.isSelfBuilt();
               // include_payload=false or builder bid → return beacon block only
               if (!blockProductionContext.includePayload() || !selfBuilt) {
                 return SafeFuture.completedFuture(

@@ -14,6 +14,7 @@
 package tech.pegasys.teku.validator.coordinator;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -25,6 +26,7 @@ import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ZERO;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
 import static tech.pegasys.teku.validator.coordinator.BlockProductionTestUtil.blockProductionContext;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -253,6 +255,8 @@ class BlockOperationSelectorFactoryTest {
                 schemaDefinitions.getBeaconBlockBodySchema().getAttestationsSchema().getDefault(),
                 proof));
     final Bytes[] capturedProof = new Bytes[1];
+    final List<Bytes32> capturedVrfProof = new ArrayList<>();
+    final List<Bytes32> vrfProof = List.of(gloasData.randomBytes32(), gloasData.randomBytes32());
     final CapturingBeaconBlockBodyBuilder pqBodyBuilder =
         new CapturingBeaconBlockBodyBuilder(false) {
           @Override
@@ -280,6 +284,17 @@ class BlockOperationSelectorFactoryTest {
             capturedProof[0] = attestationProof;
             return this;
           }
+
+          @Override
+          public boolean supportsVrfRandaoReveal() {
+            return true;
+          }
+
+          @Override
+          public BeaconBlockBodyBuilder vrfRandaoReveal(final List<Bytes32> vrfProof) {
+            capturedVrfProof.addAll(vrfProof);
+            return this;
+          }
         };
     final BlockProductionContext context =
         new BlockProductionContext(
@@ -293,8 +308,17 @@ class BlockOperationSelectorFactoryTest {
             Optional.empty(),
             BlockProductionPerformance.NOOP);
 
-    safeJoin(createFactory(gloasSpec).createSelector(context).apply(pqBodyBuilder));
+    // The RANDAO reveal is the proposer's VRF proof, which must be provided
+    assertThatThrownBy(() -> createFactory(gloasSpec).createSelector(context).apply(pqBodyBuilder))
+        .isInstanceOf(IllegalArgumentException.class);
 
+    safeJoin(
+        createFactory(gloasSpec)
+            .createSelector(context.withVrfRandaoReveal(vrfProof))
+            .apply(pqBodyBuilder));
+
+    assertThat(capturedVrfProof).isEqualTo(vrfProof);
+    assertThat(pqBodyBuilder.randaoReveal).isNull();
     assertThat(capturedProof[0]).isEqualTo(proof);
     verify(attestationPool, never()).getAttestationsForBlock(any(), any());
     // PQ blocks carry no voluntary exits

@@ -66,6 +66,14 @@ public class SignedExecutionPayloadBid
     return SszSignatures.xmssSignature(getField1());
   }
 
+  /**
+   * Whether the proposer built the payload itself: a self-built bid carries the empty signature,
+   * G2_POINT_AT_INFINITY for BLS, all zero bytes for XMSS.
+   */
+  public boolean isSelfBuilt() {
+    return isXmssSigned() ? getXmssSignature().isZero() : getSignature().isInfinity();
+  }
+
   @Override
   public SignedExecutionPayloadBidSchema getSchema() {
     return (SignedExecutionPayloadBidSchema) super.getSchema();

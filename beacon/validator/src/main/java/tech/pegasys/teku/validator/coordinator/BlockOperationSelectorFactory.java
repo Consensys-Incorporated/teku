@@ -304,8 +304,19 @@ public class BlockOperationSelectorFactory {
         setVoluntaryExitsAndParentExecutionRequests = COMPLETE;
       }
 
+      if (bodyBuilder.supportsVrfRandaoReveal()) {
+        // PQ: the RANDAO reveal is the proposer's VRF proof
+        bodyBuilder.vrfRandaoReveal(
+            blockProductionContext
+                .vrfRandaoReveal()
+                .orElseThrow(
+                    () ->
+                        new IllegalArgumentException(
+                            "A PQ block's RANDAO reveal is a VRF proof, but none was provided")));
+      } else {
+        bodyBuilder.randaoReveal(blockProductionContext.randaoReveal());
+      }
       bodyBuilder
-          .randaoReveal(blockProductionContext.randaoReveal())
           .eth1Data(eth1Data)
           .graffiti(graffitiBuilder.buildGraffiti(blockProductionContext.graffiti()))
           .attestations(attestations)

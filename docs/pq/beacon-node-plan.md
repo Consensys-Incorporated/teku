@@ -12,7 +12,7 @@ Phase 6 of [pq-fork-plan.md](pq-fork-plan.md): taking the merged PQ state transi
 | 6b | Block import and fork choice over PQ chains | Merged (#11676) |
 | 6c | Gossip validation of PQ messages | Merged (#11677, #11678, #11679); reference tests and fixes in #11687 |
 | 6d | Attestation pool, proofs and packing | In review |
-| 6e | Beacon-node block production | Not started |
+| 6e | Beacon-node block production | In review |
 
 ### 6a: block production at the spec level, and PQ test chains
 
@@ -98,10 +98,8 @@ PQ attestations carry no signatures, so the BLS pool (`AggregatingAttestationPoo
 
 ### 6e: beacon-node block production
 
-- **`BlockFactory` and `BlockOperationSelectorFactory`:**
-  - the VC's VRF proof as the RANDAO reveal (REST changes in phase 8);
-  - the merged attestation proof;
-  - a self-built bid with an all-zero XMSS signature;
-  - no payload attestations.
-- **`BlockFactoryGloas`** detects a self-built bid by its BLS signature being the point at infinity. PQ needs the all-zero XMSS check.
+- **RANDAO reveal:** `BlockProductionContext` carries the proposer's VRF proof (`withVrfRandaoReveal`), and `BlockOperationSelectorFactory` gives it to a body that takes one, failing if there is none. The VC sends it once 8c's v4 block endpoint takes it.
+- **Attestations and proof:** from 6d.
+- **Self-built bid:** `SignedExecutionPayloadBidSchema.createSelfBuilt` signs with the empty signature of the schema's kind, the empty XMSS signature from PQ. `SignedExecutionPayloadBid.isSelfBuilt` recognises either, so `BlockFactoryGloas` returns a PQ self-built block with its envelope.
+- **No payload attestations, exits or sync aggregate:** the PQ body builder reports none, and the selector leaves out voluntary exits.
 - **The self-built envelope** is signed by the validator client (phase 9c).
