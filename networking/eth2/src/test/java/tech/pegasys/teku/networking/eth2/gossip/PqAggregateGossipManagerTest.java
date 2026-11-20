@@ -19,6 +19,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -26,8 +27,10 @@ import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
+import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.gossip.encoding.GossipEncoding;
+import tech.pegasys.teku.networking.eth2.gossip.subnets.AttestationSubnetSubscriptions;
 import tech.pegasys.teku.networking.eth2.gossip.topics.GossipTopicName;
 import tech.pegasys.teku.networking.eth2.gossip.topics.OperationProcessor;
 import tech.pegasys.teku.networking.p2p.gossip.GossipNetwork;
@@ -91,6 +94,25 @@ public class PqAggregateGossipManagerTest {
     gossipManager.onNewAggregate(attestation);
     gossipManager.onNewAggregate(attestation);
 
+    verify(topicChannel).gossip(gossipEncoding.encode(aggregate));
+  }
+
+  @Test
+  public void shouldPublishAggregateAfterTheAttestationSubnetsSkipIt() {
+    // publishAttestation offers every attestation to the subnets first
+    final AttestationSubnetSubscriptions subnetSubscriptions =
+        mock(AttestationSubnetSubscriptions.class);
+    final AttestationGossipManager attestationGossipManager =
+        new AttestationGossipManager(new StubMetricsSystem(), subnetSubscriptions);
+    final SignedAggregateAndProofPq aggregate = dataStructureUtil.randomSignedAggregateAndProofPq();
+    final ValidatableAttestation attestation =
+        ValidatableAttestation.pqAggregateFromValidator(spec, aggregate);
+
+    attestationGossipManager.onNewAttestation(attestation);
+    gossipManager.onNewAggregate(attestation);
+
+    // The aggregate is not a single attestation, so it doesn't go to a subnet
+    verifyNoInteractions(subnetSubscriptions);
     verify(topicChannel).gossip(gossipEncoding.encode(aggregate));
   }
 

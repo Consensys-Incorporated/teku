@@ -230,8 +230,12 @@ public class BlockImporter {
         VerifiedBlockOperationsListener::onOperationsFromBlock, blockBody.getAttesterSlashings());
     proposerSlashingSubscribers.deliver(
         VerifiedBlockOperationsListener::onOperationsFromBlock, blockBody.getProposerSlashings());
-    voluntaryExitSubscribers.deliver(
-        VerifiedBlockOperationsListener::onOperationsFromBlock, blockBody.getVoluntaryExits());
+    blockBody
+        .getOptionalVoluntaryExits()
+        .ifPresent(
+            exits ->
+                voluntaryExitSubscribers.deliver(
+                    VerifiedBlockOperationsListener::onOperationsFromBlock, exits));
     blockBody
         .getOptionalBlsToExecutionChanges()
         .ifPresent(

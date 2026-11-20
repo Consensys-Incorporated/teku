@@ -16,8 +16,11 @@ package tech.pegasys.teku.statetransition.forkchoice;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
+import static tech.pegasys.teku.infrastructure.async.SyncAsyncRunner.SYNC_RUNNER;
 
 import java.util.List;
 import java.util.Optional;
@@ -38,6 +41,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
+import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationPq;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannelStub;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
@@ -45,6 +49,9 @@ import tech.pegasys.teku.spec.logic.common.statetransition.availability.Availabi
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.ExecutionPayloadImportResult;
 import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
+import tech.pegasys.teku.statetransition.block.BlockImporter;
+import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
+import tech.pegasys.teku.statetransition.block.VerifiedBlockOperationsListener;
 import tech.pegasys.teku.statetransition.forkchoice.fastconfirmation.FastConfirmationTracker;
 import tech.pegasys.teku.statetransition.util.DebugDataDumper;
 import tech.pegasys.teku.statetransition.validation.BlockBroadcastValidator;
@@ -54,6 +61,7 @@ import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.storage.server.StateStorageMode;
 import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystemBuilder;
 import tech.pegasys.teku.storage.storageSystem.StorageSystem;
+import tech.pegasys.teku.weaksubjectivity.WeakSubjectivityValidator;
 import tech.pegasys.teku.xmss.XmssConstants;
 
 /** Fork choice over a chain that runs from EIP-8483 through the PQ fork. */
@@ -186,6 +194,41 @@ class ForkChoicePqTest {
                 .getWeight(attestedBlock.getRoot()))
         .hasValueSatisfying(weight -> assertThat(weight).isGreaterThan(UInt64.ZERO));
     assertThat(recentChainData.getBestBlockRoot()).contains(block.getRoot());
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void blockImporterImportsPqBlocksWithoutVoluntaryExits() {
+    final WeakSubjectivityValidator weakSubjectivityValidator =
+        mock(WeakSubjectivityValidator.class);
+    when(weakSubjectivityValidator.isBlockValid(any(), any())).thenReturn(true);
+    final BlockImporter blockImporter =
+        new BlockImporter(
+            SYNC_RUNNER,
+            spec,
+            mock(ReceivedBlockEventsChannel.class),
+            recentChainData,
+            forkChoice,
+            weakSubjectivityValidator,
+            executionLayer);
+    final VerifiedBlockOperationsListener<SignedVoluntaryExit> exitListener =
+        mock(VerifiedBlockOperationsListener.class);
+    blockImporter.subscribeToVerifiedBlockVoluntaryExits(exitListener);
+    final List<SignedBlockAndState> blocks =
+        chainBuilder.generateBlocksUpToSlot(spec.computeStartSlotAtEpoch(PQ_FORK_EPOCH).plus(1));
+
+    for (final SignedBlockAndState block : blocks) {
+      storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(block.getSlot());
+      final BlockImportResult result = safeJoin(blockImporter.importBlock(block.getBlock()));
+      assertThat(result.isSuccessful())
+          .describedAs("block at slot %s: %s", block.getSlot(), result.getFailureReason())
+          .isTrue();
+      importPayload(block);
+    }
+
+    assertThat(spec.atSlot(blocks.getLast().getSlot()).getMilestone()).isEqualTo(SpecMilestone.PQ);
+    // Only pre-PQ blocks have exits to deliver
+    verify(exitListener, times(blocks.size() - 2)).onOperationsFromBlock(any());
   }
 
   private void importBlock(final SignedBlockAndState block) {
