@@ -138,6 +138,14 @@ public class FailoverValidatorApiHandler implements ValidatorApiChannel {
   }
 
   @Override
+  public SafeFuture<Optional<Map<Bytes32, Integer>>> getValidatorIndicesByXmssKey(
+      final Collection<Bytes32> xmssPublicKeys) {
+    return tryRequestUntilSuccess(
+        apiChannel -> apiChannel.getValidatorIndicesByXmssKey(xmssPublicKeys),
+        BeaconNodeRequestLabels.GET_VALIDATOR_INDICES_METHOD);
+  }
+
+  @Override
   public SafeFuture<Optional<Map<BLSPublicKey, StateValidatorData>>> getValidatorStatuses(
       final Collection<BLSPublicKey> validatorIdentifiers) {
     return tryRequestUntilSuccess(

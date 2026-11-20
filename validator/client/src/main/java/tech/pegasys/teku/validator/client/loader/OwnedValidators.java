@@ -22,6 +22,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes48;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.validator.client.Validator;
 
@@ -58,6 +60,24 @@ public class OwnedValidators {
 
   public Optional<Validator> getValidator(final BLSPublicKey publicKey) {
     return Optional.ofNullable(validators.get(publicKey));
+  }
+
+  /**
+   * The validator a duty names by its signing key: its BLS key, or from PQ its XMSS key. A
+   * validator is still identified by its BLS key, and holds its XMSS key in its signer.
+   */
+  public Optional<Validator> getValidatorBySigningKey(final Bytes signingKey) {
+    if (signingKey.size() == BLSPublicKey.SSZ_BLS_PUBKEY_SIZE) {
+      return getValidator(BLSPublicKey.fromBytesCompressed(Bytes48.wrap(signingKey)));
+    }
+    return validators.values().stream()
+        .filter(
+            validator ->
+                validator
+                    .getXmssSigner()
+                    .map(signer -> signer.getPublicKey().toBytes().equals(signingKey))
+                    .orElse(false))
+        .findFirst();
   }
 
   public List<Validator> getValidators() {

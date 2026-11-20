@@ -51,7 +51,9 @@ abstract class AbstractPreferencesPublisher implements ValidatorTimingChannel {
 
     final List<ProposerDuty> ownedProposerDuties =
         proposerDuties.getDuties().stream()
-            .filter(duty -> ownedValidators.hasValidator(duty.getPublicKey()))
+            .filter(
+                duty ->
+                    ownedValidators.getValidatorBySigningKey(duty.getPublicKeyBytes()).isPresent())
             .toList();
 
     LOG.debug(

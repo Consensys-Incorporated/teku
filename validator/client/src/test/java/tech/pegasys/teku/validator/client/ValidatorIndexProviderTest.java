@@ -31,15 +31,19 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.signatures.Signer;
+import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 import tech.pegasys.teku.validator.client.loader.OwnedValidators;
+import tech.pegasys.teku.xmss.XmssPublicKey;
 
 class ValidatorIndexProviderTest {
   private final Spec spec = TestSpecFactory.createDefault();
@@ -63,6 +67,30 @@ class ValidatorIndexProviderTest {
     provider.lookupValidators();
     final IntCollection actual = provider.getValidatorIndices().getImmediately();
     assertThat(actual).containsExactlyInAnyOrderElementsOf(IntArrayList.of(1, 20, 300));
+  }
+
+  @Test
+  void shouldLookUpPqValidatorsByXmssKey() {
+    final BLSPublicKey key2 = dataStructureUtil.randomPublicKey();
+    final Bytes32 xmssKey2 = dataStructureUtil.randomBytes32();
+    final XmssSigner xmssSigner = mock(XmssSigner.class);
+    when(xmssSigner.getPublicKey()).thenReturn(XmssPublicKey.fromBytes(xmssKey2));
+    final OwnedValidators validators = ownedValidatorsWithKeys(key1);
+    validators.addValidator(
+        new Validator(key2, mock(Signer.class), Optional::empty, false, Optional.of(xmssSigner)));
+    final ValidatorIndexProvider provider =
+        new ValidatorIndexProvider(validators, validatorApiChannel, asyncRunner);
+    // From PQ, the state has no BLS keys, so the BLS lookup finds only key1
+    when(validatorApiChannel.getValidatorIndices(validators.getPublicKeys()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(Map.of(key1, 1))));
+    when(validatorApiChannel.getValidatorIndicesByXmssKey(Set.of(xmssKey2)))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(Map.of(xmssKey2, 7))));
+
+    provider.lookupValidators();
+
+    assertThat(provider.getValidatorIndices().getImmediately())
+        .containsExactlyInAnyOrderElementsOf(IntArrayList.of(1, 7));
+    assertThat(provider.getPublicKey(7)).contains(key2);
   }
 
   @Test

@@ -22,6 +22,7 @@ import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.ethereum.json.types.validator.ProposerDuty;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -113,20 +114,22 @@ public class ProposerPreferencesPublisher extends AbstractPreferencesPublisher {
       final Bytes32 dependentRoot,
       final ForkInfo forkInfo,
       final ProposerPreferencesUtil preferencesUtil) {
-    final Optional<Validator> validator = ownedValidators.getValidator(duty.getPublicKey());
+    // From PQ, the duty names the validator by its XMSS key; its config is keyed by its BLS key
+    final Optional<Validator> validator =
+        ownedValidators.getValidatorBySigningKey(duty.getPublicKeyBytes());
     if (validator.isEmpty()) {
       return SafeFuture.completedFuture(Optional.empty());
     }
+    final BLSPublicKey publicKey = validator.get().getPublicKey();
     final Optional<Eth1Address> maybeFeeRecipient =
-        proposerConfigPropertiesProvider.getFeeRecipient(duty.getPublicKey());
+        proposerConfigPropertiesProvider.getFeeRecipient(publicKey);
     if (maybeFeeRecipient.isEmpty()) {
       return SafeFuture.completedFuture(Optional.empty());
     }
 
     // duties are loaded ahead of time, so the gas limit must be the one scheduled for the duty
     // epoch
-    final UInt64 targetGasLimit =
-        proposerConfigPropertiesProvider.getGasLimit(duty.getPublicKey(), epoch);
+    final UInt64 targetGasLimit = proposerConfigPropertiesProvider.getGasLimit(publicKey, epoch);
     final Optional<ProposerPreferences> maybePreferences =
         preferencesUtil.createProposerPreferences(
             dependentRoot,
@@ -148,10 +151,7 @@ public class ProposerPreferencesPublisher extends AbstractPreferencesPublisher {
             signature -> preferencesUtil.createSignedProposerPreferences(preferences, signature))
         .exceptionally(
             error -> {
-              LOG.warn(
-                  "Failed to sign proposer preferences for validator {}",
-                  duty.getPublicKey(),
-                  error);
+              LOG.warn("Failed to sign proposer preferences for validator {}", publicKey, error);
               return Optional.empty();
             });
   }

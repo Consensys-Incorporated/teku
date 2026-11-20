@@ -138,6 +138,41 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
     return requestValidatorData(publicKeys, StateValidatorData::getIntegerIndex);
   }
 
+  /**
+   * PQ: looks validators up by XMSS key, which the beacon node accepts as a validator id, in
+   * batches as for BLS keys.
+   */
+  @Override
+  public SafeFuture<Optional<Map<Bytes32, Integer>>> getValidatorIndicesByXmssKey(
+      final Collection<Bytes32> xmssPublicKeys) {
+    if (xmssPublicKeys.isEmpty()) {
+      return SafeFuture.completedFuture(Optional.of(emptyMap()));
+    }
+    return sendRequest(
+        () -> {
+          final List<Bytes32> keys = new ArrayList<>(xmssPublicKeys);
+          final Map<Bytes32, Integer> indices = new HashMap<>();
+          for (int i = 0; i < keys.size(); i += MAX_PUBLIC_KEY_BATCH_SIZE) {
+            final Optional<List<StateValidatorData>> validators =
+                typeDefClient.getStateValidators(
+                    keys.subList(i, Math.min(keys.size(), i + MAX_PUBLIC_KEY_BATCH_SIZE)).stream()
+                        .map(Bytes32::toHexString)
+                        .toList());
+            if (validators.isEmpty()) {
+              return Optional.empty();
+            }
+            validators
+                .get()
+                .forEach(
+                    validator ->
+                        indices.put(
+                            Bytes32.wrap(validator.getValidator().getSigningKeyBytes()),
+                            validator.getIntegerIndex()));
+          }
+          return Optional.of(indices);
+        });
+  }
+
   @Override
   public SafeFuture<Optional<Map<BLSPublicKey, StateValidatorData>>> getValidatorStatuses(
       final Collection<BLSPublicKey> publicKeys) {

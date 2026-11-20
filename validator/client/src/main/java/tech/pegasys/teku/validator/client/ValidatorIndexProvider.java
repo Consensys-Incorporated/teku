@@ -20,6 +20,7 @@ import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntCollection;
 import java.time.Duration;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,6 +30,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -75,8 +77,8 @@ public class ValidatorIndexProvider {
                         knownValidators -> {
                           logNewValidatorIndices(knownValidators);
                           validatorIndicesByPublicKey.putAll(knownValidators);
-                          firstSuccessfulRequest.complete(null);
-                          return SafeFuture.COMPLETE;
+                          return lookupPqValidators()
+                              .thenRun(() -> firstSuccessfulRequest.complete(null));
                         })
                     .orElseGet(
                         () ->
@@ -90,6 +92,38 @@ public class ValidatorIndexProvider {
               LOG.warn("Failed to load validator indices. Retrying.", error);
               asyncRunner.runAfterDelay(this::lookupValidators, RETRY_DELAY).finishError(LOG);
             });
+  }
+
+  /**
+   * From PQ, the state holds validators' XMSS keys rather than their BLS keys, so a validator the
+   * BLS lookup did not find is looked up by its signer's XMSS key. Its index is still recorded
+   * against its BLS key, which identifies it in this validator client.
+   */
+  private SafeFuture<Void> lookupPqValidators() {
+    final Map<Bytes32, BLSPublicKey> unknownByXmssKey = new HashMap<>();
+    ownedValidators.getValidators().stream()
+        .filter(validator -> !validatorIndicesByPublicKey.containsKey(validator.getPublicKey()))
+        .forEach(
+            validator ->
+                validator
+                    .getXmssSigner()
+                    .ifPresent(
+                        signer ->
+                            unknownByXmssKey.put(
+                                signer.getPublicKey().toBytes(), validator.getPublicKey())));
+    if (unknownByXmssKey.isEmpty()) {
+      return SafeFuture.COMPLETE;
+    }
+    return validatorApiChannel
+        .getValidatorIndicesByXmssKey(unknownByXmssKey.keySet())
+        .thenAccept(
+            maybeKnownValidators ->
+                maybeKnownValidators.ifPresent(
+                    knownValidators ->
+                        knownValidators.forEach(
+                            (xmssKey, index) ->
+                                validatorIndicesByPublicKey.put(
+                                    unknownByXmssKey.get(xmssKey), index))));
   }
 
   private Collection<BLSPublicKey> getUnknownValidators() {
