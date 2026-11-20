@@ -35,6 +35,7 @@ import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.Deposit;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
+import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
 import tech.pegasys.teku.spec.datastructures.type.SszSignature;
 
 /**
@@ -136,6 +137,12 @@ public class BeaconBlockBodyPq
   @Override
   public Optional<SignedExecutionPayloadBid> getOptionalSignedExecutionPayloadBid() {
     return Optional.of(getSignedExecutionPayloadBid());
+  }
+
+  /** As in Gloas, the blob commitments are the bid's. */
+  @Override
+  public Optional<SszList<SszKZGCommitment>> getOptionalBlobKzgCommitments() {
+    return Optional.of(getSignedExecutionPayloadBid().getMessage().getBlobKzgCommitments());
   }
 
   public ExecutionRequests getParentExecutionRequests() {

@@ -1,0 +1,313 @@
+{
+  "title" : "BeaconStatePq",
+  "type" : "object",
+  "required" : [ "genesis_time", "genesis_validators_root", "slot", "fork", "latest_block_header", "block_roots", "state_roots", "historical_roots", "eth1_data", "eth1_data_votes", "eth1_deposit_index", "validators", "balances", "randao_mixes", "slashings", "previous_epoch_participation", "current_epoch_participation", "justification_bits", "previous_justified_checkpoint", "current_justified_checkpoint", "finalized_checkpoint", "inactivity_scores", "latest_block_hash", "next_withdrawal_index", "next_withdrawal_validator_index", "historical_summaries", "deposit_requests_start_index", "deposit_balance_to_consume", "exit_balance_to_consume", "earliest_exit_epoch", "consolidation_balance_to_consume", "earliest_consolidation_epoch", "pending_deposits", "pending_partial_withdrawals", "pending_consolidations", "proposer_lookahead", "builders", "next_withdrawal_builder_index", "execution_payload_availability", "builder_pending_payments", "builder_pending_withdrawals", "latest_execution_payload_bid", "payload_expected_withdrawals", "ptc_window", "validator_preregistrations", "builder_preregistrations", "aggregation_committee_window" ],
+  "properties" : {
+    "genesis_time" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "genesis_validators_root" : {
+      "type" : "string",
+      "description" : "Bytes32 hexadecimal",
+      "example" : "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
+      "format" : "byte"
+    },
+    "slot" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "fork" : {
+      "$ref" : "#/components/schemas/Fork"
+    },
+    "latest_block_header" : {
+      "$ref" : "#/components/schemas/BeaconBlockHeader"
+    },
+    "block_roots" : {
+      "type" : "array",
+      "items" : {
+        "type" : "string",
+        "description" : "Bytes32 hexadecimal",
+        "example" : "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
+        "format" : "byte"
+      }
+    },
+    "state_roots" : {
+      "type" : "array",
+      "items" : {
+        "type" : "string",
+        "description" : "Bytes32 hexadecimal",
+        "example" : "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
+        "format" : "byte"
+      }
+    },
+    "historical_roots" : {
+      "type" : "array",
+      "items" : {
+        "type" : "string",
+        "description" : "Bytes32 hexadecimal",
+        "example" : "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
+        "format" : "byte"
+      }
+    },
+    "eth1_data" : {
+      "$ref" : "#/components/schemas/Eth1Data"
+    },
+    "eth1_data_votes" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/Eth1Data"
+      }
+    },
+    "eth1_deposit_index" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "validators" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/ValidatorPq"
+      }
+    },
+    "balances" : {
+      "type" : "array",
+      "items" : {
+        "type" : "string",
+        "description" : "unsigned 64 bit integer",
+        "example" : "1",
+        "format" : "uint64"
+      }
+    },
+    "randao_mixes" : {
+      "type" : "array",
+      "items" : {
+        "type" : "string",
+        "description" : "Bytes32 hexadecimal",
+        "example" : "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
+        "format" : "byte"
+      }
+    },
+    "slashings" : {
+      "type" : "array",
+      "items" : {
+        "type" : "string",
+        "description" : "unsigned 64 bit integer",
+        "example" : "1",
+        "format" : "uint64"
+      }
+    },
+    "previous_epoch_participation" : {
+      "type" : "array",
+      "items" : {
+        "type" : "string",
+        "example" : "1",
+        "description" : "unsigned 8 bit integer, max value 255",
+        "format" : "uint8"
+      }
+    },
+    "current_epoch_participation" : {
+      "type" : "array",
+      "items" : {
+        "type" : "string",
+        "example" : "1",
+        "description" : "unsigned 8 bit integer, max value 255",
+        "format" : "uint8"
+      }
+    },
+    "justification_bits" : {
+      "type" : "string",
+      "pattern" : "^0x[a-fA-F0-9]{2,}$",
+      "description" : "SSZ hexadecimal",
+      "format" : "bytes"
+    },
+    "previous_justified_checkpoint" : {
+      "$ref" : "#/components/schemas/Checkpoint"
+    },
+    "current_justified_checkpoint" : {
+      "$ref" : "#/components/schemas/Checkpoint"
+    },
+    "finalized_checkpoint" : {
+      "$ref" : "#/components/schemas/Checkpoint"
+    },
+    "inactivity_scores" : {
+      "type" : "array",
+      "items" : {
+        "type" : "string",
+        "description" : "unsigned 64 bit integer",
+        "example" : "1",
+        "format" : "uint64"
+      }
+    },
+    "latest_block_hash" : {
+      "type" : "string",
+      "description" : "Bytes32 hexadecimal",
+      "example" : "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
+      "format" : "byte"
+    },
+    "next_withdrawal_index" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "next_withdrawal_validator_index" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "historical_summaries" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/HistoricalSummary"
+      }
+    },
+    "deposit_requests_start_index" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "deposit_balance_to_consume" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "exit_balance_to_consume" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "earliest_exit_epoch" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "consolidation_balance_to_consume" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "earliest_consolidation_epoch" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "pending_deposits" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/PendingDeposit"
+      }
+    },
+    "pending_partial_withdrawals" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/PendingPartialWithdrawal"
+      }
+    },
+    "pending_consolidations" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/PendingConsolidation"
+      }
+    },
+    "proposer_lookahead" : {
+      "type" : "array",
+      "items" : {
+        "type" : "string",
+        "description" : "unsigned 64 bit integer",
+        "example" : "1",
+        "format" : "uint64"
+      }
+    },
+    "builders" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/BuilderPq"
+      }
+    },
+    "next_withdrawal_builder_index" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "execution_payload_availability" : {
+      "type" : "string",
+      "pattern" : "^0x[a-fA-F0-9]{2,}$",
+      "description" : "SSZ hexadecimal",
+      "format" : "bytes"
+    },
+    "builder_pending_payments" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/BuilderPendingPayment"
+      }
+    },
+    "builder_pending_withdrawals" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/BuilderPendingWithdrawal"
+      }
+    },
+    "latest_execution_payload_bid" : {
+      "$ref" : "#/components/schemas/ExecutionPayloadBid"
+    },
+    "payload_expected_withdrawals" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/Withdrawal"
+      }
+    },
+    "ptc_window" : {
+      "type" : "array",
+      "items" : {
+        "type" : "array",
+        "items" : {
+          "type" : "string",
+          "description" : "unsigned 64 bit integer",
+          "example" : "1",
+          "format" : "uint64"
+        }
+      }
+    },
+    "validator_preregistrations" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/ValidatorPreregistration"
+      }
+    },
+    "builder_preregistrations" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/BuilderPreregistration"
+      }
+    },
+    "aggregation_committee_window" : {
+      "type" : "array",
+      "items" : {
+        "type" : "array",
+        "items" : {
+          "type" : "array",
+          "items" : {
+            "type" : "string",
+            "description" : "unsigned 64 bit integer",
+            "example" : "1",
+            "format" : "uint64"
+          }
+        }
+      }
+    }
+  }
+}

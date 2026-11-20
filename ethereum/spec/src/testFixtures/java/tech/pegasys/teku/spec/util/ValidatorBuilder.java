@@ -19,8 +19,10 @@ import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
 import tech.pegasys.teku.spec.datastructures.state.ValidatorPhase0;
+import tech.pegasys.teku.spec.datastructures.state.versions.pq.ValidatorPq;
 
 public class ValidatorBuilder {
 
@@ -33,12 +35,31 @@ public class ValidatorBuilder {
   private UInt64 activationEpoch = FAR_FUTURE_EPOCH;
   private UInt64 exitEpoch = FAR_FUTURE_EPOCH;
   private UInt64 withdrawableEpoch = FAR_FUTURE_EPOCH;
+  // From PQ on, validators are keyed by an XMSS public key and carry a VRF root
+  private final boolean pq;
+  private Bytes32 xmssPublicKey;
+  private Bytes32 vrfRoot;
 
   public ValidatorBuilder(final Spec spec, final DataStructureUtil dataStructureUtil) {
     this.dataStructureUtil = dataStructureUtil;
     this.publicKey = dataStructureUtil.randomPublicKey();
     this.withdrawalCredentials = dataStructureUtil.randomBytes32();
     this.effectiveBalance = spec.getGenesisSpec().getConfig().getMaxEffectiveBalance();
+    this.pq = spec.getGenesisSpec().getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ);
+    if (pq) {
+      this.xmssPublicKey = dataStructureUtil.randomBytes32();
+      this.vrfRoot = dataStructureUtil.randomBytes32();
+    }
+  }
+
+  public ValidatorBuilder xmssPublicKey(final Bytes32 xmssPublicKey) {
+    this.xmssPublicKey = xmssPublicKey;
+    return this;
+  }
+
+  public ValidatorBuilder vrfRoot(final Bytes32 vrfRoot) {
+    this.vrfRoot = vrfRoot;
+    return this;
   }
 
   public ValidatorBuilder publicKey(final BLSPublicKey publicKey) {
@@ -97,6 +118,18 @@ public class ValidatorBuilder {
   }
 
   public Validator build() {
+    if (pq) {
+      return new ValidatorPq(
+          xmssPublicKey,
+          vrfRoot,
+          withdrawalCredentials,
+          effectiveBalance,
+          slashed,
+          activationEligibilityEpoch,
+          activationEpoch,
+          exitEpoch,
+          withdrawableEpoch);
+    }
     return new ValidatorPhase0(
         publicKey,
         withdrawalCredentials,

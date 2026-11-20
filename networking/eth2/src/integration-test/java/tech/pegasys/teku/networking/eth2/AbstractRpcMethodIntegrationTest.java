@@ -246,26 +246,52 @@ public abstract class AbstractRpcMethodIntegrationTest {
 
   public record PeerAndNetwork(Eth2Peer peer, Eth2P2PNetwork network) {}
 
+  /**
+   * Milestone transitions to test. The first milestone is the genesis, which is built from BLS
+   * deposits, so a PQ (or later) genesis can't be built yet.
+   */
   protected static Stream<Arguments> generateSpecTransitionWithCombinationParams() {
-    return SpecMilestone.getAllMilestonesFrom(SpecMilestone.ALTAIR).stream()
-        .flatMap(
-            milestone -> {
-              final SpecMilestone prevMilestone = milestone.getPreviousMilestone();
-              return Stream.of(
-                  Arguments.of(prevMilestone, milestone, true, true),
-                  Arguments.of(prevMilestone, milestone, false, true),
-                  Arguments.of(prevMilestone, milestone, true, false),
-                  Arguments.of(prevMilestone, milestone, false, false));
-            });
+    return withCombinationParams(
+        SpecMilestone.getAllMilestonesFrom(SpecMilestone.ALTAIR).stream()
+            .filter(milestone -> canBeGenesis(milestone.getPreviousMilestone())));
+  }
+
+  /**
+   * As {@link #generateSpecTransitionWithCombinationParams()}, but only into milestones whose
+   * blocks the test chain can produce: PQ block production is not implemented yet.
+   */
+  protected static Stream<Arguments> generateBlockProducingSpecTransitionWithCombinationParams() {
+    return withCombinationParams(
+        SpecMilestone.getAllMilestonesFrom(SpecMilestone.ALTAIR).stream()
+            .filter(milestone -> milestone.isLessThan(SpecMilestone.PQ)));
+  }
+
+  private static Stream<Arguments> withCombinationParams(final Stream<SpecMilestone> milestones) {
+    return milestones.flatMap(
+        milestone -> {
+          final SpecMilestone prevMilestone = milestone.getPreviousMilestone();
+          return Stream.of(
+              Arguments.of(prevMilestone, milestone, true, true),
+              Arguments.of(prevMilestone, milestone, false, true),
+              Arguments.of(prevMilestone, milestone, true, false),
+              Arguments.of(prevMilestone, milestone, false, false));
+        });
   }
 
   protected static Stream<Arguments> generateSpecTransition() {
     return SpecMilestone.getAllMilestonesFrom(SpecMilestone.ALTAIR).stream()
+        .filter(milestone -> canBeGenesis(milestone.getPreviousMilestone()))
         .map(milestone -> Arguments.of(milestone.getPreviousMilestone(), milestone));
   }
 
   protected static Stream<Arguments> generateSpec() {
-    return Arrays.stream(SpecMilestone.values()).map(Arguments::of);
+    return Arrays.stream(SpecMilestone.values())
+        .filter(AbstractRpcMethodIntegrationTest::canBeGenesis)
+        .map(Arguments::of);
+  }
+
+  private static boolean canBeGenesis(final SpecMilestone milestone) {
+    return milestone.isLessThan(SpecMilestone.PQ);
   }
 
   protected List<BlobSidecar> retrieveCanonicalBlobSidecarsFromPeerStorage(

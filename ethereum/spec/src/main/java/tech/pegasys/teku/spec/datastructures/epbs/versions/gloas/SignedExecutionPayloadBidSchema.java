@@ -29,14 +29,19 @@ public class SignedExecutionPayloadBidSchema
     extends ContainerSchema2<SignedExecutionPayloadBid, ExecutionPayloadBid, SszByteVector> {
 
   public SignedExecutionPayloadBidSchema(final SchemaRegistry schemaRegistry) {
-    this(schemaRegistry, SszSignatureSchema.INSTANCE);
+    this(schemaRegistry, "SignedExecutionPayloadBid", SszSignatureSchema.INSTANCE);
   }
 
-  /** For a fork whose signatures are leanXMSS (PQ): takes the signature schema. */
+  /**
+   * For a fork whose signatures are leanXMSS (PQ): takes the signature schema, and a name that
+   * keeps its type apart from the BLS-signed one.
+   */
   public SignedExecutionPayloadBidSchema(
-      final SchemaRegistry schemaRegistry, final SszByteVectorSchema<?> signatureSchema) {
+      final SchemaRegistry schemaRegistry,
+      final String containerName,
+      final SszByteVectorSchema<?> signatureSchema) {
     super(
-        "SignedExecutionPayloadBid",
+        containerName,
         namedSchema("message", schemaRegistry.get(EXECUTION_PAYLOAD_BID_SCHEMA)),
         namedSchema("signature", SszSignatures.asSignatureFieldSchema(signatureSchema)));
   }

@@ -1,0 +1,13 @@
+{
+  "title" : "AttesterSlashingPq",
+  "type" : "object",
+  "required" : [ "attestation_1", "attestation_2" ],
+  "properties" : {
+    "attestation_1" : {
+      "$ref" : "#/components/schemas/IndexedAttestationPq"
+    },
+    "attestation_2" : {
+      "$ref" : "#/components/schemas/IndexedAttestationPq"
+    }
+  }
+}

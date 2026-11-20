@@ -35,7 +35,9 @@ import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBody;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.altair.SyncAggregate;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.pq.BeaconBlockBodyPq;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
+import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequestsDataCodec;
+import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequestsSchema;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.XmssAggregateStatement;
@@ -83,6 +85,7 @@ public class BlockProcessorPq extends BlockProcessorGloas {
   private final BeaconStateAccessorsPq beaconStateAccessorsPq;
   private final XmssSignatureVerifier xmssSignatureVerifier;
   private final StarkProofVerifier starkProofVerifier;
+  private final SchemaDefinitionsPq schemaDefinitionsPq;
 
   public BlockProcessorPq(
       final SpecConfigPq specConfig,
@@ -124,6 +127,36 @@ public class BlockProcessorPq extends BlockProcessorGloas {
     this.beaconStateAccessorsPq = beaconStateAccessors;
     this.xmssSignatureVerifier = xmssSignatureVerifier;
     this.starkProofVerifier = starkProofVerifier;
+    this.schemaDefinitionsPq = schemaDefinitions;
+  }
+
+  /**
+   * [PQ fork boundary, Teku-defined] PQ extends ExecutionRequests again, so a FULL parent from
+   * before the PQ fork committed to the root of the previous fork's requests type: EIP-8483's, or
+   * Gloas's when the parent predates EIP-8483 too. As at the EIP-8483 boundary, such a parent is
+   * accepted when the requests, which must then carry no PQ-only requests, match the bid as
+   * requests of that type.
+   */
+  @Override
+  protected boolean isMatchingPreForkExecutionRequestsRoot(
+      final BeaconStateGloas state, final ExecutionRequests requests) {
+    final UInt64 parentEpoch =
+        miscHelpersPq.computeEpochAtSlot(state.getLatestBlockHeader().getSlot());
+    if (!parentEpoch.isLessThan(specConfigPq.getPqForkEpoch())) {
+      return false;
+    }
+    final ExecutionRequestsSchema<?> preForkSchema =
+        parentEpoch.isLessThan(specConfigPq.getEip8483ForkEpoch())
+            ? schemaDefinitionsPq.getPreForkExecutionRequestsSchema()
+            : schemaDefinitionsPq.getEip8483ExecutionRequestsSchema();
+    try {
+      return preForkSchema
+          .convertFrom(requests)
+          .hashTreeRoot()
+          .equals(state.getLatestExecutionPayloadBid().getExecutionRequestsRoot());
+    } catch (final IllegalArgumentException e) {
+      return false;
+    }
   }
 
   // process_block, modified in PQ: no sync aggregate

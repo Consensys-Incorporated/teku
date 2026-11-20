@@ -15,12 +15,15 @@ package tech.pegasys.teku.spec.util;
 
 import static tech.pegasys.teku.spec.config.SpecConfig.FAR_FUTURE_EPOCH;
 
+import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.BuilderGloas;
+import tech.pegasys.teku.spec.datastructures.state.versions.pq.BuilderPq;
 
 public class BuilderBuilder {
 
@@ -31,11 +34,24 @@ public class BuilderBuilder {
   private UInt64 depositEpoch = FAR_FUTURE_EPOCH;
   private UInt64 withdrawableEpoch = FAR_FUTURE_EPOCH;
 
+  // From PQ on, builders are keyed by an XMSS public key
+  private final boolean pq;
+  private Bytes32 xmssPublicKey;
+
   public BuilderBuilder(final Spec spec, final DataStructureUtil dataStructureUtil) {
     this.publicKey = dataStructureUtil.randomPublicKey();
     this.version = dataStructureUtil.randomUInt8();
     this.executionAddress = dataStructureUtil.randomEth1Address();
     this.balance = spec.getGenesisSpec().getConfig().getMaxEffectiveBalance();
+    this.pq = spec.getGenesisSpec().getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ);
+    if (pq) {
+      this.xmssPublicKey = dataStructureUtil.randomBytes32();
+    }
+  }
+
+  public BuilderBuilder xmssPublicKey(final Bytes32 xmssPublicKey) {
+    this.xmssPublicKey = xmssPublicKey;
+    return this;
   }
 
   public BuilderBuilder publicKey(final BLSPublicKey publicKey) {
@@ -69,6 +85,10 @@ public class BuilderBuilder {
   }
 
   public Builder build() {
+    if (pq) {
+      return new BuilderPq(
+          xmssPublicKey, version, executionAddress, balance, depositEpoch, withdrawableEpoch);
+    }
     return new BuilderGloas(
         publicKey, version, executionAddress, balance, depositEpoch, withdrawableEpoch);
   }

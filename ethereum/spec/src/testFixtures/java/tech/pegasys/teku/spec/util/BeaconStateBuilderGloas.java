@@ -34,6 +34,7 @@ import tech.pegasys.teku.spec.datastructures.state.SyncCommittee;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateSchemaGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.pq.MutableBeaconStatePq;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingConsolidation;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDeposit;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingPartialWithdrawal;
@@ -103,8 +104,11 @@ public class BeaconStateBuilderGloas
     state.setPreviousEpochParticipation(previousEpochParticipation);
     state.setCurrentEpochParticipation(currentEpochParticipation);
     state.setInactivityScores(inactivityScores);
-    state.setCurrentSyncCommittee(currentSyncCommittee);
-    state.setNextSyncCommittee(nextSyncCommittee);
+    // PQ (and later) states have no sync committees
+    if (!(state instanceof MutableBeaconStatePq)) {
+      state.setCurrentSyncCommittee(currentSyncCommittee);
+      state.setNextSyncCommittee(nextSyncCommittee);
+    }
     // `latest_execution_payload_header` has been replaced with `latest_execution_payload_bid`
     state.setLatestExecutionPayloadBid(latestExecutionPayloadBid);
     state.setNextWithdrawalIndex(nextWithdrawalIndex);
@@ -291,8 +295,10 @@ public class BeaconStateBuilderGloas
     inactivityScores =
         dataStructureUtil.randomSszUInt64List(
             schema.getInactivityScoresSchema(), defaultItemsInSSZLists);
-    currentSyncCommittee = dataStructureUtil.randomSyncCommittee();
-    nextSyncCommittee = dataStructureUtil.randomSyncCommittee();
+    if (spec.getMilestone().isLessThan(SpecMilestone.PQ)) {
+      currentSyncCommittee = dataStructureUtil.randomSyncCommittee();
+      nextSyncCommittee = dataStructureUtil.randomSyncCommittee();
+    }
 
     this.nextWithdrawalIndex = UInt64.ZERO;
     this.nextWithdrawalValidatorIndex =

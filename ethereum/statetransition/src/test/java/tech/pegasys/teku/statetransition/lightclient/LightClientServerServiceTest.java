@@ -65,7 +65,10 @@ import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.storage.store.UpdatableStore;
 
-@TestSpecContext(allMilestones = true, ignoredMilestones = SpecMilestone.PHASE0)
+// PQ (and Heze, which builds on it here) has no sync committees, so no light client
+@TestSpecContext(
+    allMilestones = true,
+    ignoredMilestones = {SpecMilestone.PHASE0, SpecMilestone.PQ, SpecMilestone.HEZE})
 public class LightClientServerServiceTest {
 
   /** Blocks are on the canonical chain unless a test says otherwise. */

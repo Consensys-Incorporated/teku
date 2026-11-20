@@ -1,0 +1,31 @@
+{
+  "title" : "ValidatorPreregistration",
+  "type" : "object",
+  "required" : [ "pubkey", "withdrawal_credentials", "vrf_root", "expiry_slot" ],
+  "properties" : {
+    "pubkey" : {
+      "type" : "string",
+      "description" : "Bytes32 hexadecimal",
+      "example" : "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
+      "format" : "byte"
+    },
+    "withdrawal_credentials" : {
+      "type" : "string",
+      "description" : "Bytes32 hexadecimal",
+      "example" : "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
+      "format" : "byte"
+    },
+    "vrf_root" : {
+      "type" : "string",
+      "description" : "Bytes32 hexadecimal",
+      "example" : "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
+      "format" : "byte"
+    },
+    "expiry_slot" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    }
+  }
+}

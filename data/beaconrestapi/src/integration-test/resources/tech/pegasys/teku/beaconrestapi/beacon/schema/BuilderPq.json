@@ -1,0 +1,43 @@
+{
+  "title" : "BuilderPq",
+  "type" : "object",
+  "required" : [ "pubkey", "version", "execution_address", "balance", "deposit_epoch", "withdrawable_epoch" ],
+  "properties" : {
+    "pubkey" : {
+      "type" : "string",
+      "description" : "Bytes32 hexadecimal",
+      "example" : "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
+      "format" : "byte"
+    },
+    "version" : {
+      "type" : "string",
+      "example" : "1",
+      "description" : "unsigned 8 bit integer, max value 255",
+      "format" : "uint8"
+    },
+    "execution_address" : {
+      "type" : "string",
+      "pattern" : "^0x[a-fA-F0-9]{2,}$",
+      "description" : "SSZ hexadecimal",
+      "format" : "bytes"
+    },
+    "balance" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "deposit_epoch" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    },
+    "withdrawable_epoch" : {
+      "type" : "string",
+      "description" : "unsigned 64 bit integer",
+      "example" : "1",
+      "format" : "uint64"
+    }
+  }
+}

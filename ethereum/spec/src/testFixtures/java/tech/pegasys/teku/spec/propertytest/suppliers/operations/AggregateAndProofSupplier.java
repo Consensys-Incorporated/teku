@@ -13,12 +13,14 @@
 
 package tech.pegasys.teku.spec.propertytest.suppliers.operations;
 
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.operations.AggregateAndProof;
 import tech.pegasys.teku.spec.propertytest.suppliers.DataStructureUtilSupplier;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 public class AggregateAndProofSupplier extends DataStructureUtilSupplier<AggregateAndProof> {
+  // PQ aggregates hold a PQ attestation and are a different type (PqAttestationSchemas)
   public AggregateAndProofSupplier() {
-    super(DataStructureUtil::randomAggregateAndProof);
+    super(DataStructureUtil::randomAggregateAndProof, SpecMilestone.PHASE0, SpecMilestone.EIP8483);
   }
 }

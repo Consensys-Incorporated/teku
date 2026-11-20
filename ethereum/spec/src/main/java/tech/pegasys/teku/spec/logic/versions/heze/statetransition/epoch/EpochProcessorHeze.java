@@ -14,33 +14,37 @@
 package tech.pegasys.teku.spec.logic.versions.heze.statetransition.epoch;
 
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
-import tech.pegasys.teku.spec.config.SpecConfigGloas;
+import tech.pegasys.teku.spec.config.SpecConfigPq;
 import tech.pegasys.teku.spec.constants.WithdrawalPrefixes;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDeposit;
 import tech.pegasys.teku.spec.logic.common.statetransition.epoch.status.ValidatorStatusFactory;
 import tech.pegasys.teku.spec.logic.common.util.BeaconStateUtil;
 import tech.pegasys.teku.spec.logic.common.util.ValidatorsUtil;
-import tech.pegasys.teku.spec.logic.versions.electra.helpers.BeaconStateMutatorsElectra;
-import tech.pegasys.teku.spec.logic.versions.gloas.helpers.BeaconStateAccessorsGloas;
-import tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas;
-import tech.pegasys.teku.spec.logic.versions.gloas.statetransition.epoch.EpochProcessorGloas;
-import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.logic.versions.pq.helpers.BeaconStateAccessorsPq;
+import tech.pegasys.teku.spec.logic.versions.pq.helpers.BeaconStateMutatorsPq;
+import tech.pegasys.teku.spec.logic.versions.pq.helpers.MiscHelpersPq;
+import tech.pegasys.teku.spec.logic.versions.pq.helpers.PredicatesPq;
+import tech.pegasys.teku.spec.logic.versions.pq.statetransition.epoch.EpochProcessorPq;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 
-public class EpochProcessorHeze extends EpochProcessorGloas {
+/** On this branch Heze builds on PQ: PQ's epoch processing with EIP-8365's deposit rule. */
+public class EpochProcessorHeze extends EpochProcessorPq {
 
   public EpochProcessorHeze(
-      final SpecConfigGloas specConfig,
-      final MiscHelpersGloas miscHelpers,
-      final BeaconStateAccessorsGloas beaconStateAccessors,
-      final BeaconStateMutatorsElectra beaconStateMutators,
+      final SpecConfigPq specConfig,
+      final PredicatesPq predicates,
+      final MiscHelpersPq miscHelpers,
+      final BeaconStateAccessorsPq beaconStateAccessors,
+      final BeaconStateMutatorsPq beaconStateMutators,
       final ValidatorsUtil validatorsUtil,
       final BeaconStateUtil beaconStateUtil,
       final ValidatorStatusFactory validatorStatusFactory,
-      final SchemaDefinitionsGloas schemaDefinitions,
+      final SchemaDefinitionsPq schemaDefinitions,
       final TimeProvider timeProvider) {
     super(
         specConfig,
+        predicates,
         miscHelpers,
         beaconStateAccessors,
         beaconStateMutators,
@@ -60,7 +64,7 @@ public class EpochProcessorHeze extends EpochProcessorGloas {
    */
   @Override
   public void applyPendingDeposits(final MutableBeaconState state, final PendingDeposit deposit) {
-    if (validatorsUtil.getValidatorIndex(state, deposit.getPublicKey()).isEmpty()
+    if (getPendingDepositValidatorIndex(state, deposit).isEmpty()
         && hasBlsWithdrawalCredentials(deposit)) {
       return;
     }

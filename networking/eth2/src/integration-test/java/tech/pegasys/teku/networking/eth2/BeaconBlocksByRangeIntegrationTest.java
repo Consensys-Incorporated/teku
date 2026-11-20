@@ -194,7 +194,7 @@ public class BeaconBlocksByRangeIntegrationTest extends AbstractRpcMethodIntegra
   }
 
   @ParameterizedTest(name = "{0} => {1}, nextSpecEnabledLocally={2}, nextSpecEnabledRemotely={3}")
-  @MethodSource("generateSpecTransitionWithCombinationParams")
+  @MethodSource("generateBlockProducingSpecTransitionWithCombinationParams")
   public void requestBlockByRange_withDisparateVersionsEnabled_requestBaseMilestoneBlocks(
       final SpecMilestone baseMilestone,
       final SpecMilestone nextMilestone,
@@ -219,7 +219,7 @@ public class BeaconBlocksByRangeIntegrationTest extends AbstractRpcMethodIntegra
   }
 
   @ParameterizedTest(name = "{0} => {1}, nextSpecEnabledLocally={2}, nextSpecEnabledRemotely={3}")
-  @MethodSource("generateSpecTransitionWithCombinationParams")
+  @MethodSource("generateBlockProducingSpecTransitionWithCombinationParams")
   public void requestBlockByRange_withDisparateVersionsEnabled_requestNextSpecBlocks(
       final SpecMilestone baseMilestone,
       final SpecMilestone nextMilestone,

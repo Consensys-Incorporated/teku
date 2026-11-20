@@ -37,7 +37,6 @@ import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.Blob;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
-import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.deneb.BeaconBlockBodyDeneb;
 import tech.pegasys.teku.spec.datastructures.metadata.BlobsAndMetaData;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
 import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
@@ -170,8 +169,9 @@ public class BlobSelectorFactory extends AbstractSelectorFactory<BlobSelector> {
       return Collections.emptyMap();
     }
 
+    // Not only Deneb bodies: PQ's carry the commitments in the bid too
     final SszList<SszKZGCommitment> blobKzgCommitments =
-        BeaconBlockBodyDeneb.required(block.get().getMessage().getBody()).getBlobKzgCommitments();
+        block.get().getMessage().getBody().getOptionalBlobKzgCommitments().orElseThrow();
     return IntStream.range(0, blobKzgCommitments.size())
         .mapToObj(index -> Pair.of(index, blobKzgCommitments.get(index)))
         .collect(

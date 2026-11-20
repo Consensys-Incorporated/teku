@@ -32,6 +32,8 @@
               "$ref" : "#/components/schemas/BeaconBlockGloas"
             }, {
               "$ref" : "#/components/schemas/BeaconBlockEip8483"
+            }, {
+              "$ref" : "#/components/schemas/BeaconBlockPq"
             } ]
           },
           "signature" : {

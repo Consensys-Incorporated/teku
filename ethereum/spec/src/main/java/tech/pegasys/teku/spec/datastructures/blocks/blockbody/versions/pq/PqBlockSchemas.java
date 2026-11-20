@@ -17,6 +17,7 @@ import java.util.OptionalLong;
 import tech.pegasys.teku.spec.config.SpecConfigPq;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockSchema;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlockSchema;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelopeSchema;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBidSchema;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeSchema;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferencesSchema;
@@ -30,6 +31,8 @@ public class PqBlockSchemas {
 
   private final SignedExecutionPayloadBidSchema signedExecutionPayloadBidSchema;
   private final SignedExecutionPayloadEnvelopeSchema signedExecutionPayloadEnvelopeSchema;
+  private final SignedBlindedExecutionPayloadEnvelopeSchema
+      signedBlindedExecutionPayloadEnvelopeSchema;
   private final SignedProposerPreferencesSchema signedProposerPreferencesSchema;
   private final BeaconBlockBodySchemaPq beaconBlockBodySchema;
   private final BeaconBlockSchema beaconBlockSchema;
@@ -41,12 +44,19 @@ public class PqBlockSchemas {
       final ExecutionRequestsSchemaPq executionRequestsSchema) {
     final SpecConfigPq specConfig = SpecConfigPq.required(schemaRegistry.getSpecConfig());
     this.signedExecutionPayloadBidSchema =
-        new SignedExecutionPayloadBidSchema(schemaRegistry, SszXmssSignatureSchema.INSTANCE);
+        new SignedExecutionPayloadBidSchema(
+            schemaRegistry, "SignedExecutionPayloadBidPq", SszXmssSignatureSchema.INSTANCE);
     this.signedExecutionPayloadEnvelopeSchema =
         new SignedExecutionPayloadEnvelopeSchema(
             schemaRegistry, "SignedExecutionPayloadEnvelopePq", SszXmssSignatureSchema.INSTANCE);
+    this.signedBlindedExecutionPayloadEnvelopeSchema =
+        new SignedBlindedExecutionPayloadEnvelopeSchema(
+            schemaRegistry,
+            "SignedBlindedExecutionPayloadEnvelopePq",
+            SszXmssSignatureSchema.INSTANCE);
     this.signedProposerPreferencesSchema =
-        new SignedProposerPreferencesSchema(schemaRegistry, SszXmssSignatureSchema.INSTANCE);
+        new SignedProposerPreferencesSchema(
+            schemaRegistry, "SignedProposerPreferencesPq", SszXmssSignatureSchema.INSTANCE);
     this.beaconBlockBodySchema =
         new BeaconBlockBodySchemaPq(
             "BeaconBlockBodyPq",
@@ -81,6 +91,11 @@ public class PqBlockSchemas {
 
   public SignedExecutionPayloadEnvelopeSchema getSignedExecutionPayloadEnvelopeSchema() {
     return signedExecutionPayloadEnvelopeSchema;
+  }
+
+  public SignedBlindedExecutionPayloadEnvelopeSchema
+      getSignedBlindedExecutionPayloadEnvelopeSchema() {
+    return signedBlindedExecutionPayloadEnvelopeSchema;
   }
 
   public SignedProposerPreferencesSchema getSignedProposerPreferencesSchema() {

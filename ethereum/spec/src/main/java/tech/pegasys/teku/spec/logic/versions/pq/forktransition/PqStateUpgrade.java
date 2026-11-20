@@ -34,9 +34,6 @@ import tech.pegasys.teku.spec.config.SpecConfigPq;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
-import tech.pegasys.teku.spec.datastructures.state.beaconstate.common.BeaconStateFields;
-import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.eip8483.BeaconStateEip8483;
-import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.eip8483.BeaconStateSchemaEip8483;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.pq.BeaconStatePq;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.pq.BeaconStateSchemaPq;
@@ -56,7 +53,7 @@ import tech.pegasys.teku.spec.logic.versions.pq.helpers.MiscHelpersPq;
 import tech.pegasys.teku.spec.logic.versions.pq.statetransition.epoch.EpochProcessorPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 
-public class PqStateUpgrade implements StateUpgrade<BeaconStateEip8483> {
+public class PqStateUpgrade implements StateUpgrade<BeaconStatePq> {
 
   private final SpecConfigPq specConfig;
   private final SchemaDefinitionsPq schemaDefinitions;
@@ -74,85 +71,15 @@ public class PqStateUpgrade implements StateUpgrade<BeaconStateEip8483> {
     this.miscHelpers = miscHelpers;
   }
 
-  @Override
-  public BeaconStateEip8483 upgrade(final BeaconState preState) {
-    final UInt64 epoch = beaconStateAccessors.getCurrentEpoch(preState);
-    // PQ builds on EIP-8483. The pre-state is a Gloas state when EIP-8483 is scheduled at the
-    // same epoch as PQ (and so overshadowed by it). Until PQ's own state changes land, the PQ
-    // state has the EIP-8483 layout.
-    final BeaconStateGloas preStateGloas = BeaconStateGloas.required(preState);
-    final BeaconStateSchemaEip8483 stateSchema =
-        BeaconStateSchemaEip8483.required(schemaDefinitions.getBeaconStateSchema());
-
-    return BeaconStateEip8483.required(stateSchema.createEmpty())
-        .updatedEip8483(
-            state -> {
-              BeaconStateFields.copyCommonFieldsFromSource(state, preState);
-
-              state.setFork(
-                  new Fork(
-                      preState.getFork().getCurrentVersion(),
-                      specConfig.getPqForkVersion(),
-                      epoch));
-
-              state.setPreviousEpochParticipation(preStateGloas.getPreviousEpochParticipation());
-              state.setCurrentEpochParticipation(preStateGloas.getCurrentEpochParticipation());
-              state.setInactivityScores(preStateGloas.getInactivityScores());
-              state.setCurrentSyncCommittee(preStateGloas.getCurrentSyncCommittee());
-              state.setNextSyncCommittee(preStateGloas.getNextSyncCommittee());
-
-              state.setLatestBlockHash(preStateGloas.getLatestBlockHash());
-              state.setNextWithdrawalIndex(preStateGloas.getNextWithdrawalIndex());
-              state.setNextWithdrawalValidatorIndex(
-                  preStateGloas.getNextWithdrawalValidatorIndex());
-              state.setHistoricalSummaries(preStateGloas.getHistoricalSummaries());
-              state.setDepositRequestsStartIndex(preStateGloas.getDepositRequestsStartIndex());
-              state.setDepositBalanceToConsume(preStateGloas.getDepositBalanceToConsume());
-              state.setExitBalanceToConsume(preStateGloas.getExitBalanceToConsume());
-              state.setEarliestExitEpoch(preStateGloas.getEarliestExitEpoch());
-              state.setConsolidationBalanceToConsume(
-                  preStateGloas.getConsolidationBalanceToConsume());
-              state.setEarliestConsolidationEpoch(preStateGloas.getEarliestConsolidationEpoch());
-              state.setPendingDeposits(preStateGloas.getPendingDeposits());
-              state.setPendingPartialWithdrawals(preStateGloas.getPendingPartialWithdrawals());
-              state.setPendingConsolidations(preStateGloas.getPendingConsolidations());
-              state.setProposerLookahead(preStateGloas.getProposerLookahead());
-              state.setBuilders(preStateGloas.getBuilders());
-              state.setNextWithdrawalBuilderIndex(preStateGloas.getNextWithdrawalBuilderIndex());
-              state.setExecutionPayloadAvailability(
-                  preStateGloas.getExecutionPayloadAvailability());
-              state.setBuilderPendingPayments(preStateGloas.getBuilderPendingPayments());
-              state.setBuilderPendingWithdrawals(preStateGloas.getBuilderPendingWithdrawals());
-              state.setLatestExecutionPayloadBid(preStateGloas.getLatestExecutionPayloadBid());
-              state.setPayloadExpectedWithdrawals(preStateGloas.getPayloadExpectedWithdrawals());
-              state.setPtcWindow(preStateGloas.getPtcWindow());
-              preState
-                  .toVersionEip8483()
-                  .ifPresentOrElse(
-                      preStateEip8483 -> {
-                        state.setValidatorPqRegistrations(
-                            preStateEip8483.getValidatorPqRegistrations());
-                        state.setBuilderPqRegistrations(
-                            preStateEip8483.getBuilderPqRegistrations());
-                      },
-                      () -> {
-                        state.setValidatorPqRegistrations(
-                            stateSchema.getValidatorPqRegistrationsSchema().of());
-                        state.setBuilderPqRegistrations(
-                            stateSchema.getBuilderPqRegistrationsSchema().of());
-                      });
-            });
-  }
-
   /**
    * upgrade_to_pq: the upgrade into the PQ state. Registered validators and builders take their
    * XMSS public key (and VRF root), the others a legacy key derived from their BLS public key, and
    * are exited (validators) or made withdrawable (builders) at the fork.
    *
-   * <p>Built standalone: the PQ milestone keeps upgrading into the EIP-8483 layout through {@link
-   * #upgrade} until the switch-over.
+   * <p>The post-state is built empty, so its caches keyed by BLS public keys start empty too.
    */
-  public BeaconStatePq upgradeToPqState(final BeaconState preState) {
+  @Override
+  public BeaconStatePq upgrade(final BeaconState preState) {
     final BeaconStateGloas pre = BeaconStateGloas.required(preState);
     final UInt64 epoch = beaconStateAccessors.getCurrentEpoch(pre);
     // The pre-state is a Gloas state when EIP-8483 is scheduled at the same epoch as PQ, and then

@@ -109,7 +109,11 @@ public class VoluntaryExitValidatorTest {
   }
 
   @ParameterizedTest
-  @EnumSource(value = SpecMilestone.class)
+  // From PQ on, validators exit through execution-layer requests, not signed voluntary exits
+  @EnumSource(
+      value = SpecMilestone.class,
+      names = {"PQ", "HEZE"},
+      mode = EnumSource.Mode.EXCLUDE)
   public void shouldAcceptOwnSignedVoluntaryExitNoMocks(final SpecMilestone specMilestone) {
     final Spec spec = TestSpecFactory.create(specMilestone, Eth2Network.MINIMAL);
     recentChainData = MemoryOnlyRecentChainData.create(spec);

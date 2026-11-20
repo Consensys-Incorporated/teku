@@ -19,6 +19,7 @@ import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszType;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.type.SszSignatureSchema;
+import tech.pegasys.teku.spec.datastructures.type.SszXmssSignatureSchema;
 
 /** Utility functions to extract data from the ssz bytes of block variants */
 public class BeaconBlockInvariants {
@@ -31,6 +32,13 @@ public class BeaconBlockInvariants {
    */
   private static final int BEACON_BLOCK_OFFSET_IN_SIGNED_BEACON_BLOCK =
       BYTES_PER_LENGTH_OFFSET + SszSignatureSchema.INSTANCE.getSszFixedPartSize();
+
+  /**
+   * {@link SignedBeaconBlockSchema} from PQ on: 4 (MESSAGE variable length offset) + 2404 (leanXMSS
+   * SIGNATURE fixed-size length)
+   */
+  private static final int BEACON_BLOCK_OFFSET_IN_XMSS_SIGNED_BEACON_BLOCK =
+      BYTES_PER_LENGTH_OFFSET + SszXmssSignatureSchema.INSTANCE.getSszFixedPartSize();
 
   /**
    * Extract the slot value from any {@link BeaconBlock}.
@@ -58,7 +66,8 @@ public class BeaconBlockInvariants {
    */
   public static UInt64 extractSignedBlockContainerSlot(final Bytes bytes) {
     int blockDataOffset = SszType.sszBytesToLength(bytes.slice(0, BYTES_PER_LENGTH_OFFSET));
-    if (blockDataOffset == BEACON_BLOCK_OFFSET_IN_SIGNED_BEACON_BLOCK) {
+    if (blockDataOffset == BEACON_BLOCK_OFFSET_IN_SIGNED_BEACON_BLOCK
+        || blockDataOffset == BEACON_BLOCK_OFFSET_IN_XMSS_SIGNED_BEACON_BLOCK) {
       return extractBeaconBlockSlot(bytes.slice(blockDataOffset));
     }
     // first field in SignedBlockContents points to the SignedBeaconBlock data

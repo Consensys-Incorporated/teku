@@ -23,6 +23,7 @@ import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.p2p.gossip.PreparedGossipMessage.DecodedMessagePrefix;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
@@ -30,7 +31,10 @@ import tech.pegasys.teku.statetransition.block.FutureBlockPool;
 import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystemBuilder;
 import tech.pegasys.teku.storage.storageSystem.StorageSystem;
 
-@TestSpecContext(allMilestones = true)
+// A PQ genesis (and Heze's, which builds on PQ here) can't be built from BLS deposits
+@TestSpecContext(
+    allMilestones = true,
+    ignoredMilestones = {SpecMilestone.PQ, SpecMilestone.HEZE})
 class FarFutureBlockFilterTest {
   private static final UInt64 CURRENT_SLOT = UInt64.valueOf(10);
 

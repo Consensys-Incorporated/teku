@@ -182,7 +182,7 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
    * this to the coordinated upgrade (eip8483/fork.md); here such a parent is accepted when the
    * requests, which must not carry any PQ registrations, match the bid as Gloas-typed requests.
    */
-  private boolean isMatchingPreForkExecutionRequestsRoot(
+  protected boolean isMatchingPreForkExecutionRequestsRoot(
       final BeaconStateGloas state, final ExecutionRequests requests) {
     final UInt64 parentEpoch =
         miscHelpersGloas.computeEpochAtSlot(state.getLatestBlockHeader().getSlot());

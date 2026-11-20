@@ -25,6 +25,8 @@ import static tech.pegasys.teku.infrastructure.http.RestApiConstants.BEACON_BLOC
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.SLOT;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.SUBCOMMITTEE_INDEX;
 import static tech.pegasys.teku.infrastructure.json.JsonUtil.serialize;
+import static tech.pegasys.teku.spec.SpecMilestone.ALTAIR;
+import static tech.pegasys.teku.spec.SpecMilestone.EIP8483;
 import static tech.pegasys.teku.spec.SpecMilestone.PHASE0;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -86,7 +88,8 @@ public class CreateSyncCommitteeContributionRequestTest extends AbstractTypeDefR
 
   @TestTemplate
   public void shouldGetSyncCommitteeContribution() throws JsonProcessingException {
-    assumeThat(specMilestone).isGreaterThan(PHASE0);
+    // PQ has no sync committees
+    assumeThat(specMilestone).isBetween(ALTAIR, EIP8483);
     final SyncCommitteeContribution response = dataStructureUtil.randomSyncCommitteeContribution();
     final String jsonResponse =
         serialize(

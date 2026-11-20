@@ -18,6 +18,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.IntStream;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
@@ -28,6 +30,7 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
+import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.ValidatorPqRegistrationRequestSchema;
 import tech.pegasys.teku.spec.datastructures.interop.MockStartDepositGenerator;
 import tech.pegasys.teku.spec.datastructures.interop.MockStartValidatorKeyPairFactory;
 import tech.pegasys.teku.spec.datastructures.operations.Deposit;
@@ -38,10 +41,13 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.bellatri
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.capella.BeaconStateCapella;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.deneb.BeaconStateDeneb;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.eip8483.BeaconStateEip8483;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.eip8483.BeaconStateSchemaEip8483;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.BeaconStateElectra;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.fulu.BeaconStateFulu;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.phase0.BeaconStatePhase0;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.pq.BeaconStatePq;
+import tech.pegasys.teku.spec.datastructures.state.versions.eip8483.ValidatorPqRegistrationSchema;
 import tech.pegasys.teku.spec.datastructures.util.DepositGenerator;
 
 @TestSpecContext(
@@ -117,15 +123,15 @@ public class StateUpgradeTransitionTest {
             yield TestSpecFactory.createMinimalWithEip8483ForkEpoch(milestoneTransitionEpoch);
           }
           case PQ -> {
-            // Until PQ's own state lands, the PQ state has the EIP-8483 layout
             beforeBeaconStateClass = BeaconStateEip8483.class;
-            afterBeaconStateClass = BeaconStateEip8483.class;
+            afterBeaconStateClass = BeaconStatePq.class;
             yield TestSpecFactory.createMinimalWithPqForkEpoch(milestoneTransitionEpoch);
           }
           case HEZE -> {
-            beforeBeaconStateClass = BeaconStateGloas.class;
-            afterBeaconStateClass = BeaconStateGloas.class;
-            yield TestSpecFactory.createMinimalWithHezeForkEpoch(milestoneTransitionEpoch);
+            // On this branch Heze builds on PQ, whose genesis is not built from BLS deposits
+            beforeBeaconStateClass = BeaconStateEip8483.class;
+            afterBeaconStateClass = BeaconStatePq.class;
+            yield TestSpecFactory.createMinimalWithPqAndHezeForkEpoch(milestoneTransitionEpoch);
           }
         };
 
@@ -171,6 +177,33 @@ public class StateUpgradeTransitionTest {
     final List<Deposit> deposits = initialDepositData.stream().map(Deposit::new).toList();
     final BeaconState initialState =
         spec.initializeBeaconStateFromEth1(Bytes32.ZERO, UInt64.ZERO, deposits, Optional.empty());
-    return initialState.updated(state -> state.setGenesisTime(UInt64.ZERO));
+    final BeaconState genesisState =
+        initialState.updated(state -> state.setGenesisTime(UInt64.ZERO));
+    return genesisState.toVersionEip8483().map(this::registerAllValidators).orElse(genesisState);
+  }
+
+  /**
+   * Validators that have not registered an XMSS key are exited at the PQ fork, which would leave no
+   * active validators to propose.
+   */
+  private BeaconState registerAllValidators(final BeaconStateEip8483 state) {
+    final BeaconStateSchemaEip8483 stateSchema =
+        BeaconStateSchemaEip8483.required(state.getBeaconStateSchema());
+    final ValidatorPqRegistrationSchema registrationSchema = new ValidatorPqRegistrationSchema();
+    return state.updatedEip8483(
+        mutable ->
+            mutable.setValidatorPqRegistrations(
+                stateSchema
+                    .getValidatorPqRegistrationsSchema()
+                    .createFromElements(
+                        IntStream.range(0, state.getValidators().size())
+                            .mapToObj(
+                                index ->
+                                    registrationSchema.create(
+                                        UInt64.valueOf(index),
+                                        Bytes.repeat(
+                                            (byte) (index + 1),
+                                            ValidatorPqRegistrationRequestSchema.PQ_DATA_SIZE)))
+                            .toList())));
   }
 }

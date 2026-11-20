@@ -20,7 +20,8 @@ import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUE
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NO_CONTENT;
 import static tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition.listOf;
-import static tech.pegasys.teku.spec.SpecMilestone.PHASE0;
+import static tech.pegasys.teku.spec.SpecMilestone.ALTAIR;
+import static tech.pegasys.teku.spec.SpecMilestone.EIP8483;
 
 import java.util.Collections;
 import java.util.List;
@@ -43,7 +44,8 @@ public class SendContributionAndProofsRequestTest extends AbstractTypeDefRequest
 
   @BeforeEach
   public void setup() {
-    assumeThat(specMilestone).isGreaterThan(PHASE0);
+    // PQ has no sync committees
+    assumeThat(specMilestone).isBetween(ALTAIR, EIP8483);
     request = new SendContributionAndProofsRequest(mockWebServer.url("/"), okHttpClient);
     contributionAndProofs =
         List.of(

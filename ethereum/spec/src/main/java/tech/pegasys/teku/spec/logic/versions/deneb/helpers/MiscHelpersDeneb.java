@@ -39,6 +39,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBody;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBodySchema;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.deneb.BeaconBlockBodyDeneb;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.deneb.BeaconBlockBodySchemaDeneb;
 import tech.pegasys.teku.spec.datastructures.execution.BlobAndProof;
@@ -53,7 +54,8 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsDeneb;
 
 public class MiscHelpersDeneb extends MiscHelpersCapella {
   private final Predicates predicates;
-  private final BeaconBlockBodySchemaDeneb<?> beaconBlockBodySchema;
+  // Not a Deneb body schema from PQ on, whose blocks carry no blob commitments
+  private final BeaconBlockBodySchema<?> beaconBlockBodySchema;
   private final BlobSidecarSchema blobSidecarSchema;
   private final SpecConfigDeneb specConfigDeneb;
 
@@ -88,8 +90,7 @@ public class MiscHelpersDeneb extends MiscHelpersCapella {
     super(specConfig);
     this.specConfigDeneb = specConfig;
     this.predicates = predicates;
-    this.beaconBlockBodySchema =
-        (BeaconBlockBodySchemaDeneb<?>) schemaDefinitions.getBeaconBlockBodySchema();
+    this.beaconBlockBodySchema = schemaDefinitions.getBeaconBlockBodySchema();
     this.blobSidecarSchema = schemaDefinitions.getBlobSidecarSchema();
   }
 
@@ -245,10 +246,12 @@ public class MiscHelpersDeneb extends MiscHelpersCapella {
   }
 
   public int getBlobSidecarKzgCommitmentGeneralizedIndex(final UInt64 blobSidecarIndex) {
+    final BeaconBlockBodySchemaDeneb<?> bodySchemaDeneb =
+        (BeaconBlockBodySchemaDeneb<?>) beaconBlockBodySchema;
     final long blobKzgCommitmentsGeneralizedIndex =
-        beaconBlockBodySchema.getBlobKzgCommitmentsGeneralizedIndex();
+        bodySchemaDeneb.getBlobKzgCommitmentsGeneralizedIndex();
     final long commitmentGeneralizedIndex =
-        beaconBlockBodySchema
+        bodySchemaDeneb
             .getBlobKzgCommitmentsSchema()
             .getChildGeneralizedIndex(blobSidecarIndex.longValue());
     return (int)

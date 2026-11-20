@@ -21,8 +21,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static tech.pegasys.teku.spec.SpecMilestone.EIP8483;
 import static tech.pegasys.teku.spec.SpecMilestone.GLOAS;
-import static tech.pegasys.teku.spec.SpecMilestone.HEZE;
 
 import java.util.List;
 import java.util.Map;
@@ -49,7 +49,9 @@ import tech.pegasys.teku.validator.api.SubmitDataError;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 import tech.pegasys.teku.validator.client.loader.OwnedValidators;
 
-@TestSpecContext(milestone = {GLOAS, HEZE})
+// The validator client signs with BLS: EIP-8483 is the latest milestone it can sign for until it
+// signs with XMSS in PQ
+@TestSpecContext(milestone = {GLOAS, EIP8483})
 public class ProposerPreferencesPublisherTest {
 
   private final ValidatorApiChannel validatorApiChannel = mock(ValidatorApiChannel.class);
