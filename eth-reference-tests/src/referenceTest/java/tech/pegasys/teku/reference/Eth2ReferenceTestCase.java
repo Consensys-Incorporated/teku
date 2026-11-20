@@ -14,10 +14,9 @@
 package tech.pegasys.teku.reference;
 
 import com.google.common.collect.ImmutableMap;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Assertions;
+import org.opentest4j.TestAbortedException;
 import tech.pegasys.teku.ethtests.TestFork;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
 import tech.pegasys.teku.reference.altair.fork.ForkUpgradeTestExecutor;
@@ -126,36 +125,37 @@ public abstract class Eth2ReferenceTestCase {
 
   private static final ImmutableMap<String, TestExecutor> EIP8483_TEST_TYPES = GLOAS_TEST_TYPES;
 
-  /**
-   * Fork choice, fast confirmation and gossip tests build BLS-signed blocks and attestations, which
-   * PQ replaces with XMSS signatures and STARK proofs: they wait for PQ's fork choice and
-   * networking.
-   */
-  private static final ImmutableMap<String, TestExecutor> PQ_TEST_TYPES =
-      ImmutableMap.<String, TestExecutor>builder()
-          .putAll(GLOAS_TEST_TYPES)
-          .putAll(
-              ignoring(
-                  List.of(
-                      ForkChoiceTestExecutor.FORK_CHOICE_TEST_TYPES,
-                      ForkChoiceTestExecutor.FAST_CONFIRMATION_TEST_TYPES,
-                      GossipTests.GOSSIP_TEST_TYPES)))
-          .buildKeepingLast();
+  private static final ImmutableMap<String, TestExecutor> PQ_TEST_TYPES = GLOAS_TEST_TYPES;
 
-  private static Map<String, TestExecutor> ignoring(
-      final List<Map<String, TestExecutor>> testTypes) {
-    final Map<String, TestExecutor> ignored = new HashMap<>();
-    for (final Map<String, TestExecutor> types : testTypes) {
-      types.keySet().forEach(testType -> ignored.put(testType, TestExecutor.IGNORE_TESTS));
-    }
-    return ignored;
-  }
+  /**
+   * PQ vectors that fail for reasons outside PQ. The fast confirmation ones test Gloas changes made
+   * after v1.7.0-beta.4 (consensus-specs #5670, #5788 and #5789), which Teku takes with the next
+   * Gloas release. The reorg one differs by a slot in the head and is not yet explained.
+   */
+  private static final Set<String> PQ_KNOWN_FAILURES =
+      Set.of(
+          "pq - minimal - fast_confirmation/empty_slots - fcr_handles_multiple_consecutive_empty_slots",
+          "pq - minimal - fast_confirmation/ffg - will_current_target_be_justified_fails_with_new_validator_activated_in_head_state",
+          "pq - minimal - fast_confirmation/ffg - will_no_conflicting_checkpoint_be_justified_fails_with_new_validator_activated_in_head_state",
+          "pq - minimal - fast_confirmation/is_one_confirmed - compute_committee_weight_between_slots_matches_fork_choice_weight_within_epoch",
+          "pq - minimal - fast_confirmation/is_one_confirmed - empty_slot_discount_pending_and_empty_parent",
+          "pq - minimal - fast_confirmation/is_one_confirmed - empty_slot_discount_pending_and_full_parent",
+          "pq - minimal - fast_confirmation/is_one_confirmed - is_one_confirmed_fails_inactive_attester_not_in_balance_source",
+          "pq - minimal - fast_confirmation/is_one_confirmed - is_one_confirmed_large_validator_voting_in_empty_slot",
+          "pq - minimal - fast_confirmation/is_one_confirmed - is_one_confirmed_passes_inactive_non_attester_not_in_balance_source",
+          "pq - minimal - fast_confirmation/revert_finality - fcr_no_reset_at_epoch_boundary_with_full_participation",
+          "pq - minimal - fast_confirmation/variables - observed_justified_checkpoints_properties_across_epochs",
+          "pq - minimal - fork_choice/reorg - include_votes_another_empty_chain_with_enough_ffg_votes_previous_epoch");
 
   protected void runReferenceTest(final TestDefinition testDefinition) throws Throwable {
     if (!testDefinition.getFork().equals(TestFork.PQ)) {
       SszMaxLengthFixtures.REJECTED_BY_SSZ_LIMITS.run(
           testDefinition, getExecutorFor(testDefinition));
       return;
+    }
+    if (PQ_KNOWN_FAILURES.contains(testDefinition.getDisplayName())) {
+      throw new TestAbortedException(
+          "Test " + testDefinition.getDisplayName() + " is a known failure");
     }
     // The PQ vectors are generated with XMSS inactive (real key generation takes minutes): every
     // XMSS signature and STARK proof is accepted, whatever the test's bls_setting, while leaf

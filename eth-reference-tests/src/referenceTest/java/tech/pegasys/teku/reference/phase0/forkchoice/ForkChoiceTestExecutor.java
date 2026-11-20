@@ -42,7 +42,6 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.ssz.SSZ;
 import org.assertj.core.api.Condition;
 import org.opentest4j.TestAbortedException;
-import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
 import tech.pegasys.teku.infrastructure.async.AsyncRunnerFactory;
@@ -82,6 +81,7 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteUpdater;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationPq;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
@@ -95,6 +95,7 @@ import tech.pegasys.teku.spec.logic.common.statetransition.results.ExecutionPayl
 import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 import tech.pegasys.teku.spec.logic.common.util.AttestationUtil;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.statetransition.datacolumns.CurrentSlotProvider;
 import tech.pegasys.teku.statetransition.datacolumns.DasCustodyStand;
 import tech.pegasys.teku.statetransition.datacolumns.DasSamplerBasicImpl;
@@ -360,7 +361,7 @@ public class ForkChoiceTestExecutor implements TestExecutor {
             testDefinition,
             "anchor_block" + SSZ_SNAPPY_EXTENSION,
             testDefinition.getSpec()::deserializeBeaconBlock);
-    return SignedBeaconBlock.create(testDefinition.getSpec(), anchorBlock, BLSSignature.empty());
+    return SignedBeaconBlock.createUnsigned(testDefinition.getSpec(), anchorBlock);
   }
 
   private void runSteps(
@@ -501,6 +502,10 @@ public class ForkChoiceTestExecutor implements TestExecutor {
     final Spec spec = testDefinition.getSpec();
     final ValidatableAttestation validatableAttestation =
         ValidatableAttestation.from(spec, attestation);
+    if (attestation instanceof AttestationPq) {
+      // A PQ attestation carries no signature: on_attestation only checks that it has attesters
+      validatableAttestation.setValidIndexedAttestation();
+    }
     if (maybeAttestationValidator.isPresent()) {
       final SafeFuture<InternalValidationResult> validationResult =
           maybeAttestationValidator
@@ -578,14 +583,29 @@ public class ForkChoiceTestExecutor implements TestExecutor {
             .orElseGet(
                 () -> ForkChoiceTestExecutor.<String>get(step, "payload_attestation_message"));
     final boolean valid = !step.containsKey("valid") || (boolean) step.get("valid");
+    final ValidatablePayloadAttestationMessage validatablePayloadAttestationMessage;
+    if (spec.getGenesisSchemaDefinitions() instanceof SchemaDefinitionsPq schemaDefinitionsPq) {
+      // PQ payload attestation messages are signed with XMSS
+      validatablePayloadAttestationMessage =
+          ValidatablePayloadAttestationMessage.fromNetworkPq(
+              spec,
+              TestDataUtils.loadSsz(
+                  testDefinition,
+                  payloadAttestationName + SSZ_SNAPPY_EXTENSION,
+                  schemaDefinitionsPq
+                      .getPqAttestationSchemas()
+                      .getPayloadAttestationMessageSchema()));
+    } else {
+      validatablePayloadAttestationMessage =
+          ValidatablePayloadAttestationMessage.fromNetwork(
+              TestDataUtils.loadSsz(
+                  testDefinition,
+                  payloadAttestationName + SSZ_SNAPPY_EXTENSION,
+                  SchemaDefinitionsGloas.required(spec.getGenesisSchemaDefinitions())
+                      .getPayloadAttestationMessageSchema()));
+    }
     final PayloadAttestationMessage payloadAttestationMessage =
-        TestDataUtils.loadSsz(
-            testDefinition,
-            payloadAttestationName + SSZ_SNAPPY_EXTENSION,
-            SchemaDefinitionsGloas.required(spec.getGenesisSchemaDefinitions())
-                .getPayloadAttestationMessageSchema());
-    final ValidatablePayloadAttestationMessage validatablePayloadAttestationMessage =
-        ValidatablePayloadAttestationMessage.fromNetwork(payloadAttestationMessage);
+        validatablePayloadAttestationMessage.getMessage();
     if (valid) {
       final BeaconState state =
           safeJoin(

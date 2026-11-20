@@ -82,22 +82,41 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
       final GossipExecutionPayloadEnvelopeMetaData.BlockEntry blockEntry =
           blockEntryAndBlock.blockEntry();
       final SignedBeaconBlock block = blockEntryAndBlock.block();
-      if (block.getRoot().equals(ctx.anchorPoint.getRoot())) {
-        continue;
-      }
-      ctx.forkChoice.onTick(
-          spec.computeTimeMillisAtSlot(block.getSlot(), ctx.recentChainData.getGenesisTimeMillis()),
-          Optional.empty());
-      final BlockImportResult importResult =
-          safeJoin(
-              ctx.forkChoice.onBlock(
-                  block, Optional.empty(), BlockBroadcastValidator.NOOP, ctx.executionLayer));
-      if (blockEntry.isFailed()) {
-        invalidBlockRoots.put(
-            block.getRoot(), BlockImportResult.FAILED_DESCENDANT_OF_INVALID_BLOCK);
-      } else {
+      if (!block.getRoot().equals(ctx.anchorPoint.getRoot())) {
+        ctx.forkChoice.onTick(
+            spec.computeTimeMillisAtSlot(
+                block.getSlot(), ctx.recentChainData.getGenesisTimeMillis()),
+            Optional.empty());
+        final BlockImportResult importResult =
+            safeJoin(
+                ctx.forkChoice.onBlock(
+                    block, Optional.empty(), BlockBroadcastValidator.NOOP, ctx.executionLayer));
+        if (blockEntry.isFailed()) {
+          invalidBlockRoots.put(
+              block.getRoot(), BlockImportResult.FAILED_DESCENDANT_OF_INVALID_BLOCK);
+          continue;
+        }
         assertThat(importResult.isSuccessful())
-            .describedAs("Expected setup block %s to import successfully", blockEntry.getBlock())
+            .describedAs(
+                "Expected setup block %s to import successfully but got %s %s",
+                blockEntry.getBlock(),
+                importResult.getFailureReason(),
+                importResult.getFailureCause().map(Throwable::toString).orElse(""))
+            .isTrue();
+      }
+      // A setup block whose payload later blocks build on comes with its envelope
+      final Optional<String> maybePayloadName = blockEntry.getPayload();
+      if (maybePayloadName.isPresent()) {
+        final SignedExecutionPayloadEnvelope envelope =
+            loadSsz(
+                testDefinition,
+                maybePayloadName.get() + ".ssz_snappy",
+                SchemaDefinitionsGloas.required(spec.atSlot(block.getSlot()).getSchemaDefinitions())
+                    .getSignedExecutionPayloadEnvelopeSchema());
+        assertThat(
+                safeJoin(ctx.forkChoice.onExecutionPayloadEnvelope(envelope, ctx.executionLayer))
+                    .isSuccessful())
+            .describedAs("Expected setup payload %s to import successfully", maybePayloadName.get())
             .isTrue();
       }
     }
@@ -188,8 +207,15 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
       @JsonProperty(value = "failed", defaultValue = "false")
       private boolean failed;
 
+      @JsonProperty(value = "payload")
+      private String payload;
+
       public String getBlock() {
         return block;
+      }
+
+      public Optional<String> getPayload() {
+        return Optional.ofNullable(payload);
       }
 
       public boolean isFailed() {

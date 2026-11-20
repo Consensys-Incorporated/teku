@@ -18,6 +18,7 @@ import static tech.pegasys.teku.infrastructure.logging.Converter.gweiToEth;
 import static tech.pegasys.teku.spec.config.Constants.HIGHEST_BID_SET_SIZE;
 import static tech.pegasys.teku.spec.config.Constants.MAX_SLOTS_TO_TRACK_BUILDERS_BIDS;
 import static tech.pegasys.teku.spec.config.SpecConfigGloas.PAYLOAD_BUILDER_VERSION;
+import static tech.pegasys.teku.spec.constants.EthConstants.ETH_TO_GWEI;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ignore;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.reject;
@@ -26,7 +27,6 @@ import static tech.pegasys.teku.statetransition.validation.InternalValidationRes
 import com.google.errorprone.annotations.FormatMethod;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.logging.log4j.LogManager;
@@ -38,6 +38,7 @@ import tech.pegasys.teku.infrastructure.collections.LimitedMap;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
@@ -57,8 +58,11 @@ public class ExecutionPayloadBidGossipValidator {
   private final GossipValidationHelper gossipValidationHelper;
   private final SigningRootUtil signingRootUtil;
   private final int minBidIncrementPercentage;
-  private final Map<UInt64, Set<BuilderAndParent>> seenExecutionPayloadBids =
+
+  /** The number of valid bids seen per slot, for each builder and parent. */
+  private final Map<UInt64, Map<BuilderAndParent, Integer>> seenExecutionPayloadBids =
       LimitedMap.createSynchronizedLRU(MAX_SLOTS_TO_TRACK_BUILDERS_BIDS);
+
   private final Map<BidParent, UInt64> highestBids =
       LimitedMap.createSynchronizedLRU(HIGHEST_BID_SET_SIZE);
 
@@ -208,9 +212,8 @@ public class ExecutionPayloadBidGossipValidator {
               final BuilderAndParent builderAndParent =
                   new BuilderAndParent(
                       bid.getBuilderIndex(), bid.getParentBlockHash(), bid.getParentBlockRoot());
-              if (seenExecutionPayloadBids
-                  .getOrDefault(bid.getSlot(), Set.of())
-                  .contains(builderAndParent)) {
+              if (!hasBidLimit(bid.getSlot())
+                  && getSeenBidCount(bid.getSlot(), builderAndParent) > 0) {
                 return ignoreBid(
                     bid,
                     "already received valid bid for slot %s, parent block hash %s, parent block root %s, and builder index %s",
@@ -331,6 +334,18 @@ public class ExecutionPayloadBidGossipValidator {
               }
 
               /*
+               * [IGNORE] The builder has not reached its bid limit for this slot and parent (PQ)
+               */
+              final int bidLimit = getBidLimit(builder, bid.getSlot());
+              if (getSeenBidCount(bid.getSlot(), builderAndParent) >= bidLimit) {
+                return ignoreBid(
+                    bid,
+                    "builder %s has reached its bid limit of %s",
+                    bid.getBuilderIndex(),
+                    bidLimit);
+              }
+
+              /*
                * [IGNORE] The builder can cover the bid
                */
               if (!gossipValidationHelper.builderHasEnoughBalanceForBid(
@@ -364,7 +379,7 @@ public class ExecutionPayloadBidGossipValidator {
                           .stream()
                           .anyMatch(
                               request ->
-                                  request.getPubkey().equals(builder.getPublicKey())
+                                  builder.isNamedByExitRequestPubkey(request.getPubkey())
                                       && request
                                           .getSourceAddress()
                                           .getWrappedBytes()
@@ -383,9 +398,10 @@ public class ExecutionPayloadBidGossipValidator {
                 return rejectBid(bid, "invalid execution payload bid signature");
               }
 
-              if (!seenExecutionPayloadBids
-                  .computeIfAbsent(bid.getSlot(), __ -> ConcurrentHashMap.newKeySet())
-                  .add(builderAndParent)) {
+              if (seenExecutionPayloadBids
+                      .computeIfAbsent(bid.getSlot(), __ -> new ConcurrentHashMap<>())
+                      .merge(builderAndParent, 1, Integer::sum)
+                  > bidLimit) {
                 return ignoreBid(
                     bid,
                     "another bid for parent block hash %s and parent block root %s was processed concurrently",
@@ -563,6 +579,25 @@ public class ExecutionPayloadBidGossipValidator {
       return gasLimit.equals(maxGasLimit);
     }
     return gasLimit.equals(minGasLimit);
+  }
+
+  private int getSeenBidCount(final UInt64 slot, final BuilderAndParent builderAndParent) {
+    return seenExecutionPayloadBids.getOrDefault(slot, Map.of()).getOrDefault(builderAndParent, 0);
+  }
+
+  /**
+   * From PQ, a builder may bid up to once per ETH of balance for each slot and parent
+   * (get_builder_bid_limit). Before it, only the first bid is accepted.
+   */
+  private boolean hasBidLimit(final UInt64 slot) {
+    return spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ);
+  }
+
+  private int getBidLimit(final Builder builder, final UInt64 slot) {
+    if (!hasBidLimit(slot)) {
+      return 1;
+    }
+    return builder.getBalance().dividedBy(ETH_TO_GWEI).min(Integer.MAX_VALUE).intValue();
   }
 
   record BuilderAndParent(UInt64 builderIndex, Bytes32 parentBlockHash, Bytes32 parentBlockRoot) {}

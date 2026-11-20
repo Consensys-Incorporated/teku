@@ -113,6 +113,16 @@ class SeenAggregatesCacheTest {
     assertThat(cache.add(root, bitlist(true, true, false, false))).isTrue();
   }
 
+  @Test
+  void isAlreadySeen_shouldBeFalseWhenLengthDiffers() {
+    final Bytes32 root = dataStructureUtil.randomBytes32();
+    assertThat(cache.add(root, bitlist(true, true, true, true))).isTrue();
+
+    // is_non_strict_superset: a bitlist of a different length is never covered
+    assertThat(cache.isAlreadySeen(root, bitlist(true, false, false))).isFalse();
+    assertThat(cache.isAlreadySeen(root, bitlist(true, false, false, false, false))).isFalse();
+  }
+
   private SszBitlist bitlist(final Boolean... values) {
     return bitlistSchema.of(values);
   }

@@ -151,6 +151,11 @@ public class AggregateAttestationValidatorPq {
     final AttestationUtilPq attestationUtil =
         (AttestationUtilPq) spec.atSlot(data.getSlot()).getAttestationUtil();
 
+    // [REJECT] The aggregate attestation's epoch matches its target. The state is chosen by the
+    // target epoch, so the aggregation committee can only be read once they match.
+    if (!data.getTarget().getEpoch().equals(spec.computeEpochAtSlot(data.getSlot()))) {
+      return reject("Attestation epoch does not match target epoch");
+    }
     // [REJECT] The committee index is within the expected range
     if (committeeIndex.isGreaterThanOrEqualTo(
         spec.getCommitteeCountPerSlot(state, data.getTarget().getEpoch()))) {
