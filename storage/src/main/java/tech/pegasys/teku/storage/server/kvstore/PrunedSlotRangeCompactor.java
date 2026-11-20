@@ -40,14 +40,15 @@ import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.Sl
  * have been pruned since the last compaction.
  *
  * <p>The first compaction starts from slot 0, so it also clears tombstones left by pruning before
- * this node started. Slots that no data file holds are skipped without compacting them, and each
+ * this node started. When no data file holds the pruned slots there is nothing to compact. Each
  * compaction stops before the data files it covers add up to more than {@code
  * maxBytesPerCompaction}, so a large backlog is worked through a piece at a time. Pruning often
  * finds nothing new to delete, so those runs carry on with the backlog too.
  *
  * <p>After each compaction it reports how many bytes of data files holding pruned slots are still
- * to be compacted, so working through a backlog can be watched. After each prune it reports how
- * many tombstones are left in the pruned slots, where the database can count them.
+ * to be compacted, so working through a backlog can be watched, and how many tombstones are left in
+ * the pruned slots, where the database can count them. Both read the metadata of every data file in
+ * the column, so they are only refreshed when a compaction runs, not on every prune.
  */
 class PrunedSlotRangeCompactor {
   private static final Logger LOG = LogManager.getLogger();
@@ -86,16 +87,14 @@ class PrunedSlotRangeCompactor {
   }
 
   /**
-   * Records that every key of the column at or below {@code lastPrunedSlot} has been deleted,
-   * compacts the slots pruned since the last compaction once there are enough of them, and updates
-   * the count of tombstones left in the pruned slots. Blocking: call it from the pruner, after the
-   * deletions have been committed.
+   * Records that every key of the column at or below {@code lastPrunedSlot} has been deleted and
+   * compacts the slots pruned since the last compaction once there are enough of them. Blocking:
+   * call it from the pruner, after the deletions have been committed.
    */
   synchronized void onPruned(final UInt64 lastPrunedSlot) {
     highestPrunedSlot =
         Optional.of(highestPrunedSlot.map(lastPrunedSlot::max).orElse(lastPrunedSlot));
     compactIfEnoughSlotsPruned(lastPrunedSlot);
-    updateTombstoneCount(lastPrunedSlot);
   }
 
   /**
@@ -104,14 +103,7 @@ class PrunedSlotRangeCompactor {
    * nothing until something has been pruned since startup. Blocking: call it from the pruner.
    */
   synchronized void onNothingPruned() {
-    highestPrunedSlot.ifPresent(
-        lastPrunedSlot -> {
-          final UInt64 previousNextSlotToCompact = nextSlotToCompact;
-          compactIfEnoughSlotsPruned(lastPrunedSlot);
-          if (!nextSlotToCompact.equals(previousNextSlotToCompact)) {
-            updateTombstoneCount(lastPrunedSlot);
-          }
-        });
+    highestPrunedSlot.ifPresent(this::compactIfEnoughSlotsPruned);
   }
 
   private void compactIfEnoughSlotsPruned(final UInt64 lastPrunedSlot) {
@@ -119,6 +111,11 @@ class PrunedSlotRangeCompactor {
         || lastPrunedSlot.minus(nextSlotToCompact).plus(1).isLessThan(minSlotsPerCompaction)) {
       return;
     }
+    compactPrunedSlots(lastPrunedSlot);
+    updateTombstoneCount(lastPrunedSlot);
+  }
+
+  private void compactPrunedSlots(final UInt64 lastPrunedSlot) {
     final Optional<List<SlotRangeDataFile>> maybeFiles =
         dao.getSlotRangeDataFiles(column, nextSlotToCompact, lastPrunedSlot);
     if (maybeFiles.isEmpty()) {
@@ -137,15 +134,17 @@ class PrunedSlotRangeCompactor {
       gauges.backlogBytes().set(0, metricLabel);
       return;
     }
-    // Slots before the first data file are not held anywhere, so skip them
-    final UInt64 startSlot =
+    // No data file holds the slots before the first one listed, but deletes of them can still be in
+    // memory. Compacting a range flushes the memory that overlaps it first, so the compaction
+    // starts from the next slot to compact to drop those tombstones too. That adds no files to it.
+    final UInt64 firstFileSlot =
         files.stream()
             .map(SlotRangeDataFile::firstSlot)
             .min(Comparator.naturalOrder())
             .orElseThrow()
             .max(nextSlotToCompact);
-    final UInt64 endSlot = getLastSlotWithinBudget(files, startSlot, lastPrunedSlot);
-    compact(startSlot, endSlot);
+    final UInt64 endSlot = getLastSlotWithinBudget(files, firstFileSlot, lastPrunedSlot);
+    compact(nextSlotToCompact, endSlot);
     // The files reaching past this compaction hold the slots still to compact
     final long backlogBytes =
         endSlot.equals(lastPrunedSlot)
@@ -160,14 +159,16 @@ class PrunedSlotRangeCompactor {
   /**
    * Compacting a range reads and rewrites every data file overlapping it, so the range ends just
    * before the first data file that would take the total over the budget. The files holding the
-   * start slot are always included, so every compaction makes progress.
+   * first slot held by any file are always included, so every compaction makes progress.
    */
   private UInt64 getLastSlotWithinBudget(
-      final List<SlotRangeDataFile> files, final UInt64 startSlot, final UInt64 lastPrunedSlot) {
+      final List<SlotRangeDataFile> files,
+      final UInt64 firstFileSlot,
+      final UInt64 lastPrunedSlot) {
     long bytes = 0;
     for (final SlotRangeDataFile file :
         files.stream().sorted(Comparator.comparing(SlotRangeDataFile::firstSlot)).toList()) {
-      if (file.firstSlot().isGreaterThan(startSlot)
+      if (file.firstSlot().isGreaterThan(firstFileSlot)
           && bytes + file.sizeBytes() > maxBytesPerCompaction) {
         return file.firstSlot().minus(1);
       }
@@ -222,8 +223,8 @@ class PrunedSlotRangeCompactor {
               TekuMetricCategory.STORAGE,
               "pruned_slots_tombstones",
               "Deletion tombstones not yet dropped by compaction in the data files holding pruned"
-                  + " slots. Files written before startup are mostly not counted until compaction"
-                  + " rewrites them",
+                  + " slots, as of the last compaction. Files written before startup are mostly not"
+                  + " counted until compaction rewrites them",
               "table"));
     }
   }

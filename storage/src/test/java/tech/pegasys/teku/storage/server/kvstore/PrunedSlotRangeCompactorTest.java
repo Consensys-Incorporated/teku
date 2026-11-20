@@ -93,13 +93,26 @@ class PrunedSlotRangeCompactorTest {
   }
 
   @Test
-  void shouldStartAtTheFirstDataFileInTheRange() {
+  void shouldCompactFromTheNextSlotEvenWhenNoDataFileHoldsIt() {
+    // Deletes of the slots before the first data file can still be in memory, and compacting the
+    // range flushes them so their tombstones are dropped too
     when(dao.getSlotRangeDataFiles(COLUMN, UInt64.ZERO, UInt64.valueOf(1_000)))
         .thenReturn(Optional.of(List.of(file(600, 2_000, 100), file(500, 700, 100))));
 
     compactor.onPruned(UInt64.valueOf(1_000));
 
-    verify(dao).compactSlotRange(COLUMN, UInt64.valueOf(500), UInt64.valueOf(1_000));
+    verify(dao).compactSlotRange(COLUMN, UInt64.ZERO, UInt64.valueOf(1_000));
+  }
+
+  @Test
+  void shouldSizeTheBudgetFromTheFirstDataFile() {
+    // The first data file is always compacted, even when the next slot to compact is before it
+    when(dao.getSlotRangeDataFiles(COLUMN, UInt64.ZERO, UInt64.valueOf(1_000)))
+        .thenReturn(Optional.of(List.of(file(500, 599, 5_000), file(600, 700, 10))));
+
+    compactor.onPruned(UInt64.valueOf(1_000));
+
+    verify(dao).compactSlotRange(COLUMN, UInt64.ZERO, UInt64.valueOf(599));
   }
 
   @Test
@@ -120,7 +133,7 @@ class PrunedSlotRangeCompactorTest {
     compactor.onPruned(UInt64.valueOf(1_010));
 
     final InOrder inOrder = inOrder(dao);
-    inOrder.verify(dao).compactSlotRange(COLUMN, UInt64.valueOf(100), UInt64.valueOf(299));
+    inOrder.verify(dao).compactSlotRange(COLUMN, UInt64.ZERO, UInt64.valueOf(299));
     inOrder.verify(dao).compactSlotRange(COLUMN, UInt64.valueOf(300), UInt64.valueOf(1_010));
   }
 
@@ -171,7 +184,7 @@ class PrunedSlotRangeCompactorTest {
 
     compactor.onPruned(UInt64.valueOf(1_000));
 
-    verify(dao).compactSlotRange(COLUMN, UInt64.valueOf(100), UInt64.valueOf(199));
+    verify(dao).compactSlotRange(COLUMN, UInt64.ZERO, UInt64.valueOf(199));
   }
 
   @Test
@@ -194,7 +207,7 @@ class PrunedSlotRangeCompactorTest {
     compactor.onNothingPruned();
 
     final InOrder inOrder = inOrder(dao);
-    inOrder.verify(dao).compactSlotRange(COLUMN, UInt64.valueOf(100), UInt64.valueOf(199));
+    inOrder.verify(dao).compactSlotRange(COLUMN, UInt64.ZERO, UInt64.valueOf(199));
     inOrder.verify(dao).compactSlotRange(COLUMN, UInt64.valueOf(200), UInt64.valueOf(1_000));
     // The tombstone count is refreshed after each compaction
     verify(dao, times(2)).countSlotRangeTombstones(COLUMN, UInt64.ZERO, UInt64.valueOf(1_000));
@@ -291,15 +304,14 @@ class PrunedSlotRangeCompactorTest {
   }
 
   @Test
-  void shouldReportTombstonesInThePrunedSlotsAfterEveryPrune() {
-    when(dao.countSlotRangeTombstones(COLUMN, UInt64.ZERO, UInt64.valueOf(5)))
-        .thenReturn(OptionalLong.of(42));
+  void shouldReportTombstonesInThePrunedSlotsOnlyWhenCompacting() {
     when(dao.countSlotRangeTombstones(COLUMN, UInt64.ZERO, UInt64.valueOf(9)))
         .thenReturn(OptionalLong.of(3));
 
-    // Too few slots to compact, but still reported
+    // Too few slots to compact, so the data files are not read
     compactor.onPruned(UInt64.valueOf(5));
-    assertThat(gaugeValue(TOMBSTONES)).hasValue(42);
+    verify(dao, never()).countSlotRangeTombstones(any(), any(), any());
+    assertThat(gaugeValue(TOMBSTONES)).isEmpty();
 
     compactor.onPruned(UInt64.valueOf(9));
     assertThat(gaugeValue(TOMBSTONES)).hasValue(3);

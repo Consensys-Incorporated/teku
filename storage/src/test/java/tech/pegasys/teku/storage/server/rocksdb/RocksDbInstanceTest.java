@@ -254,6 +254,25 @@ class RocksDbInstanceTest {
     assertThat(instance.countTombstones(column, first, last)).hasValue(0);
   }
 
+  @Test
+  void compactRange_shouldDropTombstonesStillInMemory() throws Exception {
+    // Deletes of keys no data file holds, which no listing of the data files can see yet
+    final UInt64 first = UInt64.valueOf(KEY_COUNT + 100);
+    final UInt64 last = UInt64.valueOf(KEY_COUNT + 200);
+    try (final KvStoreTransaction transaction = instance.startTransaction()) {
+      for (long key = first.longValue(); key <= last.longValue(); key++) {
+        transaction.delete(column, UInt64.valueOf(key));
+      }
+      transaction.commit();
+    }
+
+    // Compacting the range flushes the memory overlapping it first
+    instance.compactRange(column, UInt64.ZERO, last);
+    flush();
+
+    assertThat(instance.countTombstones(column, first, last)).hasValue(0);
+  }
+
   private long tombstonesOnTheBottomLevel() {
     return db.getColumnFamilyMetaData(columnHandle).levels().getLast().files().stream()
         .mapToLong(SstFileMetaData::numDeletions)
