@@ -48,6 +48,8 @@ import tech.pegasys.teku.networking.eth2.gossip.topics.OperationProcessor;
 import tech.pegasys.teku.networking.p2p.discovery.DiscoveryNetwork;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SignedContributionAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.ValidatableSyncCommitteeMessage;
@@ -118,15 +120,15 @@ public class GossipForkSubscriptionsGloasTest {
   }
 
   @Test
-  public void shouldIgnoreRemovedTopicsFromThePqFork() {
+  public void shouldIgnoreTopicsThePqForkRemoved() {
     final Spec pqSpec = TestSpecFactory.createMinimalPq();
     final Fork pqFork = pqSpec.getForkSchedule().getFork(UInt64.ZERO);
+    final DataStructureUtil pqData = new DataStructureUtil(pqSpec);
     final GossipForkSubscriptionsGloas gossipForkSubscriptions =
         createGossipForkSubscriptionGloas(pqSpec, pqFork);
     gossipForkSubscriptions.addGossipManagers(
         new ForkInfo(pqFork, dataStructureUtil.randomBytes32()), forkDigest());
 
-    // Their gossip managers don't exist in PQ, so these must not reach them
     assertThatNoException()
         .isThrownBy(
             () -> {
@@ -137,6 +139,11 @@ public class GossipForkSubscriptionsGloasTest {
               gossipForkSubscriptions.publishSyncCommitteeContribution(
                   mock(SignedContributionAndProof.class));
               gossipForkSubscriptions.publishVoluntaryExit(mock(SignedVoluntaryExit.class));
+              gossipForkSubscriptions.publishPayloadAttestationMessage(
+                  mock(PayloadAttestationMessage.class));
+              gossipForkSubscriptions.subscribeToExecutionProofSubnet(0);
+              gossipForkSubscriptions.publishAttestation(
+                  ValidatableAttestation.from(pqSpec, pqData.randomAttestation()));
             });
   }
 
