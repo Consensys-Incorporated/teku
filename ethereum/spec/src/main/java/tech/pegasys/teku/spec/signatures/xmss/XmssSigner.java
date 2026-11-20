@@ -71,6 +71,15 @@ public interface XmssSigner {
    */
   SafeFuture<XmssSignature> signAtReservedLeaf(Bytes32 signingRoot);
 
+  /**
+   * Gets the key ready to sign at {@code slot} without delay, by building the bottom trees its
+   * leaves are in ({@link XmssLeafLayout#bottomTreesAt}). Building a tree takes seconds, so call
+   * this ahead of the slot. Does nothing for trees already prepared, and before the PQ fork.
+   *
+   * @return how many trees this call prepared for the first time
+   */
+  SafeFuture<Integer> prepareForSlot(UInt64 slot);
+
   /** compute_vrf_proof: the RANDAO reveal of a block at {@code slot}. */
   SafeFuture<List<Bytes32>> computeVrfProof(UInt64 slot);
 
