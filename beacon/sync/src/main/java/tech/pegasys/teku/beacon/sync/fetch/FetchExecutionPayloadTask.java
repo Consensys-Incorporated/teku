@@ -51,12 +51,7 @@ public class FetchExecutionPayloadTask
   @Override
   SafeFuture<FetchResult<SignedExecutionPayloadEnvelope>> fetch(final Eth2Peer peer) {
     return peer.requestExecutionPayloadEnvelopeByRoot(beaconBlockRoot)
-        .thenApply(
-            maybeExecutionPayload ->
-                maybeExecutionPayload
-                    .map(executionPayload -> FetchResult.createSuccessful(peer, executionPayload))
-                    .orElseGet(
-                        () -> FetchResult.createFailed(peer, FetchResult.Status.FETCH_FAILED)))
+        .thenApply(maybeExecutionPayload -> createFetchResult(peer, maybeExecutionPayload))
         .exceptionally(
             err -> {
               LOG.debug(
@@ -66,5 +61,24 @@ public class FetchExecutionPayloadTask
                   err);
               return FetchResult.createFailed(peer, FetchResult.Status.FETCH_FAILED);
             });
+  }
+
+  private FetchResult<SignedExecutionPayloadEnvelope> createFetchResult(
+      final Eth2Peer peer, final Optional<SignedExecutionPayloadEnvelope> maybeExecutionPayload) {
+    if (maybeExecutionPayload.isEmpty()) {
+      return FetchResult.createFailed(peer, FetchResult.Status.FETCH_FAILED);
+    }
+
+    final SignedExecutionPayloadEnvelope executionPayload = maybeExecutionPayload.get();
+    if (!executionPayload.getBeaconBlockRoot().equals(beaconBlockRoot)) {
+      LOG.debug(
+          "Failed to fetch execution payload by beacon block root {} from peer {}: returned execution payload for beacon block root {}",
+          beaconBlockRoot,
+          peer.getId(),
+          executionPayload.getBeaconBlockRoot());
+      return FetchResult.createFailed(peer, FetchResult.Status.FETCH_FAILED);
+    }
+
+    return FetchResult.createSuccessful(peer, executionPayload);
   }
 }
