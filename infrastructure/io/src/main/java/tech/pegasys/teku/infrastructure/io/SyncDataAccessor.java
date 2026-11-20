@@ -35,8 +35,8 @@ import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException
  *
  * <p>Creating or renaming a file changes its parent directory, and on POSIX filesystems that change
  * is only durable once the directory itself is synced. Where the platform allows it, the parent
- * directory is synced after each write, so a host crash or power loss cannot roll the file back
- * to its previous version or remove it.
+ * directory is synced after each write, so a host crash or power loss cannot roll the file back to
+ * its previous version or remove it.
  */
 public class SyncDataAccessor {
 
