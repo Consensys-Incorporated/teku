@@ -283,12 +283,24 @@ public class GossipForkSubscriptionsPhase0 implements GossipForkSubscriptions {
 
   @Override
   public void subscribeToAttestationSubnetId(final int subnetId) {
-    attestationGossipManager.subscribeToSubnetId(subnetId);
+    if (isAttestationSubnetOfThisFork(subnetId)) {
+      attestationGossipManager.subscribeToSubnetId(subnetId);
+    }
   }
 
   @Override
   public void unsubscribeFromAttestationSubnetId(final int subnetId) {
-    attestationGossipManager.unsubscribeFromSubnetId(subnetId);
+    if (isAttestationSubnetOfThisFork(subnetId)) {
+      attestationGossipManager.unsubscribeFromSubnetId(subnetId);
+    }
+  }
+
+  /**
+   * PQ has fewer attestation subnets than earlier forks. Around the fork, subscriptions made for
+   * the other side's subnets are only taken up by the forks that have them.
+   */
+  private boolean isAttestationSubnetOfThisFork(final int subnetId) {
+    return subnetId < spec.atEpoch(getActivationEpoch()).miscHelpers().getAttestationSubnetCount();
   }
 
   @Override

@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.within;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -111,6 +112,51 @@ public class GossipScoringConfiguratorTest {
     validateAggregateTopicParams(allTopics, false);
     validateBlockTopicParams(allTopics, false);
     validateAllAttestationSubnetTopicParams(allTopics, false);
+  }
+
+  @Test
+  public void configureAllTopics_pqHasSixteenHeavierAttestationSubnets() {
+    final Spec pqSpec = TestSpecFactory.createMinimalWithPqForkEpoch(UInt64.ONE);
+    final GossipScoringConfigurator pqConfigurator = new GossipScoringConfigurator(pqSpec);
+    final int activeValidators = 10_000;
+
+    final Map<String, GossipTopicScoringConfig> preFork =
+        attestationSubnetTopics(pqConfigurator, activeValidators, UInt64.ZERO);
+    final Map<String, GossipTopicScoringConfig> pq =
+        attestationSubnetTopics(
+            pqConfigurator, activeValidators, pqSpec.computeStartSlotAtEpoch(UInt64.ONE));
+
+    assertThat(preFork).hasSize(64);
+    assertThat(pq).hasSize(16).doesNotContainKey(attestationSubnetTopic(16));
+    // The subnets share the same cumulative weight, and each carries four times the messages
+    final GossipTopicScoringConfig preForkSubnet = preFork.get(attestationSubnetTopic(0));
+    final GossipTopicScoringConfig pqSubnet = pq.get(attestationSubnetTopic(0));
+    assertThat(pqSubnet.getTopicWeight()).isEqualTo(preForkSubnet.getTopicWeight() * 4);
+    assertThat(pqSubnet.getFirstMessageDeliveriesCap())
+        .isGreaterThan(preForkSubnet.getFirstMessageDeliveriesCap());
+  }
+
+  private Map<String, GossipTopicScoringConfig> attestationSubnetTopics(
+      final GossipScoringConfigurator configurator,
+      final int activeValidators,
+      final UInt64 currentSlot) {
+    final GossipTopicsScoringConfig.Builder builder = GossipTopicsScoringConfig.builder();
+    configurator.configureAllTopics(
+        builder,
+        Eth2Context.builder()
+            .activeValidatorCount(activeValidators)
+            .gossipEncoding(gossipEncoding)
+            .forkDigest(forkDigest)
+            .currentSlot(currentSlot)
+            .build());
+    return builder.build().getTopicConfigs().entrySet().stream()
+        .filter(entry -> entry.getKey().contains("beacon_attestation_"))
+        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+  }
+
+  private String attestationSubnetTopic(final int subnet) {
+    return GossipTopics.getTopic(
+        forkDigest, GossipTopicName.getAttestationSubnetTopicName(subnet), gossipEncoding);
   }
 
   private void validateVoluntaryExitTopicParams(

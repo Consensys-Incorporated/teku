@@ -59,6 +59,11 @@ public class NodeBasedStableSubnetSubscriber implements StableSubnetSubscriber {
       }
       iterator.remove();
     }
+    // From PQ there are fewer attestation subnets, so subnets chosen before the fork may no
+    // longer exist. Replacing them now, rather than when they expire, keeps the node on its
+    // required number of subnets.
+    final int attestationSubnetCount = spec.atSlot(slot).miscHelpers().getAttestationSubnetCount();
+    subnetSubscriptions.removeIf(subscription -> subscription.subnetId() >= attestationSubnetCount);
 
     // Adjust the number of subscriptions
     // If there are new subscriptions, pass the new subscription set to BeaconNode
