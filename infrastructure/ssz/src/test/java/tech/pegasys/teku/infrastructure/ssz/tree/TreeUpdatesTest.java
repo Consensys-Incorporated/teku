@@ -16,7 +16,6 @@ package tech.pegasys.teku.infrastructure.ssz.tree;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import it.unimi.dsi.fastutil.longs.LongArrayList;
 import java.nio.ByteOrder;
 import java.util.List;
 import java.util.Random;
@@ -259,7 +258,32 @@ public class TreeUpdatesTest {
 
   @Test
   public void differentNumbersOfIndicesAndNodesShouldBeRejected() {
-    assertThatThrownBy(() -> new TreeUpdates(LongArrayList.of(4L, 5L), List.of(newTestLeaf(1))))
+    assertThatThrownBy(() -> new TreeUpdates(List.of(4L, 5L), List.of(newTestLeaf(1))))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> TreeUpdates.wrap(new long[] {4L, 5L}, new TreeNode[] {newTestLeaf(1)}))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  public void wrappedArraysShouldBeValidatedAndGiveTheSameTreeAsTheListOfUpdates() {
+    final int treeWidth = 8;
+    final TreeNode zeroTree = TreeUtil.createDefaultTree(treeWidth, LeafNode.EMPTY_LEAF);
+    final TreeNode leaf1 = newTestLeaf(1);
+    final TreeNode leaf2 = newTestLeaf(2);
+
+    final TreeUpdates wrapped =
+        TreeUpdates.wrap(new long[] {treeWidth + 1, treeWidth + 6}, new TreeNode[] {leaf1, leaf2});
+    final TreeUpdates fromList =
+        new TreeUpdates(
+            List.of(new Update(treeWidth + 1, leaf1), new Update(treeWidth + 6, leaf2)));
+
+    assertThat(zeroTree.updated(wrapped).hashTreeRoot())
+        .isEqualTo(zeroTree.updated(fromList).hashTreeRoot())
+        .isNotEqualTo(zeroTree.hashTreeRoot());
+    assertThatThrownBy(
+            () ->
+                TreeUpdates.wrap(
+                    new long[] {treeWidth + 6, treeWidth + 1}, new TreeNode[] {leaf1, leaf2}))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
