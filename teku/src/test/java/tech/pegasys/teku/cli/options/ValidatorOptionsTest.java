@@ -63,6 +63,22 @@ public class ValidatorOptionsTest extends AbstractBeaconNodeCommandTest {
   }
 
   @Test
+  void pqKeysDerivedFromBlsKey_shouldBeDisabledByDefault() {
+    final ValidatorConfig config =
+        getTekuConfigurationFromArguments().validatorClient().getValidatorConfig();
+    assertThat(config.isPqKeysDerivedFromBlsKey()).isFalse();
+  }
+
+  @Test
+  void pqKeysDerivedFromBlsKey_shouldBeEnabledByFlag() {
+    final ValidatorConfig config =
+        getTekuConfigurationFromArguments("--Xvalidators-pq-keys-derived-from-bls-key")
+            .validatorClient()
+            .getValidatorConfig();
+    assertThat(config.isPqKeysDerivedFromBlsKey()).isTrue();
+  }
+
+  @Test
   public void graffiti_shouldBeEmptyByDefault() {
     final ValidatorConfig config =
         getTekuConfigurationFromArguments().validatorClient().getValidatorConfig();

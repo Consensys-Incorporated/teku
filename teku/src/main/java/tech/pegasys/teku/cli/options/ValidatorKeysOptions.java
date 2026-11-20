@@ -105,6 +105,18 @@ public class ValidatorKeysOptions {
   private int validatorExternalSignerConcurrentRequestLimit =
       ValidatorConfig.DEFAULT_VALIDATOR_EXTERNAL_SIGNER_CONCURRENT_REQUEST_LIMIT;
 
+  @CommandLine.Option(
+      names = {"--Xvalidators-pq-keys-derived-from-bls-key"},
+      paramLabel = "<BOOLEAN>",
+      description =
+          "For PQ devnets: a validator keystore with no PQ keystore next to it gets PQ keys derived"
+              + " from its BLS secret key, the way devnet genesis tools derive them",
+      hidden = true,
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS,
+      fallbackValue = "true",
+      arity = "0..1")
+  private boolean pqKeysDerivedFromBlsKey = ValidatorConfig.DEFAULT_PQ_KEYS_DERIVED_FROM_BLS_KEY;
+
   public void configure(final TekuConfiguration.Builder builder) {
     builder.validator(
         config ->
@@ -120,7 +132,8 @@ public class ValidatorKeysOptions {
                     convertToPath(validatorExternalSignerKeystorePasswordFile))
                 .validatorExternalSignerTruststore(convertToPath(validatorExternalSignerTruststore))
                 .validatorExternalSignerTruststorePasswordFile(
-                    convertToPath(validatorExternalSignerTruststorePasswordFile)));
+                    convertToPath(validatorExternalSignerTruststorePasswordFile))
+                .pqKeysDerivedFromBlsKey(pqKeysDerivedFromBlsKey));
   }
 
   public List<String> getValidatorKeys() {

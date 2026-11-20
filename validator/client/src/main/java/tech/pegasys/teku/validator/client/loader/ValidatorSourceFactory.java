@@ -30,7 +30,6 @@ import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.service.serviceutils.layout.DataDirLayout;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.signatures.SlashingProtector;
-import tech.pegasys.teku.spec.signatures.xmss.XmssLeafProtector;
 import tech.pegasys.teku.validator.api.InteropConfig;
 import tech.pegasys.teku.validator.api.KeyStoreFilesLocator;
 import tech.pegasys.teku.validator.api.ValidatorConfig;
@@ -72,7 +71,7 @@ public class ValidatorSourceFactory {
   private final InteropConfig interopConfig;
   private final Supplier<HttpClient> externalSignerHttpClientFactory;
   private final SlashingProtector slashingProtector;
-  private final Optional<XmssLeafProtector> xmssLeafProtector;
+  private final Optional<PqKeyLoadingConfig> pqKeyLoadingConfig;
   private final PublicKeyLoader publicKeyLoader;
   private final AsyncRunner asyncRunner;
   private final MetricsSystem metricsSystem;
@@ -87,7 +86,7 @@ public class ValidatorSourceFactory {
       final InteropConfig interopConfig,
       final Supplier<HttpClient> externalSignerHttpClientFactory,
       final SlashingProtector slashingProtector,
-      final Optional<XmssLeafProtector> xmssLeafProtector,
+      final Optional<PqKeyLoadingConfig> pqKeyLoadingConfig,
       final PublicKeyLoader publicKeyLoader,
       final AsyncRunner asyncRunner,
       final MetricsSystem metricsSystem,
@@ -97,7 +96,7 @@ public class ValidatorSourceFactory {
     this.interopConfig = interopConfig;
     this.externalSignerHttpClientFactory = externalSignerHttpClientFactory;
     this.slashingProtector = slashingProtector;
-    this.xmssLeafProtector = xmssLeafProtector;
+    this.pqKeyLoadingConfig = pqKeyLoadingConfig;
     this.publicKeyLoader = publicKeyLoader;
     this.asyncRunner = asyncRunner;
     this.metricsSystem = metricsSystem;
@@ -239,8 +238,8 @@ public class ValidatorSourceFactory {
   }
 
   private Optional<PqValidatorKeyLoader> pqValidatorKeyLoader() {
-    return xmssLeafProtector.map(
-        leafProtector -> new PqValidatorKeyLoader(spec, leafProtector, asyncRunner));
+    return pqKeyLoadingConfig.map(
+        pqConfig -> new PqValidatorKeyLoader(spec, pqConfig, asyncRunner));
   }
 
   private ValidatorSource slashingProtected(final ValidatorSource validatorSource) {

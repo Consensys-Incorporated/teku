@@ -19,6 +19,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
@@ -56,6 +57,11 @@ import tech.pegasys.teku.xmss.XmssSigningKey;
  *
  * A missing VRF cache is rebuilt from the seed, which hashes about 2^32 leaves and takes minutes.
  * Loading a leanXMSS key builds its top tree, which takes seconds.
+ *
+ * <p>On PQ devnets, a validator with no PQ keystore can instead get keys derived from its BLS
+ * secret key (see {@link PqKeyStoreSecrets#deriveFromBlsSecretKey}), when {@link
+ * PqKeyLoadingConfig#derivedKeysVrfCacheDirectory()} is set. There are no declared public values to
+ * check those against; a key that doesn't match the chain's registry simply finds no validator.
  */
 public class PqValidatorKeyLoader {
 
@@ -64,18 +70,19 @@ public class PqValidatorKeyLoader {
 
   private final Spec spec;
   private final XmssLeafProtector leafProtector;
+  private final Optional<Path> derivedKeysVrfCacheDirectory;
   private final AsyncRunner asyncRunner;
   private final int vrfTreeDepth;
   private final int vrfCachedHeight;
 
   public PqValidatorKeyLoader(
       final Spec spec, final XmssLeafProtector leafProtector, final AsyncRunner asyncRunner) {
-    this(
-        spec,
-        leafProtector,
-        asyncRunner,
-        PqConstants.VRF_TREE_DEPTH,
-        VrfTree.DEFAULT_CACHED_HEIGHT);
+    this(spec, PqKeyLoadingConfig.keystoresOnly(leafProtector), asyncRunner);
+  }
+
+  public PqValidatorKeyLoader(
+      final Spec spec, final PqKeyLoadingConfig config, final AsyncRunner asyncRunner) {
+    this(spec, config, asyncRunner, PqConstants.VRF_TREE_DEPTH, VrfTree.DEFAULT_CACHED_HEIGHT);
   }
 
   /** Loads keys with a VRF tree of the given shape; real keys use the spec's depth. */
@@ -86,8 +93,25 @@ public class PqValidatorKeyLoader {
       final AsyncRunner asyncRunner,
       final int vrfTreeDepth,
       final int vrfCachedHeight) {
+    this(
+        spec,
+        PqKeyLoadingConfig.keystoresOnly(leafProtector),
+        asyncRunner,
+        vrfTreeDepth,
+        vrfCachedHeight);
+  }
+
+  /** Loads keys with a VRF tree of the given shape; real keys use the spec's depth. */
+  @VisibleForTesting
+  public PqValidatorKeyLoader(
+      final Spec spec,
+      final PqKeyLoadingConfig config,
+      final AsyncRunner asyncRunner,
+      final int vrfTreeDepth,
+      final int vrfCachedHeight) {
     this.spec = spec;
-    this.leafProtector = leafProtector;
+    this.leafProtector = config.leafProtector();
+    this.derivedKeysVrfCacheDirectory = config.derivedKeysVrfCacheDirectory();
     this.asyncRunner = asyncRunner;
     this.vrfTreeDepth = vrfTreeDepth;
     this.vrfCachedHeight = vrfCachedHeight;
@@ -95,7 +119,7 @@ public class PqValidatorKeyLoader {
 
   /**
    * Loads the PQ keys stored next to {@code blsKeystorePath}, encrypted with {@code password}.
-   * Returns empty if the validator has no PQ keystore.
+   * Returns empty if the validator has no PQ keystore. Never derives keys.
    *
    * @throws InvalidConfigurationException if the PQ keystore exists but cannot be loaded or does
    *     not match its seeds
@@ -106,6 +130,62 @@ public class PqValidatorKeyLoader {
     if (!Files.exists(keystorePath)) {
       return Optional.empty();
     }
+    return Optional.of(loadKeyStoreSigner(blsKeystorePath, keystorePath, password, blsPublicKey));
+  }
+
+  /**
+   * Loads the PQ keys stored next to {@code blsKeystorePath}, like {@link #load(Path, String,
+   * BLSPublicKey)}. If there is no PQ keystore and derived keys are enabled, derives the keys from
+   * the BLS secret key instead, which {@code blsSecretKey} supplies only then.
+   */
+  public Optional<XmssSigner> load(
+      final Path blsKeystorePath,
+      final String password,
+      final BLSPublicKey blsPublicKey,
+      final Supplier<Bytes32> blsSecretKey) {
+    final Path keystorePath = PqKeyFiles.keystorePath(blsKeystorePath);
+    if (Files.exists(keystorePath)) {
+      return Optional.of(loadKeyStoreSigner(blsKeystorePath, keystorePath, password, blsPublicKey));
+    }
+    return derivedKeysVrfCacheDirectory.map(
+        directory -> deriveSigner(blsSecretKey.get(), blsPublicKey, directory));
+  }
+
+  /**
+   * Builds the signer for PQ keys derived from {@code blsSecretKey}. The VRF tree is read from
+   * {@code vrfCacheDirectory}, or derived and saved there the first time.
+   */
+  @VisibleForTesting
+  XmssSigner deriveSigner(
+      final Bytes32 blsSecretKey, final BLSPublicKey blsPublicKey, final Path vrfCacheDirectory) {
+    final PqKeyStoreSecrets secrets = PqKeyStoreSecrets.deriveFromBlsSecretKey(blsSecretKey);
+    final Path vrfCachePath = derivedVrfCachePath(vrfCacheDirectory, blsPublicKey);
+    final VrfTree vrfTree =
+        Files.exists(vrfCachePath)
+            ? readVrfCache(vrfCachePath, secrets.vrfSeed())
+            : rebuildVrfCache(
+                "derived PQ keys of " + blsPublicKey, vrfCachePath, secrets.vrfSeed());
+    final XmssSigningKey signingKey =
+        Xmss.loadSigningKey(XmssSecretKey.fromBytes(secrets.xmssSeed()));
+    LOG.info(
+        "Using PQ keys derived from BLS key {}: XMSS public key {}, VRF root {}",
+        blsPublicKey,
+        signingKey.getPublicKey(),
+        vrfTree.getRoot());
+    return new LocalXmssSigner(spec, signingKey, vrfTree, leafProtector, asyncRunner);
+  }
+
+  /** Where the VRF tree of the keys derived for {@code blsPublicKey} is saved. */
+  static Path derivedVrfCachePath(final Path vrfCacheDirectory, final BLSPublicKey blsPublicKey) {
+    return vrfCacheDirectory.resolve(
+        blsPublicKey.toBytesCompressed().toUnprefixedHexString() + PqKeyFiles.VRF_CACHE_SUFFIX);
+  }
+
+  private XmssSigner loadKeyStoreSigner(
+      final Path blsKeystorePath,
+      final Path keystorePath,
+      final String password,
+      final BLSPublicKey blsPublicKey) {
     final PqKeyStoreData keyStoreData = loadKeyStore(keystorePath);
     keyStoreData
         .getBlsPubkey()
@@ -117,9 +197,8 @@ public class PqValidatorKeyLoader {
                       "PQ keystore %s belongs to BLS key %s, not %s from %s",
                       keystorePath, declared, blsPublicKey, blsKeystorePath));
             });
-    return Optional.of(
-        createSigner(
-            keystorePath, keyStoreData, PqKeyFiles.vrfCachePath(blsKeystorePath), password));
+    return createSigner(
+        keystorePath, keyStoreData, PqKeyFiles.vrfCachePath(blsKeystorePath), password);
   }
 
   @VisibleForTesting
@@ -173,7 +252,7 @@ public class PqValidatorKeyLoader {
     final VrfTree vrfTree =
         Files.exists(vrfCachePath)
             ? readVrfCache(vrfCachePath, secrets.vrfSeed())
-            : rebuildVrfCache(keystorePath, vrfCachePath, secrets.vrfSeed());
+            : rebuildVrfCache("PQ keystore " + keystorePath, vrfCachePath, secrets.vrfSeed());
     if (!vrfTree.getRoot().equals(keyStoreData.getVrfRoot())) {
       throw new InvalidConfigurationException(
           String.format(
@@ -206,12 +285,12 @@ public class PqValidatorKeyLoader {
   }
 
   private VrfTree rebuildVrfCache(
-      final Path keystorePath, final Path vrfCachePath, final Bytes32 vrfSeed) {
+      final String keysDescription, final Path vrfCachePath, final Bytes32 vrfSeed) {
     LOG.warn(
-        "VRF cache {} for PQ keystore {} is missing. Rebuilding it from the VRF seed, which can"
-            + " take several minutes.",
+        "VRF cache {} for {} is missing. Rebuilding it from the VRF seed, which can take several"
+            + " minutes.",
         vrfCachePath,
-        keystorePath);
+        keysDescription);
     final VrfTree vrfTree =
         VrfTree.derive(
             vrfSeed,
@@ -219,8 +298,9 @@ public class PqValidatorKeyLoader {
             vrfCachedHeight,
             progressLogger("Rebuilding VRF cache " + vrfCachePath));
     try {
-      SyncDataAccessor.create(vrfCachePath.toAbsolutePath().getParent())
-          .syncedWrite(vrfCachePath, vrfTree.getCachedNodes());
+      final Path directory = vrfCachePath.toAbsolutePath().getParent();
+      Files.createDirectories(directory);
+      SyncDataAccessor.create(directory).syncedWrite(vrfCachePath, vrfTree.getCachedNodes());
     } catch (final IOException e) {
       LOG.warn("Unable to save rebuilt VRF cache {}: {}", vrfCachePath, e.getMessage());
     }

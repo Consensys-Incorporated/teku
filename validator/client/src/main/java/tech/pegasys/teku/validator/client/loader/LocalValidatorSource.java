@@ -272,7 +272,18 @@ public class LocalValidatorSource extends AbstractValidatorSource implements Val
 
     @Override
     public Optional<XmssSigner> createXmssSigner() {
-      return pqValidatorKeyLoader.flatMap(loader -> loader.load(keystoreFile, password, publicKey));
+      // The BLS key is only decrypted again if the PQ keys are to be derived from it
+      return pqValidatorKeyLoader.flatMap(
+          loader -> loader.load(keystoreFile, password, publicKey, this::decryptBLSPrivateKey));
+    }
+
+    private Bytes32 decryptBLSPrivateKey() {
+      try {
+        return Bytes32.wrap(KeyStore.decrypt(password, keyStoreData));
+      } catch (final KeyStoreValidationException e) {
+        throw new InvalidConfigurationException(
+            "Failed to decrypt keystore " + keystoreFile + ". Check the password is correct.", e);
+      }
     }
 
     private Bytes32 loadBLSPrivateKey() {
