@@ -192,7 +192,7 @@ class ExecutionRequestsProcessorPqTest {
 
     assertThat(processed.getValidatorPreregistrations()).hasSize(1);
     assertThat(processed.getValidatorPreregistrations().get(0).getExpirySlot())
-        .isEqualTo(SLOT.plus(PqConstants.PREREGISTRATION_EXPIRY_SLOTS));
+        .isEqualTo(SLOT.plus(config.getPreregistrationExpirySlots()));
   }
 
   @Test

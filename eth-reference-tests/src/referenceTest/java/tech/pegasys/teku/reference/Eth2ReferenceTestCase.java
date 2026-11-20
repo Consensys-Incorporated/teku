@@ -14,6 +14,9 @@
 package tech.pegasys.teku.reference;
 
 import com.google.common.collect.ImmutableMap;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Assertions;
 import tech.pegasys.teku.ethtests.TestFork;
 import tech.pegasys.teku.ethtests.finder.TestDefinition;
@@ -36,6 +39,7 @@ import tech.pegasys.teku.reference.phase0.shuffling.ShufflingTestExecutor;
 import tech.pegasys.teku.reference.phase0.slashing_protection_interchange.SlashingProtectionInterchangeTestExecutor;
 import tech.pegasys.teku.reference.phase0.ssz_generic.SszGenericTests;
 import tech.pegasys.teku.reference.phase0.ssz_static.SszTestExecutor;
+import tech.pegasys.teku.xmss.XmssConstants;
 
 public abstract class Eth2ReferenceTestCase {
 
@@ -122,8 +126,47 @@ public abstract class Eth2ReferenceTestCase {
 
   private static final ImmutableMap<String, TestExecutor> EIP8483_TEST_TYPES = GLOAS_TEST_TYPES;
 
+  /**
+   * Fork choice, fast confirmation and gossip tests build BLS-signed blocks and attestations, which
+   * PQ replaces with XMSS signatures and STARK proofs: they wait for PQ's fork choice and
+   * networking.
+   */
+  private static final ImmutableMap<String, TestExecutor> PQ_TEST_TYPES =
+      ImmutableMap.<String, TestExecutor>builder()
+          .putAll(GLOAS_TEST_TYPES)
+          .putAll(
+              ignoring(
+                  List.of(
+                      ForkChoiceTestExecutor.FORK_CHOICE_TEST_TYPES,
+                      ForkChoiceTestExecutor.FAST_CONFIRMATION_TEST_TYPES,
+                      GossipTests.GOSSIP_TEST_TYPES)))
+          .buildKeepingLast();
+
+  private static Map<String, TestExecutor> ignoring(
+      final List<Map<String, TestExecutor>> testTypes) {
+    final Map<String, TestExecutor> ignored = new HashMap<>();
+    for (final Map<String, TestExecutor> types : testTypes) {
+      types.keySet().forEach(testType -> ignored.put(testType, TestExecutor.IGNORE_TESTS));
+    }
+    return ignored;
+  }
+
   protected void runReferenceTest(final TestDefinition testDefinition) throws Throwable {
-    SszMaxLengthFixtures.REJECTED_BY_SSZ_LIMITS.run(testDefinition, getExecutorFor(testDefinition));
+    if (!testDefinition.getFork().equals(TestFork.PQ)) {
+      SszMaxLengthFixtures.REJECTED_BY_SSZ_LIMITS.run(
+          testDefinition, getExecutorFor(testDefinition));
+      return;
+    }
+    // The PQ vectors are generated with XMSS inactive (real key generation takes minutes): every
+    // XMSS signature and STARK proof is accepted, whatever the test's bls_setting, while leaf
+    // indices are still read from the stub signatures.
+    XmssConstants.disableXmssVerification();
+    try {
+      SszMaxLengthFixtures.REJECTED_BY_SSZ_LIMITS.run(
+          testDefinition, getExecutorFor(testDefinition));
+    } finally {
+      XmssConstants.enableXmssVerification();
+    }
   }
 
   private TestExecutor getExecutorFor(final TestDefinition testDefinition) {
@@ -139,6 +182,7 @@ public abstract class Eth2ReferenceTestCase {
           case TestFork.FULU -> FULU_TEST_TYPES.get(testDefinition.getTestType());
           case TestFork.GLOAS -> GLOAS_TEST_TYPES.get(testDefinition.getTestType());
           case TestFork.EIP8483 -> EIP8483_TEST_TYPES.get(testDefinition.getTestType());
+          case TestFork.PQ -> PQ_TEST_TYPES.get(testDefinition.getTestType());
           default -> null;
         };
 

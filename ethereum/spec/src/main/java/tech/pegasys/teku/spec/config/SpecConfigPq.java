@@ -44,6 +44,10 @@ public interface SpecConfigPq extends SpecConfigEip8483 {
 
   int getMaxVoluntaryExitRequestsPerPayload();
 
+  int getPreregistrationsLimit();
+
+  int getPreregistrationExpirySlots();
+
   int getMaxSignedAggregateAndProofSizePq();
 
   int getMaxAttesterSlashingSizePq();

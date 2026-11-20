@@ -22,6 +22,7 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.XmssAggregateStatement;
+import tech.pegasys.teku.xmss.XmssConstants;
 
 class StarkProofVerifierTest {
 
@@ -75,6 +76,18 @@ class StarkProofVerifierTest {
                 List.of(statement1, statement2),
                 Bytes.concatenate(signature(1), signature(2), signature(3), Bytes.of(0))))
         .isFalse();
+  }
+
+  @Test
+  void acceptsEveryProofWhileXmssVerificationIsDisabled() {
+    XmssConstants.disableXmssVerification();
+    try {
+      // The reference tests' stub proof is empty
+      assertThat(verifier.verifyAggregates(List.of(statement1, statement2), Bytes.EMPTY)).isTrue();
+      assertThat(verified).isEmpty();
+    } finally {
+      XmssConstants.enableXmssVerification();
+    }
   }
 
   @Test

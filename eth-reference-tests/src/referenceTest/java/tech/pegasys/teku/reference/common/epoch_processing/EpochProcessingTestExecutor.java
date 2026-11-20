@@ -117,6 +117,12 @@ public class EpochProcessingTestExecutor implements TestExecutor {
           .put(
               "epoch_processing/ptc_window",
               new EpochProcessingTestExecutor(EpochOperation.PTC_WINDOW))
+          .put(
+              "epoch_processing/aggregation_committee_window",
+              new EpochProcessingTestExecutor(EpochOperation.AGGREGATION_COMMITTEE_WINDOW))
+          .put(
+              "epoch_processing/preregistration_expiry",
+              new EpochProcessingTestExecutor(EpochOperation.PREREGISTRATION_EXPIRY))
           .build();
 
   private final EpochOperation operation;

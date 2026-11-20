@@ -38,10 +38,6 @@ public final class PqConstants {
 
   public static final int VRF_TREE_DEPTH = 31;
 
-  // Preset values in beacon-chain.md that pq.yaml does not carry
-  public static final int PREREGISTRATIONS_LIMIT = 1 << 19;
-  public static final UInt64 PREREGISTRATION_EXPIRY_SLOTS = UInt64.valueOf(1L << 18);
-
   /** A post-upgrade request names 16 zero bytes followed by an XMSS public key. */
   public static final Bytes XMSS_DEPOSIT_PREFIX = Bytes.wrap(new byte[16]);
 

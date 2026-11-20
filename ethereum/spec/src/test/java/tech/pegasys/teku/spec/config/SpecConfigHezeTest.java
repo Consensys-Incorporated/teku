@@ -89,6 +89,8 @@ public class SpecConfigHezeTest {
             64,
             4,
             16,
+            524288,
+            262144,
             1055231,
             2621720,
             199240,

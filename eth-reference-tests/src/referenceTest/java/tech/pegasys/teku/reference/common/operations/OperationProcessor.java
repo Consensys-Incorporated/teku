@@ -29,6 +29,9 @@ import tech.pegasys.teku.spec.datastructures.execution.versions.electra.DepositR
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.WithdrawalRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderDepositRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderExitRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.BuilderPreregistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.ValidatorPreregistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.VoluntaryExitRequest;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.Deposit;
@@ -103,4 +106,15 @@ public interface OperationProcessor {
 
   void processBuilderPqRegistrationRequest(
       MutableBeaconState state, BuilderPqRegistrationRequest request);
+
+  void processRandao(MutableBeaconState state, BeaconBlockBody body)
+      throws BlockProcessingException;
+
+  void processValidatorPreregistrationRequest(
+      MutableBeaconState state, ValidatorPreregistrationRequest request);
+
+  void processBuilderPreregistrationRequest(
+      MutableBeaconState state, BuilderPreregistrationRequest request);
+
+  void processVoluntaryExitRequest(MutableBeaconState state, VoluntaryExitRequest request);
 }

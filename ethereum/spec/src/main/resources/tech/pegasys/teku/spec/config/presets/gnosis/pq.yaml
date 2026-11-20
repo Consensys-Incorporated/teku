@@ -28,6 +28,11 @@ MAX_VALIDATOR_PREREGISTRATION_REQUESTS_PER_PAYLOAD: 64
 MAX_BUILDER_PREREGISTRATION_REQUESTS_PER_PAYLOAD: 4
 # 2**4 (= 16)
 MAX_VOLUNTARY_EXIT_REQUESTS_PER_PAYLOAD: 16
+# Defined in the spec's preset tables; its minimal build takes them from eip8205.yaml
+# 2**19 (= 524,288)
+PREREGISTRATIONS_LIMIT: 524288
+# 2**18 (= 262,144)
+PREREGISTRATION_EXPIRY_SLOTS: 262144
 
 # Type-specific SSZ bounds
 # ---------------------------------------------------------------

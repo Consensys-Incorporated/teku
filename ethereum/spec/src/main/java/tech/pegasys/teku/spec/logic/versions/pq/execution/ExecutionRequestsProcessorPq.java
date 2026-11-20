@@ -15,8 +15,6 @@ package tech.pegasys.teku.spec.logic.versions.pq.execution;
 
 import static tech.pegasys.teku.spec.config.SpecConfig.FAR_FUTURE_EPOCH;
 import static tech.pegasys.teku.spec.config.SpecConfigGloas.PAYLOAD_BUILDER_VERSION;
-import static tech.pegasys.teku.spec.constants.PqConstants.PREREGISTRATIONS_LIMIT;
-import static tech.pegasys.teku.spec.constants.PqConstants.PREREGISTRATION_EXPIRY_SLOTS;
 import static tech.pegasys.teku.spec.constants.PqConstants.XMSS_DEPOSIT_PREFIX;
 import static tech.pegasys.teku.spec.logic.common.helpers.Predicates.getExecutionAddressUnchecked;
 
@@ -260,7 +258,7 @@ public class ExecutionRequestsProcessorPq extends ExecutionRequestsProcessorGloa
           statePq.getValidatorPreregistrations().stream()
               .filter(record -> predicatesPq.isActiveValidatorPreregistration(statePq, record))
               .count();
-      if (activePreregistrations >= PREREGISTRATIONS_LIMIT) {
+      if (activePreregistrations >= specConfigPq.getPreregistrationsLimit()) {
         continue;
       }
       final ValidatorPreregistration preregistration =
@@ -268,7 +266,7 @@ public class ExecutionRequestsProcessorPq extends ExecutionRequestsProcessorGloa
               pubkey,
               request.getWithdrawalCredentials(),
               request.getVrfRoot(),
-              state.getSlot().plus(PREREGISTRATION_EXPIRY_SLOTS));
+              state.getSlot().plus(specConfigPq.getPreregistrationExpirySlots()));
       beaconStateAccessorsPq
           .getValidatorPreregistrationIndex(statePq, pubkey)
           .ifPresentOrElse(
@@ -295,14 +293,14 @@ public class ExecutionRequestsProcessorPq extends ExecutionRequestsProcessorGloa
           statePq.getBuilderPreregistrations().stream()
               .filter(record -> predicatesPq.isActiveBuilderPreregistration(statePq, record))
               .count();
-      if (activePreregistrations >= PREREGISTRATIONS_LIMIT) {
+      if (activePreregistrations >= specConfigPq.getPreregistrationsLimit()) {
         continue;
       }
       final BuilderPreregistration preregistration =
           new BuilderPreregistration(
               pubkey,
               request.getWithdrawalCredentials(),
-              state.getSlot().plus(PREREGISTRATION_EXPIRY_SLOTS));
+              state.getSlot().plus(specConfigPq.getPreregistrationExpirySlots()));
       beaconStateAccessorsPq
           .getBuilderPreregistrationIndex(statePq, pubkey)
           .ifPresentOrElse(
