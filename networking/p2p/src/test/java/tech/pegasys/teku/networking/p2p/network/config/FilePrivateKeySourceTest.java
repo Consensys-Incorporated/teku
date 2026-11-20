@@ -19,8 +19,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import tech.pegasys.teku.network.p2p.jvmlibp2p.PrivateKeyGenerator;
 
@@ -34,6 +37,16 @@ class FilePrivateKeySourceTest {
     final Bytes savedBytes = Bytes.fromHexString(Files.readString(file));
 
     assertThat(generatedBytes).isEqualTo(savedBytes);
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void shouldSaveGeneratedKeyReadableOnlyByOwner(@TempDir final Path tempDir) throws IOException {
+    final Path file = tempDir.resolve("file.txt");
+    new GeneratingFilePrivateKeySource(file.toString()).getPrivateKeyBytes();
+
+    assertThat(Files.getPosixFilePermissions(file))
+        .isEqualTo(PosixFilePermissions.fromString("rw-------"));
   }
 
   @Test

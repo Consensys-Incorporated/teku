@@ -15,6 +15,7 @@ package tech.pegasys.teku.spec.signatures;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -47,7 +48,7 @@ public class LocalSlashingProtectorConcurrentAccessTest extends LocalSlashingPro
 
   @Test
   void cannotAccessSameValidatorConcurrently()
-      throws ExecutionException, InterruptedException, TimeoutException {
+      throws ExecutionException, InterruptedException, TimeoutException, IOException {
     final AtomicBoolean releaseLock = new AtomicBoolean(false);
 
     final SafeFuture<Void> firstSigner =
@@ -115,7 +116,7 @@ public class LocalSlashingProtectorConcurrentAccessTest extends LocalSlashingPro
 
   @Test
   void canAccessDifferentValidatorConcurrently()
-      throws ExecutionException, InterruptedException, TimeoutException {
+      throws ExecutionException, InterruptedException, TimeoutException, IOException {
     final AtomicBoolean releaseLock = new AtomicBoolean(false);
     final SafeFuture<Void> firstSigner =
         asyncRunner.runAsync(

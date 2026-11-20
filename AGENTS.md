@@ -94,7 +94,6 @@ graph TB
         SC --> SS[StorageService]
         SC --> ELS[ExecutionLayerService]
         SC --> BCS[BeaconChainService]
-        SC --> PCS[PowchainService]
         SC --> VCS[ValidatorClientService]
         SC --> TS[TimerService]
     end
@@ -127,7 +126,6 @@ graph TB
     subgraph "External Integration"
         ELM --> EL[Execution Layer Client<br/>Geth/Nethermind/Besu]
         ELM --> Builder[MEV-Boost Builder]
-        PCS --> ETH1[Ethereum PoW Chain<br/>Deposit Contract]
     end
 
     subgraph "Event Channels (Event-Driven Communication)"
@@ -135,7 +133,6 @@ graph TB
         BCS -.VoteUpdateChannel.-> PA
         BCS -.CombinedStorageChannel.-> Storage
         ELS -.ExecutionClientEventsChannel.-> BCS
-        PCS -.Eth1EventsChannel.-> BCS
     end
 
     subgraph "Infrastructure Layer"
@@ -233,7 +230,6 @@ ServiceController
 ├─ StorageService (database and state storage)
 ├─ ExecutionLayerService (Execution Layer integration)
 ├─ BeaconChainService (consensus layer processing)
-├─ PowchainService (PoW chain monitoring for deposits)
 ├─ ValidatorClientService (validator duties)
 └─ TimerService (slot timing)
 ```
@@ -241,13 +237,13 @@ ServiceController
 ### Key Modules
 
 **ethereum/spec** - Core consensus specification implementation
-- Organized by milestones: PHASE0, ALTAIR, BELLATRIX, CAPELLA, DENEB, FULU, GLOAS
+- Organized by milestones: PHASE0, ALTAIR, BELLATRIX, CAPELLA, DENEB, ELECTRA, FULU, GLOAS, HEZE
 - `Spec.java` provides unified API across all forks
 - `SpecVersion.java` encapsulates version-specific operations
 - `ForkSchedule.java` determines which fork rules apply at each epoch
 
 **beacon/** - Beacon chain functionality
-- `beacon:pow` - Proof-of-Work chain interaction
+- `beacon:pow` - Eth1 data cache period helper
 - `beacon:sync` - Block synchronization logic
 - `beacon:validator` - Validator-specific beacon operations
 
@@ -262,7 +258,7 @@ ServiceController
 - Supports Web3j and REST transport layers
 
 **storage/** - Database and state management
-- Multiple storage modes: ARCHIVE, PRUNE_ANCIENT_STATES, PRUNE_HOT_STATES
+- Multiple storage modes: ARCHIVE, PRUNE, MINIMAL
 - Supports RocksDB and LevelDB backends
 - `storage:protoarray` implements fork choice algorithm
 - `storage:archive` handles historical data (blobs, etc.)
@@ -324,7 +320,7 @@ The codebase supports multiple Ethereum consensus forks. Each milestone has:
 Teku integrates with Execution Layer clients (Geth, Nethermind, Besu, etc.) via:
 - **Engine API**: newPayload, forkchoiceUpdated, getPayload
 - **Builder API**: MEV-Boost integration for block building
-- **Web3 API**: eth_* methods for legacy PoW monitoring
+- **Web3 API**: `eth_getBlockByHash` / `eth_getBlockByNumber` for execution block lookups
 
 The `ExecutionLayerManager` abstracts these interactions and handles fallback/retry logic.
 
@@ -342,8 +338,8 @@ Each module has its own test suite under `src/test/java` and test fixtures under
 
 - **Coding style**: Google Java conventions (enforced by Spotless)
 - **Imports**: Always use proper import statements instead of fully qualified class names in code
-  - Good: `import tech.pegasys.teku.spec.logic.common.util.DataColumnSidecarValidationHelper; ... DataColumnSidecarValidationHelper helper = ...`
-  - Bad: `tech.pegasys.teku.spec.logic.common.util.DataColumnSidecarValidationHelper helper = ...`
+  - Good: `import tech.pegasys.teku.spec.logic.common.util.DataColumnSidecarUtil; ... DataColumnSidecarUtil helper = ...`
+  - Bad: `tech.pegasys.teku.spec.logic.common.util.DataColumnSidecarUtil helper = ...`
 - **Async operations**: Use `SafeFuture` and `AsyncRunner` instead of raw CompletableFuture. Never use `.join()` or `.get()` to block on futures — these block threads and defeat the purpose of async programming. Instead, compose futures using `thenApply`, `thenCompose`, `thenCombine`, `thenComposeCombined`, etc.
 - **Immutability**: Prefer immutable data structures (record types, SszData implementations)
 - **Final variables**: Declare method parameters and local variables as `final`. Declare fields as `final` unless they are intentionally mutable or populated by serialization frameworks.
@@ -378,7 +374,7 @@ When implementing features that vary across Ethereum consensus forks:
 
 ## Important Files
 
-- `settings.gradle` - Defines all 75+ submodules
+- `settings.gradle` - Defines all submodules
 - `build.gradle` - Root build configuration, dependency management
 - `CONTRIBUTING.md` - Contribution guidelines and CLA process
 - `ethereum/spec/src/main/java/tech/pegasys/teku/spec/Spec.java` - Main consensus spec API

@@ -46,6 +46,7 @@ import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.BlobSidecarsByR
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.BlocksByRangeListenerWrapper;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.DataColumnSidecarsByRangeListenerValidatingProxy;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.DataColumnSidecarsByRootListenerValidatingProxy;
+import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.ExecutionPayloadEnvelopesByRootListenerValidatingProxy;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.MetadataMessagesFactory;
 import tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods.StatusMessageFactory;
 import tech.pegasys.teku.networking.eth2.rpc.core.Eth2RpcResponseHandler;
@@ -381,6 +382,7 @@ class DefaultEth2Peer extends DelegatingPeer implements Eth2Peer {
   public SafeFuture<Void> requestExecutionPayloadEnvelopesByRoot(
       final List<Bytes32> beaconBlockRoots,
       final RpcResponseListener<SignedExecutionPayloadEnvelope> listener) {
+    final List<Bytes32> uniqueBeaconBlockRoots = beaconBlockRoots.stream().distinct().toList();
     return rpcMethods
         .executionPayloadEnvelopesByRoot()
         .map(
@@ -389,8 +391,9 @@ class DefaultEth2Peer extends DelegatingPeer implements Eth2Peer {
                     method,
                     new ExecutionPayloadEnvelopesByRootRequestMessage(
                         executionPayloadEnvelopesByRootRequestMessageSchema.get(),
-                        beaconBlockRoots),
-                    listener))
+                        uniqueBeaconBlockRoots),
+                    new ExecutionPayloadEnvelopesByRootListenerValidatingProxy(
+                        this, listener, uniqueBeaconBlockRoots)))
         .orElse(failWithUnsupportedMethodException("ExecutionPayloadEnvelopesByRoot"));
   }
 
@@ -452,7 +455,10 @@ class DefaultEth2Peer extends DelegatingPeer implements Eth2Peer {
                     method,
                     new ExecutionPayloadEnvelopesByRootRequestMessage(
                         executionPayloadEnvelopesByRootRequestMessageSchema.get(),
-                        List.of(beaconBlockRoot))))
+                        List.of(beaconBlockRoot)),
+                    listener ->
+                        new ExecutionPayloadEnvelopesByRootListenerValidatingProxy(
+                            this, listener, List.of(beaconBlockRoot))))
         .orElse(failWithUnsupportedMethodException("ExecutionPayloadEnvelopesByRoot"));
   }
 

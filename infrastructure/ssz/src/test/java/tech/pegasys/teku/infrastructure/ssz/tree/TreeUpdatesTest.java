@@ -17,6 +17,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.ByteOrder;
+import java.util.List;
+import java.util.Random;
 import java.util.stream.IntStream;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tuweni.bytes.Bytes;
@@ -216,5 +218,95 @@ public class TreeUpdatesTest {
                     .mapToObj(i -> new Update(i, newTestLeaf(i)))
                     .collect(TreeUpdates.collector()))
         .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  public void splitWithAllUpdatesOnOneSideLeavesTheOtherEmpty() {
+    final int treeWidth = 4;
+    final TreeUpdates updates =
+        IntStream.of(0, 1)
+            .mapToObj(i -> new Update(i + treeWidth, newTestLeaf(i)))
+            .collect(TreeUpdates.collector());
+
+    final Pair<TreeUpdates, TreeUpdates> split = updates.splitAtPivot();
+
+    assertThat(split.getLeft().size()).isEqualTo(2);
+    assertThat(split.getLeft().getGIndex(0)).isEqualTo(treeWidth);
+    assertThat(split.getLeft().getGIndex(1)).isEqualTo(treeWidth + 1);
+    assertThat(split.getRight().isEmpty()).isTrue();
+    assertThat(split.getRight().isFinal()).isFalse();
+  }
+
+  @Test
+  public void splitSetsDoNotReachTheUpdatesOfTheirSiblings() {
+    final int treeWidth = 4;
+    final TreeUpdates updates =
+        IntStream.range(0, 3)
+            .mapToObj(i -> new Update(i + treeWidth, newTestLeaf(i)))
+            .collect(TreeUpdates.collector());
+
+    final Pair<TreeUpdates, TreeUpdates> split = updates.splitAtPivot();
+    final TreeUpdates left = split.getLeft();
+    final TreeUpdates right = split.getRight();
+
+    assertThatThrownBy(() -> left.getNode(2)).isInstanceOf(IndexOutOfBoundsException.class);
+    assertThatThrownBy(() -> left.getGIndex(2)).isInstanceOf(IndexOutOfBoundsException.class);
+    assertThatThrownBy(() -> right.getNode(-1)).isInstanceOf(IndexOutOfBoundsException.class);
+    assertThatThrownBy(() -> right.getRelativeGIndex(1))
+        .isInstanceOf(IndexOutOfBoundsException.class);
+  }
+
+  @Test
+  public void differentNumbersOfIndicesAndNodesShouldBeRejected() {
+    assertThatThrownBy(() -> new TreeUpdates(List.of(4L, 5L), List.of(newTestLeaf(1))))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> TreeUpdates.wrap(new long[] {4L, 5L}, new TreeNode[] {newTestLeaf(1)}))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  public void wrappedArraysShouldBeValidatedAndGiveTheSameTreeAsTheListOfUpdates() {
+    final int treeWidth = 8;
+    final TreeNode zeroTree = TreeUtil.createDefaultTree(treeWidth, LeafNode.EMPTY_LEAF);
+    final TreeNode leaf1 = newTestLeaf(1);
+    final TreeNode leaf2 = newTestLeaf(2);
+
+    final TreeUpdates wrapped =
+        TreeUpdates.wrap(new long[] {treeWidth + 1, treeWidth + 6}, new TreeNode[] {leaf1, leaf2});
+    final TreeUpdates fromList =
+        new TreeUpdates(
+            List.of(new Update(treeWidth + 1, leaf1), new Update(treeWidth + 6, leaf2)));
+
+    assertThat(zeroTree.updated(wrapped).hashTreeRoot())
+        .isEqualTo(zeroTree.updated(fromList).hashTreeRoot())
+        .isNotEqualTo(zeroTree.hashTreeRoot());
+    assertThatThrownBy(
+            () ->
+                TreeUpdates.wrap(
+                    new long[] {treeWidth + 6, treeWidth + 1}, new TreeNode[] {leaf1, leaf2}))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  public void batchedUpdatesShouldGiveTheSameTreeAsUpdatesAppliedOneByOne() {
+    final int treeWidth = 1 << 10;
+    final TreeNode zeroTree = TreeUtil.createDefaultTree(treeWidth, LeafNode.EMPTY_LEAF);
+    final Random random = new Random(1);
+
+    for (final double density : new double[] {0.001, 0.05, 0.5, 1}) {
+      final List<Update> updates =
+          IntStream.range(0, treeWidth)
+              .filter(i -> random.nextDouble() < density)
+              .mapToObj(i -> new Update(treeWidth + i, newTestLeaf(i + 1)))
+              .toList();
+
+      TreeNode oneByOne = zeroTree;
+      for (final Update update : updates) {
+        oneByOne = oneByOne.updated(update.getGeneralizedIndex(), update.getNewNode());
+      }
+
+      assertThat(zeroTree.updated(new TreeUpdates(updates)).hashTreeRoot())
+          .isEqualTo(oneByOne.hashTreeRoot());
+    }
   }
 }
