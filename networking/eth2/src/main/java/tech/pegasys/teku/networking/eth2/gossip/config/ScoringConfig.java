@@ -16,6 +16,7 @@ package tech.pegasys.teku.networking.eth2.gossip.config;
 import com.google.common.base.Suppliers;
 import java.time.Duration;
 import java.util.function.Supplier;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.config.SpecConfig;
@@ -219,6 +220,19 @@ class ScoringConfig {
 
   public int getAttestationSubnetCount() {
     return spec.getNetworkingConfig().getAttestationSubnetCount();
+  }
+
+  /**
+   * The attestation subnet weight at {@code slot}. The subnets share the same cumulative weight
+   * however many there are, so each of PQ's fewer subnets weighs more.
+   */
+  public double getAttestationSubnetTopicWeight(final UInt64 slot) {
+    return ATTESTATION_SUBNET_CUMULATIVE_TOPIC_WEIGHT / getAttestationSubnetCount(slot);
+  }
+
+  /** The number of attestation subnets at {@code slot}, which is smaller from PQ. */
+  public int getAttestationSubnetCount(final UInt64 slot) {
+    return spec.atSlot(slot).miscHelpers().getAttestationSubnetCount();
   }
 
   /**

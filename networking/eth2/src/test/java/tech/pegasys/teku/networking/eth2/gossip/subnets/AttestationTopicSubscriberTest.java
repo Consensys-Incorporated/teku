@@ -359,4 +359,45 @@ class AttestationTopicSubscriberTest {
     verify(eth2P2PNetwork, times(2))
         .setLongTermAttestationSubnetSubscriptions(Collections.emptySet());
   }
+
+  @Test
+  public void shouldDropSubnetsThePqForkDoesNotHave() {
+    final Spec pqSpec = TestSpecFactory.createMinimalWithPqForkEpoch(ONE);
+    final Eth2P2PNetwork network = mock(Eth2P2PNetwork.class);
+    final AttestationTopicSubscriber pqSubscriber =
+        new AttestationTopicSubscriber(pqSpec, network, settableLabelledGaugeMock);
+    final UInt64 unsubscriptionSlot = UInt64.valueOf(1000);
+    pqSubscriber.onSlot(ONE);
+    pqSubscriber.subscribeToPersistentSubnets(
+        Set.of(
+            new SubnetSubscription(5, unsubscriptionSlot),
+            new SubnetSubscription(40, unsubscriptionSlot)));
+    verify(network).subscribeToAttestationSubnetId(40);
+
+    pqSubscriber.onSlot(pqSpec.computeStartSlotAtEpoch(ONE));
+
+    verify(network).unsubscribeFromAttestationSubnetId(40);
+    verify(network, never()).unsubscribeFromAttestationSubnetId(5);
+    // The ENR and metadata only advertise PQ's subnets. Both updates passed the subscriber's own
+    // set, which now holds subnet 5 only.
+    verify(network, times(2)).setLongTermAttestationSubnetSubscriptions(Set.of(5));
+  }
+
+  @Test
+  public void shouldNotSubscribeToSubnetsThePqForkDoesNotHave() {
+    final Spec pqSpec = TestSpecFactory.createMinimalWithPqForkEpoch(ONE);
+    final Eth2P2PNetwork network = mock(Eth2P2PNetwork.class);
+    final AttestationTopicSubscriber pqSubscriber =
+        new AttestationTopicSubscriber(pqSpec, network, settableLabelledGaugeMock);
+    pqSubscriber.onSlot(pqSpec.computeStartSlotAtEpoch(ONE));
+
+    pqSubscriber.subscribeToPersistentSubnets(
+        Set.of(
+            new SubnetSubscription(3, UInt64.MAX_VALUE),
+            new SubnetSubscription(20, UInt64.MAX_VALUE)));
+
+    verify(network).subscribeToAttestationSubnetId(3);
+    verify(network, never()).subscribeToAttestationSubnetId(20);
+    verify(network).setLongTermAttestationSubnetSubscriptions(Set.of(3));
+  }
 }

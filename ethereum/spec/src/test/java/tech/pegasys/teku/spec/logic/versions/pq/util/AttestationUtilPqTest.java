@@ -193,8 +193,7 @@ class AttestationUtilPqTest {
     assertThat(converted.getAggregationBits().getAllSetBits().toIntArray()).containsExactly(1);
     assertThat(converted.getCommitteeBitsRequired().getAllSetBits().toIntArray())
         .containsExactly(data.getIndex().intValue());
-    assertThat(attestation.getUnconvertedSingleAttestation())
-        .hasValueSatisfying(single -> assertThat(single).isInstanceOf(SingleAttestationPq.class));
+    assertThat(attestation.getUnconvertedAttestation()).isInstanceOf(SingleAttestationPq.class);
   }
 
   @Test

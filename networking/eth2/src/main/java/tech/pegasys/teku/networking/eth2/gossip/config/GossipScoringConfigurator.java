@@ -16,6 +16,7 @@ package tech.pegasys.teku.networking.eth2.gossip.config;
 import java.time.Duration;
 import java.util.Optional;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.eth2.gossip.topics.GossipTopicName;
 import tech.pegasys.teku.networking.eth2.gossip.topics.GossipTopics;
 import tech.pegasys.teku.networking.p2p.gossip.config.GossipConfig;
@@ -212,13 +213,14 @@ class GossipScoringConfigurator implements GossipConfigurator {
 
     private void configureAttestationSubnetTopics(final GossipTopicsScoringConfig.Builder builder) {
       final double slotsPerEpoch = scoringConfig.getSlotsPerEpoch();
-      final double subnetCount = scoringConfig.getAttestationSubnetCount();
-      final double subnetWeight = scoringConfig.getAttestationSubnetTopicWeight();
+      final UInt64 currentSlot = eth2Context.getCurrentSlot();
+      final int subnetCount = scoringConfig.getAttestationSubnetCount(currentSlot);
+      final double subnetWeight = scoringConfig.getAttestationSubnetTopicWeight(currentSlot);
       final double messageRate =
           (double) eth2Context.getActiveValidatorCount() / subnetCount / slotsPerEpoch;
       final boolean multipleBurstsPerSubnetPerEpoch =
           scoringConfig.getCommitteesPerSlot(eth2Context.getActiveValidatorCount())
-              >= subnetCount * 2 / slotsPerEpoch;
+              >= subnetCount * 2.0 / slotsPerEpoch;
       final Duration timeToDecay =
           multipleBurstsPerSubnetPerEpoch
               ? scoringConfig.getEpochDuration()
@@ -237,7 +239,7 @@ class GossipScoringConfigurator implements GossipConfigurator {
       final MessageDeliveriesOptions msgDeliveryOptions =
           MessageDeliveriesOptions.create(activationWindow, 16.0, decaySlots);
 
-      for (int i = 0; i < scoringConfig.getAttestationSubnetCount(); i++) {
+      for (int i = 0; i < subnetCount; i++) {
         final String subnetName = GossipTopicName.getAttestationSubnetTopicName(i);
         final String topic =
             GossipTopics.getTopic(forkDigest, subnetName, eth2Context.getGossipEncoding());

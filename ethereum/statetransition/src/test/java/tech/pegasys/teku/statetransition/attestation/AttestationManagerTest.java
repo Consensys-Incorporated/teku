@@ -34,6 +34,7 @@ import static tech.pegasys.teku.statetransition.validation.InternalValidationRes
 import java.util.List;
 import java.util.Optional;
 import org.apache.logging.log4j.Level;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,8 +58,14 @@ import tech.pegasys.teku.spec.datastructures.operations.AttestationSchema;
 import tech.pegasys.teku.spec.datastructures.operations.IndexedAttestationLight;
 import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof.SignedAggregateAndProofSchema;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationPq;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationPqSchema;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.PqAttestationSchemas;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.util.AttestationProcessingResult;
+import tech.pegasys.teku.spec.generator.PqTestKeys;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoice;
 import tech.pegasys.teku.statetransition.util.FutureItems;
@@ -66,6 +73,7 @@ import tech.pegasys.teku.statetransition.util.PendingAttestationPool;
 import tech.pegasys.teku.statetransition.util.PendingPool;
 import tech.pegasys.teku.statetransition.util.PoolFactory;
 import tech.pegasys.teku.statetransition.validation.AggregateAttestationValidator;
+import tech.pegasys.teku.statetransition.validation.AggregateAttestationValidatorPq;
 import tech.pegasys.teku.statetransition.validation.AttestationValidator;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 import tech.pegasys.teku.statetransition.validation.signatures.SignatureVerificationService;
@@ -74,6 +82,7 @@ import tech.pegasys.teku.statetransition.validatorcache.ActiveValidatorCache;
 class AttestationManagerTest {
   private final Spec spec = TestSpecFactory.createDefault();
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
+  private final Spec pqSpec = TestSpecFactory.createMinimalPq();
   private final AttestationSchema<?> attestationSchema =
       spec.getGenesisSchemaDefinitions().getAttestationSchema();
   private final SignedAggregateAndProofSchema aggregateSchema =
@@ -500,5 +509,68 @@ class AttestationManagerTest {
             .getAggregateAndProofSchema()
             .create(UInt64.valueOf(123), attestation, BLSSignature.empty()),
         BLSSignature.empty());
+  }
+
+  @Test
+  public void shouldValidatePqAggregatesWithThePqAggregateValidator() {
+    final AggregateAttestationValidatorPq pqAggregateValidator =
+        mock(AggregateAttestationValidatorPq.class);
+    final AttestationManager pqAttestationManager =
+        new AttestationManager(
+            forkChoice,
+            pendingAttestationPool,
+            futureAttestations,
+            attestationPool,
+            attestationValidator,
+            aggregateValidator,
+            Optional.of(pqAggregateValidator),
+            signatureVerificationService,
+            activeValidatorCache);
+    final SignedAggregateAndProofPq signedAggregate = pqSignedAggregate();
+    final ValidatableAttestation aggregate =
+        ValidatableAttestation.pqAggregateFromNetwork(pqSpec, signedAggregate);
+    final InternalValidationResult rejected = InternalValidationResult.reject("No thanks");
+    when(pqAggregateValidator.validate(signedAggregate, aggregate))
+        .thenReturn(completedFuture(rejected));
+
+    assertThat(pqAttestationManager.addAggregate(aggregate, Optional.empty()))
+        .isCompletedWithValue(rejected);
+
+    verify(pqAggregateValidator).validate(signedAggregate, aggregate);
+    verifyNoInteractions(aggregateValidator);
+    verify(forkChoice, never()).onAttestation(any());
+  }
+
+  @Test
+  public void shouldRejectPqAggregatesWhenThereIsNoPqAggregateValidator() {
+    final ValidatableAttestation aggregate =
+        ValidatableAttestation.pqAggregateFromNetwork(pqSpec, pqSignedAggregate());
+
+    final SafeFuture<InternalValidationResult> result =
+        attestationManager.addAggregate(aggregate, Optional.empty());
+
+    assertThat(result).isCompleted();
+    assertThat(result.getImmediately().isReject()).isTrue();
+    verifyNoInteractions(aggregateValidator);
+    verify(forkChoice, never()).onAttestation(any());
+  }
+
+  private SignedAggregateAndProofPq pqSignedAggregate() {
+    final PqAttestationSchemas schemas =
+        SchemaDefinitionsPq.required(pqSpec.getGenesisSchemaDefinitions())
+            .getPqAttestationSchemas();
+    final AttestationPqSchema pqAttestationSchema = schemas.getAttestationSchema();
+    final AttestationPq pqAttestation =
+        pqAttestationSchema.create(
+            pqAttestationSchema.getAggregationBitsSchema().ofBits(4, 0, 2),
+            dataStructureUtil.randomAttestationData(),
+            pqAttestationSchema.getCommitteeBitsSchema().orElseThrow().ofBits(0));
+    return schemas
+        .getSignedAggregateAndProofSchema()
+        .create(
+            schemas
+                .getAggregateAndProofSchema()
+                .create(UInt64.valueOf(123), pqAttestation, Bytes.EMPTY),
+            PqTestKeys.stubSignature(UInt64.ZERO).getBytes());
   }
 }

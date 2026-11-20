@@ -29,6 +29,7 @@ import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.crypto.Hash;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfigPq;
+import tech.pegasys.teku.spec.config.builder.SpecConfigBuilder;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDeposit;
 import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas;
@@ -37,6 +38,8 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 public class MiscHelpersPq extends MiscHelpersGloas {
 
   private final PredicatesPq predicatesPq;
+  private final int attestationSubnetCount;
+  private final int attestationSubnetPrefixBits;
 
   public static MiscHelpersPq required(final MiscHelpers miscHelpers) {
     if (miscHelpers instanceof MiscHelpersPq miscHelpersPq) {
@@ -52,6 +55,23 @@ public class MiscHelpersPq extends MiscHelpersGloas {
       final SchemaDefinitionsPq schemaDefinitions) {
     super(specConfig, predicates, schemaDefinitions);
     this.predicatesPq = predicates;
+    this.attestationSubnetCount = specConfig.getAttestationSubnetCountPq();
+    this.attestationSubnetPrefixBits =
+        SpecConfigBuilder.computeAttestationSubnetPrefixBits(
+            attestationSubnetCount,
+            specConfig.getNetworkingConfig().getAttestationSubnetExtraBits());
+  }
+
+  /** ATTESTATION_SUBNET_COUNT_PQ */
+  @Override
+  public int getAttestationSubnetCount() {
+    return attestationSubnetCount;
+  }
+
+  /** compute_attestation_subnet_prefix_bits, modified in PQ to use ATTESTATION_SUBNET_COUNT_PQ. */
+  @Override
+  protected int getAttestationSubnetPrefixBits() {
+    return attestationSubnetPrefixBits;
   }
 
   /** compute_legacy_xmss_pubkey: the XMSS public key derived from a BLS public key. */

@@ -89,6 +89,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestat
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionProof;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
@@ -141,6 +142,7 @@ public class Eth2P2PNetworkBuilder {
       gossipedSignedBlsToExecutionChangeProcessor;
   protected OperationProcessor<SignedExecutionPayloadEnvelope> executionPayloadProcessor;
   protected OperationProcessor<PayloadAttestationMessage> payloadAttestationMessageProcessor;
+  protected OperationProcessor<PayloadAttestationMessagePq> payloadAttestationMessagePqProcessor;
   protected OperationProcessor<SignedExecutionPayloadBid> executionPayloadBidProcessor;
   protected OperationProcessor<SignedProposerPreferences> proposerPreferencesProcessor;
   protected Optional<OperationProcessor<LightClientFinalityUpdate>>
@@ -464,6 +466,7 @@ public class Eth2P2PNetworkBuilder {
               dataColumnSidecarOperationProcessor,
               executionPayloadProcessor,
               payloadAttestationMessageProcessor,
+              payloadAttestationMessagePqProcessor,
               executionPayloadBidProcessor,
               proposerPreferencesProcessor,
               debugDataDumper,
@@ -532,6 +535,7 @@ public class Eth2P2PNetworkBuilder {
               dataColumnSidecarOperationProcessor,
               executionPayloadProcessor,
               payloadAttestationMessageProcessor,
+              payloadAttestationMessagePqProcessor,
               executionPayloadBidProcessor,
               proposerPreferencesProcessor,
               executionProofOperationProcessor,
@@ -680,6 +684,8 @@ public class Eth2P2PNetworkBuilder {
         "gossipedDataColumnSidecarOperationProcessor", dataColumnSidecarOperationProcessor);
     assertNotNull("gossipedExecutionPayloadProcessor", executionPayloadProcessor);
     assertNotNull("gossipedPayloadAttestationMessageProcessor", payloadAttestationMessageProcessor);
+    assertNotNull(
+        "gossipedPayloadAttestationMessagePqProcessor", payloadAttestationMessagePqProcessor);
     assertNotNull("gossipedExecutionProofOperationProcessor", executionProofOperationProcessor);
     assertNotNull("gossipedExecutionPayloadBidProcessor", executionPayloadBidProcessor);
     assertNotNull("gossipedProposerPreferencesProcessor", proposerPreferencesProcessor);
@@ -841,6 +847,14 @@ public class Eth2P2PNetworkBuilder {
           gossipedPayloadAttestationMessageProcessor) {
     checkNotNull(gossipedPayloadAttestationMessageProcessor);
     this.payloadAttestationMessageProcessor = gossipedPayloadAttestationMessageProcessor;
+    return this;
+  }
+
+  public Eth2P2PNetworkBuilder gossipedPayloadAttestationMessagePqProcessor(
+      final OperationProcessor<PayloadAttestationMessagePq>
+          gossipedPayloadAttestationMessagePqProcessor) {
+    checkNotNull(gossipedPayloadAttestationMessagePqProcessor);
+    this.payloadAttestationMessagePqProcessor = gossipedPayloadAttestationMessagePqProcessor;
     return this;
   }
 
