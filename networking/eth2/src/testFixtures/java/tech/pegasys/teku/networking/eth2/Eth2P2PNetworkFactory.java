@@ -107,6 +107,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestat
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionProof;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
@@ -185,6 +186,7 @@ public class Eth2P2PNetworkFactory {
     protected OperationProcessor<ExecutionProof> executionProofOperationProcessor;
     protected OperationProcessor<SignedExecutionPayloadEnvelope> executionPayloadProcessor;
     protected OperationProcessor<PayloadAttestationMessage> payloadAttestationMessageProcessor;
+    protected OperationProcessor<PayloadAttestationMessagePq> payloadAttestationMessagePqProcessor;
     protected OperationProcessor<SignedExecutionPayloadBid> executionPayloadBidProcessor;
     protected OperationProcessor<SignedProposerPreferences> proposerPreferencesProcessor;
     protected ProcessedAttestationSubscriptionProvider processedAttestationSubscriptionProvider;
@@ -662,6 +664,7 @@ public class Eth2P2PNetworkFactory {
                 dataColumnSidecarOperationProcessor,
                 executionPayloadProcessor,
                 payloadAttestationMessageProcessor,
+                payloadAttestationMessagePqProcessor,
                 executionPayloadBidProcessor,
                 proposerPreferencesProcessor,
                 debugDataDumper,
@@ -779,6 +782,9 @@ public class Eth2P2PNetworkFactory {
       }
       if (payloadAttestationMessageProcessor == null) {
         payloadAttestationMessageProcessor = OperationProcessor.noop();
+      }
+      if (payloadAttestationMessagePqProcessor == null) {
+        payloadAttestationMessagePqProcessor = OperationProcessor.noop();
       }
       if (executionPayloadBidProcessor == null) {
         executionPayloadBidProcessor = OperationProcessor.noop();

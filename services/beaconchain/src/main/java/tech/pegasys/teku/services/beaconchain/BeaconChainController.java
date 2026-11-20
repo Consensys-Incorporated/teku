@@ -2242,6 +2242,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
             .gossipedExecutionPayloadProcessor(
                 executionPayloadManager::validateAndImportExecutionPayload)
             .gossipedPayloadAttestationMessageProcessor(payloadAttestationPool::addRemote)
+            .gossipedPayloadAttestationMessagePqProcessor(payloadAttestationPool::addRemotePq)
             .gossipedExecutionPayloadBidProcessor(
                 (signedBid, arrivalTimestamp) ->
                     executionPayloadBidManager.validateAndAddBid(signedBid, RemoteBidOrigin.P2P))

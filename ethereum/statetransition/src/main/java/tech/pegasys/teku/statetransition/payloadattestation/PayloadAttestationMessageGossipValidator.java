@@ -15,6 +15,7 @@ package tech.pegasys.teku.statetransition.payloadattestation;
 
 import static tech.pegasys.teku.infrastructure.async.SafeFuture.completedFuture;
 import static tech.pegasys.teku.spec.config.Constants.VALID_PAYLOAD_ATTESTATION_SET_SIZE;
+import static tech.pegasys.teku.spec.constants.PqConstants.LEAF_OFFSET_PTC_ATTESTER;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.SAVE_FOR_FUTURE;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ignore;
@@ -200,7 +201,7 @@ public class PayloadAttestationMessageGossipValidator {
               /*
                * [REJECT] The signature is valid
                */
-              return isSignatureValid(payloadAttestationMessage, state)
+              return isSignatureValid(validatablePayloadAttestationMessage, state)
                   .thenApply(
                       signatureValid -> {
                         if (!signatureValid) {
@@ -285,9 +286,36 @@ public class PayloadAttestationMessageGossipValidator {
    * Verifies the signature through the {@link AsyncBLSSignatureVerifier}, which in production is
    * the gossip signature verification service: payload attestation messages are then verified in
    * batches with the other gossip signatures, off the calling thread, instead of one by one.
+   *
+   * <p>From PQ the message carries an XMSS signature instead, at the PTC attester leaf of its slot.
+   * A message without the signature type of its slot's fork is invalid.
    */
   private SafeFuture<Boolean> isSignatureValid(
-      final PayloadAttestationMessage payloadAttestationMessage, final BeaconState state) {
+      final ValidatablePayloadAttestationMessage validatablePayloadAttestationMessage,
+      final BeaconState state) {
+    final PayloadAttestationMessage payloadAttestationMessage =
+        validatablePayloadAttestationMessage.getMessage();
+    final Optional<Bytes> maybeXmssSignature =
+        validatablePayloadAttestationMessage.getXmssSignature();
+    final UInt64 slot = payloadAttestationMessage.getData().getSlot();
+    if (gossipValidationHelper.isPq(slot)) {
+      return completedFuture(
+          maybeXmssSignature
+              .map(
+                  xmssSignature ->
+                      gossipValidationHelper.isXmssSignatureValidWithRespectToValidatorIndex(
+                          signingRootUtil.signingRootForSignPayloadAttestationData(
+                              payloadAttestationMessage.getData(), state.getForkInfo()),
+                          payloadAttestationMessage.getValidatorIndex(),
+                          gossipValidationHelper.computeXmssLeafIndex(
+                              slot, LEAF_OFFSET_PTC_ATTESTER),
+                          xmssSignature,
+                          state))
+              .orElse(false));
+    }
+    if (maybeXmssSignature.isPresent()) {
+      return completedFuture(false);
+    }
     final Optional<BLSPublicKey> maybePublicKey =
         spec.getValidatorPubKey(state, payloadAttestationMessage.getValidatorIndex());
     if (maybePublicKey.isEmpty()) {
