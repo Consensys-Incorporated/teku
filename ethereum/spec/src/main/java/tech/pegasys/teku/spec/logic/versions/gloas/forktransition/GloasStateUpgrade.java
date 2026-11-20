@@ -221,9 +221,13 @@ public class GloasStateUpgrade implements StateUpgrade<BeaconStateFulu> {
 
     for (final PendingDeposit deposit : state.getPendingDeposits()) {
       final BLSPublicKey pubkey = deposit.getPublicKey();
-      // Deposits for existing validators stay in the pending queue
-      if (validatorsUtil.getValidatorIndex(state, pubkey).isPresent()) {
+      // Only builder-credential deposits can fund builders at the fork. Other deposits stay in the
+      // pending queue, even if a builder uses the same pubkey. Such a deposit is the only kind that
+      // can make its pubkey a pending validator, so record it for a signature check that only runs
+      // if an invalid builder deposit later needs the answer.
+      if (!predicates.isBuilderWithdrawalCredential(deposit.getWithdrawalCredentials())) {
         pendingDeposits.add(deposit);
+        pendingValidators.addPendingDeposit(deposit);
         continue;
       }
       beaconStateAccessors
@@ -236,27 +240,17 @@ public class GloasStateUpgrade implements StateUpgrade<BeaconStateFulu> {
                     builderIndex,
                     builder.copyWithNewBalance(builder.getBalance().plus(deposit.getAmount())));
               },
-              // Deposits for non-builders stay in the pending queue. If there is a valid pending
-              // deposit for a new validator with this pubkey, keep this deposit in the pending
-              // queue to be applied to that validator later.
               () -> {
-                // Deposits without builder credentials stay in the pending queue. Such a deposit is
-                // the only kind that can newly make its pubkey a pending validator, so record it
-                // for a signature check that only runs if a builder deposit later needs the answer.
-                if (!predicates.isBuilderWithdrawalCredential(deposit.getWithdrawalCredentials())) {
-                  pendingDeposits.add(deposit);
-                  pendingValidators.addPendingDeposit(deposit);
-                  return;
-                }
-                if (pendingValidators.isPendingValidator(pubkey)) {
-                  pendingDeposits.add(deposit);
-                  return;
-                }
                 if (!miscHelpers.isValidDepositSignature(
                     pubkey,
                     deposit.getWithdrawalCredentials(),
                     deposit.getAmount(),
                     deposit.getSignature())) {
+                  // Preserve validator top-ups when no builder can receive them
+                  if (validatorsUtil.getValidatorIndex(state, pubkey).isPresent()
+                      || pendingValidators.isPendingValidator(pubkey)) {
+                    pendingDeposits.add(deposit);
+                  }
                   return;
                 }
                 beaconStateMutators.addBuilderToRegistry(
@@ -280,9 +274,9 @@ public class GloasStateUpgrade implements StateUpgrade<BeaconStateFulu> {
 
   /**
    * Answers is_pending_validator for the validator deposits queued so far during builder
-   * onboarding. Deposit signatures are verified lazily, only when a builder deposit asks about the
-   * pubkey, and each deposit is verified at most once. The check is existential, so once one valid
-   * deposit is found the pubkey stays pending without verifying its remaining deposits.
+   * onboarding. Deposit signatures are verified lazily, only when an invalid builder deposit asks
+   * about the pubkey, and each deposit is verified at most once. The check is existential, so once
+   * one valid deposit is found the pubkey stays pending without verifying its remaining deposits.
    */
   private class PendingValidatorTracker {
     private final Map<BLSPublicKey, List<PendingDeposit>> unverifiedDeposits = new HashMap<>();
