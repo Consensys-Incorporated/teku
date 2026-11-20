@@ -32,6 +32,7 @@ dependencies {
 	implementation project(':infrastructure:logging')
 	implementation project(':infrastructure:ssz')
 	implementation project(':infrastructure:time')
+	implementation project(':infrastructure:xmss')
 
 	testFixturesApi 'com.google.guava:guava'
 	testFixturesApi 'io.consensys.tuweni:tuweni-bytes'

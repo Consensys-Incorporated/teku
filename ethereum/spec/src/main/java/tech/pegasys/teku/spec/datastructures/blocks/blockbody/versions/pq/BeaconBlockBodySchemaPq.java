@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.pq;
 
+import static tech.pegasys.teku.spec.constants.PqConstants.VRF_TREE_DEPTH;
+
 import it.unimi.dsi.fastutil.longs.LongList;
 import java.util.ArrayList;
 import java.util.List;
@@ -70,9 +72,6 @@ public class BeaconBlockBodySchemaPq
         ExecutionRequests,
         SszByteList>
     implements BeaconBlockBodySchema<BeaconBlockBodyPq> {
-
-  /** {@code VRF_TREE_DEPTH}: a VRF proof is the leaf and its 31-node branch. */
-  public static final int VRF_TREE_DEPTH = 31;
 
   private static final boolean[] ACTIVE_FIELDS = {
     true, true, true, true, true, true, true, false, false, false, true, false, true, true

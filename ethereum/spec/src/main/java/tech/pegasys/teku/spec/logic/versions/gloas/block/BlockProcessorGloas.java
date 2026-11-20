@@ -27,7 +27,6 @@ import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.constants.ParticipationFlags;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBody;
-import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodyGloas;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
@@ -124,7 +123,13 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
           processWithdrawals(genericState, Optional.empty());
           processExecutionPayloadBid(
               genericState,
-              BeaconBlockBodyGloas.required(beaconBlock.getBody()).getSignedExecutionPayloadBid());
+              beaconBlock
+                  .getBody()
+                  .getOptionalSignedExecutionPayloadBid()
+                  .orElseThrow(
+                      () ->
+                          new BlockProcessingException(
+                              "Signed execution payload bid expected as part of the body")));
         });
   }
 
@@ -136,9 +141,20 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
       final Supplier<ValidatorExitContext> validatorExitContextSupplier)
       throws BlockProcessingException {
     final MutableBeaconStateGloas stateGloas = MutableBeaconStateGloas.required(state);
-    final BeaconBlockBodyGloas body = BeaconBlockBodyGloas.required(beaconBlock.getBody());
-    final ExecutionPayloadBid bid = body.getSignedExecutionPayloadBid().getMessage();
-    final ExecutionRequests requests = body.getParentExecutionRequests();
+    final BeaconBlockBody body = beaconBlock.getBody();
+    final ExecutionPayloadBid bid =
+        body.getOptionalSignedExecutionPayloadBid()
+            .orElseThrow(
+                () ->
+                    new BlockProcessingException(
+                        "Signed execution payload bid expected as part of the body"))
+            .getMessage();
+    final ExecutionRequests requests =
+        body.getOptionalParentExecutionRequests()
+            .orElseThrow(
+                () ->
+                    new BlockProcessingException(
+                        "Parent execution requests expected as part of the body"));
 
     if (!miscHelpersGloas.isBidBuildingOnFullParent(stateGloas, bid)) {
       // Parent was EMPTY -- no execution requests expected
@@ -245,6 +261,13 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
         state, requests.getValidatorPqRegistrations());
     executionRequestsProcessorGloas.processBuilderPqRegistrationRequests(
         state, requests.getBuilderPqRegistrations());
+    // [New in PQ] (no-op before PQ, where the request lists are always empty)
+    executionRequestsProcessorGloas.processValidatorPreregistrationRequests(
+        state, requests.getValidatorPreregistrations());
+    executionRequestsProcessorGloas.processBuilderPreregistrationRequests(
+        state, requests.getBuilderPreregistrations());
+    executionRequestsProcessorGloas.processVoluntaryExitRequests(
+        state, requests.getVoluntaryExits());
 
     // Update parent payload availability and latest block hash
     state.setExecutionPayloadAvailability(
@@ -281,9 +304,8 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
       if (!amount.isZero()) {
         throw new BlockProcessingException("Amount must be zero for self-build blocks");
       }
-      if (!signedBid.getSignature().isInfinity()) {
-        throw new BlockProcessingException(
-            "Signature must be G2_POINT_AT_INFINITY for self-builds");
+      if (!isSelfBuildBidSignature(signedBid)) {
+        throw new BlockProcessingException("Signature must be the empty signature for self-builds");
       }
     } else {
       // Verify that the builder is active
@@ -299,9 +321,8 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
       if (!beaconStateAccessorsGloas.canBuilderCoverBid(state, builderIndex, amount)) {
         throw new BlockProcessingException("Builder doesn't have funds to cover the bid");
       }
-      if (!operationSignatureVerifier.verifyExecutionPayloadBidSignature(
-          state, signedBid, specConfig.getBLSSignatureVerifier())) {
-        throw new BlockProcessingException("Signature for the signed bind was invalid");
+      if (!verifyExecutionPayloadBidSignature(state, signedBid)) {
+        throw new BlockProcessingException("Signature for the signed bid was invalid");
       }
     }
 
@@ -363,6 +384,18 @@ public class BlockProcessorGloas extends BlockProcessorFulu {
 
     // Cache the execution payload bid
     stateGloas.setLatestExecutionPayloadBid(bid);
+  }
+
+  /** Whether a self-built bid carries the empty signature: G2_POINT_AT_INFINITY in Gloas. */
+  protected boolean isSelfBuildBidSignature(final SignedExecutionPayloadBid signedBid) {
+    return signedBid.getSignature().isInfinity();
+  }
+
+  // verify_execution_payload_bid_signature
+  protected boolean verifyExecutionPayloadBidSignature(
+      final BeaconState state, final SignedExecutionPayloadBid signedBid) {
+    return operationSignatureVerifier.verifyExecutionPayloadBidSignature(
+        state, signedBid, specConfig.getBLSSignatureVerifier());
   }
 
   @Override

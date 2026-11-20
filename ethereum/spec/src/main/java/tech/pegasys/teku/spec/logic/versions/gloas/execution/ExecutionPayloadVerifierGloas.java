@@ -187,7 +187,8 @@ public class ExecutionPayloadVerifierGloas implements ExecutionPayloadVerifier {
         state, signedEnvelope, signatureVerifier, state.getSlot());
   }
 
-  private boolean verifyExecutionPayloadEnvelopeSignature(
+  // verify_execution_payload_envelope_signature, with the slot whose epoch gives the domain
+  protected boolean verifyExecutionPayloadEnvelopeSignature(
       final BeaconState state,
       final SignedExecutionPayloadEnvelope signedEnvelope,
       final BLSSignatureVerifier signatureVerifier,
