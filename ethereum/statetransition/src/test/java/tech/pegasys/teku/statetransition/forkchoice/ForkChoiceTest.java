@@ -193,7 +193,7 @@ class ForkChoiceTest {
   private void setupWithSpec(
       final Spec unmockedSpec, final StoreConfig storeConfig, final boolean initializeGenesis) {
     unmockedSpec.reinitializeForTesting(
-        (block) -> blobSidecarsAvailabilityChecker,
+        block -> blobSidecarsAvailabilityChecker,
         AvailabilityCheckerFactory.NOOP_DATACOLUMN_SIDECAR,
         KZG.DISABLED);
     // Setting up spec and all dependants
@@ -2402,6 +2402,61 @@ class ForkChoiceTest {
                 .orElseThrow()
                 .getWeight())
         .isEqualTo(ZERO);
+  }
+
+  @Test
+  void onExecutionPayloadEnvelope_invalidChildPayloadShouldInvalidateOptimisticParentPayload() {
+    setupWithSpec(
+        TestSpecFactory.createMinimalGloas(
+            builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy =
+        recentChainData.getForkChoiceStrategy().orElseThrow();
+
+    final SignedBlockAndState grandparent = chainBuilder.generateBlockAtSlot(ONE);
+    importBlock(grandparent);
+    importPayload(grandparent);
+    final SignedBlockAndState parent = chainBuilder.generateBlockAtSlot(2);
+    importBlock(parent);
+    importPayloadOptimistically(parent);
+    // The child builds on FULL(parent)
+    final SignedBlockAndState child = chainBuilder.generateBlockAtSlot(3);
+    importBlock(child);
+
+    // The execution layer finds the parent payload invalid while validating the child's payload
+    importPayloadWithStatus(child, invalidWithLatestValidPayloadOf(grandparent));
+
+    assertThat(
+            forkChoiceStrategy.getBlockData(
+                parent.getRoot(), ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL))
+        .isEmpty();
+    assertThat(forkChoiceStrategy.getBlockData(child.getRoot())).isEmpty();
+    assertThat(
+            forkChoiceStrategy
+                .getBlockData(parent.getRoot(), ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY)
+                .map(ProtoNodeData::isOptimistic))
+        .contains(false);
+  }
+
+  private PayloadStatus invalidWithLatestValidPayloadOf(final SignedBlockAndState block) {
+    final Bytes32 latestValidHash =
+        chainBuilder
+            .getExecutionPayloadAtSlot(block.getSlot())
+            .orElseThrow()
+            .getMessage()
+            .getPayload()
+            .getBlockHash();
+    return PayloadStatus.invalid(Optional.of(latestValidHash), Optional.of("bad payload"));
+  }
+
+  private void importPayloadWithStatus(
+      final SignedBlockAndState block, final PayloadStatus payloadStatus) {
+    executionLayer.setPayloadStatus(payloadStatus);
+    assertThat(
+            forkChoice.onExecutionPayloadEnvelope(
+                chainBuilder.getExecutionPayloadAtSlot(block.getSlot()).orElseThrow(),
+                executionLayer,
+                Optional.of(mock(ReceivedExecutionPayloadEventsChannel.class))))
+        .isCompletedWithValueMatching(result -> !result.isSuccessful());
   }
 
   /** Imports the block's execution payload while the execution layer is still syncing. */

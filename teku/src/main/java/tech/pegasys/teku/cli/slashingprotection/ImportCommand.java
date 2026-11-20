@@ -16,9 +16,11 @@ package tech.pegasys.teku.cli.slashingprotection;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.Optional;
 import org.apache.logging.log4j.util.Strings;
 import picocli.CommandLine;
+import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.cli.converter.PicoCliVersionProvider;
 import tech.pegasys.teku.cli.options.ValidatorClientDataOptions;
 import tech.pegasys.teku.cli.util.SlashingProtectionCommandUtils;
@@ -73,7 +75,25 @@ public class ImportCommand implements Runnable {
     }
 
     SUB_COMMAND_LOG.display("Writing slashing protection data to: " + slashProtectionPath);
-    importer.updateLocalRecords(SUB_COMMAND_LOG::display);
+    if (!updateLocalRecords(importer, SUB_COMMAND_LOG)) {
+      System.exit(1);
+    }
+  }
+
+  /**
+   * Writes the imported data to the local records, reporting any validators that failed.
+   *
+   * @return true if every validator was imported
+   */
+  static boolean updateLocalRecords(
+      final SlashingProtectionImporter importer, final SubCommandLogger log) {
+    final Map<BLSPublicKey, String> errors = importer.updateLocalRecords(log::display);
+    if (errors.isEmpty()) {
+      return true;
+    }
+    errors.forEach((publicKey, error) -> log.error(publicKey.toHexString() + ": " + error));
+    log.error("Slashing protection data was not imported for " + errors.size() + " validator(s).");
+    return false;
   }
 
   private void verifyImportFileExists(final File importFile) {
