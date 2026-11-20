@@ -758,6 +758,18 @@ The pool aggregates BLS signatures today (`AggregatingAttestationPoolV2`, `Match
      - extend `LocalValidatorSource`/`KeyManager` to load XMSS key, VRF material and leaf DB alongside, or instead of, the BLS key;
      - provide a CLI (`teku validator generate-pq-keys`, **[inferred]** name) that emits the XMSS pubkey, the VRF root and the EIP8483 `pq_data`.
    - This tooling is a **prerequisite for EIP8483 registration**, so it may belong to the EIP8483 workstream.
+   - **Done (phase 9d):** the format, generation and loading are documented in [`pq-keystore.md`](pq-keystore.md).
+     - **Keystore:** `PqKeyStore`/`PqKeyStoreData` in `infrastructure/bls-keystore` (package `pq`). It is a versioned JSON format (`"format": "teku-pq-validator-keystore"`, `"version": 1`) with `xmss_pubkey`, `vrf_root`, an optional `bls_pubkey`, and one EIP-2335 `crypto` object over `xmss_seed ‖ vrf_seed`. `KeyStore` gained `encryptSecret`/`decrypt(Crypto)` for this.
+     - **Files:** `<name>.pq-keystore` and `<name>.vrf-cache` (the 1 MiB of level-16 nodes) sit next to the BLS keystore `<name>.json` and share its password. Neither name ends in `.json`, so key-directory scans skip them.
+     - **CLI:** `teku internal-tools validator-tools generate-pq-keys` (hidden, like `generate-keys`). `--bls-keystores` pairs new keys with existing BLS keystores; `--number-of-validators` makes keys for new validators. It prints VRF-derivation progress and can write each validator's `xmss_pubkey`, `vrf_root`, `pq_data`, `deposit_pubkey` (`XMSS_DEPOSIT_PREFIX ‖ xmss_pubkey`) and `deposit_signature` (`vrf_root ‖ 64 zero bytes`, `PqValidatorPublicData`) to JSON. It never replaces existing PQ files.
+     - **Loading:** when the spec schedules PQ, `ValidatorClientService` creates a `LocalXmssLeafProtector`, and `LocalValidatorSource` loads any sibling PQ keystore through `PqValidatorKeyLoader`. The loader checks `bls_pubkey`, recomputes one cached VRF node from the seed, checks that the cache opens to `vrf_root` (a missing cache is rebuilt), and checks the derived XMSS public key. The resulting `LocalXmssSigner` is `Validator.getXmssSigner()`.
+   - **Deferred from 9d:**
+     - PQ-only validators (no BLS keystore) are generated but not loaded: that needs index-first identity (9a);
+     - checking `xmss_pubkey`/`vrf_root` against the validator's on-chain registration (9c, with the pre-fork warning in item 7);
+     - keymanager-API import, listing and deletion of PQ keys, and deleting the PQ files with a managed BLS keystore;
+     - leaf-record interchange (item 5);
+     - signing the EIP-8483 preregistration in the CLI, since the request format waits on EL system contracts (§5.9);
+     - a cross-client keystore standard (§5.8).
 3. **VRF.** RANDAO is not a signature, so the PQ signer has `computeVrfProof(slot)` next to the BLS `Signer.createRandaoReveal`.
    - **Specified since `2f43bc0f9`** (validator.md, from `70b907fd4`): leaf `i` is `keccak256(vrf_seed ‖ uint_to_bytes(uint64(i)))`, and `compute_vrf_node`, `compute_vrf_root` and `compute_vrf_proof` build the Keccak-256 tree of depth 31 above it. Any client derives the same root from the same seed, so a validator can move its seed between clients.
    - **Done (`VrfTree`, phase 9b):** deriving the root hashes about 2^32 leaves, a one-off at key generation, in parallel. The tree keeps the level-16 nodes and above (2^15 × 32 B = 1 MiB per validator) and can be saved and restored, so a proof costs one 2^16-leaf subtree. Vectors from the spec's own functions check it. `PredicatesPq.isValidVrfProof` uses the same walk.
@@ -771,7 +783,7 @@ The pool aggregates BLS signatures today (`AggregatingAttestationPoolV2`, `Match
      - `getVrfProof`.
    - **Implementations:** `LocalXmssSigner`, `SlashingProtectedXmssSigner`, `DeletableXmssSigner` (mirror `LocalSigner`, `SlashingProtectedSigner`, `DeletableSigner` in `spec/signatures`).
    - **Done (phase 9b):** `XmssSigner` and `LocalXmssSigner` in `spec/signatures/xmss`, with the methods above (`signAtReservedLeaf(signingRoot)` for exits and preregistration). `LocalXmssSigner` records every leaf with the `XmssLeafProtector` before signing, and fails with `XmssLeafReuseException` instead of reusing one.
-   - **Still to do:** surround-vote protection. A leaf per slot and per target epoch already rules out double proposals and double votes, but not surround votes; that needs the slashing protector keyed by XMSS key (with the identity work, 9a). Deleting a key (`DeletableXmssSigner`) comes with the keymanager work (9d).
+   - **Still to do:** surround-vote protection. A leaf per slot and per target epoch already rules out double proposals and double votes, but not surround votes; that needs the slashing protector keyed by XMSS key (with the identity work, 9a). Deleting a key (`DeletableXmssSigner`) comes with the keymanager work, which 9d deferred. Until then the loaded `XmssSigner` is not wrapped.
 5. **Leaf protection: a new safety-critical store.**
    - **Today:** `SlashingProtector`/`LocalSlashingProtector` only guard blocks and attestations (`maySignBlock`, `maySignAttestation`). Aggregates, PTC messages, preferences, envelopes and randao are unguarded.
    - **PQ requires** a per-key `XmssLeafProtector`:
@@ -891,7 +903,7 @@ Sizes: S ≈ <1 eng-week, M ≈ 1–2, L ≈ 2–4, XL ≈ 4+ (rough, for one en
    - Proposal: the BN builds the proof and returns aggregate + proof; the VC signs `AggregateAndProof`. This transfers up to 1 MiB per aggregate over REST.
    - Needs a beacon-APIs change and agreement with other clients.
 6. **Stand-in proof size limits devnets.** `MAX_STARK_PROOF_SIZE` fits about 436 signatures per proof. This caps both a single aggregate (so committees should stay below about 436) and the whole block's merged proof. Devnets must use small validator sets, or accept partial inclusion. The block packer must budget bytes.
-7. **VRF tree derivation and storage are unspecified.** This affects key portability between clients, backup and restore, and the keystore standard. It needs a cross-client convention (likely an EIP or keystore extension) before mainnet-like use.
+7. **VRF tree storage is unspecified.** Derivation is specified since `2f43bc0f9`, so a seed moves between clients. How the seed and the derived cache are stored is not: Teku's own format is in `pq-keystore.md`. This affects key portability between clients, backup and restore. It needs a cross-client convention (likely an EIP or keystore extension) before mainnet-like use.
 8. **Keystore and tooling.** EIP-2335 is BLS-specific. There is no standard for XMSS seed + VRF seed keystores, `pq_data` generation, preregistration signing, or the exit message format submitted to the system contract (the CL spec defers these to EL system contracts that do not exist yet).
 9. **EL support.** No EL implements the 0x05–0x09 system contracts. PQ devnets will have empty request lists, so the preregistration, deposit and exit paths are covered only by ref tests.
 10. **Fork-boundary execution-requests root** (spec note in fork.md). The first PQ block's parent requests root may be computed over the EIP8483 type. Teku needs the same Teku-specific bridge as for EIP8483 until the spec resolves it.

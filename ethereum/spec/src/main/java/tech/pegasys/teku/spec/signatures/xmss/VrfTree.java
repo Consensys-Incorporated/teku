@@ -18,6 +18,7 @@ import static tech.pegasys.teku.spec.logic.common.helpers.MathHelpers.uint64ToBy
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -62,13 +63,40 @@ public final class VrfTree {
     return derive(seed, PqConstants.VRF_TREE_DEPTH, DEFAULT_CACHED_HEIGHT);
   }
 
+  /**
+   * Derives the full-depth tree for {@code seed}, reporting progress as each cached node is
+   * derived. Deriving hashes about 2^32 leaves, which takes minutes.
+   */
+  public static VrfTree derive(final Bytes32 seed, final DeriveProgressListener progressListener) {
+    return derive(seed, PqConstants.VRF_TREE_DEPTH, DEFAULT_CACHED_HEIGHT, progressListener);
+  }
+
   /** Derives a tree of {@code depth}, caching the nodes at {@code cachedHeight}. */
   public static VrfTree derive(final Bytes32 seed, final int depth, final int cachedHeight) {
+    return derive(seed, depth, cachedHeight, DeriveProgressListener.NOOP);
+  }
+
+  /**
+   * Derives a tree of {@code depth}, caching the nodes at {@code cachedHeight} and reporting
+   * progress as each cached node is derived.
+   */
+  public static VrfTree derive(
+      final Bytes32 seed,
+      final int depth,
+      final int cachedHeight,
+      final DeriveProgressListener progressListener) {
     checkShape(depth, cachedHeight);
+    final int nodeCount = 1 << (depth - cachedHeight);
+    final AtomicInteger derivedCount = new AtomicInteger();
     final Bytes32[] cachedNodes =
-        IntStream.range(0, 1 << (depth - cachedHeight))
+        IntStream.range(0, nodeCount)
             .parallel()
-            .mapToObj(index -> computeNode(seed, cachedHeight, index))
+            .mapToObj(
+                index -> {
+                  final Bytes32 node = computeNode(seed, cachedHeight, index);
+                  progressListener.onProgress(derivedCount.incrementAndGet(), nodeCount);
+                  return node;
+                })
             .toArray(Bytes32[]::new);
     return new VrfTree(seed, depth, cachedHeight, cachedNodes);
   }
@@ -95,6 +123,14 @@ public final class VrfTree {
       nodes[i] = Bytes32.wrap(cachedNodes.slice(i * Bytes32.SIZE, Bytes32.SIZE));
     }
     return new VrfTree(seed, depth, cachedHeight, nodes);
+  }
+
+  public int getDepth() {
+    return depth;
+  }
+
+  public int getCachedHeight() {
+    return cachedHeight;
   }
 
   public Bytes32 getRoot() {
@@ -182,6 +218,18 @@ public final class VrfTree {
               : hashPair(value, sibling);
     }
     return value;
+  }
+
+  /**
+   * Receives progress while a tree is derived. Called from the deriving threads, so implementations
+   * must be thread-safe.
+   */
+  @FunctionalInterface
+  public interface DeriveProgressListener {
+    DeriveProgressListener NOOP = (derivedNodes, totalNodes) -> {};
+
+    /** {@code derivedNodes} of the {@code totalNodes} cached nodes have been derived. */
+    void onProgress(int derivedNodes, int totalNodes);
   }
 
   private static void checkShape(final int depth, final int cachedHeight) {

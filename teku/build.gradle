@@ -45,6 +45,7 @@ dependencies {
 	implementation project(':validator:client')
 	implementation project(':validator:remote')
 	implementation project(':infrastructure:bls-keystore')
+	implementation project(':infrastructure:xmss')
 
 	api 'com.google.guava:guava'
 

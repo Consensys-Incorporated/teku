@@ -19,6 +19,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -323,5 +326,29 @@ class VrfTreeTest {
     assertThatThrownBy(
             () -> VrfTree.fromCachedNodes(seed, DEPTH, 4, Bytes.wrap(new byte[Bytes32.SIZE])))
         .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void derive_reportsProgressForEveryCachedNode() {
+    final Bytes32 seed = Bytes32.fromHexStringLenient("0x5eed");
+    final Set<Integer> reported = ConcurrentHashMap.newKeySet();
+    final AtomicInteger calls = new AtomicInteger();
+
+    final VrfTree tree =
+        VrfTree.derive(
+            seed,
+            DEPTH,
+            4,
+            (derivedNodes, totalNodes) -> {
+              assertThat(totalNodes).isEqualTo(1 << (DEPTH - 4));
+              reported.add(derivedNodes);
+              calls.incrementAndGet();
+            });
+
+    assertThat(calls).hasValue(1 << (DEPTH - 4));
+    assertThat(reported).hasSize(1 << (DEPTH - 4)).contains(1, 1 << (DEPTH - 4));
+    assertThat(tree.getRoot()).isEqualTo(VrfTree.derive(seed, DEPTH, 4).getRoot());
+    assertThat(tree.getDepth()).isEqualTo(DEPTH);
+    assertThat(tree.getCachedHeight()).isEqualTo(4);
   }
 }

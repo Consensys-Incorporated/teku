@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -63,7 +64,10 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.signatures.DeletableSigner;
+import tech.pegasys.teku.spec.signatures.Signer;
 import tech.pegasys.teku.spec.signatures.SlashingProtector;
+import tech.pegasys.teku.spec.signatures.xmss.XmssLeafProtector;
+import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.api.FileBackedGraffitiProvider;
 import tech.pegasys.teku.validator.api.GraffitiProvider;
@@ -898,6 +902,113 @@ class ValidatorLoaderTest {
     final OwnedValidators validators = validatorLoader.getOwnedValidators();
     assertThat(validators.getValidatorCount()).isEqualTo(0);
     checkGraffitiProviderTypes(validators.getValidators(), FileBackedGraffitiProvider.class);
+  }
+
+  @Test
+  void shouldAttachXmssSignerFromProvider() {
+    final ValidatorSource validatorSource = mock(ValidatorSource.class);
+    final ValidatorSource.ValidatorProvider provider =
+        mock(ValidatorSource.ValidatorProvider.class);
+    final XmssSigner xmssSigner = mock(XmssSigner.class);
+    when(provider.getPublicKey()).thenReturn(PUBLIC_KEY1);
+    when(provider.createSigner()).thenReturn(mock(Signer.class));
+    when(provider.createXmssSigner()).thenReturn(Optional.of(xmssSigner));
+    doReturn(List.of(provider)).when(validatorSource).getAvailableValidators();
+    final ValidatorLoader loader =
+        ValidatorLoader.create(
+            List.of(validatorSource),
+            Optional.empty(),
+            Optional.empty(),
+            Optional::empty,
+            Optional.empty(),
+            slashingProtectionLogger);
+
+    loader.loadValidators();
+
+    assertThat(loader.getOwnedValidators().getValidator(PUBLIC_KEY1).orElseThrow().getXmssSigner())
+        .contains(xmssSigner);
+  }
+
+  @Test
+  void shouldLoadBlsOnlyValidatorWhenPqKeysEnabled(@TempDir final Path tempDir) throws Exception {
+    writeKeystore(tempDir);
+    final ValidatorLoader validatorLoader = createLoaderWithPqKeys(tempDir);
+
+    validatorLoader.loadValidators();
+
+    final Validator validator =
+        validatorLoader.getOwnedValidators().getValidator(PUBLIC_KEY1).orElseThrow();
+    assertThat(validator.getSigner().isLocal()).isTrue();
+    assertThat(validator.getXmssSigner()).isEmpty();
+  }
+
+  @Test
+  void shouldFailToLoadValidatorWithInvalidPqKeystore(@TempDir final Path tempDir)
+      throws Exception {
+    writeKeystore(tempDir);
+    Files.writeString(tempDir.resolve("key.pq-keystore"), "{}");
+    final ValidatorLoader validatorLoader = createLoaderWithPqKeys(tempDir);
+
+    assertThatThrownBy(validatorLoader::loadValidators)
+        .isInstanceOf(InvalidConfigurationException.class)
+        .hasMessageContaining("Invalid PQ keystore");
+    assertThat(validatorLoader.getOwnedValidators().getValidatorCount()).isZero();
+  }
+
+  @Test
+  void shouldIgnorePqKeystoreWithoutXmssLeafProtector(@TempDir final Path tempDir)
+      throws Exception {
+    writeKeystore(tempDir);
+    Files.writeString(tempDir.resolve("key.pq-keystore"), "{}");
+    final ValidatorConfig config =
+        ValidatorConfig.builder()
+            .validatorKeys(
+                List.of(tempDir.toAbsolutePath() + File.pathSeparator + tempDir.toAbsolutePath()))
+            .build();
+    final ValidatorLoader validatorLoader =
+        ValidatorLoader.create(
+            spec,
+            config,
+            disabledInteropConfig,
+            httpClientFactory,
+            slashingProtector,
+            slashingProtectionLogger,
+            publicKeyLoader,
+            asyncRunner,
+            metricsSystem,
+            Optional.empty(),
+            (publicKey) -> Optional.empty());
+
+    validatorLoader.loadValidators();
+
+    assertThat(
+            validatorLoader
+                .getOwnedValidators()
+                .getValidator(PUBLIC_KEY1)
+                .orElseThrow()
+                .getXmssSigner())
+        .isEmpty();
+  }
+
+  private ValidatorLoader createLoaderWithPqKeys(final Path keysDir) {
+    final ValidatorConfig config =
+        ValidatorConfig.builder()
+            .validatorKeys(
+                List.of(keysDir.toAbsolutePath() + File.pathSeparator + keysDir.toAbsolutePath()))
+            .build();
+    return ValidatorLoader.create(
+        spec,
+        config,
+        disabledInteropConfig,
+        httpClientFactory,
+        slashingProtector,
+        Optional.of(mock(XmssLeafProtector.class)),
+        slashingProtectionLogger,
+        publicKeyLoader,
+        asyncRunner,
+        metricsSystem,
+        Optional.empty(),
+        (publicKey) -> Optional.empty());
   }
 
   static void writeKeystore(final Path tempDir) throws Exception {
