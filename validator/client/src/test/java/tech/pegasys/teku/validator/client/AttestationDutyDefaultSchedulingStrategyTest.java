@@ -16,7 +16,9 @@ package tech.pegasys.teku.validator.client;
 import static java.util.Collections.emptyList;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -26,6 +28,7 @@ import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.bls.BLSPublicKey;
@@ -37,6 +40,7 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.signatures.Signer;
+import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.api.CommitteeSubscriptionRequest;
 import tech.pegasys.teku.validator.api.FileBackedGraffitiProvider;
@@ -46,6 +50,7 @@ import tech.pegasys.teku.validator.client.duties.SlotBasedScheduledDuties;
 import tech.pegasys.teku.validator.client.duties.attestations.AggregationDuty;
 import tech.pegasys.teku.validator.client.duties.attestations.AttestationProductionDuty;
 import tech.pegasys.teku.validator.client.loader.OwnedValidators;
+import tech.pegasys.teku.xmss.XmssPublicKey;
 
 class AttestationDutyDefaultSchedulingStrategyTest {
 
@@ -150,6 +155,43 @@ class AttestationDutyDefaultSchedulingStrategyTest {
             new CommitteeSubscriptionRequest(
                 validatorIndex, committeeIndex, UInt64.valueOf(committeesAtSlot), slot, false));
     verify(beaconCommitteeSubscriptions).sendRequests();
+  }
+
+  @Test
+  void shouldScheduleAggregationFromDutyWithoutSelectionProofFromPq() {
+    final Spec pqSpec = TestSpecFactory.createMinimalPq();
+    final DataStructureUtil pqData = new DataStructureUtil(pqSpec);
+    final Bytes32 xmssKey = pqData.randomBytes32();
+    final XmssSigner xmssSigner = mock(XmssSigner.class);
+    when(xmssSigner.getPublicKey()).thenReturn(XmssPublicKey.fromBytes(xmssKey));
+    final Validator pqValidator =
+        new Validator(validatorKey, signer, Optional::empty, false, Optional.of(xmssSigner));
+    final AttestationDutyDefaultSchedulingStrategy pqStrategy =
+        new AttestationDutyDefaultSchedulingStrategy(
+            pqSpec,
+            forkProvider,
+            dependentRoot -> scheduledDuties,
+            new OwnedValidators(Map.of(validatorKey, pqValidator)),
+            beaconCommitteeSubscriptions,
+            validatorApiChannel,
+            false);
+    final UInt64 slot = UInt64.ONE;
+    final int validatorIndex = VALIDATOR_INDICES.getInt(0);
+    // From PQ, the duty names the validator by its XMSS key and says it aggregates
+    final AttesterDuty duty =
+        new AttesterDuty(xmssKey, validatorIndex, 16, 3, 4, 0, slot, Optional.of(true));
+    when(scheduledDuties.scheduleProduction(any(), any(), any())).thenReturn(new SafeFuture<>());
+
+    final SafeFuture<SlotBasedScheduledDuties<?, ?>> result =
+        pqStrategy.scheduleAllDuties(
+            UInt64.ONE, new AttesterDuties(false, pqData.randomBytes32(), List.of(duty)));
+
+    assertThat(result).isCompleted();
+    verify(beaconCommitteeSubscriptions)
+        .subscribeToBeaconCommittee(
+            new CommitteeSubscriptionRequest(validatorIndex, 3, UInt64.valueOf(4), slot, true));
+    verify(scheduledDuties).scheduleAggregation(eq(slot), eq(pqValidator), any());
+    verify(signer, never()).signAggregationSlot(any(), any());
   }
 
   @Test
