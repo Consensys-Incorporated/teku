@@ -51,13 +51,14 @@ Build standalone, switch last. Each standalone class extends its Gloas or EIP-84
    - `PqStateUpgrade` implements `upgrade_to_pq`: registered and unregistered validators and builders, pending deposits, unregistered builders' payments, and the initial aggregation-committee window. **Done.**
    - Caches keyed by BLS public keys (`ValidatorIndexCache`, the pubkey caches, `BuilderIndexCache`) are reset at the fork and keyed by `Bytes32` from PQ. **Partly done**: the upgrade builds an empty state, so the caches start empty; PQ lookups by XMSS key are linear scans, still to be cached.
    - The fork-boundary bridge for parent execution requests extends to EIP-8483 → PQ. **Done**, in `BlockProcessorPq`: a pre-PQ parent is matched as EIP-8483 requests, or Gloas requests when it predates EIP-8483 too.
-   - The `pq` reference-test fork joins `SUPPORTED_FORKS` and its executors are wired. **Deferred** to the bump to consensus-specs `2f43bc0f9`, which adds PQ to `TESTGEN_FORKS` so vectors can be generated.
+   - The `pq` reference-test fork joins `SUPPORTED_FORKS` and its executors are wired. **Not started**: consensus-specs `2f43bc0f9` adds PQ to `TESTGEN_FORKS`, so vectors can now be generated.
+   - **Spec bump to `2f43bc0f9`** (`pq-spec-keccak-vrf`): `is_valid_vrf_proof` walks a Keccak-256 tree. The VRF tree derivation it adds is validator-client work (phase 9).
    - **Heze** builds on PQ on this branch, so it switches too: `SpecLogicHeze` uses the PQ logic with EIP-8365's deposit rule on `EpochProcessorPq`, and `HezeStateUpgrade` only changes the fork, running `upgrade_to_pq` first when PQ shares Heze's epoch.
 
 ## Testing
 
 - **Unit tests** for every helper and processor, against PQ states built from the PQ schema, including the generator's PQ genesis (test resource `pq_genesis_minimal.ssz`), whose aggregation-committee window gives a cross-check for `compute_aggregation_committees`.
-- **Reference tests** (`operations`, `epoch_processing`, `sanity`, `fork`, `transition`): the vectors must be generated locally from consensus-specs `a4d16c5be` until a release carries them. Generating them is a prerequisite for slice 5.
+- **Reference tests** (`operations`, `epoch_processing`, `sanity`, `fork`, `transition`): the vectors must be generated locally from consensus-specs `2f43bc0f9` (which has PQ in `TESTGEN_FORKS`) until a release carries them. Generating them is a prerequisite for slice 5.
 - **Interop** after the switch needs the validator client's XMSS signing (phase 9).
 
 ## Risks and open questions

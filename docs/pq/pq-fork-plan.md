@@ -1,12 +1,16 @@
 # Plan: adding the consensus-specs "PQ" fork to Teku
 
 - **Spec source:** `consensus-specs` at `upstream/pq`, commit `ee867e912` (2026-11-17, "Use the superset rule for aggregates after their slot").
-- **Devnet target (2026-11-19): commit `a4d16c5be`** (2026-11-18, "Find the attested block's slot to check its payload availability"), the current `pq` tip. It adds three commits on `ee867e912`, all PQ-only:
+- **Devnet target (2026-11-20): commit [`2f43bc0f9`](https://github.com/ethereum/consensus-specs/tree/2f43bc0f989f47af81df390a90bc1f78e2436323)** (2026-11-19, "Hash the VRF tree with Keccak-256"). It adds five commits on `a4d16c5be`:
+  - `2f43bc0f9` makes the VRF tree a Keccak-256 Merkle tree: `is_valid_vrf_proof` walks the branch with the new `keccak256` helper instead of `is_valid_merkle_branch`. This is the only consensus change. RANDAO mixing and SSZ stay on sha256.
+  - `70b907fd4` defines how a validator derives its VRF tree from a secret `vrf_seed` (`compute_vrf_leaf`, `compute_vrf_node`, `compute_vrf_root`, `compute_vrf_proof`, in `validator.md`), for the validator client (phase 9).
+  - `5286c65cd` adds `PQ` to `TESTGEN_FORKS`, so PQ reference vectors can be generated; `62d77b268` adds randomized block tests; `2f42da884` skips fast confirmation tests that assume a one-slot delay.
+- **Previous devnet target (2026-11-19): commit `a4d16c5be`** (2026-11-18, "Find the attested block's slot to check its payload availability"), the current `pq` tip. It adds three commits on `ee867e912`, all PQ-only:
   - `98814e4be` returns aggregate gossip to the plain superset rule. `best_aggregate_balance` is gone.
   - `ec4e21652` adds preset `MIN_ATTESTATION_INCLUSION_DELAY_PQ = 2`, used by `process_attestation`. The timely head flag now needs an inclusion delay of **exactly** 2.
   - `a4d16c5be` adds `get_latest_block_slot`, so the head check reads payload availability at the attested block's slot (the grandparent with a two-slot delay). The `parent_slot` parameter comes back.
   - The EIP-8483 spec is unchanged, and the test-helper edits only change behaviour post-PQ, so Teku's merged EIP-8483 (`pq-devnet-0`) and its vectors are unaffected.
-- **Fork lineage in the spec:** `GLOAS -> EIP8483 -> PQ` (`PREVIOUS_FORK_OF[PQ] = EIP8483`, `PREVIOUS_FORK_OF[EIP8483] = GLOAS`). PQ and EIP8483 are not in `TESTGEN_FORKS`, so no official vectors will be published.
+- **Fork lineage in the spec:** `GLOAS -> EIP8483 -> PQ` (`PREVIOUS_FORK_OF[PQ] = EIP8483`, `PREVIOUS_FORK_OF[EIP8483] = GLOAS`). EIP8483 is not in `TESTGEN_FORKS`; PQ is from `5286c65cd`, so its vectors can be generated from the target commit.
 - **Teku baseline:** the `pq-devnet-0` branch, which carries EIP-8483 (#11649), the leanXMSS module (#11652), the PQ milestone skeleton (#11654) and the PQ containers as they land (#11656 onwards).
   - Its classes are `SpecConfigEip8483`, `SchemaDefinitionsEip8483`, `SpecLogicEip8483`, `Eip8483StateUpgrade`, `BeaconStateSchemaEip8483`, `ExecutionRequestsSchemaEip8483`, `ValidatorPqRegistration` and `BuilderPqRegistration`.
 - **Status (2026-11-19):** phases 1 (milestone skeleton) and 2 (crypto API, on lean-pq) are done; phase 3 (containers) is complete or in review ([containers-plan.md](containers-plan.md)); phase 4 (state transition, with phase 5's fork upgrade at its switch-over) is under way ([state-transition-plan.md](state-transition-plan.md)). This document was written before the work started; sections that recorded open decisions now record what was decided.
