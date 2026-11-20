@@ -187,6 +187,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
     when(miscHelpers.computeSigningRoot(eq(signedBid.getMessage()), any())).thenReturn(signingRoot);
     when(specVersion.miscHelpers()).thenReturn(miscHelpers);
     when(spec.atSlot(slot)).thenReturn(specVersion);
+    when(specVersion.getMilestone()).thenReturn(SpecMilestone.GLOAS);
     when(spec.getActiveValidatorIndices(postState, slot))
         .thenReturn(IntList.of(builderIndex.intValue()));
   }
@@ -696,6 +697,31 @@ public class ExecutionPayloadBidGossipValidatorTest {
   }
 
   @TestTemplate
+  void shouldIgnore_whenBuilderHasReachedItsBidLimitFromPq() {
+    // get_builder_bid_limit: one bid per ETH of balance, so none below 1 ETH
+    when(spec.atSlot(slot).getMilestone()).thenReturn(SpecMilestone.PQ);
+    final BeaconState lowBalanceState =
+        postState.updated(
+            mutableState -> {
+              final SszMutableList<Builder> builders =
+                  MutableBeaconStateGloas.required(mutableState).getBuilders();
+              for (int i = 0; i < builders.size(); i++) {
+                builders.set(i, builders.get(i).copyWithNewBalance(UInt64.valueOf(999_999_999L)));
+              }
+            });
+    when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(lowBalanceState)));
+    when(gossipValidationHelper.isActiveBuilder(builderIndex, lowBalanceState, slot))
+        .thenReturn(true);
+    when(gossipValidationHelper.getRandaoMixForCurrentEpoch(lowBalanceState, slot))
+        .thenReturn(bid.getPrevRandao());
+
+    assertThatSafeFuture(bidValidator.validate(signedBid))
+        .isCompletedWithValue(
+            ignoreBid(signedBid, "builder %s has reached its bid limit of %s", builderIndex, 0));
+  }
+
+  @TestTemplate
   void shouldIgnore_whenAlreadySeen() {
     assertThatSafeFuture(bidValidator.validate(signedBid)).isCompletedWithValue(ACCEPT);
     assertThatSafeFuture(bidValidator.validate(signedBid))
@@ -1083,6 +1109,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
     when(miscHelpers.computeSigningRoot(any(Bytes.class), any(Bytes32.class)))
         .thenReturn(Bytes32.random());
     when(specVersion.miscHelpers()).thenReturn(miscHelpers);
+    when(specVersion.getMilestone()).thenReturn(SpecMilestone.GLOAS);
     when(spec.atSlot(any())).thenReturn(specVersion);
 
     // Submit bids for MAX_SLOTS_TO_TRACK_BUILDERS_BIDS + 1 slots to fill the cache and evict oldest

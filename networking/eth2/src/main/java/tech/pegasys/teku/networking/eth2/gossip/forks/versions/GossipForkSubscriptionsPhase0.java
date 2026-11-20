@@ -43,6 +43,7 @@ import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.statetransition.util.DebugDataDumper;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
@@ -210,6 +211,11 @@ public class GossipForkSubscriptionsPhase0 implements GossipForkSubscriptions {
             forkInfo,
             forkDigest,
             proposerSlashingProcessor,
+            spec.atEpoch(forkInfo.getFork().getEpoch()).getSchemaDefinitions()
+                    instanceof SchemaDefinitionsPq
+                // PQ's block headers are signed with XMSS
+                ? ProposerSlashing.SSZ_SCHEMA_PQ
+                : ProposerSlashing.SSZ_SCHEMA,
             spec.getNetworkingConfig(),
             debugDataDumper);
     addGossipManager(proposerSlashingGossipManager);

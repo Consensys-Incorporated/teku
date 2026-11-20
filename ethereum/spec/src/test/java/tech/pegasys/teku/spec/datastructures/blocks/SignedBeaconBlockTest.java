@@ -21,11 +21,13 @@ import static tech.pegasys.teku.spec.SpecMilestone.GLOAS;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
+import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
+import tech.pegasys.teku.spec.datastructures.type.SszXmssSignature;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
@@ -49,6 +51,21 @@ class SignedBeaconBlockTest {
     final SignedBeaconBlock result =
         schemaDefinitions.getSignedBeaconBlockSchema().sszDeserialize(ssz);
     assertThat(result).isEqualTo(block);
+  }
+
+  @TestTemplate
+  void shouldCreateUnsignedBlockWithTheForksEmptySignature() {
+    final BeaconBlock block = dataStructureUtil.randomBeaconBlock(1);
+
+    final SignedBeaconBlock unsigned = SignedBeaconBlock.createUnsigned(spec, block);
+
+    assertThat(unsigned.getMessage()).isEqualTo(block);
+    if (spec.getGenesisSpec().getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ)) {
+      assertThat(unsigned.isXmssSigned()).isTrue();
+      assertThat(unsigned.getXmssSignature()).isEqualTo(SszXmssSignature.empty().getBytes());
+    } else {
+      assertThat(unsigned.getSignature()).isEqualTo(BLSSignature.empty());
+    }
   }
 
   @TestTemplate

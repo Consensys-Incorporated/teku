@@ -30,6 +30,11 @@ public interface Builder extends SszContainer {
    */
   BLSPublicKey getPublicKey();
 
+  /** Whether a builder exit request's {@code pubkey} names this builder. */
+  default boolean isNamedByExitRequestPubkey(final BLSPublicKey requestPubkey) {
+    return requestPubkey.equals(getPublicKey());
+  }
+
   int getVersion();
 
   Eth1Address getExecutionAddress();

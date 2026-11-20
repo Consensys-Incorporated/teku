@@ -69,6 +69,16 @@ public class SignedBeaconBlock extends Container2<SignedBeaconBlock, BeaconBlock
     return new SignedBeaconBlock(signedBeaconBlockSchema, message, signature);
   }
 
+  /** The block with the empty signature of its fork's kind, as the genesis block has. */
+  public static SignedBeaconBlock createUnsigned(final Spec spec, final BeaconBlock message) {
+    final SchemaDefinitions schemaDefinitions =
+        spec.atSlot(message.getSlot()).getSchemaDefinitions();
+    return (message.getBody().isBlinded()
+            ? schemaDefinitions.getSignedBlindedBeaconBlockSchema()
+            : schemaDefinitions.getSignedBeaconBlockSchema())
+        .createUnsigned(message);
+  }
+
   public SignedBeaconBlockHeader asHeader() {
     final BeaconBlockHeader header =
         new BeaconBlockHeader(

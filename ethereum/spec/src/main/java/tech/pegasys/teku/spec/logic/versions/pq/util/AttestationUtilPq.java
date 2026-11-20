@@ -105,6 +105,19 @@ public class AttestationUtilPq extends AttestationUtilGloas {
         && attestation.getIndexedAttestation().isPresent()) {
       return SafeFuture.completedFuture(AttestationProcessingResult.SUCCESSFUL);
     }
+    if (attestation.isValidIndexedAttestation()) {
+      // Proven elsewhere, as by the proof of the block that included it, so only its attesters
+      // are needed (on_attestation, modified in PQ)
+      final IndexedAttestationLight indexedAttestation =
+          getIndexedAttestation(state, attestation.getAttestation());
+      if (indexedAttestation.attestingIndices().isEmpty()) {
+        return SafeFuture.completedFuture(
+            AttestationProcessingResult.invalid("Attestation has no attesters"));
+      }
+      attestation.setIndexedAttestation(indexedAttestation);
+      attestation.saveCommitteeShufflingSeedAndCommitteesSize(state);
+      return SafeFuture.completedFuture(AttestationProcessingResult.SUCCESSFUL);
+    }
     if (!(attestation.getAttestation() instanceof SingleAttestationPq single)) {
       return SafeFuture.completedFuture(
           AttestationProcessingResult.invalid(

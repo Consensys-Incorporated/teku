@@ -24,6 +24,7 @@ import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 import tech.pegasys.teku.spec.datastructures.type.SszSignatureSchema;
 import tech.pegasys.teku.spec.datastructures.type.SszSignatures;
 import tech.pegasys.teku.spec.datastructures.type.SszXmssSignature;
+import tech.pegasys.teku.spec.datastructures.type.SszXmssSignatureSchema;
 
 public class SignedBeaconBlockSchema
     extends ContainerSchema2<SignedBeaconBlock, BeaconBlock, SszByteVector>
@@ -75,6 +76,17 @@ public class SignedBeaconBlockSchema
   /** A block signed with leanXMSS, for a schema that takes one. */
   public SignedBeaconBlock create(final BeaconBlock message, final SszXmssSignature signature) {
     return new SignedBeaconBlock(this, message, signature);
+  }
+
+  /**
+   * A block with the empty signature of this schema's kind: the point at infinity for BLS, all zero
+   * bytes for XMSS. The genesis and anchor blocks are not signed.
+   */
+  public SignedBeaconBlock createUnsigned(final BeaconBlock message) {
+    return getChildSchema(getFieldIndex(SignedBeaconBlockFields.SIGNATURE))
+            instanceof SszXmssSignatureSchema
+        ? create(message, SszXmssSignature.empty())
+        : create(message, BLSSignature.empty());
   }
 
   @Override
