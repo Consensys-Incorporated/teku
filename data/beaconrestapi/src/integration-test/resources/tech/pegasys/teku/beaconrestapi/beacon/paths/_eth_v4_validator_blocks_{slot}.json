@@ -20,7 +20,7 @@
       "in" : "query",
       "schema" : {
         "type" : "string",
-        "description" : "`BLSSignature Hex` BLS12-381 signature for the current epoch.",
+        "description" : "Before PQ, the BLS12-381 signature of the current epoch (96 bytes, hex). From PQ, the proposer's VRF proof for the slot, compute_vrf_proof: 32 32-byte roots concatenated (1,024 bytes, hex).",
         "example" : "0x1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505cc411d61252fb6cb3fa0017b679f8bb2305b26a285fa2737f175668d0dff91cc1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505",
         "format" : "byte"
       }

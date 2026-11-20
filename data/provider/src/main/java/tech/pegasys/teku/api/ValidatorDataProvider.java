@@ -108,6 +108,18 @@ public class ValidatorDataProvider {
         slot, randao, graffiti, includePayload, Optional.of(builderConfig));
   }
 
+  /** From PQ, the RANDAO reveal is the proposer's VRF proof for the slot. */
+  public SafeFuture<Optional<BlockContainerAndMetaData>> produceBlockWithVrfReveal(
+      final UInt64 slot,
+      final List<Bytes32> vrfRandaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final BuilderConfig builderConfig) {
+    checkBlockProducingParameters(slot, BLSSignature.empty());
+    return validatorApiChannel.createUnsignedBlockWithVrfReveal(
+        slot, vrfRandaoReveal, graffiti, includePayload, Optional.of(builderConfig));
+  }
+
   private void checkBlockProducingParameters(final UInt64 slot, final BLSSignature randao) {
     if (slot == null) {
       throw new IllegalArgumentException(NO_SLOT_PROVIDED);

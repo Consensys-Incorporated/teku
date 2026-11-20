@@ -137,6 +137,19 @@ public class SentryValidatorApiChannel implements ValidatorApiChannel {
   }
 
   @Override
+  public SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlockWithVrfReveal(
+      final UInt64 slot,
+      final List<Bytes32> vrfRandaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final Optional<BuilderConfig> builderConfig) {
+    return blockHandlerChannel
+        .orElse(dutiesProviderChannel)
+        .createUnsignedBlockWithVrfReveal(
+            slot, vrfRandaoReveal, graffiti, includePayload, builderConfig);
+  }
+
+  @Override
   public SafeFuture<Optional<AttestationData>> createAttestationData(
       final UInt64 slot, final int committeeIndex) {
     return dutiesProviderChannel.createAttestationData(slot, committeeIndex);

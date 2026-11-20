@@ -481,12 +481,40 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
       final Optional<Bytes32> graffiti,
       final boolean includePayload,
       final Optional<BuilderConfig> builderConfig) {
+    return createUnsignedBlock(
+        slot, randaoReveal, Optional.empty(), graffiti, includePayload, builderConfig);
+  }
+
+  /** PQ: the RANDAO reveal is the proposer's VRF proof, so there is no BLS reveal. */
+  @Override
+  public SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlockWithVrfReveal(
+      final UInt64 slot,
+      final List<Bytes32> vrfRandaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final Optional<BuilderConfig> builderConfig) {
+    return createUnsignedBlock(
+        slot,
+        BLSSignature.empty(),
+        Optional.of(vrfRandaoReveal),
+        graffiti,
+        includePayload,
+        builderConfig);
+  }
+
+  private SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlock(
+      final UInt64 slot,
+      final BLSSignature randaoReveal,
+      final Optional<List<Bytes32>> vrfRandaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final Optional<BuilderConfig> builderConfig) {
     return blockProductionBySlotCache
         .computeIfAbsent(
             slot,
             __ ->
                 createUnsignedBlockInternal(
-                    slot, randaoReveal, graffiti, includePayload, builderConfig))
+                    slot, randaoReveal, vrfRandaoReveal, graffiti, includePayload, builderConfig))
         .whenException(
             __ -> {
               // allow further block production attempts for this slot, including a new preparation
@@ -529,6 +557,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
   private SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlockInternal(
       final UInt64 slot,
       final BLSSignature randaoReveal,
+      final Optional<List<Bytes32>> vrfRandaoReveal,
       final Optional<Bytes32> graffiti,
       final boolean includePayload,
       final Optional<BuilderConfig> builderConfig) {
@@ -545,6 +574,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
 
     return blockProductionPreparationContext
         .toBlockProductionContext(spec, slot, randaoReveal, graffiti, includePayload, builderConfig)
+        .thenApply(context -> vrfRandaoReveal.map(context::withVrfRandaoReveal).orElse(context))
         .thenCompose(this::createBlock)
         .thenPeek(
             maybeBlock ->
