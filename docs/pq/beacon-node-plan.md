@@ -8,10 +8,10 @@ Phase 6 of [pq-fork-plan.md](pq-fork-plan.md): taking the merged PQ state transi
 
 | Slice | What | State |
 |---|---|---|
-| 6a | Block production at the spec level, and test chains through the PQ fork | In review (#11674) |
-| 6b | Block import and fork choice over PQ chains | In review (#11676, stacked on #11674) |
-| 6c | Gossip validation of PQ messages | Done: 6c-1 (#11677), 6c-2 (#11678), 6c-3 (`pq-bn-gossip-rest`) |
-| 6d | Attestation pool, proofs and packing | Not started |
+| 6a | Block production at the spec level, and test chains through the PQ fork | Merged (#11674) |
+| 6b | Block import and fork choice over PQ chains | Merged (#11676) |
+| 6c | Gossip validation of PQ messages | Merged (#11677, #11678, #11679); reference tests and fixes in #11687 |
+| 6d | Attestation pool, proofs and packing | In review |
 | 6e | Beacon-node block production | Not started |
 
 ### 6a: block production at the spec level, and PQ test chains
@@ -82,14 +82,19 @@ Phase 6 of [pq-fork-plan.md](pq-fork-plan.md): taking the merged PQ state transi
 
 ### 6d: attestation pool, proofs and packing
 
-- Keep the singles' XMSS signatures per (data, committee), in committee order, for `get_aggregate_stark`.
-- Keep the best network aggregate with its proof per (data, committee). A proposer can only include proofs it holds.
-- `AttestationPackerPq`:
-  - takes attestations from `slot - 2` or earlier (inclusion delay 2), preferring exactly `slot - 2`;
-  - groups committees with equal data;
-  - merges the proofs in body order;
-  - budgets proof bytes (`MAX_STARK_PROOF_SIZE`).
-- Switch off the exit, BLS-change and sync-committee pools for PQ.
+PQ attestations carry no signatures, so the BLS pool (`AggregatingAttestationPoolV2`) can't keep them: it reads each one's aggregate signature, which threw for every PQ attestation the node accepted. `ForkRoutingAttestationPool` sends PQ attestations, by type, to `AggregatingAttestationPoolPq`, and the rest to the BLS pool. A network without PQ keeps the BLS pool alone.
+
+- **What the pool keeps,** per attestation data and committee:
+  - the single attestations' XMSS signatures, by position in the committee;
+  - up to 4 network aggregates with their proofs, none a subset of another.
+  - Attestations with neither, such as those from blocks, can't be proven again, so they are not kept.
+- **Aggregates** (`createPqAggregateFor`, for 8c's aggregation duty): the network aggregate or the singles with the most attesters. The singles' proof is `stark.ProveAggregates` over their signatures in committee order, through `StarkProver.CONCATENATED`, the specification's stand-in, which `StarkProofVerifier.concatenated` checks.
+- **Packing** (`getPqAttestationsForBlock`):
+  - takes attestations from `slot - MIN_ATTESTATION_INCLUSION_DELAY_PQ` back to the start of the previous epoch, those at exactly the delay first (only they earn the timely head reward), then by attesters not yet on chain;
+  - takes one candidate per committee, since each proof covers exactly its attesters, and needs the committees' shuffling to match the block's chain;
+  - puts committees with equal data in one attestation (`compute_on_chain_aggregate`) and merges their proofs in body order (`stark.MergeProofs`);
+  - stays within `MAX_ATTESTATIONS_PQ` and `MAX_STARK_PROOF_SIZE`.
+- **Block production:** `BlockOperationSelectorFactory` takes the attestations with their proof for a body that carries one, and leaves out voluntary exits. The exit, BLS-change and sync pools needed no change: their validators reject at PQ (8b-2), and the PQ body builder drops the sync aggregate.
 
 ### 6e: beacon-node block production
 

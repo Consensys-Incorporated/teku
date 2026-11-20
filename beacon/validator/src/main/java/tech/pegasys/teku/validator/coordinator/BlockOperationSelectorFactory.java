@@ -86,6 +86,7 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsDeneb;
 import tech.pegasys.teku.statetransition.OperationPool;
 import tech.pegasys.teku.statetransition.attestation.AggregatingAttestationPool;
 import tech.pegasys.teku.statetransition.attestation.AttestationForkChecker;
+import tech.pegasys.teku.statetransition.attestation.PqBlockAttestations;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidManager;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadManager;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoiceNotifier;
@@ -210,9 +211,17 @@ public class BlockOperationSelectorFactory {
               blockSlotState,
               blockProductionContext.parentPayloadStatus()
                   == ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL);
-      final SszList<Attestation> attestations =
-          attestationPool.getAttestationsForBlock(
-              attestationRewardState, new AttestationForkChecker(spec, blockSlotState));
+      final AttestationForkChecker forkChecker = new AttestationForkChecker(spec, blockSlotState);
+      final SszList<Attestation> attestations;
+      if (bodyBuilder.supportsAttestationProof()) {
+        // PQ: the attestations carry no signatures, so the block proves them with one proof
+        final PqBlockAttestations pqAttestations =
+            attestationPool.getPqAttestationsForBlock(attestationRewardState, forkChecker);
+        attestations = pqAttestations.attestations();
+        bodyBuilder.attestationProof(pqAttestations.proof());
+      } else {
+        attestations = attestationPool.getAttestationsForBlock(attestationRewardState, forkChecker);
+      }
       blockProductionContext.blockProductionPerformance().getAttestationsForBlock();
 
       // Collect slashings to include
@@ -269,24 +278,29 @@ public class BlockOperationSelectorFactory {
                                           UInt64.valueOf(idx)));
                         }
                       }
-                      final SszList<SignedVoluntaryExit> voluntaryExits =
-                          getVoluntaryExitsForBlock(
-                              blockSlotState,
-                              specConfig.getMaxVoluntaryExits(),
-                              exitedValidators,
-                              validatorsWithConflictingParentRequests);
-                      bodyBuilder.voluntaryExits(voluntaryExits);
+                      // PQ removed voluntary exits from blocks
+                      if (!bodyBuilder.supportsAttestationProof()) {
+                        final SszList<SignedVoluntaryExit> voluntaryExits =
+                            getVoluntaryExitsForBlock(
+                                blockSlotState,
+                                specConfig.getMaxVoluntaryExits(),
+                                exitedValidators,
+                                validatorsWithConflictingParentRequests);
+                        bodyBuilder.voluntaryExits(voluntaryExits);
+                      }
                       // Post-Gloas: Parent Execution Requests
                       bodyBuilder.parentExecutionRequests(parentExecutionRequests);
                     });
       } else {
-        final SszList<SignedVoluntaryExit> voluntaryExits =
-            getVoluntaryExitsForBlock(
-                blockSlotState,
-                specConfig.getMaxVoluntaryExits(),
-                exitedValidators,
-                new HashSet<>());
-        bodyBuilder.voluntaryExits(voluntaryExits);
+        if (!bodyBuilder.supportsAttestationProof()) {
+          final SszList<SignedVoluntaryExit> voluntaryExits =
+              getVoluntaryExitsForBlock(
+                  blockSlotState,
+                  specConfig.getMaxVoluntaryExits(),
+                  exitedValidators,
+                  new HashSet<>());
+          bodyBuilder.voluntaryExits(voluntaryExits);
+        }
         setVoluntaryExitsAndParentExecutionRequests = COMPLETE;
       }
 
