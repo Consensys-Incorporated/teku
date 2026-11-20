@@ -35,6 +35,7 @@ import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.IndexedAttestationLight;
 import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 
 public class ValidatableAttestation {
@@ -54,8 +55,8 @@ public class ValidatableAttestation {
   private volatile boolean acceptedAsGossip = false;
 
   private volatile Optional<IndexedAttestationLight> indexedAttestation = Optional.empty();
-  private volatile Optional<Attestation> unconvertedSingleAttestation = Optional.empty();
   private volatile Optional<Bytes> aggregateProof = Optional.empty();
+  private volatile Optional<SignedAggregateAndProofPq> pqAggregate = Optional.empty();
   private volatile Optional<Bytes32> committeeShufflingSeed = Optional.empty();
   private volatile Optional<Int2IntMap> committeesSize = Optional.empty();
 
@@ -64,16 +65,28 @@ public class ValidatableAttestation {
     checkState(
         attestation.isSingleAttestation(),
         "Attestation must be a single attestation to convert to aggregated format");
-    this.unconvertedSingleAttestation = Optional.of(attestation);
     this.attestation = aggregatedFormatFromSingleAttestation;
   }
 
   /**
-   * The single attestation this was received as, before conversion to the aggregated format. PQ
-   * aggregators prove the attesters' XMSS signatures, which only the single attestations carry.
+   * PQ: an aggregate received from the network. Its SignedAggregateAndProofPq is not a {@link
+   * SignedAggregateAndProof}, so it is kept apart and validated by its own validator.
    */
-  public Optional<Attestation> getUnconvertedSingleAttestation() {
-    return unconvertedSingleAttestation;
+  public static ValidatableAttestation pqAggregateFromNetwork(
+      final Spec spec, final SignedAggregateAndProofPq signedAggregate) {
+    final ValidatableAttestation attestation =
+        new ValidatableAttestation(
+            spec,
+            signedAggregate.getMessage().getAggregate(),
+            Optional.empty(),
+            OptionalInt.empty(),
+            false);
+    attestation.pqAggregate = Optional.of(signedAggregate);
+    return attestation;
+  }
+
+  public Optional<SignedAggregateAndProofPq> getPqAggregate() {
+    return pqAggregate;
   }
 
   /** PQ: the proof of an aggregate's signatures, from its aggregator's AggregateAndProof. */

@@ -21,6 +21,7 @@ import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.statetransition.OperationAddedSubscriber;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
@@ -51,6 +52,13 @@ public interface PayloadAttestationPool {
         }
 
         @Override
+        public SafeFuture<InternalValidationResult> addRemotePq(
+            final PayloadAttestationMessagePq payloadAttestationMessage,
+            final Optional<UInt64> arrivalTimestamp) {
+          return SafeFuture.completedFuture(InternalValidationResult.ACCEPT);
+        }
+
+        @Override
         public SszList<PayloadAttestation> getPayloadAttestationsForBlock(
             final BeaconState blockSlotState, final Bytes32 parentRoot) {
           return null;
@@ -72,6 +80,13 @@ public interface PayloadAttestationPool {
 
   SafeFuture<InternalValidationResult> addRemote(
       PayloadAttestationMessage payloadAttestationMessage, Optional<UInt64> arrivalTimestamp);
+
+  /**
+   * PQ: a payload attestation message from the PQ gossip topic. Once valid it goes to fork choice
+   * only. PQ blocks carry no payload attestations, so it isn't kept for block production.
+   */
+  SafeFuture<InternalValidationResult> addRemotePq(
+      PayloadAttestationMessagePq payloadAttestationMessage, Optional<UInt64> arrivalTimestamp);
 
   SszList<PayloadAttestation> getPayloadAttestationsForBlock(
       BeaconState blockSlotState, Bytes32 parentRoot);

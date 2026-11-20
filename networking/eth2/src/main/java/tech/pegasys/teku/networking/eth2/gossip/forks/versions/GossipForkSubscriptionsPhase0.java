@@ -27,6 +27,7 @@ import tech.pegasys.teku.networking.eth2.gossip.AttestationGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.AttesterSlashingGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.BlockGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.GossipManager;
+import tech.pegasys.teku.networking.eth2.gossip.PqAggregateGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.ProposerSlashingGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.VoluntaryExitGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.encoding.GossipEncoding;
@@ -169,6 +170,21 @@ public class GossipForkSubscriptionsPhase0 implements GossipForkSubscriptions {
     addGossipManager(aggregateGossipManager);
   }
 
+  /** PQ's aggregates (SignedAggregateAndProofPq), to the same aggregate processor. */
+  void addPqAggregateGossipManager(final ForkInfo forkInfo, final Bytes4 forkDigest) {
+    addGossipManager(
+        new PqAggregateGossipManager(
+            spec,
+            recentChainData,
+            asyncRunner,
+            discoveryNetwork,
+            gossipEncoding,
+            forkInfo,
+            forkDigest,
+            aggregateProcessor,
+            debugDataDumper));
+  }
+
   void addVoluntaryExitGossipManager(final ForkInfo forkInfo, final Bytes4 forkDigest) {
     voluntaryExitGossipManager =
         new VoluntaryExitGossipManager(
@@ -242,7 +258,10 @@ public class GossipForkSubscriptionsPhase0 implements GossipForkSubscriptions {
   @Override
   public void publishAttestation(final ValidatableAttestation attestation) {
     attestationGossipManager.onNewAttestation(attestation);
-    aggregateGossipManager.onNewAggregate(attestation);
+    // PQ has its own aggregate type, so its forks have no BLS aggregate topic
+    if (aggregateGossipManager != null) {
+      aggregateGossipManager.onNewAggregate(attestation);
+    }
   }
 
   @Override
@@ -262,17 +281,32 @@ public class GossipForkSubscriptionsPhase0 implements GossipForkSubscriptions {
 
   @Override
   public void publishVoluntaryExit(final SignedVoluntaryExit message) {
-    voluntaryExitGossipManager.publishVoluntaryExit(message);
+    // PQ forks have no voluntary exit topic
+    if (voluntaryExitGossipManager != null) {
+      voluntaryExitGossipManager.publishVoluntaryExit(message);
+    }
   }
 
   @Override
   public void subscribeToAttestationSubnetId(final int subnetId) {
-    attestationGossipManager.subscribeToSubnetId(subnetId);
+    if (isAttestationSubnetOfThisFork(subnetId)) {
+      attestationGossipManager.subscribeToSubnetId(subnetId);
+    }
   }
 
   @Override
   public void unsubscribeFromAttestationSubnetId(final int subnetId) {
-    attestationGossipManager.unsubscribeFromSubnetId(subnetId);
+    if (isAttestationSubnetOfThisFork(subnetId)) {
+      attestationGossipManager.unsubscribeFromSubnetId(subnetId);
+    }
+  }
+
+  /**
+   * PQ has fewer attestation subnets than earlier forks. Around the fork, subscriptions made for
+   * the other side's subnets are only taken up by the forks that have them.
+   */
+  private boolean isAttestationSubnetOfThisFork(final int subnetId) {
+    return subnetId < spec.atEpoch(getActivationEpoch()).miscHelpers().getAttestationSubnetCount();
   }
 
   @Override

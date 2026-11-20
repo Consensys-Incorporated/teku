@@ -30,9 +30,11 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationSchema;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SingleAttestationPq;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsElectra;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.statetransition.util.DebugDataDumper;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
@@ -65,12 +67,14 @@ public class AttestationSubnetSubscriptions extends CommitteeSubnetSubscriptions
     final SchemaDefinitions schemaDefinitions =
         spec.atEpoch(forkInfo.getFork().getEpoch()).getSchemaDefinitions();
     attestationSchema =
-        spec.atEpoch(forkInfo.getFork().getEpoch())
-            .getSchemaDefinitions()
-            .toVersionElectra()
-            .<AttestationSchema<? extends Attestation>>map(
-                SchemaDefinitionsElectra::getSingleAttestationSchema)
-            .orElse(schemaDefinitions.getAttestationSchema());
+        schemaDefinitions instanceof SchemaDefinitionsPq
+            // PQ single attestations are signed with XMSS
+            ? SingleAttestationPq.SSZ_SCHEMA
+            : schemaDefinitions
+                .toVersionElectra()
+                .<AttestationSchema<? extends Attestation>>map(
+                    SchemaDefinitionsElectra::getSingleAttestationSchema)
+                .orElse(schemaDefinitions.getAttestationSchema());
     this.debugDataDumper = debugDataDumper;
   }
 
