@@ -16,17 +16,21 @@ package tech.pegasys.teku.spec.logic.versions.gloas.helpers;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.List;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import tech.pegasys.teku.infrastructure.ssz.SszMutableList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.config.GasLimitScheduleEntry;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
+import tech.pegasys.teku.spec.datastructures.state.Validator;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
@@ -130,6 +134,34 @@ public class MiscHelpersGloasTest {
     assertThat(predicates.isBuilderIndex(validatorIndex)).isTrue();
     assertThat(miscHelpers.convertValidatorIndexToBuilderIndex(validatorIndex))
         .isEqualTo(builderIndex);
+  }
+
+  @Test
+  public void computeBalanceWeightedSelection_shouldSampleCandidatesByEffectiveBalance() {
+    final int[] balancesInEth = {2048, 32, 1024, 256, 64, 1536, 512, 128};
+    final UInt64 increment = spec.getGenesisSpecConfig().getEffectiveBalanceIncrement();
+    final BeaconState state =
+        data.randomBeaconState(balancesInEth.length)
+            .updated(
+                mutableState -> {
+                  final SszMutableList<Validator> validators = mutableState.getValidators();
+                  for (int i = 0; i < validators.size(); i++) {
+                    final UInt64 effectiveBalance = increment.times(balancesInEth[i]);
+                    validators.set(i, validators.get(i).withEffectiveBalance(effectiveBalance));
+                  }
+                });
+    // A subset, so that the position of a candidate differs from its validator index
+    final IntList indices = IntList.of(0, 2, 3, 5, 7);
+    final Bytes32 seed = Bytes32.repeat((byte) 0x42);
+
+    final IntList inOrder =
+        miscHelpers.computeBalanceWeightedSelection(state, indices, seed, 4, false);
+    final IntList shuffled =
+        miscHelpers.computeBalanceWeightedSelection(state, indices, seed, 4, true);
+
+    // Expected values come from the consensus spec's compute_balance_weighted_selection
+    assertThat(inOrder.toIntArray()).containsExactly(0, 2, 5, 0);
+    assertThat(shuffled.toIntArray()).containsExactly(2, 0, 5, 2);
   }
 
   @ParameterizedTest
