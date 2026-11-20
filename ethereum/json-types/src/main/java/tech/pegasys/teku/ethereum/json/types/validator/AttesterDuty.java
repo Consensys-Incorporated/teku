@@ -15,12 +15,20 @@ package tech.pegasys.teku.ethereum.json.types.validator;
 
 import com.google.common.base.MoreObjects;
 import java.util.Objects;
+import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes48;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 
+/**
+ * An attester duty. From PQ the validator is named by its 32-byte XMSS public key, and the duty
+ * says whether the validator is in its committee's aggregation committee, as there are no selection
+ * proofs.
+ */
 public class AttesterDuty {
 
-  private final BLSPublicKey publicKey;
+  private final Bytes publicKey;
   private final int validatorIndex;
   private final int committeeLength;
 
@@ -31,6 +39,7 @@ public class AttesterDuty {
   // index of the validator in the committee
   private final int validatorCommitteeIndex;
   private final UInt64 slot;
+  private final Optional<Boolean> isAggregator;
 
   public AttesterDuty(
       final BLSPublicKey publicKey,
@@ -40,6 +49,31 @@ public class AttesterDuty {
       final int committeesAtSlot,
       final int validatorCommitteeIndex,
       final UInt64 slot) {
+    this(
+        publicKey.toBytesCompressed(),
+        validatorIndex,
+        committeeLength,
+        committeeIndex,
+        committeesAtSlot,
+        validatorCommitteeIndex,
+        slot,
+        Optional.empty());
+  }
+
+  /**
+   * @param publicKey the validator's signing key: a 48-byte BLS key, or from PQ its 32-byte XMSS
+   *     key
+   * @param isAggregator from PQ, whether the validator is in the aggregation committee
+   */
+  public AttesterDuty(
+      final Bytes publicKey,
+      final int validatorIndex,
+      final int committeeLength,
+      final int committeeIndex,
+      final int committeesAtSlot,
+      final int validatorCommitteeIndex,
+      final UInt64 slot,
+      final Optional<Boolean> isAggregator) {
     this.publicKey = publicKey;
     this.validatorIndex = validatorIndex;
     this.committeeLength = committeeLength;
@@ -47,10 +81,24 @@ public class AttesterDuty {
     this.committeesAtSlot = committeesAtSlot;
     this.validatorCommitteeIndex = validatorCommitteeIndex;
     this.slot = slot;
+    this.isAggregator = isAggregator;
   }
 
+  /**
+   * @throws IllegalArgumentException for a PQ validator, which is named by its XMSS key
+   */
   public BLSPublicKey getPublicKey() {
+    return BLSPublicKey.fromBytesCompressed(Bytes48.wrap(publicKey));
+  }
+
+  /** The validator's signing key: a BLS key, or from PQ an XMSS key. */
+  public Bytes getPublicKeyBytes() {
     return publicKey;
+  }
+
+  /** From PQ, whether the validator aggregates for its committee. */
+  public Optional<Boolean> getIsAggregator() {
+    return isAggregator;
   }
 
   public int getValidatorIndex() {
@@ -92,7 +140,8 @@ public class AttesterDuty {
         && committeesAtSlot == that.committeesAtSlot
         && validatorCommitteeIndex == that.validatorCommitteeIndex
         && Objects.equals(publicKey, that.publicKey)
-        && Objects.equals(slot, that.slot);
+        && Objects.equals(slot, that.slot)
+        && Objects.equals(isAggregator, that.isAggregator);
   }
 
   @Override
@@ -104,7 +153,8 @@ public class AttesterDuty {
         committeeIndex,
         committeesAtSlot,
         validatorCommitteeIndex,
-        slot);
+        slot,
+        isAggregator);
   }
 
   @Override
@@ -117,6 +167,7 @@ public class AttesterDuty {
         .add("committeesAtSlot", committeesAtSlot)
         .add("validatorCommitteeIndex", validatorCommitteeIndex)
         .add("slot", slot)
+        .add("isAggregator", isAggregator)
         .toString();
   }
 }

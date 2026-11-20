@@ -43,6 +43,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.plugin.services.metrics.OperationTimer;
 import tech.pegasys.teku.api.ChainDataProvider;
@@ -435,13 +436,13 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
           final UInt64 payloadTimelinessCommitteeDutySlot =
               validatorIndexToPayloadTimelinessCommitteeAssignmentMap.get(i);
           final UInt64 validatorIndex = UInt64.valueOf(i);
-          if (payloadTimelinessCommitteeDutySlot != null) {
-            spec.getValidatorPubKey(state, validatorIndex)
-                .ifPresent(
-                    publicKey ->
-                        duties.add(
-                            new PtcDuty(
-                                publicKey, validatorIndex, payloadTimelinessCommitteeDutySlot)));
+          if (payloadTimelinessCommitteeDutySlot != null && i < state.getValidators().size()) {
+            // The signing key: a BLS key, or from PQ an XMSS key
+            duties.add(
+                new PtcDuty(
+                    state.getValidators().get(i).getSigningKeyBytes(),
+                    validatorIndex,
+                    payloadTimelinessCommitteeDutySlot));
           }
         });
     return new PayloadTimelinessCommitteeDuties(
@@ -1397,8 +1398,8 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
     final List<ProposerDuty> proposerSlots = new ArrayList<>();
     for (UInt64 slot = startSlot; slot.compareTo(endSlot) < 0; slot = slot.plus(UInt64.ONE)) {
       final int proposerIndex = spec.getBeaconProposerIndex(state, slot);
-      final BLSPublicKey publicKey =
-          spec.getValidatorPubKey(state, UInt64.valueOf(proposerIndex)).orElseThrow();
+      // The signing key: a BLS key, or from PQ an XMSS key
+      final Bytes publicKey = state.getValidators().get(proposerIndex).getSigningKeyBytes();
       proposerSlots.add(new ProposerDuty(publicKey, proposerIndex, slot));
     }
     return proposerSlots;
