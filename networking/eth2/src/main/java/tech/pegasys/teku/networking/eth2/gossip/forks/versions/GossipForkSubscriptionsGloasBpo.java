@@ -30,6 +30,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestat
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionProof;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
@@ -78,6 +79,8 @@ public class GossipForkSubscriptionsGloasBpo extends GossipForkSubscriptionsGloa
       final OperationProcessor<SignedExecutionPayloadEnvelope> executionPayloadOperationProcessor,
       final OperationProcessor<PayloadAttestationMessage>
           payloadAttestationMessageOperationProcessor,
+      final OperationProcessor<PayloadAttestationMessagePq>
+          payloadAttestationMessagePqOperationProcessor,
       final OperationProcessor<SignedExecutionPayloadBid> executionPayloadBidOperationProcessor,
       final OperationProcessor<SignedProposerPreferences> proposerPreferencesOperationProcessor,
       final OperationProcessor<ExecutionProof> executionProofOperationProcessor,
@@ -109,6 +112,7 @@ public class GossipForkSubscriptionsGloasBpo extends GossipForkSubscriptionsGloa
         dataColumnSidecarOperationProcessor,
         executionPayloadOperationProcessor,
         payloadAttestationMessageOperationProcessor,
+        payloadAttestationMessagePqOperationProcessor,
         executionPayloadBidOperationProcessor,
         proposerPreferencesOperationProcessor,
         debugDataDumper,

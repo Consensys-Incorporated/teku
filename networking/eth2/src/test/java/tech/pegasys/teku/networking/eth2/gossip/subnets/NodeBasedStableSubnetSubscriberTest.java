@@ -24,6 +24,8 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Stream;
+import org.apache.tuweni.units.bigints.UInt256;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -112,6 +114,7 @@ public class NodeBasedStableSubnetSubscriberTest {
     when(miscHelpersMock.calculateNodeSubnetUnsubscriptionSlot(any(), eq(UInt64.valueOf(5))))
         .thenReturn(UInt64.valueOf(12));
 
+    when(miscHelpersMock.getAttestationSubnetCount()).thenReturn(64);
     when(specVersionMock.miscHelpers()).thenReturn(miscHelpersMock);
     when(specMock.atSlot(any())).thenReturn(specVersionMock);
     NetworkingSpecConfig networkingSpecConfigMock = mock(NetworkingSpecConfig.class);
@@ -147,6 +150,38 @@ public class NodeBasedStableSubnetSubscriberTest {
     assertThat(actual).hasSize(2);
     assertThat(actual).contains(new SubnetSubscription(12, UInt64.valueOf(12)));
     assertThat(actual).contains(new SubnetSubscription(25, UInt64.valueOf(12)));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void shouldReplaceStableSubnetsThePqForkDoesNotHave() {
+    final Spec pqSpec = TestSpecFactory.createMinimalWithPqForkEpoch(UInt64.ONE);
+    final AttestationTopicSubscriber topicSubscriber = mock(AttestationTopicSubscriber.class);
+    // A node with a stable subnet that PQ doesn't have before the fork
+    final UInt256 nodeId =
+        Stream.generate(dataStructureUtil::randomUInt256)
+            .filter(
+                id ->
+                    pqSpec
+                        .getGenesisSpec()
+                        .miscHelpers()
+                        .computeSubscribedSubnets(id, UInt64.ZERO)
+                        .stream()
+                        .anyMatch(subnet -> subnet.isGreaterThanOrEqualTo(16)))
+            .findFirst()
+            .orElseThrow();
+    final NodeBasedStableSubnetSubscriber subscriber =
+        new NodeBasedStableSubnetSubscriber(topicSubscriber, pqSpec, nodeId);
+
+    subscriber.onSlot(UInt64.ONE);
+    subscriber.onSlot(pqSpec.computeStartSlotAtEpoch(UInt64.ONE));
+
+    final ArgumentCaptor<Set<SubnetSubscription>> subscriptions =
+        ArgumentCaptor.forClass(Set.class);
+    verify(topicSubscriber, times(2)).subscribeToPersistentSubnets(subscriptions.capture());
+    assertThat(subscriptions.getAllValues().get(1))
+        .isNotEmpty()
+        .allMatch(subscription -> subscription.subnetId() < 16);
   }
 
   @NotNull

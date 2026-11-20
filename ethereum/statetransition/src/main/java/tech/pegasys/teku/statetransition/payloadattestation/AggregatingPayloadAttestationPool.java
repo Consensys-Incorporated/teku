@@ -46,6 +46,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.Bea
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.statetransition.OperationAddedSubscriber;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
@@ -166,6 +167,36 @@ public class AggregatingPayloadAttestationPool
       final PayloadAttestationMessage payloadAttestationMessage,
       final Optional<UInt64> arrivalTimestamp) {
     return add(ValidatablePayloadAttestationMessage.fromNetwork(payloadAttestationMessage), true);
+  }
+
+  /**
+   * A message whose block isn't available yet is ignored rather than queued: the queue holds the
+   * BLS-typed message only, which would lose the XMSS signature. Queueing is optional (MAY) in the
+   * p2p spec.
+   */
+  @Override
+  public SafeFuture<InternalValidationResult> addRemotePq(
+      final PayloadAttestationMessagePq payloadAttestationMessage,
+      final Optional<UInt64> arrivalTimestamp) {
+    final ValidatablePayloadAttestationMessage validatablePayloadAttestationMessage =
+        ValidatablePayloadAttestationMessage.fromNetworkPq(spec, payloadAttestationMessage);
+    return validator
+        .validate(validatablePayloadAttestationMessage)
+        .thenApply(
+            result -> {
+              if (result.isAccept()) {
+                validatedSubscribers.forEach(
+                    subscriber ->
+                        subscriber.onOperationAdded(
+                            validatablePayloadAttestationMessage, result, true));
+              }
+              if (result.isSaveForFuture()) {
+                return InternalValidationResult.ignore(
+                    "Payload attestation's block %s is not available",
+                    payloadAttestationMessage.getData().getBeaconBlockRoot());
+              }
+              return result;
+            });
   }
 
   private SafeFuture<InternalValidationResult> add(
