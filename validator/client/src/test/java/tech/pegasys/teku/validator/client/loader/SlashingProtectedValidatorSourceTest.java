@@ -36,6 +36,7 @@ import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.signatures.LocalSlashingProtectorConcurrentAccess;
 import tech.pegasys.teku.spec.signatures.Signer;
 import tech.pegasys.teku.spec.signatures.SlashingProtector;
+import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.client.restapi.apis.schema.PostKeyResult;
 
@@ -106,5 +107,17 @@ public class SlashingProtectedValidatorSourceTest {
     final ForkInfo forkInfo = dataStructureUtil.randomForkInfo();
     assertThat(slashingSigner.signBlock(block, forkInfo)).isCompleted();
     assertThat(slashingSigner.signBlock(block, forkInfo)).isCompletedExceptionally();
+  }
+
+  @Test
+  void availableValidators_shouldDelegateXmssSigner() {
+    final ValidatorSource.ValidatorProvider provider =
+        mock(ValidatorSource.ValidatorProvider.class);
+    final XmssSigner xmssSigner = mock(XmssSigner.class);
+    when(provider.createXmssSigner()).thenReturn(Optional.of(xmssSigner));
+    doReturn(List.of(provider)).when(delegate).getAvailableValidators();
+
+    assertThat(validatorSource.getAvailableValidators().get(0).createXmssSigner())
+        .contains(xmssSigner);
   }
 }
