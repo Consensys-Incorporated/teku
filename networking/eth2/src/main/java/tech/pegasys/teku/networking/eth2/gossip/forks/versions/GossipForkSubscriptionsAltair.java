@@ -207,21 +207,30 @@ public class GossipForkSubscriptionsAltair extends GossipForkSubscriptionsPhase0
 
   @Override
   public void publishSyncCommitteeMessage(final ValidatableSyncCommitteeMessage message) {
-    syncCommitteeMessageGossipManager.publish(message);
+    if (syncCommitteeMessageGossipManager != null) {
+      syncCommitteeMessageGossipManager.publish(message);
+    }
   }
 
   @Override
   public void publishSyncCommitteeContribution(final SignedContributionAndProof message) {
-    syncCommitteeContributionGossipManager.publishContribution(message);
+    if (syncCommitteeContributionGossipManager != null) {
+      syncCommitteeContributionGossipManager.publishContribution(message);
+    }
   }
 
   @Override
   public void subscribeToSyncCommitteeSubnet(final int subnetId) {
-    syncCommitteeMessageGossipManager.subscribeToSubnetId(subnetId);
+    // PQ forks have no sync committee topics
+    if (syncCommitteeMessageGossipManager != null) {
+      syncCommitteeMessageGossipManager.subscribeToSubnetId(subnetId);
+    }
   }
 
   @Override
   public void unsubscribeFromSyncCommitteeSubnet(final int subnetId) {
-    syncCommitteeMessageGossipManager.unsubscribeFromSubnetId(subnetId);
+    if (syncCommitteeMessageGossipManager != null) {
+      syncCommitteeMessageGossipManager.unsubscribeFromSubnetId(subnetId);
+    }
   }
 }

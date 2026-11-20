@@ -46,7 +46,7 @@ public class GossipForkSubscriptionsElectra extends GossipForkSubscriptionsDeneb
 
   final OperationProcessor<ExecutionProof> executionProofOperationProcessor;
 
-  private Optional<ExecutionProofGossipManager> executionProofGossipManager;
+  private Optional<ExecutionProofGossipManager> executionProofGossipManager = Optional.empty();
   private final boolean isExecutionProofTopicEnabled;
   private static final Logger LOG = LogManager.getLogger();
 

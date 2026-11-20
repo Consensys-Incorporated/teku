@@ -258,7 +258,10 @@ public class GossipForkSubscriptionsPhase0 implements GossipForkSubscriptions {
   @Override
   public void publishAttestation(final ValidatableAttestation attestation) {
     attestationGossipManager.onNewAttestation(attestation);
-    aggregateGossipManager.onNewAggregate(attestation);
+    // PQ has its own aggregate type, so its forks have no BLS aggregate topic
+    if (aggregateGossipManager != null) {
+      aggregateGossipManager.onNewAggregate(attestation);
+    }
   }
 
   @Override
@@ -278,7 +281,10 @@ public class GossipForkSubscriptionsPhase0 implements GossipForkSubscriptions {
 
   @Override
   public void publishVoluntaryExit(final SignedVoluntaryExit message) {
-    voluntaryExitGossipManager.publishVoluntaryExit(message);
+    // PQ forks have no voluntary exit topic
+    if (voluntaryExitGossipManager != null) {
+      voluntaryExitGossipManager.publishVoluntaryExit(message);
+    }
   }
 
   @Override

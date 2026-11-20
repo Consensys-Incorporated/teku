@@ -264,7 +264,10 @@ public class GossipForkSubscriptionsGloas extends GossipForkSubscriptionsFulu {
 
   @Override
   public void publishPayloadAttestationMessage(final PayloadAttestationMessage message) {
-    payloadAttestationMessageGossipManager.publish(message);
+    // PQ forks gossip PQ payload attestation messages, which local validators don't publish yet
+    if (payloadAttestationMessageGossipManager != null) {
+      payloadAttestationMessageGossipManager.publish(message);
+    }
   }
 
   @Override

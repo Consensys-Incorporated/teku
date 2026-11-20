@@ -21,6 +21,7 @@ import tech.pegasys.teku.bls.keystore.model.KeyStoreData;
 import tech.pegasys.teku.spec.signatures.Signer;
 import tech.pegasys.teku.spec.signatures.SlashingProtectedSigner;
 import tech.pegasys.teku.spec.signatures.SlashingProtector;
+import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
 import tech.pegasys.teku.validator.client.restapi.apis.schema.DeleteKeyResult;
 
 public class SlashingProtectedValidatorSource implements ValidatorSource {
@@ -97,6 +98,12 @@ public class SlashingProtectedValidatorSource implements ValidatorSource {
     public Signer createSigner() {
       return new SlashingProtectedSigner(
           getPublicKey(), slashingProtector, delegate.createSigner());
+    }
+
+    @Override
+    public Optional<XmssSigner> createXmssSigner() {
+      // Leaf protection is built into the XMSS signer itself
+      return delegate.createXmssSigner();
     }
   }
 }
