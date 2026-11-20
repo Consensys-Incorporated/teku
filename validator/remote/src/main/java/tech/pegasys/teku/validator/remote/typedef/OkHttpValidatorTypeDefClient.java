@@ -211,6 +211,27 @@ public class OkHttpValidatorTypeDefClient extends OkHttpValidatorMinimalTypeDefC
         randaoReveal, graffiti, maybeBuilderConfig.map(BuilderConfig::getBuilderBoostFactor));
   }
 
+  /** PQ: a block requested with the proposer's VRF proof as its RANDAO reveal. */
+  public Optional<BlockContainerAndMetaData> createUnsignedBlockWithVrfReveal(
+      final UInt64 slot,
+      final List<Bytes32> vrfRandaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final BuilderConfig builderConfig) {
+    return new ProduceBlockRequest(
+            getBaseEndpoint(),
+            getOkHttpClient(),
+            schemaDefinitionCache,
+            slot,
+            preferSszBlockEncoding)
+        .submitV4WithVrfReveal(
+            vrfRandaoReveal,
+            graffiti,
+            includePayload,
+            builderConfig,
+            schemaDefinitionCache.milestoneAtSlot(slot));
+  }
+
   public void registerValidators(
       final SszList<SignedValidatorRegistration> validatorRegistrations) {
     final RegisterValidatorsRequest registerValidatorsRequest =
