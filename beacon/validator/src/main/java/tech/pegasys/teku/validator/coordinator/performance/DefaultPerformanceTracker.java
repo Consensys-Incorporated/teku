@@ -51,8 +51,10 @@ import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.SingleAttestation;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeMessage;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SingleAttestationPq;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.util.AttestationUtil;
+import tech.pegasys.teku.spec.logic.versions.pq.util.AttestationUtilPq;
 import tech.pegasys.teku.statetransition.attestation.utils.AttestationBits;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 import tech.pegasys.teku.validator.api.ValidatorPerformanceTrackingMode;
@@ -377,6 +379,11 @@ public class DefaultPerformanceTracker implements PerformanceTracker {
 
   private Attestation convertSingleAttestation(
       final BeaconState state, final Attestation attestation) {
+    if (attestation instanceof SingleAttestationPq singleAttestationPq) {
+      return ((AttestationUtilPq)
+              spec.atSlot(singleAttestationPq.getData().getSlot()).getAttestationUtil())
+          .convertSingleAttestationToAggregated(state, singleAttestationPq);
+    }
     if (attestation.isSingleAttestation()) {
       final SingleAttestation singleAttestation = attestation.toSingleAttestationRequired();
       final AttestationUtil attestationUtil =
