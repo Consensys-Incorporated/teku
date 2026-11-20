@@ -15,6 +15,7 @@ package tech.pegasys.teku.networking.eth2.gossip.forks.versions;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -25,10 +26,20 @@ import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.networking.eth2.gossip.AggregateGossipManager;
+import tech.pegasys.teku.networking.eth2.gossip.AttestationGossipManager;
+import tech.pegasys.teku.networking.eth2.gossip.AttesterSlashingGossipManager;
+import tech.pegasys.teku.networking.eth2.gossip.BlockGossipManager;
+import tech.pegasys.teku.networking.eth2.gossip.DataColumnSidecarGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.ExecutionPayloadBidGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.ExecutionPayloadGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.PayloadAttestationMessageGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.ProposerPreferencesGossipManager;
+import tech.pegasys.teku.networking.eth2.gossip.ProposerSlashingGossipManager;
+import tech.pegasys.teku.networking.eth2.gossip.SignedBlsToExecutionChangeGossipManager;
+import tech.pegasys.teku.networking.eth2.gossip.SignedContributionAndProofGossipManager;
+import tech.pegasys.teku.networking.eth2.gossip.SyncCommitteeMessageGossipManager;
+import tech.pegasys.teku.networking.eth2.gossip.VoluntaryExitGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.encoding.GossipEncoding;
 import tech.pegasys.teku.networking.eth2.gossip.topics.OperationProcessor;
 import tech.pegasys.teku.networking.p2p.discovery.DiscoveryNetwork;
@@ -63,6 +74,40 @@ public class GossipForkSubscriptionsGloasTest {
     verify(gossipForkSubscriptions).addGossipManager(any(ProposerPreferencesGossipManager.class));
   }
 
+  @Test
+  public void shouldAddOnlyPqTopicsFromThePqFork() {
+    final Spec pqSpec = TestSpecFactory.createMinimalPq();
+    final Fork pqFork = pqSpec.getForkSchedule().getFork(UInt64.ZERO);
+    final GossipForkSubscriptionsGloas gossipForkSubscriptions =
+        spy(createGossipForkSubscriptionGloas(pqSpec, pqFork));
+
+    gossipForkSubscriptions.addGossipManagers(
+        new ForkInfo(pqFork, dataStructureUtil.randomBytes32()), forkDigest());
+
+    verify(gossipForkSubscriptions, times(8)).addGossipManager(any());
+    verify(gossipForkSubscriptions).addGossipManager(any(AttestationGossipManager.class));
+    verify(gossipForkSubscriptions).addGossipManager(any(BlockGossipManager.class));
+    verify(gossipForkSubscriptions).addGossipManager(any(ProposerSlashingGossipManager.class));
+    verify(gossipForkSubscriptions).addGossipManager(any(AttesterSlashingGossipManager.class));
+    verify(gossipForkSubscriptions).addGossipManager(any(DataColumnSidecarGossipManager.class));
+    verify(gossipForkSubscriptions).addGossipManager(any(ExecutionPayloadGossipManager.class));
+    verify(gossipForkSubscriptions).addGossipManager(any(ExecutionPayloadBidGossipManager.class));
+    verify(gossipForkSubscriptions).addGossipManager(any(ProposerPreferencesGossipManager.class));
+    // Removed in PQ
+    verify(gossipForkSubscriptions, never())
+        .addGossipManager(any(VoluntaryExitGossipManager.class));
+    verify(gossipForkSubscriptions, never())
+        .addGossipManager(any(SignedBlsToExecutionChangeGossipManager.class));
+    verify(gossipForkSubscriptions, never())
+        .addGossipManager(any(SyncCommitteeMessageGossipManager.class));
+    verify(gossipForkSubscriptions, never())
+        .addGossipManager(any(SignedContributionAndProofGossipManager.class));
+    // Their PQ types aren't decoded yet
+    verify(gossipForkSubscriptions, never()).addGossipManager(any(AggregateGossipManager.class));
+    verify(gossipForkSubscriptions, never())
+        .addGossipManager(any(PayloadAttestationMessageGossipManager.class));
+  }
+
   private ForkInfo forkInfo() {
     return new ForkInfo(fork, dataStructureUtil.randomBytes32());
   }
@@ -71,8 +116,13 @@ public class GossipForkSubscriptionsGloasTest {
     return dataStructureUtil.randomBytes4();
   }
 
-  @SuppressWarnings({"unchecked", "rawtypes"})
   private GossipForkSubscriptionsGloas createGossipForkSubscriptionGloas() {
+    return createGossipForkSubscriptionGloas(spec, fork);
+  }
+
+  @SuppressWarnings({"unchecked", "rawtypes"})
+  private GossipForkSubscriptionsGloas createGossipForkSubscriptionGloas(
+      final Spec spec, final Fork fork) {
     final DiscoveryNetwork discoveryNetwork = mock(DiscoveryNetwork.class);
     final RecentChainData recentChainData = MemoryOnlyRecentChainData.create(spec);
     final GossipEncoding gossipEncoding = mock(GossipEncoding.class);

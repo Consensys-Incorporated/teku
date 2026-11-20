@@ -27,6 +27,7 @@ import tech.pegasys.teku.networking.eth2.gossip.encoding.GossipEncoding;
 import tech.pegasys.teku.networking.eth2.gossip.topics.OperationProcessor;
 import tech.pegasys.teku.networking.p2p.discovery.DiscoveryNetwork;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
@@ -132,11 +133,41 @@ public class GossipForkSubscriptionsGloas extends GossipForkSubscriptionsFulu {
 
   @Override
   protected void addGossipManagers(final ForkInfo forkInfo, final Bytes4 forkDigest) {
+    if (isPq()) {
+      addPqGossipManagers(forkInfo, forkDigest);
+      return;
+    }
     super.addGossipManagers(forkInfo, forkDigest);
     addExecutionPayloadGossipManager(forkInfo, forkDigest);
     addPayloadAttestationMessageGossipManager(forkInfo, forkDigest);
     addExecutionPayloadBidGossipManager(forkInfo, forkDigest);
     addProposerPreferencesGossipManager(forkInfo, forkDigest);
+  }
+
+  /**
+   * PQ (and Heze, which builds on it) keeps only the topics whose messages it has. Voluntary exits,
+   * BLS to execution changes, sync committee messages and contributions, and the light client
+   * topics are removed (PQ p2p-interface.md).
+   *
+   * <p>Aggregates and payload attestation messages carry PQ types that their gossip managers don't
+   * decode yet, so they are not subscribed: a message that fails to decode would be rejected and
+   * its sender penalised.
+   */
+  private void addPqGossipManagers(final ForkInfo forkInfo, final Bytes4 forkDigest) {
+    addAttestationGossipManager(forkInfo, forkDigest);
+    addBlockGossipManager(forkInfo, forkDigest);
+    addProposerSlashingGossipManager(forkInfo, forkDigest);
+    addAttesterSlashingGossipManager(forkInfo, forkDigest);
+    addDataColumnSidecarGossipManager(forkInfo, forkDigest);
+    addExecutionPayloadGossipManager(forkInfo, forkDigest);
+    addExecutionPayloadBidGossipManager(forkInfo, forkDigest);
+    addProposerPreferencesGossipManager(forkInfo, forkDigest);
+  }
+
+  private boolean isPq() {
+    return spec.atEpoch(getActivationEpoch())
+        .getMilestone()
+        .isGreaterThanOrEqualTo(SpecMilestone.PQ);
   }
 
   void addExecutionPayloadGossipManager(final ForkInfo forkInfo, final Bytes4 forkDigest) {
