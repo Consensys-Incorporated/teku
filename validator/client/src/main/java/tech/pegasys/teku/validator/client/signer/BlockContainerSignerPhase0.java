@@ -15,11 +15,14 @@ package tech.pegasys.teku.validator.client.signer;
 
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.BlockContainer;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
+import tech.pegasys.teku.spec.datastructures.type.SszXmssSignature;
+import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
 import tech.pegasys.teku.validator.client.Validator;
 
 public class BlockContainerSignerPhase0 implements BlockContainerSigner {
@@ -36,6 +39,24 @@ public class BlockContainerSignerPhase0 implements BlockContainerSigner {
       final Validator validator,
       final ForkInfo forkInfo) {
     final BeaconBlock unsignedBlock = unsignedBlockContainer.getBlock();
+    if (spec.atSlot(unsignedBlock.getSlot())
+        .getMilestone()
+        .isGreaterThanOrEqualTo(SpecMilestone.PQ)) {
+      // PQ: blocks are signed with leanXMSS at the proposer leaf of their slot
+      final XmssSigner xmssSigner =
+          validator
+              .getXmssSigner()
+              .orElseThrow(
+                  () -> new IllegalStateException("Validator has no PQ keys to propose with"));
+      return xmssSigner
+          .signBlock(unsignedBlock, forkInfo)
+          .thenApply(
+              signature ->
+                  spec.atSlot(unsignedBlock.getSlot())
+                      .getSchemaDefinitions()
+                      .getSignedBeaconBlockSchema()
+                      .create(unsignedBlock, new SszXmssSignature(signature.toBytes())));
+    }
     return validator
         .getSigner()
         .signBlock(unsignedBlock, forkInfo)

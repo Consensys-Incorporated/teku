@@ -312,6 +312,23 @@ public class RemoteValidatorApiHandler implements RemoteValidatorApiChannel {
   }
 
   @Override
+  public SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlockWithVrfReveal(
+      final UInt64 slot,
+      final List<Bytes32> vrfRandaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final Optional<BuilderConfig> builderConfig) {
+    return sendRequest(
+        () ->
+            typeDefClient.createUnsignedBlockWithVrfReveal(
+                slot,
+                vrfRandaoReveal,
+                graffiti,
+                includePayload,
+                builderConfig.orElse(BuilderConfig.NO_OP)));
+  }
+
+  @Override
   public SafeFuture<SendSignedBlockResult> sendSignedBlock(
       final SignedBlockContainer blockContainer,
       final BroadcastValidationLevel broadcastValidationLevel,

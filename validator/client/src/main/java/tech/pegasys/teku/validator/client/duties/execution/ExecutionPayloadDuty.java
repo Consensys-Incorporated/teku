@@ -22,11 +22,14 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.logging.ValidatorLogger;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeSchema;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
+import tech.pegasys.teku.spec.datastructures.type.SszXmssSignature;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
@@ -96,6 +99,25 @@ public class ExecutionPayloadDuty implements ExecutionPayloadBidEventsChannel {
       final Validator validator,
       final ExecutionPayloadEnvelope executionPayload,
       final ForkInfo forkInfo) {
+    final SignedExecutionPayloadEnvelopeSchema schema =
+        SchemaDefinitionsGloas.required(
+                spec.atSlot(executionPayload.getSlot()).getSchemaDefinitions())
+            .getSignedExecutionPayloadEnvelopeSchema();
+    if (spec.atSlot(executionPayload.getSlot())
+        .getMilestone()
+        .isGreaterThanOrEqualTo(SpecMilestone.PQ)) {
+      // PQ: a self-built envelope is signed with leanXMSS at the envelope leaf of its slot
+      return validator
+          .getXmssSigner()
+          .map(signer -> signer.signExecutionPayloadEnvelope(executionPayload, forkInfo))
+          .orElseGet(
+              () ->
+                  SafeFuture.failedFuture(
+                      new IllegalStateException("Validator has no PQ keys to sign with")))
+          .thenApply(
+              signature ->
+                  schema.create(executionPayload, new SszXmssSignature(signature.toBytes())));
+    }
     return validator
         .getSigner()
         .signExecutionPayloadEnvelope(executionPayload, forkInfo)

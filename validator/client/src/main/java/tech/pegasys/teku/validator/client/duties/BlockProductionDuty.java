@@ -31,6 +31,7 @@ import tech.pegasys.teku.infrastructure.metrics.Validator.DutyType;
 import tech.pegasys.teku.infrastructure.metrics.Validator.ValidatorDutyMetricsSteps;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.BlockContainer;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBody;
@@ -41,6 +42,7 @@ import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadSummary;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
+import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 import tech.pegasys.teku.validator.client.BuilderConfigProvider;
 import tech.pegasys.teku.validator.client.ForkProvider;
@@ -98,15 +100,7 @@ public class BlockProductionDuty implements Duty {
   }
 
   private SafeFuture<DutyResult> produceBlock(final ForkInfo forkInfo) {
-    return createRandaoReveal(forkInfo)
-        // create unsigned block
-        .thenComposeCombined(
-            createBuilderConfig(validator, slot),
-            (randaoReveal, builderConfig) ->
-                validatorDutyMetrics.record(
-                    () -> createUnsignedBlock(randaoReveal, builderConfig),
-                    this,
-                    ValidatorDutyMetricsSteps.CREATE))
+    return createUnsignedBlock(forkInfo)
         .thenCompose(this::validateBlock)
         .thenCompose(
             blockContainerAndMetaData ->
@@ -138,6 +132,38 @@ public class BlockProductionDuty implements Duty {
         slot,
         error);
     return DutyResult.forError(validator.getPublicKey(), error);
+  }
+
+  private SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlock(
+      final ForkInfo forkInfo) {
+    if (spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ)) {
+      // PQ: the RANDAO reveal is the proposer's VRF proof for the slot
+      final Optional<XmssSigner> maybeXmssSigner = validator.getXmssSigner();
+      if (maybeXmssSigner.isEmpty()) {
+        return SafeFuture.failedFuture(
+            new IllegalStateException("Validator has no PQ keys to propose with"));
+      }
+      return maybeXmssSigner
+          .get()
+          .computeVrfProof(slot)
+          .thenComposeCombined(
+              createBuilderConfig(validator, slot),
+              (vrfProof, builderConfig) ->
+                  validatorDutyMetrics.record(
+                      () ->
+                          validatorApiChannel.createUnsignedBlockWithVrfReveal(
+                              slot, vrfProof, validator.getGraffiti(), false, builderConfig),
+                      this,
+                      ValidatorDutyMetricsSteps.CREATE));
+    }
+    return createRandaoReveal(forkInfo)
+        .thenComposeCombined(
+            createBuilderConfig(validator, slot),
+            (randaoReveal, builderConfig) ->
+                validatorDutyMetrics.record(
+                    () -> createUnsignedBlock(randaoReveal, builderConfig),
+                    this,
+                    ValidatorDutyMetricsSteps.CREATE));
   }
 
   private SafeFuture<BLSSignature> createRandaoReveal(final ForkInfo forkInfo) {
