@@ -251,7 +251,6 @@ public abstract class AbstractSszMutableComposite<
 
     // A page is created on the first change that falls in it
     private Object[][] pages = NO_PAGES;
-    private int size;
 
     @SuppressWarnings("unchecked")
     T get(final int index) {
@@ -271,20 +270,16 @@ public abstract class AbstractSszMutableComposite<
         page = new Object[PAGE_SIZE];
         pages[pageIndex] = page;
       }
-      final int slot = index & PAGE_MASK;
-      if (page[slot] == null) {
-        size++;
-      }
-      page[slot] = change;
+      page[index & PAGE_MASK] = change;
     }
 
+    // There are pages as soon as there is a change: changes are never removed one by one
     boolean isEmpty() {
-      return size == 0;
+      return pages.length == 0;
     }
 
     void clear() {
       pages = NO_PAGES;
-      size = 0;
     }
 
     /** Visits the changes in index order. */
