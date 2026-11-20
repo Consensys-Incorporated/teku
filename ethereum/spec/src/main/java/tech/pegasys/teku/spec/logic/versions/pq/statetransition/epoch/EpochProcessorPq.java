@@ -195,7 +195,7 @@ public class EpochProcessorPq extends EpochProcessorGloas {
   }
 
   @SuppressWarnings("unchecked")
-  private static SszList<SszList<SszUInt64>> toAggregationCommittees(
+  public static SszList<SszList<SszUInt64>> toAggregationCommittees(
       final SszVectorSchema<SszList<SszList<SszUInt64>>, ?> windowSchema,
       final List<IntList> committees) {
     final SszListSchema<SszList<SszUInt64>, ?> committeesSchema =
