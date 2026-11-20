@@ -24,14 +24,8 @@ public class GossipTests {
           .put("networking/gossip_attester_slashing", new GossipAttesterSlashingTestExecutor())
           .put(
               "networking/gossip_beacon_aggregate_and_proof",
-              new GossipBeaconAggregateAndProofTestExecutor(
-                  // TODO: https://github.com/Consensys-Incorporated/teku/issues/11153
-                  "gossip_beacon_aggregate_and_proof__ignore_payload_pending_el_validation"))
-          .put(
-              "networking/gossip_beacon_attestation",
-              new GossipBeaconAttestationTestExecutor(
-                  // TODO: https://github.com/Consensys-Incorporated/teku/issues/11153
-                  "gossip_beacon_attestation__ignore_payload_pending_el_validation"))
+              new GossipBeaconAggregateAndProofTestExecutor())
+          .put("networking/gossip_beacon_attestation", new GossipBeaconAttestationTestExecutor())
           .put("networking/gossip_blob_sidecar", new GossipBlobSidecarTestExecutor())
           // TODO: https://github.com/Consensys-Incorporated/teku/issues/10578
           .put("networking/gossip_data_column_sidecar", TestExecutor.IGNORE_TESTS)
@@ -61,14 +55,9 @@ public class GossipTests {
               "networking/gossip_proposer_preferences", new GossipProposerPreferencesTestExecutor())
           .put(
               "networking/gossip_execution_payload_envelope",
-              // TODO: enable after consensus-specs v1.7.0-beta.5 release
-              // new GossipExecutionPayloadEnvelopeTestExecutor())
-              TestExecutor.IGNORE_TESTS)
+              new GossipExecutionPayloadEnvelopeTestExecutor())
           .put(
               "networking/gossip_execution_payload_bid",
-              // TODO: https://github.com/Consensys-Incorporated/teku/issues/11233
-              new GossipExecutionPayloadBidTestExecutor(
-                  "gossip_execution_payload_bid__ignore_builder_exit_in_parent_payload",
-                  "gossip_execution_payload_bid__ignore_builder_exit_with_pending_balance"))
+              new GossipExecutionPayloadBidTestExecutor())
           .build();
 }
