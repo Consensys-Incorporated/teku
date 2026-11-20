@@ -19,20 +19,31 @@ import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.ints.IntSet;
 import it.unimi.dsi.fastutil.ints.IntSets;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
+import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 
 public class ValidatablePayloadAttestationMessage {
 
   private final PayloadAttestationMessage message;
+  private final Optional<Bytes> xmssSignature;
 
   private volatile Optional<IntSet> payloadTimelinessCommitteePositions = Optional.empty();
 
   private ValidatablePayloadAttestationMessage(final PayloadAttestationMessage message) {
+    this(message, Optional.empty());
+  }
+
+  private ValidatablePayloadAttestationMessage(
+      final PayloadAttestationMessage message, final Optional<Bytes> xmssSignature) {
     this.message = message;
+    this.xmssSignature = xmssSignature;
   }
 
   public static ValidatablePayloadAttestationMessage fromValidator(
@@ -45,6 +56,21 @@ public class ValidatablePayloadAttestationMessage {
     return new ValidatablePayloadAttestationMessage(message);
   }
 
+  /**
+   * PQ: a PayloadAttestationMessagePq from gossip. Its XMSS signature is kept apart, and the rest
+   * is carried as a PayloadAttestationMessage with an empty BLS signature, which is all fork choice
+   * reads.
+   */
+  public static ValidatablePayloadAttestationMessage fromNetworkPq(
+      final Spec spec, final PayloadAttestationMessagePq message) {
+    final PayloadAttestationMessage converted =
+        SchemaDefinitionsGloas.required(
+                spec.atSlot(message.getData().getSlot()).getSchemaDefinitions())
+            .getPayloadAttestationMessageSchema()
+            .create(message.getValidatorIndex(), message.getData(), BLSSignature.empty());
+    return new ValidatablePayloadAttestationMessage(converted, Optional.of(message.getSignature()));
+  }
+
   public static ValidatablePayloadAttestationMessage fromBlock(
       final PayloadAttestationMessage message) {
     return new ValidatablePayloadAttestationMessage(message);
@@ -52,6 +78,11 @@ public class ValidatablePayloadAttestationMessage {
 
   public PayloadAttestationMessage getMessage() {
     return message;
+  }
+
+  /** PQ: the message's XMSS signature, present only for messages from the PQ gossip topic. */
+  public Optional<Bytes> getXmssSignature() {
+    return xmssSignature;
   }
 
   public PayloadAttestationData getData() {

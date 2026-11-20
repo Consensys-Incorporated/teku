@@ -63,7 +63,11 @@ Phase 6 of [pq-fork-plan.md](pq-fork-plan.md): taking the merged PQ state transi
   - the STARK proof (`isValidAggregateProof`).
 
   The aggregate is then marked verified, keeps its proof for the pool, and goes through `AttestationValidator`'s shared checks. The seen rules are the spec's superset rule and one aggregate per aggregator and epoch.
-- **Still to do:** payload attestation messages have their own PQ type (`PayloadAttestationMessagePq`), so they come with the PQ topic decoders (phase 7), as does wiring the aggregate validator to its gossip topic.
+- **Done in phase 7:** the PQ topic decoders.
+  - `PqAggregateGossipManager` hands `SignedAggregateAndProofPq` to `AttestationManager`, which routes it to `AggregateAttestationValidatorPq`.
+  - `PqPayloadAttestationMessageGossipManager` hands `PayloadAttestationMessagePq` to `PayloadAttestationPool.addRemotePq`.
+    - `PayloadAttestationMessageGossipValidator` checks the XMSS signature at the PTC attester leaf (offset 2) for PQ slots, and rejects a message whose signature type doesn't match its slot's fork.
+    - A valid message goes to fork choice only: PQ blocks carry no payload attestations, so it is neither kept for block production nor queued while its block is unknown (ignored instead, which the spec allows).
 
 **6c-3: slashings (done).**
 - **Proposer slashings:** `OperationSignatureVerifierPq` checks a proposer slashing's headers with XMSS at the proposer leaf of their slot. Gossip validation (`ProposerSlashingValidator`, through `Spec.verifyProposerSlashingSignature`) and block processing both use it. `BlockProcessorPq` no longer has its own copy.

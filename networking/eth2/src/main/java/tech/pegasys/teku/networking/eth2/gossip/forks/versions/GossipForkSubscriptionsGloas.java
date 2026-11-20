@@ -22,11 +22,13 @@ import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.networking.eth2.gossip.ExecutionPayloadBidGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.ExecutionPayloadGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.PayloadAttestationMessageGossipManager;
+import tech.pegasys.teku.networking.eth2.gossip.PqPayloadAttestationMessageGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.ProposerPreferencesGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.encoding.GossipEncoding;
 import tech.pegasys.teku.networking.eth2.gossip.topics.OperationProcessor;
 import tech.pegasys.teku.networking.p2p.discovery.DiscoveryNetwork;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
@@ -35,6 +37,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestat
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionProof;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
@@ -54,6 +57,8 @@ public class GossipForkSubscriptionsGloas extends GossipForkSubscriptionsFulu {
 
   private final OperationProcessor<SignedExecutionPayloadEnvelope> executionPayloadProcessor;
   private final OperationProcessor<PayloadAttestationMessage> payloadAttestationMessageProcessor;
+  private final OperationProcessor<PayloadAttestationMessagePq>
+      payloadAttestationMessagePqProcessor;
   private final OperationProcessor<SignedExecutionPayloadBid> executionPayloadBidProcessor;
   private final OperationProcessor<SignedProposerPreferences> proposerPreferencesProcessor;
 
@@ -91,6 +96,8 @@ public class GossipForkSubscriptionsGloas extends GossipForkSubscriptionsFulu {
       final OperationProcessor<SignedExecutionPayloadEnvelope> executionPayloadOperationProcessor,
       final OperationProcessor<PayloadAttestationMessage>
           payloadAttestationMessageOperationProcessor,
+      final OperationProcessor<PayloadAttestationMessagePq>
+          payloadAttestationMessagePqOperationProcessor,
       final OperationProcessor<SignedExecutionPayloadBid> executionPayloadBidOperationProcessor,
       final OperationProcessor<SignedProposerPreferences> proposerPreferencesOperationProcessor,
       final DebugDataDumper debugDataDumper,
@@ -126,17 +133,49 @@ public class GossipForkSubscriptionsGloas extends GossipForkSubscriptionsFulu {
         isSuperNodeSupplier);
     this.executionPayloadProcessor = executionPayloadOperationProcessor;
     this.payloadAttestationMessageProcessor = payloadAttestationMessageOperationProcessor;
+    this.payloadAttestationMessagePqProcessor = payloadAttestationMessagePqOperationProcessor;
     this.executionPayloadBidProcessor = executionPayloadBidOperationProcessor;
     this.proposerPreferencesProcessor = proposerPreferencesOperationProcessor;
   }
 
   @Override
   protected void addGossipManagers(final ForkInfo forkInfo, final Bytes4 forkDigest) {
+    if (isPq()) {
+      addPqGossipManagers(forkInfo, forkDigest);
+      return;
+    }
     super.addGossipManagers(forkInfo, forkDigest);
     addExecutionPayloadGossipManager(forkInfo, forkDigest);
     addPayloadAttestationMessageGossipManager(forkInfo, forkDigest);
     addExecutionPayloadBidGossipManager(forkInfo, forkDigest);
     addProposerPreferencesGossipManager(forkInfo, forkDigest);
+  }
+
+  /**
+   * PQ (and Heze, which builds on it) keeps only the topics whose messages it has. Voluntary exits,
+   * BLS to execution changes, sync committee messages and contributions, and the light client
+   * topics are removed (PQ p2p-interface.md).
+   *
+   * <p>Aggregates and payload attestation messages are PQ's own types, with their own gossip
+   * managers.
+   */
+  private void addPqGossipManagers(final ForkInfo forkInfo, final Bytes4 forkDigest) {
+    addAttestationGossipManager(forkInfo, forkDigest);
+    addBlockGossipManager(forkInfo, forkDigest);
+    addPqAggregateGossipManager(forkInfo, forkDigest);
+    addPqPayloadAttestationMessageGossipManager(forkInfo, forkDigest);
+    addProposerSlashingGossipManager(forkInfo, forkDigest);
+    addAttesterSlashingGossipManager(forkInfo, forkDigest);
+    addDataColumnSidecarGossipManager(forkInfo, forkDigest);
+    addExecutionPayloadGossipManager(forkInfo, forkDigest);
+    addExecutionPayloadBidGossipManager(forkInfo, forkDigest);
+    addProposerPreferencesGossipManager(forkInfo, forkDigest);
+  }
+
+  private boolean isPq() {
+    return spec.atEpoch(getActivationEpoch())
+        .getMilestone()
+        .isGreaterThanOrEqualTo(SpecMilestone.PQ);
   }
 
   void addExecutionPayloadGossipManager(final ForkInfo forkInfo, final Bytes4 forkDigest) {
@@ -169,6 +208,21 @@ public class GossipForkSubscriptionsGloas extends GossipForkSubscriptionsFulu {
             spec.getNetworkingConfig(),
             debugDataDumper);
     addGossipManager(payloadAttestationMessageGossipManager);
+  }
+
+  void addPqPayloadAttestationMessageGossipManager(
+      final ForkInfo forkInfo, final Bytes4 forkDigest) {
+    addGossipManager(
+        new PqPayloadAttestationMessageGossipManager(
+            spec,
+            recentChainData,
+            asyncRunner,
+            discoveryNetwork,
+            gossipEncoding,
+            forkInfo,
+            forkDigest,
+            payloadAttestationMessagePqProcessor,
+            debugDataDumper));
   }
 
   void addExecutionPayloadBidGossipManager(final ForkInfo forkInfo, final Bytes4 forkDigest) {
@@ -210,7 +264,10 @@ public class GossipForkSubscriptionsGloas extends GossipForkSubscriptionsFulu {
 
   @Override
   public void publishPayloadAttestationMessage(final PayloadAttestationMessage message) {
-    payloadAttestationMessageGossipManager.publish(message);
+    // PQ forks gossip PQ payload attestation messages, which local validators don't publish yet
+    if (payloadAttestationMessageGossipManager != null) {
+      payloadAttestationMessageGossipManager.publish(message);
+    }
   }
 
   @Override
