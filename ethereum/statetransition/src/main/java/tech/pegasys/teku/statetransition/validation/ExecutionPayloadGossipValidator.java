@@ -14,6 +14,7 @@
 package tech.pegasys.teku.statetransition.validation;
 
 import static tech.pegasys.teku.spec.config.Constants.VALID_EXECUTION_PAYLOAD_SET_SIZE;
+import static tech.pegasys.teku.spec.constants.PqConstants.LEAF_OFFSET_EXECUTION_PAYLOAD_ENVELOPE;
 import static tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel.CONSENSUS_AND_EQUIVOCATION;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.SAVE_FOR_FUTURE;
@@ -316,6 +317,16 @@ public class ExecutionPayloadGossipValidator {
     final Bytes signingRoot =
         signingRootUtil.signingRootForSignExecutionPayloadEnvelope(
             envelope.getMessage(), postState.getForkInfo());
+    if (envelope.isXmssSigned()) {
+      // PQ: at the envelope leaf of the block's slot
+      return gossipValidationHelper.isXmssSignatureValidWithRespectToBuilderIndex(
+          signingRoot,
+          envelope.getMessage().getBuilderIndex(),
+          gossipValidationHelper.computeXmssLeafIndex(
+              envelope.getSlot(), LEAF_OFFSET_EXECUTION_PAYLOAD_ENVELOPE),
+          envelope.getXmssSignature(),
+          postState);
+    }
     return gossipValidationHelper.isSignatureValidWithRespectToBuilderIndex(
         signingRoot, envelope.getMessage().getBuilderIndex(), envelope.getSignature(), postState);
   }

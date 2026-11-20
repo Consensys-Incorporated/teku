@@ -14,6 +14,7 @@
 package tech.pegasys.teku.statetransition.validation;
 
 import static tech.pegasys.teku.infrastructure.async.SafeFuture.completedFuture;
+import static tech.pegasys.teku.spec.constants.PqConstants.LEAF_OFFSET_PROPOSER_PREFERENCES;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ignore;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.reject;
@@ -295,6 +296,16 @@ public class ProposerPreferencesGossipValidator {
         new ForkInfo(spec.fork(proposalEpoch), state.getGenesisValidatorsRoot());
     final Bytes signingRoot =
         signingRootUtil.signingRootForSignProposerPreferences(proposerPreferences, forkInfo);
+    if (signedProposerPreferences.isXmssSigned()) {
+      // PQ: at the preferences leaf of the proposal slot
+      return gossipValidationHelper.isXmssSignatureValidWithRespectToValidatorIndex(
+          signingRoot,
+          proposerPreferences.getValidatorIndex(),
+          gossipValidationHelper.computeXmssLeafIndex(
+              proposerPreferences.getProposalSlot(), LEAF_OFFSET_PROPOSER_PREFERENCES),
+          signedProposerPreferences.getXmssSignature(),
+          state);
+    }
     return gossipValidationHelper.isSignatureValidWithRespectToProposerIndex(
         signingRoot,
         proposerPreferences.getValidatorIndex(),
