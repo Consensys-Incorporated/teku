@@ -21,8 +21,8 @@ import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
 
 record Step(
     boolean shouldSucceed,
-    // we don't fail importing when the interchange contains slashable data, so can safely
-    // ignore this field in the tests
+    // an implementation may reject an interchange containing slashable data, in which case the
+    // step's checks and all later steps are ignored
     boolean containsSlashableData,
     SlashingProtectionInterchangeFormat interchange,
     List<Block> blocks,
