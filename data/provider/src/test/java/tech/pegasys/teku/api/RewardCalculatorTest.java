@@ -36,6 +36,7 @@ import tech.pegasys.teku.api.migrated.SyncCommitteeRewardData;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blocks.BlockContainer;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
@@ -149,6 +150,26 @@ public class RewardCalculatorTest {
                 calculator.getBlockRewardData(mock(BlockContainer.class), mock(BeaconState.class)))
         .isInstanceOf(BadRequestException.class)
         .hasMessage("error");
+  }
+
+  @Test
+  void getSyncCommitteeRewardsFromBlockId_shouldRejectPq() {
+    final Spec pqSpec = TestSpecFactory.createMinimalPq();
+    final RewardCalculator rewardCalculator =
+        new RewardCalculator(pqSpec, blockRewardCalculatorUtil);
+    final BlockAndMetaData blockAndMetaData =
+        new BlockAndMetaData(
+            new DataStructureUtil(pqSpec).randomSignedBeaconBlock(),
+            SpecMilestone.PQ,
+            false,
+            true,
+            false);
+    assertThatThrownBy(
+            () ->
+                rewardCalculator.getSyncCommitteeRewardData(
+                    Set.of(), blockAndMetaData, mock(BeaconState.class)))
+        .isInstanceOf(BadRequestException.class)
+        .hasMessageContaining("has no sync committees");
   }
 
   @Test

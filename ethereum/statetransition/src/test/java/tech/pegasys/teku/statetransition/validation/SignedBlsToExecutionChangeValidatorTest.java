@@ -224,4 +224,15 @@ class SignedBlsToExecutionChangeValidatorTest {
         .when(signatureVerificationService)
         .verify(any(BLSPublicKey.class), any(Bytes.class), any(BLSSignature.class));
   }
+
+  @Test
+  public void shouldRejectChangesOnceThePqForkIsActive() {
+    final Spec pqSpec = TestSpecFactory.createMinimalPq();
+    final SignedBlsToExecutionChangeValidator pqValidator =
+        new SignedBlsToExecutionChangeValidator(
+            pqSpec, timeProvider, recentChainData, signatureVerificationService);
+
+    assertThat(pqValidator.validateForGossip(dataStructureUtil.randomSignedBlsToExecutionChange()))
+        .isCompletedWithValueMatching(InternalValidationResult::isReject);
+  }
 }

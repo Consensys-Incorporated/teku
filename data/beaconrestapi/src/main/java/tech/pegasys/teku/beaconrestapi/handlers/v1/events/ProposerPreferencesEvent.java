@@ -36,9 +36,10 @@ public class ProposerPreferencesEvent
         .build();
   }
 
-  public ProposerPreferencesEvent(final SignedProposerPreferences proposerPreferences) {
+  public ProposerPreferencesEvent(
+      final SpecMilestone milestone, final SignedProposerPreferences proposerPreferences) {
     super(
         buildTypeDef(proposerPreferences),
-        new VersionedProposerPreferences(SpecMilestone.GLOAS, proposerPreferences));
+        new VersionedProposerPreferences(milestone, proposerPreferences));
   }
 }

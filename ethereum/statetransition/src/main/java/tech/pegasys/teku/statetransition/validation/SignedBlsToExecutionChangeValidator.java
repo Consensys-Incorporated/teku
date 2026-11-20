@@ -64,6 +64,13 @@ public class SignedBlsToExecutionChangeValidator
     final BlsToExecutionChange blsToExecutionChange = operation.getMessage();
     final UInt64 validatorIndex = blsToExecutionChange.getValidatorIndex();
 
+    // [REJECT] PQ disables BLS to execution changes
+    if (isPqActive()) {
+      return SafeFuture.completedFuture(
+          InternalValidationResult.reject(
+              "BLS to execution changes are disabled from the PQ fork"));
+    }
+
     /*
      [IGNORE] current_epoch >= CAPELLA_FORK_EPOCH
     */
@@ -130,6 +137,17 @@ public class SignedBlsToExecutionChangeValidator
               }
               return InternalValidationResult.create(ACCEPT);
             });
+  }
+
+  private boolean isPqActive() {
+    if (!spec.isMilestoneSupported(SpecMilestone.PQ)) {
+      return false;
+    }
+    final UInt64 genesisTime = recentChainData.getGenesisTime();
+    final UInt64 currentTime = timeProvider.getTimeInSeconds();
+    return spec.atTime(genesisTime, currentTime)
+        .getMilestone()
+        .isGreaterThanOrEqualTo(SpecMilestone.PQ);
   }
 
   private boolean isCapellaActive() {

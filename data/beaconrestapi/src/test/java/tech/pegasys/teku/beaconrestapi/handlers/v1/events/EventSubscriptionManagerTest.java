@@ -66,6 +66,7 @@ import tech.pegasys.teku.spec.datastructures.operations.SignedBlsToExecutionChan
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
 import tech.pegasys.teku.spec.datastructures.operations.SingleAttestation;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SignedContributionAndProof;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SingleAttestationPq;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.executionlayer.ForkChoiceState;
 import tech.pegasys.teku.spec.executionlayer.PayloadBuildingAttributes;
@@ -573,6 +574,26 @@ public class EventSubscriptionManagerTest {
   }
 
   @Test
+  void shouldPropagatePqSingleAttestation() throws IOException {
+    when(req.getQueryString()).thenReturn("&topics=single_attestation");
+    manager.registerClient(client1);
+    final Spec pqSpec = TestSpecFactory.createMinimalPq();
+    final DataStructureUtil pqData = new DataStructureUtil(pqSpec);
+    final SingleAttestationPq pqSingleAttestation =
+        new SingleAttestationPq(
+            UInt64.ONE,
+            UInt64.valueOf(7),
+            pqData.randomAttestationData(),
+            pqData.randomXmssSignature().getBytes());
+
+    manager.onNewAttestation(ValidatableAttestation.from(pqSpec, pqSingleAttestation));
+    asyncRunner.executeQueuedActions();
+
+    checkEvent("single_attestation", new SingleAttestationEvent(pqSingleAttestation));
+    assertThat(outputStream.getString()).contains("\"attester_index\":\"7\"");
+  }
+
+  @Test
   void shouldPropagateSingleAttestation() throws IOException {
     when(req.getQueryString()).thenReturn("&topics=single_attestation");
     manager.registerClient(client1);
@@ -741,7 +762,9 @@ public class EventSubscriptionManagerTest {
     manager.registerClient(client1);
 
     triggerExecutionPayloadBidEvent();
-    checkEvent("execution_payload_bid", new ExecutionPayloadBidEvent(sampleExecutionPayloadBid));
+    checkEvent(
+        "execution_payload_bid",
+        new ExecutionPayloadBidEvent(SpecMilestone.GLOAS, sampleExecutionPayloadBid));
     assertThat(outputStream.getString()).contains("\"version\":\"gloas\"");
   }
 
@@ -753,7 +776,7 @@ public class EventSubscriptionManagerTest {
     triggerPayloadAttestationMessageEvent();
     checkEvent(
         "payload_attestation_message",
-        new PayloadAttestationMessageEvent(samplePayloadAttestationMessage));
+        new PayloadAttestationMessageEvent(SpecMilestone.GLOAS, samplePayloadAttestationMessage));
     assertThat(outputStream.getString()).contains("\"version\":\"gloas\"");
   }
 
@@ -763,7 +786,9 @@ public class EventSubscriptionManagerTest {
     manager.registerClient(client1);
 
     triggerProposerPreferencesEvent();
-    checkEvent("proposer_preferences", new ProposerPreferencesEvent(sampleProposerPreferences));
+    checkEvent(
+        "proposer_preferences",
+        new ProposerPreferencesEvent(SpecMilestone.GLOAS, sampleProposerPreferences));
     assertThat(outputStream.getString()).contains("\"version\":\"gloas\"");
   }
 

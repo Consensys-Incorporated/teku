@@ -37,9 +37,10 @@ public class PayloadAttestationMessageEvent
         .build();
   }
 
-  public PayloadAttestationMessageEvent(final PayloadAttestationMessage payloadAttestationMessage) {
+  public PayloadAttestationMessageEvent(
+      final SpecMilestone milestone, final PayloadAttestationMessage payloadAttestationMessage) {
     super(
         buildTypeDef(payloadAttestationMessage),
-        new VersionedPayloadAttestationMessage(SpecMilestone.GLOAS, payloadAttestationMessage));
+        new VersionedPayloadAttestationMessage(milestone, payloadAttestationMessage));
   }
 }
