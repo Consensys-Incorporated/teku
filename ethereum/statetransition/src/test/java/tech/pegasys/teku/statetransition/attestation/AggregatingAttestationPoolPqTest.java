@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.spec.datastructures.type.SszXmssSignatureSchema.XMSS_SIGNATURE_SIZE;
 
 import it.unimi.dsi.fastutil.ints.IntList;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.IntStream;
@@ -37,6 +38,7 @@ import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SingleAttest
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.XmssAggregateStatement;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.versions.pq.crypto.StarkProver;
+import tech.pegasys.teku.spec.logic.versions.pq.helpers.BeaconStateAccessorsPq;
 import tech.pegasys.teku.spec.logic.versions.pq.util.AttestationUtilPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
@@ -89,6 +91,33 @@ class AggregatingAttestationPoolPqTest {
     assertThat(aggregate.get().proof())
         .isEqualTo(Bytes.concatenate(signatureOf(second), signatureOf(first)));
     assertThat(pool.getSize()).isEqualTo(2);
+  }
+
+  @Test
+  void shouldAggregateWhenTheHeadIsEpochsBehindTheAttestations() throws Exception {
+    // With empty slots the head state is too old for committee lookups at the attestation's slot
+    final UInt64 laterSlot = attestationSlot.plus(spec.slotsPerEpoch(attestationSlot) * 3L);
+    storageSystem.chainUpdater().setCurrentSlot(laterSlot);
+    final BeaconState laterState = spec.processSlots(head.getState(), laterSlot);
+    final AttestationData data =
+        spec.getGenericAttestationData(laterSlot, laterState, head, UInt64.ZERO);
+    final IntList committee = spec.getBeaconCommittee(laterState, laterSlot, UInt64.ZERO);
+    final List<List<XmssAggregateStatement>> provenStatements = new ArrayList<>();
+    final AggregatingAttestationPoolPq recordingPool =
+        new AggregatingAttestationPoolPq(
+            spec, storageSystem.recentChainData(), recordingProver(provenStatements));
+    recordingPool.add(singleAttestation(laterState, data, 0, committee.getInt(1)));
+    recordingPool.add(singleAttestation(laterState, data, 0, committee.getInt(0)));
+
+    final Optional<PqAggregate> aggregate =
+        recordingPool.createPqAggregateFor(data.hashTreeRoot(), UInt64.ZERO);
+
+    assertThat(aggregate).isPresent();
+    // The statement get_attestation_statements gives with an up-to-date state
+    assertThat(provenStatements)
+        .containsExactly(
+            ((BeaconStateAccessorsPq) spec.atSlot(laterSlot).beaconStateAccessors())
+                .getAttestationStatements(laterState, aggregate.get().attestation()));
   }
 
   @Test
@@ -265,6 +294,14 @@ class AggregatingAttestationPoolPqTest {
 
   private ValidatableAttestation singleAttestation(
       final AttestationData data, final int committeeIndex, final int validatorIndex) {
+    return singleAttestation(head.getState(), data, committeeIndex, validatorIndex);
+  }
+
+  private ValidatableAttestation singleAttestation(
+      final BeaconState state,
+      final AttestationData data,
+      final int committeeIndex,
+      final int validatorIndex) {
     final SingleAttestationPq single =
         new SingleAttestationPq(
             UInt64.valueOf(committeeIndex),
@@ -273,10 +310,33 @@ class AggregatingAttestationPoolPqTest {
             dataStructureUtil.randomXmssSignature().getBytes());
     final ValidatableAttestation attestation = ValidatableAttestation.from(spec, single);
     attestation.convertToAggregatedFormatFromSingleAttestation(
-        ((AttestationUtilPq) spec.atSlot(attestationSlot).getAttestationUtil())
-            .convertSingleAttestationToAggregated(head.getState(), single));
-    attestation.saveCommitteeShufflingSeedAndCommitteesSize(head.getState());
+        ((AttestationUtilPq) spec.atSlot(data.getSlot()).getAttestationUtil())
+            .convertSingleAttestationToAggregated(state, single));
+    attestation.saveCommitteeShufflingSeedAndCommitteesSize(state);
     return attestation;
+  }
+
+  /** The concatenation prover, recording the statements it proves. */
+  private static StarkProver recordingProver(
+      final List<List<XmssAggregateStatement>> provenStatements) {
+    return new StarkProver() {
+      @Override
+      public Bytes proveAggregates(
+          final List<XmssAggregateStatement> statements, final List<List<Bytes>> signatures) {
+        provenStatements.add(statements);
+        return StarkProver.CONCATENATED.proveAggregates(statements, signatures);
+      }
+
+      @Override
+      public long proofSizeOf(final int signatureCount) {
+        return StarkProver.CONCATENATED.proofSizeOf(signatureCount);
+      }
+
+      @Override
+      public Bytes mergeProofs(final List<Bytes> proofs) {
+        return StarkProver.CONCATENATED.mergeProofs(proofs);
+      }
+    };
   }
 
   private static Bytes signatureOf(final ValidatableAttestation attestation) {
