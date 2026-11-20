@@ -10,7 +10,7 @@ Phase 6 of [pq-fork-plan.md](pq-fork-plan.md): taking the merged PQ state transi
 |---|---|---|
 | 6a | Block production at the spec level, and test chains through the PQ fork | In review (#11674) |
 | 6b | Block import and fork choice over PQ chains | In review (#11676, stacked on #11674) |
-| 6c | Gossip validation of PQ messages | In progress: 6c-1 (`pq-bn-gossip`) and 6c-2 (`pq-bn-gossip-atts`) done |
+| 6c | Gossip validation of PQ messages | Done: 6c-1 (#11677), 6c-2 (#11678), 6c-3 (`pq-bn-gossip-rest`) |
 | 6d | Attestation pool, proofs and packing | Not started |
 | 6e | Beacon-node block production | Not started |
 
@@ -65,10 +65,12 @@ Phase 6 of [pq-fork-plan.md](pq-fork-plan.md): taking the merged PQ state transi
   The aggregate is then marked verified, keeps its proof for the pool, and goes through `AttestationValidator`'s shared checks. The seen rules are the spec's superset rule and one aggregate per aggregator and epoch.
 - **Still to do:** payload attestation messages have their own PQ type (`PayloadAttestationMessagePq`), so they come with the PQ topic decoders (phase 7), as does wiring the aggregate validator to its gossip topic.
 
-**6c-3: the rest.**
-- **Slashings:** `ProposerSlashingValidator` and `AttesterSlashingValidator`, still BLS today.
-- **Removed messages are rejected:** voluntary exits, BLS changes, sync committee messages and contributions.
-- **An async XMSS verification service:** about 30 µs to 70 µs per verify, kept off the network threads.
+**6c-3: slashings (done).**
+- **Proposer slashings:** `OperationSignatureVerifierPq` checks a proposer slashing's headers with XMSS at the proposer leaf of their slot. Gossip validation (`ProposerSlashingValidator`, through `Spec.verifyProposerSlashingSignature`) and block processing both use it. `BlockProcessorPq` no longer has its own copy.
+- **Attester slashings** already worked: `Spec.validateAttesterSlashing` checks both indexed attestations with `AttestationUtilPq`, which verifies their proofs.
+- **Moved elsewhere:**
+  - **Removed messages** (voluntary exits, BLS changes, sync committee messages and contributions): rejecting them is phase 7's PQ topic subscriptions, which leave those topics out, and phase 8's REST pools.
+  - **An async XMSS verification service** (about 30 µs to 70 µs per verify): to be sized once a devnet shows the gossip load.
 
 ### 6d: attestation pool, proofs and packing
 

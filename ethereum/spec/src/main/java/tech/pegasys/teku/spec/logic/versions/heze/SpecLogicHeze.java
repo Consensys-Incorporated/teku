@@ -38,7 +38,6 @@ import tech.pegasys.teku.spec.logic.versions.capella.operations.validation.Opera
 import tech.pegasys.teku.spec.logic.versions.electra.operations.validation.VoluntaryExitValidatorElectra;
 import tech.pegasys.teku.spec.logic.versions.fulu.util.BlindBlockUtilFulu;
 import tech.pegasys.teku.spec.logic.versions.fulu.util.BlockProposalUtilFulu;
-import tech.pegasys.teku.spec.logic.versions.gloas.operations.OperationSignatureVerifierGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.operations.validation.AttestationDataValidatorGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.util.DataColumnSidecarUtilGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.util.ForkChoiceUtilGloas;
@@ -58,6 +57,7 @@ import tech.pegasys.teku.spec.logic.versions.pq.helpers.BeaconStateAccessorsPq;
 import tech.pegasys.teku.spec.logic.versions.pq.helpers.BeaconStateMutatorsPq;
 import tech.pegasys.teku.spec.logic.versions.pq.helpers.MiscHelpersPq;
 import tech.pegasys.teku.spec.logic.versions.pq.helpers.PredicatesPq;
+import tech.pegasys.teku.spec.logic.versions.pq.operations.OperationSignatureVerifierPq;
 import tech.pegasys.teku.spec.logic.versions.pq.util.AttestationUtilPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsHeze;
 
@@ -139,10 +139,11 @@ public class SpecLogicHeze extends AbstractSpecLogic {
     // aggregated into a STARK proof; the BLS operation verifier only serves operations PQ no
     // longer has.
     final XmssSignatureVerifier xmssSignatureVerifier = XmssSignatureVerifier.LEAN_XMSS;
+    final OperationSignatureVerifierPq operationSignatureVerifier =
+        new OperationSignatureVerifierPq(
+            miscHelpers, beaconStateAccessors, predicates, xmssSignatureVerifier);
     final StarkProofVerifier starkProofVerifier =
         StarkProofVerifier.concatenated(xmssSignatureVerifier);
-    final OperationSignatureVerifierGloas operationSignatureVerifier =
-        new OperationSignatureVerifierGloas(miscHelpers, beaconStateAccessors, predicates);
 
     // Weak subjectivity
     final WeakSubjectivityCalculatorGloas weakSubjectivityCalculator =
