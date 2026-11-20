@@ -17,6 +17,7 @@ import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.spec.signatures.Signer;
+import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
 import tech.pegasys.teku.validator.api.GraffitiProvider;
 
 public class Validator {
@@ -24,6 +25,7 @@ public class Validator {
   private final Signer signer;
   private final GraffitiProvider graffitiProvider;
   private final boolean readOnly;
+  private final Optional<XmssSigner> xmssSigner;
 
   public Validator(
       final BLSPublicKey publicKey, final Signer signer, final GraffitiProvider graffitiProvider) {
@@ -35,10 +37,20 @@ public class Validator {
       final Signer signer,
       final GraffitiProvider graffitiProvider,
       final boolean readOnly) {
+    this(publicKey, signer, graffitiProvider, readOnly, Optional.empty());
+  }
+
+  public Validator(
+      final BLSPublicKey publicKey,
+      final Signer signer,
+      final GraffitiProvider graffitiProvider,
+      final boolean readOnly,
+      final Optional<XmssSigner> xmssSigner) {
     this.publicKey = publicKey;
     this.signer = signer;
     this.graffitiProvider = graffitiProvider;
     this.readOnly = readOnly;
+    this.xmssSigner = xmssSigner;
   }
 
   public BLSPublicKey getPublicKey() {
@@ -47,6 +59,11 @@ public class Validator {
 
   public Signer getSigner() {
     return signer;
+  }
+
+  /** Signs this validator's messages from the PQ fork on, if it has PQ keys. */
+  public Optional<XmssSigner> getXmssSigner() {
+    return xmssSigner;
   }
 
   public Optional<Bytes32> getGraffiti() {

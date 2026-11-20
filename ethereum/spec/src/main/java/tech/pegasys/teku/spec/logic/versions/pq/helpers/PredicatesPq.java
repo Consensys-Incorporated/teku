@@ -21,10 +21,8 @@ import static tech.pegasys.teku.spec.constants.PqConstants.XMSS_DEPOSIT_PREFIX;
 import static tech.pegasys.teku.spec.constants.PqConstants.XMSS_RESERVED_LEAVES;
 
 import java.util.List;
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.bytes.Bytes48;
-import tech.pegasys.teku.infrastructure.crypto.Hash;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
@@ -33,6 +31,7 @@ import tech.pegasys.teku.spec.datastructures.state.versions.pq.BuilderPreregistr
 import tech.pegasys.teku.spec.datastructures.state.versions.pq.ValidatorPq;
 import tech.pegasys.teku.spec.datastructures.state.versions.pq.ValidatorPreregistration;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.PredicatesGloas;
+import tech.pegasys.teku.spec.signatures.xmss.VrfTree;
 
 public class PredicatesPq extends PredicatesGloas {
 
@@ -68,16 +67,7 @@ public class PredicatesPq extends PredicatesGloas {
     checkArgument(
         proof.size() == VRF_TREE_DEPTH + 1, "A VRF proof has %s elements", VRF_TREE_DEPTH + 1);
     final Bytes32 vrfRoot = ((ValidatorPq) state.getValidators().get(validatorIndex)).getVrfRoot();
-    Bytes32 value = proof.getFirst();
-    for (int height = 0; height < VRF_TREE_DEPTH; height++) {
-      final Bytes32 sibling = proof.get(height + 1);
-      // UInt64 holds the slot's unsigned bits, so an unsigned shift reads them
-      value =
-          ((slot.longValue() >>> height) & 1) == 1
-              ? Hash.keccak256(Bytes.concatenate(sibling, value))
-              : Hash.keccak256(Bytes.concatenate(value, sibling));
-    }
-    return value.equals(vrfRoot);
+    return VrfTree.computeRootFromProof(proof, slot).equals(vrfRoot);
   }
 
   /**

@@ -19,6 +19,7 @@ import java.util.Optional;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.keystore.model.KeyStoreData;
 import tech.pegasys.teku.spec.signatures.Signer;
+import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
 import tech.pegasys.teku.validator.client.restapi.apis.schema.DeleteKeyResult;
 
 public interface ValidatorSource {
@@ -37,6 +38,14 @@ public interface ValidatorSource {
     BLSPublicKey getPublicKey();
 
     Signer createSigner();
+
+    /**
+     * Creates the validator's leanXMSS signer for the PQ fork, if it has PQ keys. Loading a key
+     * builds its top tree, so this is slow; call it once per validator.
+     */
+    default Optional<XmssSigner> createXmssSigner() {
+      return Optional.empty();
+    }
 
     boolean isReadOnly();
   }

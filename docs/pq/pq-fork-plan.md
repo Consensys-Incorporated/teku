@@ -38,7 +38,7 @@ Teku-side, the hardest parts are not the state transition. They are:
 **Crypto recommendation** (revised 2026-11-18 after finding `ethereum/lean-pq-bindings`, §2.2):
 - Use **`io.github.crate-crypto:lean-pq`** (Maven Central, Java 25 FFM, natives bundled) for leanXMSS keygen, sign and verify. It is the same publisher and release model as `java-eth-kzg`. A pure-Java port is no longer needed for the first devnet; keep it as a fallback only.
 - Hide it behind a small `infrastructure/xmss` API with an `XmssConstants.verificationDisabled` switch, which the reference tests require.
-- Keep STARK as the spec's concatenation stand-in for consensus, behind an interface. lean-pq's `Aggregate` is a real leanVM proof but **does not prove leaf indices** and embeds its claims, so it cannot implement the spec's `VerifyAggregates` as written (§2.2, §5.17).
+- Keep STARK as the spec's concatenation stand-in for consensus, behind an interface. lean-pq's `Aggregate` is a real leanVM proof but **does not prove leaf indices**, so it cannot implement the spec's `VerifyAggregates` as written (§2.2, §5.17). From lean-pq 0.13.0, proving and verifying aggregates need a `leanvm-sidecar` process (§2.2).
 
 ---
 
@@ -392,13 +392,25 @@ PQ is an emergency fork for when elliptic-curve cryptography can no longer be tr
   - 0.10.1 already used every core inside each signature, so extra caller threads didn't help it. In 0.11.0 the caller parallelizes instead.
   - Aggregate throughput is therefore close: about 156 vs 115 signatures per second on this machine.
   - Either way, 1,000 keys take about 6–9 s of signing per round. A large validator client cannot sign every key at a single deadline on one host, so PQ duties must be spread through the slot, or keys spread across hosts. This feeds §3.15.10.
+- **Update 2026-11-20, v0.13.0** (released 2026-11-19; see the bindings [README](https://github.com/leanEthereum/leanVM/tree/main/bindings#readme) and `CHANGELOG.md`):
+  - **The bindings moved into leanVM** (`bindings/`, 0.12.0) and are released from there with tags `bindings-vX.Y.Z`. The Maven coordinates are unchanged. Aggregates from 0.11.x and 0.12.0 reject each other.
+  - **Aggregation left the JVM** (0.13.0, leanVM #804). `LeanPq.aggregate`, `LeanPq.setup` and `Aggregate.fromBytes` are gone. Proving and verifying aggregates both go through a `Sidecar`, a client for the `leanvm-sidecar` process (below):
+    - `Sidecar.connect(socket)` or `Sidecar.start(binary, socket, threads)`;
+    - `sidecar.aggregate(children ≤ 16, xmss, sphincs)`;
+    - `sidecar.verify(proofBytes, xmssClaims, sphincsClaims)`, which throws `LeanPqException` unless the proof covers exactly those claims.
+  - **Sidecar limits:**
+    - Linux and macOS only.
+    - The sidecar must be built from the same release as the bindings; a mismatched one is rejected.
+    - The socket's directory must be private (mode 0700).
+    - A sidecar serves at most 16 connections, so share one `Sidecar` per process. Its calls run one at a time.
+  - **leanXMSS signing and single-signature verification still run in-process,** and they are all Teku uses today. The EthLib vectors and the spec KAT still pass through `infrastructure/xmss` on 0.13.0.
 - **Packaging (as of v0.10.1):** on Maven Central as `io.github.crate-crypto:lean-pq`, versions 0.6.1 to 0.11.0, jar SHA-1 `3b098870…`. The jar is 7.5 MB and bundles natives for linux-x86_64 and linux-aarch64 (glibc ≥ 2.17; x86_64 needs AVX2 and PCLMULQDQ), macOS universal, and windows-x86_64. There is no musl or Windows arm64 build. The library is the named module `org.ethereum.leanpq`.
 - **FFM, not JNI:** the JVM needs `--enable-native-access=ALL-UNNAMED`, because Teku runs on the class path. Add it to the start scripts, the Docker image and test JVM args, the same way `java-eth-kzg` is handled. On Linux and macOS the native library is copied into `java.io.tmpdir`, which must allow executable mappings. `-Dlean.pq.native.path` overrides it.
 - **API:**
   - `XmssSecretKey.fromSeed(32 B)`, `generate()`, `toBytes()` (32-byte seed), `publicKey()` (32 B), `prepare(leaf)`, `sign(msg32, leaf)` (2404 B); it is `AutoCloseable`;
   - `LeanPq.xmssVerify(pk, msg, sig)` (static);
   - leanSPHINCS (stateless, 7740 B signatures), which the spec does not use;
-  - `LeanPq.aggregate(children ≤ 16, xmss SignedMessages, sphincs SignedMessages) → Aggregate`, with `Aggregate.fromBytes` (verifies on decode; from 0.11.0 it takes the expected claims), `toBytes()`, and `xmssClaims()`.
+  - up to 0.12.0: `LeanPq.aggregate(children ≤ 16, xmss SignedMessages, sphincs SignedMessages) → Aggregate`, with `Aggregate.fromBytes` (verifies on decode; from 0.11.0 it takes the expected claims), `toBytes()`, and `xmssClaims()`. From 0.13.0 these are `Sidecar.aggregate` and `Sidecar.verify` (above).
 - **Spec compatibility: confirmed 2026-11-18.** v0.10.1 pins leanVM `5e3ade21`, which hashes with Keccak-256 and vendors EthLib's leanXMSS vectors from commit `03b7e4dd`. Those 37 vectors are byte-identical to EthLib v0.3.0, which the pyspec pins; v0.3.0 only adds 4 more verify cases. A local run against the spec's `utils/xmss_kat.json` matched: the derived public key matches, the signature at leaf 1 is **byte-for-byte identical**, and the KAT signature verifies.
 - **Measured** (Apple Silicon, JDK 25, single run; the Java test is not committed):
   - verify: about 62 µs average over 100 (the first call costs about 740 ms to load the native library);
@@ -429,17 +441,20 @@ PQ is an emergency fork for when elliptic-curve cryptography can no longer be tr
   - Verify is answered without waiting for proofs in progress.
   - It doesn't verify children it is given, so a caller must verify untrusted children first.
 - **Claims are still `(pubkey, message)`,** plus an optional DA commitment. The leaf-index gap (§5.17) is unchanged.
-- **Clients:** only Rust and Go. Teku would implement the protocol itself: a few hundred lines on `java.nio` Unix-domain sockets (`UnixDomainSocketAddress`, Java 16+).
-- **Maturity:** one day old. It isn't published (`publish = false`), so operators would build it from source with `cargo`. leanVM has 5 releases, none including the sidecar.
-- **Versus lean-pq in-process aggregation:**
+- **Clients:** since lean-pq 0.13.0, every binding has one, including Java's `Sidecar`. Teku no longer needs to implement the protocol itself.
+- **Maturity:** two days old. Operators build it from source with `cargo install`, at the bindings' release tag with the `experimental_prover` feature. The README recommends building it on the target machine, because proving is performance-critical.
+- **Versus lean-pq in-process aggregation** (written for 0.11.0; from 0.13.0 there is no in-process option):
   - The sidecar moves the heavy proving work out of the JVM: about 1.6 GB of native memory and seconds of CPU per proof, plus any native crash.
   - It can run the faster experimental prover.
   - It can be shared, for example by a beacon node and a validator client on one host.
   - The cost is another process for operators to run, version-match and secure (the socket must be private), plus a new failure mode when the socket is down.
 - **Fit for Teku:**
   - Proving is only needed by aggregators and proposers, so a sidecar `StarkAggregator` backend is a good option for production proving.
-  - Verifying aggregates is consensus-critical on every node, so it should not depend on an external process. Keep it in-process through lean-pq, which also verifies an aggregate in about 8 ms.
-  - That requires lean-pq's leanVM and the sidecar's to produce compatible proofs. lean-pq 0.11.0 pins leanVM `28368657`, the same commit as the sidecar's README, so the two should agree. Still check the verifier tag (`leanvm-v1`) at runtime.
+  - **Superseded by 0.13.0:** the plan was to keep verifying aggregates in-process through lean-pq, because verification is consensus-critical on every node and shouldn't depend on an external process. lean-pq 0.13.0 removed in-process verification, so a real `StarkProofVerifier` needs a sidecar on every PQ node, not just aggregators and proposers. That raises questions to settle before replacing the concatenation stand-in:
+    - **Operations:** every beacon node needs a sidecar built from the release matching Teku's lean-pq, on Linux or macOS only. Teku could launch it itself with `Sidecar.start` from a configured binary, or connect to one the operator runs.
+    - **Throughput:** one shared `Sidecar` handles one call at a time, and verifies share it with proving. Each block and each gossiped aggregate needs a verify, so measure verify latency through the socket while a proof is in progress. The sidecar protocol says verify does not wait for proofs, but the Java client serializes its own calls, so verifies may need their own connection.
+    - **Failure mode:** with the sidecar down, Teku can't validate blocks with attestations. That needs a clear startup check and a health metric, and should not be treated as an invalid proof (no peer penalties, no invalid-block marking).
+    - **Alternatives:** ask upstream to keep an in-process verify (verification needs no prover and was about 8 ms), or verify through the Rust `lean_vm` crate behind Teku's own native wrapper.
   - Either way, this waits for the spec to define a real `AttestationProof`.
 
 **Performance** (go-leanxmss, M2 Max):
@@ -758,11 +773,21 @@ The pool aggregates BLS signatures today (`AggregatingAttestationPoolV2`, `Match
      - extend `LocalValidatorSource`/`KeyManager` to load XMSS key, VRF material and leaf DB alongside, or instead of, the BLS key;
      - provide a CLI (`teku validator generate-pq-keys`, **[inferred]** name) that emits the XMSS pubkey, the VRF root and the EIP8483 `pq_data`.
    - This tooling is a **prerequisite for EIP8483 registration**, so it may belong to the EIP8483 workstream.
-3. **VRF.** RANDAO is not a signature, so `Signer.createRandaoReveal` gets a PQ sibling `getVrfProof(slot)`.
-   - **[inferred]** Teku must pick a derivation, for example `leaf_i = sha256(vrf_seed ‖ uint64(i))`.
-   - **[inferred]** The root needs about 2^32 sha256 calls, about 5 to 10 min per validator in Java. This is a one-off at key generation.
-   - **[inferred]** To produce a proof cheaply, persist the level-16 nodes (2^15 × 32 B = 1 MiB per validator). Each proof then costs about 2^16 hashes.
-   - The spec leaves this to clients, which hurts portability between clients (§5).
+   - **Done (phase 9d):** the format, generation and loading are documented in [`pq-keystore.md`](pq-keystore.md).
+     - **Keystore:** `PqKeyStore`/`PqKeyStoreData` in `infrastructure/bls-keystore` (package `pq`). It is a versioned JSON format (`"format": "teku-pq-validator-keystore"`, `"version": 1`) with `xmss_pubkey`, `vrf_root`, an optional `bls_pubkey`, and one EIP-2335 `crypto` object over `xmss_seed ‖ vrf_seed`. `KeyStore` gained `encryptSecret`/`decrypt(Crypto)` for this.
+     - **Files:** `<name>.pq-keystore` and `<name>.vrf-cache` (the 1 MiB of level-16 nodes) sit next to the BLS keystore `<name>.json` and share its password. Neither name ends in `.json`, so key-directory scans skip them.
+     - **CLI:** `teku internal-tools validator-tools generate-pq-keys` (hidden, like `generate-keys`). `--bls-keystores` pairs new keys with existing BLS keystores; `--number-of-validators` makes keys for new validators. It prints VRF-derivation progress and can write each validator's `xmss_pubkey`, `vrf_root`, `pq_data`, `deposit_pubkey` (`XMSS_DEPOSIT_PREFIX ‖ xmss_pubkey`) and `deposit_signature` (`vrf_root ‖ 64 zero bytes`, `PqValidatorPublicData`) to JSON. It never replaces existing PQ files.
+     - **Loading:** when the spec schedules PQ, `ValidatorClientService` creates a `LocalXmssLeafProtector`, and `LocalValidatorSource` loads any sibling PQ keystore through `PqValidatorKeyLoader`. The loader checks `bls_pubkey`, recomputes one cached VRF node from the seed, checks that the cache opens to `vrf_root` (a missing cache is rebuilt), and checks the derived XMSS public key. The resulting `LocalXmssSigner` is `Validator.getXmssSigner()`.
+   - **Deferred from 9d:**
+     - PQ-only validators (no BLS keystore) are generated but not loaded: that needs index-first identity (9a);
+     - checking `xmss_pubkey`/`vrf_root` against the validator's on-chain registration (9c, with the pre-fork warning in item 7);
+     - keymanager-API import, listing and deletion of PQ keys, and deleting the PQ files with a managed BLS keystore;
+     - leaf-record interchange (item 5);
+     - signing the EIP-8483 preregistration in the CLI, since the request format waits on EL system contracts (§5.9);
+     - a cross-client keystore standard (§5.8).
+3. **VRF.** RANDAO is not a signature, so the PQ signer has `computeVrfProof(slot)` next to the BLS `Signer.createRandaoReveal`.
+   - **Specified since `2f43bc0f9`** (validator.md, from `70b907fd4`): leaf `i` is `keccak256(vrf_seed ‖ uint_to_bytes(uint64(i)))`, and `compute_vrf_node`, `compute_vrf_root` and `compute_vrf_proof` build the Keccak-256 tree of depth 31 above it. Any client derives the same root from the same seed, so a validator can move its seed between clients.
+   - **Done (`VrfTree`, phase 9b):** deriving the root hashes about 2^32 leaves, a one-off at key generation, in parallel. The tree keeps the level-16 nodes and above (2^15 × 32 B = 1 MiB per validator) and can be saved and restored, so a proof costs one 2^16-leaf subtree. Vectors from the spec's own functions check it. `PredicatesPq.isValidVrfProof` uses the same walk.
 4. **Signer.**
    - Add `XmssSigner`, or make `Signer` methods return a sealed `ValidatorSignature` (`Bls`/`Xmss`). `Signer` currently returns `SafeFuture<BLSSignature>` for 15 methods.
    - **Recommend** a separate `XmssSigner` interface held by the VC `Validator` next to the BLS `Signer`. Duties select by `spec.atSlot(slot).getMilestone()`.
@@ -772,15 +797,18 @@ The pool aggregates BLS signatures today (`AggregatingAttestationPoolV2`, `Match
      - `signReserved(message)` for exits and preregistration (allocates the next reserved leaf);
      - `getVrfProof`.
    - **Implementations:** `LocalXmssSigner`, `SlashingProtectedXmssSigner`, `DeletableXmssSigner` (mirror `LocalSigner`, `SlashingProtectedSigner`, `DeletableSigner` in `spec/signatures`).
+   - **Done (phase 9b):** `XmssSigner` and `LocalXmssSigner` in `spec/signatures/xmss`, with the methods above (`signAtReservedLeaf(signingRoot)` for exits and preregistration). `LocalXmssSigner` records every leaf with the `XmssLeafProtector` before signing, and fails with `XmssLeafReuseException` instead of reusing one.
+   - **Still to do:** surround-vote protection. A leaf per slot and per target epoch already rules out double proposals and double votes, but not surround votes; that needs the slashing protector keyed by XMSS key (with the identity work, 9a). Deleting a key (`DeletableXmssSigner`) comes with the keymanager work, which 9d deferred. Until then the loaded `XmssSigner` is not wrapped.
 5. **Leaf protection: a new safety-critical store.**
    - **Today:** `SlashingProtector`/`LocalSlashingProtector` only guard blocks and attestations (`maySignBlock`, `maySignAttestation`). Aggregates, PTC messages, preferences, envelopes and randao are unguarded.
    - **PQ requires** a per-key `XmssLeafProtector`:
      - `maySign(pubkey, leaf, signingRoot)` returns true if the leaf is unused or recorded with the same root;
      - record durably (fsync) **before** signing;
      - an allocator for reserved leaves.
-   - **Storage [inferred]:** per-key file under the slashing-protection dir.
-     - Per-slot and attestation leaves are monotonic, so store a high-water mark per region plus an exact map for recent leaves.
-     - Reserved leaves get a counter.
+   - **Done (phase 9b): `LocalXmssLeafProtector`**, a per-key `<xmss pubkey>.xmss-leaves` file in the slashing-protection dir, written with `SyncDataAccessor.syncedWrite` before signing is allowed. Its `XmssLeafRecord`:
+     - keeps every reserved leaf with its signing root, and allocates the next one above the highest used, so each is used once and in increasing order;
+     - for the attestation, builder bid and per-slot regions, keeps the exact roots within a window (64 attestation leaves; 2^14 bid and per-slot leaves, since preferences are signed up to an epoch ahead) and refuses anything below the window's watermark;
+     - is the same on every network, since a key used on two networks still must not reuse a leaf.
    - **Interchange:** EIP-3076 has no leaf records, so an extension or a new format is needed.
    - **Higher stakes:** leaf reuse **exposes the key**. It is worse than slashing, because anyone can then forge at that leaf.
    - **Existing behaviour to fix:** `ProposerPreferencesPublisher` may re-sign preferences for the same slot when the dependent root changes. The spec forbids that in PQ, so make it sign once per slot.
@@ -857,7 +885,7 @@ Sizes: S ≈ <1 eng-week, M ≈ 1–2, L ≈ 2–4, XL ≈ 4+ (rough, for one en
 | 7 | **Networking:** `GossipForkSubscriptionsPq`, 16 subnets (subscriptions, stable subnets, scoring), metadata/ENR syncnets zero, LC RPC off, PQ size bounds, gossip rate limits | M | 3 (schemas), 6 (validators) | 6, 8 | `networking:eth2` tests; local 2-node sync across the fork |
 | 8 | **REST and beacon-APIs:** XMSS/VRF JSON types, validator pubkey types, removed endpoints, aggregate+proof and aggregator-duty endpoints (draft upstream beacon-APIs PR), OpenAPI regeneration | M–L | 3; API design from 0 | 6, 7, 9 | `beaconrestapi` unit and integration tests; VC↔BN contract agreed |
 | 9 | **Validator client:** (9a) identity refactor (index-first `ValidatorIdentity`) can start after 1; (9b) `XmssSigner` stack, `XmssLeafProtector` store, reserved-leaf allocator, VRF provider and cache; (9c) duties (attestation, aggregation without selection proof, block with VRF, PTC, preferences once per slot, envelope; sync disabled); (9d) keystore format, key/VRF/`pq_data` generation CLI, keymanager import, pre-fork "unregistered" warnings; (9e) external-signer stance | XL | 1 (9a), 2 and 8 (9b–c) | 3–8 | VC unit tests; acceptance test with stubbed XMSS across the fork |
-| 10 | **Real crypto:** `LeanPqXmss` on `io.github.crate-crypto:lean-pq` (keygen, sign, verify plus Teku's own leaf-prefix check); `--enable-native-access` in scripts, Docker and tests; key cache with `prepare`; performance benchmarks (BN verify throughput, VC sign latency at N keys); leanVM STARK via `LeanPq.aggregate` once the spec defines `AttestationProof` | M | 2 (API) | 3–9 | KATs (`xmss_kat.json`, EthLib vectors) pass through the binding; JMH benchmarks within budget |
+| 10 | **Real crypto:** `LeanPqXmss` on `io.github.crate-crypto:lean-pq` (keygen, sign, verify plus Teku's own leaf-prefix check); `--enable-native-access` in scripts, Docker and tests; key cache with `prepare`; performance benchmarks (BN verify throughput, VC sign latency at N keys); leanVM STARK through the `leanvm-sidecar` (`Sidecar.aggregate` / `Sidecar.verify` since lean-pq 0.13.0) once the spec defines `AttestationProof` | M | 2 (API) | 3–9 | KATs (`xmss_kat.json`, EthLib vectors) pass through the binding; JMH benchmarks within budget |
 | 11 | **Reference tests and devnet:** local PQ vector generation and full ref-test run; Kurtosis config (Gloas → EIP8483 → PQ with real XMSS on minimal, validator count under the proof-size cap); multi-client interop when available | M–L | 4–10 | — | all PQ ref tests green; devnet finalises across the PQ fork with real signatures |
 
 **Critical path:** 0 → 1 → 3 → 4 → 5 → 6 → 11.
@@ -878,7 +906,7 @@ Sizes: S ≈ <1 eng-week, M ≈ 1–2, L ≈ 2–4, XL ≈ 4+ (rough, for one en
    - The leanXMSS hash function changed on 2026-10-28.
    - The STARK encoding is a placeholder.
    - Pin to a commit, keep a spec-diff log, and avoid polishing `AttestationProof` handling beyond the stand-in.
-3. **Crypto backend.** Resolved for signatures: use `io.github.crate-crypto:lean-pq` (§2.2, §2.4). Remaining risks: upstream API churn (breaking releases 0.7, 0.9 and 0.10 within a month), KAT drift as EthLib moves, the `--enable-native-access` requirement, and no musl build.
+3. **Crypto backend.** Resolved for signatures: use `io.github.crate-crypto:lean-pq` (§2.2, §2.4). Remaining risks: upstream API churn (breaking releases 0.7, 0.9, 0.10, 0.11, 0.12 and 0.13 within a month), KAT drift as EthLib moves, the `--enable-native-access` requirement, and no musl build. From 0.13.0, real STARK verification needs a sidecar process on every node (§2.2).
 4. **Leaf-index safety** (worse than slashing, because a reused leaf can be forged).
    - The VC must record before signing (durable fsync), and survive crash or restore.
    - A restored backup with an old leaf DB, or two VCs running one key, is catastrophic.
@@ -890,7 +918,7 @@ Sizes: S ≈ <1 eng-week, M ≈ 1–2, L ≈ 2–4, XL ≈ 4+ (rough, for one en
    - Proposal: the BN builds the proof and returns aggregate + proof; the VC signs `AggregateAndProof`. This transfers up to 1 MiB per aggregate over REST.
    - Needs a beacon-APIs change and agreement with other clients.
 6. **Stand-in proof size limits devnets.** `MAX_STARK_PROOF_SIZE` fits about 436 signatures per proof. This caps both a single aggregate (so committees should stay below about 436) and the whole block's merged proof. Devnets must use small validator sets, or accept partial inclusion. The block packer must budget bytes.
-7. **VRF tree derivation and storage are unspecified.** This affects key portability between clients, backup and restore, and the keystore standard. It needs a cross-client convention (likely an EIP or keystore extension) before mainnet-like use.
+7. **VRF tree storage is unspecified.** Derivation is specified since `2f43bc0f9`, so a seed moves between clients. How the seed and the derived cache are stored is not: Teku's own format is in `pq-keystore.md`. This affects key portability between clients, backup and restore. It needs a cross-client convention (likely an EIP or keystore extension) before mainnet-like use.
 8. **Keystore and tooling.** EIP-2335 is BLS-specific. There is no standard for XMSS seed + VRF seed keystores, `pq_data` generation, preregistration signing, or the exit message format submitted to the system contract (the CL spec defers these to EL system contracts that do not exist yet).
 9. **EL support.** No EL implements the 0x05–0x09 system contracts. PQ devnets will have empty request lists, so the preregistration, deposit and exit paths are covered only by ref tests.
 10. **Fork-boundary execution-requests root** (spec note in fork.md). The first PQ block's parent requests root may be computed over the EIP8483 type. Teku needs the same Teku-specific bridge as for EIP8483 until the spec resolves it.
