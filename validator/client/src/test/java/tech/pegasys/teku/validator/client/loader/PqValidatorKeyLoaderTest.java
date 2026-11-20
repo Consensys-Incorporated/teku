@@ -30,6 +30,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tech.pegasys.teku.bls.BLSPublicKey;
+import tech.pegasys.teku.bls.BLSSecretKey;
 import tech.pegasys.teku.bls.keystore.model.Cipher;
 import tech.pegasys.teku.bls.keystore.model.Pbkdf2Param;
 import tech.pegasys.teku.bls.keystore.model.Pbkdf2PseudoRandomFunction;
@@ -62,6 +63,22 @@ class PqValidatorKeyLoaderTest {
           Bytes32.fromHexStringLenient("0x5eed"));
   private static final VrfTree VRF_TREE =
       VrfTree.derive(SECRETS.vrfSeed(), VRF_DEPTH, VRF_CACHED_HEIGHT);
+
+  // Validator 0 of a PQ genesis made by ethpandaops/eth-beacon-genesis (pq branch) for the mnemonic
+  // "giant issue aisle success illegal bike spike question tent bar rely arctic volcano long crawl
+  // hungry vocal artwork sniff fantasy very lucky have athlete": its BLS secret key at
+  // m/12381/3600/0/0/0 (EIP-2333), and the XMSS public key and VRF seed the tool derived from it.
+  // The genesis tool's own VRF test pins the same VRF seed.
+  private static final Bytes32 GENESIS_VALIDATOR_0_BLS_SECRET_KEY =
+      Bytes32.fromHexString("0x0dce41fa73ae9f6bdfd51df4d422d75eee174553dba5fd450c4437e4ed3fc903");
+  private static final BLSPublicKey GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY =
+      BLSSecretKey.fromBytes(GENESIS_VALIDATOR_0_BLS_SECRET_KEY).toPublicKey();
+  private static final XmssPublicKey GENESIS_VALIDATOR_0_XMSS_PUBLIC_KEY =
+      XmssPublicKey.fromBytes(
+          Bytes32.fromHexString(
+              "0xd7792e263b94cf0b7a9f70d8374c6d34a600b4247057d4079f810caff711c632"));
+  private static final Bytes32 GENESIS_VALIDATOR_0_VRF_SEED =
+      Bytes32.fromHexString("0x543fc5a4d86e79a434e9741770f7ee17c25bdc31be8d61436d7f9836538b03df");
 
   // Loading a key builds its top tree, so derive the public key once
   private static XmssPublicKey xmssPublicKey;
@@ -222,6 +239,93 @@ class PqValidatorKeyLoaderTest {
         .hasMessageContaining("declares XMSS public key");
   }
 
+  @Test
+  void load_derivesKeysFromBlsKeyLikeTheDevnetGenesisTool() {
+    final PqValidatorKeyLoader derivingLoader = derivingLoader();
+
+    final XmssSigner signer =
+        derivingLoader
+            .load(
+                blsKeystorePath,
+                PASSWORD,
+                GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY,
+                () -> GENESIS_VALIDATOR_0_BLS_SECRET_KEY)
+            .orElseThrow();
+
+    // The XMSS public key the genesis tool registered for this validator
+    assertThat(signer.getPublicKey()).isEqualTo(GENESIS_VALIDATOR_0_XMSS_PUBLIC_KEY);
+    final VrfTree expectedVrfTree =
+        VrfTree.derive(GENESIS_VALIDATOR_0_VRF_SEED, VRF_DEPTH, VRF_CACHED_HEIGHT);
+    final UInt64 slot = UInt64.valueOf(201);
+    assertThat(VrfTree.computeRootFromProof(safeJoin(signer.computeVrfProof(slot)), slot))
+        .isEqualTo(expectedVrfTree.getRoot());
+    assertThat(derivedVrfCachePath())
+        .hasBinaryContent(expectedVrfTree.getCachedNodes().toArrayUnsafe());
+  }
+
+  @Test
+  void load_derivedKeysReadTheSavedVrfCache() {
+    // A cache from another seed shows the saved cache is read, not rebuilt
+    writeFile(derivedVrfCachePath(), VRF_TREE.getCachedNodes());
+
+    assertThatThrownBy(
+            () ->
+                derivingLoader()
+                    .load(
+                        blsKeystorePath,
+                        PASSWORD,
+                        GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY,
+                        () -> GENESIS_VALIDATOR_0_BLS_SECRET_KEY))
+        .isInstanceOf(InvalidConfigurationException.class)
+        .hasMessageContaining("was not derived from");
+  }
+
+  @Test
+  void load_prefersPqKeystoreOverDerivedKeys() {
+    writeKeystore(xmssPublicKey.toBytes(), VRF_TREE.getRoot(), Optional.of(blsPublicKey));
+    writeVrfCache(VRF_TREE.getCachedNodes());
+
+    final XmssSigner signer =
+        derivingLoader()
+            .load(blsKeystorePath, PASSWORD, blsPublicKey, PqValidatorKeyLoaderTest::noSecretKey)
+            .orElseThrow();
+
+    assertThat(signer.getPublicKey()).isEqualTo(xmssPublicKey);
+  }
+
+  @Test
+  void load_doesNotDecryptBlsKeyWhenDerivingIsDisabled() {
+    assertThat(
+            loader.load(
+                blsKeystorePath, PASSWORD, blsPublicKey, PqValidatorKeyLoaderTest::noSecretKey))
+        .isEmpty();
+  }
+
+  private PqValidatorKeyLoader derivingLoader() {
+    return new PqValidatorKeyLoader(
+        spec,
+        new PqKeyLoadingConfig(
+            new LocalXmssLeafProtector(
+                SyncDataAccessor.create(slashingProtectionDir), slashingProtectionDir),
+            Optional.of(derivedVrfCacheDir())),
+        SYNC_RUNNER,
+        VRF_DEPTH,
+        VRF_CACHED_HEIGHT);
+  }
+
+  private Path derivedVrfCacheDir() {
+    return tempDir.resolve("pq-derived-vrf-cache");
+  }
+
+  private Path derivedVrfCachePath() {
+    return PqValidatorKeyLoader.derivedVrfCachePath(
+        derivedVrfCacheDir(), GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY);
+  }
+
+  private static Bytes32 noSecretKey() {
+    throw new AssertionError("The BLS secret key should not be needed");
+  }
+
   private void writeKeystore(
       final Bytes32 declaredXmssPubkey,
       final Bytes32 declaredVrfRoot,
@@ -243,8 +347,13 @@ class PqValidatorKeyLoaderTest {
   }
 
   private void writeVrfCache(final Bytes nodes) {
+    writeFile(PqKeyFiles.vrfCachePath(blsKeystorePath), nodes);
+  }
+
+  private static void writeFile(final Path path, final Bytes content) {
     try {
-      Files.write(PqKeyFiles.vrfCachePath(blsKeystorePath), nodes.toArrayUnsafe());
+      Files.createDirectories(path.getParent());
+      Files.write(path, content.toArrayUnsafe());
     } catch (final IOException e) {
       throw new RuntimeException(e);
     }

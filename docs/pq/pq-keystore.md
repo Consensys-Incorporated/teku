@@ -80,6 +80,19 @@ The signer is available as `Validator.getXmssSigner()`. Any mismatch fails valid
 
 On networks without a PQ fork, PQ files are ignored and nothing touches the native leanXMSS library.
 
+## Keys derived from the BLS key (devnets)
+
+The PQ devnet genesis tool (ethpandaops `eth-beacon-genesis`, `pq` branch, used by the `ethereum-genesis-generator` `pq` image) doesn't write PQ keystores. It derives each genesis validator's PQ keys from the validator's BLS secret key `sk` (32 bytes, big-endian), at `m/12381/3600/i/0/0` for a mnemonic:
+
+- XMSS seed: `sha256("leanxmss-seed" ‖ sk)`;
+- VRF seed: `sha256("vrf-seed" ‖ sk)`, with the spec's depth-31 Keccak-256 VRF tree.
+
+The hidden flag `--Xvalidators-pq-keys-derived-from-bls-key` makes Teku do the same for any local BLS keystore that has no `.pq-keystore` next to it (`PqKeyStoreSecrets.deriveFromBlsSecretKey`). A `.pq-keystore`, where present, still wins. The flag is off by default: with it, anyone who has the BLS key has the PQ keys too, so it is for devnets only.
+
+- There are no declared public values to check derived keys against. A key that doesn't match the genesis just finds no validator index, and the validator gets no PQ duties.
+- The VRF tree of each derived key is saved in `<validator data dir>/pq-derived-vrf-cache/<bls pubkey>.vrf-cache`, not next to the keystore, which may be read-only. The first start derives it: about 2^32 Keccak-256 hashes, roughly 75 seconds per key on a 16-core machine (`VrfKeccak`). Later starts read it back.
+- Checked against a real genesis: for the generator's test mnemonic, the derived XMSS public key of validator 0 is the one its genesis registered, and the VRF seed is the one its VRF test pins (`PqValidatorKeyLoaderTest`, `PqKeyStoreSecretsTest`, `VrfTreeTest`).
+
 ## Not covered yet
 
 - Checking `vrf_root` and `xmss_pubkey` against the validator's registration in the beacon state (`validator_pq_registrations`, or the PQ `Validator` after the fork). That belongs with the duties work (9c) and the pre-fork registration warning.

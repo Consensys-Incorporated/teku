@@ -14,7 +14,6 @@
 package tech.pegasys.teku.spec.signatures.xmss;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static tech.pegasys.teku.spec.logic.common.helpers.MathHelpers.uint64ToBytes;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -155,17 +154,30 @@ public final class VrfTree {
     final long leafIndex = slot.longValue();
     final List<Bytes32> proof = new ArrayList<>(depth + 1);
 
-    // Below the cached height: build the subtree holding the leaf and read the siblings from it
+    // Below the cached height: build the subtree holding the leaf and read the siblings from it.
+    // Each layer is hashed in place over the one below: node j of a layer overwrites node j of the
+    // layer below, after nodes 2j and 2j + 1 (j <= 2j) have been read.
     final long subtreeStart = (leafIndex >>> cachedHeight) << cachedHeight;
-    Bytes32[] layer = new Bytes32[1 << cachedHeight];
-    for (int i = 0; i < layer.length; i++) {
-      layer[i] = computeLeaf(seed, UInt64.valueOf(subtreeStart + i));
+    final VrfKeccak keccak = new VrfKeccak();
+    final long[] seedLanes = VrfKeccak.toLanes(seed);
+    final long[] layer = new long[(1 << cachedHeight) * VrfKeccak.LANES];
+    for (int i = 0; i < 1 << cachedHeight; i++) {
+      keccak.hashLeaf(seedLanes, subtreeStart + i, layer, i * VrfKeccak.LANES);
     }
-    proof.add(layer[(int) (leafIndex - subtreeStart)]);
+    final int leafInSubtree = (int) (leafIndex - subtreeStart);
+    proof.add(VrfKeccak.fromLanes(layer, leafInSubtree * VrfKeccak.LANES));
     for (int height = 0; height < cachedHeight; height++) {
-      final int indexInLayer = (int) ((leafIndex - subtreeStart) >>> height);
-      proof.add(layer[indexInLayer ^ 1]);
-      layer = parentLayer(layer);
+      final int indexInLayer = leafInSubtree >>> height;
+      proof.add(VrfKeccak.fromLanes(layer, (indexInLayer ^ 1) * VrfKeccak.LANES));
+      final int parentCount = 1 << (cachedHeight - height - 1);
+      for (int j = 0; j < parentCount; j++) {
+        keccak.hashPair(
+            layer,
+            2 * j * VrfKeccak.LANES,
+            (2 * j + 1) * VrfKeccak.LANES,
+            layer,
+            j * VrfKeccak.LANES);
+      }
     }
 
     // From the cached height up: read the siblings from the cached layers
@@ -178,7 +190,9 @@ public final class VrfTree {
 
   /** compute_vrf_leaf: {@code keccak256(vrf_seed ‖ uint_to_bytes(index))}. */
   public static Bytes32 computeLeaf(final Bytes32 seed, final UInt64 index) {
-    return Hash.keccak256(Bytes.concatenate(seed, uint64ToBytes(index)));
+    final long[] leaf = new long[VrfKeccak.LANES];
+    new VrfKeccak().hashLeaf(VrfKeccak.toLanes(seed), index.longValue(), leaf, 0);
+    return VrfKeccak.fromLanes(leaf, 0);
   }
 
   /**
@@ -187,19 +201,23 @@ public final class VrfTree {
    */
   public static Bytes32 computeNode(final Bytes32 seed, final int height, final long index) {
     checkArgument(height >= 0 && height < Long.SIZE - 1, "Invalid VRF tree height %s", height);
+    final VrfKeccak keccak = new VrfKeccak();
+    final long[] seedLanes = VrfKeccak.toLanes(seed);
+    // Slots 0..height hold the pending node at each level; the last slot holds the current node
+    final int current = (height + 1) * VrfKeccak.LANES;
+    final long[] nodes = new long[current + VrfKeccak.LANES];
     final long firstLeaf = index << height;
-    final Bytes32[] pending = new Bytes32[height + 1];
     for (long i = 0; i < (1L << height); i++) {
-      Bytes32 node = computeLeaf(seed, UInt64.valueOf(firstLeaf + i));
+      keccak.hashLeaf(seedLanes, firstLeaf + i, nodes, current);
       // Each trailing one bit of i closes a complete subtree with the pending left sibling
       int level = 0;
       for (long bits = i; (bits & 1) == 1; bits >>>= 1) {
-        node = hashPair(pending[level], node);
+        keccak.hashPair(nodes, level * VrfKeccak.LANES, current, nodes, current);
         level++;
       }
-      pending[level] = node;
+      System.arraycopy(nodes, current, nodes, level * VrfKeccak.LANES, VrfKeccak.LANES);
     }
-    return pending[height];
+    return VrfKeccak.fromLanes(nodes, height * VrfKeccak.LANES);
   }
 
   /**

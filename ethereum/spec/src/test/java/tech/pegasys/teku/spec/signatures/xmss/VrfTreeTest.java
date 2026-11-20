@@ -300,6 +300,19 @@ class VrfTreeTest {
   }
 
   @Test
+  void computeNode_matchesDevnetGenesisTool() {
+    // The pinned vector in ethpandaops/eth-beacon-genesis (pq) validators/vrf_test.go: node 1 at
+    // height 18 for the VRF seed of its devnet validator 0
+    final Bytes32 seed =
+        Bytes32.fromHexString("0x543fc5a4d86e79a434e9741770f7ee17c25bdc31be8d61436d7f9836538b03df");
+
+    assertThat(VrfTree.computeNode(seed, 18, 1))
+        .isEqualTo(
+            Bytes32.fromHexString(
+                "0xa8e932e0dd6ec363635fdb0b30ea60d24cc1a861904c879e236c0e77f9efa562"));
+  }
+
+  @Test
   void computeRootFromProof_onlyReadsTheLowSlotBits() {
     final SpecVector vector = SPEC_VECTORS.getFirst();
     final VrfTree tree = VrfTree.derive(vector.seed(), DEPTH, 4);

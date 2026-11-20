@@ -72,6 +72,7 @@ public class ValidatorConfig {
   public static final UInt64 DEFAULT_BUILDER_REGISTRATION_GAS_LIMIT = UInt64.valueOf(60_000_000);
   public static final boolean DEFAULT_OBOL_DVT_SELECTIONS_ENDPOINT_ENABLED = false;
   public static final boolean DEFAULT_ATTESTATIONS_V2_APIS_ENABLED = false;
+  public static final boolean DEFAULT_PQ_KEYS_DERIVED_FROM_BLS_KEY = false;
   public static final int DEFAULT_EVENT_STREAM_MAX_EVENT_SIZE_MEGABYTES = 8;
   public static final int DEFAULT_BEACON_API_MAX_RESPONSE_SIZE_MB = 64;
   // Builder default options
@@ -135,6 +136,7 @@ public class ValidatorConfig {
   private final UInt64 p2pBuilderBoostFactor;
   private final UInt64 builderMaxExecutionPayment;
   private final List<URL> builderUrls;
+  private final boolean pqKeysDerivedFromBlsKey;
 
   private ValidatorConfig(
       final List<String> validatorKeys,
@@ -184,7 +186,8 @@ public class ValidatorConfig {
       final UInt64 p2pBuilderMinBid,
       final UInt64 p2pBuilderBoostFactor,
       final UInt64 builderMaxExecutionPayment,
-      final List<URL> builderUrls) {
+      final List<URL> builderUrls,
+      final boolean pqKeysDerivedFromBlsKey) {
     this.validatorKeys = validatorKeys;
     this.validatorExternalSignerPublicKeySources = validatorExternalSignerPublicKeySources;
     this.validatorExternalSignerUrl = validatorExternalSignerUrl;
@@ -238,6 +241,7 @@ public class ValidatorConfig {
     this.p2pBuilderBoostFactor = p2pBuilderBoostFactor;
     this.builderMaxExecutionPayment = builderMaxExecutionPayment;
     this.builderUrls = builderUrls;
+    this.pqKeysDerivedFromBlsKey = pqKeysDerivedFromBlsKey;
 
     LOG.debug(
         "Executor queue - {} threads, max queue size {} ", executorThreads, executorMaxQueueSize);
@@ -452,6 +456,15 @@ public class ValidatorConfig {
     return builderUrls;
   }
 
+  /**
+   * Whether a validator with no PQ keystore gets PQ keys derived from its BLS secret key, the way
+   * devnet genesis tools derive them. Off by default: anyone who has the BLS key can then derive
+   * the PQ keys too.
+   */
+  public boolean isPqKeysDerivedFromBlsKey() {
+    return pqKeysDerivedFromBlsKey;
+  }
+
   public static final class Builder {
     private List<String> validatorKeys = new ArrayList<>();
     private List<String> validatorExternalSignerPublicKeySources = new ArrayList<>();
@@ -514,6 +527,7 @@ public class ValidatorConfig {
     private UInt64 p2pBuilderBoostFactor = DEFAULT_P2P_BUILDER_BOOST_FACTOR;
     private UInt64 builderMaxExecutionPayment = DEFAULT_BUILDER_MAX_EXECUTION_PAYMENT;
     private List<URL> builderUrls = new ArrayList<>();
+    private boolean pqKeysDerivedFromBlsKey = DEFAULT_PQ_KEYS_DERIVED_FROM_BLS_KEY;
 
     private Builder() {}
 
@@ -835,6 +849,11 @@ public class ValidatorConfig {
       return this;
     }
 
+    public Builder pqKeysDerivedFromBlsKey(final boolean pqKeysDerivedFromBlsKey) {
+      this.pqKeysDerivedFromBlsKey = pqKeysDerivedFromBlsKey;
+      return this;
+    }
+
     public ValidatorConfig build() {
       validateExternalSignerUrlAndPublicKeys();
       validateExternalSignerKeystoreAndPasswordFileConfig();
@@ -888,7 +907,8 @@ public class ValidatorConfig {
           p2pBuilderMinBid,
           p2pBuilderBoostFactor,
           builderMaxExecutionPayment,
-          builderUrls);
+          builderUrls,
+          pqKeysDerivedFromBlsKey);
     }
 
     private void validateExternalSignerUrlAndPublicKeys() {
