@@ -34,6 +34,7 @@ import tech.pegasys.teku.networking.eth2.gossip.DataColumnSidecarGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.ExecutionPayloadBidGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.ExecutionPayloadGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.PayloadAttestationMessageGossipManager;
+import tech.pegasys.teku.networking.eth2.gossip.PqAggregateGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.ProposerPreferencesGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.ProposerSlashingGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.SignedBlsToExecutionChangeGossipManager;
@@ -84,9 +85,10 @@ public class GossipForkSubscriptionsGloasTest {
     gossipForkSubscriptions.addGossipManagers(
         new ForkInfo(pqFork, dataStructureUtil.randomBytes32()), forkDigest());
 
-    verify(gossipForkSubscriptions, times(8)).addGossipManager(any());
+    verify(gossipForkSubscriptions, times(9)).addGossipManager(any());
     verify(gossipForkSubscriptions).addGossipManager(any(AttestationGossipManager.class));
     verify(gossipForkSubscriptions).addGossipManager(any(BlockGossipManager.class));
+    verify(gossipForkSubscriptions).addGossipManager(any(PqAggregateGossipManager.class));
     verify(gossipForkSubscriptions).addGossipManager(any(ProposerSlashingGossipManager.class));
     verify(gossipForkSubscriptions).addGossipManager(any(AttesterSlashingGossipManager.class));
     verify(gossipForkSubscriptions).addGossipManager(any(DataColumnSidecarGossipManager.class));
@@ -102,8 +104,9 @@ public class GossipForkSubscriptionsGloasTest {
         .addGossipManager(any(SyncCommitteeMessageGossipManager.class));
     verify(gossipForkSubscriptions, never())
         .addGossipManager(any(SignedContributionAndProofGossipManager.class));
-    // Their PQ types aren't decoded yet
+    // Earlier forks' aggregate type
     verify(gossipForkSubscriptions, never()).addGossipManager(any(AggregateGossipManager.class));
+    // Its PQ type isn't decoded yet
     verify(gossipForkSubscriptions, never())
         .addGossipManager(any(PayloadAttestationMessageGossipManager.class));
   }

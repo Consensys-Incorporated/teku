@@ -27,6 +27,7 @@ import tech.pegasys.teku.networking.eth2.gossip.AttestationGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.AttesterSlashingGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.BlockGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.GossipManager;
+import tech.pegasys.teku.networking.eth2.gossip.PqAggregateGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.ProposerSlashingGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.VoluntaryExitGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.encoding.GossipEncoding;
@@ -167,6 +168,21 @@ public class GossipForkSubscriptionsPhase0 implements GossipForkSubscriptions {
             aggregateProcessor,
             debugDataDumper);
     addGossipManager(aggregateGossipManager);
+  }
+
+  /** PQ's aggregates (SignedAggregateAndProofPq), to the same aggregate processor. */
+  void addPqAggregateGossipManager(final ForkInfo forkInfo, final Bytes4 forkDigest) {
+    addGossipManager(
+        new PqAggregateGossipManager(
+            spec,
+            recentChainData,
+            asyncRunner,
+            discoveryNetwork,
+            gossipEncoding,
+            forkInfo,
+            forkDigest,
+            aggregateProcessor,
+            debugDataDumper));
   }
 
   void addVoluntaryExitGossipManager(final ForkInfo forkInfo, final Bytes4 forkDigest) {

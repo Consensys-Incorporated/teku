@@ -149,13 +149,14 @@ public class GossipForkSubscriptionsGloas extends GossipForkSubscriptionsFulu {
    * BLS to execution changes, sync committee messages and contributions, and the light client
    * topics are removed (PQ p2p-interface.md).
    *
-   * <p>Aggregates and payload attestation messages carry PQ types that their gossip managers don't
-   * decode yet, so they are not subscribed: a message that fails to decode would be rejected and
-   * its sender penalised.
+   * <p>Aggregates are PQ's own type, with their own gossip manager. Payload attestation messages
+   * also carry a PQ type, which isn't decoded yet, so that topic is not subscribed: a message that
+   * fails to decode would be rejected and its sender penalised.
    */
   private void addPqGossipManagers(final ForkInfo forkInfo, final Bytes4 forkDigest) {
     addAttestationGossipManager(forkInfo, forkDigest);
     addBlockGossipManager(forkInfo, forkDigest);
+    addPqAggregateGossipManager(forkInfo, forkDigest);
     addProposerSlashingGossipManager(forkInfo, forkDigest);
     addAttesterSlashingGossipManager(forkInfo, forkDigest);
     addDataColumnSidecarGossipManager(forkInfo, forkDigest);

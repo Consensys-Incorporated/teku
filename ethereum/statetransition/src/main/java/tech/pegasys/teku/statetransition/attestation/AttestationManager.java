@@ -37,6 +37,7 @@ import tech.pegasys.teku.statetransition.forkchoice.ForkChoice;
 import tech.pegasys.teku.statetransition.util.FutureItems;
 import tech.pegasys.teku.statetransition.util.PendingAttestationPool;
 import tech.pegasys.teku.statetransition.validation.AggregateAttestationValidator;
+import tech.pegasys.teku.statetransition.validation.AggregateAttestationValidatorPq;
 import tech.pegasys.teku.statetransition.validation.AttestationValidator;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 import tech.pegasys.teku.statetransition.validation.ValidationResultCode;
@@ -66,6 +67,7 @@ public class AttestationManager extends Service
 
   private final AttestationValidator attestationValidator;
   private final AggregateAttestationValidator aggregateValidator;
+  private final Optional<AggregateAttestationValidatorPq> pqAggregateValidator;
   // SignatureVerificationService is only included here, so that it's lifecycle can be controlled by
   // AttestationManager
   private final SignatureVerificationService signatureVerificationService;
@@ -79,12 +81,35 @@ public class AttestationManager extends Service
       final AggregateAttestationValidator aggregateValidator,
       final SignatureVerificationService signatureVerificationService,
       final ActiveValidatorChannel activeValidatorChannel) {
+    this(
+        attestationProcessor,
+        pendingAttestationPool,
+        futureAttestations,
+        aggregatingAttestationPool,
+        attestationValidator,
+        aggregateValidator,
+        Optional.empty(),
+        signatureVerificationService,
+        activeValidatorChannel);
+  }
+
+  AttestationManager(
+      final ForkChoice attestationProcessor,
+      final PendingAttestationPool pendingAttestationPool,
+      final FutureItems<ValidatableAttestation> futureAttestations,
+      final AggregatingAttestationPool aggregatingAttestationPool,
+      final AttestationValidator attestationValidator,
+      final AggregateAttestationValidator aggregateValidator,
+      final Optional<AggregateAttestationValidatorPq> pqAggregateValidator,
+      final SignatureVerificationService signatureVerificationService,
+      final ActiveValidatorChannel activeValidatorChannel) {
     this.attestationProcessor = attestationProcessor;
     this.pendingAttestationPool = pendingAttestationPool;
     this.futureAttestations = futureAttestations;
     this.aggregatingAttestationPool = aggregatingAttestationPool;
     this.attestationValidator = attestationValidator;
     this.aggregateValidator = aggregateValidator;
+    this.pqAggregateValidator = pqAggregateValidator;
     this.signatureVerificationService = signatureVerificationService;
     this.activeValidatorChannel = activeValidatorChannel;
   }
@@ -98,6 +123,29 @@ public class AttestationManager extends Service
       final AggregateAttestationValidator aggregateValidator,
       final SignatureVerificationService signatureVerificationService,
       final ActiveValidatorChannel activeValidatorChannel) {
+    return create(
+        pendingAttestationPool,
+        futureAttestations,
+        attestationProcessor,
+        aggregatingAttestationPool,
+        attestationValidator,
+        aggregateValidator,
+        Optional.empty(),
+        signatureVerificationService,
+        activeValidatorChannel);
+  }
+
+  /** With {@code pqAggregateValidator} for networks that schedule PQ. */
+  public static AttestationManager create(
+      final PendingAttestationPool pendingAttestationPool,
+      final FutureItems<ValidatableAttestation> futureAttestations,
+      final ForkChoice attestationProcessor,
+      final AggregatingAttestationPool aggregatingAttestationPool,
+      final AttestationValidator attestationValidator,
+      final AggregateAttestationValidator aggregateValidator,
+      final Optional<AggregateAttestationValidatorPq> pqAggregateValidator,
+      final SignatureVerificationService signatureVerificationService,
+      final ActiveValidatorChannel activeValidatorChannel) {
     return new AttestationManager(
         attestationProcessor,
         pendingAttestationPool,
@@ -105,6 +153,7 @@ public class AttestationManager extends Service
         aggregatingAttestationPool,
         attestationValidator,
         aggregateValidator,
+        pqAggregateValidator,
         signatureVerificationService,
         activeValidatorChannel);
   }
@@ -155,8 +204,19 @@ public class AttestationManager extends Service
 
   public SafeFuture<InternalValidationResult> addAggregate(
       final ValidatableAttestation attestation, final Optional<UInt64> arrivalTime) {
-    SafeFuture<InternalValidationResult> validationResult =
-        aggregateValidator.validate(attestation);
+    final SafeFuture<InternalValidationResult> validationResult =
+        attestation
+            .getPqAggregate()
+            .map(
+                pqAggregate ->
+                    pqAggregateValidator
+                        .map(validator -> validator.validate(pqAggregate, attestation))
+                        .orElseGet(
+                            () ->
+                                SafeFuture.completedFuture(
+                                    InternalValidationResult.reject(
+                                        "PQ aggregates are not supported on this network"))))
+            .orElseGet(() -> aggregateValidator.validate(attestation));
     processInternallyValidatedAttestation(validationResult, attestation);
     return validationResult;
   }

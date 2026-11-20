@@ -260,6 +260,7 @@ import tech.pegasys.teku.statetransition.util.PendingPool;
 import tech.pegasys.teku.statetransition.util.PoolFactory;
 import tech.pegasys.teku.statetransition.util.RPCFetchDelayProvider;
 import tech.pegasys.teku.statetransition.validation.AggregateAttestationValidator;
+import tech.pegasys.teku.statetransition.validation.AggregateAttestationValidatorPq;
 import tech.pegasys.teku.statetransition.validation.AttestationValidator;
 import tech.pegasys.teku.statetransition.validation.AttesterSlashingValidator;
 import tech.pegasys.teku.statetransition.validation.BlobSidecarGossipValidator;
@@ -2104,6 +2105,13 @@ public class BeaconChainController extends Service implements BeaconChainControl
                 attestation ->
                     aggregateValidator.addSeenAggregate(
                         ValidatableAttestation.from(spec, attestation))));
+    // PQ aggregates are a different type, with their own validator
+    final Optional<AggregateAttestationValidatorPq> pqAggregateValidator =
+        spec.isMilestoneSupported(SpecMilestone.PQ)
+            ? Optional.of(
+                new AggregateAttestationValidatorPq(
+                    spec, attestationValidator, gossipValidationHelper))
+            : Optional.empty();
     attestationManager =
         AttestationManager.create(
             pendingAttestationPool,
@@ -2112,6 +2120,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
             aggregatingAttestationPool,
             attestationValidator,
             aggregateValidator,
+            pqAggregateValidator,
             signatureVerificationService,
             eventChannels.getPublisher(ActiveValidatorChannel.class, beaconAsyncRunner));
     eventChannels
