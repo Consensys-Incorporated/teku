@@ -13,25 +13,35 @@
 
 package tech.pegasys.teku.spec.datastructures.operations.versions.pq;
 
+import java.util.Optional;
+import java.util.function.Supplier;
 import org.apache.tuweni.bytes.Bytes;
+import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszBitlist;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
 import tech.pegasys.teku.infrastructure.ssz.containers.Container4;
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema4;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszPrimitiveSchemas;
+import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszBitlistSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszBitvectorSchema;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
+import tech.pegasys.teku.spec.datastructures.operations.AttestationSchema;
 import tech.pegasys.teku.spec.datastructures.type.SszXmssSignature;
 import tech.pegasys.teku.spec.datastructures.type.SszXmssSignatureSchema;
 
 /** A single attester's attestation in PQ, signed with XMSS at its target epoch's leaf. */
 public class SingleAttestationPq
-    extends Container4<
-        SingleAttestationPq, SszUInt64, SszUInt64, AttestationData, SszXmssSignature> {
+    extends Container4<SingleAttestationPq, SszUInt64, SszUInt64, AttestationData, SszXmssSignature>
+    implements Attestation {
 
   public static class SingleAttestationPqSchema
       extends ContainerSchema4<
-          SingleAttestationPq, SszUInt64, SszUInt64, AttestationData, SszXmssSignature> {
+          SingleAttestationPq, SszUInt64, SszUInt64, AttestationData, SszXmssSignature>
+      implements AttestationSchema<SingleAttestationPq> {
 
     private SingleAttestationPqSchema() {
       super(
@@ -45,6 +55,30 @@ public class SingleAttestationPq
     @Override
     public SingleAttestationPq createFromBackingNode(final TreeNode node) {
       return new SingleAttestationPq(this, node);
+    }
+
+    @Override
+    public Attestation create(
+        final SszBitlist aggregationBits,
+        final AttestationData data,
+        final BLSSignature signature,
+        final Supplier<SszBitvector> committeeBits) {
+      throw new UnsupportedOperationException("A PQ single attestation has no aggregation bits");
+    }
+
+    @Override
+    public SszBitlistSchema<?> getAggregationBitsSchema() {
+      throw new UnsupportedOperationException("A PQ single attestation has no aggregation bits");
+    }
+
+    @Override
+    public Optional<SszBitvectorSchema<?>> getCommitteeBitsSchema() {
+      return Optional.empty();
+    }
+
+    @Override
+    public boolean requiresCommitteeBits() {
+      return false;
     }
   }
 
@@ -71,10 +105,44 @@ public class SingleAttestationPq
     return getField0().get();
   }
 
+  @Override
+  public UInt64 getFirstCommitteeIndex() {
+    return getCommitteeIndex();
+  }
+
+  @Override
+  public SszBitlist getAggregationBits() {
+    throw new UnsupportedOperationException("A PQ single attestation has no aggregation bits");
+  }
+
+  /**
+   * @throws UnsupportedOperationException always: a PQ single attestation is signed with XMSS
+   */
+  @Override
+  public BLSSignature getAggregateSignature() {
+    throw new UnsupportedOperationException("A PQ single attestation is signed with XMSS");
+  }
+
+  @Override
+  public boolean requiresCommitteeBits() {
+    return false;
+  }
+
+  @Override
+  public boolean isSingleAttestation() {
+    return true;
+  }
+
+  @Override
+  public UInt64 getValidatorIndexRequired() {
+    return getAttesterIndex();
+  }
+
   public UInt64 getAttesterIndex() {
     return getField1().get();
   }
 
+  @Override
   public AttestationData getData() {
     return getField2();
   }

@@ -10,7 +10,7 @@ Phase 6 of [pq-fork-plan.md](pq-fork-plan.md): taking the merged PQ state transi
 |---|---|---|
 | 6a | Block production at the spec level, and test chains through the PQ fork | In review (#11674) |
 | 6b | Block import and fork choice over PQ chains | In review (#11676, stacked on #11674) |
-| 6c | Gossip validation of PQ messages | In progress (`pq-bn-gossip`): 6c-1 done |
+| 6c | Gossip validation of PQ messages | In progress: 6c-1 (`pq-bn-gossip`) and 6c-2 (`pq-bn-gossip-atts`) done |
 | 6d | Attestation pool, proofs and packing | Not started |
 | 6e | Beacon-node block production | Not started |
 
@@ -48,13 +48,22 @@ Phase 6 of [pq-fork-plan.md](pq-fork-plan.md): taking the merged PQ state transi
 - **Blocks:** the proposer's signature at offset 0, both before a future block is saved and after its state is built. The finalized state may be from before the fork, without XMSS keys, so the head state is the fallback.
 - **Envelopes** at offset 4, **preferences** at offset 3 of the proposal slot, and **bids** at the leaf the signature carries, which must be in the builders' bid range (`verify_execution_payload_bid_signature`).
 
-**6c-2: attestations.**
-- Single attestations: XMSS at the target epoch's attestation leaf; the subnet is modulo 16.
-- Aggregates:
-  - no selection proof; the aggregator must be in the aggregation committee;
-  - verify the proof against the aggregate's statements;
-  - apply the best-aggregate (balance) seen rule.
-- Payload attestation messages: these have their own PQ type (`PayloadAttestationMessagePq`), so they come with the PQ topic decoders. XMSS at offset 2.
+**6c-2: attestations (done, except payload attestation messages).**
+- **Single attestations go through the existing pipeline.** `SingleAttestationPq` implements `Attestation`, as Electra's `SingleAttestation` does; the BLS-only accessors throw.
+  - `AttestationUtilPq` verifies a PQ single at its target epoch's attestation leaf, after checking the attester is in the committee.
+  - It then converts it to a one-attester PQ aggregate for the pool and fork choice, as Electra does.
+  - `ValidatableAttestation` keeps the original single, whose XMSS signature aggregators prove (6d).
+- **Subnets:** attestation subnets are computed modulo `ATTESTATION_SUBNET_COUNT_PQ` (16).
+- **Aggregates:** `AggregateAttestationValidatorPq` handles them, since `SignedAggregateAndProofPq` is not a `SignedAggregateAndProof`. Its PQ checks run against the attestation's state:
+  - exactly one committee;
+  - the committee index is in range, and the bits match the committee size;
+  - the aggregate has participants;
+  - the aggregator is in the aggregation committee (`AttestationUtilPq.isAggregator`), with no selection proof;
+  - the aggregator's XMSS signature at offset 1;
+  - the STARK proof (`isValidAggregateProof`).
+
+  The aggregate is then marked verified, keeps its proof for the pool, and goes through `AttestationValidator`'s shared checks. The seen rules are the spec's superset rule and one aggregate per aggregator and epoch.
+- **Still to do:** payload attestation messages have their own PQ type (`PayloadAttestationMessagePq`), so they come with the PQ topic decoders (phase 7), as does wiring the aggregate validator to its gossip topic.
 
 **6c-3: the rest.**
 - **Slashings:** `ProposerSlashingValidator` and `AttesterSlashingValidator`, still BLS today.

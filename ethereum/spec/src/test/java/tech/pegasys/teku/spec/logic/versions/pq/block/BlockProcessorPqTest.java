@@ -119,7 +119,13 @@ class BlockProcessorPqTest {
       };
 
   private final AttestationUtilPq attestationUtil =
-      new AttestationUtilPq(config, schemaDefinitions, accessors, miscHelpers, starkVerifier);
+      new AttestationUtilPq(
+          config,
+          schemaDefinitions,
+          accessors,
+          miscHelpers,
+          starkVerifier,
+          XmssSignatureVerifier.NO_OP);
 
   private final BlockProcessorPq blockProcessor =
       new BlockProcessorPq(
