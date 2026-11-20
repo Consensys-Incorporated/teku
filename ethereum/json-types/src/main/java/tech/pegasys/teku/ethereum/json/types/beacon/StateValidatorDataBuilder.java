@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.ethereum.json.types.beacon;
 
+import static tech.pegasys.teku.ethereum.json.types.beacon.ValidatorTypeDefinition.VALIDATOR_TYPE;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.EXECUTION_OPTIMISTIC;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.FINALIZED;
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.BOOLEAN_TYPE;
@@ -26,18 +27,10 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaDataBuilder;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
-import tech.pegasys.teku.spec.datastructures.state.ValidatorPhase0;
 
 public class StateValidatorDataBuilder {
   private static final DeserializableTypeDefinition<ValidatorStatus> STATUS_TYPE =
       DeserializableTypeDefinition.enumOf(ValidatorStatus.class);
-
-  // The BLS-keyed validator's JSON shape. PQ validators get their own when the REST API supports
-  // PQ.
-  @SuppressWarnings("unchecked")
-  private static final DeserializableTypeDefinition<Validator> VALIDATOR_TYPE =
-      (DeserializableTypeDefinition<Validator>)
-          (DeserializableTypeDefinition<?>) ValidatorPhase0.SSZ_SCHEMA.getJsonTypeDefinition();
 
   public static final DeserializableTypeDefinition<StateValidatorData> STATE_VALIDATOR_DATA_TYPE =
       DeserializableTypeDefinition.object(StateValidatorData.class, StateValidatorDataBuilder.class)

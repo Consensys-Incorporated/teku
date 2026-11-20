@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.spec.datastructures.state;
 
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.bytes.Bytes48;
 import tech.pegasys.teku.bls.BLSPublicKey;
@@ -44,6 +45,12 @@ public interface Validator extends SszContainer {
    * @throws UnsupportedOperationException for a PQ validator, which has no BLS key
    */
   BLSPublicKey getPublicKey();
+
+  /**
+   * The key the validator signs with, as the REST API shows it: a 48-byte BLS public key, or a
+   * 32-byte XMSS public key for a PQ validator.
+   */
+  Bytes getSigningKeyBytes();
 
   Bytes32 getWithdrawalCredentials();
 

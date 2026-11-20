@@ -37,6 +37,7 @@ import tech.pegasys.teku.spec.datastructures.operations.versions.pq.IndexedAttes
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.IndexedAttestationPqSchema;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.XmssAggregateStatement;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconStateCache;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.pq.BeaconStatePq;
 import tech.pegasys.teku.spec.datastructures.state.versions.pq.BuilderPq;
 import tech.pegasys.teku.spec.datastructures.state.versions.pq.BuilderPreregistration;
@@ -258,18 +259,14 @@ public class BeaconStateAccessorsPq extends BeaconStateAccessorsGloas {
   }
 
   /**
-   * The index of the validator with XMSS public key {@code pubkey}. A linear scan for now; an index
-   * cache keyed by XMSS public key comes with the switch-over.
+   * The index of the validator with XMSS public key {@code pubkey}, through the state's validator
+   * index cache.
    */
   public Optional<Integer> getValidatorIndexByXmssKey(
       final BeaconState state, final Bytes32 pubkey) {
-    final SszList<?> validators = state.getValidators();
-    for (int i = 0; i < validators.size(); i++) {
-      if (((ValidatorPq) validators.get(i)).getXmssPublicKey().equals(pubkey)) {
-        return Optional.of(i);
-      }
-    }
-    return Optional.empty();
+    return BeaconStateCache.getTransitionCaches(state)
+        .getValidatorIndexCache()
+        .getValidatorIndexByXmssKey(state, pubkey);
   }
 
   /** The index of the builder with XMSS public key {@code pubkey}. A linear scan for now. */

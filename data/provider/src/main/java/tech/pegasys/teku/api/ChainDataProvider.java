@@ -105,6 +105,8 @@ import tech.pegasys.teku.storage.client.RecentChainData;
 
 public class ChainDataProvider {
   private static final Logger LOG = LogManager.getLogger();
+  // "0x" and 64 hex characters
+  private static final int XMSS_PUBLIC_KEY_HEX_LENGTH = 66;
   private final BlockSelectorFactory blockSelectorFactory;
   private final StateSelectorFactory stateSelectorFactory;
   private final BlobSidecarSelectorFactory blobSidecarSelectorFactory;
@@ -404,6 +406,10 @@ public class ChainDataProvider {
     }
 
     if (validatorParameter.toLowerCase(Locale.ROOT).startsWith("0x")) {
+      // PQ validators are keyed by 32-byte XMSS public keys
+      if (validatorParameter.length() == XMSS_PUBLIC_KEY_HEX_LENGTH) {
+        return spec.getValidatorIndexByXmssKey(state, getBytes32FromParameter(validatorParameter));
+      }
       final Bytes48 keyBytes = getBytes48FromParameter(validatorParameter);
       try {
         return spec.getValidatorIndex(state, BLSPublicKey.fromBytesCompressed(keyBytes));
@@ -428,12 +434,22 @@ public class ChainDataProvider {
     }
   }
 
+  private Bytes32 getBytes32FromParameter(final String validatorParameter) {
+    try {
+      return Bytes32.fromHexString(validatorParameter);
+    } catch (IllegalArgumentException ex) {
+      throw new BadRequestException(
+          String.format("Invalid public key: %s; %s", validatorParameter, ex.getMessage()));
+    }
+  }
+
   private Bytes48 getBytes48FromParameter(final String validatorParameter) {
     try {
       if (validatorParameter.length() != 98) {
         throw new IllegalArgumentException(
             String.format(
-                "Expected a length of 98 for a hex encoded bytes48 with 0x prefix, but got length %s",
+                "Expected a length of 98 for a hex encoded bytes48 BLS public key, or 66 for a"
+                    + " bytes32 XMSS public key, with 0x prefix, but got length %s",
                 validatorParameter.length()));
       }
       return Bytes48.fromHexString(validatorParameter);
@@ -730,6 +746,10 @@ public class ChainDataProvider {
     }
 
     if (builderParameter.toLowerCase(Locale.ROOT).startsWith("0x")) {
+      // PQ builders are keyed by 32-byte XMSS public keys
+      if (builderParameter.length() == XMSS_PUBLIC_KEY_HEX_LENGTH) {
+        return spec.getBuilderIndexByXmssKey(state, getBytes32FromParameter(builderParameter));
+      }
       final Bytes48 keyBytes = getBytes48FromParameter(builderParameter);
       try {
         return findBuilderIndexByPublicKey(state, BLSPublicKey.fromBytesCompressed(keyBytes));
@@ -755,6 +775,10 @@ public class ChainDataProvider {
 
   private Optional<Integer> findBuilderIndexByPublicKey(
       final BeaconStateGloas state, final BLSPublicKey publicKey) {
+    if (state.toVersionPq().isPresent()) {
+      // PQ builders have no BLS key
+      return Optional.empty();
+    }
     final SszList<Builder> builders = state.getBuilders();
     return IntStream.range(0, builders.size())
         .filter(i -> builders.get(i).getPublicKey().equals(publicKey))

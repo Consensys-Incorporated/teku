@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.spec.datastructures.state.versions.pq;
 
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.bytes.Bytes48;
 import tech.pegasys.teku.bls.BLSPublicKey;
@@ -129,6 +130,11 @@ public class ValidatorPq
   @Override
   public BLSPublicKey getPublicKey() {
     throw new UnsupportedOperationException("A PQ validator has no BLS public key");
+  }
+
+  @Override
+  public Bytes getSigningKeyBytes() {
+    return getXmssPublicKey();
   }
 
   @Override

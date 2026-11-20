@@ -67,7 +67,8 @@ public class EpochAttestationRewardsCalculator {
         .filter(
             i ->
                 validatorIds.isEmpty()
-                    || validatorIds.contains(allValidators.get(i).getPublicKey().toHexString())
+                    || validatorIds.contains(
+                        allValidators.get(i).getSigningKeyBytes().toHexString())
                     || validatorIds.contains(String.valueOf(i)))
         .filter(i -> validatorStatuses.getStatuses().get(i).isEligibleValidator())
         .distinct()

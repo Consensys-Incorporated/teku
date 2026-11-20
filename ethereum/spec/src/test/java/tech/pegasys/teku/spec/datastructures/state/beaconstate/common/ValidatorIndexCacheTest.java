@@ -22,11 +22,18 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.collections.cache.Cache;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.pq.BeaconStatePq;
+import tech.pegasys.teku.spec.datastructures.state.versions.pq.ValidatorPq;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 public class ValidatorIndexCacheTest {
@@ -94,5 +101,89 @@ public class ValidatorIndexCacheTest {
     // state didn't get scanned, because we had the index but it was out of bounds
     assertThat(validatorIndexCache.getLastCachedIndex()).isEqualTo(-1);
     assertThat(validatorIndexCache.getValidatorIndices().size()).isEqualTo(1);
+  }
+
+  @Test
+  public void shouldFindPqValidatorsByXmssKey() {
+    final BeaconState pqState = pqState(pqKey(0), pqKey(1), pqKey(2));
+    final ValidatorIndexCache validatorIndexCache = new ValidatorIndexCache();
+
+    assertThat(validatorIndexCache.getValidatorIndexByXmssKey(pqState, pqKey(2))).contains(2);
+    // Scanning for index 2 cached the keys before it
+    assertThat(validatorIndexCache.getValidatorIndexByXmssKey(pqState, pqKey(1))).contains(1);
+    assertThat(validatorIndexCache.getValidatorIndexByXmssKey(pqState, pqKey(3))).isEmpty();
+  }
+
+  @Test
+  public void shouldFindPqValidatorsAppendedAfterAnEarlierLookup() {
+    final ValidatorIndexCache validatorIndexCache = new ValidatorIndexCache();
+    assertThat(validatorIndexCache.getValidatorIndexByXmssKey(pqState(pqKey(0)), pqKey(1)))
+        .isEmpty();
+
+    assertThat(
+            validatorIndexCache.getValidatorIndexByXmssKey(pqState(pqKey(0), pqKey(1)), pqKey(1)))
+        .contains(1);
+  }
+
+  @Test
+  public void shouldNotUseAnXmssIndexCachedFromAnotherBranch() {
+    final ValidatorIndexCache validatorIndexCache = new ValidatorIndexCache();
+    // One branch appended key 2 at index 1, another key 3, then key 2 at index 2
+    assertThat(
+            validatorIndexCache.getValidatorIndexByXmssKey(pqState(pqKey(0), pqKey(2)), pqKey(2)))
+        .contains(1);
+    final BeaconState otherBranch = pqState(pqKey(0), pqKey(3), pqKey(2));
+
+    assertThat(validatorIndexCache.getValidatorIndexByXmssKey(otherBranch, pqKey(2))).contains(2);
+    assertThat(validatorIndexCache.getValidatorIndexByXmssKey(otherBranch, pqKey(3))).contains(1);
+  }
+
+  @Test
+  public void shouldFindNoBlsKeyInAPqState() {
+    final ValidatorIndexCache validatorIndexCache = new ValidatorIndexCache();
+
+    assertThat(validatorIndexCache.getValidatorIndex(pqState(pqKey(0)), missingPublicKey))
+        .isEmpty();
+  }
+
+  @Test
+  public void shouldFindPqValidatorsWithoutCaching() {
+    final BeaconState pqState = pqState(pqKey(0), pqKey(1));
+
+    assertThat(ValidatorIndexCache.NO_OP_INSTANCE.getValidatorIndexByXmssKey(pqState, pqKey(1)))
+        .contains(1);
+    assertThat(ValidatorIndexCache.NO_OP_INSTANCE.getValidatorIndexByXmssKey(pqState, pqKey(0)))
+        .contains(0);
+  }
+
+  private static Bytes32 pqKey(final int i) {
+    return Bytes32.fromHexStringLenient(Integer.toHexString(i + 1));
+  }
+
+  private BeaconState pqState(final Bytes32... keys) {
+    final Spec pqSpec = TestSpecFactory.createMinimalPq();
+    return BeaconStatePq.required(
+            SchemaDefinitionsPq.required(
+                    pqSpec.forMilestone(SpecMilestone.PQ).getSchemaDefinitions())
+                .getPqBeaconStateSchema()
+                .createEmpty())
+        .updatedPq(
+            mutable -> {
+              for (final Bytes32 key : keys) {
+                mutable
+                    .getValidators()
+                    .append(
+                        new ValidatorPq(
+                            key,
+                            Bytes32.ZERO,
+                            Bytes32.ZERO,
+                            UInt64.ZERO,
+                            false,
+                            UInt64.ZERO,
+                            UInt64.ZERO,
+                            UInt64.MAX_VALUE,
+                            UInt64.MAX_VALUE));
+              }
+            });
   }
 }

@@ -79,10 +79,12 @@ public abstract class BeaconStateAccessors {
     return getValidatorChurnLimit(state);
   }
 
+  /** The BLS key of the validator at {@code validatorIndex}. PQ validators have none. */
   public Optional<BLSPublicKey> getValidatorPubKey(
       final BeaconState state, final UInt64 validatorIndex) {
     if (validatorIndex.isGreaterThanOrEqualTo(state.getValidators().size())
-        || validatorIndex.longValue() < 0) {
+        || validatorIndex.longValue() < 0
+        || state.toVersionPq().isPresent()) {
       return Optional.empty();
     }
     return Optional.of(

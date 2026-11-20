@@ -135,6 +135,7 @@ import tech.pegasys.teku.spec.logic.versions.fulu.helpers.MiscHelpersFulu;
 import tech.pegasys.teku.spec.logic.versions.fulu.util.ForkChoiceUtilFulu;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.util.ForkChoiceUtilGloas;
+import tech.pegasys.teku.spec.logic.versions.pq.helpers.BeaconStateAccessorsPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.schemas.registry.SchemaRegistryBuilder;
@@ -1292,6 +1293,22 @@ public class Spec {
   public Optional<Integer> getValidatorIndex(
       final BeaconState state, final BLSPublicKey publicKey) {
     return atState(state).getValidatorsUtil().getValidatorIndex(state, publicKey);
+  }
+
+  /** PQ: the index of the validator with XMSS public key {@code xmssPublicKey}. */
+  public Optional<Integer> getValidatorIndexByXmssKey(
+      final BeaconState state, final Bytes32 xmssPublicKey) {
+    return atState(state).beaconStateAccessors() instanceof BeaconStateAccessorsPq accessorsPq
+        ? accessorsPq.getValidatorIndexByXmssKey(state, xmssPublicKey)
+        : Optional.empty();
+  }
+
+  /** PQ: the index of the builder with XMSS public key {@code xmssPublicKey}. */
+  public Optional<Integer> getBuilderIndexByXmssKey(
+      final BeaconState state, final Bytes32 xmssPublicKey) {
+    return atState(state).beaconStateAccessors() instanceof BeaconStateAccessorsPq accessorsPq
+        ? accessorsPq.getBuilderIndexByXmssKey(state, xmssPublicKey)
+        : Optional.empty();
   }
 
   public Optional<CommitteeAssignment> getCommitteeAssignment(
