@@ -15,14 +15,18 @@ package tech.pegasys.teku.networking.eth2.gossip.forks.versions;
 
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
@@ -34,6 +38,7 @@ import tech.pegasys.teku.networking.eth2.gossip.BlockGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.DataColumnSidecarGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.ExecutionPayloadBidGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.ExecutionPayloadGossipManager;
+import tech.pegasys.teku.networking.eth2.gossip.GossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.PayloadAttestationMessageGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.PqAggregateGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.PqPayloadAttestationMessageGossipManager;
@@ -46,6 +51,7 @@ import tech.pegasys.teku.networking.eth2.gossip.VoluntaryExitGossipManager;
 import tech.pegasys.teku.networking.eth2.gossip.encoding.GossipEncoding;
 import tech.pegasys.teku.networking.eth2.gossip.topics.OperationProcessor;
 import tech.pegasys.teku.networking.p2p.discovery.DiscoveryNetwork;
+import tech.pegasys.teku.networking.p2p.gossip.TopicChannel;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
@@ -66,6 +72,7 @@ public class GossipForkSubscriptionsGloasTest {
   private final Spec spec = TestSpecFactory.createMainnetGloas();
   private final Fork fork = spec.getForkSchedule().getFork(UInt64.ZERO);
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
+  private final DiscoveryNetwork<?> discoveryNetwork = mock(DiscoveryNetwork.class);
 
   @Test
   public void shouldAddRequiredGossipManagers() {
@@ -147,6 +154,28 @@ public class GossipForkSubscriptionsGloasTest {
             });
   }
 
+  @Test
+  public void shouldOnlySubscribeToAttestationSubnetsThePqForkHas() {
+    final Spec pqSpec = TestSpecFactory.createMinimalPq();
+    final Fork pqFork = pqSpec.getForkSchedule().getFork(UInt64.ZERO);
+    final GossipForkSubscriptionsGloas gossipForkSubscriptions =
+        spy(createGossipForkSubscriptionGloas(pqSpec, pqFork));
+    when(discoveryNetwork.subscribe(any(), any())).thenReturn(mock(TopicChannel.class));
+    gossipForkSubscriptions.addGossipManagers(
+        new ForkInfo(pqFork, dataStructureUtil.randomBytes32()), forkDigest());
+    final ArgumentCaptor<GossipManager> managers = ArgumentCaptor.forClass(GossipManager.class);
+    verify(gossipForkSubscriptions, atLeastOnce()).addGossipManager(managers.capture());
+    managers.getAllValues().stream()
+        .filter(AttestationGossipManager.class::isInstance)
+        .forEach(GossipManager::subscribe);
+
+    gossipForkSubscriptions.subscribeToAttestationSubnetId(3);
+    gossipForkSubscriptions.subscribeToAttestationSubnetId(20);
+
+    verify(discoveryNetwork).subscribe(contains("beacon_attestation_3/"), any());
+    verify(discoveryNetwork, never()).subscribe(contains("beacon_attestation_20/"), any());
+  }
+
   private ForkInfo forkInfo() {
     return new ForkInfo(fork, dataStructureUtil.randomBytes32());
   }
@@ -162,7 +191,6 @@ public class GossipForkSubscriptionsGloasTest {
   @SuppressWarnings({"unchecked", "rawtypes"})
   private GossipForkSubscriptionsGloas createGossipForkSubscriptionGloas(
       final Spec spec, final Fork fork) {
-    final DiscoveryNetwork discoveryNetwork = mock(DiscoveryNetwork.class);
     final RecentChainData recentChainData = MemoryOnlyRecentChainData.create(spec);
     final GossipEncoding gossipEncoding = mock(GossipEncoding.class);
     final OperationProcessor noopOperationProcessor = OperationProcessor.NOOP;

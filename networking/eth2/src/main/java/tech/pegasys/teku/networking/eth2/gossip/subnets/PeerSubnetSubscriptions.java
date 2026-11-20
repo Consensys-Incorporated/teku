@@ -113,7 +113,7 @@ public class PeerSubnetSubscriptions {
             .attestationSubnetSubscriptions(
                 b ->
                     // Track all attestation subnets
-                    streamAllAttestationSubnetIds(currentSchemaDefinitions)
+                    streamAllAttestationSubnetIds(currentVersion)
                         .forEach(
                             attestationSubnet -> {
                               b.addRelevantSubnet(attestationSubnet);
@@ -161,6 +161,7 @@ public class PeerSubnetSubscriptions {
                             }))
             .build();
     updateMetrics(
+        currentVersion,
         currentSchemaDefinitions,
         subnetPeerCountGauge,
         subscriptions,
@@ -171,11 +172,12 @@ public class PeerSubnetSubscriptions {
   }
 
   private static void updateMetrics(
+      final SpecVersion currentVersion,
       final SchemaDefinitionsSupplier currentSchemaDefinitions,
       final SettableLabelledGauge subnetPeerCountGauge,
       final PeerSubnetSubscriptions subscriptions,
       final int dataColumnSidecarSubnetCount) {
-    streamAllAttestationSubnetIds(currentSchemaDefinitions)
+    streamAllAttestationSubnetIds(currentVersion)
         .forEach(
             subnetId ->
                 subnetPeerCountGauge.set(
@@ -199,9 +201,12 @@ public class PeerSubnetSubscriptions {
                     "data_column_sidecar_" + subnetId));
   }
 
-  private static IntStream streamAllAttestationSubnetIds(
-      final SchemaDefinitionsSupplier currentSchemaDefinitions) {
-    return IntStream.range(0, currentSchemaDefinitions.getAttnetsENRFieldSchema().getLength());
+  /**
+   * The attestation subnets of the current fork. From PQ there are fewer of them than the attnets
+   * field's bits, and peers are neither sought nor counted for the rest.
+   */
+  private static IntStream streamAllAttestationSubnetIds(final SpecVersion currentVersion) {
+    return IntStream.range(0, currentVersion.miscHelpers().getAttestationSubnetCount());
   }
 
   private static IntStream streamAllSyncCommitteeSubnetIds(

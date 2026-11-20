@@ -298,9 +298,7 @@ public class MiscHelpers {
 
     final int nodeIdPrefix =
         nodeId
-            .shiftRight(
-                NetworkConstants.NODE_ID_BITS
-                    - specConfig.getNetworkingConfig().getAttestationSubnetPrefixBits())
+            .shiftRight(NetworkConstants.NODE_ID_BITS - getAttestationSubnetPrefixBits())
             .intValue();
 
     final UInt64 nodeOffset =
@@ -315,13 +313,19 @@ public class MiscHelpers {
                     .dividedBy(specConfig.getNetworkingConfig().getEpochsPerSubnetSubscription())));
 
     final int permutedPrefix =
-        computeShuffledIndex(
-            nodeIdPrefix,
-            1 << specConfig.getNetworkingConfig().getAttestationSubnetPrefixBits(),
-            permutationSeed);
+        computeShuffledIndex(nodeIdPrefix, 1 << getAttestationSubnetPrefixBits(), permutationSeed);
 
-    return UInt64.valueOf(
-        (permutedPrefix + index) % specConfig.getNetworkingConfig().getAttestationSubnetCount());
+    return UInt64.valueOf((permutedPrefix + index) % getAttestationSubnetCount());
+  }
+
+  /** The number of attestation subnets that attestations are gossiped on. */
+  public int getAttestationSubnetCount() {
+    return specConfig.getNetworkingConfig().getAttestationSubnetCount();
+  }
+
+  /** compute_attestation_subnet_prefix_bits */
+  protected int getAttestationSubnetPrefixBits() {
+    return specConfig.getNetworkingConfig().getAttestationSubnetPrefixBits();
   }
 
   public UInt64 calculateNodeSubnetUnsubscriptionSlot(

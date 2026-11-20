@@ -117,6 +117,11 @@ public class AttestationTopicSubscriber implements SlotEventsChannel {
             subnetSubscription.unsubscriptionSlot());
         continue;
       }
+      if (maybeCurrentSlot != null
+          && subnetId >= spec.atSlot(maybeCurrentSlot).miscHelpers().getAttestationSubnetCount()) {
+        LOG.trace("Skipping persistent subnet {}, which the current fork doesn't have", subnetId);
+        continue;
+      }
 
       shouldUpdateENR = persistentSubnetIdSet.add(subnetId) || shouldUpdateENR;
       LOG.trace(
@@ -150,12 +155,15 @@ public class AttestationTopicSubscriber implements SlotEventsChannel {
   public synchronized void onSlot(final UInt64 slot) {
     currentSlot.set(slot);
     boolean shouldUpdateENR = false;
+    // From PQ there are fewer attestation subnets. Subnets beyond them no longer exist, and must
+    // not be advertised in the ENR or metadata.
+    final int attestationSubnetCount = spec.atSlot(slot).miscHelpers().getAttestationSubnetCount();
 
     final Iterator<Int2ObjectMap.Entry<UInt64>> iterator =
         subnetIdToUnsubscribeSlot.int2ObjectEntrySet().iterator();
     while (iterator.hasNext()) {
       final Int2ObjectMap.Entry<UInt64> entry = iterator.next();
-      if (entry.getValue().compareTo(slot) < 0) {
+      if (entry.getValue().compareTo(slot) < 0 || entry.getIntKey() >= attestationSubnetCount) {
         final int subnetId = entry.getIntKey();
         LOG.trace("Unsubscribing from subnet {}", subnetId);
         eth2P2PNetwork.unsubscribeFromAttestationSubnetId(subnetId);
