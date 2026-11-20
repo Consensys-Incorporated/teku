@@ -29,7 +29,6 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
-import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodyGloas;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
@@ -281,9 +280,13 @@ public class ForkChoiceUtilGloas extends ForkChoiceUtilFulu {
     if (blockSlotState.getLatestBlockHeader().getSlot().isLessThan(firstGloasSlot.get())) {
       return ForkChoiceNode.createBase(parentRoot);
     }
+    // Gloas and later bodies (PQ included) carry the bid
     final ExecutionPayloadBid bid =
-        BeaconBlockBodyGloas.required(block.getMessage().getBody())
-            .getSignedExecutionPayloadBid()
+        block
+            .getMessage()
+            .getBody()
+            .getOptionalSignedExecutionPayloadBid()
+            .orElseThrow()
             .getMessage();
     return miscHelpersGloas.isBidBuildingOnFullParent(
             BeaconStateGloas.required(blockSlotState), bid)

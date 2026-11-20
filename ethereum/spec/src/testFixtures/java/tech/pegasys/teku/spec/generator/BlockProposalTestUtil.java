@@ -34,8 +34,10 @@ import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.kzg.KZGCommitment;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.config.SpecConfig;
+import tech.pegasys.teku.spec.constants.PqConstants;
 import tech.pegasys.teku.spec.datastructures.blobs.BlobKzgCommitmentsSchema;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.Blob;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
@@ -62,15 +64,18 @@ import tech.pegasys.teku.spec.datastructures.operations.Deposit;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.SignedBlsToExecutionChange;
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
+import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.bellatrix.BeaconStateBellatrix;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
+import tech.pegasys.teku.spec.datastructures.type.SszXmssSignature;
 import tech.pegasys.teku.spec.datastructures.util.BeaconBlockBodyLists;
 import tech.pegasys.teku.spec.datastructures.util.BlobsUtil;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.EpochProcessingException;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.SlotProcessingException;
 import tech.pegasys.teku.spec.logic.common.util.ExecutionPayloadProposalUtil.ExecutionPayloadProposalData;
+import tech.pegasys.teku.spec.logic.versions.pq.helpers.MiscHelpersPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsBellatrix;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsDeneb;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
@@ -295,8 +300,16 @@ public class BlockProposalTestUtil {
             blockSlotState,
             parentBlockSigningRoot,
             builder -> {
+              if (builder.supportsVrfRandaoReveal()) {
+                builder.vrfRandaoReveal(PqTestKeys.vrfProof(proposerIndex, newSlot));
+              } else {
+                builder.randaoReveal(randaoReveal);
+              }
+              if (builder.supportsAttestationProof()) {
+                // XMSS verification is disabled when tests import these blocks
+                builder.attestationProof(Bytes.EMPTY);
+              }
               builder
-                  .randaoReveal(randaoReveal)
                   .eth1Data(eth1Data)
                   .graffiti(Bytes32.ZERO)
                   .attestations(attestations)
@@ -353,7 +366,8 @@ public class BlockProposalTestUtil {
               }
               if (builder.supportsPayloadAttestations()) {
                 builder.payloadAttestations(
-                    payloadAttestations.orElseGet(dataStructureUtil::emptyPayloadAttestations));
+                    payloadAttestations.orElseGet(
+                        () -> dataStructureUtil.emptyPayloadAttestations(newSlot)));
               }
               if (builder.supportsParentExecutionRequests()) {
                 builder.parentExecutionRequests(
@@ -370,11 +384,8 @@ public class BlockProposalTestUtil {
             newBlockAndState -> {
               // Sign block and set block signature
               final BeaconBlock block = newBlockAndState.getBlock();
-              BLSSignature blockSignature =
-                  signer.signBlock(block, blockSlotState.getForkInfo()).join();
-
               final SignedBeaconBlock signedBlock =
-                  SignedBeaconBlock.create(spec, block, blockSignature);
+                  signBlock(signer, block, blockSlotState.getForkInfo());
               return new SignedBlockAndState(signedBlock, newBlockAndState.getState());
             });
   }
@@ -412,8 +423,16 @@ public class BlockProposalTestUtil {
         .getBeaconBlockBodySchema()
         .createBlockBody(
             builder -> {
+              if (builder.supportsVrfRandaoReveal()) {
+                builder.vrfRandaoReveal(PqTestKeys.vrfProof(proposerIndex, newSlot));
+              } else {
+                builder.randaoReveal(randaoReveal);
+              }
+              if (builder.supportsAttestationProof()) {
+                // XMSS verification is disabled when tests import these blocks
+                builder.attestationProof(Bytes.EMPTY);
+              }
               builder
-                  .randaoReveal(randaoReveal)
                   .eth1Data(eth1Data)
                   .graffiti(Bytes32.ZERO)
                   .attestations(attestations)
@@ -469,7 +488,8 @@ public class BlockProposalTestUtil {
               }
               if (builder.supportsPayloadAttestations()) {
                 builder.payloadAttestations(
-                    payloadAttestations.orElseGet(dataStructureUtil::emptyPayloadAttestations));
+                    payloadAttestations.orElseGet(
+                        () -> dataStructureUtil.emptyPayloadAttestations(newSlot)));
               }
               if (builder.supportsParentExecutionRequests()) {
                 builder.parentExecutionRequests(
@@ -494,12 +514,7 @@ public class BlockProposalTestUtil {
                           blockSlotState.hashTreeRoot(),
                           blockBody);
 
-              // Sign block and set block signature
-              final BLSSignature blockSignature =
-                  signer.signBlock(block, state.getForkInfo()).join();
-
-              final SignedBeaconBlock signedBlock =
-                  SignedBeaconBlock.create(spec, block, blockSignature);
+              final SignedBeaconBlock signedBlock = signBlock(signer, block, state.getForkInfo());
               final BeaconState updatedState =
                   state.updated(w -> w.setLatestBlockHeader(BeaconBlockHeader.fromBlock(block)));
               return new SignedBlockAndState(signedBlock, updatedState);
@@ -719,9 +734,37 @@ public class BlockProposalTestUtil {
                 UInt64.ZERO,
                 kzgCommitments,
                 executionPayloadProposalData.executionRequests().hashTreeRoot());
-    return schemaDefinitions
-        .getSignedExecutionPayloadBidSchema()
-        .create(bid, BLSSignature.infinity());
+    // A self-built bid is unsigned: the point at infinity, or from PQ on, an all-zero XMSS
+    // signature
+    return isPq(newSlot)
+        ? schemaDefinitions
+            .getSignedExecutionPayloadBidSchema()
+            .create(bid, SszXmssSignature.empty())
+        : schemaDefinitions
+            .getSignedExecutionPayloadBidSchema()
+            .create(bid, BLSSignature.infinity());
+  }
+
+  /**
+   * Signs with the BLS signer before PQ. From PQ on, signs with a stub XMSS signature at the
+   * block's leaf, as tests import PQ blocks with XMSS verification disabled.
+   */
+  private SignedBeaconBlock signBlock(
+      final Signer signer, final BeaconBlock block, final ForkInfo forkInfo) {
+    if (!isPq(block.getSlot())) {
+      return SignedBeaconBlock.create(spec, block, signer.signBlock(block, forkInfo).join());
+    }
+    final UInt64 leafIndex =
+        MiscHelpersPq.required(spec.atSlot(block.getSlot()).miscHelpers())
+            .computeXmssLeafIndex(block.getSlot(), PqConstants.LEAF_OFFSET_BEACON_PROPOSER);
+    return spec.atSlot(block.getSlot())
+        .getSchemaDefinitions()
+        .getSignedBeaconBlockSchema()
+        .create(block, PqTestKeys.stubSignature(leafIndex));
+  }
+
+  private boolean isPq(final UInt64 slot) {
+    return spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ);
   }
 
   private Boolean isMergeTransitionComplete(final BeaconState state) {

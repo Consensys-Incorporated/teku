@@ -18,10 +18,13 @@ import static tech.pegasys.teku.spec.config.SpecConfigGloas.BUILDER_INDEX_SELF_B
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
+import tech.pegasys.teku.spec.constants.PqConstants;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockAndState;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.logic.common.util.ExecutionPayloadProposalUtil.ExecutionPayloadProposalData;
+import tech.pegasys.teku.spec.logic.versions.pq.helpers.MiscHelpersPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.signatures.Signer;
 
@@ -49,6 +52,17 @@ public class ExecutionPayloadProposalTestUtil {
                 BUILDER_INDEX_SELF_BUILD,
                 blockAndState.getRoot(),
                 blockAndState.getBlock().getParentRoot());
+    if (spec.atSlot(newSlot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ)) {
+      // XMSS verification is disabled when tests import PQ envelopes: a stub signature at the
+      // envelope's leaf
+      final UInt64 leafIndex =
+          MiscHelpersPq.required(spec.atSlot(newSlot).miscHelpers())
+              .computeXmssLeafIndex(newSlot, PqConstants.LEAF_OFFSET_EXECUTION_PAYLOAD_ENVELOPE);
+      return SafeFuture.completedFuture(
+          schemaDefinitions
+              .getSignedExecutionPayloadEnvelopeSchema()
+              .create(executionPayload, PqTestKeys.stubSignature(leafIndex)));
+    }
     // Sign execution payload and set signature
     return signer
         .signExecutionPayloadEnvelope(executionPayload, blockAndState.getState().getForkInfo())

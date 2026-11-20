@@ -48,9 +48,9 @@ import tech.pegasys.teku.spec.datastructures.blobs.versions.gloas.DataColumnSide
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
-import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodyGloas;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.BlobAndCellProofs;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
@@ -287,17 +287,20 @@ public class MiscHelpersGloas extends MiscHelpersFulu {
    */
   public static boolean isParentBlockFull(
       final SignedBeaconBlock parentBlock, final SignedBeaconBlock block) {
-    final Optional<BeaconBlockBodyGloas> maybeParentBlockBody =
-        parentBlock.getMessage().getBody().toVersionGloas();
-    if (maybeParentBlockBody.isEmpty()) {
+    // Gloas and later bodies (PQ included) carry the bid
+    final Optional<SignedExecutionPayloadBid> maybeParentBid =
+        parentBlock.getMessage().getBody().getOptionalSignedExecutionPayloadBid();
+    if (maybeParentBid.isEmpty()) {
       return false;
     }
-    return BeaconBlockBodyGloas.required(block.getMessage().getBody())
-        .getSignedExecutionPayloadBid()
+    return block
+        .getMessage()
+        .getBody()
+        .getOptionalSignedExecutionPayloadBid()
+        .orElseThrow()
         .getMessage()
         .getParentBlockHash()
-        .equals(
-            maybeParentBlockBody.get().getSignedExecutionPayloadBid().getMessage().getBlockHash());
+        .equals(maybeParentBid.get().getMessage().getBlockHash());
   }
 
   public boolean isExecutionRequestsRootMatchingLatestBid(

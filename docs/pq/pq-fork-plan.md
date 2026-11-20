@@ -13,7 +13,7 @@
 - **Fork lineage in the spec:** `GLOAS -> EIP8483 -> PQ` (`PREVIOUS_FORK_OF[PQ] = EIP8483`, `PREVIOUS_FORK_OF[EIP8483] = GLOAS`). EIP8483 is not in `TESTGEN_FORKS`; PQ is from `5286c65cd`, so its vectors can be generated from the target commit.
 - **Teku baseline:** the `pq-devnet-0` branch, which carries EIP-8483 (#11649), the leanXMSS module (#11652), the PQ milestone skeleton (#11654) and the PQ containers as they land (#11656 onwards).
   - Its classes are `SpecConfigEip8483`, `SchemaDefinitionsEip8483`, `SpecLogicEip8483`, `Eip8483StateUpgrade`, `BeaconStateSchemaEip8483`, `ExecutionRequestsSchemaEip8483`, `ValidatorPqRegistration` and `BuilderPqRegistration`.
-- **Status (2026-11-19):** phases 1 (milestone skeleton) and 2 (crypto API, on lean-pq) are done; phase 3 (containers) is complete or in review ([containers-plan.md](containers-plan.md)); phase 4 (state transition, with phase 5's fork upgrade at its switch-over) is under way ([state-transition-plan.md](state-transition-plan.md)). This document was written before the work started; sections that recorded open decisions now record what was decided.
+- **Status (2026-11-20):** phases 1 (milestone skeleton), 2 (crypto API, on lean-pq) and 3 (containers) are done ([containers-plan.md](containers-plan.md)); phases 4 and 5 (state transition and fork upgrade) are merged ([state-transition-plan.md](state-transition-plan.md)); phase 6 (beacon-node pipelines) is under way ([beacon-node-plan.md](beacon-node-plan.md)). This document was written before the work started; sections that recorded open decisions now record what was decided.
 - **Markers:** statements are read from the spec or code unless marked **[inferred]**. Sizes are relative effort, not commitments.
 
 ---

@@ -3656,8 +3656,13 @@ public final class DataStructureUtil {
   }
 
   public SszList<PayloadAttestation> emptyPayloadAttestations() {
+    return emptyPayloadAttestations(randomSlot());
+  }
+
+  /** At {@code slot}, which must be at a milestone whose blocks carry payload attestations. */
+  public SszList<PayloadAttestation> emptyPayloadAttestations(final UInt64 slot) {
     return BeaconBlockBodySchemaGloas.required(
-            getGloasSchemaDefinitions(randomSlot()).getBeaconBlockBodySchema())
+            getGloasSchemaDefinitions(slot).getBeaconBlockBodySchema())
         .getPayloadAttestationsSchema()
         .createFromElements(List.of());
   }

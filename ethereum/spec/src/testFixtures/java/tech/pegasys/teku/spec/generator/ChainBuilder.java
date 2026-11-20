@@ -429,6 +429,10 @@ public class ChainBuilder {
             .executionPayloadHeader(payloadHeader)
             .build();
 
+    if (spec.isMilestoneSupported(SpecMilestone.PQ)) {
+      // Validators without an XMSS key are exited at the PQ fork
+      genesisState = PqTestKeys.registerAllValidators(genesisState);
+    }
     return addGenesisBlock(genesisState);
   }
 
