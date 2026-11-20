@@ -391,11 +391,13 @@ class FastConfirmationCalculator {
   /**
    * Implements {@code get_node_support_between_slots}: the total effective balance (per {@code
    * balanceSource}) of unslashed, active, non-equivocating validators assigned to the inclusive
-   * slot range whose latest vote supports exactly {@code node} (per {@code get_supported_node}).
+   * slot range whose latest vote supports any of {@code nodes} (per {@code get_supported_node}).
+   *
+   * <p>The spec takes a set; this takes a list of distinct nodes, as callers pass at most two.
    */
   UInt64 getNodeSupportBetweenSlots(
       final BeaconState balanceSource,
-      final ForkChoiceNode node,
+      final List<ForkChoiceNode> nodes,
       final UInt64 startSlot,
       final UInt64 endSlot) {
     final List<UInt64> balances = getScoringBalances(balanceSource);
@@ -415,16 +417,36 @@ class FastConfirmationCalculator {
       if (votedRoot.isZero()) {
         continue;
       }
+      // get_supported_node resolves a vote to a node of the block it voted for, so a vote for any
+      // other block cannot support one of the nodes: skip it before resolving its payload status.
+      if (!containsNodeOfBlock(nodes, votedRoot)) {
+        continue;
+      }
       // Support is per fork-choice node, not per block: under Gloas two votes for the same block
       // support different nodes when they disagree on whether the payload was present.
       final Optional<ForkChoiceNode> maybeVotedNode =
           forkChoice.getSupportedNode(
               currentSlot, votedRoot, vote.getNextSlot(), vote.isNextFullPayloadHint());
-      if (maybeVotedNode.isPresent() && maybeVotedNode.get().equals(node)) {
+      if (maybeVotedNode.isPresent() && nodes.contains(maybeVotedNode.get())) {
         support = support.plus(balance);
       }
     }
     return support;
+  }
+
+  /**
+   * Whether any of {@code nodes} is a node of the block {@code blockRoot}. A linear scan, run per
+   * committee member: we expect at most two nodes (a block's PENDING node and its FULL or EMPTY
+   * variant), so its efficiency is not an issue.
+   */
+  private static boolean containsNodeOfBlock(
+      final List<ForkChoiceNode> nodes, final Bytes32 blockRoot) {
+    for (final ForkChoiceNode node : nodes) {
+      if (node.blockRoot().equals(blockRoot)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -536,6 +558,16 @@ class FastConfirmationCalculator {
    * Implements {@code compute_empty_slot_support_discount}: weight discountable from the safety
    * threshold when empty slots precede the block, i.e. parent support from the empty slots'
    * committees beyond what could be adversarial.
+   *
+   * <p>Implements the Gloas modification too: support is discounted for the parent block's
+   * (PENDING) node together with the node the block built on, i.e. the parent's FULL or EMPTY
+   * variant. Support for the other variant counts against the block, so it is not discounted.
+   * Pre-Gloas both are the same node, as in the phase0 spec.
+   *
+   * @throws IllegalStateException if fork choice has no ancestor of the block at the parent's slot.
+   *     The spec's {@code get_ancestor} always returns one, so this is a store inconsistency; it is
+   *     reported like the calculator's other missing-node lookups rather than discounting only the
+   *     PENDING node's support, which would then be memoized with the safety threshold.
    */
   UInt64 computeEmptySlotSupportDiscount(final BeaconState balanceSource, final Bytes32 blockRoot) {
     final Bytes32 parentRoot = getBlockParentRoot(blockRoot);
@@ -547,16 +579,21 @@ class FastConfirmationCalculator {
     }
     final UInt64 firstEmptySlot = parentSlot.plus(1);
     final UInt64 lastEmptySlot = blockSlot.minus(1);
-    // The discountable support is that of the node the block actually built on, which under Gloas
-    // carries the parent's payload status rather than the parent's PENDING node.
-    final Optional<ForkChoiceNode> maybeParentNode =
-        forkChoice.getAncestorNode(getNodeForRoot(blockRoot), parentSlot);
-    if (maybeParentNode.isEmpty()) {
-      return UInt64.ZERO;
-    }
+    final ForkChoiceNode parentNode =
+        forkChoice
+            .getAncestorNode(getNodeForRoot(blockRoot), parentSlot)
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "Missing ancestor node of " + blockRoot + " at slot " + parentSlot));
+    final ForkChoiceNode parentPendingNode = getNodeForRoot(parentRoot);
+    // Pre-Gloas the block builds on the parent's PENDING node itself.
+    final List<ForkChoiceNode> discountableNodes =
+        parentNode.equals(parentPendingNode)
+            ? List.of(parentPendingNode)
+            : List.of(parentPendingNode, parentNode);
     final UInt64 parentSupportInEmptySlots =
-        getNodeSupportBetweenSlots(
-            balanceSource, maybeParentNode.get(), firstEmptySlot, lastEmptySlot);
+        getNodeSupportBetweenSlots(balanceSource, discountableNodes, firstEmptySlot, lastEmptySlot);
     final UInt64 adversarialWeight =
         computeAdversarialWeight(balanceSource, firstEmptySlot, lastEmptySlot);
     return parentSupportInEmptySlots.isGreaterThan(adversarialWeight)
