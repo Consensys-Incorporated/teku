@@ -37,6 +37,7 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.signatures.DeletableSigner;
 import tech.pegasys.teku.spec.signatures.Signer;
 import tech.pegasys.teku.spec.signatures.SlashingProtector;
+import tech.pegasys.teku.spec.signatures.xmss.XmssLeafProtector;
 import tech.pegasys.teku.validator.api.GraffitiProvider;
 import tech.pegasys.teku.validator.api.InteropConfig;
 import tech.pegasys.teku.validator.api.UpdatableGraffitiProvider;
@@ -256,6 +257,38 @@ public class ValidatorLoader {
       final MetricsSystem metricsSystem,
       final Optional<DataDirLayout> maybeMutableDir,
       final Function<BLSPublicKey, Optional<Bytes32>> updatableGraffitiProvider) {
+    return create(
+        spec,
+        config,
+        interopConfig,
+        externalSignerHttpClientFactory,
+        slashingProtector,
+        Optional.empty(),
+        slashingProtectionLogger,
+        publicKeyLoader,
+        asyncRunner,
+        metricsSystem,
+        maybeMutableDir,
+        updatableGraffitiProvider);
+  }
+
+  /**
+   * @param xmssLeafProtector guards the leaves of the validators' leanXMSS keys. When present, PQ
+   *     keys stored next to local BLS keystores are loaded; when empty, they are ignored.
+   */
+  public static ValidatorLoader create(
+      final Spec spec,
+      final ValidatorConfig config,
+      final InteropConfig interopConfig,
+      final Supplier<HttpClient> externalSignerHttpClientFactory,
+      final SlashingProtector slashingProtector,
+      final Optional<XmssLeafProtector> xmssLeafProtector,
+      final SlashingProtectionLogger slashingProtectionLogger,
+      final PublicKeyLoader publicKeyLoader,
+      final AsyncRunner asyncRunner,
+      final MetricsSystem metricsSystem,
+      final Optional<DataDirLayout> maybeMutableDir,
+      final Function<BLSPublicKey, Optional<Bytes32>> updatableGraffitiProvider) {
     final ValidatorSourceFactory validatorSources =
         new ValidatorSourceFactory(
             spec,
@@ -263,6 +296,7 @@ public class ValidatorLoader {
             interopConfig,
             externalSignerHttpClientFactory,
             slashingProtector,
+            xmssLeafProtector,
             publicKeyLoader,
             asyncRunner,
             metricsSystem,

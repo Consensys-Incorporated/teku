@@ -54,6 +54,7 @@ import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.signatures.Signer;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
+import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.api.KeyStoreFilesLocator;
 import tech.pegasys.teku.validator.client.ValidatorClientService;
@@ -296,5 +297,41 @@ class LocalValidatorSourceTest {
         KeyStoreLoader.loadFromString(
             Resources.toString(Resources.getResource(resourceName), StandardCharsets.UTF_8));
     return localValidatorSource.addValidator(keyStoreData, password, publicKey);
+  }
+
+  @Test
+  void createXmssSigner_loadsPqKeysNextToTheKeystore(@TempDir final Path tempDir) throws Exception {
+    final Path pbkdf2Keystore = Path.of(Resources.getResource("pbkdf2TestVector.json").toURI());
+    final Path passwordFile = createTempFile(tempDir, "pass", ".txt");
+    writeString(passwordFile, EXPECTED_PASSWORD);
+    when(keyStoreFilesLocator.parse()).thenReturn(List.of(Pair.of(pbkdf2Keystore, passwordFile)));
+    final PqValidatorKeyLoader pqValidatorKeyLoader = mock(PqValidatorKeyLoader.class);
+    final XmssSigner xmssSigner = mock(XmssSigner.class);
+    when(pqValidatorKeyLoader.load(pbkdf2Keystore, EXPECTED_PASSWORD, PBKDF2_PUBKEY))
+        .thenReturn(Optional.of(xmssSigner));
+    final LocalValidatorSource source =
+        new LocalValidatorSource(
+            spec,
+            true,
+            keystoreLocker,
+            keyStoreFilesLocator,
+            asyncRunner,
+            true,
+            Optional.empty(),
+            Optional.of(pqValidatorKeyLoader));
+
+    final ValidatorProvider provider = source.getAvailableValidators().getFirst();
+
+    assertThat(provider.createXmssSigner()).contains(xmssSigner);
+  }
+
+  @Test
+  void createXmssSigner_isEmptyWithoutPqKeyLoader(@TempDir final Path tempDir) throws Exception {
+    final Path pbkdf2Keystore = Path.of(Resources.getResource("pbkdf2TestVector.json").toURI());
+    final Path passwordFile = createTempFile(tempDir, "pass", ".txt");
+    writeString(passwordFile, EXPECTED_PASSWORD);
+    when(keyStoreFilesLocator.parse()).thenReturn(List.of(Pair.of(pbkdf2Keystore, passwordFile)));
+
+    assertThat(validatorSource.getAvailableValidators().getFirst().createXmssSigner()).isEmpty();
   }
 }

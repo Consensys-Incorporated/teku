@@ -45,6 +45,7 @@ import tech.pegasys.teku.service.serviceutils.layout.DataDirLayout;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.signatures.LocalSigner;
 import tech.pegasys.teku.spec.signatures.Signer;
+import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
 import tech.pegasys.teku.validator.api.KeyStoreFilesLocator;
 import tech.pegasys.teku.validator.client.ValidatorClientService;
 import tech.pegasys.teku.validator.client.restapi.apis.schema.DeleteKeyResult;
@@ -58,6 +59,7 @@ public class LocalValidatorSource extends AbstractValidatorSource implements Val
   private final KeystoreLocker keystoreLocker;
   private final AsyncRunner asyncRunner;
   private final KeyStoreFilesLocator keyStoreFilesLocator;
+  private final Optional<PqValidatorKeyLoader> pqValidatorKeyLoader;
   private final Map<BLSPublicKey, ActiveLocalValidatorSource> localValidatorSourceMap =
       new ConcurrentHashMap<>();
 
@@ -69,12 +71,37 @@ public class LocalValidatorSource extends AbstractValidatorSource implements Val
       final AsyncRunner asyncRunner,
       final boolean readOnly,
       final Optional<DataDirLayout> maybeDataDirLayout) {
+    this(
+        spec,
+        validatorKeystoreLockingEnabled,
+        keystoreLocker,
+        keyStoreFilesLocator,
+        asyncRunner,
+        readOnly,
+        maybeDataDirLayout,
+        Optional.empty());
+  }
+
+  /**
+   * @param pqValidatorKeyLoader loads the PQ keys stored next to each BLS keystore, if present.
+   *     Empty when the network has no PQ fork, so no PQ keys are loaded.
+   */
+  public LocalValidatorSource(
+      final Spec spec,
+      final boolean validatorKeystoreLockingEnabled,
+      final KeystoreLocker keystoreLocker,
+      final KeyStoreFilesLocator keyStoreFilesLocator,
+      final AsyncRunner asyncRunner,
+      final boolean readOnly,
+      final Optional<DataDirLayout> maybeDataDirLayout,
+      final Optional<PqValidatorKeyLoader> pqValidatorKeyLoader) {
     super(readOnly, maybeDataDirLayout);
     this.spec = spec;
     this.validatorKeystoreLockingEnabled = validatorKeystoreLockingEnabled;
     this.keystoreLocker = keystoreLocker;
     this.asyncRunner = asyncRunner;
     this.keyStoreFilesLocator = keyStoreFilesLocator;
+    this.pqValidatorKeyLoader = pqValidatorKeyLoader;
   }
 
   @Override
@@ -241,6 +268,11 @@ public class LocalValidatorSource extends AbstractValidatorSource implements Val
                 getPublicKey(), keyPair.getPublicKey()));
       }
       return new LocalSigner(spec, keyPair, asyncRunner);
+    }
+
+    @Override
+    public Optional<XmssSigner> createXmssSigner() {
+      return pqValidatorKeyLoader.flatMap(loader -> loader.load(keystoreFile, password, publicKey));
     }
 
     private Bytes32 loadBLSPrivateKey() {
