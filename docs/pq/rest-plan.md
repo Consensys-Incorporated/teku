@@ -47,13 +47,14 @@ No beacon-APIs work for PQ exists upstream yet. Until a cross-client draft does,
 ### 8b-2: events and removed operations
 
 - **Events:**
-  - `SingleAttestationPq` should go out on `single_attestation`;
-  - bid, preferences and payload attestation events need the right version;
-  - PQ payload attestation messages should reach the event stream.
-- **Removed operations at PQ slots:** reject them with a 400 that names the fork, instead of 500s or silent acceptance. That covers:
-  - voluntary exits and BLS changes (POST);
-  - sync committee messages, contributions and subscriptions;
-  - sync rewards, and block rewards (which read the sync aggregate).
+  - PQ single attestations stream on `single_attestation`. `SingleAttestationEvent` uses the attestation's own schema, so it no longer converts to the BLS `SingleAttestation`, which threw for them.
+  - Bid, preferences and payload attestation events report the milestone at their slot, instead of always `gloas`.
+  - **Not yet:** PQ payload attestation messages on the event stream. The pool hands them to fork choice only, and an event would need the `PayloadAttestationMessagePq` rebuilt with its XMSS signature.
+- **Removed operations:**
+  - Voluntary exits and BLS changes are rejected by their validators once the chain is in PQ, with a reason naming the fork. That covers REST and the local pools.
+  - Sync committee subscriptions no longer 500 for a period running into PQ: they use the current slot's sync committee helpers, and duties wholly in PQ have nothing to subscribe to.
+  - Sync committee rewards for a PQ block are a 400 naming the fork. Block rewards count no sync aggregate reward for a block without one.
+  - Sync committee messages and contributions were already rejected by their validators, and their gossip topics are gone (phase 7).
 
 ### 8c: the validator contract
 

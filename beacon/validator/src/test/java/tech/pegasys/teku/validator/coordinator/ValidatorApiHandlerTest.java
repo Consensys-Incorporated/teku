@@ -1161,6 +1161,34 @@ class ValidatorApiHandlerTest {
   }
 
   @Test
+  void subscribeToSyncCommitteeSubnets_shouldSubscribeForAPeriodRunningIntoPq() {
+    setUp(TestSpecFactory.createMinimalWithPqForkEpoch(UInt64.valueOf(40)));
+    when(chainDataClient.getCurrentSlot()).thenReturn(UInt64.ONE);
+    final SyncCommitteeSubnetSubscription subscription =
+        new SyncCommitteeSubnetSubscription(1, IntSet.of(1), UInt64.valueOf(44));
+
+    assertThat(validatorApiHandler.subscribeToSyncCommitteeSubnets(List.of(subscription)))
+        .isCompleted();
+
+    verify(syncCommitteeSubscriptionManager)
+        .subscribe(0, spec.computeStartSlotAtEpoch(UInt64.valueOf(44)));
+  }
+
+  @Test
+  void subscribeToSyncCommitteeSubnets_shouldIgnoreSubscriptionsOncePqIsActive() {
+    setUp(TestSpecFactory.createMinimalWithPqForkEpoch(UInt64.valueOf(40)));
+    when(chainDataClient.getCurrentSlot())
+        .thenReturn(spec.computeStartSlotAtEpoch(UInt64.valueOf(41)));
+    final SyncCommitteeSubnetSubscription subscription =
+        new SyncCommitteeSubnetSubscription(1, IntSet.of(1), UInt64.valueOf(44));
+
+    assertThat(validatorApiHandler.subscribeToSyncCommitteeSubnets(List.of(subscription)))
+        .isCompleted();
+
+    verifyNoInteractions(syncCommitteeSubscriptionManager);
+  }
+
+  @Test
   public void sendSignedAttestations_shouldAddAttestationToAttestationManager() {
     final Attestation attestation = dataStructureUtil.randomAttestation();
     when(attestationManager.addAttestation(any(ValidatableAttestation.class), any()))

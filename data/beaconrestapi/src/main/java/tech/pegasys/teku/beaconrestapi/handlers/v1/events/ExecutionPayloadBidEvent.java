@@ -34,9 +34,10 @@ public class ExecutionPayloadBidEvent
         .build();
   }
 
-  public ExecutionPayloadBidEvent(final SignedExecutionPayloadBid executionPayloadBid) {
+  public ExecutionPayloadBidEvent(
+      final SpecMilestone milestone, final SignedExecutionPayloadBid executionPayloadBid) {
     super(
         buildTypeDef(executionPayloadBid),
-        new VersionedExecutionPayloadBid(SpecMilestone.GLOAS, executionPayloadBid));
+        new VersionedExecutionPayloadBid(milestone, executionPayloadBid));
   }
 }

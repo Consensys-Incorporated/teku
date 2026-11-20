@@ -109,6 +109,11 @@ public class RewardCalculator {
               + " is pre altair, and no sync committee information is available");
     }
 
+    if (spec.atSlot(block.getSlot()).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ)) {
+      throw new BadRequestException(
+          "Slot " + block.getSlot() + " is in the PQ fork, which has no sync committees");
+    }
+
     final UInt64 epoch = spec.computeEpochAtSlot(block.getSlot());
     final SyncCommittee committee =
         spec.getSyncCommitteeUtil(block.getSlot()).orElseThrow().getSyncCommittee(state, epoch);

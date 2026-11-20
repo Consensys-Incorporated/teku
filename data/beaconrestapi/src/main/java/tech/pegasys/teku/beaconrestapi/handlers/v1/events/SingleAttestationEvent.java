@@ -13,11 +13,12 @@
 
 package tech.pegasys.teku.beaconrestapi.handlers.v1.events;
 
-import tech.pegasys.teku.spec.datastructures.operations.SingleAttestation;
+import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 
-public class SingleAttestationEvent extends Event<SingleAttestation> {
-  SingleAttestationEvent(final SingleAttestation attestation) {
+/** A single attestation: BLS-signed, or from PQ XMSS-signed ({@code SingleAttestationPq}). */
+public class SingleAttestationEvent extends Event<Attestation> {
+  SingleAttestationEvent(final Attestation attestation) {
     super(
-        attestation.toSingleAttestationRequired().getSchema().getJsonTypeDefinition(), attestation);
+        attestation.getSchema().castTypeToAttestationSchema().getJsonTypeDefinition(), attestation);
   }
 }

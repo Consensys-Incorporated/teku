@@ -16,7 +16,9 @@ package tech.pegasys.teku.spec.logic.common.util;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -94,6 +96,26 @@ public class BlockRewardCalculatorUtilTest {
     final BlockRewardData reward =
         calculator.calculateBlockRewards(block, blockProcessorAltair, preState);
     assertThat(reward.syncAggregate()).isEqualTo(140L);
+  }
+
+  @Test
+  void calculateBlockRewards_shouldGiveNoSyncAggregateRewardForABlockWithoutOne() {
+    // PQ blocks have no sync aggregate
+    final BeaconState preState = data.randomBeaconState();
+    final BeaconBlock blockWithAggregate =
+        data.blockBuilder(preState.getSlot().increment().longValue())
+            .syncAggregate(data.randomSyncAggregate(1, 2, 3, 4))
+            .build()
+            .getImmediately();
+    final BeaconBlockBody body = spy(blockWithAggregate.getBody());
+    doReturn(Optional.empty()).when(body).getOptionalSyncAggregate();
+    final BeaconBlock block = spy(blockWithAggregate);
+    doReturn(body).when(block).getBody();
+
+    final BlockRewardData reward =
+        calculator.calculateBlockRewards(block, blockProcessorAltair, preState);
+
+    assertThat(reward.syncAggregate()).isZero();
   }
 
   @Test

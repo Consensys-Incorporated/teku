@@ -380,4 +380,16 @@ public class VoluntaryExitValidatorTest {
     assertThat(stateFuture).isCompleted();
     return safeJoin(stateFuture);
   }
+
+  @Test
+  public void shouldRejectExitsOnceThePqForkIsActive() {
+    final Spec pqSpec = TestSpecFactory.createMinimalPq();
+    final RecentChainData pqChainData = mock(RecentChainData.class);
+    when(pqChainData.getGenesisTime()).thenReturn(UInt64.ZERO);
+    final VoluntaryExitValidator pqValidator =
+        new VoluntaryExitValidator(pqSpec, pqChainData, timeProvider, gossipValidationHelper);
+
+    assertThat(pqValidator.validateForGossip(dataStructureUtil.randomSignedVoluntaryExit()))
+        .isCompletedWithValueMatching(InternalValidationResult::isReject);
+  }
 }

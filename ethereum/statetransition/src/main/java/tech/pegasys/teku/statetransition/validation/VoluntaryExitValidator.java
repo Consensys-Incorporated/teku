@@ -27,6 +27,7 @@ import tech.pegasys.teku.infrastructure.collections.LimitedMap;
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.operations.validation.OperationInvalidReason;
@@ -59,6 +60,12 @@ public class VoluntaryExitValidator implements OperationValidator<SignedVoluntar
 
   @Override
   public SafeFuture<InternalValidationResult> validateForGossip(final SignedVoluntaryExit exit) {
+    // [REJECT] PQ removed voluntary exits as an operation: they are execution layer requests
+    if (isPqActive()) {
+      return SafeFuture.completedFuture(
+          InternalValidationResult.reject(
+              "Voluntary exits are execution layer requests from the PQ fork"));
+    }
     if (!canAcceptExitForValidator(exit)) {
       LOG.trace(
           "VoluntaryExitValidator: Exit is not the first one for validator {}.",
@@ -125,6 +132,13 @@ public class VoluntaryExitValidator implements OperationValidator<SignedVoluntar
       return true;
     }
     return false;
+  }
+
+  private boolean isPqActive() {
+    return spec.isMilestoneSupported(SpecMilestone.PQ)
+        && spec.atTime(recentChainData.getGenesisTime(), timeProvider.getTimeInSeconds())
+            .getMilestone()
+            .isGreaterThanOrEqualTo(SpecMilestone.PQ);
   }
 
   @Override

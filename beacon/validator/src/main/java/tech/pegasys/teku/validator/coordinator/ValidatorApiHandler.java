@@ -803,8 +803,15 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
       // untilEpoch is exclusive, so it will unsubscribe at the first slot of the specified index
       final UInt64 untilEpoch = subscription.untilEpoch();
       final UInt64 unsubscribeSlot = spec.computeStartSlotAtEpoch(untilEpoch);
-      final SyncCommitteeUtil syncCommitteeUtil =
-          spec.getSyncCommitteeUtilRequired(spec.computeStartSlotAtEpoch(untilEpoch));
+      // PQ removes sync committees: a period running into it ends without them, and a duty that
+      // is all in PQ has nothing to subscribe to
+      final Optional<SyncCommitteeUtil> maybeSyncCommitteeUtil =
+          spec.getSyncCommitteeUtil(unsubscribeSlot)
+              .or(() -> spec.getSyncCommitteeUtil(combinedChainDataClient.getCurrentSlot()));
+      if (maybeSyncCommitteeUtil.isEmpty()) {
+        continue;
+      }
+      final SyncCommitteeUtil syncCommitteeUtil = maybeSyncCommitteeUtil.get();
       final IntSet syncCommitteeIndices = subscription.syncCommitteeIndices();
       performanceTracker.saveExpectedSyncCommitteeParticipant(
           subscription.validatorIndex(), syncCommitteeIndices, untilEpoch.decrement());

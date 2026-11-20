@@ -83,13 +83,19 @@ public class BlockRewardCalculatorUtil {
       final BeaconBlock block,
       final BlockProcessorAltair blockProcessorAltair,
       final BeaconState preState) {
-    final long proposerReward = getProposerReward(preState);
-    final SyncAggregate aggregate = block.getBody().getOptionalSyncAggregate().orElseThrow();
     final UInt64 proposerIndex = block.getProposerIndex();
     final long attestationsBlockRewards =
         calculateAttestationRewards(block, blockProcessorAltair, preState);
+    // PQ blocks have no sync aggregate, since PQ removes sync committees
     final long syncAggregateBlockRewards =
-        calculateProposerSyncAggregateBlockRewards(proposerReward, aggregate);
+        block
+            .getBody()
+            .getOptionalSyncAggregate()
+            .map(
+                aggregate ->
+                    calculateProposerSyncAggregateBlockRewards(
+                        getProposerReward(preState), aggregate))
+            .orElse(0L);
     final long proposerSlashingsBlockRewards = calculateProposerSlashingsRewards(block, preState);
     final long attesterSlashingsBlockRewards = calculateAttesterSlashingsRewards(block, preState);
 

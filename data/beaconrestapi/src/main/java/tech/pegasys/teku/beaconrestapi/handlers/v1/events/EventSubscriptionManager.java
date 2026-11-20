@@ -286,8 +286,7 @@ public class EventSubscriptionManager
       final AttestationEvent attestationEvent = new AttestationEvent(actualAttestation);
       notifySubscribersOfEvent(EventType.attestation, attestationEvent);
     } else {
-      final SingleAttestationEvent attestationEvent =
-          new SingleAttestationEvent(actualAttestation.toSingleAttestationRequired());
+      final SingleAttestationEvent attestationEvent = new SingleAttestationEvent(actualAttestation);
       notifySubscribersOfEvent(EventType.single_attestation, attestationEvent);
     }
   }
@@ -370,7 +369,9 @@ public class EventSubscriptionManager
 
   protected void onExecutionPayloadBid(final SignedExecutionPayloadBid executionPayloadBid) {
     notifySubscribersOfEvent(
-        EventType.execution_payload_bid, new ExecutionPayloadBidEvent(executionPayloadBid));
+        EventType.execution_payload_bid,
+        new ExecutionPayloadBidEvent(
+            milestoneAt(executionPayloadBid.getMessage().getSlot()), executionPayloadBid));
   }
 
   protected void onNewPayloadAttestationMessage(
@@ -380,7 +381,9 @@ public class EventSubscriptionManager
     if (result.isAccept()) {
       notifySubscribersOfEvent(
           EventType.payload_attestation_message,
-          new PayloadAttestationMessageEvent(payloadAttestationMessage));
+          new PayloadAttestationMessageEvent(
+              milestoneAt(payloadAttestationMessage.getData().getSlot()),
+              payloadAttestationMessage));
     }
   }
 
@@ -390,8 +393,15 @@ public class EventSubscriptionManager
       final boolean fromNetwork) {
     if (result.isAccept()) {
       notifySubscribersOfEvent(
-          EventType.proposer_preferences, new ProposerPreferencesEvent(proposerPreferences));
+          EventType.proposer_preferences,
+          new ProposerPreferencesEvent(
+              milestoneAt(proposerPreferences.getMessage().getProposalSlot()),
+              proposerPreferences));
     }
+  }
+
+  private SpecMilestone milestoneAt(final UInt64 slot) {
+    return spec.atSlot(slot).getMilestone();
   }
 
   private void notifySubscribersOfEvent(final EventType eventType, final Event<?> event) {
