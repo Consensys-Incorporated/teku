@@ -934,7 +934,7 @@ tasks.register("dockerDistUntar") {
 	}
 }
 
-def dockerJdkVariants = ["jdk25", "jdk26"]
+def dockerJdkVariants = ["jdk25", "jdk27"]
 def dockerBuildDir = "build/docker-teku/"
 def localDockerImage = "local/teku"
 

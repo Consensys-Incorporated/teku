@@ -1,13 +1,13 @@
 # Changelog
 
 ## Upcoming Breaking Changes
- - Teku will stop publishing the `-jdk26` Docker images in a future release, because Java 26 is end of life and no longer receives security fixes. Use the `-jdk25` tags instead.
 
 ## Current Releases
 
 ## Unreleased Changes
 
 ### Breaking Changes
+ - Teku no longer publishes the `-jdk26` Docker images, because Java 26 is end of life and no longer receives security fixes. Use the new `-jdk27` tags instead, or the default `-jdk25` ones.
 
 ### Additions and Improvements
  - Removed the Gloas fork schedule for the HOODI network (previously epoch 132352, 26 Oct 2026); Gloas is unscheduled on HOODI again.
