@@ -66,18 +66,29 @@ public class KeyStore {
     checkNotNull(blsPublicKey, "PublicKey cannot be null");
     checkNotNull(password, "Password cannot be null");
     checkNotNull(path, "Path cannot be null");
-    checkNotNull(kdfParam, "KDFParam cannot be null");
-    checkNotNull(cipher, "Cipher cannot be null");
 
-    kdfParam.validate();
-    cipher.validate();
-
-    final Crypto crypto = encryptUsingCipherFunction(blsPrivateKey, password, kdfParam, cipher);
+    final Crypto crypto = encryptSecret(blsPrivateKey, password, kdfParam, cipher);
     return new KeyStoreData(crypto, blsPublicKey, path);
   }
 
-  private static Crypto encryptUsingCipherFunction(
+  /**
+   * Encrypts an arbitrary secret into an EIP-2335 {@code crypto} object, for key formats other than
+   * the BLS keystore that reuse its encryption.
+   *
+   * @param secret The secret to encrypt. AES-128-CTR is a stream cipher, so it may be any length.
+   * @param password The password to use for encryption
+   * @param kdfParam crypto function such as scrypt or PBKDF2 and related parameters
+   * @param cipher cipher function and iv parameter to use.
+   * @return the {@code crypto} object holding the encrypted secret and its checksum
+   */
+  public static Crypto encryptSecret(
       final Bytes secret, final String password, final KdfParam kdfParam, final Cipher cipher) {
+    checkNotNull(secret, "Secret cannot be null");
+    checkNotNull(password, "Password cannot be null");
+    checkNotNull(kdfParam, "KDFParam cannot be null");
+    checkNotNull(cipher, "Cipher cannot be null");
+    kdfParam.validate();
+    cipher.validate();
     final Bytes decryptionKey = kdfParam.generateDecryptionKey(password);
     final Bytes cipherMessage =
         applyCipherFunction(decryptionKey, cipher, true, secret.toArrayUnsafe());
@@ -99,10 +110,22 @@ public class KeyStore {
   public static boolean validatePassword(final String password, final KeyStoreData keyStoreData) {
     checkNotNull(password, "Password cannot be null");
     checkNotNull(keyStoreData, "KeyStoreData cannot be null");
+    return validatePassword(password, keyStoreData.getCrypto());
+  }
 
-    final Bytes decryptionKey =
-        keyStoreData.getCrypto().getKdf().getParam().generateDecryptionKey(password);
-    return validateChecksum(decryptionKey, keyStoreData);
+  /**
+   * Validates password against an EIP-2335 {@code crypto} object without decrypting it
+   *
+   * @param password The password to validate
+   * @param crypto The encrypted secret against which to validate the password
+   * @return true if password is valid, false otherwise.
+   */
+  public static boolean validatePassword(final String password, final Crypto crypto) {
+    checkNotNull(password, "Password cannot be null");
+    checkNotNull(crypto, "Crypto cannot be null");
+
+    final Bytes decryptionKey = crypto.getKdf().getParam().generateDecryptionKey(password);
+    return validateChecksum(decryptionKey, crypto);
   }
 
   /**
@@ -115,25 +138,35 @@ public class KeyStore {
   public static Bytes decrypt(final String password, final KeyStoreData keyStoreData) {
     checkNotNull(password, "Password cannot be null");
     checkNotNull(keyStoreData, "KeyStoreData cannot be null");
+    return decrypt(password, keyStoreData.getCrypto());
+  }
 
-    final Bytes decryptionKey =
-        keyStoreData.getCrypto().getKdf().getParam().generateDecryptionKey(password);
+  /**
+   * Decrypts the secret held in an EIP-2335 {@code crypto} object
+   *
+   * @param password The password to use for decryption
+   * @param crypto The encrypted secret
+   * @return decrypted secret in Bytes
+   */
+  public static Bytes decrypt(final String password, final Crypto crypto) {
+    checkNotNull(password, "Password cannot be null");
+    checkNotNull(crypto, "Crypto cannot be null");
 
-    if (!validateChecksum(decryptionKey, keyStoreData)) {
+    final Bytes decryptionKey = crypto.getKdf().getParam().generateDecryptionKey(password);
+
+    if (!validateChecksum(decryptionKey, crypto)) {
       throw new KeyStoreValidationException(
           "Failed to decrypt KeyStore, checksum validation failed.");
     }
 
-    final Cipher cipher = keyStoreData.getCrypto().getCipher();
+    final Cipher cipher = crypto.getCipher();
     final byte[] encryptedMessage = cipher.getMessage().toArrayUnsafe();
     return applyCipherFunction(decryptionKey, cipher, false, encryptedMessage);
   }
 
-  private static boolean validateChecksum(
-      final Bytes decryptionKey, final KeyStoreData keyStoreData) {
-    final Bytes checksum =
-        calculateSHA256Checksum(decryptionKey, keyStoreData.getCrypto().getCipher().getMessage());
-    return Objects.equals(checksum, keyStoreData.getCrypto().getChecksum().getMessage());
+  private static boolean validateChecksum(final Bytes decryptionKey, final Crypto crypto) {
+    final Bytes checksum = calculateSHA256Checksum(decryptionKey, crypto.getCipher().getMessage());
+    return Objects.equals(checksum, crypto.getChecksum().getMessage());
   }
 
   private static Bytes calculateSHA256Checksum(

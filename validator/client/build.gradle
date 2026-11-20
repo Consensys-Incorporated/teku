@@ -26,6 +26,7 @@ dependencies {
 	implementation project(':ethereum:signingrecord')
 	implementation project(':infrastructure:bls-keystore')
 	implementation project(':infrastructure:subscribers')
+	implementation project(':infrastructure:xmss')
 
 	implementation 'io.consensys.tuweni:tuweni-bytes'
 	implementation 'commons-io:commons-io'

@@ -57,6 +57,7 @@ class ValidatorSourceFactoryTest {
             disabledInteropConfig,
             () -> httpClient,
             slashingProtector,
+            Optional.empty(),
             publicKeyLoader,
             asyncRunner,
             metricsSystem,

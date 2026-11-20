@@ -78,7 +78,8 @@ public class MultithreadedValidatorLoader {
                                     publicKey,
                                     new DeletableSigner(provider.createSigner()),
                                     graffitiProvider,
-                                    provider.isReadOnly());
+                                    provider.isReadOnly(),
+                                    provider.createXmssSigner());
                             int loadedValidatorCount = numberOfLoadedKeys.incrementAndGet();
                             if (loadedValidatorCount % 10 == 0) {
                               STATUS_LOG.atLoadedValidatorNumber(
