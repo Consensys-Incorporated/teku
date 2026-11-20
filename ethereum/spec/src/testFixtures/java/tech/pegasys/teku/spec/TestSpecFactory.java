@@ -338,6 +338,22 @@ public class TestSpecFactory {
     return create(config, SpecMilestone.HEZE);
   }
 
+  /**
+   * Create a spec that forks to PQ and Heze at the same epoch, from EIP-8483: a PQ genesis is not
+   * built from BLS deposits, so a fork into Heze from genesis has to cross PQ too.
+   *
+   * @param forkEpoch The PQ and Heze fork epoch
+   * @return A spec forking from EIP-8483 to Heze at the given epoch
+   */
+  public static Spec createMinimalWithPqAndHezeForkEpoch(final UInt64 forkEpoch) {
+    final SpecConfigAndParent<? extends SpecConfig> config =
+        getHezeSpecConfig(
+            Eth2Network.MINIMAL,
+            builder ->
+                builder.eip8483ForkEpoch(ZERO).pqForkEpoch(forkEpoch).hezeForkEpoch(forkEpoch));
+    return create(config, SpecMilestone.HEZE);
+  }
+
   public static Spec createMinimalPhase0(final Consumer<SpecConfigBuilder> configAdapter) {
     return create(SpecMilestone.PHASE0, Eth2Network.MINIMAL, configAdapter);
   }

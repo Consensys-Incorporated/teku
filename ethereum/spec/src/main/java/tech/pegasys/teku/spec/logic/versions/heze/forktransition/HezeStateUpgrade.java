@@ -17,96 +17,54 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfigHeze;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
-import tech.pegasys.teku.spec.datastructures.state.beaconstate.common.BeaconStateFields;
-import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.eip8483.BeaconStateEip8483;
-import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.eip8483.BeaconStateSchemaEip8483;
-import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.pq.BeaconStatePq;
 import tech.pegasys.teku.spec.logic.common.forktransition.StateUpgrade;
-import tech.pegasys.teku.spec.logic.versions.gloas.helpers.BeaconStateAccessorsGloas;
+import tech.pegasys.teku.spec.logic.versions.pq.forktransition.PqStateUpgrade;
+import tech.pegasys.teku.spec.logic.versions.pq.helpers.BeaconStateAccessorsPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsHeze;
 
-public class HezeStateUpgrade implements StateUpgrade<BeaconStateEip8483> {
+/**
+ * On this branch Heze builds on PQ and keeps its state layout, so the upgrade only changes the
+ * fork. When PQ is scheduled at the same epoch as Heze (and so overshadowed by it), the pre-state
+ * is an EIP-8483 or Gloas state, which goes through {@code upgrade_to_pq} first.
+ */
+public class HezeStateUpgrade implements StateUpgrade<BeaconStatePq> {
 
   private final SpecConfigHeze specConfig;
   private final SchemaDefinitionsHeze schemaDefinitions;
-  private final BeaconStateAccessorsGloas beaconStateAccessors;
+  private final BeaconStateAccessorsPq beaconStateAccessors;
+  private final PqStateUpgrade pqStateUpgrade;
 
   public HezeStateUpgrade(
       final SpecConfigHeze specConfig,
       final SchemaDefinitionsHeze schemaDefinitions,
-      final BeaconStateAccessorsGloas beaconStateAccessors) {
+      final BeaconStateAccessorsPq beaconStateAccessors,
+      final PqStateUpgrade pqStateUpgrade) {
     this.specConfig = specConfig;
     this.schemaDefinitions = schemaDefinitions;
     this.beaconStateAccessors = beaconStateAccessors;
+    this.pqStateUpgrade = pqStateUpgrade;
   }
 
   @Override
-  public BeaconStateEip8483 upgrade(final BeaconState preState) {
+  public BeaconStatePq upgrade(final BeaconState preState) {
     final UInt64 epoch = beaconStateAccessors.getCurrentEpoch(preState);
-    // On this branch Heze builds on PQ, which builds on EIP-8483 and so far keeps its state
-    // layout. The pre-state is a PQ or EIP-8483 state, or a Gloas state when both are scheduled at
-    // the same epoch as Heze (and so overshadowed by it).
-    final BeaconStateGloas preStateGloas = BeaconStateGloas.required(preState);
-    final BeaconStateSchemaEip8483 stateSchema =
-        BeaconStateSchemaEip8483.required(schemaDefinitions.getBeaconStateSchema());
-
-    return BeaconStateEip8483.required(stateSchema.createEmpty())
-        .updatedEip8483(
-            state -> {
-              BeaconStateFields.copyCommonFieldsFromSource(state, preState);
-
-              state.setFork(
-                  new Fork(
-                      preState.getFork().getCurrentVersion(),
-                      specConfig.getHezeForkVersion(),
-                      epoch));
-
-              state.setPreviousEpochParticipation(preStateGloas.getPreviousEpochParticipation());
-              state.setCurrentEpochParticipation(preStateGloas.getCurrentEpochParticipation());
-              state.setInactivityScores(preStateGloas.getInactivityScores());
-              state.setCurrentSyncCommittee(preStateGloas.getCurrentSyncCommittee());
-              state.setNextSyncCommittee(preStateGloas.getNextSyncCommittee());
-
-              state.setLatestBlockHash(preStateGloas.getLatestBlockHash());
-              state.setNextWithdrawalIndex(preStateGloas.getNextWithdrawalIndex());
-              state.setNextWithdrawalValidatorIndex(
-                  preStateGloas.getNextWithdrawalValidatorIndex());
-              state.setHistoricalSummaries(preStateGloas.getHistoricalSummaries());
-              state.setDepositRequestsStartIndex(preStateGloas.getDepositRequestsStartIndex());
-              state.setDepositBalanceToConsume(preStateGloas.getDepositBalanceToConsume());
-              state.setExitBalanceToConsume(preStateGloas.getExitBalanceToConsume());
-              state.setEarliestExitEpoch(preStateGloas.getEarliestExitEpoch());
-              state.setConsolidationBalanceToConsume(
-                  preStateGloas.getConsolidationBalanceToConsume());
-              state.setEarliestConsolidationEpoch(preStateGloas.getEarliestConsolidationEpoch());
-              state.setPendingDeposits(preStateGloas.getPendingDeposits());
-              state.setPendingPartialWithdrawals(preStateGloas.getPendingPartialWithdrawals());
-              state.setPendingConsolidations(preStateGloas.getPendingConsolidations());
-              state.setProposerLookahead(preStateGloas.getProposerLookahead());
-              state.setBuilders(preStateGloas.getBuilders());
-              state.setNextWithdrawalBuilderIndex(preStateGloas.getNextWithdrawalBuilderIndex());
-              state.setExecutionPayloadAvailability(
-                  preStateGloas.getExecutionPayloadAvailability());
-              state.setBuilderPendingPayments(preStateGloas.getBuilderPendingPayments());
-              state.setBuilderPendingWithdrawals(preStateGloas.getBuilderPendingWithdrawals());
-              state.setLatestExecutionPayloadBid(preStateGloas.getLatestExecutionPayloadBid());
-              state.setPayloadExpectedWithdrawals(preStateGloas.getPayloadExpectedWithdrawals());
-              state.setPtcWindow(preStateGloas.getPtcWindow());
-              preState
-                  .toVersionEip8483()
-                  .ifPresentOrElse(
-                      preStateEip8483 -> {
-                        state.setValidatorPqRegistrations(
-                            preStateEip8483.getValidatorPqRegistrations());
-                        state.setBuilderPqRegistrations(
-                            preStateEip8483.getBuilderPqRegistrations());
-                      },
-                      () -> {
-                        state.setValidatorPqRegistrations(
-                            stateSchema.getValidatorPqRegistrationsSchema().of());
-                        state.setBuilderPqRegistrations(
-                            stateSchema.getBuilderPqRegistrationsSchema().of());
-                      });
-            });
+    final BeaconStatePq pqState =
+        preState
+            .toVersionPq()
+            .map(
+                state ->
+                    BeaconStatePq.required(
+                        schemaDefinitions
+                            .getPqBeaconStateSchema()
+                            .createFromBackingNode(state.getBackingNode())))
+            .orElseGet(() -> pqStateUpgrade.upgrade(preState));
+    return pqState.updatedPq(
+        state ->
+            state.setFork(
+                new Fork(
+                    preState.getFork().getCurrentVersion(),
+                    specConfig.getHezeForkVersion(),
+                    epoch)));
   }
 }

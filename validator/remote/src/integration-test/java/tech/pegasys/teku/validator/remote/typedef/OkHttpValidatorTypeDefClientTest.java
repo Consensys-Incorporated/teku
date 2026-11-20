@@ -40,6 +40,7 @@ import static tech.pegasys.teku.infrastructure.json.JsonUtil.serialize;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
 import static tech.pegasys.teku.spec.SpecMilestone.ALTAIR;
 import static tech.pegasys.teku.spec.SpecMilestone.BELLATRIX;
+import static tech.pegasys.teku.spec.SpecMilestone.EIP8483;
 import static tech.pegasys.teku.spec.SpecMilestone.ELECTRA;
 import static tech.pegasys.teku.spec.SpecMilestone.FULU;
 import static tech.pegasys.teku.spec.SpecMilestone.GLOAS;
@@ -134,7 +135,8 @@ class OkHttpValidatorTypeDefClientTest extends AbstractTypeDefRequestTestBase {
   @TestTemplate
   public void createSyncCommitteeContribution_whenSuccess_returnsContribution()
       throws JsonProcessingException {
-    assumeThat(specMilestone).isGreaterThanOrEqualTo(ALTAIR);
+    // PQ has no sync committees
+    assumeThat(specMilestone).isBetween(ALTAIR, EIP8483);
     final SyncCommitteeContribution contribution =
         dataStructureUtil.randomSyncCommitteeContribution();
     final SyncCommitteeContributionSchema syncCommitteeContributionSchema =
@@ -746,7 +748,8 @@ class OkHttpValidatorTypeDefClientTest extends AbstractTypeDefRequestTestBase {
 
   @TestTemplate
   public void sendSignedContributionAndProof_acceptsPopulatedList() throws InterruptedException {
-    assumeThat(specMilestone).isGreaterThanOrEqualTo(ALTAIR);
+    // PQ has no sync committees
+    assumeThat(specMilestone).isBetween(ALTAIR, EIP8483);
     final SignedContributionAndProof proof = dataStructureUtil.randomSignedContributionAndProof();
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_OK));
     typeDefClient.sendContributionAndProofs(List.of(proof));
@@ -761,7 +764,8 @@ class OkHttpValidatorTypeDefClientTest extends AbstractTypeDefRequestTestBase {
 
   @TestTemplate
   public void sendSignedContributionAndProof_canRespondFailure() {
-    assumeThat(specMilestone).isGreaterThanOrEqualTo(ALTAIR);
+    // PQ has no sync committees
+    assumeThat(specMilestone).isBetween(ALTAIR, EIP8483);
     final SignedContributionAndProof proof = dataStructureUtil.randomSignedContributionAndProof();
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_BAD_REQUEST));
     assertThatThrownBy(() -> typeDefClient.sendContributionAndProofs(List.of(proof)))
@@ -1025,7 +1029,8 @@ class OkHttpValidatorTypeDefClientTest extends AbstractTypeDefRequestTestBase {
 
   @TestTemplate
   public void sendAggregate_makesExpectedRequest_postElectra() throws Exception {
-    assumeThat(specMilestone).isGreaterThanOrEqualTo(ELECTRA);
+    // PQ aggregates are a different type, not yet sent by the validator client
+    assumeThat(specMilestone).isBetween(ELECTRA, EIP8483);
     mockWebServer.enqueue(new MockResponse().setResponseCode(SC_NO_CONTENT));
 
     final List<SignedAggregateAndProof> aggregateAndProofs =

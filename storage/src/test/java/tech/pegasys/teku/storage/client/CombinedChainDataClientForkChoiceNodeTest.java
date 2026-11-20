@@ -41,7 +41,9 @@ import tech.pegasys.teku.storage.storageSystem.StorageSystem;
 import tech.pegasys.teku.storage.store.StoreConfig;
 import tech.pegasys.teku.storage.store.UpdatableStore.StoreTransaction;
 
-@TestSpecContext(milestone = {SpecMilestone.FULU, SpecMilestone.GLOAS, SpecMilestone.HEZE})
+// The chain is built from BLS deposits, which a PQ genesis (and Heze's, which builds on PQ here)
+// can't be: EIP-8483 is the latest milestone it covers
+@TestSpecContext(milestone = {SpecMilestone.FULU, SpecMilestone.GLOAS, SpecMilestone.EIP8483})
 class CombinedChainDataClientForkChoiceNodeTest {
 
   private Spec spec;

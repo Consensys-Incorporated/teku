@@ -33,6 +33,8 @@
         "$ref" : "#/components/schemas/BlockContentsEip8483"
       }, {
         "$ref" : "#/components/schemas/BeaconBlockEip8483"
+      }, {
+        "$ref" : "#/components/schemas/BeaconBlockPq"
       } ]
     }
   }

@@ -34,7 +34,10 @@ import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUp
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
-@TestSpecContext(allMilestones = true, ignoredMilestones = SpecMilestone.PHASE0)
+// PQ has no sync committees, so no light client
+@TestSpecContext(
+    allMilestones = true,
+    ignoredMilestones = {SpecMilestone.PHASE0, SpecMilestone.PQ, SpecMilestone.HEZE})
 public class GetLightClientOptimisticUpdateIntegrationTest
     extends AbstractDataBackedRestAPIIntegrationTest {
 

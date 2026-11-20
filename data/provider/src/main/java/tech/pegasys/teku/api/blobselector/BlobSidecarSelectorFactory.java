@@ -170,13 +170,12 @@ public class BlobSidecarSelectorFactory extends AbstractSelectorFactory<BlobSide
       return SafeFuture.completedFuture(Optional.empty());
     }
     final SignedBeaconBlock block = maybeBlock.get();
-    return block
-        .getMessage()
-        .getBody()
-        .toVersionDeneb()
+    // Not only Deneb bodies: PQ's carry the commitments in the bid too
+    return Optional.of(block.getMessage().getBody())
+        .filter(body -> body.getOptionalBlobKzgCommitments().isPresent())
         .map(
-            blockBodyDeneb ->
-                blockBodyDeneb
+            blockBody ->
+                blockBody
                     .getOptionalBlobKzgCommitments()
                     .map(
                         blobKzgCommitments -> {

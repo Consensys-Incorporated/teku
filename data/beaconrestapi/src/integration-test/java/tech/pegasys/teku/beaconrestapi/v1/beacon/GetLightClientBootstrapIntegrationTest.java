@@ -38,7 +38,10 @@ import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrapSch
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
 
-@TestSpecContext(allMilestones = true, ignoredMilestones = SpecMilestone.PHASE0)
+// PQ has no sync committees, so no light client
+@TestSpecContext(
+    allMilestones = true,
+    ignoredMilestones = {SpecMilestone.PHASE0, SpecMilestone.PQ, SpecMilestone.HEZE})
 public class GetLightClientBootstrapIntegrationTest
     extends AbstractDataBackedRestAPIIntegrationTest {
 

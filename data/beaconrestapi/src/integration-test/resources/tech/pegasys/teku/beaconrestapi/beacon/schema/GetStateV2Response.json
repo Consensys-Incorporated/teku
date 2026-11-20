@@ -34,6 +34,8 @@
         "$ref" : "#/components/schemas/BeaconStateGloas"
       }, {
         "$ref" : "#/components/schemas/BeaconStateEip8483"
+      }, {
+        "$ref" : "#/components/schemas/BeaconStatePq"
       } ]
     }
   }

@@ -42,7 +42,7 @@ public class BuilderPq
 
     private BuilderPqSchema() {
       super(
-          "Builder",
+          "BuilderPq",
           namedSchema("pubkey", SszPrimitiveSchemas.BYTES32_SCHEMA),
           namedSchema("version", SszPrimitiveSchemas.UINT8_SCHEMA),
           namedSchema("execution_address", SszByteVectorSchema.create(Bytes20.SIZE)),

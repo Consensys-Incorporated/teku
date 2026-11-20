@@ -1,0 +1,22 @@
+{
+  "title" : "AttestationPq",
+  "type" : "object",
+  "required" : [ "aggregation_bits", "data", "committee_bits" ],
+  "properties" : {
+    "aggregation_bits" : {
+      "type" : "string",
+      "pattern" : "^0x[a-fA-F0-9]{2,}$",
+      "description" : "SSZ hexadecimal",
+      "format" : "bytes"
+    },
+    "data" : {
+      "$ref" : "#/components/schemas/AttestationData"
+    },
+    "committee_bits" : {
+      "type" : "string",
+      "pattern" : "^0x[a-fA-F0-9]{2,}$",
+      "description" : "SSZ hexadecimal",
+      "format" : "bytes"
+    }
+  }
+}

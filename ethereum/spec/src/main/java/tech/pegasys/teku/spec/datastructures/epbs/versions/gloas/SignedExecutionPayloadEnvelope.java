@@ -114,10 +114,13 @@ public class SignedExecutionPayloadEnvelope
 
   public SignedBlindedExecutionPayloadEnvelope blind(
       final SchemaDefinitionsGloas schemaDefinitions) {
+    final SignedBlindedExecutionPayloadEnvelopeSchema schema =
+        schemaDefinitions.getSignedBlindedExecutionPayloadEnvelopeSchema();
+    final BlindedExecutionPayloadEnvelope message = getMessage().blind(schemaDefinitions);
     final SignedBlindedExecutionPayloadEnvelope blinded =
-        schemaDefinitions
-            .getSignedBlindedExecutionPayloadEnvelopeSchema()
-            .create(getMessage().blind(schemaDefinitions), getSignature());
+        isXmssSigned()
+            ? schema.create(message, (SszXmssSignature) getField1())
+            : schema.create(message, getSignature());
     checkState(
         blinded.hashTreeRoot().equals(hashTreeRoot()),
         "The blinded root does not match the unblinded root");

@@ -30,7 +30,7 @@ public class MergedGenesisInteropModeAcceptanceTest extends AcceptanceTestBase {
   @EnumSource(value = SpecMilestone.class)
   public void startFromMergedStatePerMilestoneUsingTerminalBlockHash(
       final SpecMilestone specMilestone) throws Exception {
-    if (specMilestone.isGreaterThanOrEqualTo(SpecMilestone.CAPELLA)) {
+    if (isSupportedAtGenesis(specMilestone)) {
       final TekuNodeConfig config =
           createTekuNodeBuilderForMilestone(specMilestone)
               .withTerminalBlockHash(
@@ -50,7 +50,7 @@ public class MergedGenesisInteropModeAcceptanceTest extends AcceptanceTestBase {
   @EnumSource(value = SpecMilestone.class)
   public void startFromMergedStatePerMilestoneUsingTotalDifficultySimulation(
       final SpecMilestone specMilestone) throws Exception {
-    if (specMilestone.isGreaterThanOrEqualTo(SpecMilestone.CAPELLA)) {
+    if (isSupportedAtGenesis(specMilestone)) {
       final TekuNodeConfig config =
           createTekuNodeBuilderForMilestone(specMilestone).withStubExecutionEngine().build();
 
@@ -60,6 +60,15 @@ public class MergedGenesisInteropModeAcceptanceTest extends AcceptanceTestBase {
       node.waitForNonDefaultExecutionPayload();
       node.waitForNewBlock();
     }
+  }
+
+  /**
+   * From PQ on, validators sign with leanXMSS, so an interop genesis built from BLS keys can't
+   * start a PQ chain. Heze builds on PQ.
+   */
+  private static boolean isSupportedAtGenesis(final SpecMilestone specMilestone) {
+    return specMilestone.isGreaterThanOrEqualTo(SpecMilestone.CAPELLA)
+        && specMilestone.isLessThan(SpecMilestone.PQ);
   }
 
   private static TekuNodeConfigBuilder createTekuNodeBuilderForMilestone(

@@ -20,7 +20,9 @@ import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFuture.completedFuture;
 import static tech.pegasys.teku.spec.SpecMilestone.ALTAIR;
 import static tech.pegasys.teku.spec.SpecMilestone.BELLATRIX;
+import static tech.pegasys.teku.spec.SpecMilestone.HEZE;
 import static tech.pegasys.teku.spec.SpecMilestone.PHASE0;
+import static tech.pegasys.teku.spec.SpecMilestone.PQ;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
 
 import java.util.Optional;
@@ -113,7 +115,9 @@ class SimpleOperationPoolForkTest {
   }
 
   @TestTemplate
-  void shouldLimitVoluntaryExitsToConsensusMaximum() {
+  void shouldLimitVoluntaryExitsToConsensusMaximum(final SpecContext specContext) {
+    // From PQ on, blocks carry no voluntary exits: validators exit through execution requests
+    specContext.assumeIsNotOneOf(PQ, HEZE);
     final OperationValidator<SignedVoluntaryExit> validator = mock(OperationValidator.class);
     final OperationPool<SignedVoluntaryExit> pool =
         new MappedOperationPool<>(
@@ -132,7 +136,8 @@ class SimpleOperationPoolForkTest {
 
   @TestTemplate
   void shouldLimitBlsToExecutionChangesToConsensusMaximum(final SpecContext specContext) {
-    specContext.assumeIsNotOneOf(PHASE0, ALTAIR, BELLATRIX);
+    // PQ blocks carry no BLS to execution changes
+    specContext.assumeIsNotOneOf(PHASE0, ALTAIR, BELLATRIX, PQ, HEZE);
     final OperationValidator<SignedBlsToExecutionChange> validator = mock(OperationValidator.class);
     final OperationPool<SignedBlsToExecutionChange> pool =
         new MappedOperationPool<>(

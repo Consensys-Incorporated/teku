@@ -44,6 +44,8 @@
               "$ref" : "#/components/schemas/SignedBeaconBlockGloas"
             }, {
               "$ref" : "#/components/schemas/SignedBeaconBlockEip8483"
+            }, {
+              "$ref" : "#/components/schemas/SignedBeaconBlockPq"
             } ]
           }
         }

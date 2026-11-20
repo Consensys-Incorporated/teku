@@ -234,9 +234,14 @@ class ProposersDataManagerTest {
               .thenReturn(Optional.of(preferences));
           manager.updatePreparedProposersFromProposerPreferences(
               List.of(
-                  schemaDefinitions
-                      .getSignedProposerPreferencesSchema()
-                      .create(preferences, dataStructureUtil.randomSignature())),
+                  // PQ proposer preferences are XMSS-signed
+                  schemaDefinitions.toVersionPq().isPresent()
+                      ? schemaDefinitions
+                          .getSignedProposerPreferencesSchema()
+                          .create(preferences, dataStructureUtil.randomXmssSignature())
+                      : schemaDefinitions
+                          .getSignedProposerPreferencesSchema()
+                          .create(preferences, dataStructureUtil.randomSignature())),
               UInt64.ONE);
         });
   }

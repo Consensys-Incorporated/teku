@@ -47,7 +47,10 @@ import tech.pegasys.teku.spec.logic.common.helpers.Predicates;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
-@TestSpecContext(allMilestones = true, ignoredMilestones = SpecMilestone.PHASE0)
+// PQ (and Heze, which builds on it here) has no sync committees, so no light client
+@TestSpecContext(
+    allMilestones = true,
+    ignoredMilestones = {SpecMilestone.PHASE0, SpecMilestone.PQ, SpecMilestone.HEZE})
 public class LightClientUtilTest {
   private Spec spec;
   private DataStructureUtil dataStructureUtil;

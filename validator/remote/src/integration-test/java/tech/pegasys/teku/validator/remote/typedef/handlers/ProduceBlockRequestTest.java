@@ -28,6 +28,7 @@ import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_INCL
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
 import static tech.pegasys.teku.spec.SpecMilestone.BELLATRIX;
 import static tech.pegasys.teku.spec.SpecMilestone.DENEB;
+import static tech.pegasys.teku.spec.SpecMilestone.EIP8483;
 import static tech.pegasys.teku.spec.SpecMilestone.FULU;
 import static tech.pegasys.teku.spec.SpecMilestone.GLOAS;
 
@@ -273,7 +274,8 @@ public class ProduceBlockRequestTest extends AbstractTypeDefRequestTestBase {
 
   @TestTemplate
   public void shouldGetBlockContentsAsSszV4() {
-    assumeThat(specMilestone).isGreaterThanOrEqualTo(GLOAS);
+    // PQ block production is not implemented yet
+    assumeThat(specMilestone).isBetween(GLOAS, EIP8483);
 
     final BlockContainer blockContents = dataStructureUtil.randomBlockContents(ONE);
     assertThat(blockContents).isInstanceOf(BlockContentsGloas.class);
@@ -303,7 +305,8 @@ public class ProduceBlockRequestTest extends AbstractTypeDefRequestTestBase {
 
   @TestTemplate
   public void shouldGetBeaconBlockAsSszV4WhenPayloadNotIncluded() {
-    assumeThat(specMilestone).isGreaterThanOrEqualTo(GLOAS);
+    // PQ block production is not implemented yet
+    assumeThat(specMilestone).isBetween(GLOAS, EIP8483);
 
     final BeaconBlock beaconBlock = dataStructureUtil.randomBeaconBlock(ONE);
 
@@ -333,7 +336,8 @@ public class ProduceBlockRequestTest extends AbstractTypeDefRequestTestBase {
 
   @TestTemplate
   public void shouldGetBlockContentsAsJsonV4() {
-    assumeThat(specMilestone).isGreaterThanOrEqualTo(GLOAS);
+    // PQ block production is not implemented yet
+    assumeThat(specMilestone).isBetween(GLOAS, EIP8483);
 
     final BlockContainer blockContents = dataStructureUtil.randomBlockContents(ONE);
 
@@ -357,7 +361,8 @@ public class ProduceBlockRequestTest extends AbstractTypeDefRequestTestBase {
 
   @TestTemplate
   public void shouldGetBeaconBlockAsJsonV4WhenPayloadNotIncluded() {
-    assumeThat(specMilestone).isGreaterThanOrEqualTo(GLOAS);
+    // PQ block production is not implemented yet
+    assumeThat(specMilestone).isBetween(GLOAS, EIP8483);
 
     final BeaconBlock beaconBlock = dataStructureUtil.randomBeaconBlock(ONE);
 

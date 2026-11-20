@@ -20,7 +20,11 @@ import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 public class SignedContributionAndProofSupplier
     extends DataStructureUtilSupplier<SignedContributionAndProof> {
+  // PQ has no sync committees
   public SignedContributionAndProofSupplier() {
-    super(DataStructureUtil::randomSignedContributionAndProof, SpecMilestone.ALTAIR);
+    super(
+        DataStructureUtil::randomSignedContributionAndProof,
+        SpecMilestone.ALTAIR,
+        SpecMilestone.EIP8483);
   }
 }

@@ -135,6 +135,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBody;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBodyBuilder;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBodySchema;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.common.BlockBodyFields;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.altair.SyncAggregate;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.altair.SyncAggregateSchema;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.capella.BeaconBlockBodySchemaCapella;
@@ -143,6 +144,8 @@ import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.deneb.Bea
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.deneb.BeaconBlockBodySchemaDeneb;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodyGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodySchemaGloas;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.pq.BeaconBlockBodyPq;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.pq.BeaconBlockBodySchemaPq;
 import tech.pegasys.teku.spec.datastructures.builder.BlobsBundleSchema;
 import tech.pegasys.teku.spec.datastructures.builder.BuilderBid;
 import tech.pegasys.teku.spec.datastructures.builder.BuilderBidBuilder;
@@ -170,8 +173,11 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestat
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBidSchema;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeSchema;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferencesSchema;
 import tech.pegasys.teku.spec.datastructures.execution.BlobsBundle;
 import tech.pegasys.teku.spec.datastructures.execution.ClientVersion;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
@@ -235,6 +241,8 @@ import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SignedCo
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncAggregatorSelectionData;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeContribution;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeMessage;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationPqSchema;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.IndexedAttestationPqSchema;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
@@ -261,6 +269,8 @@ import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGProof;
 import tech.pegasys.teku.spec.datastructures.type.SszPublicKey;
 import tech.pegasys.teku.spec.datastructures.type.SszSignature;
+import tech.pegasys.teku.spec.datastructures.type.SszXmssSignature;
+import tech.pegasys.teku.spec.datastructures.type.SszXmssSignatureSchema;
 import tech.pegasys.teku.spec.datastructures.util.DepositGenerator;
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.executionlayer.ForkChoiceState;
@@ -278,6 +288,7 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsElectra;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsFulu;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsHeze;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 
 public final class DataStructureUtil {
 
@@ -1021,6 +1032,13 @@ public final class DataStructureUtil {
     final AttestationSchema<?> attestationSchema =
         spec.getGenesisSchemaDefinitions().getAttestationSchema();
     final UInt64 slot = randomSlot();
+    if (attestationSchema instanceof AttestationPqSchema pqSchema) {
+      // PQ attestations carry no signature
+      return pqSchema.create(
+          randomBitlist(pqSchema.getAggregationBitsSchema(), getMaxValidatorsPerAttestation(slot)),
+          randomAttestationData(),
+          randomSszBitvector(pqSchema.getCommitteeBitsSchema().orElseThrow().getLength()));
+    }
     return attestationSchema.create(
         randomBitlist(
             attestationSchema.getAggregationBitsSchema(), getMaxValidatorsPerAttestation(slot)),
@@ -1301,6 +1319,12 @@ public final class DataStructureUtil {
   }
 
   public SignedBeaconBlock signedBlock(final BeaconBlock block) {
+    if (block.getBody() instanceof BeaconBlockBodyPq) {
+      return spec.atSlot(block.getSlot())
+          .getSchemaDefinitions()
+          .getSignedBeaconBlockSchema()
+          .create(block, randomXmssSignature());
+    }
     return signedBlock(block, randomSignature());
   }
 
@@ -1567,6 +1591,10 @@ public final class DataStructureUtil {
       final UInt64 slot, final Consumer<BeaconBlockBodyBuilder> builderModifier) {
     final BeaconBlockBodySchema<?> schema =
         spec.atSlot(slot).getSchemaDefinitions().getBlindedBeaconBlockBodySchema();
+    if (schema instanceof BeaconBlockBodySchemaPq pqSchema) {
+      // PQ block bodies have no builder yet; builderModifier does not apply
+      return randomPqBeaconBlockBody(pqSchema);
+    }
     return schema
         .createBlockBody(
             builder -> {
@@ -1717,6 +1745,10 @@ public final class DataStructureUtil {
       final UInt64 slot, final Consumer<BeaconBlockBodyBuilder> builderModifier) {
     final BeaconBlockBodySchema<?> schema =
         spec.atSlot(slot).getSchemaDefinitions().getBeaconBlockBodySchema();
+    if (schema instanceof BeaconBlockBodySchemaPq pqSchema) {
+      // PQ block bodies have no builder yet; builderModifier does not apply
+      return randomPqBeaconBlockBody(pqSchema);
+    }
     return schema
         .createBlockBody(
             builder -> {
@@ -1788,6 +1820,10 @@ public final class DataStructureUtil {
       final UInt64 slot, final Consumer<BeaconBlockBodyBuilder> builderModifier) {
     final BeaconBlockBodySchema<?> schema =
         spec.atSlot(slot).getSchemaDefinitions().getBeaconBlockBodySchema();
+    if (schema instanceof BeaconBlockBodySchemaPq pqSchema) {
+      // PQ block bodies have no builder yet; builderModifier does not apply
+      return randomPqBeaconBlockBody(pqSchema);
+    }
     return schema
         .createBlockBody(
             builder -> {
@@ -1878,6 +1914,15 @@ public final class DataStructureUtil {
 
   public IndexedAttestation randomIndexedAttestation(
       final AttestationData data, final UInt64... attestingIndicesInput) {
+    final Optional<SchemaDefinitionsPq> pqSchemaDefinitions =
+        spec.atSlot(data.getSlot()).getSchemaDefinitions().toVersionPq();
+    if (pqSchemaDefinitions.isPresent()) {
+      // PQ indexed attestations carry a STARK proof instead of a signature
+      final IndexedAttestationPqSchema pqSchema =
+          pqSchemaDefinitions.get().getPqAttestationSchemas().getIndexedAttestationSchema();
+      return pqSchema.create(
+          pqSchema.getAttestingIndicesSchema().of(attestingIndicesInput), data, randomBytes(64));
+    }
     final IndexedAttestationSchema indexedAttestationSchema =
         spec.atSlot(data.getSlot()).getSchemaDefinitions().getIndexedAttestationSchema();
     final SszUInt64List attestingIndices =
@@ -3716,16 +3761,18 @@ public final class DataStructureUtil {
   }
 
   public SignedExecutionPayloadBid randomSignedExecutionPayloadBid(final UInt64 executionPayment) {
-    return getGloasSchemaDefinitions(randomSlot())
-        .getSignedExecutionPayloadBidSchema()
-        .create(randomExecutionPayloadBid(executionPayment), randomSignature());
+    final UInt64 slot = randomSlot();
+    return signBid(
+        getGloasSchemaDefinitions(slot).getSignedExecutionPayloadBidSchema(),
+        randomExecutionPayloadBid(executionPayment));
   }
 
   public SignedExecutionPayloadBid randomSignedExecutionPayloadBid(
       final ExecutionPayloadBid executionPayloadBid) {
-    return getGloasSchemaDefinitions(executionPayloadBid.getSlot())
-        .getSignedExecutionPayloadBidSchema()
-        .create(executionPayloadBid, randomSignature());
+    return signBid(
+        getGloasSchemaDefinitions(executionPayloadBid.getSlot())
+            .getSignedExecutionPayloadBidSchema(),
+        executionPayloadBid);
   }
 
   public SignedExecutionPayloadBid randomSignedExecutionPayloadBidWithCommitments(
@@ -3736,25 +3783,23 @@ public final class DataStructureUtil {
         rematerializeBlobKzgCommitments(
             schemaDefinitions.getExecutionPayloadBidSchema().getBlobKzgCommitmentsSchema(),
             blobKzgCommitments);
-    return schemaDefinitions
-        .getSignedExecutionPayloadBidSchema()
-        .create(
-            schemaDefinitions
-                .getExecutionPayloadBidSchema()
-                .create(
-                    randomBytes32(),
-                    randomBytes32(),
-                    randomBytes32(),
-                    randomBytes32(),
-                    randomEth1Address(),
-                    randomUInt64(),
-                    randomBuilderIndex(),
-                    slot,
-                    randomUInt64(),
-                    randomUInt64(),
-                    bidCommitments,
-                    randomBytes32()),
-            randomSignature());
+    return signBid(
+        schemaDefinitions.getSignedExecutionPayloadBidSchema(),
+        schemaDefinitions
+            .getExecutionPayloadBidSchema()
+            .create(
+                randomBytes32(),
+                randomBytes32(),
+                randomBytes32(),
+                randomBytes32(),
+                randomEth1Address(),
+                randomUInt64(),
+                randomBuilderIndex(),
+                slot,
+                randomUInt64(),
+                randomUInt64(),
+                bidCommitments,
+                randomBytes32()));
   }
 
   public ProposerPreferences randomProposerPreferences() {
@@ -3765,9 +3810,11 @@ public final class DataStructureUtil {
   }
 
   public SignedProposerPreferences randomSignedProposerPreferences() {
-    return getGloasSchemaDefinitions(randomSlot())
-        .getSignedProposerPreferencesSchema()
-        .create(randomProposerPreferences(), randomSignature());
+    final SignedProposerPreferencesSchema schema =
+        getGloasSchemaDefinitions(randomSlot()).getSignedProposerPreferencesSchema();
+    return isXmssSigned(schema)
+        ? schema.create(randomProposerPreferences(), randomXmssSignature())
+        : schema.create(randomProposerPreferences(), randomSignature());
   }
 
   public ExecutionPayloadEnvelope randomExecutionPayloadEnvelope() {
@@ -3805,9 +3852,9 @@ public final class DataStructureUtil {
   }
 
   public SignedExecutionPayloadEnvelope randomSignedExecutionPayloadEnvelope(final long slot) {
-    return getGloasSchemaDefinitions(UInt64.valueOf(slot))
-        .getSignedExecutionPayloadEnvelopeSchema()
-        .create(randomExecutionPayloadEnvelope(UInt64.valueOf(slot)), randomSignature());
+    return signEnvelope(
+        getGloasSchemaDefinitions(UInt64.valueOf(slot)).getSignedExecutionPayloadEnvelopeSchema(),
+        randomExecutionPayloadEnvelope(UInt64.valueOf(slot)));
   }
 
   public BlindedExecutionPayloadEnvelope randomBlindedExecutionPayloadEnvelope() {
@@ -3826,9 +3873,67 @@ public final class DataStructureUtil {
 
   public SignedExecutionPayloadEnvelope randomSignedExecutionPayloadEnvelopeForBlock(
       final SignedBeaconBlock block) {
-    return getGloasSchemaDefinitions(block.getSlot())
-        .getSignedExecutionPayloadEnvelopeSchema()
-        .create(randomExecutionPayloadEnvelopeForBlock(block), randomSignature());
+    return signEnvelope(
+        getGloasSchemaDefinitions(block.getSlot()).getSignedExecutionPayloadEnvelopeSchema(),
+        randomExecutionPayloadEnvelopeForBlock(block));
+  }
+
+  /**
+   * A random PQ block body: a random VRF proof, eth1 data, graffiti, XMSS-signed bid and
+   * attestation proof, with no operations or parent execution requests.
+   */
+  public BeaconBlockBodyPq randomPqBeaconBlockBody(final BeaconBlockBodySchemaPq schema) {
+    final BeaconBlockBody emptyBody = schema.createEmpty();
+    final List<SszData> fieldValues = new ArrayList<>(emptyBody.size());
+    for (int i = 0; i < emptyBody.size(); i++) {
+      fieldValues.add(emptyBody.get(i));
+    }
+    final SszBytes32VectorSchema<?> vrfProofSchema =
+        (SszBytes32VectorSchema<?>)
+            schema.getChildSchema(schema.getFieldIndex(BlockBodyFields.RANDAO_REVEAL));
+    fieldValues.set(
+        schema.getFieldIndex(BlockBodyFields.RANDAO_REVEAL),
+        vrfProofSchema.of(
+            IntStream.range(0, vrfProofSchema.getLength())
+                .mapToObj(__ -> randomBytes32())
+                .toList()));
+    fieldValues.set(schema.getFieldIndex(BlockBodyFields.ETH1_DATA), randomEth1Data());
+    fieldValues.set(schema.getFieldIndex(BlockBodyFields.GRAFFITI), SszBytes32.of(randomBytes32()));
+    fieldValues.set(
+        schema.getFieldIndex(BlockBodyFields.SIGNED_EXECUTION_PAYLOAD_BID),
+        schema
+            .getSignedExecutionPayloadBidSchema()
+            .create(randomExecutionPayloadBid(), randomXmssSignature()));
+    fieldValues.set(
+        schema.getFieldIndex(BlockBodyFields.PROOF),
+        schema.getAttestationProofSchema().fromBytes(randomBytes(64)));
+    return BeaconBlockBodyPq.required(schema.createFromFieldValues(fieldValues));
+  }
+
+  /** A random leanXMSS signature, as PQ signs blocks, bids and envelopes. */
+  public SszXmssSignature randomXmssSignature() {
+    return new SszXmssSignature(randomBytes(SszXmssSignatureSchema.XMSS_SIGNATURE_SIZE));
+  }
+
+  private static boolean isXmssSigned(final SszContainerSchema<?> signedSchema) {
+    return signedSchema
+            .getChildSchema(signedSchema.getFieldIndex("signature"))
+            .getSszFixedPartSize()
+        == SszXmssSignatureSchema.XMSS_SIGNATURE_SIZE;
+  }
+
+  private SignedExecutionPayloadBid signBid(
+      final SignedExecutionPayloadBidSchema schema, final ExecutionPayloadBid bid) {
+    return isXmssSigned(schema)
+        ? schema.create(bid, randomXmssSignature())
+        : schema.create(bid, randomSignature());
+  }
+
+  private SignedExecutionPayloadEnvelope signEnvelope(
+      final SignedExecutionPayloadEnvelopeSchema schema, final ExecutionPayloadEnvelope envelope) {
+    return isXmssSigned(schema)
+        ? schema.create(envelope, randomXmssSignature())
+        : schema.create(envelope, randomSignature());
   }
 
   public ExecutionProof randomExecutionProof() {

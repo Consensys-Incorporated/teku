@@ -1,6 +1,6 @@
 # Teku PQ fork: state-transition plan
 
-Last updated 2026-11-19. Part of the [PQ fork plan](pq-fork-plan.md) (phase 4, with the switch-over that brings in phase 5). Follows the [containers plan](containers-plan.md).
+Last updated 2026-11-20. Part of the [PQ fork plan](pq-fork-plan.md) (phase 4, with the switch-over that brings in phase 5). Follows the [containers plan](containers-plan.md).
 
 ## Summary
 
@@ -10,11 +10,11 @@ XMSS and STARK verification sit behind interfaces with a disabled mode, as the r
 
 | Slice | Status |
 | --- | --- |
-| 1. Helpers | Not started |
-| 2. Execution requests | Not started |
-| 3. Epoch processing | Not started |
-| 4. Block processing | Not started |
-| 5. Switch-over and fork upgrade | Not started |
+| 1. Helpers | Done (`pq-st-helpers`) |
+| 2. Execution requests | Done (`pq-st-requests`) |
+| 3. Epoch processing | Done (`pq-st-epoch`) |
+| 4. Block processing | Done (`pq-st-block`) |
+| 5. Switch-over and fork upgrade | Upgrade done (`pq-st-upgrade`); switch-over done (`pq-st-switch`) except the reference-test fork |
 
 ## Approach
 
@@ -47,11 +47,12 @@ Build standalone, switch last. Each standalone class extends its Gloas or EIP-84
    - `process_operations` with PQ's limits and `process_stark` after the attestations; `process_attestation` without a signature and with the inclusion delay of 2. No sync aggregate, exits, BLS changes or payload attestations.
    - `XmssSignatureVerifier` and a STARK verifier interface threaded through block processing, each with a disabled mode, and `is_valid_indexed_attestation` through the STARK verifier.
 5. **Switch-over and fork upgrade.**
-   - `SpecLogicPq` wires the PQ helpers and processors, with no sync-committee or light-client util; `SchemaDefinitionsPq` returns the PQ containers as the milestone's schemas, with registry entries.
-   - `PqStateUpgrade` implements `upgrade_to_pq`: registered and unregistered validators and builders, pending deposits, unregistered builders' payments, and the initial aggregation-committee window.
-   - Caches keyed by BLS public keys (`ValidatorIndexCache`, the pubkey caches, `BuilderIndexCache`) are reset at the fork and keyed by `Bytes32` from PQ.
-   - The fork-boundary bridge for parent execution requests extends to EIP-8483 → PQ.
-   - The `pq` reference-test fork joins `SUPPORTED_FORKS` and its executors are wired.
+   - `SpecLogicPq` wires the PQ helpers and processors, with no sync-committee or light-client util; `SchemaDefinitionsPq` returns the PQ containers as the milestone's schemas, with registry entries. **Done**: the state and execution requests are registry entries for PQ; the block, attestation, attester slashing and XMSS-signed bid, envelope and proposer preferences schemas are returned by `SchemaDefinitionsPq`. The aggregate, single attestation and payload attestation message schemas don't share the Gloas types and stay on `getPqAttestationSchemas()` until PQ's networking uses them. Block production (`createBeaconBlockBodyBuilder`) throws until the validator client work.
+   - `PqStateUpgrade` implements `upgrade_to_pq`: registered and unregistered validators and builders, pending deposits, unregistered builders' payments, and the initial aggregation-committee window. **Done.**
+   - Caches keyed by BLS public keys (`ValidatorIndexCache`, the pubkey caches, `BuilderIndexCache`) are reset at the fork and keyed by `Bytes32` from PQ. **Partly done**: the upgrade builds an empty state, so the caches start empty; PQ lookups by XMSS key are linear scans, still to be cached.
+   - The fork-boundary bridge for parent execution requests extends to EIP-8483 → PQ. **Done**, in `BlockProcessorPq`: a pre-PQ parent is matched as EIP-8483 requests, or Gloas requests when it predates EIP-8483 too.
+   - The `pq` reference-test fork joins `SUPPORTED_FORKS` and its executors are wired. **Deferred** to the bump to consensus-specs `2f43bc0f9`, which adds PQ to `TESTGEN_FORKS` so vectors can be generated.
+   - **Heze** builds on PQ on this branch, so it switches too: `SpecLogicHeze` uses the PQ logic with EIP-8365's deposit rule on `EpochProcessorPq`, and `HezeStateUpgrade` only changes the fork, running `upgrade_to_pq` first when PQ shares Heze's epoch.
 
 ## Testing
 
@@ -65,3 +66,4 @@ Build standalone, switch last. Each standalone class extends its Gloas or EIP-84
 - **Committee cap.** Capping at 16 committees changes shuffling, committee sizes and indices. Any cache that bypasses the per-fork accessor gives wrong committees only in PQ.
 - **Spec gaps.** The fork-boundary execution-requests root, and registrations taking pending new-validator deposits, are open in the spec ([PQ fork plan §1.6](pq-fork-plan.md)).
 - **Runnable devnets.** See Approach: the switch stops PQ devnets until phase 9.
+- **Validator client event size.** A maximum PQ attester slashing (two 1 MiB STARK proofs) is an 8,389,454-byte `attester_slashing` event, over the validator client's 8 MB default limit. To settle with the validator client work (`EventStreamDefaultSizeLimitTest` leaves PQ out until then).

@@ -13,13 +13,18 @@
 
 package tech.pegasys.teku.spec.propertytest.suppliers.operations;
 
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof;
 import tech.pegasys.teku.spec.propertytest.suppliers.DataStructureUtilSupplier;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 public class SignedAggregateAndProofSupplier
     extends DataStructureUtilSupplier<SignedAggregateAndProof> {
+  // PQ aggregates hold a PQ attestation and are a different type (PqAttestationSchemas)
   public SignedAggregateAndProofSupplier() {
-    super(DataStructureUtil::randomSignedAggregateAndProof);
+    super(
+        DataStructureUtil::randomSignedAggregateAndProof,
+        SpecMilestone.PHASE0,
+        SpecMilestone.EIP8483);
   }
 }

@@ -16,15 +16,18 @@ package tech.pegasys.teku.spec.datastructures.epbs.versions.gloas;
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.BLINDED_EXECUTION_PAYLOAD_ENVELOPE_SCHEMA;
 
 import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszByteVector;
 import tech.pegasys.teku.infrastructure.ssz.containers.ContainerSchema2;
+import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszByteVectorSchema;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
-import tech.pegasys.teku.spec.datastructures.type.SszSignature;
 import tech.pegasys.teku.spec.datastructures.type.SszSignatureSchema;
+import tech.pegasys.teku.spec.datastructures.type.SszSignatures;
+import tech.pegasys.teku.spec.datastructures.type.SszXmssSignature;
 import tech.pegasys.teku.spec.schemas.registry.SchemaRegistry;
 
 public class SignedBlindedExecutionPayloadEnvelopeSchema
     extends ContainerSchema2<
-        SignedBlindedExecutionPayloadEnvelope, BlindedExecutionPayloadEnvelope, SszSignature> {
+        SignedBlindedExecutionPayloadEnvelope, BlindedExecutionPayloadEnvelope, SszByteVector> {
 
   public SignedBlindedExecutionPayloadEnvelopeSchema(final SchemaRegistry schemaRegistry) {
     this(schemaRegistry, "SignedBlindedExecutionPayloadEnvelope");
@@ -35,14 +38,28 @@ public class SignedBlindedExecutionPayloadEnvelopeSchema
    */
   public SignedBlindedExecutionPayloadEnvelopeSchema(
       final SchemaRegistry schemaRegistry, final String containerName) {
+    this(schemaRegistry, containerName, SszSignatureSchema.INSTANCE);
+  }
+
+  /** For a fork whose signatures are leanXMSS (PQ): takes the signature schema. */
+  public SignedBlindedExecutionPayloadEnvelopeSchema(
+      final SchemaRegistry schemaRegistry,
+      final String containerName,
+      final SszByteVectorSchema<?> signatureSchema) {
     super(
         containerName,
         namedSchema("message", schemaRegistry.get(BLINDED_EXECUTION_PAYLOAD_ENVELOPE_SCHEMA)),
-        namedSchema("signature", SszSignatureSchema.INSTANCE));
+        namedSchema("signature", SszSignatures.asSignatureFieldSchema(signatureSchema)));
   }
 
   public SignedBlindedExecutionPayloadEnvelope create(
       final BlindedExecutionPayloadEnvelope message, final BLSSignature signature) {
+    return new SignedBlindedExecutionPayloadEnvelope(this, message, signature);
+  }
+
+  /** For a schema that takes a leanXMSS signature. */
+  public SignedBlindedExecutionPayloadEnvelope create(
+      final BlindedExecutionPayloadEnvelope message, final SszXmssSignature signature) {
     return new SignedBlindedExecutionPayloadEnvelope(this, message, signature);
   }
 

@@ -62,7 +62,7 @@ public class ValidatorPq
 
     private ValidatorPqSchema() {
       super(
-          "Validator",
+          "ValidatorPq",
           namedSchema(ValidatorFields.PUBKEY, SszPrimitiveSchemas.BYTES32_SCHEMA),
           namedSchema(VRF_ROOT_FIELD_NAME, SszPrimitiveSchemas.BYTES32_SCHEMA),
           namedSchema(ValidatorFields.WITHDRAWAL_CREDENTIALS, SszPrimitiveSchemas.BYTES32_SCHEMA),

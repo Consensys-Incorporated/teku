@@ -16,20 +16,32 @@ package tech.pegasys.teku.spec.datastructures.epbs.versions.gloas;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.TestTemplate;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
 import tech.pegasys.teku.spec.Spec;
-import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.SpecMilestone;
+import tech.pegasys.teku.spec.TestSpecContext;
+import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
+@TestSpecContext(milestone = {SpecMilestone.GLOAS, SpecMilestone.EIP8483, SpecMilestone.PQ})
 class SignedExecutionPayloadEnvelopeTest {
-  private final Spec spec = TestSpecFactory.createMinimalGloas();
-  private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
-  private final SchemaDefinitionsGloas schemaDefinitions =
-      SchemaDefinitionsGloas.required(spec.getGenesisSchemaDefinitions());
+  private Spec spec;
+  private DataStructureUtil dataStructureUtil;
+  private SchemaDefinitionsGloas schemaDefinitions;
+  private SpecMilestone milestone;
 
-  @Test
+  @BeforeEach
+  void setUp(final SpecContext specContext) {
+    spec = specContext.getSpec();
+    dataStructureUtil = specContext.getDataStructureUtil();
+    schemaDefinitions = SchemaDefinitionsGloas.required(spec.getGenesisSchemaDefinitions());
+    milestone = specContext.getSpecMilestone();
+  }
+
+  @TestTemplate
   void shouldBlindAndUnblind() {
     final SignedExecutionPayloadEnvelope originalSignedExecutionPayloadEnvelope =
         dataStructureUtil.randomSignedExecutionPayloadEnvelope(10);
@@ -40,6 +52,21 @@ class SignedExecutionPayloadEnvelopeTest {
         .isEqualTo(originalSignedExecutionPayloadEnvelope.hashTreeRoot());
     assertThat(signedBlindedExecutionPayloadEnvelope.getMessage().getPayloadHeader().hashTreeRoot())
         .isEqualTo(originalSignedExecutionPayloadEnvelope.getMessage().getPayload().hashTreeRoot());
+    // From PQ on, the envelope keeps its leanXMSS signature when blinded
+    final boolean xmssSigned = milestone.isGreaterThanOrEqualTo(SpecMilestone.PQ);
+    assertThat(originalSignedExecutionPayloadEnvelope.isXmssSigned()).isEqualTo(xmssSigned);
+    assertThat(signedBlindedExecutionPayloadEnvelope.isXmssSigned()).isEqualTo(xmssSigned);
+    if (xmssSigned) {
+      assertThat(signedBlindedExecutionPayloadEnvelope.getXmssSignature())
+          .isEqualTo(originalSignedExecutionPayloadEnvelope.getXmssSignature());
+    } else {
+      assertThat(signedBlindedExecutionPayloadEnvelope.getSignature())
+          .isEqualTo(originalSignedExecutionPayloadEnvelope.getSignature());
+    }
+    assertThat(
+            spec.deserializeSignedBlindedExecutionPayloadEnvelope(
+                signedBlindedExecutionPayloadEnvelope.sszSerialize()))
+        .isEqualTo(signedBlindedExecutionPayloadEnvelope);
     assertThatNoException().isThrownBy(signedBlindedExecutionPayloadEnvelope::sszSerialize);
     assertThatNoException()
         .isThrownBy(

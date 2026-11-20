@@ -30,8 +30,7 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
-import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystemBuilder;
-import tech.pegasys.teku.storage.storageSystem.StorageSystem;
+import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 public class GossipTopicsTest {
   private final GossipEncoding gossipEncoding = GossipEncoding.SSZ_SNAPPY;
@@ -66,10 +65,10 @@ public class GossipTopicsTest {
     final P2PConfig p2pConfig =
         P2PConfig.builder().specProvider(spec).executionProofTopicEnabled(true).build();
 
-    final StorageSystem storageSystem = InMemoryStorageSystemBuilder.buildDefault(32, spec);
-    storageSystem.chainUpdater().initializeGenesis();
-    final Bytes32 genesisValidatorsRoot =
-        storageSystem.recentChainData().getGenesisData().orElseThrow().getGenesisValidatorsRoot();
+    // Only the genesis validators root is needed: a genesis for the highest milestone can't be
+    // built
+    // from BLS deposits from PQ on
+    final Bytes32 genesisValidatorsRoot = new DataStructureUtil(spec).randomBytes32();
 
     // all topics for highest fork, (fork-1) and (fork-2)
     final List<Integer> topicsPerFork =

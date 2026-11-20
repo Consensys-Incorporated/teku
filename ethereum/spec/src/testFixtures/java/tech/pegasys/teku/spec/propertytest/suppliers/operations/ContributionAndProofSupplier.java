@@ -19,7 +19,9 @@ import tech.pegasys.teku.spec.propertytest.suppliers.DataStructureUtilSupplier;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 public class ContributionAndProofSupplier extends DataStructureUtilSupplier<ContributionAndProof> {
+  // PQ has no sync committees
   public ContributionAndProofSupplier() {
-    super(DataStructureUtil::randomContributionAndProof, SpecMilestone.ALTAIR);
+    super(
+        DataStructureUtil::randomContributionAndProof, SpecMilestone.ALTAIR, SpecMilestone.EIP8483);
   }
 }

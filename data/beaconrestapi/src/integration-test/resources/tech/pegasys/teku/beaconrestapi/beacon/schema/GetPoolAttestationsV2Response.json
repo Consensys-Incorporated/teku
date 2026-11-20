@@ -18,6 +18,8 @@
           "$ref" : "#/components/schemas/AttestationElectra"
         }, {
           "$ref" : "#/components/schemas/AttestationGloas"
+        }, {
+          "$ref" : "#/components/schemas/AttestationPq"
         } ]
       }
     }

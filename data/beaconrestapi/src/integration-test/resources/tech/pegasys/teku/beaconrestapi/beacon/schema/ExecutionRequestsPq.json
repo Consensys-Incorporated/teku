@@ -1,0 +1,55 @@
+{
+  "title" : "ExecutionRequestsPq",
+  "type" : "object",
+  "required" : [ "deposits", "withdrawals", "consolidations", "builder_deposits", "builder_exits", "validator_preregistrations", "builder_preregistrations", "voluntary_exits" ],
+  "properties" : {
+    "deposits" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/DepositRequest"
+      }
+    },
+    "withdrawals" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/WithdrawalRequest"
+      }
+    },
+    "consolidations" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/ConsolidationRequest"
+      }
+    },
+    "builder_deposits" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/BuilderDepositRequest"
+      }
+    },
+    "builder_exits" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/BuilderExitRequest"
+      }
+    },
+    "validator_preregistrations" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/ValidatorPreregistrationRequest"
+      }
+    },
+    "builder_preregistrations" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/BuilderPreregistrationRequest"
+      }
+    },
+    "voluntary_exits" : {
+      "type" : "array",
+      "items" : {
+        "$ref" : "#/components/schemas/VoluntaryExitRequest"
+      }
+    }
+  }
+}

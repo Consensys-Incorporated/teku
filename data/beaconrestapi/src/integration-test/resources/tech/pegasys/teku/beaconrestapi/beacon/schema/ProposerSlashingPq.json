@@ -1,0 +1,13 @@
+{
+  "title" : "ProposerSlashingPq",
+  "type" : "object",
+  "required" : [ "signed_header_1", "signed_header_2" ],
+  "properties" : {
+    "signed_header_1" : {
+      "$ref" : "#/components/schemas/SignedBeaconBlockHeaderPq"
+    },
+    "signed_header_2" : {
+      "$ref" : "#/components/schemas/SignedBeaconBlockHeaderPq"
+    }
+  }
+}

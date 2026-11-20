@@ -29,14 +29,19 @@ public class SignedProposerPreferencesSchema
     extends ContainerSchema2<SignedProposerPreferences, ProposerPreferences, SszByteVector> {
 
   public SignedProposerPreferencesSchema(final SchemaRegistry schemaRegistry) {
-    this(schemaRegistry, SszSignatureSchema.INSTANCE);
+    this(schemaRegistry, "SignedProposerPreferences", SszSignatureSchema.INSTANCE);
   }
 
-  /** For a fork whose signatures are leanXMSS (PQ): takes the signature schema. */
+  /**
+   * For a fork whose signatures are leanXMSS (PQ): takes the signature schema, and a name that
+   * keeps its type apart from the BLS-signed one.
+   */
   public SignedProposerPreferencesSchema(
-      final SchemaRegistry schemaRegistry, final SszByteVectorSchema<?> signatureSchema) {
+      final SchemaRegistry schemaRegistry,
+      final String containerName,
+      final SszByteVectorSchema<?> signatureSchema) {
     super(
-        "SignedProposerPreferences",
+        containerName,
         namedSchema("message", schemaRegistry.get(PROPOSER_PREFERENCES_SCHEMA)),
         namedSchema("signature", SszSignatures.asSignatureFieldSchema(signatureSchema)));
   }

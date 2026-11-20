@@ -20,7 +20,11 @@ import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 public class SyncCommitteeContributionSupplier
     extends DataStructureUtilSupplier<SyncCommitteeContribution> {
+  // PQ has no sync committees
   public SyncCommitteeContributionSupplier() {
-    super(DataStructureUtil::randomSyncCommitteeContribution, SpecMilestone.ALTAIR);
+    super(
+        DataStructureUtil::randomSyncCommitteeContribution,
+        SpecMilestone.ALTAIR,
+        SpecMilestone.EIP8483);
   }
 }

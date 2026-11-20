@@ -53,7 +53,8 @@ import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.schemas.ApiSchemas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
-@TestSpecContext(milestone = {SpecMilestone.GLOAS, SpecMilestone.HEZE})
+// A PQ (or later) genesis, which Heze needs, can't be built from BLS deposits
+@TestSpecContext(milestone = {SpecMilestone.GLOAS})
 public class PostNewBlockV4IntegrationTest extends AbstractDataBackedRestAPIIntegrationTest {
 
   private static final Logger LOG = LogManager.getLogger();

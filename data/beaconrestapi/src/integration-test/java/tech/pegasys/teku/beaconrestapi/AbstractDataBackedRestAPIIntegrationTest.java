@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.beaconrestapi;
 
+import static com.google.common.base.Preconditions.checkState;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
@@ -411,8 +412,15 @@ public abstract class AbstractDataBackedRestAPIIntegrationTest {
     startRestAPIAtGenesis(StateStorageMode.ARCHIVE, SpecMilestone.PHASE0, CONFIG);
   }
 
+  /**
+   * Starts with every milestone scheduled, up to the highest. A PQ (or later) genesis can't be
+   * built from BLS deposits, so PQ and Heze fork at epoch 1 and the genesis is EIP-8483.
+   */
   protected void startRestAPIAtGenesisWithHighestSupportedMilestone() {
-    startRestAPIAtGenesis(StateStorageMode.ARCHIVE, SpecMilestone.getHighestMilestone(), CONFIG);
+    checkState(
+        SpecMilestone.getHighestMilestone() == SpecMilestone.HEZE,
+        "Schedule the new highest milestone here");
+    startRestAPIAtGenesis(TestSpecFactory.createMinimalWithPqAndHezeForkEpoch(UInt64.ONE));
   }
 
   protected void startRestApiAtGenesisStoringNonCanonicalBlocks(final SpecMilestone specMilestone) {

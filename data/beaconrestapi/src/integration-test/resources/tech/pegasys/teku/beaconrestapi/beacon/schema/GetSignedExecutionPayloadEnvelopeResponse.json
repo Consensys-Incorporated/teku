@@ -20,6 +20,8 @@
         "$ref" : "#/components/schemas/SignedExecutionPayloadEnvelope"
       }, {
         "$ref" : "#/components/schemas/SignedExecutionPayloadEnvelopeEip8483"
+      }, {
+        "$ref" : "#/components/schemas/SignedExecutionPayloadEnvelopePq"
       } ]
     }
   }

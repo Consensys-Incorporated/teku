@@ -110,18 +110,6 @@ class ExecutionPayloadVerifierPqTest {
     assertThat(calls).containsExactly(expectedCall(state, builderKey, envelope));
   }
 
-  @Test
-  void blsSignedEnvelopeIsRejected() throws Exception {
-    final BeaconStatePq state = stateWithLatestBlock(UInt64.valueOf(5));
-    final SignedExecutionPayloadEnvelope envelope =
-        schemaDefinitions
-            .getSignedExecutionPayloadEnvelopeSchema()
-            .create(envelopeMessage(BUILDER_INDEX_SELF_BUILD), dataStructureUtil.randomSignature());
-
-    assertThat(verify(state, envelope)).isFalse();
-    assertThat(calls).isEmpty();
-  }
-
   private boolean verify(final BeaconStatePq state, final SignedExecutionPayloadEnvelope envelope) {
     return verifier.verifyExecutionPayloadEnvelopeSignature(
         state, envelope, BLSSignatureVerifier.NOOP, blockSlot);

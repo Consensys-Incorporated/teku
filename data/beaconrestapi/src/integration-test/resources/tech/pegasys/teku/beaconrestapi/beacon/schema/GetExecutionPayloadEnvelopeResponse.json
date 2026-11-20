@@ -14,6 +14,8 @@
         "$ref" : "#/components/schemas/ExecutionPayloadEnvelope"
       }, {
         "$ref" : "#/components/schemas/ExecutionPayloadEnvelopeEip8483"
+      }, {
+        "$ref" : "#/components/schemas/ExecutionPayloadEnvelopePq"
       } ]
     }
   }

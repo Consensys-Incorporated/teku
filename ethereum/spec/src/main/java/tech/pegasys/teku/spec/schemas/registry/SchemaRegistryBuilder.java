@@ -24,6 +24,7 @@ import static tech.pegasys.teku.spec.SpecMilestone.FULU;
 import static tech.pegasys.teku.spec.SpecMilestone.GLOAS;
 import static tech.pegasys.teku.spec.SpecMilestone.HEZE;
 import static tech.pegasys.teku.spec.SpecMilestone.PHASE0;
+import static tech.pegasys.teku.spec.SpecMilestone.PQ;
 import static tech.pegasys.teku.spec.schemas.registry.BaseSchemaProvider.providerBuilder;
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.AGGREGATE_AND_PROOF_SCHEMA;
 import static tech.pegasys.teku.spec.schemas.registry.SchemaTypes.AGGREGATION_BITS_SCHEMA;
@@ -224,6 +225,7 @@ import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionP
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsSchemaGloas;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionListSchema;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.SignedInclusionListSchema;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.ExecutionRequestsSchemaPq;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrapSchema;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdateSchema;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdateSchema;
@@ -269,6 +271,7 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.electra.
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.fulu.BeaconStateSchemaFulu;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateSchemaGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.phase0.BeaconStateSchemaPhase0;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.pq.BeaconStateSchemaPq;
 import tech.pegasys.teku.spec.datastructures.state.versions.capella.HistoricalSummary.HistoricalSummarySchema;
 import tech.pegasys.teku.spec.datastructures.state.versions.eip8483.BuilderPqRegistrationSchema;
 import tech.pegasys.teku.spec.datastructures.state.versions.eip8483.ValidatorPqRegistrationSchema;
@@ -695,6 +698,9 @@ public class SchemaRegistryBuilder {
             EIP8483,
             (registry, specConfig, schemaName) ->
                 BeaconStateSchemaEip8483.create(SpecConfigEip8483.required(specConfig), registry))
+        .withCreator(
+            PQ,
+            (registry, specConfig, schemaName) -> BeaconStateSchemaPq.create(specConfig, registry))
         .build();
   }
 
@@ -747,6 +753,8 @@ public class SchemaRegistryBuilder {
         .withCreator(
             EIP8483,
             (registry, _, schemaName) -> new ExecutionRequestsSchemaEip8483(registry, schemaName))
+        .withCreator(
+            PQ, (registry, _, schemaName) -> new ExecutionRequestsSchemaPq(registry, schemaName))
         .build();
   }
 

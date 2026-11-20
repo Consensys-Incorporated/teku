@@ -31,10 +31,12 @@ import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.config.SpecConfigEip8483;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
+import tech.pegasys.teku.spec.config.SpecConfigPq;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.common.BlockBodyFields;
 import tech.pegasys.teku.spec.datastructures.execution.versions.eip8483.ExecutionRequestsFieldsEip8483;
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.ExecutionRequestsFields;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionRequestsFieldsGloas;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.ExecutionRequestsFieldsPq;
 
 /**
  * Every progressive list of a beacon block body or of execution requests declares the limit the
@@ -46,7 +48,8 @@ import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionR
  * <p>Each container is also checked to have no list field beyond the ones listed here, so that a
  * list added by a later milestone can't silently arrive without a declared limit.
  */
-@TestSpecContext(milestone = {SpecMilestone.GLOAS, SpecMilestone.EIP8483, SpecMilestone.HEZE})
+@TestSpecContext(
+    milestone = {SpecMilestone.GLOAS, SpecMilestone.EIP8483, SpecMilestone.PQ, SpecMilestone.HEZE})
 class ProgressiveListLimitsSanityTest {
 
   /**
@@ -57,6 +60,7 @@ class ProgressiveListLimitsSanityTest {
 
   private SpecConfigGloas config;
   private Optional<SpecConfigEip8483> eip8483Config;
+  private Optional<SpecConfigPq> pqConfig;
   private SchemaDefinitionsGloas schemaDefinitions;
 
   @BeforeEach
@@ -65,6 +69,7 @@ class ProgressiveListLimitsSanityTest {
     // SpecConfigGloas.required unwraps to the inner Gloas config, so read EIP-8483 from the
     // original
     eip8483Config = specContext.getSpec().getGenesisSpecConfig().toVersionEip8483();
+    pqConfig = specContext.getSpec().getGenesisSpecConfig().toVersionPq();
     schemaDefinitions = SchemaDefinitionsGloas.required(specContext.getSchemaDefinitions());
   }
 
@@ -92,6 +97,16 @@ class ProgressiveListLimitsSanityTest {
   }
 
   private Map<SszFieldName, Long> expectedBlockBodyLimits() {
+    if (pqConfig.isPresent()) {
+      final SpecConfigPq pq = pqConfig.get();
+      return Map.ofEntries(
+          Map.entry(BlockBodyFields.PROPOSER_SLASHINGS, (long) pq.getMaxProposerSlashings()),
+          Map.entry(BlockBodyFields.ATTESTER_SLASHINGS, (long) pq.getMaxAttesterSlashingsElectra()),
+          Map.entry(BlockBodyFields.ATTESTATIONS, (long) pq.getMaxAttestationsPq()),
+          Map.entry(BlockBodyFields.DEPOSITS, 0L),
+          // the attestation proof is a byte list
+          Map.entry(BlockBodyFields.PROOF, (long) pq.getMaxStarkProofSize()));
+    }
     return Map.ofEntries(
         Map.entry(BlockBodyFields.PROPOSER_SLASHINGS, (long) config.getMaxProposerSlashings()),
         Map.entry(
@@ -107,6 +122,20 @@ class ProgressiveListLimitsSanityTest {
 
   private Map<SszFieldName, Long> expectedExecutionRequestsLimits() {
     final Map<SszFieldName, Long> limits = new HashMap<>(expectedGloasExecutionRequestsLimits());
+    if (pqConfig.isPresent()) {
+      // PQ drops EIP-8483's registrations for preregistrations and voluntary exits
+      final SpecConfigPq pq = pqConfig.get();
+      limits.put(
+          ExecutionRequestsFieldsPq.VALIDATOR_PREREGISTRATIONS,
+          (long) pq.getMaxValidatorPreregistrationRequestsPerPayload());
+      limits.put(
+          ExecutionRequestsFieldsPq.BUILDER_PREREGISTRATIONS,
+          (long) pq.getMaxBuilderPreregistrationRequestsPerPayload());
+      limits.put(
+          ExecutionRequestsFieldsPq.VOLUNTARY_EXITS,
+          (long) pq.getMaxVoluntaryExitRequestsPerPayload());
+      return limits;
+    }
     eip8483Config.ifPresent(
         eip8483 -> {
           limits.put(

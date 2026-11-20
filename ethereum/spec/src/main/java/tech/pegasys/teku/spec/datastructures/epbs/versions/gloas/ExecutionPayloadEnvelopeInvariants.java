@@ -22,6 +22,7 @@ import tech.pegasys.teku.infrastructure.bytes.Bytes20;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszType;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.type.SszSignatureSchema;
+import tech.pegasys.teku.spec.datastructures.type.SszXmssSignatureSchema;
 
 /** Utility functions to extract data from the ssz bytes of execution payload envelopes. */
 public class ExecutionPayloadEnvelopeInvariants {
@@ -31,6 +32,10 @@ public class ExecutionPayloadEnvelopeInvariants {
 
   private static final int EXECUTION_PAYLOAD_ENVELOPE_OFFSET_IN_SIGNED_ENVELOPE =
       BYTES_PER_LENGTH_OFFSET + SszSignatureSchema.INSTANCE.getSszFixedPartSize();
+
+  // From PQ on, envelopes are signed with leanXMSS (2404 bytes) instead of BLS (96 bytes)
+  private static final int EXECUTION_PAYLOAD_ENVELOPE_OFFSET_IN_XMSS_SIGNED_ENVELOPE =
+      BYTES_PER_LENGTH_OFFSET + SszXmssSignatureSchema.INSTANCE.getSszFixedPartSize();
 
   // Fixed part of ExecutionPayloadEnvelope:
   // payload_offset(4) + execution_requests_offset(4) + builder_index(8) +
@@ -100,7 +105,8 @@ public class ExecutionPayloadEnvelopeInvariants {
       final Bytes bytes, final int slotOffsetInPayload) {
     final int envelopeDataOffset =
         SszType.sszBytesToLength(bytes.slice(0, BYTES_PER_LENGTH_OFFSET));
-    if (envelopeDataOffset != EXECUTION_PAYLOAD_ENVELOPE_OFFSET_IN_SIGNED_ENVELOPE) {
+    if (envelopeDataOffset != EXECUTION_PAYLOAD_ENVELOPE_OFFSET_IN_SIGNED_ENVELOPE
+        && envelopeDataOffset != EXECUTION_PAYLOAD_ENVELOPE_OFFSET_IN_XMSS_SIGNED_ENVELOPE) {
       throw new IllegalArgumentException("Unexpected signed execution payload envelope format");
     }
     final int payloadDataOffset =
