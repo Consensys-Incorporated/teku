@@ -16,6 +16,7 @@ package tech.pegasys.teku.validator.coordinator;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
@@ -29,6 +30,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.BeforeEach;
@@ -97,6 +99,7 @@ import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.OperationPool;
 import tech.pegasys.teku.statetransition.SimpleOperationPool;
 import tech.pegasys.teku.statetransition.attestation.AggregatingAttestationPool;
+import tech.pegasys.teku.statetransition.attestation.PqBlockAttestations;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidManager;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadManager;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoiceNotifier;
@@ -232,6 +235,70 @@ class BlockOperationSelectorFactoryTest {
     this.executionPayloadContext = dataStructureUtil.randomPayloadExecutionContext(false);
     when(forkChoiceNotifier.getPayloadId(any(), any()))
         .thenReturn(SafeFuture.completedFuture(Optional.of(executionPayloadContext)));
+  }
+
+  @Test
+  void shouldTakeAttestationsWithTheirProofForBlocksThatCarryOne() {
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final DataStructureUtil gloasData = new DataStructureUtil(gloasSpec);
+    final SchemaDefinitionsGloas schemaDefinitions =
+        SchemaDefinitionsGloas.required(gloasSpec.getGenesisSchemaDefinitions());
+    final UInt64 blockSlot = UInt64.valueOf(10);
+    final BeaconStateGloas blockSlotState =
+        BeaconStateGloas.required(gloasData.randomBeaconState(blockSlot));
+    final Bytes proof = gloasData.randomBytes(64);
+    when(attestationPool.getPqAttestationsForBlock(any(), any()))
+        .thenReturn(
+            new PqBlockAttestations(
+                schemaDefinitions.getBeaconBlockBodySchema().getAttestationsSchema().getDefault(),
+                proof));
+    final Bytes[] capturedProof = new Bytes[1];
+    final CapturingBeaconBlockBodyBuilder pqBodyBuilder =
+        new CapturingBeaconBlockBodyBuilder(false) {
+          @Override
+          public Boolean supportsSyncAggregate() {
+            return false;
+          }
+
+          @Override
+          public Boolean supportsExecutionPayload() {
+            return false;
+          }
+
+          @Override
+          public Boolean supportsBlsToExecutionChanges() {
+            return false;
+          }
+
+          @Override
+          public boolean supportsAttestationProof() {
+            return true;
+          }
+
+          @Override
+          public BeaconBlockBodyBuilder attestationProof(final Bytes attestationProof) {
+            capturedProof[0] = attestationProof;
+            return this;
+          }
+        };
+    final BlockProductionContext context =
+        new BlockProductionContext(
+            blockSlot,
+            blockSlotState,
+            ForkChoiceNode.createFull(parentRoot),
+            blockSlotState.getLatestBlockHash(),
+            randaoReveal,
+            Optional.empty(),
+            false,
+            Optional.empty(),
+            BlockProductionPerformance.NOOP);
+
+    safeJoin(createFactory(gloasSpec).createSelector(context).apply(pqBodyBuilder));
+
+    assertThat(capturedProof[0]).isEqualTo(proof);
+    verify(attestationPool, never()).getAttestationsForBlock(any(), any());
+    // PQ blocks carry no voluntary exits
+    assertThat(pqBodyBuilder.voluntaryExits).isNull();
   }
 
   @Test

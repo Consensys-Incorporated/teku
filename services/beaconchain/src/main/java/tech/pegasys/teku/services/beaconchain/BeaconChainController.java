@@ -147,6 +147,7 @@ import tech.pegasys.teku.spec.logic.common.statetransition.availability.Availabi
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.spec.logic.common.util.BlockRewardCalculatorUtil;
 import tech.pegasys.teku.spec.logic.versions.deneb.helpers.MiscHelpersDeneb;
+import tech.pegasys.teku.spec.logic.versions.pq.crypto.StarkProver;
 import tech.pegasys.teku.spec.networks.Eth2Network;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsElectra;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsFulu;
@@ -158,8 +159,10 @@ import tech.pegasys.teku.statetransition.OperationPool;
 import tech.pegasys.teku.statetransition.OperationsReOrgManager;
 import tech.pegasys.teku.statetransition.SimpleOperationPool;
 import tech.pegasys.teku.statetransition.attestation.AggregatingAttestationPool;
+import tech.pegasys.teku.statetransition.attestation.AggregatingAttestationPoolPq;
 import tech.pegasys.teku.statetransition.attestation.AggregatingAttestationPoolV2;
 import tech.pegasys.teku.statetransition.attestation.AttestationManager;
+import tech.pegasys.teku.statetransition.attestation.ForkRoutingAttestationPool;
 import tech.pegasys.teku.statetransition.attestation.utils.AggregatingAttestationPoolProfiler;
 import tech.pegasys.teku.statetransition.attestation.utils.AggregatingAttestationPoolProfilerCSV;
 import tech.pegasys.teku.statetransition.blobs.BlobSidecarManager;
@@ -2413,7 +2416,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
             ? new AggregatingAttestationPoolProfilerCSV(debugDataDirectory)
             : AggregatingAttestationPoolProfiler.NOOP;
 
-    aggregatingAttestationPool =
+    final AggregatingAttestationPool blsAttestationPool =
         new AggregatingAttestationPoolV2(
             spec,
             recentChainData,
@@ -2423,6 +2426,15 @@ public class BeaconChainController extends Service implements BeaconChainControl
             eth2NetworkConfiguration.getAggregatingAttestationPoolV2BlockAggregationTimeLimit(),
             eth2NetworkConfiguration
                 .getAggregatingAttestationPoolV2TotalBlockAggregationTimeLimit());
+    // PQ attestations carry XMSS signatures and STARK proofs, so they have their own pool
+    aggregatingAttestationPool =
+        spec.isMilestoneSupported(SpecMilestone.PQ)
+            ? new ForkRoutingAttestationPool(
+                spec,
+                recentChainData,
+                blsAttestationPool,
+                new AggregatingAttestationPoolPq(spec, recentChainData, StarkProver.CONCATENATED))
+            : blsAttestationPool;
 
     eventChannels.subscribe(SlotEventsChannel.class, aggregatingAttestationPool);
     blockImporter.subscribeToVerifiedBlockAttestations(
