@@ -68,4 +68,12 @@ public class PqAggregateGossipManager extends AbstractGossipManager<SignedAggreg
             GossipTopicName.BEACON_AGGREGATE_AND_PROOF.toString()),
         debugDataDumper);
   }
+
+  /** Publishes an aggregate from this node's validator client, once. */
+  public void onNewAggregate(final ValidatableAttestation validatableAttestation) {
+    validatableAttestation
+        .getPqAggregate()
+        .filter(__ -> validatableAttestation.markGossiped())
+        .ifPresent(this::publishMessage);
+  }
 }

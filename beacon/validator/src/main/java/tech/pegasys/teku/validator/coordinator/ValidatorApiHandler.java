@@ -105,6 +105,8 @@ import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SignedCo
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeContribution;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeMessage;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.ValidatableSyncCommitteeMessage;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationAndProofPq;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
@@ -112,6 +114,7 @@ import tech.pegasys.teku.spec.datastructures.validator.SubnetSubscription;
 import tech.pegasys.teku.spec.logic.common.util.BlockProposalUtil;
 import tech.pegasys.teku.spec.logic.common.util.SyncCommitteeUtil;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.statetransition.attestation.AggregatingAttestationPool;
 import tech.pegasys.teku.statetransition.attestation.AttestationManager;
 import tech.pegasys.teku.statetransition.datacolumns.DataAvailabilitySampler;
@@ -759,6 +762,51 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
         attestationPool
             .createAggregateFor(attestationHashTreeRoot, committeeIndex)
             .filter(attestation -> attestation.getData().getSlot().equals(slot)));
+  }
+
+  @Override
+  public SafeFuture<Optional<AttestationAndProofPq>> createPqAggregate(
+      final UInt64 slot, final Bytes32 attestationHashTreeRoot, final UInt64 committeeIndex) {
+    if (isSyncActive()) {
+      return NodeSyncingException.failedFuture();
+    }
+    return SafeFuture.completedFuture(
+        attestationPool
+            .createPqAggregateFor(attestationHashTreeRoot, committeeIndex)
+            .filter(aggregate -> aggregate.attestation().getData().getSlot().equals(slot))
+            .map(
+                aggregate ->
+                    SchemaDefinitionsPq.required(spec.atSlot(slot).getSchemaDefinitions())
+                        .getPqAttestationSchemas()
+                        .getAttestationAndProofSchema()
+                        .create(aggregate.attestation(), aggregate.proof())));
+  }
+
+  @Override
+  public SafeFuture<List<SubmitDataError>> sendPqAggregateAndProofs(
+      final List<SignedAggregateAndProofPq> aggregateAndProofs) {
+    return SafeFuture.collectAll(
+            aggregateAndProofs.stream()
+                .map(
+                    aggregateAndProof ->
+                        attestationManager
+                            .addAggregate(
+                                ValidatableAttestation.pqAggregateFromValidator(
+                                    spec, aggregateAndProof),
+                                Optional.empty())
+                            .thenPeek(
+                                result -> {
+                                  if (result.isReject()) {
+                                    VALIDATOR_LOGGER.producedInvalidAggregate(
+                                        aggregateAndProof
+                                            .getMessage()
+                                            .getAggregate()
+                                            .getData()
+                                            .getSlot(),
+                                        result.getDescription().orElse("Unknown reason"));
+                                  }
+                                })))
+        .thenApply(this::convertInternalValidationResults);
   }
 
   @Override

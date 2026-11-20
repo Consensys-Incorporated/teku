@@ -79,6 +79,7 @@ public class GetAggregateAttestationV2Test extends AbstractMigratedBeaconHandler
     request.setQueryParameter(RestApiConstants.ATTESTATION_DATA_ROOT, blockRoot.toHexString());
     request.setQueryParameter(RestApiConstants.SLOT, slot.toString());
     request.setQueryParameter(RestApiConstants.COMMITTEE_INDEX, committeeIndex.toString());
+    when(validatorDataProvider.getMilestoneAtSlot(slot)).thenReturn(SpecMilestone.PHASE0);
   }
 
   @Test

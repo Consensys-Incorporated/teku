@@ -19,6 +19,7 @@ import tech.pegasys.teku.spec.config.SpecConfigPq;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq.PayloadAttestationMessagePqSchema;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashingSchema;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AggregateAndProofPq.AggregateAndProofPqSchema;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationAndProofPq.AttestationAndProofPqSchema;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq.SignedAggregateAndProofPqSchema;
 import tech.pegasys.teku.spec.schemas.registry.SchemaRegistry;
 
@@ -34,6 +35,7 @@ public class PqAttestationSchemas {
   private final AttesterSlashingSchema attesterSlashingSchema;
   private final AggregateAndProofPqSchema aggregateAndProofSchema;
   private final SignedAggregateAndProofPqSchema signedAggregateAndProofSchema;
+  private final AttestationAndProofPqSchema attestationAndProofSchema;
   private final PayloadAttestationMessagePqSchema payloadAttestationMessageSchema;
 
   public PqAttestationSchemas(final SchemaRegistry schemaRegistry) {
@@ -51,6 +53,8 @@ public class PqAttestationSchemas {
         new AggregateAndProofPqSchema(attestationSchema, attestationProofSchema);
     this.signedAggregateAndProofSchema =
         new SignedAggregateAndProofPqSchema(aggregateAndProofSchema);
+    this.attestationAndProofSchema =
+        new AttestationAndProofPqSchema(attestationSchema, attestationProofSchema);
     this.payloadAttestationMessageSchema = new PayloadAttestationMessagePqSchema(schemaRegistry);
   }
 
@@ -77,6 +81,11 @@ public class PqAttestationSchemas {
 
   public SignedAggregateAndProofPqSchema getSignedAggregateAndProofSchema() {
     return signedAggregateAndProofSchema;
+  }
+
+  /** The validator API's aggregate with its proof, which an aggregator signs. */
+  public AttestationAndProofPqSchema getAttestationAndProofSchema() {
+    return attestationAndProofSchema;
   }
 
   public PayloadAttestationMessagePqSchema getPayloadAttestationMessageSchema() {

@@ -55,6 +55,8 @@ import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SignedContributionAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeContribution;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeMessage;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationAndProofPq;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.datastructures.validator.SubnetSubscription;
@@ -344,6 +346,23 @@ public interface ValidatorApiChannel extends BuilderApiChannel, ChannelInterface
 
   SafeFuture<Optional<Attestation>> createAggregate(
       UInt64 slot, Bytes32 attestationHashTreeRoot, Optional<UInt64> committeeIndex);
+
+  /**
+   * PQ: the best aggregate of the committee's attestations with the proof of their signatures,
+   * which an aggregator signs as an {@code AggregateAndProofPq}.
+   */
+  default SafeFuture<Optional<AttestationAndProofPq>> createPqAggregate(
+      final UInt64 slot, final Bytes32 attestationHashTreeRoot, final UInt64 committeeIndex) {
+    return SafeFuture.failedFuture(
+        new UnsupportedOperationException("PQ aggregates are not supported"));
+  }
+
+  /** PQ: publishes aggregators' signed aggregates with their proofs. */
+  default SafeFuture<List<SubmitDataError>> sendPqAggregateAndProofs(
+      final List<SignedAggregateAndProofPq> aggregateAndProofs) {
+    return SafeFuture.failedFuture(
+        new UnsupportedOperationException("PQ aggregates are not supported"));
+  }
 
   SafeFuture<Optional<SyncCommitteeContribution>> createSyncCommitteeContribution(
       UInt64 slot, int subcommitteeIndex, Bytes32 beaconBlockRoot);

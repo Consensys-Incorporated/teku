@@ -58,6 +58,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -123,6 +124,8 @@ import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SignedContributionAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeContribution;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeMessage;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationPq;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.CheckpointState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
@@ -131,6 +134,7 @@ import tech.pegasys.teku.spec.logic.common.util.SyncCommitteeUtil;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.attestation.AggregatingAttestationPool;
 import tech.pegasys.teku.statetransition.attestation.AttestationManager;
+import tech.pegasys.teku.statetransition.attestation.PqAggregate;
 import tech.pegasys.teku.statetransition.datacolumns.DataAvailabilitySampler;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidManager;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadManager;
@@ -1117,6 +1121,44 @@ class ValidatorApiHandlerTest {
                 attestationData.hashTreeRoot(),
                 Optional.empty()))
         .isCompletedWithValue(aggregate);
+  }
+
+  @Test
+  public void createPqAggregate_shouldReturnAggregateWithProofFromAttestationPool() {
+    setUp(TestSpecFactory.createMinimalPq());
+    final AttestationPq attestation = (AttestationPq) dataStructureUtil.randomAttestation();
+    final Bytes proof = dataStructureUtil.randomBytes(64);
+    final Bytes32 dataRoot = attestation.getData().hashTreeRoot();
+    final UInt64 slot = attestation.getData().getSlot();
+    when(attestationPool.createPqAggregateFor(dataRoot, ONE))
+        .thenReturn(Optional.of(new PqAggregate(attestation, proof)));
+
+    assertThat(validatorApiHandler.createPqAggregate(slot, dataRoot, ONE))
+        .isCompletedWithValueMatching(
+            maybeAggregate ->
+                maybeAggregate.orElseThrow().getAggregate().equals(attestation)
+                    && maybeAggregate.get().getProof().equals(proof));
+    // An aggregate for another slot is not the one asked for
+    assertThat(validatorApiHandler.createPqAggregate(slot.plus(1), dataRoot, ONE))
+        .isCompletedWithValue(Optional.empty());
+  }
+
+  @Test
+  public void sendPqAggregateAndProofs_shouldAddAggregateFromValidator() {
+    setUp(TestSpecFactory.createMinimalPq());
+    final SignedAggregateAndProofPq aggregateAndProof =
+        dataStructureUtil.randomSignedAggregateAndProofPq();
+    when(attestationManager.addAggregate(any(ValidatableAttestation.class), any()))
+        .thenReturn(completedFuture(InternalValidationResult.ACCEPT));
+
+    assertThat(validatorApiHandler.sendPqAggregateAndProofs(List.of(aggregateAndProof)))
+        .isCompletedWithValue(emptyList());
+
+    final ArgumentCaptor<ValidatableAttestation> attestationCaptor =
+        ArgumentCaptor.forClass(ValidatableAttestation.class);
+    verify(attestationManager).addAggregate(attestationCaptor.capture(), eq(Optional.empty()));
+    assertThat(attestationCaptor.getValue().getPqAggregate()).contains(aggregateAndProof);
+    assertThat(attestationCaptor.getValue().isProducedLocally()).isTrue();
   }
 
   @Test
