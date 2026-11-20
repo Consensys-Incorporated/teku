@@ -758,11 +758,9 @@ The pool aggregates BLS signatures today (`AggregatingAttestationPoolV2`, `Match
      - extend `LocalValidatorSource`/`KeyManager` to load XMSS key, VRF material and leaf DB alongside, or instead of, the BLS key;
      - provide a CLI (`teku validator generate-pq-keys`, **[inferred]** name) that emits the XMSS pubkey, the VRF root and the EIP8483 `pq_data`.
    - This tooling is a **prerequisite for EIP8483 registration**, so it may belong to the EIP8483 workstream.
-3. **VRF.** RANDAO is not a signature, so `Signer.createRandaoReveal` gets a PQ sibling `getVrfProof(slot)`.
-   - **[inferred]** Teku must pick a derivation, for example `leaf_i = sha256(vrf_seed ‖ uint64(i))`.
-   - **[inferred]** The root needs about 2^32 sha256 calls, about 5 to 10 min per validator in Java. This is a one-off at key generation.
-   - **[inferred]** To produce a proof cheaply, persist the level-16 nodes (2^15 × 32 B = 1 MiB per validator). Each proof then costs about 2^16 hashes.
-   - The spec leaves this to clients, which hurts portability between clients (§5).
+3. **VRF.** RANDAO is not a signature, so the PQ signer has `computeVrfProof(slot)` next to the BLS `Signer.createRandaoReveal`.
+   - **Specified since `2f43bc0f9`** (validator.md, from `70b907fd4`): leaf `i` is `keccak256(vrf_seed ‖ uint_to_bytes(uint64(i)))`, and `compute_vrf_node`, `compute_vrf_root` and `compute_vrf_proof` build the Keccak-256 tree of depth 31 above it. Any client derives the same root from the same seed, so a validator can move its seed between clients.
+   - **Done (`VrfTree`, phase 9b):** deriving the root hashes about 2^32 leaves, a one-off at key generation, in parallel. The tree keeps the level-16 nodes and above (2^15 × 32 B = 1 MiB per validator) and can be saved and restored, so a proof costs one 2^16-leaf subtree. Vectors from the spec's own functions check it. `PredicatesPq.isValidVrfProof` uses the same walk.
 4. **Signer.**
    - Add `XmssSigner`, or make `Signer` methods return a sealed `ValidatorSignature` (`Bls`/`Xmss`). `Signer` currently returns `SafeFuture<BLSSignature>` for 15 methods.
    - **Recommend** a separate `XmssSigner` interface held by the VC `Validator` next to the BLS `Signer`. Duties select by `spec.atSlot(slot).getMilestone()`.
@@ -772,15 +770,18 @@ The pool aggregates BLS signatures today (`AggregatingAttestationPoolV2`, `Match
      - `signReserved(message)` for exits and preregistration (allocates the next reserved leaf);
      - `getVrfProof`.
    - **Implementations:** `LocalXmssSigner`, `SlashingProtectedXmssSigner`, `DeletableXmssSigner` (mirror `LocalSigner`, `SlashingProtectedSigner`, `DeletableSigner` in `spec/signatures`).
+   - **Done (phase 9b):** `XmssSigner` and `LocalXmssSigner` in `spec/signatures/xmss`, with the methods above (`signAtReservedLeaf(signingRoot)` for exits and preregistration). `LocalXmssSigner` records every leaf with the `XmssLeafProtector` before signing, and fails with `XmssLeafReuseException` instead of reusing one.
+   - **Still to do:** surround-vote protection. A leaf per slot and per target epoch already rules out double proposals and double votes, but not surround votes; that needs the slashing protector keyed by XMSS key (with the identity work, 9a). Deleting a key (`DeletableXmssSigner`) comes with the keymanager work (9d).
 5. **Leaf protection: a new safety-critical store.**
    - **Today:** `SlashingProtector`/`LocalSlashingProtector` only guard blocks and attestations (`maySignBlock`, `maySignAttestation`). Aggregates, PTC messages, preferences, envelopes and randao are unguarded.
    - **PQ requires** a per-key `XmssLeafProtector`:
      - `maySign(pubkey, leaf, signingRoot)` returns true if the leaf is unused or recorded with the same root;
      - record durably (fsync) **before** signing;
      - an allocator for reserved leaves.
-   - **Storage [inferred]:** per-key file under the slashing-protection dir.
-     - Per-slot and attestation leaves are monotonic, so store a high-water mark per region plus an exact map for recent leaves.
-     - Reserved leaves get a counter.
+   - **Done (phase 9b): `LocalXmssLeafProtector`**, a per-key `<xmss pubkey>.xmss-leaves` file in the slashing-protection dir, written with `SyncDataAccessor.syncedWrite` before signing is allowed. Its `XmssLeafRecord`:
+     - keeps every reserved leaf with its signing root, and allocates the next one above the highest used, so each is used once and in increasing order;
+     - for the attestation, builder bid and per-slot regions, keeps the exact roots within a window (64 attestation leaves; 2^14 bid and per-slot leaves, since preferences are signed up to an epoch ahead) and refuses anything below the window's watermark;
+     - is the same on every network, since a key used on two networks still must not reuse a leaf.
    - **Interchange:** EIP-3076 has no leaf records, so an extension or a new format is needed.
    - **Higher stakes:** leaf reuse **exposes the key**. It is worse than slashing, because anyone can then forge at that leaf.
    - **Existing behaviour to fix:** `ProposerPreferencesPublisher` may re-sign preferences for the same slot when the dependent root changes. The spec forbids that in PQ, so make it sign once per slot.

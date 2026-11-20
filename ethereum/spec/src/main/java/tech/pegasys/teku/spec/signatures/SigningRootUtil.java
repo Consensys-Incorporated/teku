@@ -30,6 +30,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPrefere
 import tech.pegasys.teku.spec.datastructures.operations.AggregateAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.VoluntaryExit;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
 
@@ -100,6 +101,19 @@ public class SigningRootUtil {
             forkInfo.getFork(),
             forkInfo.getGenesisValidatorsRoot());
     return specVersion.miscHelpers().computeSigningRoot(aggregateAndProof, domain);
+  }
+
+  /** PQ: the aggregate and proof carries the attesters' proof, with no selection proof. */
+  public Bytes signingRootForSignAggregateAndProof(
+      final AggregateAndProofPq aggregateAndProof, final ForkInfo forkInfo) {
+    final UInt64 slot = aggregateAndProof.getAggregate().getData().getSlot();
+    final Bytes32 domain =
+        spec.getDomain(
+            Domain.AGGREGATE_AND_PROOF,
+            spec.computeEpochAtSlot(slot),
+            forkInfo.getFork(),
+            forkInfo.getGenesisValidatorsRoot());
+    return spec.atSlot(slot).miscHelpers().computeSigningRoot(aggregateAndProof, domain);
   }
 
   public Bytes signingRootForSignVoluntaryExit(
