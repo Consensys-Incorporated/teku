@@ -38,6 +38,7 @@ import tech.pegasys.teku.spec.datastructures.operations.versions.pq.IndexedAttes
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.XmssAggregateStatement;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.pq.BeaconStatePq;
+import tech.pegasys.teku.spec.datastructures.state.versions.pq.BuilderPq;
 import tech.pegasys.teku.spec.datastructures.state.versions.pq.BuilderPreregistration;
 import tech.pegasys.teku.spec.datastructures.state.versions.pq.ValidatorPq;
 import tech.pegasys.teku.spec.datastructures.state.versions.pq.ValidatorPreregistration;
@@ -252,6 +253,32 @@ public class BeaconStateAccessorsPq extends BeaconStateAccessorsGloas {
             .of(attesters.intStream().distinct().sorted().mapToObj(UInt64::valueOf).toList()),
         data,
         proof);
+  }
+
+  /**
+   * The index of the validator with XMSS public key {@code pubkey}. A linear scan for now; an index
+   * cache keyed by XMSS public key comes with the switch-over.
+   */
+  public Optional<Integer> getValidatorIndexByXmssKey(
+      final BeaconState state, final Bytes32 pubkey) {
+    final SszList<?> validators = state.getValidators();
+    for (int i = 0; i < validators.size(); i++) {
+      if (((ValidatorPq) validators.get(i)).getXmssPublicKey().equals(pubkey)) {
+        return Optional.of(i);
+      }
+    }
+    return Optional.empty();
+  }
+
+  /** The index of the builder with XMSS public key {@code pubkey}. A linear scan for now. */
+  public Optional<Integer> getBuilderIndexByXmssKey(final BeaconState state, final Bytes32 pubkey) {
+    final SszList<?> builders = BeaconStatePq.required(state).getBuilders();
+    for (int i = 0; i < builders.size(); i++) {
+      if (((BuilderPq) builders.get(i)).getXmssPublicKey().equals(pubkey)) {
+        return Optional.of(i);
+      }
+    }
+    return Optional.empty();
   }
 
   /** get_validator_preregistration_index */

@@ -23,6 +23,9 @@ import tech.pegasys.teku.spec.datastructures.execution.versions.electra.DepositR
 import tech.pegasys.teku.spec.datastructures.execution.versions.electra.WithdrawalRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderDepositRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderExitRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.BuilderPreregistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.ValidatorPreregistrationRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.pq.VoluntaryExitRequest;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.MutableBeaconState;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateMutators.ValidatorExitContext;
 
@@ -55,5 +58,20 @@ public interface ExecutionRequestsProcessor {
       final MutableBeaconState state,
       final List<BuilderPqRegistrationRequest> builderPqRegistrationRequests) {
     // NO-OP (until EIP-8483)
+  }
+
+  default void processValidatorPreregistrationRequests(
+      final MutableBeaconState state, final List<ValidatorPreregistrationRequest> requests) {
+    // NO-OP (until PQ)
+  }
+
+  default void processBuilderPreregistrationRequests(
+      final MutableBeaconState state, final List<BuilderPreregistrationRequest> requests) {
+    // NO-OP (until PQ)
+  }
+
+  default void processVoluntaryExitRequests(
+      final MutableBeaconState state, final List<VoluntaryExitRequest> requests) {
+    // NO-OP (until PQ)
   }
 }
