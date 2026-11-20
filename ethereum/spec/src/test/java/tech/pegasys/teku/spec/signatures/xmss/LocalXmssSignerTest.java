@@ -145,7 +145,7 @@ class LocalXmssSignerTest {
     assertVerifies(
         miscHelpers.computeXmssLeafIndex(
             aggregate.getData().getSlot(), LEAF_OFFSET_AGGREGATE_AND_PROOF),
-        signingRootUtil.signingRootForSignAggregateAndProof(aggregateAndProof, forkInfo),
+        signingRootUtil.signingRootForSignAggregateAndProofPq(aggregateAndProof, forkInfo),
         signature);
   }
 

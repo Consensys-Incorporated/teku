@@ -104,7 +104,7 @@ public class SigningRootUtil {
   }
 
   /** PQ: the aggregate and proof carries the attesters' proof, with no selection proof. */
-  public Bytes signingRootForSignAggregateAndProof(
+  public Bytes signingRootForSignAggregateAndProofPq(
       final AggregateAndProofPq aggregateAndProof, final ForkInfo forkInfo) {
     final UInt64 slot = aggregateAndProof.getAggregate().getData().getSlot();
     final Bytes32 domain =
