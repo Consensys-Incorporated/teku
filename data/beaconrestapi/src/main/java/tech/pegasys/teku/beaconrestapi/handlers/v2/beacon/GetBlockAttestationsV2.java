@@ -41,6 +41,7 @@ import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
 
 public class GetBlockAttestationsV2 extends RestApiEndpoint {
@@ -97,8 +98,12 @@ public class GetBlockAttestationsV2 extends RestApiEndpoint {
   private static SerializableTypeDefinition<ObjectAndMetaData<List<Attestation>>> getResponseType(
       final SchemaDefinitionCache schemaDefinitionCache) {
 
+    final SerializableOneOfTypeDefinitionBuilder<List<Attestation>> oneOfBuilder =
+        new SerializableOneOfTypeDefinitionBuilder<List<Attestation>>();
+    BeaconRestApiTypes.pqAttestationTypeDef(schemaDefinitionCache)
+        .ifPresent(pqType -> oneOfBuilder.withType(pqAttestationsPredicate(), listOf(pqType)));
     final SerializableOneOfTypeDefinition<List<Attestation>> oneOfTypeDefinition =
-        new SerializableOneOfTypeDefinitionBuilder<List<Attestation>>()
+        oneOfBuilder
             .withType(
                 electraAttestationsPredicate(),
                 listOf(BeaconRestApiTypes.electraAttestationTypeDef(schemaDefinitionCache)))
@@ -123,6 +128,14 @@ public class GetBlockAttestationsV2 extends RestApiEndpoint {
 
   private static Predicate<List<Attestation>> electraAttestationsPredicate() {
     // Only once we are in Electra attestations will have committee bits
-    return attestations -> !attestations.isEmpty() && attestations.get(0).requiresCommitteeBits();
+    return attestations ->
+        !attestations.isEmpty()
+            && attestations.get(0).requiresCommitteeBits()
+            && !(attestations.get(0) instanceof AttestationPq);
+  }
+
+  private static Predicate<List<Attestation>> pqAttestationsPredicate() {
+    // PQ attestations carry no signature, the block's attestation proof covers them
+    return attestations -> !attestations.isEmpty() && attestations.get(0) instanceof AttestationPq;
   }
 }

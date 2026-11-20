@@ -49,6 +49,7 @@ import tech.pegasys.teku.api.migrated.GetAttestationRewardsResponse;
 import tech.pegasys.teku.api.migrated.StateBuilderData;
 import tech.pegasys.teku.api.migrated.StateSyncCommitteesData;
 import tech.pegasys.teku.api.migrated.StateValidatorIdentity;
+import tech.pegasys.teku.api.migrated.StateValidatorIdentityPq;
 import tech.pegasys.teku.api.migrated.SyncCommitteeRewardData;
 import tech.pegasys.teku.api.provider.GenesisData;
 import tech.pegasys.teku.api.response.ValidatorStatus;
@@ -59,6 +60,7 @@ import tech.pegasys.teku.ethereum.json.types.beacon.StateValidatorData;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.ssz.Merkleizable;
+import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -474,14 +476,22 @@ public class ChainDataProvider {
             .toList());
   }
 
-  public SafeFuture<Optional<ObjectAndMetaData<SszList<StateValidatorIdentity>>>>
+  public SafeFuture<Optional<ObjectAndMetaData<SszList<? extends SszData>>>>
       getStateValidatorIdentities(final String stateIdParam, final List<String> validators) {
     return fromState(stateIdParam, state -> getValidatorIdentitiesFromState(state, validators));
   }
 
   @VisibleForTesting
-  SszList<StateValidatorIdentity> getValidatorIdentitiesFromState(
+  SszList<? extends SszData> getValidatorIdentitiesFromState(
       final BeaconState state, final List<String> validators) {
+    if (state.toVersionPq().isPresent()) {
+      // PQ validators are identified by their XMSS keys
+      return StateValidatorIdentityPq.SSZ_LIST_SCHEMA.createFromElements(
+          getValidatorSelector(state, validators)
+              .mapToObj(index -> StateValidatorIdentityPq.fromState(state, index))
+              .flatMap(Optional::stream)
+              .toList());
+    }
     return StateValidatorIdentity.SSZ_LIST_SCHEMA.createFromElements(
         getValidatorSelector(state, validators)
             .mapToObj(index -> StateValidatorIdentity.fromState(state, index))

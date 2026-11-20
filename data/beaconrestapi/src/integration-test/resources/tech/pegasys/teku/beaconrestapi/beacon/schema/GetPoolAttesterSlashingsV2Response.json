@@ -12,6 +12,11 @@
       "oneOf" : [ {
         "type" : "array",
         "items" : {
+          "$ref" : "#/components/schemas/AttesterSlashingPq"
+        }
+      }, {
+        "type" : "array",
+        "items" : {
           "$ref" : "#/components/schemas/AttesterSlashingElectra"
         }
       }, {

@@ -10,10 +10,19 @@
       "type" : "boolean"
     },
     "data" : {
-      "type" : "array",
-      "items" : {
-        "$ref" : "#/components/schemas/StateValidatorIdentity"
-      }
+      "title" : "StateValidatorIdentities",
+      "type" : "object",
+      "oneOf" : [ {
+        "type" : "array",
+        "items" : {
+          "$ref" : "#/components/schemas/StateValidatorIdentity"
+        }
+      }, {
+        "type" : "array",
+        "items" : {
+          "$ref" : "#/components/schemas/StateValidatorIdentityPq"
+        }
+      } ]
     }
   }
 }

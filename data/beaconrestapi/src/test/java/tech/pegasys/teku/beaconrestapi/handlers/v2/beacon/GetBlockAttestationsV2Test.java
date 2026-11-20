@@ -43,6 +43,7 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationSchema;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
@@ -175,5 +176,24 @@ class GetBlockAttestationsV2Test extends AbstractMigratedBeaconHandlerTest {
   @Test
   void metadata_shouldHandle503() throws JsonProcessingException {
     verifyMetadataErrorResponse(handler, SC_SERVICE_UNAVAILABLE);
+  }
+
+  @Test
+  public void shouldSerializePqAttestationsWithoutSignatures() throws JsonProcessingException {
+    final Spec pqSpec = TestSpecFactory.createMinimalPq();
+    final DataStructureUtil pqDataStructureUtil = new DataStructureUtil(pqSpec);
+    final List<Attestation> pqAttestations = List.of(pqDataStructureUtil.randomAttestation());
+    assertThat(pqAttestations.get(0)).isInstanceOf(AttestationPq.class);
+    final GetBlockAttestationsV2 pqHandler =
+        new GetBlockAttestationsV2(chainDataProvider, new SchemaDefinitionCache(pqSpec));
+
+    final String json =
+        getResponseStringFromMetadata(
+            pqHandler,
+            SC_OK,
+            new ObjectAndMetaData<>(pqAttestations, SpecMilestone.PQ, false, true, false));
+
+    assertThat(json).contains("\"version\":\"pq\"").contains("committee_bits");
+    assertThat(json).doesNotContain("signature");
   }
 }

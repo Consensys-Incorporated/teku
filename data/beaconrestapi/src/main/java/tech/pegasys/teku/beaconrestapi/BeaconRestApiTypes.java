@@ -66,8 +66,10 @@ import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.RAW_INTEGER_
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.STRING_TYPE;
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.UINT64_TYPE;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import java.util.EnumSet;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.apache.tuweni.bytes.Bytes32;
@@ -75,9 +77,12 @@ import tech.pegasys.teku.api.response.EventType;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.ethereum.json.types.beacon.StatusParameter;
 import tech.pegasys.teku.infrastructure.http.RestApiConstants;
+import tech.pegasys.teku.infrastructure.json.JsonUtil;
 import tech.pegasys.teku.infrastructure.json.types.CoreTypes;
 import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.json.types.EnumTypeDefinition;
+import tech.pegasys.teku.infrastructure.json.types.SerializableOneOfTypeDefinition;
+import tech.pegasys.teku.infrastructure.json.types.SerializableOneOfTypeDefinitionBuilder;
 import tech.pegasys.teku.infrastructure.json.types.SerializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.json.types.StringValueTypeDefinition;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.ParameterMetadata;
@@ -86,6 +91,7 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
+import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
 
@@ -242,14 +248,58 @@ public class BeaconRestApiTypes {
           .withField("root", BYTES32_TYPE, Function.identity())
           .build();
 
+  /** A signed block header, BLS-signed or from PQ XMSS-signed. */
+  public static final SerializableTypeDefinition<SignedBeaconBlockHeader>
+      SIGNED_BEACON_BLOCK_HEADER_TYPE =
+          new SerializableOneOfTypeDefinitionBuilder<SignedBeaconBlockHeader>()
+              .title("SignedBeaconBlockHeader")
+              .withType(
+                  header -> !header.isXmssSigned(),
+                  SignedBeaconBlockHeader.SSZ_SCHEMA.getJsonTypeDefinition())
+              .withType(
+                  SignedBeaconBlockHeader::isXmssSigned,
+                  SignedBeaconBlockHeader.SSZ_SCHEMA_PQ.getJsonTypeDefinition())
+              .build();
+
+  /** A proposer slashing, of BLS-signed headers or from PQ XMSS-signed ones. */
+  public static final SerializableOneOfTypeDefinition<ProposerSlashing> PROPOSER_SLASHING_TYPE =
+      new SerializableOneOfTypeDefinitionBuilder<ProposerSlashing>()
+          .title("ProposerSlashing")
+          .withType(
+              slashing -> !slashing.getHeader1().isXmssSigned(),
+              ProposerSlashing.SSZ_SCHEMA.getJsonTypeDefinition())
+          .withType(
+              slashing -> slashing.getHeader1().isXmssSigned(),
+              ProposerSlashing.SSZ_SCHEMA_PQ.getJsonTypeDefinition())
+          .build();
+
+  // "0x" and a 96-byte BLS signature in hex
+  private static final int BLS_SIGNATURE_HEX_LENGTH = 2 + 2 * 96;
+
+  /**
+   * Picks a proposer slashing's JSON type by the length of its first header's signature: requests
+   * carry no consensus version, and an XMSS signature is far longer than a BLS one. A body that
+   * can't be read is parsed as the BLS type, which rejects it.
+   */
+  public static DeserializableTypeDefinition<ProposerSlashing> selectProposerSlashingType(
+      final String json) {
+    Optional<String> signature;
+    try {
+      signature = JsonUtil.getAttribute(json, STRING_TYPE, "signed_header_1", "signature");
+    } catch (final JsonProcessingException | RuntimeException e) {
+      // Not a readable slashing: parsing it as the BLS type reports what's wrong with it
+      signature = Optional.empty();
+    }
+    return signature.map(String::length).orElse(0) > BLS_SIGNATURE_HEX_LENGTH
+        ? ProposerSlashing.SSZ_SCHEMA_PQ.getJsonTypeDefinition()
+        : ProposerSlashing.SSZ_SCHEMA.getJsonTypeDefinition();
+  }
+
   public static final SerializableTypeDefinition<BlockAndMetaData> BLOCK_HEADER_TYPE =
       SerializableTypeDefinition.object(BlockAndMetaData.class)
           .withField("root", BYTES32_TYPE, block -> block.getData().getRoot())
           .withField("canonical", BOOLEAN_TYPE, BlockAndMetaData::isCanonical)
-          .withField(
-              "header",
-              SignedBeaconBlockHeader.SSZ_SCHEMA.getJsonTypeDefinition(),
-              data -> data.getData().asHeader())
+          .withField("header", SIGNED_BEACON_BLOCK_HEADER_TYPE, data -> data.getData().asHeader())
           .build();
 
   public static final ParameterMetadata<UInt64> BLOB_INDICES_PARAMETER =
@@ -299,6 +349,19 @@ public class BeaconRestApiTypes {
         .getSchemaDefinition(SpecMilestone.ELECTRA)
         .getAttestationSchema()
         .getJsonTypeDefinition();
+  }
+
+  /** PQ's attestation type (no signature), when the network schedules PQ. */
+  public static Optional<DeserializableTypeDefinition<Attestation>> pqAttestationTypeDef(
+      final SchemaDefinitionCache schemaDefinitionCache) {
+    if (!schemaDefinitionCache.getSupportedMilestones().contains(SpecMilestone.PQ)) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        schemaDefinitionCache
+            .getSchemaDefinition(SpecMilestone.PQ)
+            .getAttestationSchema()
+            .getJsonTypeDefinition());
   }
 
   public static DeserializableTypeDefinition<Attestation> phase0AttestationTypeDef(

@@ -15,9 +15,11 @@ package tech.pegasys.teku.beaconrestapi.handlers.v1.beacon;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
+import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.PROPOSER_SLASHING_TYPE;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
+import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.getRequestBodyFromMetadata;
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMetadataEmptyResponse;
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMetadataErrorResponse;
 
@@ -28,6 +30,8 @@ import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerTest;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.http.HttpErrorResponse;
+import tech.pegasys.teku.infrastructure.json.JsonUtil;
+import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 
@@ -80,5 +84,25 @@ public class PostProposerSlashingTest extends AbstractMigratedBeaconHandlerTest 
   @Test
   void metadata_shouldHandle200() throws IOException {
     verifyMetadataEmptyResponse(handler, SC_OK);
+  }
+
+  @Test
+  void shouldParseBlsAndPqSlashingsByTheirSignatures() throws Exception {
+    final ProposerSlashing blsSlashing = dataStructureUtil.randomProposerSlashing();
+    final ProposerSlashing pqSlashing =
+        new ProposerSlashing(
+            new SignedBeaconBlockHeader(
+                dataStructureUtil.randomBeaconBlockHeader(),
+                dataStructureUtil.randomXmssSignature()),
+            new SignedBeaconBlockHeader(
+                dataStructureUtil.randomBeaconBlockHeader(),
+                dataStructureUtil.randomXmssSignature()));
+
+    assertThat(getRequestBodyFromMetadata(handler, toJson(blsSlashing))).isEqualTo(blsSlashing);
+    assertThat(getRequestBodyFromMetadata(handler, toJson(pqSlashing))).isEqualTo(pqSlashing);
+  }
+
+  private static String toJson(final ProposerSlashing slashing) throws JsonProcessingException {
+    return JsonUtil.serialize(slashing, PROPOSER_SLASHING_TYPE);
   }
 }

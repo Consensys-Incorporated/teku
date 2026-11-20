@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.beaconrestapi.handlers.v1.beacon;
 
+import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.PROPOSER_SLASHING_TYPE;
+import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.selectProposerSlashingType;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_BEACON;
@@ -46,7 +48,8 @@ public class PostProposerSlashing extends RestApiEndpoint {
             .description(
                 "Submits proposer slashing object to node's pool and, if it passes validation, the node MUST broadcast it to network.")
             .tags(TAG_BEACON)
-            .requestBodyType(ProposerSlashing.SSZ_SCHEMA.getJsonTypeDefinition())
+            .requestBodyType(
+                PROPOSER_SLASHING_TYPE, context -> selectProposerSlashingType(context.getBody()))
             .response(
                 SC_OK,
                 "Proposer Slashing has been successfully validated, added to the pool, and broadcast.")

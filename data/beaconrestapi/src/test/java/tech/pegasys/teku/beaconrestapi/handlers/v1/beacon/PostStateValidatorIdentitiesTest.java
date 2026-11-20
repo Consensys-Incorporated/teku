@@ -53,8 +53,8 @@ public class PostStateValidatorIdentitiesTest
   void metadata_shouldHandle200() throws IOException {
     final SszList<StateValidatorIdentity> stateValidatorIdentities = getValidatorsList();
 
-    final ObjectAndMetaData<List<StateValidatorIdentity>> responseData =
-        withMetaData(stateValidatorIdentities.asList());
+    final ObjectAndMetaData<SszList<StateValidatorIdentity>> responseData =
+        withMetaData(stateValidatorIdentities);
 
     final String data = getResponseStringFromMetadata(handler, SC_OK, responseData);
     final String expected =

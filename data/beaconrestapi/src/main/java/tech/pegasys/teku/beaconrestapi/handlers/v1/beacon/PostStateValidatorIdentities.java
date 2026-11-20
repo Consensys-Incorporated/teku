@@ -27,14 +27,16 @@ import java.util.List;
 import java.util.Optional;
 import tech.pegasys.teku.api.ChainDataProvider;
 import tech.pegasys.teku.api.DataProvider;
-import tech.pegasys.teku.api.migrated.StateValidatorIdentity;
+import tech.pegasys.teku.api.migrated.StateValidatorIdentityPq;
 import tech.pegasys.teku.ethereum.json.types.EthereumTypes;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.json.types.SerializableOneOfTypeDefinitionBuilder;
 import tech.pegasys.teku.infrastructure.json.types.SerializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.AsyncApiResponse;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.EndpointMetadata;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
+import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 
@@ -42,15 +44,26 @@ public class PostStateValidatorIdentities extends RestApiEndpoint {
   public static final String ROUTE = "/eth/v1/beacon/states/{state_id}/validator_identities";
   private final ChainDataProvider chainDataProvider;
 
-  static final SerializableTypeDefinition<ObjectAndMetaData<SszList<StateValidatorIdentity>>>
+  // BLS-keyed identities, or from PQ identities keyed by XMSS public keys
+  private static final SerializableTypeDefinition<SszList<? extends SszData>> IDENTITIES_TYPE =
+      new SerializableOneOfTypeDefinitionBuilder<SszList<? extends SszData>>()
+          .title("StateValidatorIdentities")
+          .withType(
+              identities -> identities.getSchema().equals(SSZ_LIST_SCHEMA),
+              SSZ_LIST_SCHEMA.getJsonTypeDefinition())
+          .withType(
+              identities -> identities.getSchema().equals(StateValidatorIdentityPq.SSZ_LIST_SCHEMA),
+              StateValidatorIdentityPq.SSZ_LIST_SCHEMA.getJsonTypeDefinition())
+          .build();
+
+  static final SerializableTypeDefinition<ObjectAndMetaData<SszList<? extends SszData>>>
       RESPONSE_TYPE =
-          SerializableTypeDefinition.<ObjectAndMetaData<SszList<StateValidatorIdentity>>>object()
+          SerializableTypeDefinition.<ObjectAndMetaData<SszList<? extends SszData>>>object()
               .name("GetStateValidatorIdentitiesResponse")
               .withField(
                   EXECUTION_OPTIMISTIC, BOOLEAN_TYPE, ObjectAndMetaData::isExecutionOptimistic)
               .withField(FINALIZED, BOOLEAN_TYPE, ObjectAndMetaData::isFinalized)
-              .withField(
-                  "data", SSZ_LIST_SCHEMA.getJsonTypeDefinition(), ObjectAndMetaData::getData)
+              .withField("data", IDENTITIES_TYPE, ObjectAndMetaData::getData)
               .build();
 
   public PostStateValidatorIdentities(final DataProvider dataProvider) {
@@ -79,7 +92,7 @@ public class PostStateValidatorIdentities extends RestApiEndpoint {
   public void handleRequest(final RestApiRequest request) throws JsonProcessingException {
     final Optional<List<String>> validators = request.getOptionalRequestBody();
 
-    final SafeFuture<Optional<ObjectAndMetaData<SszList<StateValidatorIdentity>>>> future =
+    final SafeFuture<Optional<ObjectAndMetaData<SszList<? extends SszData>>>> future =
         chainDataProvider.getStateValidatorIdentities(
             request.getPathParameter(PARAMETER_STATE_ID), validators.orElse(List.of()));
 

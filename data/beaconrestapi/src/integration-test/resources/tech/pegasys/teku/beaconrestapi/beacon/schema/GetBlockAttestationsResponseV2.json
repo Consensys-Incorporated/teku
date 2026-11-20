@@ -18,6 +18,11 @@
       "oneOf" : [ {
         "type" : "array",
         "items" : {
+          "$ref" : "#/components/schemas/AttestationPq"
+        }
+      }, {
+        "type" : "array",
+        "items" : {
           "$ref" : "#/components/schemas/AttestationElectra"
         }
       }, {
