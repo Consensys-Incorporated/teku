@@ -20,6 +20,7 @@ import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfig;
+import tech.pegasys.teku.spec.config.SpecConfigPq;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.MinimalBeaconBlockSummary;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
@@ -185,8 +186,16 @@ public class BeaconStateUtil {
     final UInt64 committeesSinceEpochStart = committeesPerSlot.times(slotsSinceEpochStart);
     return committeesSinceEpochStart
         .plus(committeeIndex)
-        .mod(specConfig.getAttestationSubnetCount())
+        .mod(getAttestationSubnetCount())
         .intValue();
+  }
+
+  /** PQ has its own, smaller number of attestation subnets (ATTESTATION_SUBNET_COUNT_PQ). */
+  private int getAttestationSubnetCount() {
+    return specConfig
+        .toVersionPq()
+        .map(SpecConfigPq::getAttestationSubnetCountPq)
+        .orElseGet(specConfig::getAttestationSubnetCount);
   }
 
   private int computeSubnetForCommittee(

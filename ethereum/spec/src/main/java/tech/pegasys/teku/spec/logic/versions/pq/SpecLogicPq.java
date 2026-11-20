@@ -153,7 +153,12 @@ public class SpecLogicPq extends AbstractSpecLogic {
         new BeaconStateUtil(config, predicates, miscHelpers, beaconStateAccessors);
     final AttestationUtilPq attestationUtil =
         new AttestationUtilPq(
-            config, schemaDefinitions, beaconStateAccessors, miscHelpers, starkProofVerifier);
+            config,
+            schemaDefinitions,
+            beaconStateAccessors,
+            miscHelpers,
+            starkProofVerifier,
+            xmssSignatureVerifier);
     final AttestationDataValidatorGloas attestationDataValidator =
         new AttestationDataValidatorGloas(config, miscHelpers, beaconStateAccessors);
     final VoluntaryExitValidatorElectra voluntaryExitValidator =

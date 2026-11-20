@@ -25,6 +25,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.jetbrains.annotations.NotNull;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -53,6 +54,8 @@ public class ValidatableAttestation {
   private volatile boolean acceptedAsGossip = false;
 
   private volatile Optional<IndexedAttestationLight> indexedAttestation = Optional.empty();
+  private volatile Optional<Attestation> unconvertedSingleAttestation = Optional.empty();
+  private volatile Optional<Bytes> aggregateProof = Optional.empty();
   private volatile Optional<Bytes32> committeeShufflingSeed = Optional.empty();
   private volatile Optional<Int2IntMap> committeesSize = Optional.empty();
 
@@ -61,7 +64,25 @@ public class ValidatableAttestation {
     checkState(
         attestation.isSingleAttestation(),
         "Attestation must be a single attestation to convert to aggregated format");
+    this.unconvertedSingleAttestation = Optional.of(attestation);
     this.attestation = aggregatedFormatFromSingleAttestation;
+  }
+
+  /**
+   * The single attestation this was received as, before conversion to the aggregated format. PQ
+   * aggregators prove the attesters' XMSS signatures, which only the single attestations carry.
+   */
+  public Optional<Attestation> getUnconvertedSingleAttestation() {
+    return unconvertedSingleAttestation;
+  }
+
+  /** PQ: the proof of an aggregate's signatures, from its aggregator's AggregateAndProof. */
+  public Optional<Bytes> getAggregateProof() {
+    return aggregateProof;
+  }
+
+  public void setAggregateProof(final Bytes aggregateProof) {
+    this.aggregateProof = Optional.of(aggregateProof);
   }
 
   public static ValidatableAttestation from(final Spec spec, final Attestation attestation) {
