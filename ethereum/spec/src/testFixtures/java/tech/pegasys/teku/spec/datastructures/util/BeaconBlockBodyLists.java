@@ -13,12 +13,15 @@
 
 package tech.pegasys.teku.spec.datastructures.util;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static tech.pegasys.teku.spec.config.SpecConfig.GENESIS_SLOT;
 
 import tech.pegasys.teku.infrastructure.ssz.SszList;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBodySchema;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.pq.BeaconBlockBodySchemaPq;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
@@ -63,6 +66,11 @@ public class BeaconBlockBodyLists {
 
   public SszList<SignedVoluntaryExit> createVoluntaryExits(
       final SignedVoluntaryExit... voluntaryExits) {
+    if (blockBodySchema instanceof BeaconBlockBodySchemaPq) {
+      // PQ blocks have no voluntary exits field: exits are execution requests
+      checkArgument(voluntaryExits.length == 0, "PQ blocks carry no voluntary exits");
+      return SszListSchema.create(SignedVoluntaryExit.SSZ_SCHEMA, 0).of();
+    }
     return blockBodySchema.getVoluntaryExitsSchema().of(voluntaryExits);
   }
 

@@ -43,6 +43,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloa
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBidSchema;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
+import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequestsSchema;
 import tech.pegasys.teku.spec.datastructures.execution.versions.pq.ExecutionRequestsSchemaPq;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
@@ -118,11 +119,11 @@ public class BeaconBlockBodySchemaPq
         namedSchema(BlockBodyFields.PROOF, attestationSchemas.getAttestationProofSchema()));
   }
 
-  /** Building PQ block bodies comes with PQ's block production. */
   @Override
   public SafeFuture<? extends BeaconBlockBody> createBlockBody(
       final Function<BeaconBlockBodyBuilder, SafeFuture<Void>> bodyBuilder) {
-    throw new UnsupportedOperationException("PQ block production is not implemented yet");
+    final BeaconBlockBodyBuilderPq builder = new BeaconBlockBodyBuilderPq(this);
+    return bodyBuilder.apply(builder).thenApply(__ -> builder.build());
   }
 
   @Override
@@ -154,6 +155,11 @@ public class BeaconBlockBodySchemaPq
   public SignedExecutionPayloadBidSchema getSignedExecutionPayloadBidSchema() {
     return (SignedExecutionPayloadBidSchema)
         getChildSchema(getFieldIndex(BlockBodyFields.SIGNED_EXECUTION_PAYLOAD_BID));
+  }
+
+  public ExecutionRequestsSchema<?> getParentExecutionRequestsSchema() {
+    return (ExecutionRequestsSchema<?>)
+        getChildSchema(getFieldIndex(BlockBodyFields.PARENT_EXECUTION_REQUESTS));
   }
 
   public SszByteListSchema<?> getAttestationProofSchema() {

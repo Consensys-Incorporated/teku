@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.spec.datastructures.blocks.blockbody;
 
+import java.util.List;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
@@ -100,6 +102,24 @@ public interface BeaconBlockBodyBuilder {
   }
 
   BeaconBlockBodyBuilder parentExecutionRequests(ExecutionRequests parentExecutionRequests);
+
+  /** PQ: the RANDAO reveal is the proposer's VRF proof for the slot, not a BLS signature. */
+  default boolean supportsVrfRandaoReveal() {
+    return false;
+  }
+
+  default BeaconBlockBodyBuilder vrfRandaoReveal(final List<Bytes32> vrfProof) {
+    throw new UnsupportedOperationException("Only PQ block bodies carry a VRF proof");
+  }
+
+  /** PQ: the proof of the attesters' signatures of every attestation in the block. */
+  default boolean supportsAttestationProof() {
+    return false;
+  }
+
+  default BeaconBlockBodyBuilder attestationProof(final Bytes attestationProof) {
+    throw new UnsupportedOperationException("Only PQ block bodies carry an attestation proof");
+  }
 
   BeaconBlockBody build();
 }

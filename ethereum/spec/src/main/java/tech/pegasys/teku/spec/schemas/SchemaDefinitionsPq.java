@@ -29,6 +29,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainer;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockContainerSchema;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBodyBuilder;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBodySchema;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.pq.BeaconBlockBodyBuilderPq;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.pq.PqBlockSchemas;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelopeSchema;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBidSchema;
@@ -193,7 +194,7 @@ public class SchemaDefinitionsPq extends SchemaDefinitionsEip8483 {
   /** Building PQ block bodies comes with PQ's block production. */
   @Override
   public BeaconBlockBodyBuilder createBeaconBlockBodyBuilder() {
-    throw new UnsupportedOperationException("PQ block production is not implemented yet");
+    return new BeaconBlockBodyBuilderPq(getPqBlockSchemas().getBeaconBlockBodySchema());
   }
 
   @Override

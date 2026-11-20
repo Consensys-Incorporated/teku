@@ -30,12 +30,21 @@ import tech.pegasys.teku.infrastructure.crypto.Hash;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.config.SpecConfigPq;
 import tech.pegasys.teku.spec.datastructures.state.versions.electra.PendingDeposit;
+import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.MiscHelpersGloas;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 
 public class MiscHelpersPq extends MiscHelpersGloas {
 
   private final PredicatesPq predicatesPq;
+
+  public static MiscHelpersPq required(final MiscHelpers miscHelpers) {
+    if (miscHelpers instanceof MiscHelpersPq miscHelpersPq) {
+      return miscHelpersPq;
+    }
+    throw new IllegalArgumentException(
+        "Expected PQ misc helpers but got: " + miscHelpers.getClass().getSimpleName());
+  }
 
   public MiscHelpersPq(
       final SpecConfigPq specConfig,

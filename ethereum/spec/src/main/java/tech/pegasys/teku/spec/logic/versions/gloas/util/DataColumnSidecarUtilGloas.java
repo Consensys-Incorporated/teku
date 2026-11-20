@@ -32,7 +32,6 @@ import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBody;
-import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodyGloas;
 import tech.pegasys.teku.spec.datastructures.execution.BlobAndCellProofs;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
@@ -185,10 +184,8 @@ public class DataColumnSidecarUtilGloas implements DataColumnSidecarUtil {
 
   @Override
   public SszList<SszKZGCommitment> getKzgCommitments(final BeaconBlock block) {
-    return BeaconBlockBodyGloas.required(block.getBody())
-        .getSignedExecutionPayloadBid()
-        .getMessage()
-        .getBlobKzgCommitments();
+    // Gloas and later bodies (PQ included) carry the bid's commitments
+    return block.getBody().getOptionalBlobKzgCommitments().orElseThrow();
   }
 
   @Override
