@@ -15,6 +15,8 @@ package tech.pegasys.teku.networking.eth2.gossip.forks.versions;
 
 import java.util.Optional;
 import java.util.function.Supplier;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -54,6 +56,8 @@ import tech.pegasys.teku.statetransition.util.DebugDataDumper;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
 public class GossipForkSubscriptionsGloas extends GossipForkSubscriptionsFulu {
+
+  private static final Logger LOG = LogManager.getLogger();
 
   private final OperationProcessor<SignedExecutionPayloadEnvelope> executionPayloadProcessor;
   private final OperationProcessor<PayloadAttestationMessage> payloadAttestationMessageProcessor;
@@ -176,6 +180,51 @@ public class GossipForkSubscriptionsGloas extends GossipForkSubscriptionsFulu {
     return spec.atEpoch(getActivationEpoch())
         .getMilestone()
         .isGreaterThanOrEqualTo(SpecMilestone.PQ);
+  }
+
+  // PQ has no voluntary exit or sync committee topics, so their gossip managers are never created.
+  // Subnet subscriptions still arrive for every fork, and a message may still be published at the
+  // fork boundary, so these are ignored rather than sent to a missing manager.
+
+  @Override
+  public void publishVoluntaryExit(final SignedVoluntaryExit message) {
+    if (isPq()) {
+      LOG.debug("Not publishing voluntary exit: PQ has no voluntary exit topic");
+      return;
+    }
+    super.publishVoluntaryExit(message);
+  }
+
+  @Override
+  public void publishSyncCommitteeMessage(final ValidatableSyncCommitteeMessage message) {
+    if (isPq()) {
+      LOG.debug("Not publishing sync committee message: PQ has no sync committee topics");
+      return;
+    }
+    super.publishSyncCommitteeMessage(message);
+  }
+
+  @Override
+  public void publishSyncCommitteeContribution(final SignedContributionAndProof message) {
+    if (isPq()) {
+      LOG.debug("Not publishing sync committee contribution: PQ has no sync committee topics");
+      return;
+    }
+    super.publishSyncCommitteeContribution(message);
+  }
+
+  @Override
+  public void subscribeToSyncCommitteeSubnet(final int subnetId) {
+    if (!isPq()) {
+      super.subscribeToSyncCommitteeSubnet(subnetId);
+    }
+  }
+
+  @Override
+  public void unsubscribeFromSyncCommitteeSubnet(final int subnetId) {
+    if (!isPq()) {
+      super.unsubscribeFromSyncCommitteeSubnet(subnetId);
+    }
   }
 
   void addExecutionPayloadGossipManager(final ForkInfo forkInfo, final Bytes4 forkDigest) {
