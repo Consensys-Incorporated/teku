@@ -24,11 +24,18 @@ import tech.pegasys.teku.infrastructure.metrics.Validator.DutyType;
 import tech.pegasys.teku.infrastructure.metrics.Validator.ValidatorDutyMetricsSteps;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.operations.AggregateAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AggregateAndProofPq;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationAndProofPq;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.PqAttestationSchemas;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
+import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 import tech.pegasys.teku.validator.client.ForkProvider;
 import tech.pegasys.teku.validator.client.Validator;
@@ -101,7 +108,92 @@ public class AggregationDuty implements Duty {
     if (!aggregators.hasAggregators()) {
       return SafeFuture.completedFuture(DutyResult.NOOP);
     }
+    if (spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ)) {
+      // PQ: aggregators come from the aggregation committee, and the beacon node proves the
+      // aggregate's signatures
+      return new BatchAttestationSendingStrategy<SignedAggregateAndProofPq>(
+              validatorApiChannel::sendPqAggregateAndProofs)
+          .send(aggregators.streamAggregators().map(this::aggregatePqCommittee));
+    }
     return sendingStrategy.send(aggregators.streamAggregators().map(this::aggregateCommittee));
+  }
+
+  private SafeFuture<ProductionResult<SignedAggregateAndProofPq>> aggregatePqCommittee(
+      final CommitteeAggregator aggregator) {
+    final Optional<XmssSigner> maybeXmssSigner = aggregator.validator().getXmssSigner();
+    if (maybeXmssSigner.isEmpty()) {
+      return SafeFuture.completedFuture(
+          ProductionResult.failure(
+              aggregator.validator().getPublicKey(),
+              new IllegalStateException("Validator has no PQ keys to aggregate with")));
+    }
+    return aggregator
+        .unsignedAttestationFuture()
+        .thenCompose(
+            maybeAttestation -> {
+              if (maybeAttestation.isEmpty()) {
+                return SafeFuture.completedFuture(
+                    ProductionResult.<SignedAggregateAndProofPq>failure(
+                        aggregator.validator().getPublicKey(),
+                        new IllegalStateException(
+                            "Unable to perform aggregation for committee because no attestation was produced")));
+              }
+              return validatorDutyMetrics
+                  .record(
+                      () ->
+                          validatorApiChannel.createPqAggregate(
+                              slot,
+                              maybeAttestation.get().hashTreeRoot(),
+                              aggregator.attestationCommitteeIndex()),
+                      this,
+                      ValidatorDutyMetricsSteps.CREATE)
+                  .thenCompose(
+                      maybeAggregate -> {
+                        if (maybeAggregate.isEmpty()) {
+                          validatorLogger.aggregationSkipped(
+                              slot, aggregator.attestationCommitteeIndex());
+                          return SafeFuture.completedFuture(
+                              ProductionResult.<SignedAggregateAndProofPq>noop(
+                                  aggregator.validator().getPublicKey()));
+                        }
+                        return validatorDutyMetrics.record(
+                            () ->
+                                signPqAggregate(
+                                    aggregator, maybeXmssSigner.get(), maybeAggregate.get()),
+                            this,
+                            ValidatorDutyMetricsSteps.SIGN);
+                      });
+            })
+        .exceptionally(
+            error -> ProductionResult.failure(aggregator.validator().getPublicKey(), error));
+  }
+
+  /** get_aggregate_and_proof and its XMSS signature at the aggregate leaf. */
+  private SafeFuture<ProductionResult<SignedAggregateAndProofPq>> signPqAggregate(
+      final CommitteeAggregator aggregator,
+      final XmssSigner xmssSigner,
+      final AttestationAndProofPq aggregateWithProof) {
+    final PqAttestationSchemas schemas =
+        SchemaDefinitionsPq.required(spec.atSlot(slot).getSchemaDefinitions())
+            .getPqAttestationSchemas();
+    final AggregateAndProofPq aggregateAndProof =
+        schemas
+            .getAggregateAndProofSchema()
+            .create(
+                aggregator.validatorIndex(),
+                aggregateWithProof.getAggregate(),
+                aggregateWithProof.getProof());
+    return forkProvider
+        .getForkInfo(slot)
+        .thenCompose(forkInfo -> xmssSigner.signAggregateAndProof(aggregateAndProof, forkInfo))
+        .thenApply(
+            signature ->
+                ProductionResult.success(
+                    aggregator.validator().getPublicKey(),
+                    aggregateAndProof.getAggregate().getData().getBeaconBlockRoot(),
+                    schemas
+                        .getSignedAggregateAndProofSchema()
+                        .create(aggregateAndProof, signature.toBytes())));
   }
 
   private SafeFuture<ProductionResult<SignedAggregateAndProof>> aggregateCommittee(

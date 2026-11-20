@@ -21,11 +21,13 @@ import java.util.function.Function;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuty;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.validator.api.CommitteeSubscriptionRequest;
@@ -101,6 +103,31 @@ abstract class AbstractAttestationDutySchedulingStrategy
             duty.getValidatorIndex(),
             validator,
             duty.getSlot());
+
+    if (spec.atSlot(duty.getSlot()).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ)) {
+      // PQ: the beacon node says who is in the aggregation committee; there's no selection proof
+      final boolean isAggregator = duty.getIsAggregator().orElse(false);
+      beaconCommitteeSubscriptions.subscribeToBeaconCommittee(
+          new CommitteeSubscriptionRequest(
+              duty.getValidatorIndex(),
+              duty.getCommitteeIndex(),
+              UInt64.valueOf(duty.getCommitteesAtSlot()),
+              duty.getSlot(),
+              isAggregator));
+      if (isAggregator) {
+        scheduledDuties.scheduleAggregation(
+            duty.getSlot(),
+            validator,
+            aggregationDuty ->
+                aggregationDuty.addValidator(
+                    validator,
+                    duty.getValidatorIndex(),
+                    BLSSignature.empty(),
+                    duty.getCommitteeIndex(),
+                    unsignedAttestationFuture));
+      }
+      return SafeFuture.COMPLETE;
+    }
 
     return scheduleAggregation(
         scheduledDuties,
