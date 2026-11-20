@@ -30,6 +30,7 @@ dependencies {
 	implementation 'org.hyperledger.besu.internal:besu-metrics-core'
 	implementation 'io.libp2p:jvm-libp2p'
 
+	testImplementation project(':infrastructure:xmss')
 	testImplementation testFixtures(project(':ethereum:spec'))
 	testImplementation testFixtures(project(':ethereum:networks'))
 	testImplementation testFixtures(project(':ethereum:weaksubjectivity'))

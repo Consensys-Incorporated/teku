@@ -44,6 +44,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.kzg.KZGCommitment;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
+import tech.pegasys.teku.spec.config.SpecConfigPq;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.Blob;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
@@ -639,7 +640,13 @@ public class ChainBuilder {
     final UInt64 slotsPerEpoch = UInt64.valueOf(spec.getGenesisSpecConfig().getSlotsPerEpoch());
     final UInt64 minAssignedSlot =
         slot.compareTo(slotsPerEpoch) <= 0 ? UInt64.ZERO : slot.minus(slotsPerEpoch);
-    final int minInclusionDiff = spec.getSpecConfig(currentEpoch).getMinAttestationInclusionDelay();
+    final boolean isPqBlock = isPq(slot);
+    // PQ includes attestations two slots after their own (MIN_ATTESTATION_INCLUSION_DELAY_PQ)
+    final int minInclusionDiff =
+        isPqBlock
+            ? SpecConfigPq.required(spec.getSpecConfig(currentEpoch))
+                .getMinAttestationInclusionDelayPq()
+            : spec.getSpecConfig(currentEpoch).getMinAttestationInclusionDelay();
     final UInt64 maxAssignedSlot = slot.minusMinZero(minInclusionDiff);
 
     // Generate stream of consistent, valid attestations for inclusion
@@ -648,7 +655,13 @@ public class ChainBuilder {
         .map(this::getLatestBlockAndStateAtSlot)
         .filter(Objects::nonNull)
         .filter(b -> b.getSlot().compareTo(minBlockSlot) >= 0)
+        // Attestations from before the PQ fork have another type, so a PQ block can't include them
+        .filter(b -> isPq(b.getSlot()) == isPqBlock)
         .flatMap(this::streamValidAttestationsWithTargetBlock);
+  }
+
+  private boolean isPq(final UInt64 slot) {
+    return spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ);
   }
 
   /**

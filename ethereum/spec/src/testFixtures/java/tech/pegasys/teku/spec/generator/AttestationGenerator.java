@@ -41,6 +41,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationSchema;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationPqSchema;
 import tech.pegasys.teku.spec.datastructures.state.Committee;
 import tech.pegasys.teku.spec.datastructures.state.CommitteeAssignment;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
@@ -101,6 +102,13 @@ public class AttestationGenerator {
                 attestationSchema.getAggregationBitsSchema().ofBits(targetBitlistSize),
                 SszBitlist::or,
                 SszBitlist::or);
+    if (attestationSchema instanceof AttestationPqSchema pqSchema) {
+      // PQ attestations carry no signature: the block's proof covers them
+      return pqSchema.create(
+          targetBitlist,
+          srcAttestations.get(0).getData(),
+          srcAttestations.get(0).getCommitteeBitsRequired());
+    }
     final BLSSignature targetSig =
         BLS.aggregate(
             srcAttestations.stream()
@@ -408,6 +416,14 @@ public class AttestationGenerator {
           spec.atSlot(attestationData.getSlot()).getSchemaDefinitions().getAttestationSchema();
       final SszBitlist aggregationBitfield =
           getAggregationBits(attestationSchema, committeeSize, indexIntoCommittee);
+      if (attestationSchema instanceof AttestationPqSchema pqSchema) {
+        // PQ attestations carry no signature: the block's proof covers them, and tests import
+        // PQ blocks with XMSS verification disabled
+        return pqSchema.create(
+            aggregationBitfield,
+            attestationData,
+            getCommitteeBitsSupplier(attestationSchema, committeeIndex).get());
+      }
 
       final BLSSignature signature =
           new LocalSigner(spec, attesterKeyPair, SyncAsyncRunner.SYNC_RUNNER)

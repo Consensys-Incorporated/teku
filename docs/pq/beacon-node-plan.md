@@ -8,8 +8,8 @@ Phase 6 of [pq-fork-plan.md](pq-fork-plan.md): taking the merged PQ state transi
 
 | Slice | What | State |
 |---|---|---|
-| 6a | Block production at the spec level, and test chains through the PQ fork | In progress (`pq-bn-blocks`) |
-| 6b | Block import and fork choice over PQ chains | Not started |
+| 6a | Block production at the spec level, and test chains through the PQ fork | In review (#11674) |
+| 6b | Block import and fork choice over PQ chains | Done (`pq-bn-import`, stacked on 6a) |
 | 6c | Gossip validation of PQ messages | Not started |
 | 6d | Attestation pool, proofs and packing | Not started |
 | 6e | Beacon-node block production | Not started |
@@ -27,15 +27,19 @@ Phase 6 of [pq-fork-plan.md](pq-fork-plan.md): taking the merged PQ state transi
   - `ChainBuilder` registers every validator's XMSS key and VRF root in an EIP-8483 genesis, so none is exited at the fork. A PQ genesis can't be built from BLS deposits, so test specs schedule PQ at epoch 1 or later.
   - Each test validator's VRF tree has identical leaves, so its root and proofs take 31 hashes, not 2^32. The proofs are real and pass `process_randao`.
   - Blocks, envelopes and bids carry stub XMSS signatures that only hold their leaf index. Tests importing them disable XMSS verification, as the spec's own tests do.
-  - Not yet: attestations in PQ test blocks; they need 6d's PQ attestations and proofs.
+  - Attestations in PQ test blocks arrive with 6b: `AttestationGenerator` builds unsigned PQ attestations, and `ChainBuilder` includes them two slots later (`MIN_ATTESTATION_INCLUSION_DELAY_PQ`), never across the fork.
 
 ### 6b: block import and fork choice
 
-- Import PQ chains through `ForkChoice` and `BlockImporter` with a storage system, across the fork.
-- PQ blocks have no payload attestations, so block import applies no PTC votes from them.
-- `ForkChoice.onAttestation` for PQ attestations from blocks: the block's STARK proof covers their signatures.
-- `ForkChoice.onPayloadAttestationMessage` with XMSS signatures (offset 2).
-- `ValidatableAttestation` and `DeferredAttestations` must not assume a BLS aggregate signature.
+- **Already worked once 6a fixed `isParentBlockFull`.** `ForkChoicePqTest` imports a chain from EIP-8483 through the PQ fork with a storage system:
+  - blocks through `ForkChoice.onBlock`, and envelopes through `onExecutionPayloadEnvelope`;
+  - each PQ block lands on its parent's full node, across the fork too.
+- **Attestations in PQ blocks:** the block's STARK proof covers their signatures, and their votes reach fork choice. A block carrying attestations gives the attested block weight and becomes head.
+- **PQ blocks carry no payload attestations**, so block import applies no PTC votes from them.
+- **Test chains:**
+  - `AttestationGenerator` builds unsigned PQ attestations and aggregates them by their bits.
+  - `ChainBuilder` includes attestations at PQ's inclusion delay of 2, and never puts pre-fork attestations in a PQ block.
+- **Moved to 6c:** votes from gossip, meaning single attestations (XMSS), aggregates (proofs) and payload attestation messages (XMSS). `ForkChoice.onAttestation` and `onPayloadAttestationMessage` take them after gossip validation.
 
 ### 6c: gossip validation
 
