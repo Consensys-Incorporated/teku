@@ -16,11 +16,13 @@ package tech.pegasys.teku.cli.options;
 import com.google.common.base.Strings;
 import java.net.MalformedURLException;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.apache.commons.lang3.StringUtils;
 import picocli.CommandLine;
 import tech.pegasys.teku.config.TekuConfiguration;
@@ -117,6 +119,17 @@ public class ValidatorKeysOptions {
       arity = "0..1")
   private boolean pqKeysDerivedFromBlsKey = ValidatorConfig.DEFAULT_PQ_KEYS_DERIVED_FROM_BLS_KEY;
 
+  @CommandLine.Option(
+      names = {"--Xvalidators-pq-vrf-state-url"},
+      paramLabel = "<URL>",
+      description =
+          "For PQ devnets: a file of precomputed VRF tree states (ethereum-package vrf_state_url,"
+              + " 1028 bytes per key), from which keys derived from BLS keys take their VRF states"
+              + " instead of deriving each tree in full",
+      hidden = true,
+      arity = "1")
+  private String pqVrfStateUrl = null;
+
   public void configure(final TekuConfiguration.Builder builder) {
     builder.validator(
         config ->
@@ -133,7 +146,20 @@ public class ValidatorKeysOptions {
                 .validatorExternalSignerTruststore(convertToPath(validatorExternalSignerTruststore))
                 .validatorExternalSignerTruststorePasswordFile(
                     convertToPath(validatorExternalSignerTruststorePasswordFile))
-                .pqKeysDerivedFromBlsKey(pqKeysDerivedFromBlsKey));
+                .pqKeysDerivedFromBlsKey(pqKeysDerivedFromBlsKey)
+                .pqVrfStateUrl(parsePqVrfStateUrl()));
+  }
+
+  private Optional<URI> parsePqVrfStateUrl() {
+    if (Strings.isNullOrEmpty(pqVrfStateUrl)) {
+      return Optional.empty();
+    }
+    try {
+      return Optional.of(new URI(pqVrfStateUrl));
+    } catch (final URISyntaxException e) {
+      throw new InvalidConfigurationException(
+          "Invalid configuration. PQ VRF state URL has invalid syntax", e);
+    }
   }
 
   public List<String> getValidatorKeys() {

@@ -19,23 +19,33 @@ import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import static tech.pegasys.teku.infrastructure.async.SyncAsyncRunner.SYNC_RUNNER;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.stream.IntStream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSecretKey;
+import tech.pegasys.teku.bls.BLSTestUtil;
 import tech.pegasys.teku.bls.keystore.model.Cipher;
 import tech.pegasys.teku.bls.keystore.model.Pbkdf2Param;
 import tech.pegasys.teku.bls.keystore.model.Pbkdf2PseudoRandomFunction;
 import tech.pegasys.teku.bls.keystore.pq.PqKeyStore;
 import tech.pegasys.teku.bls.keystore.pq.PqKeyStoreSecrets;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
 import tech.pegasys.teku.infrastructure.io.SyncDataAccessor;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -301,13 +311,163 @@ class PqValidatorKeyLoaderTest {
         .isEmpty();
   }
 
+  @Test
+  void load_derivedKeysTakeTheirVrfStateFromTheStateUrl() {
+    // Another key's state first, as in a file holding many validators' states
+    final Path statesFile = tempDir.resolve("states.vrf");
+    writeFile(
+        statesFile,
+        Bytes.concatenate(vrfStateOf(SECRETS.vrfSeed()), vrfStateOf(GENESIS_VALIDATOR_0_VRF_SEED)));
+
+    final XmssSigner signer =
+        derivingLoader(Optional.of(statesFile.toUri()))
+            .load(
+                blsKeystorePath,
+                PASSWORD,
+                GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY,
+                () -> GENESIS_VALIDATOR_0_BLS_SECRET_KEY)
+            .orElseThrow();
+
+    final VrfTree expectedVrfTree =
+        VrfTree.derive(GENESIS_VALIDATOR_0_VRF_SEED, VRF_DEPTH, VRF_CACHED_HEIGHT);
+    final UInt64 slot = UInt64.valueOf(201);
+    assertThat(safeJoin(signer.computeVrfProof(slot)))
+        .isEqualTo(expectedVrfTree.computeProof(slot));
+    // The state is saved, and the tree isn't derived in full
+    assertThat(derivedVrfStatePath())
+        .hasBinaryContent(vrfStateOf(GENESIS_VALIDATOR_0_VRF_SEED).toArrayUnsafe());
+    assertThat(derivedVrfCachePath()).doesNotExist();
+  }
+
+  @Test
+  void load_derivedKeysLoadedInParallelAllSaveTheirVrfStates() {
+    // Keys load in parallel, and each saves its state as soon as it is found
+    final List<Bytes32> blsSecretKeys =
+        IntStream.range(0, 4)
+            .mapToObj(seed -> BLSTestUtil.randomKeyPair(seed).getSecretKey().toBytes())
+            .toList();
+    final Path statesFile = tempDir.resolve("states.vrf");
+    writeFile(
+        statesFile,
+        Bytes.concatenate(
+            blsSecretKeys.stream()
+                .map(sk -> vrfStateOf(PqKeyStoreSecrets.deriveFromBlsSecretKey(sk).vrfSeed()))
+                .toArray(Bytes[]::new)));
+    final PqValidatorKeyLoader loader = derivingLoader(Optional.of(statesFile.toUri()));
+    final ExecutorService executor = Executors.newFixedThreadPool(blsSecretKeys.size());
+    try {
+      final List<SafeFuture<Optional<XmssSigner>>> loads =
+          blsSecretKeys.stream()
+              .map(
+                  sk ->
+                      SafeFuture.of(
+                          CompletableFuture.supplyAsync(
+                              () ->
+                                  loader.load(
+                                      blsKeystorePath,
+                                      PASSWORD,
+                                      BLSSecretKey.fromBytes(sk).toPublicKey(),
+                                      () -> sk),
+                              executor)))
+              .toList();
+
+      assertThat(SafeFuture.collectAll(loads.stream()))
+          .succeedsWithin(Duration.ofMinutes(2))
+          .asInstanceOf(InstanceOfAssertFactories.LIST)
+          .allMatch(signer -> ((Optional<?>) signer).isPresent());
+    } finally {
+      executor.shutdownNow();
+    }
+    for (final Bytes32 sk : blsSecretKeys) {
+      assertThat(
+              PqValidatorKeyLoader.derivedVrfStatePath(
+                  derivedVrfCacheDir(), BLSSecretKey.fromBytes(sk).toPublicKey()))
+          .exists();
+    }
+  }
+
+  @Test
+  void load_derivedKeysReadTheirSavedVrfState() {
+    writeFile(derivedVrfStatePath(), vrfStateOf(GENESIS_VALIDATOR_0_VRF_SEED));
+
+    // No state URL: the saved state alone saves deriving the tree
+    final XmssSigner signer =
+        derivingLoader()
+            .load(
+                blsKeystorePath,
+                PASSWORD,
+                GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY,
+                () -> GENESIS_VALIDATOR_0_BLS_SECRET_KEY)
+            .orElseThrow();
+
+    final UInt64 slot = UInt64.valueOf(77);
+    assertThat(safeJoin(signer.computeVrfProof(slot)))
+        .isEqualTo(
+            VrfTree.derive(GENESIS_VALIDATOR_0_VRF_SEED, VRF_DEPTH, VRF_CACHED_HEIGHT)
+                .computeProof(slot));
+    assertThat(derivedVrfCachePath()).doesNotExist();
+  }
+
+  @Test
+  void load_derivesTheVrfTreeWhenTheStateUrlHasNoStateForTheKey() {
+    final Path statesFile = tempDir.resolve("states.vrf");
+    writeFile(statesFile, vrfStateOf(SECRETS.vrfSeed()));
+
+    assertThat(
+            derivingLoader(Optional.of(statesFile.toUri()))
+                .load(
+                    blsKeystorePath,
+                    PASSWORD,
+                    GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY,
+                    () -> GENESIS_VALIDATOR_0_BLS_SECRET_KEY))
+        .isPresent();
+
+    assertThat(derivedVrfCachePath()).exists();
+    assertThat(derivedVrfStatePath()).doesNotExist();
+  }
+
+  @Test
+  void load_derivesTheVrfTreeWhenTheStateUrlCannotBeRead() {
+    assertThat(
+            derivingLoader(Optional.of(tempDir.resolve("missing.vrf").toUri()))
+                .load(
+                    blsKeystorePath,
+                    PASSWORD,
+                    GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY,
+                    () -> GENESIS_VALIDATOR_0_BLS_SECRET_KEY))
+        .isPresent();
+
+    assertThat(derivedVrfCachePath()).exists();
+  }
+
+  /** The serialized slot-0 VRF state of the test-depth tree of {@code seed}. */
+  private static Bytes vrfStateOf(final Bytes32 seed) {
+    final VrfTree tree = VrfTree.derive(seed, VRF_DEPTH, VRF_CACHED_HEIGHT);
+    final List<Bytes> siblings = new ArrayList<>();
+    for (int height = 0; height < VRF_DEPTH; height++) {
+      siblings.add(VrfTree.computeNode(seed, height, 1));
+    }
+    return Bytes.concatenate(
+        tree.getRoot(), Bytes.wrap(new byte[Integer.BYTES]), Bytes.concatenate(siblings));
+  }
+
+  private Path derivedVrfStatePath() {
+    return PqValidatorKeyLoader.derivedVrfStatePath(
+        derivedVrfCacheDir(), GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY);
+  }
+
   private PqValidatorKeyLoader derivingLoader() {
+    return derivingLoader(Optional.empty());
+  }
+
+  private PqValidatorKeyLoader derivingLoader(final Optional<URI> vrfStateUrl) {
     return new PqValidatorKeyLoader(
         spec,
         new PqKeyLoadingConfig(
             new LocalXmssLeafProtector(
                 SyncDataAccessor.create(slashingProtectionDir), slashingProtectionDir),
-            Optional.of(derivedVrfCacheDir())),
+            Optional.of(derivedVrfCacheDir()),
+            vrfStateUrl),
         SYNC_RUNNER,
         VRF_DEPTH,
         VRF_CACHED_HEIGHT);

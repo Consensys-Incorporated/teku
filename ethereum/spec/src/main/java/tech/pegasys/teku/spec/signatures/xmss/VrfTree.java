@@ -39,7 +39,7 @@ import tech.pegasys.teku.spec.constants.PqConstants;
  *
  * <p>The seed is secret: anyone who learns it can compute the validator's future RANDAO reveals.
  */
-public final class VrfTree {
+public final class VrfTree implements VrfProver {
 
   public static final int DEFAULT_CACHED_HEIGHT = 16;
 
@@ -132,6 +132,7 @@ public final class VrfTree {
     return cachedHeight;
   }
 
+  @Override
   public Bytes32 getRoot() {
     return upperLayers.getLast()[0];
   }
@@ -145,6 +146,7 @@ public final class VrfTree {
    * compute_vrf_proof: the leaf at index {@code slot}, followed by its Merkle branch from the leaf
    * up.
    */
+  @Override
   public List<Bytes32> computeProof(final UInt64 slot) {
     checkArgument(
         slot.isLessThan(UInt64.valueOf(1L << depth)),
@@ -278,7 +280,7 @@ public final class VrfTree {
     return parents;
   }
 
-  private static Bytes32 hashPair(final Bytes32 left, final Bytes32 right) {
+  static Bytes32 hashPair(final Bytes32 left, final Bytes32 right) {
     return Hash.keccak256(Bytes.concatenate(left, right));
   }
 }

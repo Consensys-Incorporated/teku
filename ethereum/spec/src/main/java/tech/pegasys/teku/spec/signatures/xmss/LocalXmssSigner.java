@@ -48,7 +48,7 @@ public class LocalXmssSigner implements XmssSigner {
 
   private final Spec spec;
   private final XmssSigningKey signingKey;
-  private final VrfTree vrfTree;
+  private final VrfProver vrfProver;
   private final XmssLeafProtector leafProtector;
   private final AsyncRunner asyncRunner;
   private final SigningRootUtil signingRootUtil;
@@ -56,12 +56,12 @@ public class LocalXmssSigner implements XmssSigner {
   public LocalXmssSigner(
       final Spec spec,
       final XmssSigningKey signingKey,
-      final VrfTree vrfTree,
+      final VrfProver vrfProver,
       final XmssLeafProtector leafProtector,
       final AsyncRunner asyncRunner) {
     this.spec = spec;
     this.signingKey = signingKey;
-    this.vrfTree = vrfTree;
+    this.vrfProver = vrfProver;
     this.leafProtector = leafProtector;
     this.asyncRunner = asyncRunner;
     this.signingRootUtil = new SigningRootUtil(spec);
@@ -140,7 +140,7 @@ public class LocalXmssSigner implements XmssSigner {
 
   @Override
   public SafeFuture<List<Bytes32>> computeVrfProof(final UInt64 slot) {
-    return asyncRunner.runAsync(() -> SafeFuture.completedFuture(vrfTree.computeProof(slot)));
+    return asyncRunner.runAsync(() -> SafeFuture.completedFuture(vrfProver.computeProof(slot)));
   }
 
   @Override

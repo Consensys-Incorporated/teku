@@ -137,6 +137,7 @@ public class ValidatorConfig {
   private final UInt64 builderMaxExecutionPayment;
   private final List<URL> builderUrls;
   private final boolean pqKeysDerivedFromBlsKey;
+  private final Optional<URI> pqVrfStateUrl;
 
   private ValidatorConfig(
       final List<String> validatorKeys,
@@ -187,7 +188,8 @@ public class ValidatorConfig {
       final UInt64 p2pBuilderBoostFactor,
       final UInt64 builderMaxExecutionPayment,
       final List<URL> builderUrls,
-      final boolean pqKeysDerivedFromBlsKey) {
+      final boolean pqKeysDerivedFromBlsKey,
+      final Optional<URI> pqVrfStateUrl) {
     this.validatorKeys = validatorKeys;
     this.validatorExternalSignerPublicKeySources = validatorExternalSignerPublicKeySources;
     this.validatorExternalSignerUrl = validatorExternalSignerUrl;
@@ -242,6 +244,7 @@ public class ValidatorConfig {
     this.builderMaxExecutionPayment = builderMaxExecutionPayment;
     this.builderUrls = builderUrls;
     this.pqKeysDerivedFromBlsKey = pqKeysDerivedFromBlsKey;
+    this.pqVrfStateUrl = pqVrfStateUrl;
 
     LOG.debug(
         "Executor queue - {} threads, max queue size {} ", executorThreads, executorMaxQueueSize);
@@ -465,6 +468,14 @@ public class ValidatorConfig {
     return pqKeysDerivedFromBlsKey;
   }
 
+  /**
+   * Where precomputed VRF tree states of derived PQ keys can be fetched, as devnet tooling
+   * publishes them (ethereum-package {@code vrf_state_url}), to save deriving each tree in full.
+   */
+  public Optional<URI> getPqVrfStateUrl() {
+    return pqVrfStateUrl;
+  }
+
   public static final class Builder {
     private List<String> validatorKeys = new ArrayList<>();
     private List<String> validatorExternalSignerPublicKeySources = new ArrayList<>();
@@ -528,6 +539,7 @@ public class ValidatorConfig {
     private UInt64 builderMaxExecutionPayment = DEFAULT_BUILDER_MAX_EXECUTION_PAYMENT;
     private List<URL> builderUrls = new ArrayList<>();
     private boolean pqKeysDerivedFromBlsKey = DEFAULT_PQ_KEYS_DERIVED_FROM_BLS_KEY;
+    private Optional<URI> pqVrfStateUrl = Optional.empty();
 
     private Builder() {}
 
@@ -854,6 +866,11 @@ public class ValidatorConfig {
       return this;
     }
 
+    public Builder pqVrfStateUrl(final Optional<URI> pqVrfStateUrl) {
+      this.pqVrfStateUrl = pqVrfStateUrl;
+      return this;
+    }
+
     public ValidatorConfig build() {
       validateExternalSignerUrlAndPublicKeys();
       validateExternalSignerKeystoreAndPasswordFileConfig();
@@ -908,7 +925,8 @@ public class ValidatorConfig {
           p2pBuilderBoostFactor,
           builderMaxExecutionPayment,
           builderUrls,
-          pqKeysDerivedFromBlsKey);
+          pqKeysDerivedFromBlsKey,
+          pqVrfStateUrl);
     }
 
     private void validateExternalSignerUrlAndPublicKeys() {
