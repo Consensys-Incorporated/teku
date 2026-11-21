@@ -301,7 +301,7 @@ public class ValidatorClientService extends Service {
                   .runAsync(
                       () ->
                           validatorClientService.scheduleValidatorsDuties(
-                              config, validatorApiChannel, asyncRunner))
+                              config, validatorApiChannel, genesisDataProvider, asyncRunner))
                   .propagateTo(validatorClientService.initializationComplete);
               return SafeFuture.COMPLETE;
             })
@@ -478,6 +478,7 @@ public class ValidatorClientService extends Service {
   private void scheduleValidatorsDuties(
       final ValidatorClientConfiguration config,
       final ValidatorApiChannel validatorApiChannel,
+      final GenesisDataProvider genesisDataProvider,
       final AsyncRunner asyncRunner) {
     validatorTimingChannels.add(validatorStatusProvider);
     final OwnedValidators validators = validatorLoader.getOwnedValidators();
@@ -647,6 +648,19 @@ public class ValidatorClientService extends Service {
 
     final ValidatorStatusLogger validatorStatusLogger = new ValidatorStatusLogger(validators);
     validatorTimingChannels.add(validatorStatusLogger);
+
+    if (spec.isMilestoneSupported(SpecMilestone.PQ)) {
+      final XmssKeyWarmer xmssKeyWarmer = new XmssKeyWarmer(spec, validators, timeProvider);
+      validatorTimingChannels.add(xmssKeyWarmer);
+      // Slot events only start at genesis, so prepare the keys for the current slot right away
+      genesisDataProvider
+          .getGenesisTime()
+          .thenAccept(
+              genesisTime ->
+                  xmssKeyWarmer.onSlot(
+                      spec.getCurrentSlot(timeProvider.getTimeInSeconds(), genesisTime)))
+          .finishError(LOG);
+    }
 
     addValidatorCountMetric(metricsSystem, validators);
   }

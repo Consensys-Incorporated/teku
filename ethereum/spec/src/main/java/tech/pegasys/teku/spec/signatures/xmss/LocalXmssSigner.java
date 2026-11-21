@@ -19,7 +19,9 @@ import static tech.pegasys.teku.spec.constants.PqConstants.LEAF_OFFSET_EXECUTION
 import static tech.pegasys.teku.spec.constants.PqConstants.LEAF_OFFSET_PROPOSER_PREFERENCES;
 import static tech.pegasys.teku.spec.constants.PqConstants.LEAF_OFFSET_PTC_ATTESTER;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
@@ -35,6 +37,7 @@ import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AggregateAnd
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.logic.versions.pq.helpers.MiscHelpersPq;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
+import tech.pegasys.teku.xmss.XmssConstants;
 import tech.pegasys.teku.xmss.XmssPublicKey;
 import tech.pegasys.teku.xmss.XmssSignature;
 import tech.pegasys.teku.xmss.XmssSigningKey;
@@ -42,9 +45,13 @@ import tech.pegasys.teku.xmss.XmssSigningKey;
 /**
  * Signs with a leanXMSS key held in this process. Every signature is first recorded with the {@link
  * XmssLeafProtector}, so a leaf is never used for two different messages, even across restarts.
- * Signing and VRF proofs run on the async runner, as both are CPU-heavy.
+ * Signing, preparing trees and VRF proofs run on the async runner, as all are CPU-heavy.
  */
 public class LocalXmssSigner implements XmssSigner {
+
+  // Fewer than the key's own cache holds, so a tree this signer remembers preparing is one the
+  // key still has
+  private static final int MAX_PREPARED_TREES = 4;
 
   private final Spec spec;
   private final XmssSigningKey signingKey;
@@ -52,6 +59,15 @@ public class LocalXmssSigner implements XmssSigner {
   private final XmssLeafProtector leafProtector;
   private final AsyncRunner asyncRunner;
   private final SigningRootUtil signingRootUtil;
+
+  // The bottom trees prepareForSlot has asked the key for, most recently used last
+  private final Map<Long, SafeFuture<Void>> preparedTrees =
+      new LinkedHashMap<>(MAX_PREPARED_TREES + 1, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(final Map.Entry<Long, SafeFuture<Void>> eldest) {
+          return size() > MAX_PREPARED_TREES;
+        }
+      };
 
   public LocalXmssSigner(
       final Spec spec,
@@ -136,6 +152,45 @@ public class LocalXmssSigner implements XmssSigner {
                 leaf.map(leafIndex -> signAtRecordedLeaf(leafIndex, signingRoot))
                     .orElseGet(
                         () -> SafeFuture.failedFuture(new XmssLeafReuseException(getPublicKey()))));
+  }
+
+  @Override
+  public SafeFuture<Integer> prepareForSlot(final UInt64 slot) {
+    SafeFuture<Integer> prepared = SafeFuture.completedFuture(0);
+    // One tree after the other, so preparing a key keeps a single thread busy
+    for (final long bottomTree : XmssLeafLayout.bottomTreesAt(spec, slot)) {
+      prepared =
+          prepared.thenCompose(
+              count -> prepareBottomTree(bottomTree).thenApply(isNew -> isNew ? count + 1 : count));
+    }
+    return prepared;
+  }
+
+  /** Builds {@code bottomTree} unless this signer already asked for it. True if it was new. */
+  private SafeFuture<Boolean> prepareBottomTree(final long bottomTree) {
+    final SafeFuture<Void> building = new SafeFuture<>();
+    final SafeFuture<Void> alreadyRequested;
+    synchronized (preparedTrees) {
+      alreadyRequested = preparedTrees.get(bottomTree);
+      if (alreadyRequested == null) {
+        preparedTrees.put(bottomTree, building);
+      }
+    }
+    if (alreadyRequested != null) {
+      return alreadyRequested.thenApply(__ -> false);
+    }
+    asyncRunner
+        .runAsync(() -> signingKey.prepare(XmssConstants.firstLeafOfBottomTree(bottomTree)))
+        .propagateTo(building);
+    return building
+        .whenException(
+            error -> {
+              // Forget the failure, so a later call tries again
+              synchronized (preparedTrees) {
+                preparedTrees.remove(bottomTree, building);
+              }
+            })
+        .thenApply(__ -> true);
   }
 
   @Override

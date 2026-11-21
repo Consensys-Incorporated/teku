@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.concurrent.CountDownLatch;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterEach;
@@ -92,6 +93,44 @@ class XmssTest {
       assertThat(otherSignature.getLeafIndex()).isEqualTo(otherLeaf);
       assertThat(Xmss.verify(publicKey, otherLeaf, message, otherSignature)).isTrue();
     }
+  }
+
+  @Test
+  void shouldSignWhileAnotherBottomTreeIsBeingPrepared() throws Exception {
+    final UInt64 leafInFirstTree = UInt64.valueOf(7);
+    final UInt64 leafInSecondTree = XmssConstants.firstLeafOfBottomTree(1);
+    try (XmssSigningKey key = Xmss.loadSigningKey(secretKey)) {
+      key.prepare(leafInFirstTree);
+      final CountDownLatch preparing = new CountDownLatch(1);
+      final Thread prepareSecondTree =
+          new Thread(
+              () -> {
+                preparing.countDown();
+                key.prepare(leafInSecondTree);
+              });
+      prepareSecondTree.start();
+      preparing.await();
+      // Building a tree takes seconds; give it time to get under way
+      Thread.sleep(100);
+
+      final XmssSignature signed = key.sign(leafInFirstTree, message);
+
+      // Signing takes a fraction of a tree build, so it finished first unless it had to wait
+      assertThat(prepareSecondTree.isAlive()).isTrue();
+      assertThat(Xmss.verify(publicKey, leafInFirstTree, message, signed)).isTrue();
+      prepareSecondTree.join();
+    }
+  }
+
+  @Test
+  void shouldGroupLeavesIntoBottomTreesOf65536() {
+    assertThat(XmssConstants.bottomTreeIndex(UInt64.ZERO)).isZero();
+    assertThat(XmssConstants.bottomTreeIndex(UInt64.valueOf(65535))).isZero();
+    assertThat(XmssConstants.bottomTreeIndex(UInt64.valueOf(65536))).isEqualTo(1);
+    assertThat(XmssConstants.bottomTreeIndex(XmssConstants.MAX_LEAF_INDEX)).isEqualTo(65535);
+    assertThat(XmssConstants.firstLeafOfBottomTree(1)).isEqualTo(UInt64.valueOf(65536));
+    assertThat(XmssConstants.firstLeafOfBottomTree(65535))
+        .isEqualTo(XmssConstants.MAX_LEAF_INDEX.minus(65535));
   }
 
   @Test

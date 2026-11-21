@@ -24,6 +24,10 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
  * <p>This class signs whatever leaf it is given. Never sign two different messages at the same
  * leaf: that reveals enough of the key to forge signatures. Callers must record a leaf as used
  * before publishing any signature made with it.
+ *
+ * <p>Safe to share between threads. Calls do not wait for each other, so a slow {@link #prepare} of
+ * one bottom tree does not delay a {@link #sign} in another. Closing is safe while calls are in
+ * progress: the key is freed once they return, and later calls fail.
  */
 public final class XmssSigningKey implements AutoCloseable {
 
@@ -39,19 +43,23 @@ public final class XmssSigningKey implements AutoCloseable {
     return publicKey;
   }
 
-  /** Precomputes the signing state for {@code leafIndex} so a later {@link #sign} is fast. */
-  public synchronized void prepare(final UInt64 leafIndex) {
+  /**
+   * Builds the bottom tree that holds {@code leafIndex}, so a later {@link #sign} in it is fast.
+   * Building takes seconds; it does nothing if the key already holds that tree. A key keeps the
+   * last few trees it used.
+   */
+  public void prepare(final UInt64 leafIndex) {
     XmssSignature.encodeLeafIndex(leafIndex);
     key.prepare(leafIndex.longValue());
   }
 
-  public synchronized XmssSignature sign(final UInt64 leafIndex, final Bytes32 message) {
+  public XmssSignature sign(final UInt64 leafIndex, final Bytes32 message) {
     XmssSignature.encodeLeafIndex(leafIndex);
     return XmssSignature.fromBytes(Bytes.wrap(key.sign(message.toArray(), leafIndex.longValue())));
   }
 
   @Override
-  public synchronized void close() {
+  public void close() {
     key.close();
   }
 }

@@ -29,6 +29,12 @@ public final class XmssConstants {
   public static final UInt64 MAX_LEAF_INDEX = UInt64.valueOf(0xFFFFFFFFL);
 
   /**
+   * A key's leaves are grouped into bottom trees of {@code 2^BOTTOM_TREE_HEIGHT} leaves. Signing at
+   * a leaf needs its bottom tree, which takes seconds to build the first time.
+   */
+  public static final int BOTTOM_TREE_HEIGHT = 16;
+
+  /**
    * When set, {@link Xmss#verify} accepts every signature. Reference tests need this because their
    * vectors carry stub signatures. Never set it in production.
    */
@@ -36,6 +42,16 @@ public final class XmssConstants {
   public static boolean verificationDisabled = false;
 
   private XmssConstants() {}
+
+  /** The index of the bottom tree that holds {@code leafIndex}. */
+  public static long bottomTreeIndex(final UInt64 leafIndex) {
+    return leafIndex.longValue() >>> BOTTOM_TREE_HEIGHT;
+  }
+
+  /** The first leaf of bottom tree {@code bottomTreeIndex}. */
+  public static UInt64 firstLeafOfBottomTree(final long bottomTreeIndex) {
+    return UInt64.valueOf(bottomTreeIndex << BOTTOM_TREE_HEIGHT);
+  }
 
   public static void disableXmssVerification() {
     verificationDisabled = true;
