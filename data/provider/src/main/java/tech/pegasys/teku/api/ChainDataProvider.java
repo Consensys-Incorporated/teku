@@ -98,6 +98,7 @@ import tech.pegasys.teku.spec.logic.versions.gloas.helpers.PredicatesGloas;
 import tech.pegasys.teku.spec.schemas.api.StateValidatorBalanceData;
 import tech.pegasys.teku.statetransition.lightclient.LightClientBootstrapProvider;
 import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
+import tech.pegasys.teku.statetransition.lightclient.NewerLightClientUpdateFilter;
 import tech.pegasys.teku.storage.client.BlobReconstructionProvider;
 import tech.pegasys.teku.storage.client.BlobSidecarReconstructionProvider;
 import tech.pegasys.teku.storage.client.ChainDataUnavailableException;
@@ -207,12 +208,14 @@ public class ChainDataProvider {
 
   public void subscribeToNewLightClientFinalityUpdates(
       final Consumer<LightClientFinalityUpdate> subscriber) {
-    lightClientUpdateStore.subscribeToPublishedFinalityUpdates(subscriber);
+    lightClientUpdateStore.subscribeToPublishedFinalityUpdates(
+        NewerLightClientUpdateFilter.forFinalityUpdates(subscriber));
   }
 
   public void subscribeToNewLightClientOptimisticUpdates(
       final Consumer<LightClientOptimisticUpdate> subscriber) {
-    lightClientUpdateStore.subscribeToPublishedOptimisticUpdates(subscriber);
+    lightClientUpdateStore.subscribeToPublishedOptimisticUpdates(
+        NewerLightClientUpdateFilter.forOptimisticUpdates(subscriber));
   }
 
   public UInt64 getCurrentEpoch(final BeaconState state) {
