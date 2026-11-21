@@ -440,7 +440,8 @@ public class ValidatorClientService extends Service {
                         SyncDataAccessor.create(slashingProtectionPath), slashingProtectionPath),
                     config.getValidatorConfig().isPqKeysDerivedFromBlsKey()
                         ? Optional.of(getDerivedPqKeysVrfCachePath(services.getDataDirLayout()))
-                        : Optional.empty()))
+                        : Optional.empty(),
+                    config.getValidatorConfig().getPqVrfStateUrl()))
             : Optional.empty();
     final SlashingProtectionLogger slashingProtectionLogger =
         new SlashingProtectionLogger(
