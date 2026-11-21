@@ -15,13 +15,12 @@ package tech.pegasys.teku.spec.signatures;
 
 import com.google.common.annotations.VisibleForTesting;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.signingrecord.ValidatorSigningRecord;
@@ -30,7 +29,6 @@ import tech.pegasys.teku.infrastructure.io.SyncDataAccessor;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 
 public class LocalSlashingProtectorConcurrentAccess implements SlashingProtector {
-  private static final Logger LOG = LogManager.getLogger();
   private final Map<BLSPublicKey, LocalSlashingProtectionRecord> records =
       new ConcurrentHashMap<>();
   private final SyncDataAccessor dataAccessor;
@@ -81,7 +79,8 @@ public class LocalSlashingProtectorConcurrentAccess implements SlashingProtector
   }
 
   @Override
-  public Optional<ValidatorSigningRecord> getSigningRecord(final BLSPublicKey validator) {
+  public Optional<ValidatorSigningRecord> getSigningRecord(final BLSPublicKey validator)
+      throws IOException {
     final Optional<LocalSlashingProtectionRecord> maybeRecord =
         Optional.ofNullable(records.get(validator));
     if (maybeRecord.isEmpty()) {
@@ -104,34 +103,42 @@ public class LocalSlashingProtectorConcurrentAccess implements SlashingProtector
 
   @VisibleForTesting
   LocalSlashingProtectionRecord getOrCreateSigningRecord(
-      final BLSPublicKey validator, final Bytes32 genesisValidatorsRoot) {
-    return records.computeIfAbsent(validator, __ -> addRecord(validator, genesisValidatorsRoot));
+      final BLSPublicKey validator, final Bytes32 genesisValidatorsRoot) throws IOException {
+    try {
+      // computeIfAbsent caches nothing when loading throws, so a failed read is retried next time
+      return records.computeIfAbsent(
+          validator, __ -> loadRecordUnchecked(validator, genesisValidatorsRoot));
+    } catch (final UncheckedIOException e) {
+      throw e.getCause();
+    }
   }
 
-  private LocalSlashingProtectionRecord addRecord(
+  private LocalSlashingProtectionRecord loadRecordUnchecked(
       final BLSPublicKey publicKey, final Bytes32 genesisValidatorsRoot) {
-    final Path slashingProtectedPath =
-        slashingProtectionBaseDir.resolve(
-            publicKey.toBytesCompressed().toUnprefixedHexString() + ".yml");
-    final Optional<ValidatorSigningRecord> maybeRecord =
-        getValidatorSigningRecordFromFile(publicKey);
+    try {
+      return loadRecord(publicKey, genesisValidatorsRoot);
+    } catch (final IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  private LocalSlashingProtectionRecord loadRecord(
+      final BLSPublicKey publicKey, final Bytes32 genesisValidatorsRoot) throws IOException {
+    // a missing file means the key has never signed; a failed read must not be treated that way
+    final ValidatorSigningRecord signingRecord =
+        getValidatorSigningRecordFromFile(publicKey)
+            .orElseGet(() -> ValidatorSigningRecord.emptySigningRecord(genesisValidatorsRoot));
     return new LocalSlashingProtectionRecord(
-        slashingProtectedPath,
-        maybeRecord.orElse(ValidatorSigningRecord.emptySigningRecord(genesisValidatorsRoot)),
-        new ReentrantLock());
+        validatorRecordPath(publicKey), signingRecord, new ReentrantLock());
   }
 
   private Optional<ValidatorSigningRecord> getValidatorSigningRecordFromFile(
-      final BLSPublicKey publicKey) {
+      final BLSPublicKey publicKey) throws IOException {
+    return dataAccessor.read(validatorRecordPath(publicKey)).map(ValidatorSigningRecord::fromBytes);
+  }
 
-    final Path slashingProtectedPath =
-        slashingProtectionBaseDir.resolve(
-            publicKey.toBytesCompressed().toUnprefixedHexString() + ".yml");
-    try {
-      return dataAccessor.read(slashingProtectedPath).map(ValidatorSigningRecord::fromBytes);
-    } catch (IOException e) {
-      LOG.error("Failed to load validator signing record {}", publicKey, e);
-      return Optional.empty();
-    }
+  private Path validatorRecordPath(final BLSPublicKey publicKey) {
+    return slashingProtectionBaseDir.resolve(
+        publicKey.toBytesCompressed().toUnprefixedHexString() + ".yml");
   }
 }
