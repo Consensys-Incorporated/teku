@@ -22,18 +22,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBytes32Vector;
-import tech.pegasys.teku.infrastructure.subscribers.Subscribers;
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -71,12 +70,18 @@ public class LightClientServerService
   private final BiPredicate<UInt64, Bytes32> isCanonicalBlock;
   private final AsyncRunner asyncRunner;
   private final TimeProvider timeProvider;
-  private final Subscribers<Consumer<LightClientFinalityUpdate>> finalityUpdateSubscribers =
-      Subscribers.create(true);
-  private final Subscribers<Consumer<LightClientOptimisticUpdate>> optimisticUpdateSubscribers =
-      Subscribers.create(true);
   private final AtomicReference<Optional<PendingBootstrap>> pendingBootstrap =
       new AtomicReference<>(Optional.empty());
+
+  private final AtomicReference<Optional<UInt64>> lastBlockImportBootstrapRetrySlot =
+      new AtomicReference<>(Optional.empty());
+
+  /**
+   * Whether the last pending bootstrap block lookup failed. A persistent failure is logged at WARN
+   * once and at DEBUG afterwards, until a lookup succeeds again.
+   */
+  private final AtomicBoolean pendingBootstrapLookupFailing = new AtomicBoolean(false);
+
   private final Map<UInt64, PendingUpdate> pendingUpdatesByPeriod = new ConcurrentHashMap<>();
   private final Map<Bytes32, BoundaryBootstrap> boundaryBootstraps = new ConcurrentHashMap<>();
 
@@ -147,16 +152,6 @@ public class LightClientServerService
     this.timeProvider = timeProvider;
   }
 
-  public void subscribeToFinalityUpdatesToPublish(
-      final Consumer<LightClientFinalityUpdate> subscriber) {
-    finalityUpdateSubscribers.subscribe(subscriber);
-  }
-
-  public void subscribeToOptimisticUpdatesToPublish(
-      final Consumer<LightClientOptimisticUpdate> subscriber) {
-    optimisticUpdateSubscribers.subscribe(subscriber);
-  }
-
   @Override
   public void onBlockValidated(final SignedBeaconBlock block) {
     // This is a no-operation because we cannot generate any light client updates until the block is
@@ -171,6 +166,7 @@ public class LightClientServerService
       return;
     }
 
+    retryPendingBootstrapOncePerSlot();
     captureBoundaryBootstraps(block);
 
     final Optional<SyncAggregate> maybeSyncAggregate =
@@ -331,9 +327,33 @@ public class LightClientServerService
                 .map(util -> util.createLightClientBootstrap(state, block)));
   }
 
+  private void retryPendingBootstrapOncePerSlot() {
+    final Optional<PendingBootstrap> maybePending = pendingBootstrap.get();
+    if (maybePending.isEmpty()) {
+      return;
+    }
+    final UInt64 currentSlot =
+        spec.getCurrentSlotFromTimeMillis(
+            timeProvider.getTimeInMillis(), maybePending.get().genesisTimeMillis());
+    final Optional<UInt64> lastRetrySlot = lastBlockImportBootstrapRetrySlot.get();
+    if (lastRetrySlot.isPresent() && currentSlot.isLessThanOrEqualTo(lastRetrySlot.get())) {
+      return;
+    }
+    if (!lastBlockImportBootstrapRetrySlot.compareAndSet(lastRetrySlot, Optional.of(currentSlot))) {
+      return;
+    }
+    pendingBootstrap.getAndSet(Optional.empty()).ifPresent(this::retryPendingBootstrap);
+  }
+
   private void retryPendingBootstrap(final PendingBootstrap pending) {
     retrieveBlockByRoot
         .apply(pending.blockRoot())
+        .thenPeek(__ -> pendingBootstrapLookupFailing.set(false))
+        .exceptionally(
+            error -> {
+              logPendingBootstrapLookupFailure(pending.blockRoot(), error);
+              return Optional.empty();
+            })
         .thenAccept(
             maybeBlock -> {
               if (maybeBlock.isEmpty()) {
@@ -354,6 +374,19 @@ public class LightClientServerService
                     "Failed to retry light client bootstrap for block {}",
                     pending.blockRoot(),
                     error));
+  }
+
+  private void logPendingBootstrapLookupFailure(final Bytes32 blockRoot, final Throwable error) {
+    if (pendingBootstrapLookupFailing.getAndSet(true)) {
+      LOG.debug(
+          "Failed to look up block {} for pending light client bootstrap again", blockRoot, error);
+    } else {
+      LOG.warn(
+          "Failed to look up block {} for pending light client bootstrap. "
+              + "Further consecutive failures will be logged at debug level",
+          blockRoot,
+          error);
+    }
   }
 
   private void retryPendingUpdate(final UInt64 period, final PendingUpdate pending) {
@@ -399,7 +432,8 @@ public class LightClientServerService
                                     new PendingBootstrap(
                                         blockRoot,
                                         state.getCurrentSyncCommittee(),
-                                        state.createCurrentSyncCommitteeProof()))));
+                                        state.createCurrentSyncCommitteeProof(),
+                                        secondsToMillis(state.getGenesisTime())))));
                 return Optional.<LightClientBootstrap>empty();
               }
               return createBootstrap(maybeBlock.get(), maybeState);
@@ -503,8 +537,7 @@ public class LightClientServerService
                         finalityUpdate,
                         finalityUpdate.getSignatureSlot().get(),
                         genesisTimeMillis,
-                        lightClientStore::getLatestFinalityUpdate,
-                        finalityUpdateSubscribers);
+                        lightClientStore::publishFinalityUpdateIfLatest);
                   }
                 }
 
@@ -516,8 +549,7 @@ public class LightClientServerService
                       optimisticUpdate,
                       optimisticUpdate.getSignatureSlot().get(),
                       genesisTimeMillis,
-                      lightClientStore::getLatestOptimisticUpdate,
-                      optimisticUpdateSubscribers);
+                      lightClientStore::publishOptimisticUpdateIfLatest);
                 }
 
                 return Optional.of(update);
@@ -529,8 +561,7 @@ public class LightClientServerService
       final T update,
       final UInt64 signatureSlot,
       final UInt64 genesisTimeMillis,
-      final Supplier<Optional<T>> latestUpdate,
-      final Subscribers<Consumer<T>> subscribers) {
+      final Consumer<T> publishIfLatest) {
     final UInt64 slotStartMillis = spec.computeTimeMillisAtSlot(signatureSlot, genesisTimeMillis);
     final UInt64 currentTimeMillis = timeProvider.getTimeInMillis();
 
@@ -544,11 +575,7 @@ public class LightClientServerService
 
     asyncRunner
         .runAfterDelay(
-            () -> {
-              if (latestUpdate.get().filter(update::equals).isPresent()) {
-                subscribers.forEach(subscriber -> subscriber.accept(update));
-              }
-            },
+            () -> publishIfLatest.accept(update),
             Duration.ofMillis(publishTimeMillis.minusMinZero(currentTimeMillis).longValue()))
         .finishError(LOG);
   }
@@ -577,7 +604,8 @@ public class LightClientServerService
   private record PendingBootstrap(
       Bytes32 blockRoot,
       SyncCommittee currentSyncCommittee,
-      SszBytes32Vector currentSyncCommitteeBranch) {}
+      SszBytes32Vector currentSyncCommitteeBranch,
+      UInt64 genesisTimeMillis) {}
 
   private record PendingUpdate(
       Bytes32 signatureBlockRoot,

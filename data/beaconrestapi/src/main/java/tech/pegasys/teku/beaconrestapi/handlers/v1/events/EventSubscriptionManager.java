@@ -49,6 +49,8 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
@@ -120,6 +122,10 @@ public class EventSubscriptionManager
         (dataColumnSidecar, remoteOrigin) -> onNewDataColumnSidecar(dataColumnSidecar));
     nodeDataProvider.subscribeToPayloadAttestationMessages(this::onNewPayloadAttestationMessage);
     nodeDataProvider.subscribeToProposerPreferences(this::onNewProposerPreferences);
+    chainDataProvider.subscribeToNewLightClientFinalityUpdates(
+        this::onNewLightClientFinalityUpdate);
+    chainDataProvider.subscribeToNewLightClientOptimisticUpdates(
+        this::onNewLightClientOptimisticUpdate);
   }
 
   public void registerClient(final SseClient sseClient) {
@@ -392,6 +398,23 @@ public class EventSubscriptionManager
       notifySubscribersOfEvent(
           EventType.proposer_preferences, new ProposerPreferencesEvent(proposerPreferences));
     }
+  }
+
+  protected void onNewLightClientFinalityUpdate(final LightClientFinalityUpdate finalityUpdate) {
+    final SpecMilestone milestone =
+        spec.atSlot(finalityUpdate.getAttestedHeader().getBeacon().getSlot()).getMilestone();
+    notifySubscribersOfEvent(
+        EventType.light_client_finality_update,
+        new LightClientFinalityUpdateEvent(milestone, finalityUpdate));
+  }
+
+  protected void onNewLightClientOptimisticUpdate(
+      final LightClientOptimisticUpdate optimisticUpdate) {
+    final SpecMilestone milestone =
+        spec.atSlot(optimisticUpdate.getAttestedHeader().getBeacon().getSlot()).getMilestone();
+    notifySubscribersOfEvent(
+        EventType.light_client_optimistic_update,
+        new LightClientOptimisticUpdateEvent(milestone, optimisticUpdate));
   }
 
   private void notifySubscribersOfEvent(final EventType eventType, final Event<?> event) {

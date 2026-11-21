@@ -44,4 +44,9 @@ public class LightClientOptimisticUpdate
   public SszUInt64 getSignatureSlot() {
     return getField2();
   }
+
+  @Override
+  public LightClientOptimisticUpdateSchema getSchema() {
+    return (LightClientOptimisticUpdateSchema) super.getSchema();
+  }
 }

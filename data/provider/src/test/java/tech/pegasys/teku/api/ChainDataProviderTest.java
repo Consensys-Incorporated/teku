@@ -83,6 +83,8 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeDataWithParent;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeValidationStatus;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockAndMetaData;
 import tech.pegasys.teku.spec.datastructures.metadata.DataColumnSidecarsAndMetaData;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
@@ -1481,5 +1483,71 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
 
   private BeaconState getHeadState() {
     return safeJoin(mockCombinedChainDataClient.getChainHead().orElseThrow().getState());
+  }
+
+  @Test
+  public void subscribeToNewLightClientFinalityUpdates_shouldOnlyDeliverNewerFinality() {
+    final LightClientUpdateStore store = new LightClientUpdateStore(spec);
+    final ChainDataProvider provider = providerWithLightClientStore(store);
+    final List<LightClientFinalityUpdate> delivered = new ArrayList<>();
+    provider.subscribeToNewLightClientFinalityUpdates(delivered::add);
+
+    final LightClientFinalityUpdate first =
+        data.randomLightClientFinalityUpdate(
+            UInt64.valueOf(9), UInt64.valueOf(8), UInt64.valueOf(10));
+    // Newer attested slot, so it replaces the latest update, but the same finalized slot
+    final LightClientFinalityUpdate sameFinality =
+        data.randomLightClientFinalityUpdate(
+            UInt64.valueOf(10), UInt64.valueOf(8), UInt64.valueOf(11));
+    final LightClientFinalityUpdate newerFinality =
+        data.randomLightClientFinalityUpdate(
+            UInt64.valueOf(17), UInt64.valueOf(16), UInt64.valueOf(18));
+
+    addAndPublish(store, first);
+    addAndPublish(store, sameFinality);
+    addAndPublish(store, newerFinality);
+
+    assertThat(store.getLatestFinalityUpdate()).contains(newerFinality);
+    assertThat(delivered).containsExactly(first, newerFinality);
+  }
+
+  @Test
+  public void subscribeToNewLightClientOptimisticUpdates_shouldNotDeliverOlderUpdateAfterReorg() {
+    final LightClientUpdateStore store = new LightClientUpdateStore(spec);
+    final ChainDataProvider provider = providerWithLightClientStore(store);
+    final List<LightClientOptimisticUpdate> delivered = new ArrayList<>();
+    provider.subscribeToNewLightClientOptimisticUpdates(delivered::add);
+
+    final LightClientOptimisticUpdate first =
+        data.randomLightClientOptimisticUpdate(UInt64.valueOf(9), UInt64.valueOf(10));
+    final LightClientOptimisticUpdate olderAfterReorg =
+        data.randomLightClientOptimisticUpdate(UInt64.valueOf(8), UInt64.valueOf(9));
+
+    store.addOptimisticUpdate(first, data.randomBytes32(), (slot, root) -> true);
+    store.publishOptimisticUpdateIfLatest(first);
+    // A reorg removes the latest update, so an update with a lower attested slot becomes latest
+    store.removeNonCanonicalUpdates(UInt64.ZERO, (slot, root) -> false);
+    store.addOptimisticUpdate(olderAfterReorg, data.randomBytes32(), (slot, root) -> true);
+    store.publishOptimisticUpdateIfLatest(olderAfterReorg);
+
+    assertThat(store.getLatestOptimisticUpdate()).contains(olderAfterReorg);
+    assertThat(delivered).containsExactly(first);
+  }
+
+  private ChainDataProvider providerWithLightClientStore(final LightClientUpdateStore store) {
+    return new ChainDataProvider(
+        spec,
+        recentChainData,
+        combinedChainDataClient,
+        rewardCalculatorMock,
+        mockBlobSidecarReconstructionProvider,
+        mockBlobReconstructionProvider,
+        store);
+  }
+
+  private void addAndPublish(
+      final LightClientUpdateStore store, final LightClientFinalityUpdate update) {
+    store.addFinalityUpdate(update, data.randomBytes32(), (slot, root) -> true);
+    store.publishFinalityUpdateIfLatest(update);
   }
 }

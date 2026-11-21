@@ -22,6 +22,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiPredicate;
 import org.apache.tuweni.bytes.Bytes32;
@@ -427,6 +428,71 @@ public class LightClientUpdateStoreTest {
 
     store.addFinalityUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
     assertThat(store.getLatestFinalityUpdate()).contains(newer);
+  }
+
+  @TestTemplate
+  public void addFinalityUpdate_shouldNotNotifyPublishedUpdateSubscribers() {
+    final List<LightClientFinalityUpdate> notified = new ArrayList<>();
+    store.subscribeToPublishedFinalityUpdates(notified::add);
+
+    store.addFinalityUpdate(
+        dataStructureUtil.randomLightClientFinalityUpdate(
+            periodOneStartSlot(), periodOneStartSlot()),
+        dataStructureUtil.randomBytes32(),
+        CANONICAL);
+
+    assertThat(store.getLatestFinalityUpdate()).isPresent();
+    assertThat(notified).isEmpty();
+  }
+
+  @TestTemplate
+  public void publishFinalityUpdateIfLatest_shouldOnlyNotifyForLatestUpdate() {
+    final List<LightClientFinalityUpdate> notified = new ArrayList<>();
+    store.subscribeToPublishedFinalityUpdates(notified::add);
+    final LightClientFinalityUpdate older =
+        dataStructureUtil.randomLightClientFinalityUpdate(
+            periodOneStartSlot(), periodOneStartSlot());
+    final LightClientFinalityUpdate newer =
+        dataStructureUtil.randomLightClientFinalityUpdate(
+            periodOneStartSlot().increment(), periodOneStartSlot());
+
+    store.addFinalityUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
+    store.addFinalityUpdate(newer, dataStructureUtil.randomBytes32(), CANONICAL);
+    store.publishFinalityUpdateIfLatest(older);
+    store.publishFinalityUpdateIfLatest(newer);
+
+    assertThat(notified).containsExactly(newer);
+  }
+
+  @TestTemplate
+  public void addOptimisticUpdate_shouldNotNotifyPublishedUpdateSubscribers() {
+    final List<LightClientOptimisticUpdate> notified = new ArrayList<>();
+    store.subscribeToPublishedOptimisticUpdates(notified::add);
+
+    store.addOptimisticUpdate(
+        dataStructureUtil.randomLightClientOptimisticUpdate(periodOneStartSlot()),
+        dataStructureUtil.randomBytes32(),
+        CANONICAL);
+
+    assertThat(store.getLatestOptimisticUpdate()).isPresent();
+    assertThat(notified).isEmpty();
+  }
+
+  @TestTemplate
+  public void publishOptimisticUpdateIfLatest_shouldOnlyNotifyForLatestUpdate() {
+    final List<LightClientOptimisticUpdate> notified = new ArrayList<>();
+    store.subscribeToPublishedOptimisticUpdates(notified::add);
+    final LightClientOptimisticUpdate older =
+        dataStructureUtil.randomLightClientOptimisticUpdate(periodOneStartSlot());
+    final LightClientOptimisticUpdate newer =
+        dataStructureUtil.randomLightClientOptimisticUpdate(periodOneStartSlot().increment());
+
+    store.addOptimisticUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
+    store.addOptimisticUpdate(newer, dataStructureUtil.randomBytes32(), CANONICAL);
+    store.publishOptimisticUpdateIfLatest(older);
+    store.publishOptimisticUpdateIfLatest(newer);
+
+    assertThat(notified).containsExactly(newer);
   }
 
   @TestTemplate

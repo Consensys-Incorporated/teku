@@ -2267,13 +2267,13 @@ public class BeaconChainController extends Service implements BeaconChainControl
               (update, arrivalTimestamp) -> finalityValidator.validate(update))
           .gossipedLightClientOptimisticUpdateProcessor(
               (update, arrivalTimestamp) -> optimisticValidator.validate(update));
-      lightClientServerService.subscribeToFinalityUpdatesToPublish(
+      lightClientUpdateStore.subscribeToPublishedFinalityUpdates(
           update ->
               publishLightClientUpdate(
                   update.getSignatureSlot().get(),
                   () -> finalityValidator.markForwarded(update),
                   () -> p2pNetwork.publishLightClientFinalityUpdate(update)));
-      lightClientServerService.subscribeToOptimisticUpdatesToPublish(
+      lightClientUpdateStore.subscribeToPublishedOptimisticUpdates(
           update ->
               publishLightClientUpdate(
                   update.getSignatureSlot().get(),
@@ -2438,6 +2438,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
                 dataProvider,
                 eth1DataProvider,
                 beaconConfig.beaconRestApiConfig(),
+                beaconConfig.eth2NetworkConfig().isLightClientServerEnabled(),
                 eventChannels,
                 eventAsyncRunner,
                 timeProvider,

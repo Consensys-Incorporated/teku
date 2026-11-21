@@ -28,9 +28,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiPredicate;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
+import org.apache.logging.log4j.Level;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
@@ -350,6 +352,170 @@ public class LightClientServerServiceTest {
   }
 
   @TestTemplate
+  public void onBlockImported_shouldStorePendingBootstrapOnceMissingBlockArrives() {
+    final Chain chain = generateChain();
+    final LightClientUpdateChannel channel =
+        mock(LightClientUpdateChannel.class, invocation -> SafeFuture.COMPLETE);
+    final LightClientServerService bootstrapService =
+        new LightClientServerService(
+            spec,
+            new LightClientUpdateStore(spec, channel),
+            this::lookUpBlock,
+            this::lookUpState,
+            CANONICAL,
+            asyncRunner,
+            timeProvider);
+    final SignedBlockAndState anchor = chain.attested();
+    blocksByRoot.remove(anchor.getRoot());
+
+    bootstrapService.onNewFinalizedCheckpoint(checkpointAt(anchor), false);
+    bootstrapService.onBlockImported(chain.signature().getBlock(), false);
+    verify(channel, never()).onNewLightClientBootstrap(any());
+
+    blocksByRoot.put(anchor.getRoot(), anchor.getBlock());
+    advanceToNextSlot();
+    bootstrapService.onBlockImported(chain.signature().getBlock(), false);
+
+    verify(channel)
+        .onNewLightClientBootstrap(
+            spec.getLightClientUtilRequired(anchor.getSlot())
+                .createLightClientBootstrap(anchor.getState(), anchor.getBlock()));
+  }
+
+  @TestTemplate
+  public void onBlockImported_shouldRetryPendingBootstrapAtMostOncePerSlot() {
+    final Chain chain = generateChain();
+    final LightClientUpdateChannel channel =
+        mock(LightClientUpdateChannel.class, invocation -> SafeFuture.COMPLETE);
+    final SignedBlockAndState anchor = chain.attested();
+    final SignedBeaconBlock importedBlock = chain.genesis().getBlock();
+    final AtomicInteger anchorLookups = new AtomicInteger();
+    final LightClientServerService bootstrapService =
+        new LightClientServerService(
+            spec,
+            new LightClientUpdateStore(spec, channel),
+            root -> {
+              if (root.equals(anchor.getRoot())) {
+                anchorLookups.incrementAndGet();
+              }
+              return lookUpBlock(root);
+            },
+            this::lookUpState,
+            CANONICAL,
+            asyncRunner,
+            timeProvider);
+    blocksByRoot.remove(anchor.getRoot());
+
+    bootstrapService.onNewFinalizedCheckpoint(checkpointAt(anchor), false);
+    final int lookupsAfterFinalization = anchorLookups.get();
+
+    for (int i = 0; i < 10; i++) {
+      bootstrapService.onBlockImported(importedBlock, false);
+    }
+    assertThat(anchorLookups.get()).isEqualTo(lookupsAfterFinalization + 1);
+
+    blocksByRoot.put(anchor.getRoot(), anchor.getBlock());
+    bootstrapService.onBlockImported(importedBlock, false);
+    assertThat(anchorLookups.get()).isEqualTo(lookupsAfterFinalization + 1);
+    verify(channel, never()).onNewLightClientBootstrap(any());
+
+    advanceToNextSlot();
+    for (int i = 0; i < 10; i++) {
+      bootstrapService.onBlockImported(importedBlock, false);
+    }
+    assertThat(anchorLookups.get()).isEqualTo(lookupsAfterFinalization + 2);
+    verify(channel)
+        .onNewLightClientBootstrap(
+            spec.getLightClientUtilRequired(anchor.getSlot())
+                .createLightClientBootstrap(anchor.getState(), anchor.getBlock()));
+  }
+
+  @TestTemplate
+  public void onBlockImported_shouldWarnOnlyOnceForConsecutiveBootstrapLookupFailures() {
+    final Chain chain = generateChain();
+    final AtomicBoolean failLookup = new AtomicBoolean(false);
+    final LightClientServerService bootstrapService =
+        new LightClientServerService(
+            spec,
+            new LightClientUpdateStore(spec),
+            root ->
+                failLookup.get()
+                    ? SafeFuture.failedFuture(new RuntimeException("lookup failed"))
+                    : lookUpBlock(root),
+            this::lookUpState,
+            CANONICAL,
+            asyncRunner,
+            timeProvider);
+    final SignedBlockAndState anchor = chain.attested();
+    // Import a block without sync committee participation, so block import doesn't do any other
+    // lookups that would fail
+    final SignedBeaconBlock importedBlock = chain.genesis().getBlock();
+    blocksByRoot.remove(anchor.getRoot());
+    bootstrapService.onNewFinalizedCheckpoint(checkpointAt(anchor), false);
+    failLookup.set(true);
+
+    try (final LogCaptor logCaptor =
+        LogCaptor.forClass(LightClientServerService.class, Level.DEBUG)) {
+      for (int i = 0; i < 3; i++) {
+        advanceToNextSlot();
+        bootstrapService.onBlockImported(importedBlock, false);
+      }
+      assertThat(bootstrapLookupFailureLogs(logCaptor.getWarnLogs())).hasSize(1);
+      assertThat(bootstrapLookupFailureLogs(logCaptor.getDebugLogs())).hasSize(2);
+
+      // A successful lookup (block still missing) resets the state, so the next failure warns
+      failLookup.set(false);
+      advanceToNextSlot();
+      bootstrapService.onBlockImported(importedBlock, false);
+      failLookup.set(true);
+      advanceToNextSlot();
+      bootstrapService.onBlockImported(importedBlock, false);
+
+      assertThat(bootstrapLookupFailureLogs(logCaptor.getWarnLogs())).hasSize(2);
+      assertThat(bootstrapLookupFailureLogs(logCaptor.getDebugLogs())).hasSize(2);
+    }
+  }
+
+  private static List<String> bootstrapLookupFailureLogs(final List<String> logs) {
+    return logs.stream().filter(log -> log.contains("for pending light client bootstrap")).toList();
+  }
+
+  @TestTemplate
+  public void onBlockImported_shouldKeepPendingBootstrapWhenBlockLookupFails() {
+    final Chain chain = generateChain();
+    final LightClientUpdateChannel channel =
+        mock(LightClientUpdateChannel.class, invocation -> SafeFuture.COMPLETE);
+    final AtomicBoolean failLookup = new AtomicBoolean(false);
+    final LightClientServerService bootstrapService =
+        new LightClientServerService(
+            spec,
+            new LightClientUpdateStore(spec, channel),
+            root ->
+                failLookup.get()
+                    ? SafeFuture.failedFuture(new RuntimeException("lookup failed"))
+                    : lookUpBlock(root),
+            this::lookUpState,
+            CANONICAL,
+            asyncRunner,
+            timeProvider);
+    final SignedBlockAndState anchor = chain.attested();
+    blocksByRoot.remove(anchor.getRoot());
+
+    bootstrapService.onNewFinalizedCheckpoint(checkpointAt(anchor), false);
+    failLookup.set(true);
+    bootstrapService.onBlockImported(chain.signature().getBlock(), false);
+    failLookup.set(false);
+    blocksByRoot.put(anchor.getRoot(), anchor.getBlock());
+    advanceToNextSlot();
+    bootstrapService.onBlockImported(chain.signature().getBlock(), false);
+
+    verify(channel)
+        .onNewLightClientBootstrap(
+            spec.getLightClientUtilRequired(anchor.getSlot())
+                .createLightClientBootstrap(anchor.getState(), anchor.getBlock()));
+  }
+
+  @TestTemplate
   public void onNewFinalizedCheckpoint_shouldSkipBootstrapWhenStateIsNotBlockPostState() {
     final Chain chain = generateChain();
     final LightClientUpdateChannel channel =
@@ -635,7 +801,7 @@ public class LightClientServerServiceTest {
     final Chain chain = generateChain();
     finalizeAttestedStateAt(chain, chain.attested().getRoot());
     final List<LightClientFinalityUpdate> published = new ArrayList<>();
-    service.subscribeToFinalityUpdatesToPublish(published::add);
+    store.subscribeToPublishedFinalityUpdates(published::add);
     timeProvider.advanceTimeByMillis(signatureSlotStartMillis(chain));
 
     service.onBlockImported(chain.signature().getBlock(), false);
@@ -652,7 +818,7 @@ public class LightClientServerServiceTest {
   public void onBlockImported_shouldPublishOptimisticUpdateAtSyncMessageDue() {
     final Chain chain = generateChain();
     final List<LightClientOptimisticUpdate> published = new ArrayList<>();
-    service.subscribeToOptimisticUpdatesToPublish(published::add);
+    store.subscribeToPublishedOptimisticUpdates(published::add);
     timeProvider.advanceTimeByMillis(signatureSlotStartMillis(chain));
 
     service.onBlockImported(chain.signature().getBlock(), false);
@@ -670,7 +836,7 @@ public class LightClientServerServiceTest {
     final Chain chain = generateChain();
     finalizeAttestedStateAt(chain, chain.attested().getRoot());
     final List<LightClientFinalityUpdate> published = new ArrayList<>();
-    service.subscribeToFinalityUpdatesToPublish(published::add);
+    store.subscribeToPublishedFinalityUpdates(published::add);
     timeProvider.advanceTimeByMillis(signatureSlotStartMillis(chain));
 
     service.onBlockImported(chain.signature().getBlock(), false);
@@ -684,6 +850,8 @@ public class LightClientServerServiceTest {
   public void onBlockImported_shouldNotPublishFinalityUpdateImportedAfterSignatureSlot() {
     final Chain chain = generateChain();
     finalizeAttestedStateAt(chain, chain.attested().getRoot());
+    final List<LightClientFinalityUpdate> published = new ArrayList<>();
+    store.subscribeToPublishedFinalityUpdates(published::add);
     timeProvider.advanceTimeByMillis(
         signatureSlotStartMillis(chain)
             .plus(spec.getSlotDurationMillis(chain.signature().getSlot())));
@@ -692,6 +860,47 @@ public class LightClientServerServiceTest {
 
     assertThat(store.getLatestFinalityUpdate()).isPresent();
     assertThat(asyncRunner.hasDelayedActions()).isFalse();
+    asyncRunner.executeQueuedActions();
+    assertThat(published).isEmpty();
+  }
+
+  @TestTemplate
+  public void onBlockImported_shouldNotPublishOptimisticUpdateImportedAfterSignatureSlot() {
+    final Chain chain = generateChain();
+    final List<LightClientOptimisticUpdate> published = new ArrayList<>();
+    store.subscribeToPublishedOptimisticUpdates(published::add);
+    timeProvider.advanceTimeByMillis(
+        signatureSlotStartMillis(chain)
+            .plus(spec.getSlotDurationMillis(chain.signature().getSlot())));
+
+    service.onBlockImported(chain.signature().getBlock(), false);
+
+    assertThat(store.getLatestOptimisticUpdate()).isPresent();
+    assertThat(asyncRunner.hasDelayedActions()).isFalse();
+    asyncRunner.executeQueuedActions();
+    assertThat(published).isEmpty();
+  }
+
+  @TestTemplate
+  public void onBlockImported_shouldNotNotifySubscribersBeforeSyncMessageDue() {
+    final Chain chain = generateChain();
+    finalizeAttestedStateAt(chain, chain.attested().getRoot());
+    final List<LightClientFinalityUpdate> publishedFinality = new ArrayList<>();
+    final List<LightClientOptimisticUpdate> publishedOptimistic = new ArrayList<>();
+    store.subscribeToPublishedFinalityUpdates(publishedFinality::add);
+    store.subscribeToPublishedOptimisticUpdates(publishedOptimistic::add);
+    timeProvider.advanceTimeByMillis(signatureSlotStartMillis(chain));
+
+    service.onBlockImported(chain.signature().getBlock(), false);
+
+    assertThat(store.getLatestFinalityUpdate()).isPresent();
+    assertThat(store.getLatestOptimisticUpdate()).isPresent();
+    assertThat(publishedFinality).isEmpty();
+    assertThat(publishedOptimistic).isEmpty();
+  }
+
+  private void advanceToNextSlot() {
+    timeProvider.advanceTimeByMillis(spec.getSlotDurationMillis(UInt64.ZERO));
   }
 
   private UInt64 signatureSlotStartMillis(final Chain chain) {

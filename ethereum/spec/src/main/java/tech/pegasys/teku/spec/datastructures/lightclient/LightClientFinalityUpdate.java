@@ -61,4 +61,9 @@ public class LightClientFinalityUpdate
   public SszUInt64 getSignatureSlot() {
     return getField4();
   }
+
+  @Override
+  public LightClientFinalityUpdateSchema getSchema() {
+    return (LightClientFinalityUpdateSchema) super.getSchema();
+  }
 }

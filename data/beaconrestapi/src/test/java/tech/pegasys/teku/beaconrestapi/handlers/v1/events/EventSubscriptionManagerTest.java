@@ -15,6 +15,7 @@ package tech.pegasys.teku.beaconrestapi.handlers.v1.events;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.spec.config.SpecConfigGloas.BUILDER_INDEX_SELF_BUILD;
 
@@ -27,9 +28,11 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import tech.pegasys.teku.api.ChainDataProvider;
 import tech.pegasys.teku.api.ConfigProvider;
 import tech.pegasys.teku.api.NodeDataProvider;
@@ -59,6 +62,8 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
@@ -742,6 +747,43 @@ public class EventSubscriptionManagerTest {
 
     triggerExecutionPayloadBidEvent();
     checkEvent("execution_payload_bid", new ExecutionPayloadBidEvent(sampleExecutionPayloadBid));
+    assertThat(outputStream.getString()).contains("\"version\":\"gloas\"");
+  }
+
+  @Test
+  void shouldPropagateLightClientFinalityUpdate() throws IOException {
+    when(req.getQueryString()).thenReturn("&topics=light_client_finality_update");
+    manager.registerClient(client1);
+    final LightClientFinalityUpdate finalityUpdate =
+        data.randomLightClientFinalityUpdate(UInt64.valueOf(9), UInt64.valueOf(8));
+    final ArgumentCaptor<Consumer<LightClientFinalityUpdate>> subscriber = ArgumentCaptor.captor();
+    verify(chainDataProvider).subscribeToNewLightClientFinalityUpdates(subscriber.capture());
+
+    subscriber.getValue().accept(finalityUpdate);
+    asyncRunner.executeQueuedActions();
+
+    checkEvent(
+        "light_client_finality_update",
+        new LightClientFinalityUpdateEvent(SpecMilestone.GLOAS, finalityUpdate));
+    assertThat(outputStream.getString()).contains("\"version\":\"gloas\"");
+  }
+
+  @Test
+  void shouldPropagateLightClientOptimisticUpdate() throws IOException {
+    when(req.getQueryString()).thenReturn("&topics=light_client_optimistic_update");
+    manager.registerClient(client1);
+    final LightClientOptimisticUpdate optimisticUpdate =
+        data.randomLightClientOptimisticUpdate(UInt64.valueOf(9));
+    final ArgumentCaptor<Consumer<LightClientOptimisticUpdate>> subscriber =
+        ArgumentCaptor.captor();
+    verify(chainDataProvider).subscribeToNewLightClientOptimisticUpdates(subscriber.capture());
+
+    subscriber.getValue().accept(optimisticUpdate);
+    asyncRunner.executeQueuedActions();
+
+    checkEvent(
+        "light_client_optimistic_update",
+        new LightClientOptimisticUpdateEvent(SpecMilestone.GLOAS, optimisticUpdate));
     assertThat(outputStream.getString()).contains("\"version\":\"gloas\"");
   }
 

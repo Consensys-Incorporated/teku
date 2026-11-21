@@ -617,8 +617,6 @@ public class BeaconNodeCommandTest extends AbstractBeaconNodeCommandTest {
       "false",
       "--rest-api-enabled",
       "false",
-      "--Xrest-api-light-client-enabled",
-      "false",
       "--rest-api-interface",
       "127.0.0.1",
       "--Xrest-api-max-url-length",
@@ -718,7 +716,6 @@ public class BeaconNodeCommandTest extends AbstractBeaconNodeCommandTest {
                 b.restApiPort(5051)
                     .restApiDocsEnabled(false)
                     .restApiEnabled(false)
-                    .restApiLightClientEnabled(false)
                     .restApiInterface("127.0.0.1")
                     .restApiHostAllowlist(List.of("127.0.0.1", "localhost"))
                     .restApiCorsAllowedOrigins(new ArrayList<>())

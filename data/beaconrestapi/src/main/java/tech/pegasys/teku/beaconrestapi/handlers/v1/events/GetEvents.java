@@ -22,6 +22,7 @@ import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_VALIDAT
 import com.fasterxml.jackson.core.JsonProcessingException;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import tech.pegasys.teku.api.ChainDataProvider;
 import tech.pegasys.teku.api.ConfigProvider;
 import tech.pegasys.teku.api.DataProvider;
@@ -39,7 +40,12 @@ import tech.pegasys.teku.spec.Spec;
 
 public class GetEvents extends RestApiEndpoint {
   public static final String ROUTE = "/eth/v1/events";
+  private static final Set<String> LIGHT_CLIENT_TOPICS =
+      Set.of(
+          EventType.light_client_finality_update.name(),
+          EventType.light_client_optimistic_update.name());
   private final EventSubscriptionManager eventSubscriptionManager;
+  private final boolean lightClientEnabled;
 
   public GetEvents(
       final Spec spec,
@@ -47,7 +53,8 @@ public class GetEvents extends RestApiEndpoint {
       final EventChannels eventChannels,
       final AsyncRunner asyncRunner,
       final TimeProvider timeProvider,
-      final int maxPendingEvents) {
+      final int maxPendingEvents,
+      final boolean lightClientEnabled) {
     this(
         spec,
         dataProvider.getNodeDataProvider(),
@@ -57,7 +64,8 @@ public class GetEvents extends RestApiEndpoint {
         eventChannels,
         asyncRunner,
         timeProvider,
-        maxPendingEvents);
+        maxPendingEvents,
+        lightClientEnabled);
   }
 
   GetEvents(
@@ -69,7 +77,8 @@ public class GetEvents extends RestApiEndpoint {
       final EventChannels eventChannels,
       final AsyncRunner asyncRunner,
       final TimeProvider timeProvider,
-      final int maxPendingEvents) {
+      final int maxPendingEvents,
+      final boolean lightClientEnabled) {
     super(
         EndpointMetadata.get(ROUTE)
             .operationId("getEvents")
@@ -98,6 +107,7 @@ public class GetEvents extends RestApiEndpoint {
             eventChannels,
             timeProvider,
             maxPendingEvents);
+    this.lightClientEnabled = lightClientEnabled;
   }
 
   @Override
@@ -110,11 +120,16 @@ public class GetEvents extends RestApiEndpoint {
       return;
     }
     final Optional<String> invalidTopic =
-        topics.stream().filter(topic -> !EventType.isValidTopic(topic)).findFirst();
+        topics.stream().filter(topic -> !isSupportedTopic(topic)).findFirst();
     if (invalidTopic.isPresent()) {
       request.respondError(SC_BAD_REQUEST, String.format("Invalid topic: %s", invalidTopic.get()));
       return;
     }
     request.startEventStream(eventSubscriptionManager::registerClient);
+  }
+
+  private boolean isSupportedTopic(final String topic) {
+    return EventType.isValidTopic(topic)
+        && (lightClientEnabled || !LIGHT_CLIENT_TOPICS.contains(topic));
   }
 }

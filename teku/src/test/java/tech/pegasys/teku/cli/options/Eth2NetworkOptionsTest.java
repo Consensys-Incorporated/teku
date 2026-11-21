@@ -170,6 +170,15 @@ class Eth2NetworkOptionsTest extends AbstractBeaconNodeCommandTest {
         .isEqualTo(Boolean.valueOf(value));
   }
 
+  @ParameterizedTest
+  @ValueSource(strings = {"true", "false"})
+  void shouldSetLightClientServerEnabled(final String value) {
+    final TekuConfiguration config =
+        getTekuConfigurationFromArguments("--Xlight-client-server-enabled", value);
+    assertThat(config.eth2NetworkConfiguration().isLightClientServerEnabled())
+        .isEqualTo(Boolean.valueOf(value));
+  }
+
   @Test
   void shouldAggregatingAttestationPoolProfilerDisabledByDefault() {
     final TekuConfiguration config = getTekuConfigurationFromArguments();

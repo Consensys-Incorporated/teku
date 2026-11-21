@@ -19,6 +19,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
+import tech.pegasys.teku.statetransition.lightclient.NewerLightClientUpdateFilter;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
 public class LightClientOptimisticUpdateGossipValidator
@@ -52,10 +53,6 @@ public class LightClientOptimisticUpdateGossipValidator
   @Override
   protected boolean isNewer(
       final LightClientOptimisticUpdate update, final LightClientOptimisticUpdate forwarded) {
-    return update
-        .getAttestedHeader()
-        .getBeacon()
-        .getSlot()
-        .isGreaterThan(forwarded.getAttestedHeader().getBeacon().getSlot());
+    return NewerLightClientUpdateFilter.isNewerOptimisticUpdate(update, forwarded);
   }
 }

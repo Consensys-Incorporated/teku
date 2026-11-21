@@ -87,17 +87,6 @@ public class BeaconRestApiOptions {
       BeaconRestApiConfig.DEFAULT_REST_API_CORS_ALLOWED_ORIGINS;
 
   @Option(
-      names = {"--Xrest-api-light-client-enabled"},
-      paramLabel = "<BOOLEAN>",
-      showDefaultValue = Visibility.ALWAYS,
-      description =
-          "Enables Beacon Rest API light client endpoints and storage of light client data.",
-      fallbackValue = "true",
-      arity = "0..1",
-      hidden = true)
-  private boolean restApiLightClientEnabled = false;
-
-  @Option(
       names = {"--Xrest-api-max-pending-events"},
       paramLabel = "<INTEGER>",
       hidden = true)
@@ -191,7 +180,6 @@ public class BeaconRestApiOptions {
         restApiBuilder ->
             restApiBuilder
                 .restApiEnabled(restApiEnabled)
-                .restApiLightClientEnabled(restApiLightClientEnabled)
                 .restApiDocsEnabled(restApiDocsEnabled)
                 .restApiPort(restApiPort)
                 .restApiInterface(restApiInterface)
