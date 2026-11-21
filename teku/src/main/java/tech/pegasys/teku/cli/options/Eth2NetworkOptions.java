@@ -301,8 +301,9 @@ public class Eth2NetworkOptions {
       description =
           "Prove and verify PQ attestation proofs with leanVM, as PQ devnet clients do, launching"
               + " this leanvm-sidecar executable. It must be built from the network's leanVM"
-              + " revision. Without it or --Xpq-leanvm-sidecar-socket, proofs are the"
-              + " specification's concatenation stand-in.",
+              + " revision; the Docker image has one at /usr/local/bin/leanvm-sidecar. Without it or"
+              + " --Xpq-leanvm-sidecar-socket, proofs are the specification's concatenation"
+              + " stand-in.",
       arity = "1")
   private Path leanVmSidecarBinary;
 
