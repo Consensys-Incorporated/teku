@@ -48,7 +48,6 @@ public class BeaconRestApiConfig {
   private final boolean restApiDocsEnabled;
   private final boolean restApiEnabled;
   private final Duration restApiAsyncTimeout;
-  private final boolean restApiLightClientEnabled;
   private final boolean beaconLivenessTrackingEnabled;
   private final boolean getBlobsSidecarsDownloadEnabled;
   private final Duration getBlobsSidecarsDownloadTimeoutSeconds;
@@ -67,7 +66,6 @@ public class BeaconRestApiConfig {
       final boolean restApiDocsEnabled,
       final boolean restApiEnabled,
       final Duration restApiAsyncTimeout,
-      final boolean restApiLightClientEnabled,
       final String restApiInterface,
       final List<String> restApiHostAllowlist,
       final List<String> restApiCorsAllowedOrigins,
@@ -84,7 +82,6 @@ public class BeaconRestApiConfig {
     this.restApiDocsEnabled = restApiDocsEnabled;
     this.restApiEnabled = restApiEnabled;
     this.restApiAsyncTimeout = restApiAsyncTimeout;
-    this.restApiLightClientEnabled = restApiLightClientEnabled;
     this.restApiInterface = restApiInterface;
     this.restApiHostAllowlist = restApiHostAllowlist;
     this.restApiCorsAllowedOrigins = restApiCorsAllowedOrigins;
@@ -113,10 +110,6 @@ public class BeaconRestApiConfig {
 
   public Duration getRestApiAsyncTimeout() {
     return restApiAsyncTimeout;
-  }
-
-  public boolean isRestApiLightClientEnabled() {
-    return restApiLightClientEnabled;
   }
 
   public boolean isBeaconLivenessTrackingEnabled() {
@@ -188,7 +181,6 @@ public class BeaconRestApiConfig {
     private boolean restApiDocsEnabled = false;
     private boolean restApiEnabled = false;
     private Duration restApiAsyncTimeout = DEFAULT_REST_API_ASYNC_TIMEOUT;
-    private boolean restApiLightClientEnabled = false;
     private boolean beaconLivenessTrackingEnabled = DEFAULT_BEACON_LIVENESS_TRACKING_ENABLED;
     private boolean getBlobsSidecarsDownloadEnabled = DEFAULT_GETBLOBS_SIDECARS_DOWNLOAD_ENABLED;
     private Duration getBlobsSidecarsDownloadTimeoutSeconds =
@@ -232,12 +224,6 @@ public class BeaconRestApiConfig {
             String.format("Invalid restApiAsyncTimeoutSeconds: %d", restApiAsyncTimeoutSeconds));
       }
       this.restApiAsyncTimeout = Duration.ofSeconds(restApiAsyncTimeoutSeconds);
-      return this;
-    }
-
-    public BeaconRestApiConfigBuilder restApiLightClientEnabled(
-        final boolean restApiLightClientEnabled) {
-      this.restApiLightClientEnabled = restApiLightClientEnabled;
       return this;
     }
 
@@ -350,7 +336,6 @@ public class BeaconRestApiConfig {
           restApiDocsEnabled,
           restApiEnabled,
           restApiAsyncTimeout,
-          restApiLightClientEnabled,
           restApiInterface,
           restApiHostAllowlist,
           restApiCorsAllowedOrigins,

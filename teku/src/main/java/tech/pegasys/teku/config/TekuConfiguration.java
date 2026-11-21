@@ -257,8 +257,6 @@ public class TekuConfiguration {
       p2pConfigBuilder.discovery(
           b -> b.bootnodesDefault(eth2NetworkConfiguration.getDiscoveryBootnodes()));
       restApiBuilder.eth1DepositContractAddressDefault(depositContractAddress);
-      restApiBuilder.restApiLightClientEnabled(
-          eth2NetworkConfiguration.isLightClientServerEnabled());
 
       final ValidatorConfig validatorConfig = validatorConfigBuilder.build();
 

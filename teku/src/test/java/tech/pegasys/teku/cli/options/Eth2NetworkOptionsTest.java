@@ -172,12 +172,10 @@ class Eth2NetworkOptionsTest extends AbstractBeaconNodeCommandTest {
 
   @ParameterizedTest
   @ValueSource(strings = {"true", "false"})
-  void shouldSetLightClientServerAndRestApiEnabled(final String value) {
+  void shouldSetLightClientServerEnabled(final String value) {
     final TekuConfiguration config =
         getTekuConfigurationFromArguments("--Xlight-client-server-enabled", value);
     assertThat(config.eth2NetworkConfiguration().isLightClientServerEnabled())
-        .isEqualTo(Boolean.valueOf(value));
-    assertThat(config.beaconChain().beaconRestApiConfig().isRestApiLightClientEnabled())
         .isEqualTo(Boolean.valueOf(value));
   }
 

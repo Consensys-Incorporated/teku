@@ -2438,6 +2438,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
                 dataProvider,
                 eth1DataProvider,
                 beaconConfig.beaconRestApiConfig(),
+                beaconConfig.eth2NetworkConfig().isLightClientServerEnabled(),
                 eventChannels,
                 eventAsyncRunner,
                 timeProvider,
