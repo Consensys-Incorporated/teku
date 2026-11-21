@@ -50,7 +50,11 @@ public class AttestationGossipManager implements GossipManager {
   }
 
   public void onNewAttestation(final ValidatableAttestation validatableAttestation) {
-    if (validatableAttestation.isAggregate() || !validatableAttestation.markGossiped()) {
+    // A PQ aggregate isn't isAggregate() (it has no BLS SignedAggregateAndProof) but belongs on the
+    // aggregate topic. Check it before markGossiped, which would stop that topic publishing it.
+    if (validatableAttestation.isAggregate()
+        || validatableAttestation.getPqAggregate().isPresent()
+        || !validatableAttestation.markGossiped()) {
       return;
     }
     final Attestation attestation = validatableAttestation.getUnconvertedAttestation();

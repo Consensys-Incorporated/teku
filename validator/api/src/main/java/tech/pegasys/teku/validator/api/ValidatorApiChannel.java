@@ -47,6 +47,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
@@ -371,6 +372,13 @@ public interface ValidatorApiChannel extends BuilderApiChannel, ChannelInterface
       final List<SignedAggregateAndProofPq> aggregateAndProofs) {
     return SafeFuture.failedFuture(
         new UnsupportedOperationException("PQ aggregates are not supported"));
+  }
+
+  /** PQ: publishes PTC members' payload attestation messages, signed with leanXMSS. */
+  default SafeFuture<List<SubmitDataError>> sendPqPayloadAttestationMessages(
+      final List<PayloadAttestationMessagePq> payloadAttestationMessages) {
+    return SafeFuture.failedFuture(
+        new UnsupportedOperationException("PQ payload attestation messages are not supported"));
   }
 
   SafeFuture<Optional<SyncCommitteeContribution>> createSyncCommitteeContribution(

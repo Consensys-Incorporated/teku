@@ -24,6 +24,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestat
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionProof;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
@@ -112,6 +113,10 @@ public interface GossipForkSubscriptions {
 
   default void publishPayloadAttestationMessage(final PayloadAttestationMessage message) {
     // since Gloas
+  }
+
+  default void publishPqPayloadAttestationMessage(final PayloadAttestationMessagePq message) {
+    // since PQ
   }
 
   default void publishExecutionPayloadBid(final SignedExecutionPayloadBid message) {

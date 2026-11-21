@@ -2310,6 +2310,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
         new LocalOperationAcceptedFilter<>(p2pNetwork::publishSignedBlsToExecutionChange));
     payloadAttestationPool.subscribeOperationAdded(
         new LocalOperationAcceptedFilter<>(p2pNetwork::publishPayloadAttestationMessage));
+    payloadAttestationPool.subscribePqOperationAdded(
+        new LocalOperationAcceptedFilter<>(p2pNetwork::publishPqPayloadAttestationMessage));
     proposerPreferencesManager.subscribeOperationAdded(
         new LocalOperationAcceptedFilter<>(p2pNetwork::publishProposerPreferences));
     executionPayloadBidManager.subscribeOperationAdded(

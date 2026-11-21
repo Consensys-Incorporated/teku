@@ -205,28 +205,42 @@ public class BeaconStateAccessorsPq extends BeaconStateAccessorsGloas {
   public List<XmssAggregateStatement> getAttestationStatements(
       final BeaconState state, final Attestation attestation) {
     final AttestationData data = attestation.getData();
+    final SszBitlist aggregationBits = attestation.getAggregationBits();
+    final List<XmssAggregateStatement> statements = new ArrayList<>();
+    int committeeOffset = 0;
+    for (final UInt64 committeeIndex : attestation.getCommitteeIndicesRequired()) {
+      final IntList committee = getBeaconCommittee(state, data.getSlot(), committeeIndex);
+      final IntList attesters = new IntArrayList();
+      for (int i = 0; i < committee.size(); i++) {
+        if (aggregationBits.isSet(committeeOffset + i)) {
+          attesters.add(committee.getInt(i));
+        }
+      }
+      statements.add(getAttestationStatement(state, data, attesters));
+      committeeOffset += committee.size();
+    }
+    return statements;
+  }
+
+  /**
+   * The statement that the signatures of {@code attesters}, validator indices in committee order,
+   * prove for {@code data}: one committee's entry in get_attestation_statements. It needs no
+   * committee lookup, so {@code state} may be any state with these validators and the fork at the
+   * attestation's target epoch.
+   */
+  public XmssAggregateStatement getAttestationStatement(
+      final BeaconState state, final AttestationData data, final IntList attesters) {
     final UInt64 targetEpoch = data.getTarget().getEpoch();
     final Bytes32 domain =
         getDomain(
             Domain.BEACON_ATTESTER, targetEpoch, state.getFork(), state.getGenesisValidatorsRoot());
     final Bytes32 message = Bytes32.wrap(miscHelpers.computeSigningRoot(data, domain));
     final UInt64 leafIndex = miscHelpersPq.computeXmssAttestationLeafIndex(targetEpoch);
-    final SszBitlist aggregationBits = attestation.getAggregationBits();
-    final List<XmssAggregateStatement> statements = new ArrayList<>();
-    int committeeOffset = 0;
-    for (final UInt64 committeeIndex : attestation.getCommitteeIndicesRequired()) {
-      final IntList committee = getBeaconCommittee(state, data.getSlot(), committeeIndex);
-      final List<Bytes32> pubkeys = new ArrayList<>();
-      for (int i = 0; i < committee.size(); i++) {
-        if (aggregationBits.isSet(committeeOffset + i)) {
-          pubkeys.add(
-              ((ValidatorPq) state.getValidators().get(committee.getInt(i))).getXmssPublicKey());
-        }
-      }
-      statements.add(new XmssAggregateStatement(pubkeys, leafIndex, message));
-      committeeOffset += committee.size();
-    }
-    return statements;
+    final List<Bytes32> pubkeys = new ArrayList<>(attesters.size());
+    attesters.forEach(
+        attester ->
+            pubkeys.add(((ValidatorPq) state.getValidators().get(attester)).getXmssPublicKey()));
+    return new XmssAggregateStatement(pubkeys, leafIndex, message);
   }
 
   /**

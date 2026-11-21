@@ -130,6 +130,11 @@ public class BeaconBlockBodyPq
     throw new UnsupportedOperationException("PQ blocks have no voluntary exits");
   }
 
+  @Override
+  public Optional<SszList<SignedVoluntaryExit>> getOptionalVoluntaryExits() {
+    return Optional.empty();
+  }
+
   public SignedExecutionPayloadBid getSignedExecutionPayloadBid() {
     return getField7();
   }

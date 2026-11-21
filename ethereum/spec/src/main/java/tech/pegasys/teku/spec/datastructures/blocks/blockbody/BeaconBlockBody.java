@@ -68,6 +68,11 @@ public interface BeaconBlockBody extends SszContainer {
 
   SszList<SignedVoluntaryExit> getVoluntaryExits();
 
+  /** The voluntary exits, or empty from PQ, whose blocks have none (exits are EL requests). */
+  default Optional<SszList<SignedVoluntaryExit>> getOptionalVoluntaryExits() {
+    return Optional.of(getVoluntaryExits());
+  }
+
   default Optional<SyncAggregate> getOptionalSyncAggregate() {
     return Optional.empty();
   }

@@ -119,7 +119,10 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
     }
     if (attestation.getUnconvertedAttestation() instanceof SingleAttestationPq single) {
       final int position = bits.streamAllSetBits().findFirst().orElseThrow();
-      if (committee.singleSignatures.putIfAbsent(position, single.getSignature()) == null) {
+      if (committee.singleSignatures.putIfAbsent(
+              position,
+              new SingleSignature(single.getAttesterIndex().intValue(), single.getSignature()))
+          == null) {
         size++;
       }
     } else {
@@ -411,6 +414,9 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
 
   private record ProvenAggregate(SszBitlist bits, Bytes proof) {}
 
+  /** A single attestation's XMSS signature and the validator who made it. */
+  private record SingleSignature(int attesterIndex, Bytes signature) {}
+
   private record DataCandidate(
       AttestationData data,
       boolean isTimely,
@@ -465,13 +471,21 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
       if (networkProof.isPresent()) {
         return networkProof.get();
       }
-      final AttestationPq attestation = toAttestation(getAttestationSchema(this));
-      final List<XmssAggregateStatement> statements =
+      // The single attestations name their attesters, so the statement needs no committee
+      // lookup: the state may be well behind the attestation, e.g. after empty slots
+      final IntList attesters = new IntArrayList(bits.cardinality());
+      final List<Bytes> signatures = new ArrayList<>(bits.cardinality());
+      bits.stream()
+          .forEach(
+              position -> {
+                final SingleSignature single = committee.singleSignatures.get(position);
+                attesters.add(single.attesterIndex());
+                signatures.add(single.signature());
+              });
+      final XmssAggregateStatement statement =
           ((BeaconStateAccessorsPq) spec.atSlot(state.getSlot()).beaconStateAccessors())
-              .getAttestationStatements(state, attestation);
-      final List<Bytes> signatures = new ArrayList<>();
-      bits.stream().forEach(position -> signatures.add(committee.singleSignatures.get(position)));
-      return starkProver.proveAggregates(statements, List.of(signatures));
+              .getAttestationStatement(state, committee.data, attesters);
+      return starkProver.proveAggregates(List.of(statement), List.of(signatures));
     }
 
     AttestationPq toAttestation(final AttestationPqSchema schema) {
@@ -489,7 +503,9 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
     private final int committeeIndex;
     private final int committeeSize;
     private final Bytes32 shufflingSeed;
-    private final Int2ObjectSortedMap<Bytes> singleSignatures = new Int2ObjectAVLTreeMap<>();
+    // By position in the committee
+    private final Int2ObjectSortedMap<SingleSignature> singleSignatures =
+        new Int2ObjectAVLTreeMap<>();
     private final List<ProvenAggregate> aggregates = new ArrayList<>();
     private final BitSet included = new BitSet();
 

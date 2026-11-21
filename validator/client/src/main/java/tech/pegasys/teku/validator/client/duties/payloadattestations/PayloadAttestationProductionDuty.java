@@ -28,11 +28,16 @@ import tech.pegasys.teku.infrastructure.metrics.Validator.DutyType;
 import tech.pegasys.teku.infrastructure.metrics.Validator.ValidatorDutyMetricsSteps;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessageSchema;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq.PayloadAttestationMessagePqSchema;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
+import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 import tech.pegasys.teku.validator.client.ForkProvider;
 import tech.pegasys.teku.validator.client.Validator;
@@ -40,6 +45,7 @@ import tech.pegasys.teku.validator.client.duties.Duty;
 import tech.pegasys.teku.validator.client.duties.DutyResult;
 import tech.pegasys.teku.validator.client.duties.ProductionResult;
 import tech.pegasys.teku.validator.client.duties.ValidatorDutyMetrics;
+import tech.pegasys.teku.validator.client.duties.attestations.BatchAttestationSendingStrategy;
 import tech.pegasys.teku.validator.client.duties.attestations.SendingStrategy;
 
 public class PayloadAttestationProductionDuty implements Duty {
@@ -87,18 +93,32 @@ public class PayloadAttestationProductionDuty implements Duty {
       return SafeFuture.completedFuture(DutyResult.NOOP);
     }
 
+    if (spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ)) {
+      // PQ: signed with leanXMSS and published as PQ payload attestation messages
+      return forkProvider
+          .getForkInfo(slot)
+          .thenCompose(
+              forkInfo ->
+                  new BatchAttestationSendingStrategy<PayloadAttestationMessagePq>(
+                          validatorApiChannel::sendPqPayloadAttestationMessages)
+                      .send(
+                          produceAllPayloadAttestations(
+                              slot, forkInfo, validators, this::signPqPayloadAttestation)));
+    }
     return forkProvider
         .getForkInfo(slot)
         .thenCompose(
             forkInfo ->
-                sendingStrategy.send(produceAllPayloadAttestations(slot, forkInfo, validators)));
+                sendingStrategy.send(
+                    produceAllPayloadAttestations(
+                        slot, forkInfo, validators, this::signBlsPayloadAttestation)));
   }
 
-  private Stream<SafeFuture<ProductionResult<PayloadAttestationMessage>>>
-      produceAllPayloadAttestations(
-          final UInt64 slot,
-          final ForkInfo forkInfo,
-          final List<ValidatorWithIndex> validatorsWithIndex) {
+  private <T> Stream<SafeFuture<ProductionResult<T>>> produceAllPayloadAttestations(
+      final UInt64 slot,
+      final ForkInfo forkInfo,
+      final List<ValidatorWithIndex> validatorsWithIndex,
+      final PayloadAttestationSigner<T> signer) {
 
     final SafeFuture<Optional<PayloadAttestationData>> unsignedPayloadAttestationDataFuture =
         validatorDutyMetrics.record(
@@ -108,15 +128,19 @@ public class PayloadAttestationProductionDuty implements Duty {
         .map(
             validatorWithIndex ->
                 signPayloadAttestationForValidator(
-                    slot, forkInfo, validatorWithIndex, unsignedPayloadAttestationDataFuture));
+                    slot,
+                    forkInfo,
+                    validatorWithIndex,
+                    unsignedPayloadAttestationDataFuture,
+                    signer));
   }
 
-  private SafeFuture<ProductionResult<PayloadAttestationMessage>>
-      signPayloadAttestationForValidator(
-          final UInt64 slot,
-          final ForkInfo forkInfo,
-          final ValidatorWithIndex validatorWithIndex,
-          final SafeFuture<Optional<PayloadAttestationData>> unsignedPayloadAttestationDataFuture) {
+  private <T> SafeFuture<ProductionResult<T>> signPayloadAttestationForValidator(
+      final UInt64 slot,
+      final ForkInfo forkInfo,
+      final ValidatorWithIndex validatorWithIndex,
+      final SafeFuture<Optional<PayloadAttestationData>> unsignedPayloadAttestationDataFuture,
+      final PayloadAttestationSigner<T> signer) {
     return unsignedPayloadAttestationDataFuture
         .thenCompose(
             maybeUnsignedPayloadAttestationData ->
@@ -126,8 +150,7 @@ public class PayloadAttestationProductionDuty implements Duty {
                           validatePayloadAttestationData(slot, payloadAttestationData);
                           return validatorDutyMetrics.record(
                               () ->
-                                  signPayloadAttestationForValidator(
-                                      forkInfo, payloadAttestationData, validatorWithIndex),
+                                  signer.sign(forkInfo, payloadAttestationData, validatorWithIndex),
                               this,
                               ValidatorDutyMetricsSteps.SIGN);
                         })
@@ -149,11 +172,10 @@ public class PayloadAttestationProductionDuty implements Duty {
         slot);
   }
 
-  private SafeFuture<ProductionResult<PayloadAttestationMessage>>
-      signPayloadAttestationForValidator(
-          final ForkInfo forkInfo,
-          final PayloadAttestationData payloadAttestationData,
-          final ValidatorWithIndex validatorWithIndex) {
+  private SafeFuture<ProductionResult<PayloadAttestationMessage>> signBlsPayloadAttestation(
+      final ForkInfo forkInfo,
+      final PayloadAttestationData payloadAttestationData,
+      final ValidatorWithIndex validatorWithIndex) {
     return validatorWithIndex
         .validator
         .getSigner()
@@ -179,6 +201,43 @@ public class PayloadAttestationProductionDuty implements Duty {
             .getPayloadAttestationMessageSchema();
 
     return payloadAttestationMessageSchema.create(validatorWithIndex.index, data, signature);
+  }
+
+  /** get_payload_attestation_message_signature from PQ: leanXMSS at the PTC leaf of the slot. */
+  private SafeFuture<ProductionResult<PayloadAttestationMessagePq>> signPqPayloadAttestation(
+      final ForkInfo forkInfo,
+      final PayloadAttestationData payloadAttestationData,
+      final ValidatorWithIndex validatorWithIndex) {
+    final Optional<XmssSigner> xmssSigner = validatorWithIndex.validator.getXmssSigner();
+    if (xmssSigner.isEmpty()) {
+      return SafeFuture.completedFuture(
+          ProductionResult.failure(
+              validatorWithIndex.validator.getPublicKey(),
+              new IllegalStateException("Validator has no PQ keys to sign with")));
+    }
+    final PayloadAttestationMessagePqSchema schema =
+        SchemaDefinitionsPq.required(
+                spec.atSlot(payloadAttestationData.getSlot()).getSchemaDefinitions())
+            .getPqAttestationSchemas()
+            .getPayloadAttestationMessageSchema();
+    return xmssSigner
+        .get()
+        .signPayloadAttestationData(payloadAttestationData, forkInfo)
+        .thenApply(
+            signature ->
+                ProductionResult.success(
+                    validatorWithIndex.validator.getPublicKey(),
+                    payloadAttestationData.getBeaconBlockRoot(),
+                    schema.create(
+                        validatorWithIndex.index, payloadAttestationData, signature.toBytes())));
+  }
+
+  @FunctionalInterface
+  private interface PayloadAttestationSigner<T> {
+    SafeFuture<ProductionResult<T>> sign(
+        ForkInfo forkInfo,
+        PayloadAttestationData payloadAttestationData,
+        ValidatorWithIndex validatorWithIndex);
   }
 
   private record ValidatorWithIndex(Validator validator, UInt64 index) {}
