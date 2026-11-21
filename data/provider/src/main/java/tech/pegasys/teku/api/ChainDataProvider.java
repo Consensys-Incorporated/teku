@@ -61,13 +61,11 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.ssz.Merkleizable;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
-import tech.pegasys.teku.infrastructure.ssz.collections.SszUInt64Vector;
 import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszUInt64VectorSchema;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.SpecVersion;
-import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
@@ -99,6 +97,7 @@ import tech.pegasys.teku.spec.logic.common.statetransition.epoch.status.Validato
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.EpochProcessingException;
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.SlotProcessingException;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.PredicatesGloas;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.schemas.api.StateValidatorBalanceData;
 import tech.pegasys.teku.statetransition.lightclient.LightClientBootstrapProvider;
 import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
@@ -858,10 +857,10 @@ public class ChainDataProvider {
                 state -> {
                   final UInt64 slot = maybeSlot.orElse(state.getSlot());
                   final SpecVersion specVersion = spec.atSlot(state.getSlot());
-                  final SszUInt64VectorSchema<SszUInt64Vector> ptcSchema =
-                      SszUInt64VectorSchema.create(
-                          SpecConfigGloas.required(specVersion.getConfig())
-                              .getPayloadTimelinessCommitteeSize());
+                  final SszUInt64VectorSchema<?> ptcSchema =
+                      SchemaDefinitionsGloas.required(specVersion.getSchemaDefinitions())
+                          .getPtcWindowSchema()
+                          .getPayloadTimelinessCommitteeSchema();
                   return new StatePtcData(
                       slot,
                       ptcSchema.of(
