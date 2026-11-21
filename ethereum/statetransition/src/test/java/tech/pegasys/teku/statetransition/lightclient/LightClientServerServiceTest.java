@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiPredicate;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
+import org.apache.logging.log4j.Level;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
@@ -427,6 +428,56 @@ public class LightClientServerServiceTest {
         .onNewLightClientBootstrap(
             spec.getLightClientUtilRequired(anchor.getSlot())
                 .createLightClientBootstrap(anchor.getState(), anchor.getBlock()));
+  }
+
+  @TestTemplate
+  public void onBlockImported_shouldWarnOnlyOnceForConsecutiveBootstrapLookupFailures() {
+    final Chain chain = generateChain();
+    final AtomicBoolean failLookup = new AtomicBoolean(false);
+    final LightClientServerService bootstrapService =
+        new LightClientServerService(
+            spec,
+            new LightClientUpdateStore(spec),
+            root ->
+                failLookup.get()
+                    ? SafeFuture.failedFuture(new RuntimeException("lookup failed"))
+                    : lookUpBlock(root),
+            this::lookUpState,
+            CANONICAL,
+            asyncRunner,
+            timeProvider);
+    final SignedBlockAndState anchor = chain.attested();
+    // Import a block without sync committee participation, so block import doesn't do any other
+    // lookups that would fail
+    final SignedBeaconBlock importedBlock = chain.genesis().getBlock();
+    blocksByRoot.remove(anchor.getRoot());
+    bootstrapService.onNewFinalizedCheckpoint(checkpointAt(anchor), false);
+    failLookup.set(true);
+
+    try (final LogCaptor logCaptor =
+        LogCaptor.forClass(LightClientServerService.class, Level.DEBUG)) {
+      for (int i = 0; i < 3; i++) {
+        advanceToNextSlot();
+        bootstrapService.onBlockImported(importedBlock, false);
+      }
+      assertThat(bootstrapLookupFailureLogs(logCaptor.getWarnLogs())).hasSize(1);
+      assertThat(bootstrapLookupFailureLogs(logCaptor.getDebugLogs())).hasSize(2);
+
+      // A successful lookup (block still missing) resets the state, so the next failure warns
+      failLookup.set(false);
+      advanceToNextSlot();
+      bootstrapService.onBlockImported(importedBlock, false);
+      failLookup.set(true);
+      advanceToNextSlot();
+      bootstrapService.onBlockImported(importedBlock, false);
+
+      assertThat(bootstrapLookupFailureLogs(logCaptor.getWarnLogs())).hasSize(2);
+      assertThat(bootstrapLookupFailureLogs(logCaptor.getDebugLogs())).hasSize(2);
+    }
+  }
+
+  private static List<String> bootstrapLookupFailureLogs(final List<String> logs) {
+    return logs.stream().filter(log -> log.contains("for pending light client bootstrap")).toList();
   }
 
   @TestTemplate

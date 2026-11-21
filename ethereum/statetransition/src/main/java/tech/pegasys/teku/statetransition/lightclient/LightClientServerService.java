@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
@@ -74,6 +75,12 @@ public class LightClientServerService
 
   private final AtomicReference<Optional<UInt64>> lastBlockImportBootstrapRetrySlot =
       new AtomicReference<>(Optional.empty());
+
+  /**
+   * Whether the last pending bootstrap block lookup failed. A persistent failure is logged at WARN
+   * once and at DEBUG afterwards, until a lookup succeeds again.
+   */
+  private final AtomicBoolean pendingBootstrapLookupFailing = new AtomicBoolean(false);
 
   private final Map<UInt64, PendingUpdate> pendingUpdatesByPeriod = new ConcurrentHashMap<>();
   private final Map<Bytes32, BoundaryBootstrap> boundaryBootstraps = new ConcurrentHashMap<>();
@@ -341,12 +348,10 @@ public class LightClientServerService
   private void retryPendingBootstrap(final PendingBootstrap pending) {
     retrieveBlockByRoot
         .apply(pending.blockRoot())
+        .thenPeek(__ -> pendingBootstrapLookupFailing.set(false))
         .exceptionally(
             error -> {
-              LOG.warn(
-                  "Failed to look up block {} for pending light client bootstrap",
-                  pending.blockRoot(),
-                  error);
+              logPendingBootstrapLookupFailure(pending.blockRoot(), error);
               return Optional.empty();
             })
         .thenAccept(
@@ -369,6 +374,19 @@ public class LightClientServerService
                     "Failed to retry light client bootstrap for block {}",
                     pending.blockRoot(),
                     error));
+  }
+
+  private void logPendingBootstrapLookupFailure(final Bytes32 blockRoot, final Throwable error) {
+    if (pendingBootstrapLookupFailing.getAndSet(true)) {
+      LOG.debug(
+          "Failed to look up block {} for pending light client bootstrap again", blockRoot, error);
+    } else {
+      LOG.warn(
+          "Failed to look up block {} for pending light client bootstrap. "
+              + "Further consecutive failures will be logged at debug level",
+          blockRoot,
+          error);
+    }
   }
 
   private void retryPendingUpdate(final UInt64 period, final PendingUpdate pending) {
