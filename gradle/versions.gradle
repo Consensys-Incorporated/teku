@@ -50,7 +50,7 @@ dependencyManagement {
 		dependency 'tech.pegasys:jblst:0.3.18'
 		dependency 'io.consensys.protocols:jc-kzg-4844:2.1.8'
 		dependency 'io.github.crate-crypto:java-eth-kzg:0.10.0'
-		dependency 'io.github.crate-crypto:lean-pq:0.14.0'
+		dependency 'io.github.crate-crypto:lean-pq:0.16.0'
 
 		dependency 'org.hdrhistogram:HdrHistogram:2.2.2'
 

@@ -66,11 +66,11 @@ public interface StarkProver {
         }
 
         @Override
-        public Bytes mergeProofs(final List<Bytes> proofs) {
+        public Bytes mergeProofs(final List<ProvenStatements> proofs) {
           if (XmssConstants.verificationDisabled) {
             return STUB_PROOF;
           }
-          return Bytes.wrap(proofs.toArray(Bytes[]::new));
+          return Bytes.wrap(proofs.stream().map(ProvenStatements::proof).toArray(Bytes[]::new));
         }
       };
 
@@ -83,6 +83,18 @@ public interface StarkProver {
   /** The size of a proof of {@code signatureCount} signatures, before it is built. */
   long proofSizeOf(int signatureCount);
 
-  /** {@code stark.MergeProofs}: one proof of the concatenation of the proofs' statements. */
-  Bytes mergeProofs(List<Bytes> proofs);
+  /**
+   * Whether a merged proof is as large as its children together, as the concatenation stand-in's
+   * is, so a block's proof size budget must count each child. A recursive proof's size barely grows
+   * with what it proves.
+   */
+  default boolean isMergedProofSizeTheSumOfChildren() {
+    return true;
+  }
+
+  /**
+   * {@code stark.MergeProofs}: one proof of the concatenation of the proofs' statements. Each proof
+   * comes with its statements, which a recursive prover needs to fold it in.
+   */
+  Bytes mergeProofs(List<ProvenStatements> proofs);
 }

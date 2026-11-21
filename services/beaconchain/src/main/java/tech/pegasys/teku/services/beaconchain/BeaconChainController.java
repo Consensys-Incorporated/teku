@@ -33,7 +33,9 @@ import com.google.common.base.Throwables;
 import it.unimi.dsi.fastutil.ints.IntSet;
 import java.io.IOException;
 import java.net.BindException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.Map;
@@ -113,6 +115,7 @@ import tech.pegasys.teku.networking.eth2.peers.DataColumnPeerManagerImpl;
 import tech.pegasys.teku.networking.eth2.peers.MetadataDasPeerCustodyTracker;
 import tech.pegasys.teku.networking.p2p.discovery.DiscoveryConfig;
 import tech.pegasys.teku.networks.Eth2NetworkConfiguration;
+import tech.pegasys.teku.networks.LeanVmSidecarConfig;
 import tech.pegasys.teku.networks.StateBoostrapConfig;
 import tech.pegasys.teku.service.serviceutils.Service;
 import tech.pegasys.teku.service.serviceutils.ServiceConfig;
@@ -147,7 +150,7 @@ import tech.pegasys.teku.spec.logic.common.statetransition.availability.Availabi
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.spec.logic.common.util.BlockRewardCalculatorUtil;
 import tech.pegasys.teku.spec.logic.versions.deneb.helpers.MiscHelpersDeneb;
-import tech.pegasys.teku.spec.logic.versions.pq.crypto.StarkProver;
+import tech.pegasys.teku.spec.logic.versions.pq.crypto.StarkBackend;
 import tech.pegasys.teku.spec.networks.Eth2Network;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsElectra;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsFulu;
@@ -337,6 +340,7 @@ import tech.pegasys.teku.validator.coordinator.publisher.ExecutionPayloadPublish
 import tech.pegasys.teku.validator.coordinator.publisher.MilestoneBasedBlockPublisher;
 import tech.pegasys.teku.weaksubjectivity.WeakSubjectivityCalculator;
 import tech.pegasys.teku.weaksubjectivity.WeakSubjectivityValidator;
+import tech.pegasys.teku.xmss.LeanVmSidecar;
 
 /**
  * The central class which assembles together and initializes Beacon Chain components
@@ -439,6 +443,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
   protected volatile Optional<DasCustodyBackfiller> dasCustodyBackfiller = Optional.empty();
   protected volatile Optional<DataColumnSidecarRetriever> recoveringSidecarRetriever =
       Optional.empty();
+  protected volatile Optional<LeanVmSidecar> leanVmSidecar = Optional.empty();
   protected volatile Optional<DataColumnSidecarRetriever> simpleSidecarRetriever = Optional.empty();
   protected volatile AvailabilityCheckerFactory<UInt64> dasSamplerManager;
   protected volatile DasSamplerBasic dasSamplerBasic = DasSamplerBasic.NOOP;
@@ -652,7 +657,55 @@ public class BeaconChainController extends Service implements BeaconChainControl
                   terminalPowBlockMonitor.ifPresent(TerminalPowBlockMonitor::stop);
                   recoveringSidecarRetriever.ifPresent(DataColumnSidecarRetriever::stop);
                 }))
-        .thenRun(forkChoiceExecutor::stop);
+        .thenRun(forkChoiceExecutor::stop)
+        .thenRun(
+            () ->
+                leanVmSidecar.ifPresent(
+                    sidecar -> {
+                      StarkBackend.useConcatenation();
+                      sidecar.close();
+                    }));
+  }
+
+  /**
+   * Proves and verifies PQ attestation proofs with a leanVM sidecar when one is configured, as PQ
+   * devnet clients do, in place of the specification's concatenation stand-in.
+   */
+  protected void initLeanVmSidecar() {
+    final Optional<LeanVmSidecarConfig> config =
+        beaconConfig.eth2NetworkConfig().getLeanVmSidecar();
+    if (config.isEmpty() || !spec.isMilestoneSupported(SpecMilestone.PQ)) {
+      return;
+    }
+    final Path socket = config.get().socket().orElseGet(this::defaultLeanVmSidecarSocket);
+    try {
+      final LeanVmSidecar sidecar =
+          config
+              .get()
+              .binary()
+              .map(binary -> LeanVmSidecar.start(binary, socket, 0))
+              .orElseGet(() -> LeanVmSidecar.connect(socket));
+      leanVmSidecar = Optional.of(sidecar);
+      StarkBackend.useLeanVm(sidecar);
+    } catch (final RuntimeException e) {
+      throw new InvalidConfigurationException(
+          "Unable to use the leanVM sidecar on " + socket + ": " + e.getMessage(), e);
+    }
+  }
+
+  /** In the beacon data directory, which the sidecar needs private to the node's user. */
+  private Path defaultLeanVmSidecarSocket() {
+    final Path directory = beaconDataDirectory.resolve("leanvm");
+    try {
+      Files.createDirectories(directory);
+      if (directory.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+        Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("rwx------"));
+      }
+    } catch (final IOException e) {
+      throw new InvalidConfigurationException(
+          "Unable to create the leanVM sidecar directory " + directory, e);
+    }
+    return directory.resolve("sidecar.sock");
   }
 
   protected SafeFuture<?> initialize() {
@@ -761,6 +814,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
   }
 
   public void initAll() {
+    // Before anything verifies or builds a PQ attestation proof
+    initLeanVmSidecar();
     initKeyValueStore();
     initExecutionLayer();
     initExecutionLayerBlockProductionManager();
@@ -2435,7 +2490,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
                 spec,
                 recentChainData,
                 blsAttestationPool,
-                new AggregatingAttestationPoolPq(spec, recentChainData, StarkProver.CONCATENATED))
+                new AggregatingAttestationPoolPq(spec, recentChainData, StarkBackend.prover()))
             : blsAttestationPool;
 
     eventChannels.subscribe(SlotEventsChannel.class, aggregatingAttestationPool);

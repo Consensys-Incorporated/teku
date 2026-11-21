@@ -37,6 +37,7 @@ import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationP
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SingleAttestationPq;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.XmssAggregateStatement;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.logic.versions.pq.crypto.ProvenStatements;
 import tech.pegasys.teku.spec.logic.versions.pq.crypto.StarkProver;
 import tech.pegasys.teku.spec.logic.versions.pq.helpers.BeaconStateAccessorsPq;
 import tech.pegasys.teku.spec.logic.versions.pq.util.AttestationUtilPq;
@@ -222,7 +223,7 @@ class AggregatingAttestationPoolPqTest {
           }
 
           @Override
-          public Bytes mergeProofs(final List<Bytes> proofs) {
+          public Bytes mergeProofs(final List<ProvenStatements> proofs) {
             return StarkProver.CONCATENATED.mergeProofs(proofs);
           }
         };
@@ -231,6 +232,70 @@ class AggregatingAttestationPoolPqTest {
     pool.add(singleAttestation(data, 0, committee(0).getInt(0)));
 
     assertThat(blockAttestations(attestationSlot.plus(2)).attestations()).isEmpty();
+  }
+
+  @Test
+  void shouldMergeRecursiveProofsWithTheirStatementsAndNoSizeBudget() {
+    // A recursive prover: proof sizes don't add up, and merging needs each proof's statements
+    final List<ProvenStatements> merged = new ArrayList<>();
+    final StarkProver recursive =
+        new StarkProver() {
+          @Override
+          public Bytes proveAggregates(
+              final List<XmssAggregateStatement> statements, final List<List<Bytes>> signatures) {
+            return Bytes.fromHexString("0x5afe");
+          }
+
+          @Override
+          public long proofSizeOf(final int signatureCount) {
+            return Long.MAX_VALUE;
+          }
+
+          @Override
+          public boolean isMergedProofSizeTheSumOfChildren() {
+            return false;
+          }
+
+          @Override
+          public Bytes mergeProofs(final List<ProvenStatements> proofs) {
+            merged.addAll(proofs);
+            return Bytes.fromHexString("0x3e26ed");
+          }
+        };
+    pool = new AggregatingAttestationPoolPq(spec, storageSystem.recentChainData(), recursive);
+    final AttestationData data = attestationData(0);
+    final IntList committee = committee(0);
+    pool.add(singleAttestation(data, 0, committee.getInt(1)));
+    final Bytes networkProof = randomProof(2);
+    pool.add(networkAggregate(attestationData(1), 1, networkProof, 0, 1));
+
+    final PqBlockAttestations blockAttestations = blockAttestations(attestationSlot.plus(2));
+
+    assertThat(blockAttestations.attestations()).hasSize(2);
+    assertThat(blockAttestations.proof()).isEqualTo(Bytes.fromHexString("0x3e26ed"));
+    // Each proof comes with the statement get_attestation_statements gives for its committee
+    final BeaconStateAccessorsPq accessors =
+        (BeaconStateAccessorsPq) spec.atSlot(attestationSlot).beaconStateAccessors();
+    assertThat(merged).hasSize(2);
+    for (final ProvenStatements proven : merged) {
+      final XmssAggregateStatement statement = proven.statements().getFirst();
+      final Attestation onChain =
+          blockAttestations.attestations().stream()
+              .filter(attestation -> attestation.getData().equals(statementData(proven)))
+              .findFirst()
+              .orElseThrow();
+      assertThat(accessors.getAttestationStatements(head.getState(), onChain))
+          .containsExactly(statement);
+    }
+    assertThat(merged.stream().map(ProvenStatements::proof))
+        .containsExactlyInAnyOrder(Bytes.fromHexString("0x5afe"), networkProof);
+  }
+
+  /** The attestation data of a merged proof, from which committee its statement covers. */
+  private AttestationData statementData(final ProvenStatements proven) {
+    return proven.proof().equals(Bytes.fromHexString("0x5afe"))
+        ? attestationData(0)
+        : attestationData(1);
   }
 
   @Test
@@ -333,7 +398,7 @@ class AggregatingAttestationPoolPqTest {
       }
 
       @Override
-      public Bytes mergeProofs(final List<Bytes> proofs) {
+      public Bytes mergeProofs(final List<ProvenStatements> proofs) {
         return StarkProver.CONCATENATED.mergeProofs(proofs);
       }
     };

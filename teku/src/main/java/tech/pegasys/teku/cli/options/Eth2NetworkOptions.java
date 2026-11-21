@@ -18,6 +18,8 @@ import static tech.pegasys.teku.networks.Eth2NetworkConfiguration.DEFAULT_ASYNC_
 import static tech.pegasys.teku.networks.Eth2NetworkConfiguration.DEFAULT_ASYNC_P2P_MAX_THREADS;
 import static tech.pegasys.teku.spec.constants.NetworkConstants.DEFAULT_SAFE_SLOTS_TO_IMPORT_OPTIMISTICALLY;
 
+import java.nio.file.Path;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.function.Consumer;
@@ -37,6 +39,7 @@ import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.p2p.network.config.NetworkConfig;
 import tech.pegasys.teku.networks.Eth2NetworkConfiguration;
+import tech.pegasys.teku.networks.LeanVmSidecarConfig;
 
 public class Eth2NetworkOptions {
 
@@ -290,6 +293,29 @@ public class Eth2NetworkOptions {
           "Override the PQ fork version (4 bytes hex). Needed when the network config has no PQ_FORK_VERSION.",
       arity = "1")
   private String pqForkVersion;
+
+  @Option(
+      names = {"--Xpq-leanvm-sidecar-binary"},
+      hidden = true,
+      paramLabel = "<path>",
+      description =
+          "Prove and verify PQ attestation proofs with leanVM, as PQ devnet clients do, launching"
+              + " this leanvm-sidecar executable. It must be built from the network's leanVM"
+              + " revision. Without it or --Xpq-leanvm-sidecar-socket, proofs are the"
+              + " specification's concatenation stand-in.",
+      arity = "1")
+  private Path leanVmSidecarBinary;
+
+  @Option(
+      names = {"--Xpq-leanvm-sidecar-socket"},
+      hidden = true,
+      paramLabel = "<path>",
+      description =
+          "The Unix socket of the leanVM sidecar: the one to connect to, or with"
+              + " --Xpq-leanvm-sidecar-binary, the one to launch it on (default: in the beacon"
+              + " node's data directory).",
+      arity = "1")
+  private Path leanVmSidecarSocket;
 
   @Option(
       names = {"--Xnetwork-heze-fork-epoch"},
@@ -600,6 +626,9 @@ public class Eth2NetworkOptions {
         implicitEpochDefault(gloasForkEpoch, builder::gloasForkEpoch);
       }
     }
+    builder.leanVmSidecar(
+        LeanVmSidecarConfig.of(
+            Optional.ofNullable(leanVmSidecarBinary), Optional.ofNullable(leanVmSidecarSocket)));
     if (pqForkVersion != null) {
       builder.pqForkVersion(Bytes4.fromHexString(pqForkVersion));
     }

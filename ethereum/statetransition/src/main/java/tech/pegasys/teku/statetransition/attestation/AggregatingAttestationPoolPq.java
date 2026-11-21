@@ -43,6 +43,7 @@ import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationP
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SingleAttestationPq;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.XmssAggregateStatement;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.logic.versions.pq.crypto.ProvenStatements;
 import tech.pegasys.teku.spec.logic.versions.pq.crypto.StarkProver;
 import tech.pegasys.teku.spec.logic.versions.pq.helpers.BeaconStateAccessorsPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
@@ -182,7 +183,9 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
     final AttestationPqSchema attestationSchema =
         schemaDefinitions.getPqAttestationSchemas().getAttestationSchema();
     final List<Attestation> attestations = new ArrayList<>();
-    final List<Bytes> proofs = new ArrayList<>();
+    final List<ProvenStatements> proofs = new ArrayList<>();
+    // A recursive proof's size barely grows with its children; the stand-in's is their sum
+    final boolean budgetProofSize = starkProver.isMergedProofSizeTheSumOfChildren();
     long remainingProofSize = config.getMaxStarkProofSize();
     for (final DataCandidate candidate : candidates) {
       if (attestations.size() >= config.getMaxAttestationsPq()) {
@@ -190,7 +193,7 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
       }
       final List<CommitteeCandidate> included = new ArrayList<>();
       for (final CommitteeCandidate committee : candidate.committees()) {
-        final long proofSize = committee.proofSize();
+        final long proofSize = budgetProofSize ? committee.proofSize() : 0;
         if (proofSize <= remainingProofSize) {
           included.add(committee);
           remainingProofSize -= proofSize;
@@ -200,7 +203,12 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
         continue;
       }
       attestations.add(createOnChainAggregate(attestationSchema, candidate.data(), included));
-      included.forEach(committee -> proofs.add(committee.proof(stateAtBlockSlot)));
+      included.forEach(
+          committee ->
+              proofs.add(
+                  new ProvenStatements(
+                      List.of(committee.statement(stateAtBlockSlot)),
+                      committee.proof(stateAtBlockSlot))));
     }
     return new PqBlockAttestations(
         schemaDefinitions
@@ -471,21 +479,32 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
       if (networkProof.isPresent()) {
         return networkProof.get();
       }
-      // The single attestations name their attesters, so the statement needs no committee
-      // lookup: the state may be well behind the attestation, e.g. after empty slots
-      final IntList attesters = new IntArrayList(bits.cardinality());
       final List<Bytes> signatures = new ArrayList<>(bits.cardinality());
       bits.stream()
           .forEach(
-              position -> {
-                final SingleSignature single = committee.singleSignatures.get(position);
-                attesters.add(single.attesterIndex());
-                signatures.add(single.signature());
-              });
-      final XmssAggregateStatement statement =
-          ((BeaconStateAccessorsPq) spec.atSlot(state.getSlot()).beaconStateAccessors())
-              .getAttestationStatement(state, committee.data, attesters);
-      return starkProver.proveAggregates(List.of(statement), List.of(signatures));
+              position -> signatures.add(committee.singleSignatures.get(position).signature()));
+      return starkProver.proveAggregates(List.of(statement(state)), List.of(signatures));
+    }
+
+    /**
+     * The statement this candidate's proof proves. Built from the single attestations' attesters,
+     * it needs no committee lookup, so the state may be well behind the attestation, e.g. after
+     * empty slots. A network aggregate's needs its committee from {@code state}, which must be
+     * recent enough, as a block's state is.
+     */
+    XmssAggregateStatement statement(final BeaconState state) {
+      final BeaconStateAccessorsPq accessors =
+          (BeaconStateAccessorsPq) spec.atSlot(state.getSlot()).beaconStateAccessors();
+      if (networkProof.isPresent()) {
+        return accessors
+            .getAttestationStatements(state, toAttestation(getAttestationSchema(this)))
+            .getFirst();
+      }
+      final IntList attesters = new IntArrayList(bits.cardinality());
+      bits.stream()
+          .forEach(
+              position -> attesters.add(committee.singleSignatures.get(position).attesterIndex()));
+      return accessors.getAttestationStatement(state, committee.data, attesters);
     }
 
     AttestationPq toAttestation(final AttestationPqSchema schema) {
