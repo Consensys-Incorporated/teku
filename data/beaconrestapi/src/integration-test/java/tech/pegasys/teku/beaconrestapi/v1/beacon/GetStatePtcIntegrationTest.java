@@ -23,6 +23,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.io.IOException;
 import java.nio.ByteOrder;
 import java.util.Map;
+import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import okhttp3.Response;
 import org.apache.tuweni.bytes.Bytes;
@@ -60,33 +61,38 @@ public class GetStatePtcIntegrationTest extends AbstractDataBackedRestAPIIntegra
   public void shouldGetPtcForStateSlotAsSsz() throws Exception {
     startRestAPIAtGenesis(SpecMilestone.GLOAS);
 
-    final JsonNode validators;
-    try (final Response response = get("head")) {
+    // Use a non-zero slot so the slot field is visible in the SSZ bytes
+    final String route = GetStatePtc.ROUTE.replace("{state_id}", "head") + "?slot=1";
+
+    final JsonNode data;
+    try (final Response response = getResponse(route)) {
       assertThat(response.code()).isEqualTo(SC_OK);
-      validators =
-          JsonTestUtil.parseAsJsonNode(response.body().string()).get("data").get("validators");
+      data = JsonTestUtil.parseAsJsonNode(response.body().string()).get("data");
     }
 
     final Bytes expected =
         Bytes.concatenate(
-            StreamSupport.stream(validators.spliterator(), false)
+            Stream.concat(
+                    Stream.of(data.get("slot")),
+                    StreamSupport.stream(data.get("validators").spliterator(), false))
                 .map(
-                    validator ->
+                    value ->
                         Bytes.ofUnsignedLong(
-                            Long.parseUnsignedLong(validator.asText()), ByteOrder.LITTLE_ENDIAN))
+                            Long.parseUnsignedLong(value.asText()), ByteOrder.LITTLE_ENDIAN))
                 .toArray(Bytes[]::new));
 
-    try (final Response response =
-        getResponse(GetStatePtc.ROUTE.replace("{state_id}", "head"), OCTET_STREAM)) {
+    try (final Response response = getResponse(route, OCTET_STREAM)) {
       assertThat(response.code()).isEqualTo(SC_OK);
       final Bytes body = Bytes.wrap(response.body().bytes());
+      assertThat(body.slice(0, 8)).isEqualTo(Bytes.ofUnsignedLong(1, ByteOrder.LITTLE_ENDIAN));
       assertThat(body.size())
           .isEqualTo(
               8
-                  * spec.getGenesisSpecConfig()
-                      .toVersionGloas()
-                      .orElseThrow()
-                      .getPayloadTimelinessCommitteeSize());
+                  + 8
+                      * spec.getGenesisSpecConfig()
+                          .toVersionGloas()
+                          .orElseThrow()
+                          .getPayloadTimelinessCommitteeSize());
       assertThat(body).isEqualTo(expected);
     }
   }

@@ -35,6 +35,7 @@ import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
 import tech.pegasys.teku.infrastructure.restapi.openapi.response.OctetStreamResponseContentTypeDefinition;
 import tech.pegasys.teku.infrastructure.restapi.openapi.response.ResponseContentTypeDefinition;
+import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 
 public class GetStatePtc extends RestApiEndpoint {
@@ -52,7 +53,7 @@ public class GetStatePtc extends RestApiEndpoint {
             .operationId("getStatePtc")
             .summary("Get the payload timeliness committee for a slot.")
             .description(
-                "Returns the payload timeliness committee for the requested slot from the state with the given `state_id`")
+                "Returns the payload timeliness committee for the requested slot from the state with the given `state_id`. Should return 400 if the state retrieved or the requested slot is prior to Gloas.")
             .tags(TAG_BEACON)
             .pathParam(PARAMETER_STATE_ID)
             .queryParam(SLOT_PARAMETER)
@@ -87,7 +88,11 @@ public class GetStatePtc extends RestApiEndpoint {
 
   private static ResponseContentTypeDefinition<ObjectAndMetaData<StatePtcData>> sszResponseType() {
     return new OctetStreamResponseContentTypeDefinition<>(
-        (data, out) -> data.getData().validators().sszSerialize(out), __ -> Collections.emptyMap());
+        (data, out) -> {
+          SszUInt64.of(data.getData().slot()).sszSerialize(out);
+          data.getData().validators().sszSerialize(out);
+        },
+        __ -> Collections.emptyMap());
   }
 
   @Override
