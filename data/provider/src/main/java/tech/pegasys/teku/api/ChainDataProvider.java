@@ -61,9 +61,13 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.ssz.Merkleizable;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszUInt64Vector;
+import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszUInt64VectorSchema;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
+import tech.pegasys.teku.spec.SpecVersion;
+import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
@@ -853,14 +857,20 @@ public class ChainDataProvider {
             stateAndMetaData.map(
                 state -> {
                   final UInt64 slot = maybeSlot.orElse(state.getSlot());
+                  final SpecVersion specVersion = spec.atSlot(state.getSlot());
+                  final SszUInt64VectorSchema<SszUInt64Vector> ptcSchema =
+                      SszUInt64VectorSchema.create(
+                          SpecConfigGloas.required(specVersion.getConfig())
+                              .getPayloadTimelinessCommitteeSize());
                   return new StatePtcData(
                       slot,
-                      spec.atSlot(state.getSlot())
-                          .beaconStateAccessors()
-                          .getPtc(state, slot)
-                          .intStream()
-                          .mapToObj(UInt64::valueOf)
-                          .toList());
+                      ptcSchema.of(
+                          specVersion
+                              .beaconStateAccessors()
+                              .getPtc(state, slot)
+                              .intStream()
+                              .mapToObj(UInt64::valueOf)
+                              .toList()));
                 }));
   }
 

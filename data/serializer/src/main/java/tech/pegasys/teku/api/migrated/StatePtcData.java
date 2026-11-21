@@ -13,7 +13,7 @@
 
 package tech.pegasys.teku.api.migrated;
 
-import java.util.List;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszUInt64Vector;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 
-public record StatePtcData(UInt64 slot, List<UInt64> validators) {}
+public record StatePtcData(UInt64 slot, SszUInt64Vector validators) {}

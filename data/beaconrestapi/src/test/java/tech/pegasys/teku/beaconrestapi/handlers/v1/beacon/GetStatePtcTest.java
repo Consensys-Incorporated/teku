@@ -16,6 +16,7 @@ package tech.pegasys.teku.beaconrestapi.handlers.v1.beacon;
 import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
+import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_ACCEPTABLE;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NO_CONTENT;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
@@ -25,13 +26,13 @@ import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMe
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMetadataErrorResponse;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.api.exceptions.BadRequestException;
 import tech.pegasys.teku.api.migrated.StatePtcData;
 import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerWithChainDataProviderTest;
 import tech.pegasys.teku.infrastructure.restapi.StubRestApiRequest;
+import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszUInt64VectorSchema;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
@@ -93,7 +94,8 @@ class GetStatePtcTest extends AbstractMigratedBeaconHandlerWithChainDataProvider
         new ObjectAndMetaData<>(
             new StatePtcData(
                 UInt64.valueOf(5),
-                List.of(UInt64.valueOf(9), UInt64.valueOf(2), UInt64.valueOf(9))),
+                SszUInt64VectorSchema.create(3)
+                    .of(UInt64.valueOf(9), UInt64.valueOf(2), UInt64.valueOf(9))),
             SpecMilestone.GLOAS,
             false,
             true,
@@ -112,6 +114,11 @@ class GetStatePtcTest extends AbstractMigratedBeaconHandlerWithChainDataProvider
   @Test
   void metadata_shouldHandle404() throws JsonProcessingException {
     verifyMetadataErrorResponse(handler, SC_NOT_FOUND);
+  }
+
+  @Test
+  void metadata_shouldHandle406() throws JsonProcessingException {
+    verifyMetadataErrorResponse(handler, SC_NOT_ACCEPTABLE);
   }
 
   @Test

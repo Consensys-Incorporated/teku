@@ -1089,7 +1089,7 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
             .getData();
 
     assertThat(ptc.slot()).isEqualTo(UInt64.valueOf(19));
-    assertThat(ptc.validators())
+    assertThat(ptc.validators().asListUnboxed())
         .isEqualTo(BeaconStateGloas.required(state).getPtcWindow().get(11).asListUnboxed());
   }
 
@@ -1113,7 +1113,13 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
     final Optional<UInt64> slot = Optional.of(UInt64.valueOf(requestedSlot));
 
     if (inWindow) {
-      assertThat(provider.getStatePtc(stateAndMetaData, slot).orElseThrow().getData().validators())
+      assertThat(
+              provider
+                  .getStatePtc(stateAndMetaData, slot)
+                  .orElseThrow()
+                  .getData()
+                  .validators()
+                  .asListUnboxed())
           .isEqualTo(
               gloasSpec
                   .getPtc(state, UInt64.valueOf(requestedSlot))

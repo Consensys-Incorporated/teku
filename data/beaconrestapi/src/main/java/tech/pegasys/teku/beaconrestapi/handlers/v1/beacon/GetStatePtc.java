@@ -24,6 +24,7 @@ import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.UINT64_TYPE;
 import static tech.pegasys.teku.infrastructure.json.types.SerializableTypeDefinition.listOf;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import java.util.Collections;
 import tech.pegasys.teku.api.ChainDataProvider;
 import tech.pegasys.teku.api.DataProvider;
 import tech.pegasys.teku.api.migrated.StatePtcData;
@@ -32,6 +33,8 @@ import tech.pegasys.teku.infrastructure.restapi.endpoints.AsyncApiResponse;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.EndpointMetadata;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
+import tech.pegasys.teku.infrastructure.restapi.openapi.response.OctetStreamResponseContentTypeDefinition;
+import tech.pegasys.teku.infrastructure.restapi.openapi.response.ResponseContentTypeDefinition;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 
 public class GetStatePtc extends RestApiEndpoint {
@@ -49,7 +52,7 @@ public class GetStatePtc extends RestApiEndpoint {
             .operationId("getStatePtc")
             .summary("Get the payload timeliness committee for a slot.")
             .description(
-                "Returns the payload timeliness committee for the requested slot from the state with the given 'stateId', in committee order. Should return 400 if the state retrieved or the requested slot is prior to Gloas, or the slot is outside the PTC window of the state.")
+                "Returns the payload timeliness committee for the requested slot from the state with the given `state_id`")
             .tags(TAG_BEACON)
             .pathParam(PARAMETER_STATE_ID)
             .queryParam(SLOT_PARAMETER)
@@ -67,14 +70,24 @@ public class GetStatePtc extends RestApiEndpoint {
                         "data",
                         SerializableTypeDefinition.object(StatePtcData.class)
                             .withField("slot", UINT64_TYPE, StatePtcData::slot)
-                            .withField("validators", listOf(UINT64_TYPE), StatePtcData::validators)
+                            .withField(
+                                "validators",
+                                listOf(UINT64_TYPE),
+                                data -> data.validators().asListUnboxed())
                             .build(),
                         ObjectAndMetaData::getData)
-                    .build())
+                    .build(),
+                sszResponseType())
             .withNotFoundResponse()
             .withChainDataResponses()
+            .withNotAcceptableResponse()
             .build());
     this.chainDataProvider = chainDataProvider;
+  }
+
+  private static ResponseContentTypeDefinition<ObjectAndMetaData<StatePtcData>> sszResponseType() {
+    return new OctetStreamResponseContentTypeDefinition<>(
+        (data, out) -> data.getData().validators().sszSerialize(out), __ -> Collections.emptyMap());
   }
 
   @Override

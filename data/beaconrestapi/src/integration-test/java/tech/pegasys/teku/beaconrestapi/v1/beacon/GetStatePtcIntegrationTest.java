@@ -14,14 +14,18 @@
 package tech.pegasys.teku.beaconrestapi.v1.beacon;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static tech.pegasys.teku.infrastructure.http.ContentTypes.OCTET_STREAM;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import java.io.IOException;
+import java.nio.ByteOrder;
 import java.util.Map;
+import java.util.stream.StreamSupport;
 import okhttp3.Response;
+import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.beaconrestapi.AbstractDataBackedRestAPIIntegrationTest;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.GetStatePtc;
@@ -49,6 +53,41 @@ public class GetStatePtcIntegrationTest extends AbstractDataBackedRestAPIIntegra
                   .toVersionGloas()
                   .orElseThrow()
                   .getPayloadTimelinessCommitteeSize());
+    }
+  }
+
+  @Test
+  public void shouldGetPtcForStateSlotAsSsz() throws Exception {
+    startRestAPIAtGenesis(SpecMilestone.GLOAS);
+
+    final JsonNode validators;
+    try (final Response response = get("head")) {
+      assertThat(response.code()).isEqualTo(SC_OK);
+      validators =
+          JsonTestUtil.parseAsJsonNode(response.body().string()).get("data").get("validators");
+    }
+
+    final Bytes expected =
+        Bytes.concatenate(
+            StreamSupport.stream(validators.spliterator(), false)
+                .map(
+                    validator ->
+                        Bytes.ofUnsignedLong(
+                            Long.parseUnsignedLong(validator.asText()), ByteOrder.LITTLE_ENDIAN))
+                .toArray(Bytes[]::new));
+
+    try (final Response response =
+        getResponse(GetStatePtc.ROUTE.replace("{state_id}", "head"), OCTET_STREAM)) {
+      assertThat(response.code()).isEqualTo(SC_OK);
+      final Bytes body = Bytes.wrap(response.body().bytes());
+      assertThat(body.size())
+          .isEqualTo(
+              8
+                  * spec.getGenesisSpecConfig()
+                      .toVersionGloas()
+                      .orElseThrow()
+                      .getPayloadTimelinessCommitteeSize());
+      assertThat(body).isEqualTo(expected);
     }
   }
 
