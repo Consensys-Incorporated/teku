@@ -27,7 +27,9 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
  *   <li>{@code previousBalanceSource} — {@code get_previous_balance_source}: {@code
  *       store.checkpoint_states[previous_epoch_observed_justified_checkpoint]}. Used only by
  *       reconfirmation ({@code is_confirmed_chain_safe}), which runs only at epoch-start slots, so
- *       it is {@link Optional} and left empty on other slots.
+ *       it is {@link Optional} and left empty on other slots. It is also empty at an epoch start
+ *       when the checkpoint state has been pruned; reconfirmation then fails only if it actually
+ *       has blocks to score against it.
  *   <li>{@code currentBalanceSource} — {@code get_current_balance_source}: {@code
  *       store.checkpoint_states[current_epoch_observed_justified_checkpoint]}, used for
  *       current-epoch weights.

@@ -21,8 +21,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.PosixFilePermissions;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -60,5 +63,34 @@ public class SyncDataAccessorTest {
 
     content = Files.readString(filePath);
     assertThat(content).isEqualTo("B");
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  @DisabledOnOs(OS.WINDOWS)
+  public void shouldRestrictFileToOwnerWhenOwnerOnly(
+      final boolean useAtomicMove, @TempDir final Path tempDir) throws IOException {
+    final Path filePath = tempDir.resolve("myfile.dat");
+    Files.writeString(filePath, "old");
+    Files.setPosixFilePermissions(filePath, PosixFilePermissions.fromString("rw-r--r--"));
+    final SyncDataAccessor syncDataAccessor = new SyncDataAccessor(useAtomicMove, true);
+
+    syncDataAccessor.syncedWrite(filePath, Bytes.fromHexString("0x41"));
+
+    assertThat(Files.readString(filePath)).isEqualTo("A");
+    assertThat(Files.getPosixFilePermissions(filePath)).isEqualTo(SecretFiles.OWNER_READ_WRITE);
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  public void createOwnerOnly_shouldWriteNewFilesReadableOnlyByOwner(@TempDir final Path tempDir)
+      throws IOException {
+    final Path filePath = tempDir.resolve("myfile.dat");
+    final SyncDataAccessor syncDataAccessor = SyncDataAccessor.createOwnerOnly(tempDir);
+
+    syncDataAccessor.syncedWrite(filePath, Bytes.fromHexString("0x41"));
+
+    assertThat(Files.readString(filePath)).isEqualTo("A");
+    assertThat(Files.getPosixFilePermissions(filePath)).isEqualTo(SecretFiles.OWNER_READ_WRITE);
   }
 }

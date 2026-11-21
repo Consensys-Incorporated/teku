@@ -28,8 +28,10 @@ import static tech.pegasys.teku.statetransition.validation.InternalValidationRes
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.reject;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
@@ -42,13 +44,20 @@ import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.BlockRootAndBuilderIndex;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBidSchema;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
+import tech.pegasys.teku.spec.datastructures.execution.versions.capella.ExecutionPayloadCapella;
+import tech.pegasys.teku.spec.datastructures.execution.versions.capella.Withdrawal;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateSchemaGloas;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 @TestSpecContext(milestone = {SpecMilestone.GLOAS})
@@ -65,7 +74,9 @@ public class ExecutionPayloadGossipValidatorTest {
   private UInt64 slot;
   private Bytes32 blockRoot;
   private BeaconBlock beaconBlock;
-  private BeaconState postState;
+  private BeaconState blockState;
+  private ExecutionPayload payload;
+  private SchemaDefinitionsGloas schemaDefinitions;
 
   @BeforeEach
   void setUp(final SpecContext specContext) {
@@ -75,32 +86,41 @@ public class ExecutionPayloadGossipValidatorTest {
             spec, gossipValidationHelper, blockGossipValidator, invalidBlockRoots);
 
     slot = dataStructureUtil.randomSlot();
-    signedEnvelope = dataStructureUtil.randomSignedExecutionPayloadEnvelope(slot.longValue());
-    envelope = signedEnvelope.getMessage();
+    schemaDefinitions =
+        SchemaDefinitionsGloas.required(specContext.getSpec().atSlot(slot).getSchemaDefinitions());
+    // Non-empty transactions, so only the tests that add an empty one hit that rule
+    payload =
+        dataStructureUtil.randomExecutionPayload(
+            slot, builder -> builder.transactions(List.of(Bytes.fromHexString("0x01"))));
+    envelope =
+        schemaDefinitions
+            .getExecutionPayloadEnvelopeSchema()
+            .create(
+                payload,
+                dataStructureUtil.randomExecutionRequests(slot),
+                dataStructureUtil.randomBuilderIndex(),
+                dataStructureUtil.randomBytes32(),
+                dataStructureUtil.randomBytes32());
+    signedEnvelope =
+        schemaDefinitions
+            .getSignedExecutionPayloadEnvelopeSchema()
+            .create(envelope, dataStructureUtil.randomSignature());
     slot = envelope.getSlot();
     blockRoot = envelope.getBeaconBlockRoot();
-    postState = dataStructureUtil.randomBeaconState();
 
-    final SignedExecutionPayloadBid matchingBid =
-        dataStructureUtil.randomSignedExecutionPayloadBid(
-            dataStructureUtil.randomExecutionPayloadBid(
-                slot,
-                envelope.getBuilderIndex(),
-                envelope.getPayload().getBlockHash(),
-                envelope.getExecutionRequests().hashTreeRoot()));
-    beaconBlock =
-        dataStructureUtil.randomBeaconBlock(
-            slot,
-            dataStructureUtil.randomBeaconBlockBody(
-                builder -> builder.signedExecutionPayloadBid(matchingBid)));
+    beaconBlock = mockBlockWithMatchingBid();
+    blockState =
+        createBlockState(
+            payload.getParentHash(),
+            ExecutionPayloadCapella.required(payload).getWithdrawals().asList());
 
     when(gossipValidationHelper.getSlotForBlockRoot(envelope.getBeaconBlockRoot()))
         .thenReturn(Optional.of(slot));
     when(gossipValidationHelper.isBeforeFinalizedSlot(slot)).thenReturn(false);
-    when(gossipValidationHelper.retrieveBlockByRoot(blockRoot))
-        .thenReturn(SafeFuture.completedFuture(Optional.of(beaconBlock)));
     when(gossipValidationHelper.getStateAtBlockRoot(any(Bytes32.class)))
-        .thenReturn(SafeFuture.completedFuture(Optional.of(postState)));
+        .thenReturn(SafeFuture.completedFuture(Optional.of(blockState)));
+    when(spec.computeTimeAtSlot(any(BeaconState.class), eq(slot)))
+        .thenReturn(payload.getTimestamp());
     final SpecVersion specVersion = mock(SpecVersion.class);
     final MiscHelpers miscHelpers = mock(MiscHelpers.class);
     final Bytes32 signingRoot = Bytes32.random();
@@ -204,20 +224,13 @@ public class ExecutionPayloadGossipValidatorTest {
 
   @TestTemplate
   void shouldRejectIfBuilderIndexMismatch() {
-    final SignedExecutionPayloadBid mismatchedBid =
-        dataStructureUtil.randomSignedExecutionPayloadBid(
-            dataStructureUtil.randomExecutionPayloadBid(
-                slot,
-                envelope.getBuilderIndex().plus(1),
-                envelope.getPayload().getBlockHash(),
-                envelope.getExecutionRequests().hashTreeRoot()));
-    final BeaconBlock blockWithMismatchedBid =
-        dataStructureUtil.randomBeaconBlock(
-            slot,
-            dataStructureUtil.randomBeaconBlockBody(
-                builder -> builder.signedExecutionPayloadBid(mismatchedBid)));
-    when(gossipValidationHelper.retrieveBlockByRoot(blockRoot))
-        .thenReturn(SafeFuture.completedFuture(Optional.of(blockWithMismatchedBid)));
+    mockBlockWithBid(
+        envelope.getParentBeaconBlockRoot(),
+        envelope.getBuilderIndex().plus(1),
+        payload.getPrevRandao(),
+        payload.getGasLimit(),
+        payload.getBlockHash(),
+        envelope.getExecutionRequests().hashTreeRoot());
 
     assertThatSafeFuture(validator.validate(signedEnvelope))
         .isCompletedWithValue(
@@ -228,51 +241,158 @@ public class ExecutionPayloadGossipValidatorTest {
 
   @TestTemplate
   void shouldRejectIfPayloadHashMismatch() {
-    final SignedExecutionPayloadBid mismatchedBid =
-        dataStructureUtil.randomSignedExecutionPayloadBid(
-            dataStructureUtil.randomExecutionPayloadBid(
-                slot,
-                envelope.getBuilderIndex(),
-                dataStructureUtil.randomBytes32(),
-                envelope.getExecutionRequests().hashTreeRoot()));
-    final BeaconBlock blockWithMismatchedBid =
-        dataStructureUtil.randomBeaconBlock(
-            slot,
-            dataStructureUtil.randomBeaconBlockBody(
-                builder -> builder.signedExecutionPayloadBid(mismatchedBid)));
-    when(gossipValidationHelper.retrieveBlockByRoot(blockRoot))
-        .thenReturn(SafeFuture.completedFuture(Optional.of(blockWithMismatchedBid)));
+    final Bytes32 bidBlockHash = dataStructureUtil.randomBytes32();
+    mockBlockWithBid(
+        envelope.getParentBeaconBlockRoot(),
+        envelope.getBuilderIndex(),
+        payload.getPrevRandao(),
+        payload.getGasLimit(),
+        bidBlockHash,
+        envelope.getExecutionRequests().hashTreeRoot());
 
     assertThatSafeFuture(validator.validate(signedEnvelope))
         .isCompletedWithValue(
             reject(
                 "Invalid payload block hash. Execution Payload Envelope had %s but ExecutionPayload Bid had %s",
-                envelope.getPayload().getBlockHash(), mismatchedBid.getMessage().getBlockHash()));
+                payload.getBlockHash(), bidBlockHash));
   }
 
   @TestTemplate
   void shouldRejectIfExecutionRequestsMismatch() {
-    final SignedExecutionPayloadBid mismatchedBid =
-        dataStructureUtil.randomSignedExecutionPayloadBid(
-            dataStructureUtil.randomExecutionPayloadBid(
-                slot,
-                envelope.getBuilderIndex(),
-                envelope.getPayload().getBlockHash(),
-                dataStructureUtil.randomBytes32()));
-    final BeaconBlock blockWithMismatchedBid =
-        dataStructureUtil.randomBeaconBlock(
-            slot,
-            dataStructureUtil.randomBeaconBlockBody(
-                builder -> builder.signedExecutionPayloadBid(mismatchedBid)));
-    when(gossipValidationHelper.retrieveBlockByRoot(blockRoot))
-        .thenReturn(SafeFuture.completedFuture(Optional.of(blockWithMismatchedBid)));
+    final Bytes32 bidExecutionRequestsRoot = dataStructureUtil.randomBytes32();
+    mockBlockWithBid(
+        envelope.getParentBeaconBlockRoot(),
+        envelope.getBuilderIndex(),
+        payload.getPrevRandao(),
+        payload.getGasLimit(),
+        payload.getBlockHash(),
+        bidExecutionRequestsRoot);
 
     assertThatSafeFuture(validator.validate(signedEnvelope))
         .isCompletedWithValue(
             reject(
                 "Invalid execution requests. Execution Payload Envelope had execution requests root of %s but ExecutionPayload Bid had %s",
-                envelope.getExecutionRequests().hashTreeRoot(),
-                mismatchedBid.getMessage().getExecutionRequestsRoot()));
+                envelope.getExecutionRequests().hashTreeRoot(), bidExecutionRequestsRoot));
+  }
+
+  @TestTemplate
+  void shouldRejectIfParentBeaconBlockRootMismatch() {
+    final Bytes32 blockParentRoot = dataStructureUtil.randomBytes32();
+    mockBlockWithBid(
+        blockParentRoot,
+        envelope.getBuilderIndex(),
+        payload.getPrevRandao(),
+        payload.getGasLimit(),
+        payload.getBlockHash(),
+        envelope.getExecutionRequests().hashTreeRoot());
+
+    assertThatSafeFuture(validator.validate(signedEnvelope))
+        .isCompletedWithValue(
+            reject(
+                "Invalid parent beacon block root. Execution payload envelope had %s but the block had %s",
+                envelope.getParentBeaconBlockRoot(), blockParentRoot));
+  }
+
+  @TestTemplate
+  void shouldRejectIfPrevRandaoMismatch() {
+    final Bytes32 bidPrevRandao = dataStructureUtil.randomBytes32();
+    mockBlockWithBid(
+        envelope.getParentBeaconBlockRoot(),
+        envelope.getBuilderIndex(),
+        bidPrevRandao,
+        payload.getGasLimit(),
+        payload.getBlockHash(),
+        envelope.getExecutionRequests().hashTreeRoot());
+
+    assertThatSafeFuture(validator.validate(signedEnvelope))
+        .isCompletedWithValue(
+            reject(
+                "Invalid payload prev randao. Execution Payload Envelope had %s but ExecutionPayload Bid had %s",
+                payload.getPrevRandao(), bidPrevRandao));
+  }
+
+  @TestTemplate
+  void shouldRejectIfGasLimitMismatch() {
+    final UInt64 bidGasLimit = payload.getGasLimit().plus(1);
+    mockBlockWithBid(
+        envelope.getParentBeaconBlockRoot(),
+        envelope.getBuilderIndex(),
+        payload.getPrevRandao(),
+        bidGasLimit,
+        payload.getBlockHash(),
+        envelope.getExecutionRequests().hashTreeRoot());
+
+    assertThatSafeFuture(validator.validate(signedEnvelope))
+        .isCompletedWithValue(
+            reject(
+                "Invalid payload gas limit. Execution Payload Envelope had %s but ExecutionPayload Bid had %s",
+                payload.getGasLimit(), bidGasLimit));
+  }
+
+  @TestTemplate
+  void shouldRejectIfParentHashIsNotTheLatestBlockHash() {
+    final Bytes32 latestBlockHash = dataStructureUtil.randomBytes32();
+    mockBlockState(
+        createBlockState(
+            latestBlockHash, ExecutionPayloadCapella.required(payload).getWithdrawals().asList()));
+
+    assertThatSafeFuture(validator.validate(signedEnvelope))
+        .isCompletedWithValue(
+            reject(
+                "Invalid payload parent hash. Execution Payload Envelope had %s but the latest block hash is %s",
+                payload.getParentHash(), latestBlockHash));
+  }
+
+  @TestTemplate
+  void shouldRejectIfTimestampIsIncorrect() {
+    final UInt64 expectedTimestamp = payload.getTimestamp().plus(1);
+    when(spec.computeTimeAtSlot(any(BeaconState.class), eq(slot))).thenReturn(expectedTimestamp);
+
+    assertThatSafeFuture(validator.validate(signedEnvelope))
+        .isCompletedWithValue(
+            reject(
+                "Invalid payload timestamp. Execution Payload Envelope had %s but expected %s",
+                payload.getTimestamp(), expectedTimestamp));
+  }
+
+  @TestTemplate
+  void shouldRejectIfPayloadContainsAnEmptyTransaction() {
+    final ExecutionPayload payloadWithEmptyTransaction =
+        dataStructureUtil.randomExecutionPayload(
+            slot,
+            builder ->
+                builder
+                    .parentHash(payload.getParentHash())
+                    .prevRandao(payload.getPrevRandao())
+                    .gasLimit(payload.getGasLimit())
+                    .blockHash(payload.getBlockHash())
+                    .timestamp(payload.getTimestamp())
+                    .withdrawals(
+                        () -> ExecutionPayloadCapella.required(payload).getWithdrawals().asList())
+                    .transactions(List.of(Bytes.fromHexString("0x01"), Bytes.EMPTY)));
+    final SignedExecutionPayloadEnvelope envelopeWithEmptyTransaction =
+        createSignedEnvelopeWithPayload(payloadWithEmptyTransaction);
+
+    assertThatSafeFuture(validator.validate(envelopeWithEmptyTransaction))
+        .isCompletedWithValue(reject("Execution payload envelope contains an empty transaction"));
+  }
+
+  @TestTemplate
+  void shouldRejectIfWithdrawalsDoNotMatchExpectedWithdrawals() {
+    final List<Withdrawal> expectedWithdrawals =
+        List.of(dataStructureUtil.randomWithdrawal(), dataStructureUtil.randomWithdrawal());
+    final BeaconState blockStateWithOtherWithdrawals =
+        createBlockState(payload.getParentHash(), expectedWithdrawals);
+    mockBlockState(blockStateWithOtherWithdrawals);
+
+    assertThatSafeFuture(validator.validate(signedEnvelope))
+        .isCompletedWithValue(
+            reject(
+                "Invalid payload withdrawals. Execution Payload Envelope had withdrawals root %s but expected %s",
+                ExecutionPayloadCapella.required(payload).getWithdrawals().hashTreeRoot(),
+                BeaconStateGloas.required(blockStateWithOtherWithdrawals)
+                    .getPayloadExpectedWithdrawals()
+                    .hashTreeRoot()));
   }
 
   @TestTemplate
@@ -372,6 +492,89 @@ public class ExecutionPayloadGossipValidatorTest {
             validator.validate(
                 signedEnvelope, Optional.of(BroadcastValidationLevel.CONSENSUS_AND_EQUIVOCATION)))
         .isCompletedWithValue(ACCEPT);
+  }
+
+  private BeaconBlock mockBlockWithMatchingBid() {
+    return mockBlockWithBid(
+        envelope.getParentBeaconBlockRoot(),
+        envelope.getBuilderIndex(),
+        payload.getPrevRandao(),
+        payload.getGasLimit(),
+        payload.getBlockHash(),
+        envelope.getExecutionRequests().hashTreeRoot());
+  }
+
+  private BeaconBlock mockBlockWithBid(
+      final Bytes32 parentRoot,
+      final UInt64 builderIndex,
+      final Bytes32 prevRandao,
+      final UInt64 gasLimit,
+      final Bytes32 blockHash,
+      final Bytes32 executionRequestsRoot) {
+    final ExecutionPayloadBidSchema bidSchema = schemaDefinitions.getExecutionPayloadBidSchema();
+    final SignedExecutionPayloadBid bid =
+        dataStructureUtil.randomSignedExecutionPayloadBid(
+            bidSchema.create(
+                dataStructureUtil.randomBytes32(),
+                dataStructureUtil.randomBytes32(),
+                blockHash,
+                prevRandao,
+                dataStructureUtil.randomEth1Address(),
+                gasLimit,
+                builderIndex,
+                slot,
+                dataStructureUtil.randomUInt64(),
+                dataStructureUtil.randomUInt64(),
+                bidSchema.getBlobKzgCommitmentsSchema().getDefault(),
+                executionRequestsRoot));
+    final BeaconBlock block =
+        dataStructureUtil.randomBeaconBlock(
+            slot,
+            dataStructureUtil.randomBeaconBlockBody(
+                builder -> builder.signedExecutionPayloadBid(bid)));
+    final BeaconBlock blockWithParentRoot =
+        new BeaconBlock(
+            block.getSchema(),
+            slot,
+            block.getProposerIndex(),
+            parentRoot,
+            block.getStateRoot(),
+            block.getBody());
+    when(gossipValidationHelper.retrieveBlockByRoot(blockRoot))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(blockWithParentRoot)));
+    return blockWithParentRoot;
+  }
+
+  private BeaconState createBlockState(
+      final Bytes32 latestBlockHash, final List<Withdrawal> payloadExpectedWithdrawals) {
+    return BeaconStateGloas.required(dataStructureUtil.randomBeaconState())
+        .updatedGloas(
+            state -> {
+              state.setLatestBlockHash(latestBlockHash);
+              state.setPayloadExpectedWithdrawals(
+                  BeaconStateSchemaGloas.required(state.getBeaconStateSchema())
+                      .getPayloadExpectedWithdrawalsSchema()
+                      .createFromElements(payloadExpectedWithdrawals));
+            });
+  }
+
+  private void mockBlockState(final BeaconState state) {
+    when(gossipValidationHelper.getStateAtBlockRoot(any(Bytes32.class)))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(state)));
+  }
+
+  private SignedExecutionPayloadEnvelope createSignedEnvelopeWithPayload(
+      final ExecutionPayload newPayload) {
+    final ExecutionPayloadEnvelope newEnvelope =
+        envelope
+            .getSchema()
+            .create(
+                newPayload,
+                envelope.getExecutionRequests(),
+                envelope.getBuilderIndex(),
+                envelope.getBeaconBlockRoot(),
+                envelope.getParentBeaconBlockRoot());
+    return signedEnvelope.getSchema().create(newEnvelope, signedEnvelope.getSignature());
   }
 
   private SignedExecutionPayloadEnvelope createSignedEnvelopeWithBlockRoot(final Bytes32 root) {

@@ -23,13 +23,17 @@ import static org.mockito.Mockito.when;
 import com.google.common.io.Resources;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Optional;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import tech.pegasys.techu.service.serviceutils.layout.SimpleDataDirLayout;
 import tech.pegasys.teku.bls.BLS;
@@ -52,6 +56,7 @@ import tech.pegasys.teku.spec.signatures.Signer;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.api.KeyStoreFilesLocator;
+import tech.pegasys.teku.validator.client.ValidatorClientService;
 import tech.pegasys.teku.validator.client.loader.ValidatorSource.ValidatorProvider;
 import tech.pegasys.teku.validator.client.restapi.apis.schema.DeleteKeyResult;
 import tech.pegasys.teku.validator.client.restapi.apis.schema.DeletionStatus;
@@ -222,6 +227,23 @@ class LocalValidatorSourceTest {
             tempDir, "pbkdf2TestVector.json", EXPECTED_PASSWORD, PBKDF2_PUBKEY);
     assertThat(result.getResult().getImportStatus()).isEqualTo(ImportStatus.IMPORTED);
     assertThat(result.getSigner()).isNotEmpty();
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void shouldSaveAddedValidatorPasswordReadableOnlyByOwner(@TempDir final Path tempDir)
+      throws IOException {
+    final AddValidatorResult result =
+        getResultFromAddingValidator(
+            tempDir, "pbkdf2TestVector.json", EXPECTED_PASSWORD, PBKDF2_PUBKEY);
+    assertThat(result.getResult().getImportStatus()).isEqualTo(ImportStatus.IMPORTED);
+
+    final Path passwordFile =
+        ValidatorClientService.getManagedLocalKeystorePasswordPath(new SimpleDataDirLayout(tempDir))
+            .resolve(PBKDF2_PUBKEY.toBytesCompressed().toUnprefixedHexString() + ".txt");
+    assertThat(Files.readString(passwordFile)).isEqualTo(EXPECTED_PASSWORD);
+    assertThat(Files.getPosixFilePermissions(passwordFile))
+        .isEqualTo(PosixFilePermissions.fromString("rw-------"));
   }
 
   @Test
