@@ -19,8 +19,10 @@ import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import static tech.pegasys.teku.infrastructure.async.SyncAsyncRunner.SYNC_RUNNER;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
@@ -301,13 +303,116 @@ class PqValidatorKeyLoaderTest {
         .isEmpty();
   }
 
+  @Test
+  void load_derivedKeysTakeTheirVrfStateFromTheStateUrl() {
+    // Another key's state first, as in a file holding many validators' states
+    final Path statesFile = tempDir.resolve("states.vrf");
+    writeFile(
+        statesFile,
+        Bytes.concatenate(vrfStateOf(SECRETS.vrfSeed()), vrfStateOf(GENESIS_VALIDATOR_0_VRF_SEED)));
+
+    final XmssSigner signer =
+        derivingLoader(Optional.of(statesFile.toUri()))
+            .load(
+                blsKeystorePath,
+                PASSWORD,
+                GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY,
+                () -> GENESIS_VALIDATOR_0_BLS_SECRET_KEY)
+            .orElseThrow();
+
+    final VrfTree expectedVrfTree =
+        VrfTree.derive(GENESIS_VALIDATOR_0_VRF_SEED, VRF_DEPTH, VRF_CACHED_HEIGHT);
+    final UInt64 slot = UInt64.valueOf(201);
+    assertThat(safeJoin(signer.computeVrfProof(slot)))
+        .isEqualTo(expectedVrfTree.computeProof(slot));
+    // The state is saved, and the tree isn't derived in full
+    assertThat(derivedVrfStatePath())
+        .hasBinaryContent(vrfStateOf(GENESIS_VALIDATOR_0_VRF_SEED).toArrayUnsafe());
+    assertThat(derivedVrfCachePath()).doesNotExist();
+  }
+
+  @Test
+  void load_derivedKeysReadTheirSavedVrfState() {
+    writeFile(derivedVrfStatePath(), vrfStateOf(GENESIS_VALIDATOR_0_VRF_SEED));
+
+    // No state URL: the saved state alone saves deriving the tree
+    final XmssSigner signer =
+        derivingLoader()
+            .load(
+                blsKeystorePath,
+                PASSWORD,
+                GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY,
+                () -> GENESIS_VALIDATOR_0_BLS_SECRET_KEY)
+            .orElseThrow();
+
+    final UInt64 slot = UInt64.valueOf(77);
+    assertThat(safeJoin(signer.computeVrfProof(slot)))
+        .isEqualTo(
+            VrfTree.derive(GENESIS_VALIDATOR_0_VRF_SEED, VRF_DEPTH, VRF_CACHED_HEIGHT)
+                .computeProof(slot));
+    assertThat(derivedVrfCachePath()).doesNotExist();
+  }
+
+  @Test
+  void load_derivesTheVrfTreeWhenTheStateUrlHasNoStateForTheKey() {
+    final Path statesFile = tempDir.resolve("states.vrf");
+    writeFile(statesFile, vrfStateOf(SECRETS.vrfSeed()));
+
+    assertThat(
+            derivingLoader(Optional.of(statesFile.toUri()))
+                .load(
+                    blsKeystorePath,
+                    PASSWORD,
+                    GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY,
+                    () -> GENESIS_VALIDATOR_0_BLS_SECRET_KEY))
+        .isPresent();
+
+    assertThat(derivedVrfCachePath()).exists();
+    assertThat(derivedVrfStatePath()).doesNotExist();
+  }
+
+  @Test
+  void load_derivesTheVrfTreeWhenTheStateUrlCannotBeRead() {
+    assertThat(
+            derivingLoader(Optional.of(tempDir.resolve("missing.vrf").toUri()))
+                .load(
+                    blsKeystorePath,
+                    PASSWORD,
+                    GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY,
+                    () -> GENESIS_VALIDATOR_0_BLS_SECRET_KEY))
+        .isPresent();
+
+    assertThat(derivedVrfCachePath()).exists();
+  }
+
+  /** The serialized slot-0 VRF state of the test-depth tree of {@code seed}. */
+  private static Bytes vrfStateOf(final Bytes32 seed) {
+    final VrfTree tree = VrfTree.derive(seed, VRF_DEPTH, VRF_CACHED_HEIGHT);
+    final List<Bytes> siblings = new ArrayList<>();
+    for (int height = 0; height < VRF_DEPTH; height++) {
+      siblings.add(VrfTree.computeNode(seed, height, 1));
+    }
+    return Bytes.concatenate(
+        tree.getRoot(), Bytes.wrap(new byte[Integer.BYTES]), Bytes.concatenate(siblings));
+  }
+
+  private Path derivedVrfStatePath() {
+    return PqValidatorKeyLoader.derivedVrfStatePath(
+        derivedVrfCacheDir(), GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY);
+  }
+
   private PqValidatorKeyLoader derivingLoader() {
+    return derivingLoader(Optional.empty());
+  }
+
+  private PqValidatorKeyLoader derivingLoader(final Optional<URI> vrfStateUrl) {
     return new PqValidatorKeyLoader(
         spec,
         new PqKeyLoadingConfig(
             new LocalXmssLeafProtector(
                 SyncDataAccessor.create(slashingProtectionDir), slashingProtectionDir),
-            Optional.of(derivedVrfCacheDir())),
+            Optional.of(derivedVrfCacheDir()),
+            vrfStateUrl),
         SYNC_RUNNER,
         VRF_DEPTH,
         VRF_CACHED_HEIGHT);

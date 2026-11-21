@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.validator.client.loader;
 
+import java.net.URI;
 import java.nio.file.Path;
 import java.util.Optional;
 import tech.pegasys.teku.spec.signatures.xmss.XmssLeafProtector;
@@ -22,11 +23,20 @@ import tech.pegasys.teku.spec.signatures.xmss.XmssLeafProtector;
  *
  * @param leafProtector guards the leaves of the validators' leanXMSS keys
  * @param derivedKeysVrfCacheDirectory when present, a validator with no PQ keystore gets PQ keys
- *     derived from its BLS secret key, and the VRF tree of each derived key is saved in this
- *     directory; when empty, such a validator has no PQ keys
+ *     derived from its BLS secret key, and the VRF tree (or VRF state) of each derived key is saved
+ *     in this directory; when empty, such a validator has no PQ keys
+ * @param vrfStateUrl where derived keys can find precomputed VRF states (a devnet {@code
+ *     vrf_state_url} file) instead of deriving each VRF tree in full
  */
 public record PqKeyLoadingConfig(
-    XmssLeafProtector leafProtector, Optional<Path> derivedKeysVrfCacheDirectory) {
+    XmssLeafProtector leafProtector,
+    Optional<Path> derivedKeysVrfCacheDirectory,
+    Optional<URI> vrfStateUrl) {
+
+  public PqKeyLoadingConfig(
+      final XmssLeafProtector leafProtector, final Optional<Path> derivedKeysVrfCacheDirectory) {
+    this(leafProtector, derivedKeysVrfCacheDirectory, Optional.empty());
+  }
 
   /** Loads only PQ keystores; nothing is derived. */
   public static PqKeyLoadingConfig keystoresOnly(final XmssLeafProtector leafProtector) {

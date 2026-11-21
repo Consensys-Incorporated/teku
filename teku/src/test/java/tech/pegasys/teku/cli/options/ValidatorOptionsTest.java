@@ -79,6 +79,23 @@ public class ValidatorOptionsTest extends AbstractBeaconNodeCommandTest {
   }
 
   @Test
+  void pqVrfStateUrl_shouldBeEmptyByDefault() {
+    final ValidatorConfig config =
+        getTekuConfigurationFromArguments().validatorClient().getValidatorConfig();
+    assertThat(config.getPqVrfStateUrl()).isEmpty();
+  }
+
+  @Test
+  void pqVrfStateUrl_shouldBeReadFromFlag() {
+    final String url = "https://example.com/xmss-keys/b9dec4e1daa17dfe.vrf";
+    final ValidatorConfig config =
+        getTekuConfigurationFromArguments("--Xvalidators-pq-vrf-state-url=" + url)
+            .validatorClient()
+            .getValidatorConfig();
+    assertThat(config.getPqVrfStateUrl()).contains(URI.create(url));
+  }
+
+  @Test
   public void graffiti_shouldBeEmptyByDefault() {
     final ValidatorConfig config =
         getTekuConfigurationFromArguments().validatorClient().getValidatorConfig();
