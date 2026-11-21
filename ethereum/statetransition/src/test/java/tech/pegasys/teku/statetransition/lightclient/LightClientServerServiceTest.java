@@ -1,4 +1,4 @@
- /*
+/*
  * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiPredicate;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -371,8 +372,57 @@ public class LightClientServerServiceTest {
     verify(channel, never()).onNewLightClientBootstrap(any());
 
     blocksByRoot.put(anchor.getRoot(), anchor.getBlock());
+    advanceToNextSlot();
     bootstrapService.onBlockImported(chain.signature().getBlock(), false);
 
+    verify(channel)
+        .onNewLightClientBootstrap(
+            spec.getLightClientUtilRequired(anchor.getSlot())
+                .createLightClientBootstrap(anchor.getState(), anchor.getBlock()));
+  }
+
+  @TestTemplate
+  public void onBlockImported_shouldRetryPendingBootstrapAtMostOncePerSlot() {
+    final Chain chain = generateChain();
+    final LightClientUpdateChannel channel =
+        mock(LightClientUpdateChannel.class, invocation -> SafeFuture.COMPLETE);
+    final SignedBlockAndState anchor = chain.attested();
+    final SignedBeaconBlock importedBlock = chain.genesis().getBlock();
+    final AtomicInteger anchorLookups = new AtomicInteger();
+    final LightClientServerService bootstrapService =
+        new LightClientServerService(
+            spec,
+            new LightClientUpdateStore(spec, channel),
+            root -> {
+              if (root.equals(anchor.getRoot())) {
+                anchorLookups.incrementAndGet();
+              }
+              return lookUpBlock(root);
+            },
+            this::lookUpState,
+            CANONICAL,
+            asyncRunner,
+            timeProvider);
+    blocksByRoot.remove(anchor.getRoot());
+
+    bootstrapService.onNewFinalizedCheckpoint(checkpointAt(anchor), false);
+    final int lookupsAfterFinalization = anchorLookups.get();
+
+    for (int i = 0; i < 10; i++) {
+      bootstrapService.onBlockImported(importedBlock, false);
+    }
+    assertThat(anchorLookups.get()).isEqualTo(lookupsAfterFinalization + 1);
+
+    blocksByRoot.put(anchor.getRoot(), anchor.getBlock());
+    bootstrapService.onBlockImported(importedBlock, false);
+    assertThat(anchorLookups.get()).isEqualTo(lookupsAfterFinalization + 1);
+    verify(channel, never()).onNewLightClientBootstrap(any());
+
+    advanceToNextSlot();
+    for (int i = 0; i < 10; i++) {
+      bootstrapService.onBlockImported(importedBlock, false);
+    }
+    assertThat(anchorLookups.get()).isEqualTo(lookupsAfterFinalization + 2);
     verify(channel)
         .onNewLightClientBootstrap(
             spec.getLightClientUtilRequired(anchor.getSlot())
@@ -405,6 +455,7 @@ public class LightClientServerServiceTest {
     bootstrapService.onBlockImported(chain.signature().getBlock(), false);
     failLookup.set(false);
     blocksByRoot.put(anchor.getRoot(), anchor.getBlock());
+    advanceToNextSlot();
     bootstrapService.onBlockImported(chain.signature().getBlock(), false);
 
     verify(channel)
@@ -795,6 +846,10 @@ public class LightClientServerServiceTest {
     assertThat(store.getLatestOptimisticUpdate()).isPresent();
     assertThat(publishedFinality).isEmpty();
     assertThat(publishedOptimistic).isEmpty();
+  }
+
+  private void advanceToNextSlot() {
+    timeProvider.advanceTimeByMillis(spec.getSlotDurationMillis(UInt64.ZERO));
   }
 
   private UInt64 signatureSlotStartMillis(final Chain chain) {

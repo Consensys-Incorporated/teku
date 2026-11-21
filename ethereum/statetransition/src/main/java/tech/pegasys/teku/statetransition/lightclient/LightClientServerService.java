@@ -71,6 +71,10 @@ public class LightClientServerService
   private final TimeProvider timeProvider;
   private final AtomicReference<Optional<PendingBootstrap>> pendingBootstrap =
       new AtomicReference<>(Optional.empty());
+
+  private final AtomicReference<Optional<UInt64>> lastBlockImportBootstrapRetrySlot =
+      new AtomicReference<>(Optional.empty());
+
   private final Map<UInt64, PendingUpdate> pendingUpdatesByPeriod = new ConcurrentHashMap<>();
   private final Map<Bytes32, BoundaryBootstrap> boundaryBootstraps = new ConcurrentHashMap<>();
 
@@ -155,7 +159,7 @@ public class LightClientServerService
       return;
     }
 
-    pendingBootstrap.getAndSet(Optional.empty()).ifPresent(this::retryPendingBootstrap);
+    retryPendingBootstrapOncePerSlot();
     captureBoundaryBootstraps(block);
 
     final Optional<SyncAggregate> maybeSyncAggregate =
@@ -316,6 +320,24 @@ public class LightClientServerService
                 .map(util -> util.createLightClientBootstrap(state, block)));
   }
 
+  private void retryPendingBootstrapOncePerSlot() {
+    final Optional<PendingBootstrap> maybePending = pendingBootstrap.get();
+    if (maybePending.isEmpty()) {
+      return;
+    }
+    final UInt64 currentSlot =
+        spec.getCurrentSlotFromTimeMillis(
+            timeProvider.getTimeInMillis(), maybePending.get().genesisTimeMillis());
+    final Optional<UInt64> lastRetrySlot = lastBlockImportBootstrapRetrySlot.get();
+    if (lastRetrySlot.isPresent() && currentSlot.isLessThanOrEqualTo(lastRetrySlot.get())) {
+      return;
+    }
+    if (!lastBlockImportBootstrapRetrySlot.compareAndSet(lastRetrySlot, Optional.of(currentSlot))) {
+      return;
+    }
+    pendingBootstrap.getAndSet(Optional.empty()).ifPresent(this::retryPendingBootstrap);
+  }
+
   private void retryPendingBootstrap(final PendingBootstrap pending) {
     retrieveBlockByRoot
         .apply(pending.blockRoot())
@@ -392,7 +414,8 @@ public class LightClientServerService
                                     new PendingBootstrap(
                                         blockRoot,
                                         state.getCurrentSyncCommittee(),
-                                        state.createCurrentSyncCommitteeProof()))));
+                                        state.createCurrentSyncCommitteeProof(),
+                                        secondsToMillis(state.getGenesisTime())))));
                 return Optional.<LightClientBootstrap>empty();
               }
               return createBootstrap(maybeBlock.get(), maybeState);
@@ -563,7 +586,8 @@ public class LightClientServerService
   private record PendingBootstrap(
       Bytes32 blockRoot,
       SyncCommittee currentSyncCommittee,
-      SszBytes32Vector currentSyncCommitteeBranch) {}
+      SszBytes32Vector currentSyncCommitteeBranch,
+      UInt64 genesisTimeMillis) {}
 
   private record PendingUpdate(
       Bytes32 signatureBlockRoot,
