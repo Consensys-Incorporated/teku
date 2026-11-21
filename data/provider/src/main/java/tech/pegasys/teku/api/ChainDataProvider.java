@@ -207,12 +207,12 @@ public class ChainDataProvider {
 
   public void subscribeToNewLightClientFinalityUpdates(
       final Consumer<LightClientFinalityUpdate> subscriber) {
-    lightClientUpdateStore.subscribeToNewFinalityUpdates(subscriber);
+    lightClientUpdateStore.subscribeToPublishedFinalityUpdates(subscriber);
   }
 
   public void subscribeToNewLightClientOptimisticUpdates(
       final Consumer<LightClientOptimisticUpdate> subscriber) {
-    lightClientUpdateStore.subscribeToNewOptimisticUpdates(subscriber);
+    lightClientUpdateStore.subscribeToPublishedOptimisticUpdates(subscriber);
   }
 
   public UInt64 getCurrentEpoch(final BeaconState state) {

@@ -26,14 +26,12 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBytes32Vector;
-import tech.pegasys.teku.infrastructure.subscribers.Subscribers;
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -71,10 +69,6 @@ public class LightClientServerService
   private final BiPredicate<UInt64, Bytes32> isCanonicalBlock;
   private final AsyncRunner asyncRunner;
   private final TimeProvider timeProvider;
-  private final Subscribers<Consumer<LightClientFinalityUpdate>> finalityUpdateSubscribers =
-      Subscribers.create(true);
-  private final Subscribers<Consumer<LightClientOptimisticUpdate>> optimisticUpdateSubscribers =
-      Subscribers.create(true);
   private final AtomicReference<Optional<PendingBootstrap>> pendingBootstrap =
       new AtomicReference<>(Optional.empty());
   private final Map<UInt64, PendingUpdate> pendingUpdatesByPeriod = new ConcurrentHashMap<>();
@@ -145,16 +139,6 @@ public class LightClientServerService
     this.isCanonicalBlock = isCanonicalBlock;
     this.asyncRunner = asyncRunner;
     this.timeProvider = timeProvider;
-  }
-
-  public void subscribeToFinalityUpdatesToPublish(
-      final Consumer<LightClientFinalityUpdate> subscriber) {
-    finalityUpdateSubscribers.subscribe(subscriber);
-  }
-
-  public void subscribeToOptimisticUpdatesToPublish(
-      final Consumer<LightClientOptimisticUpdate> subscriber) {
-    optimisticUpdateSubscribers.subscribe(subscriber);
   }
 
   @Override
@@ -512,8 +496,7 @@ public class LightClientServerService
                         finalityUpdate,
                         finalityUpdate.getSignatureSlot().get(),
                         genesisTimeMillis,
-                        lightClientStore::getLatestFinalityUpdate,
-                        finalityUpdateSubscribers);
+                        lightClientStore::publishFinalityUpdateIfLatest);
                   }
                 }
 
@@ -525,8 +508,7 @@ public class LightClientServerService
                       optimisticUpdate,
                       optimisticUpdate.getSignatureSlot().get(),
                       genesisTimeMillis,
-                      lightClientStore::getLatestOptimisticUpdate,
-                      optimisticUpdateSubscribers);
+                      lightClientStore::publishOptimisticUpdateIfLatest);
                 }
 
                 return Optional.of(update);
@@ -538,8 +520,7 @@ public class LightClientServerService
       final T update,
       final UInt64 signatureSlot,
       final UInt64 genesisTimeMillis,
-      final Supplier<Optional<T>> latestUpdate,
-      final Subscribers<Consumer<T>> subscribers) {
+      final Consumer<T> publishIfLatest) {
     final UInt64 slotStartMillis = spec.computeTimeMillisAtSlot(signatureSlot, genesisTimeMillis);
     final UInt64 currentTimeMillis = timeProvider.getTimeInMillis();
 
@@ -553,11 +534,7 @@ public class LightClientServerService
 
     asyncRunner
         .runAfterDelay(
-            () -> {
-              if (latestUpdate.get().filter(update::equals).isPresent()) {
-                subscribers.forEach(subscriber -> subscriber.accept(update));
-              }
-            },
+            () -> publishIfLatest.accept(update),
             Duration.ofMillis(publishTimeMillis.minusMinZero(currentTimeMillis).longValue()))
         .finishError(LOG);
   }

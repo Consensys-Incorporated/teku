@@ -1,4 +1,4 @@
-/*
+ /*
  * Copyright (c) 2026 Consensys Incorporated. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
@@ -699,7 +699,7 @@ public class LightClientServerServiceTest {
     final Chain chain = generateChain();
     finalizeAttestedStateAt(chain, chain.attested().getRoot());
     final List<LightClientFinalityUpdate> published = new ArrayList<>();
-    service.subscribeToFinalityUpdatesToPublish(published::add);
+    store.subscribeToPublishedFinalityUpdates(published::add);
     timeProvider.advanceTimeByMillis(signatureSlotStartMillis(chain));
 
     service.onBlockImported(chain.signature().getBlock(), false);
@@ -716,7 +716,7 @@ public class LightClientServerServiceTest {
   public void onBlockImported_shouldPublishOptimisticUpdateAtSyncMessageDue() {
     final Chain chain = generateChain();
     final List<LightClientOptimisticUpdate> published = new ArrayList<>();
-    service.subscribeToOptimisticUpdatesToPublish(published::add);
+    store.subscribeToPublishedOptimisticUpdates(published::add);
     timeProvider.advanceTimeByMillis(signatureSlotStartMillis(chain));
 
     service.onBlockImported(chain.signature().getBlock(), false);
@@ -734,7 +734,7 @@ public class LightClientServerServiceTest {
     final Chain chain = generateChain();
     finalizeAttestedStateAt(chain, chain.attested().getRoot());
     final List<LightClientFinalityUpdate> published = new ArrayList<>();
-    service.subscribeToFinalityUpdatesToPublish(published::add);
+    store.subscribeToPublishedFinalityUpdates(published::add);
     timeProvider.advanceTimeByMillis(signatureSlotStartMillis(chain));
 
     service.onBlockImported(chain.signature().getBlock(), false);
@@ -748,6 +748,8 @@ public class LightClientServerServiceTest {
   public void onBlockImported_shouldNotPublishFinalityUpdateImportedAfterSignatureSlot() {
     final Chain chain = generateChain();
     finalizeAttestedStateAt(chain, chain.attested().getRoot());
+    final List<LightClientFinalityUpdate> published = new ArrayList<>();
+    store.subscribeToPublishedFinalityUpdates(published::add);
     timeProvider.advanceTimeByMillis(
         signatureSlotStartMillis(chain)
             .plus(spec.getSlotDurationMillis(chain.signature().getSlot())));
@@ -756,6 +758,43 @@ public class LightClientServerServiceTest {
 
     assertThat(store.getLatestFinalityUpdate()).isPresent();
     assertThat(asyncRunner.hasDelayedActions()).isFalse();
+    asyncRunner.executeQueuedActions();
+    assertThat(published).isEmpty();
+  }
+
+  @TestTemplate
+  public void onBlockImported_shouldNotPublishOptimisticUpdateImportedAfterSignatureSlot() {
+    final Chain chain = generateChain();
+    final List<LightClientOptimisticUpdate> published = new ArrayList<>();
+    store.subscribeToPublishedOptimisticUpdates(published::add);
+    timeProvider.advanceTimeByMillis(
+        signatureSlotStartMillis(chain)
+            .plus(spec.getSlotDurationMillis(chain.signature().getSlot())));
+
+    service.onBlockImported(chain.signature().getBlock(), false);
+
+    assertThat(store.getLatestOptimisticUpdate()).isPresent();
+    assertThat(asyncRunner.hasDelayedActions()).isFalse();
+    asyncRunner.executeQueuedActions();
+    assertThat(published).isEmpty();
+  }
+
+  @TestTemplate
+  public void onBlockImported_shouldNotNotifySubscribersBeforeSyncMessageDue() {
+    final Chain chain = generateChain();
+    finalizeAttestedStateAt(chain, chain.attested().getRoot());
+    final List<LightClientFinalityUpdate> publishedFinality = new ArrayList<>();
+    final List<LightClientOptimisticUpdate> publishedOptimistic = new ArrayList<>();
+    store.subscribeToPublishedFinalityUpdates(publishedFinality::add);
+    store.subscribeToPublishedOptimisticUpdates(publishedOptimistic::add);
+    timeProvider.advanceTimeByMillis(signatureSlotStartMillis(chain));
+
+    service.onBlockImported(chain.signature().getBlock(), false);
+
+    assertThat(store.getLatestFinalityUpdate()).isPresent();
+    assertThat(store.getLatestOptimisticUpdate()).isPresent();
+    assertThat(publishedFinality).isEmpty();
+    assertThat(publishedOptimistic).isEmpty();
   }
 
   private UInt64 signatureSlotStartMillis(final Chain chain) {

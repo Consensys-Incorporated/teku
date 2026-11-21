@@ -151,23 +151,32 @@ public class LightClientUpdateStore {
       return false;
     }
 
-    if (!replaceIfLater(
+    return replaceIfLater(
         latestFinalityUpdate,
         new StoredUpdate<>(finalityUpdate, signatureSlot, signatureBlockRoot),
-        update -> update.getAttestedHeader().getBeacon().getSlot())) {
-      return false;
-    }
-    finalityUpdateSubscribers.deliver(Consumer::accept, finalityUpdate);
-    return true;
+        update -> update.getAttestedHeader().getBeacon().getSlot());
   }
 
-  public void subscribeToNewFinalityUpdates(final Consumer<LightClientFinalityUpdate> subscriber) {
+  public void subscribeToPublishedFinalityUpdates(
+      final Consumer<LightClientFinalityUpdate> subscriber) {
     finalityUpdateSubscribers.subscribe(subscriber);
   }
 
-  public void subscribeToNewOptimisticUpdates(
+  public void subscribeToPublishedOptimisticUpdates(
       final Consumer<LightClientOptimisticUpdate> subscriber) {
     optimisticUpdateSubscribers.subscribe(subscriber);
+  }
+
+  public void publishFinalityUpdateIfLatest(final LightClientFinalityUpdate finalityUpdate) {
+    if (getLatestFinalityUpdate().filter(finalityUpdate::equals).isPresent()) {
+      finalityUpdateSubscribers.deliver(Consumer::accept, finalityUpdate);
+    }
+  }
+
+  public void publishOptimisticUpdateIfLatest(final LightClientOptimisticUpdate optimisticUpdate) {
+    if (getLatestOptimisticUpdate().filter(optimisticUpdate::equals).isPresent()) {
+      optimisticUpdateSubscribers.deliver(Consumer::accept, optimisticUpdate);
+    }
   }
 
   public synchronized boolean addOptimisticUpdate(
@@ -179,14 +188,10 @@ public class LightClientUpdateStore {
       return false;
     }
 
-    if (!replaceIfLater(
+    return replaceIfLater(
         latestOptimisticUpdate,
         new StoredUpdate<>(optimisticUpdate, signatureSlot, signatureBlockRoot),
-        update -> update.getAttestedHeader().getBeacon().getSlot())) {
-      return false;
-    }
-    optimisticUpdateSubscribers.deliver(Consumer::accept, optimisticUpdate);
-    return true;
+        update -> update.getAttestedHeader().getBeacon().getSlot());
   }
 
   private <T> boolean replaceIfLater(

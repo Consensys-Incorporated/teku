@@ -431,9 +431,24 @@ public class LightClientUpdateStoreTest {
   }
 
   @TestTemplate
-  public void addFinalityUpdate_shouldNotifySubscribersOnlyWhenLatestChanges() {
+  public void addFinalityUpdate_shouldNotNotifyPublishedUpdateSubscribers() {
     final List<LightClientFinalityUpdate> notified = new ArrayList<>();
-    store.subscribeToNewFinalityUpdates(notified::add);
+    store.subscribeToPublishedFinalityUpdates(notified::add);
+
+    store.addFinalityUpdate(
+        dataStructureUtil.randomLightClientFinalityUpdate(
+            periodOneStartSlot(), periodOneStartSlot()),
+        dataStructureUtil.randomBytes32(),
+        CANONICAL);
+
+    assertThat(store.getLatestFinalityUpdate()).isPresent();
+    assertThat(notified).isEmpty();
+  }
+
+  @TestTemplate
+  public void publishFinalityUpdateIfLatest_shouldOnlyNotifyForLatestUpdate() {
+    final List<LightClientFinalityUpdate> notified = new ArrayList<>();
+    store.subscribeToPublishedFinalityUpdates(notified::add);
     final LightClientFinalityUpdate older =
         dataStructureUtil.randomLightClientFinalityUpdate(
             periodOneStartSlot(), periodOneStartSlot());
@@ -443,20 +458,30 @@ public class LightClientUpdateStoreTest {
 
     store.addFinalityUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
     store.addFinalityUpdate(newer, dataStructureUtil.randomBytes32(), CANONICAL);
-    store.addFinalityUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
-    store.addFinalityUpdate(
-        dataStructureUtil.randomLightClientFinalityUpdate(
-            periodOneStartSlot().plus(2), periodOneStartSlot()),
-        dataStructureUtil.randomBytes32(),
-        (slot, root) -> false);
+    store.publishFinalityUpdateIfLatest(older);
+    store.publishFinalityUpdateIfLatest(newer);
 
-    assertThat(notified).containsExactly(older, newer);
+    assertThat(notified).containsExactly(newer);
   }
 
   @TestTemplate
-  public void addOptimisticUpdate_shouldNotifySubscribersOnlyWhenLatestChanges() {
+  public void addOptimisticUpdate_shouldNotNotifyPublishedUpdateSubscribers() {
     final List<LightClientOptimisticUpdate> notified = new ArrayList<>();
-    store.subscribeToNewOptimisticUpdates(notified::add);
+    store.subscribeToPublishedOptimisticUpdates(notified::add);
+
+    store.addOptimisticUpdate(
+        dataStructureUtil.randomLightClientOptimisticUpdate(periodOneStartSlot()),
+        dataStructureUtil.randomBytes32(),
+        CANONICAL);
+
+    assertThat(store.getLatestOptimisticUpdate()).isPresent();
+    assertThat(notified).isEmpty();
+  }
+
+  @TestTemplate
+  public void publishOptimisticUpdateIfLatest_shouldOnlyNotifyForLatestUpdate() {
+    final List<LightClientOptimisticUpdate> notified = new ArrayList<>();
+    store.subscribeToPublishedOptimisticUpdates(notified::add);
     final LightClientOptimisticUpdate older =
         dataStructureUtil.randomLightClientOptimisticUpdate(periodOneStartSlot());
     final LightClientOptimisticUpdate newer =
@@ -464,13 +489,10 @@ public class LightClientUpdateStoreTest {
 
     store.addOptimisticUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
     store.addOptimisticUpdate(newer, dataStructureUtil.randomBytes32(), CANONICAL);
-    store.addOptimisticUpdate(older, dataStructureUtil.randomBytes32(), CANONICAL);
-    store.addOptimisticUpdate(
-        dataStructureUtil.randomLightClientOptimisticUpdate(periodOneStartSlot().plus(2)),
-        dataStructureUtil.randomBytes32(),
-        (slot, root) -> false);
+    store.publishOptimisticUpdateIfLatest(older);
+    store.publishOptimisticUpdateIfLatest(newer);
 
-    assertThat(notified).containsExactly(older, newer);
+    assertThat(notified).containsExactly(newer);
   }
 
   @TestTemplate
