@@ -29,6 +29,7 @@ dependencies {
 	implementation project(':services:executionlayer')
 	implementation project(':services:zkchain')
 	implementation project(':infrastructure:ssz')
+	implementation project(':infrastructure:xmss')
 	implementation project(':storage')
 	implementation project(':storage:api')
 	implementation project(':beacon:sync')
