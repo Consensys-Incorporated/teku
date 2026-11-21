@@ -21,7 +21,9 @@ import java.net.URI;
 import java.net.URLConnection;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
@@ -83,6 +85,7 @@ public class PqValidatorKeyLoader {
   private final Optional<URI> vrfStateUrl;
   // Fetched at most once, when the first derived key without a saved VRF tree or state needs it
   private final Supplier<Optional<Bytes>> fetchedVrfStates;
+  private final Map<Path, SyncDataAccessor> dataAccessors = new ConcurrentHashMap<>();
   private final AsyncRunner asyncRunner;
   private final int vrfTreeDepth;
   private final int vrfCachedHeight;
@@ -256,12 +259,18 @@ public class PqValidatorKeyLoader {
     }
   }
 
-  private static void saveDerivedFile(final Path path, final Bytes content) {
+  /**
+   * Saves a VRF tree or state, which is derived data: if it can't be saved, it is derived again on
+   * the next start.
+   */
+  private void saveDerivedFile(final Path path, final Bytes content) {
     try {
       final Path directory = path.toAbsolutePath().getParent();
       Files.createDirectories(directory);
-      SyncDataAccessor.create(directory).syncedWrite(path, content);
-    } catch (final IOException e) {
+      // Keys load in parallel. Creating an accessor runs a write test through a fixed temporary
+      // file name, so the keys share one accessor per directory.
+      dataAccessors.computeIfAbsent(directory, SyncDataAccessor::create).syncedWrite(path, content);
+    } catch (final IOException | RuntimeException e) {
       LOG.warn("Unable to save {}: {}", path, e.getMessage());
     }
   }
@@ -394,13 +403,7 @@ public class PqValidatorKeyLoader {
             vrfTreeDepth,
             vrfCachedHeight,
             progressLogger("Rebuilding VRF cache " + vrfCachePath));
-    try {
-      final Path directory = vrfCachePath.toAbsolutePath().getParent();
-      Files.createDirectories(directory);
-      SyncDataAccessor.create(directory).syncedWrite(vrfCachePath, vrfTree.getCachedNodes());
-    } catch (final IOException e) {
-      LOG.warn("Unable to save rebuilt VRF cache {}: {}", vrfCachePath, e.getMessage());
-    }
+    saveDerivedFile(vrfCachePath, vrfTree.getCachedNodes());
     return vrfTree;
   }
 

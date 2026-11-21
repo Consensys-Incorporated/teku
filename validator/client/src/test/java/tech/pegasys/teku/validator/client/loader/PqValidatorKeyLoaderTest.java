@@ -22,22 +22,30 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.stream.IntStream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSecretKey;
+import tech.pegasys.teku.bls.BLSTestUtil;
 import tech.pegasys.teku.bls.keystore.model.Cipher;
 import tech.pegasys.teku.bls.keystore.model.Pbkdf2Param;
 import tech.pegasys.teku.bls.keystore.model.Pbkdf2PseudoRandomFunction;
 import tech.pegasys.teku.bls.keystore.pq.PqKeyStore;
 import tech.pegasys.teku.bls.keystore.pq.PqKeyStoreSecrets;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
 import tech.pegasys.teku.infrastructure.io.SyncDataAccessor;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -329,6 +337,53 @@ class PqValidatorKeyLoaderTest {
     assertThat(derivedVrfStatePath())
         .hasBinaryContent(vrfStateOf(GENESIS_VALIDATOR_0_VRF_SEED).toArrayUnsafe());
     assertThat(derivedVrfCachePath()).doesNotExist();
+  }
+
+  @Test
+  void load_derivedKeysLoadedInParallelAllSaveTheirVrfStates() {
+    // Keys load in parallel, and each saves its state as soon as it is found
+    final List<Bytes32> blsSecretKeys =
+        IntStream.range(0, 4)
+            .mapToObj(seed -> BLSTestUtil.randomKeyPair(seed).getSecretKey().toBytes())
+            .toList();
+    final Path statesFile = tempDir.resolve("states.vrf");
+    writeFile(
+        statesFile,
+        Bytes.concatenate(
+            blsSecretKeys.stream()
+                .map(sk -> vrfStateOf(PqKeyStoreSecrets.deriveFromBlsSecretKey(sk).vrfSeed()))
+                .toArray(Bytes[]::new)));
+    final PqValidatorKeyLoader loader = derivingLoader(Optional.of(statesFile.toUri()));
+    final ExecutorService executor = Executors.newFixedThreadPool(blsSecretKeys.size());
+    try {
+      final List<SafeFuture<Optional<XmssSigner>>> loads =
+          blsSecretKeys.stream()
+              .map(
+                  sk ->
+                      SafeFuture.of(
+                          CompletableFuture.supplyAsync(
+                              () ->
+                                  loader.load(
+                                      blsKeystorePath,
+                                      PASSWORD,
+                                      BLSSecretKey.fromBytes(sk).toPublicKey(),
+                                      () -> sk),
+                              executor)))
+              .toList();
+
+      assertThat(SafeFuture.collectAll(loads.stream()))
+          .succeedsWithin(Duration.ofMinutes(2))
+          .asInstanceOf(InstanceOfAssertFactories.LIST)
+          .allMatch(signer -> ((Optional<?>) signer).isPresent());
+    } finally {
+      executor.shutdownNow();
+    }
+    for (final Bytes32 sk : blsSecretKeys) {
+      assertThat(
+              PqValidatorKeyLoader.derivedVrfStatePath(
+                  derivedVrfCacheDir(), BLSSecretKey.fromBytes(sk).toPublicKey()))
+          .exists();
+    }
   }
 
   @Test
