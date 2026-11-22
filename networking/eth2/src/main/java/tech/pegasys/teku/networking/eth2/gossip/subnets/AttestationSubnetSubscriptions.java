@@ -113,7 +113,8 @@ public class AttestationSubnetSubscriptions extends CommitteeSubnetSubscriptions
         GossipTopicName.getAttestationSubnetTopicName(subnetId),
         attestationSchema,
         subnetId,
-        debugDataDumper);
+        debugDataDumper,
+        attestationSchema.equals(SingleAttestationPq.SSZ_SCHEMA));
   }
 
   private SafeFuture<Optional<Integer>> computeSubnetForAttestation(final Attestation attestation) {

@@ -94,6 +94,7 @@ import tech.pegasys.teku.infrastructure.metrics.SettableLabelledGauge;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.infrastructure.version.VersionProvider;
 import tech.pegasys.teku.kzg.KZG;
 import tech.pegasys.teku.networking.eth2.Eth2P2PNetwork;
 import tech.pegasys.teku.networking.eth2.Eth2P2PNetworkBuilder;
@@ -116,6 +117,7 @@ import tech.pegasys.teku.networking.eth2.peers.MetadataDasPeerCustodyTracker;
 import tech.pegasys.teku.networking.p2p.discovery.DiscoveryConfig;
 import tech.pegasys.teku.networks.Eth2NetworkConfiguration;
 import tech.pegasys.teku.networks.LeanVmSidecarConfig;
+import tech.pegasys.teku.networks.PqTimingConfig;
 import tech.pegasys.teku.networks.StateBoostrapConfig;
 import tech.pegasys.teku.service.serviceutils.Service;
 import tech.pegasys.teku.service.serviceutils.ServiceConfig;
@@ -251,6 +253,7 @@ import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
 import tech.pegasys.teku.statetransition.payloadattestation.AggregatingPayloadAttestationPool;
 import tech.pegasys.teku.statetransition.payloadattestation.PayloadAttestationMessageGossipValidator;
 import tech.pegasys.teku.statetransition.payloadattestation.PayloadAttestationPool;
+import tech.pegasys.teku.statetransition.pq.timing.PqTimingController;
 import tech.pegasys.teku.statetransition.synccommittee.SignedContributionAndProofValidator;
 import tech.pegasys.teku.statetransition.synccommittee.SyncCommitteeContributionPool;
 import tech.pegasys.teku.statetransition.synccommittee.SyncCommitteeMessagePool;
@@ -444,6 +447,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
   protected volatile Optional<DataColumnSidecarRetriever> recoveringSidecarRetriever =
       Optional.empty();
   protected volatile Optional<LeanVmSidecar> leanVmSidecar = Optional.empty();
+  protected volatile Optional<PqTimingController> pqTimingController = Optional.empty();
   protected volatile Optional<DataColumnSidecarRetriever> simpleSidecarRetriever = Optional.empty();
   protected volatile AvailabilityCheckerFactory<UInt64> dasSamplerManager;
   protected volatile DasSamplerBasic dasSamplerBasic = DasSamplerBasic.NOOP;
@@ -658,6 +662,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
                   recoveringSidecarRetriever.ifPresent(DataColumnSidecarRetriever::stop);
                 }))
         .thenRun(forkChoiceExecutor::stop)
+        .thenRun(() -> pqTimingController.ifPresent(PqTimingController::stop))
         .thenRun(
             () ->
                 leanVmSidecar.ifPresent(
@@ -691,6 +696,56 @@ public class BeaconChainController extends Service implements BeaconChainControl
       throw new InvalidConfigurationException(
           "Unable to use the leanVM sidecar on " + socket + ": " + e.getMessage(), e);
     }
+  }
+
+  /**
+   * Records PQ gossip and proving timings, and in observer mode runs proving experiments, when the
+   * PQ timing export is on.
+   */
+  protected void initPqTiming(final AggregatingAttestationPoolPq pqAttestationPool) {
+    final Optional<PqTimingConfig> config = beaconConfig.eth2NetworkConfig().getPqTiming();
+    if (config.isEmpty()) {
+      return;
+    }
+    final PqTimingController controller =
+        new PqTimingController(
+            spec,
+            recentChainData,
+            pqAttestationPool,
+            // Experiments wait for their slot times and prove while the next one is planned
+            asyncRunnerFactory.create("pqTiming", 2),
+            config.get().output().orElseGet(() -> beaconDataDirectory.resolve("pq-timing")),
+            config.get().measurement(),
+            beaconConfig
+                .eth2NetworkConfig()
+                .getEth2Network()
+                .map(Object::toString)
+                .orElse("custom"),
+            VersionProvider.VERSION,
+            leanVmSidecar
+                .filter(
+                    __ ->
+                        beaconConfig
+                            .eth2NetworkConfig()
+                            .getLeanVmSidecar()
+                            .orElseThrow()
+                            .binary()
+                            .isPresent())
+                .map(__ -> Runtime.getRuntime().availableProcessors()),
+            () -> syncService == null || !syncService.getCurrentSyncState().isInSync(),
+            () -> p2pNetwork == null ? 0 : p2pNetwork.getPeerCount());
+    pqTimingController = Optional.of(controller);
+    eventChannels.subscribe(SlotEventsChannel.class, controller);
+  }
+
+  /** Observer mode joins every attestation subnet, as --p2p-subscribe-all-subnets-enabled does. */
+  private boolean isSubscribeAllSubnetsEnabled() {
+    return beaconConfig.p2pConfig().isSubscribeAllSubnetsEnabled()
+        || beaconConfig
+            .eth2NetworkConfig()
+            .getPqTiming()
+            .map(PqTimingConfig::measurement)
+            .orElse(false);
   }
 
   /** In the beacon data directory, which the sidecar needs private to the node's user. */
@@ -1917,7 +1972,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
 
   protected void initSubnetSubscriber() {
     LOG.debug("BeaconChainController.initSubnetSubscriber");
-    if (beaconConfig.p2pConfig().isSubscribeAllSubnetsEnabled()) {
+    if (isSubscribeAllSubnetsEnabled()) {
       LOG.info("Subscribing to all attestation subnets");
       this.stableSubnetSubscriber =
           AllSubnetsSubscriber.create(attestationTopicSubscriber, spec.getNetworkingConfig());
@@ -1991,7 +2046,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
                 metricsSystem,
                 timeProvider));
     syncCommitteeSubscriptionManager =
-        beaconConfig.p2pConfig().isSubscribeAllSubnetsEnabled()
+        isSubscribeAllSubnetsEnabled()
             ? new AllSyncCommitteeSubscriptions(p2pNetwork, spec)
             : new SyncCommitteeSubscriptionManager(p2pNetwork);
     final BlockImportChannel blockImportChannel =
@@ -2110,7 +2165,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
 
     eventChannels.subscribe(SlotEventsChannel.class, syncCommitteeSubscriptionManager);
 
-    if (!beaconConfig.p2pConfig().isSubscribeAllSubnetsEnabled()) {
+    if (!isSubscribeAllSubnetsEnabled()) {
       eventChannels.subscribe(SlotEventsChannel.class, attestationTopicSubscriber);
     }
   }
@@ -2484,21 +2539,23 @@ public class BeaconChainController extends Service implements BeaconChainControl
             eth2NetworkConfiguration
                 .getAggregatingAttestationPoolV2TotalBlockAggregationTimeLimit());
     // PQ attestations carry XMSS signatures and STARK proofs, so they have their own pool
-    aggregatingAttestationPool =
-        spec.isMilestoneSupported(SpecMilestone.PQ)
-            ? new ForkRoutingAttestationPool(
-                spec,
-                recentChainData,
-                blsAttestationPool,
-                new AggregatingAttestationPoolPq(
-                    spec,
-                    recentChainData,
-                    StarkBackend.prover(),
-                    // Proves aggregates and merges block proofs ahead of time, one at a time, as
-                    // the leanVM sidecar does
-                    asyncRunnerFactory.create("pqProving", 1),
-                    timeProvider))
-            : blsAttestationPool;
+    if (spec.isMilestoneSupported(SpecMilestone.PQ)) {
+      final AggregatingAttestationPoolPq pqAttestationPool =
+          new AggregatingAttestationPoolPq(
+              spec,
+              recentChainData,
+              StarkBackend.prover(),
+              // Proves aggregates and merges block proofs ahead of time, one at a time, as the
+              // leanVM sidecar does
+              asyncRunnerFactory.create("pqProving", 1),
+              timeProvider);
+      aggregatingAttestationPool =
+          new ForkRoutingAttestationPool(
+              spec, recentChainData, blsAttestationPool, pqAttestationPool);
+      initPqTiming(pqAttestationPool);
+    } else {
+      aggregatingAttestationPool = blsAttestationPool;
+    }
 
     eventChannels.subscribe(SlotEventsChannel.class, aggregatingAttestationPool);
     blockImporter.subscribeToVerifiedBlockAttestations(
