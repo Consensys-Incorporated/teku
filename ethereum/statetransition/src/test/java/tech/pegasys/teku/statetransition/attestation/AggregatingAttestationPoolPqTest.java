@@ -16,7 +16,9 @@ package tech.pegasys.teku.statetransition.attestation;
 import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.spec.datastructures.type.SszXmssSignatureSchema.XMSS_SIGNATURE_SIZE;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import it.unimi.dsi.fastutil.ints.IntList;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -26,6 +28,7 @@ import java.util.stream.IntStream;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -46,6 +49,9 @@ import tech.pegasys.teku.spec.logic.versions.pq.helpers.BeaconStateAccessorsPq;
 import tech.pegasys.teku.spec.logic.versions.pq.util.AttestationUtilPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.statetransition.attestation.AggregatingAttestationPoolPq.MeasuredProof;
+import tech.pegasys.teku.statetransition.pq.timing.PqTiming;
+import tech.pegasys.teku.statetransition.pq.timing.PqTimingEvents;
 import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystemBuilder;
 import tech.pegasys.teku.storage.storageSystem.StorageSystem;
 
@@ -465,6 +471,140 @@ class AggregatingAttestationPoolPqTest {
     pool.onSlot(attestationSlot.plus(1));
 
     assertThat(asyncRunner.hasDelayedActions()).isFalse();
+  }
+
+  @Test
+  void shouldRecordProvingAndMergingTimings(@TempDir final Path timingRoot) throws Exception {
+    final RecursiveProver prover = new RecursiveProver();
+    pool = new AggregatingAttestationPoolPq(spec, storageSystem.recentChainData(), prover);
+    PqTimingEvents.start(timingRoot, false);
+    try {
+      final AttestationData data0 = attestationData(0);
+      final IntList committee0 = committee(0);
+      pool.add(singleAttestation(data0, 0, committee0.getInt(0)));
+      pool.add(singleAttestation(data0, 0, committee0.getInt(1)));
+      pool.add(networkAggregate(attestationData(1), 1, randomProof(1), 0));
+      final UInt64 blockSlot = attestationSlot.plus(2);
+
+      // An aggregator's proof of the single attestations
+      pool.createPqAggregateFor(data0.hashTreeRoot(), UInt64.ZERO);
+      // Proves committee 0 again and merges it with committee 1's aggregate
+      blockAttestations(blockSlot);
+      // Merges a better aggregate of committee 1 into the first merge
+      pool.add(networkAggregate(attestationData(1), 1, randomProof(2), 0, 1));
+      blockAttestations(blockSlot);
+    } finally {
+      PqTiming.stop();
+    }
+
+    final List<JsonNode> events = PqTimingEvents.stopAndRead(timingRoot);
+    assertThat(events)
+        .extracting(
+            event ->
+                event.get("kind").asText()
+                    + ":"
+                    + event.get("work").asText()
+                    + ":"
+                    + event.get("round").asInt())
+        .containsExactly(
+            "proof_started:committee:1",
+            "proof_finished:committee:1",
+            "proof_started:fallback:1",
+            "proof_finished:fallback:1",
+            "proof_started:initial:1",
+            "proof_finished:initial:1",
+            "proposal_snapshot:initial:1",
+            "proof_started:improvement:2",
+            "proof_finished:improvement:2",
+            "proposal_snapshot:improvement:2");
+    final JsonNode committeeProof = events.get(1);
+    assertThat(committeeProof.get("slot").asLong()).isEqualTo(attestationSlot.longValue());
+    assertThat(committeeProof.get("committee").asInt()).isZero();
+    assertThat(committeeProof.get("signatures").asInt()).isEqualTo(2);
+    assertThat(committeeProof.get("committee_size").asInt()).isEqualTo(committee(0).size());
+    final JsonNode firstMerge = events.get(5);
+    assertThat(firstMerge.get("slot").asLong()).isEqualTo(attestationSlot.plus(2).longValue());
+    assertThat(firstMerge.get("reference_slot").asLong()).isEqualTo(attestationSlot.longValue());
+    assertThat(firstMerge.get("input_proof_count").asInt()).isEqualTo(2);
+    assertThat(firstMerge.get("claims").asInt()).isEqualTo(3);
+    assertThat(firstMerge.get("proof_id").asText())
+        .isEqualTo(PqTiming.proofId(RecursiveProver.mergedProof(1)));
+    final JsonNode lastSnapshot = events.get(9);
+    assertThat(lastSnapshot.get("outcome").asText()).isEqualTo("candidate");
+    assertThat(lastSnapshot.get("records").asInt()).isEqualTo(2);
+    assertThat(lastSnapshot.get("claims").asInt()).isEqualTo(4);
+    assertThat(lastSnapshot.get("proof_id").asText())
+        .isEqualTo(PqTiming.proofId(RecursiveProver.mergedProof(2)));
+  }
+
+  @Test
+  void shouldRecordAProposalWithNothingToInclude(@TempDir final Path timingRoot) throws Exception {
+    PqTimingEvents.start(timingRoot, false);
+
+    blockAttestations(attestationSlot.plus(2));
+
+    assertThat(PqTimingEvents.stopAndRead(timingRoot))
+        .singleElement()
+        .satisfies(
+            snapshot -> {
+              assertThat(snapshot.get("kind").asText()).isEqualTo("proposal_snapshot");
+              assertThat(snapshot.get("outcome").asText()).isEqualTo("no_candidate");
+            });
+  }
+
+  @Test
+  void shouldProveACommitteesSingleAttestationsForMeasurement() {
+    final List<List<XmssAggregateStatement>> proven = new ArrayList<>();
+    pool =
+        new AggregatingAttestationPoolPq(
+            spec, storageSystem.recentChainData(), recordingProver(proven));
+    final AttestationData data = attestationData(0);
+    final IntList committee = committee(0);
+    final ValidatableAttestation first = singleAttestation(data, 0, committee.getInt(0));
+    final ValidatableAttestation second = singleAttestation(data, 0, committee.getInt(1));
+    pool.add(first);
+    pool.add(second);
+    // A network aggregate with more attesters needs no proving, so isn't measured
+    pool.add(networkAggregate(data, 0, randomProof(3), 0, 1, 2));
+
+    final Optional<MeasuredProof> measured = pool.proveCommitteeForMeasurement(attestationSlot, 0);
+
+    assertThat(measured).isPresent();
+    assertThat(measured.get().proof())
+        .isEqualTo(Bytes.concatenate(signatureOf(first), signatureOf(second)));
+    assertThat(measured.get().statements()).isEqualTo(proven.getFirst());
+    assertThat(measured.get().claims()).isEqualTo(2);
+    assertThat(measured.get().records()).isEqualTo(1);
+    assertThat(measured.get().round()).isZero();
+    assertThat(pool.proveCommitteeForMeasurement(attestationSlot, 1)).isEmpty();
+    assertThat(pool.proveCommitteeForMeasurement(attestationSlot.plus(1), 0)).isEmpty();
+  }
+
+  @Test
+  void shouldMergeAheadAndForABlockForMeasurement() throws Exception {
+    final RecursiveProver prover = new RecursiveProver();
+    pool = new AggregatingAttestationPoolPq(spec, storageSystem.recentChainData(), prover);
+    final UInt64 blockSlot = attestationSlot.plus(2);
+    assertThat(pool.mergeAheadForMeasurement(blockSlot, head.getState())).isEmpty();
+    pool.add(networkAggregate(attestationData(0), 0, randomProof(1), 0));
+    pool.add(networkAggregate(attestationData(1), 1, randomProof(1), 0));
+
+    final Optional<MeasuredProof> ahead = pool.mergeAheadForMeasurement(blockSlot, head.getState());
+
+    assertThat(ahead).isPresent();
+    assertThat(ahead.get().proof()).isEqualTo(RecursiveProver.mergedProof(1));
+    assertThat(ahead.get().statements()).hasSize(2);
+    assertThat(ahead.get().round()).isEqualTo(1);
+    assertThat(ahead.get().records()).isEqualTo(2);
+
+    pool.add(networkAggregate(attestationData(1), 1, randomProof(2), 0, 1));
+    final Optional<MeasuredProof> block =
+        pool.mergeForBlockMeasurement(spec.processSlots(head.getState(), blockSlot));
+
+    assertThat(block).isPresent();
+    assertThat(block.get().proof()).isEqualTo(RecursiveProver.mergedProof(2));
+    assertThat(block.get().round()).isEqualTo(2);
+    assertThat(block.get().claims()).isEqualTo(3);
   }
 
   private static int attesterCount(final PqBlockAttestations blockAttestations) {

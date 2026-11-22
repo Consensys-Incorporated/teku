@@ -22,9 +22,11 @@ import java.util.BitSet;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
@@ -54,6 +56,7 @@ import tech.pegasys.teku.spec.logic.versions.pq.helpers.BeaconStateAccessorsPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.statetransition.attestation.MergedProofCache.Claim;
 import tech.pegasys.teku.statetransition.attestation.MergedProofCache.MergedProof;
+import tech.pegasys.teku.statetransition.pq.timing.PqTiming;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
 /**
@@ -200,11 +203,7 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
     final UInt64 blockSlot = stateAtBlockSlot.getSlot();
     final SchemaDefinitionsPq schemaDefinitions =
         SchemaDefinitionsPq.required(spec.atSlot(blockSlot).getSchemaDefinitions());
-    final List<SelectedData> selected;
-    synchronized (this) {
-      selected = selectForBlock(stateAtBlockSlot, forkChecker);
-    }
-    final MergeResult merged = merge(blockSlot, selected);
+    final MergeResult merged = mergeForBlock(stateAtBlockSlot, forkChecker);
     final AttestationPqSchema attestationSchema =
         schemaDefinitions.getPqAttestationSchemas().getAttestationSchema();
     return new PqBlockAttestations(
@@ -219,6 +218,18 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
                                 attestationSchema, data.data(), data.committees()))
                     .toList()),
         merged.proof());
+  }
+
+  private MergeResult mergeForBlock(
+      final BeaconState stateAtBlockSlot, final AttestationForkChecker forkChecker) {
+    final UInt64 blockSlot = stateAtBlockSlot.getSlot();
+    final List<SelectedData> selected;
+    synchronized (this) {
+      selected = selectForBlock(stateAtBlockSlot, forkChecker);
+    }
+    final MergeResult merged = merge(blockSlot, selected);
+    recordProposalSnapshot(blockSlot, merged);
+    return merged;
   }
 
   private List<SelectedData> selectForBlock(
@@ -292,9 +303,11 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
         selected.stream()
             .flatMap(data -> data.committees().stream())
             .map(
-                committee -> new ProvenStatements(List.of(committee.statement()), prove(committee)))
+                committee ->
+                    new ProvenStatements(
+                        List.of(committee.statement()), proveForBlock(blockSlot, committee)))
             .toList();
-    return new MergeResult(selected, starkProver.mergeProofs(proofs));
+    return new MergeResult(selected, mergeProofs(blockSlot, 1, proofs, selected.size()), 1);
   }
 
   /**
@@ -345,7 +358,10 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
           maxProofsPerMerge);
     }
     if (fresh.isEmpty()) {
-      return new MergeResult(included, earlier.map(MergedProof::proof).orElse(Bytes.EMPTY));
+      return new MergeResult(
+          included,
+          earlier.map(MergedProof::proof).orElse(Bytes.EMPTY),
+          earlier.map(MergedProof::round).orElse(0));
     }
 
     final List<ProvenStatements> children = new ArrayList<>();
@@ -357,13 +373,62 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
           statements.addAll(proof.statements());
         });
     for (final SelectedCommittee committee : fresh) {
-      children.add(new ProvenStatements(List.of(committee.statement()), prove(committee)));
+      children.add(
+          new ProvenStatements(
+              List.of(committee.statement()), proveForBlock(blockSlot, committee)));
       claims.addAll(committee.claims());
       statements.add(committee.statement());
     }
-    final Bytes proof = starkProver.mergeProofs(children);
-    mergedProofs.add(blockSlot, new MergedProof(claims, statements, proof));
-    return new MergeResult(included, proof);
+    final int round = earlier.map(MergedProof::round).orElse(0) + 1;
+    final Bytes proof = mergeProofs(blockSlot, round, children, included.size());
+    mergedProofs.add(blockSlot, new MergedProof(claims, statements, proof, round));
+    return new MergeResult(included, proof, round);
+  }
+
+  /** Merges the proofs, timed as merge round {@code round} for the block when there are several. */
+  private Bytes mergeProofs(
+      final UInt64 blockSlot,
+      final int round,
+      final List<ProvenStatements> children,
+      final int records) {
+    if (children.size() < 2) {
+      // a single proof is used as it is, without a backend call
+      return starkProver.mergeProofs(children);
+    }
+    final Map<String, Object> fields = new LinkedHashMap<>();
+    fields.put("input_proof_count", children.size());
+    fields.put("records", records);
+    fields.put(
+        "claims",
+        children.stream()
+            .mapToInt(c -> c.statements().stream().mapToInt(st -> st.pubkeys().size()).sum())
+            .sum());
+    return PqTiming.job("initial", blockSlot, proposalReferenceSlot(blockSlot), round)
+        .run(fields, () -> starkProver.mergeProofs(children));
+  }
+
+  private void recordProposalSnapshot(final UInt64 blockSlot, final MergeResult merged) {
+    final Map<String, Object> fields = new LinkedHashMap<>();
+    if (!merged.proof().isEmpty()) {
+      fields.put("proof_id", PqTiming.proofId(merged.proof()));
+      fields.put("records", merged.included().size());
+      fields.put(
+          "claims",
+          merged.included().stream()
+              .flatMap(data -> data.committees().stream())
+              .mapToInt(committee -> committee.claims().size())
+              .sum());
+    }
+    PqTiming.job(
+            "initial", blockSlot, proposalReferenceSlot(blockSlot), Math.max(1, merged.round()))
+        .emit("proposal_snapshot", merged.proof().isEmpty() ? "no_candidate" : "candidate", fields);
+  }
+
+  /** The vote slot whose committees are timely in a block at {@code blockSlot}. */
+  private UInt64 proposalReferenceSlot(final UInt64 blockSlot) {
+    return blockSlot.minusMinZero(
+        SpecConfigPq.required(spec.atSlot(blockSlot).getConfig())
+            .getMinAttestationInclusionDelayPq());
   }
 
   private static boolean isPartlyIn(final Set<Claim> claims, final Set<Claim> others) {
@@ -372,13 +437,25 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
         && claims.stream().anyMatch(others::contains);
   }
 
-  private Bytes prove(final SelectedCommittee committee) {
+  /** A committee's proof for a block: its network proof, or proved now from its signatures. */
+  private Bytes proveForBlock(final UInt64 blockSlot, final SelectedCommittee committee) {
+    return prove(
+        committee,
+        PqTiming.job("fallback", blockSlot, proposalReferenceSlot(blockSlot)),
+        Map.of("signatures", committee.signatures().size()));
+  }
+
+  private Bytes prove(
+      final SelectedCommittee committee, final PqTiming.Job job, final Map<String, Object> fields) {
     return committee
         .networkProof()
         .orElseGet(
             () ->
-                starkProver.proveAggregates(
-                    List.of(committee.statement()), List.of(committee.signatures())));
+                job.run(
+                    fields,
+                    () ->
+                        starkProver.proveAggregates(
+                            List.of(committee.statement()), List.of(committee.signatures()))));
   }
 
   /**
@@ -405,13 +482,13 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
             });
   }
 
-  private void prepareBlockProof(final UInt64 blockSlot, final BeaconState headState) {
+  private MergeResult prepareBlockProof(final UInt64 blockSlot, final BeaconState headState) {
     final List<SelectedData> timely;
     synchronized (this) {
       timely = selectTimely(blockSlot, headState);
     }
     if (timely.isEmpty()) {
-      return;
+      return new MergeResult(List.of(), Bytes.EMPTY, 0);
     }
     final long start = System.currentTimeMillis();
     final MergeResult merged = mergeIncrementally(blockSlot, timely);
@@ -420,6 +497,92 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
         merged.included().stream().mapToInt(data -> data.committees().size()).sum(),
         blockSlot,
         System.currentTimeMillis() - start);
+    return merged;
+  }
+
+  /**
+   * For PQ timing experiments: proves the single attestations of a committee at {@code slot}, for
+   * the data most of them voted for, as an aggregator would. Network aggregates are left out, as
+   * they need no proving. Empty when the committee has no single attestations.
+   */
+  public Optional<MeasuredProof> proveCommitteeForMeasurement(
+      final UInt64 slot, final int committeeIndex) {
+    final Optional<CommitteeCandidate> maybeCandidate;
+    synchronized (this) {
+      maybeCandidate =
+          dataRootsBySlot.getOrDefault(slot, Set.of()).stream()
+              .map(committeesByDataRoot::get)
+              .filter(Objects::nonNull)
+              .map(committees -> committees.get(committeeIndex))
+              .filter(Objects::nonNull)
+              .flatMap(committee -> committee.getAllCandidates().stream())
+              .filter(candidate -> candidate.networkProof.isEmpty())
+              .max(Comparator.comparingInt(CommitteeCandidate::attesterCount));
+    }
+    if (maybeCandidate.isEmpty()) {
+      return Optional.empty();
+    }
+    final CommitteeCandidate candidate = maybeCandidate.get();
+    return retrieveStateForAttestation(candidate.committee().data)
+        .map(
+            state -> {
+              final SelectedCommittee selected;
+              synchronized (this) {
+                selected = candidate.select(state);
+              }
+              final Map<String, Object> fields = new LinkedHashMap<>();
+              fields.put("committee", selected.committeeIndex());
+              fields.put("signatures", selected.signatures().size());
+              fields.put("committee_size", selected.committeeSize());
+              final Bytes proof = prove(selected, PqTiming.job("committee", slot, slot), fields);
+              return new MeasuredProof(
+                  List.of(selected.statement()), proof, selected.claims().size(), 1, 0);
+            });
+  }
+
+  /**
+   * For PQ timing experiments: the merge ahead of a block at {@code blockSlot}, as if a local
+   * validator proposed it. Empty when there is nothing to merge.
+   */
+  public Optional<MeasuredProof> mergeAheadForMeasurement(
+      final UInt64 blockSlot, final BeaconState headState) {
+    return MeasuredProof.of(prepareBlockProof(blockSlot, headState));
+  }
+
+  /**
+   * For PQ timing experiments: the attestations' proof for a block at the state's slot, as block
+   * production merges it. Empty when there is nothing to include.
+   */
+  public Optional<MeasuredProof> mergeForBlockMeasurement(final BeaconState stateAtBlockSlot) {
+    return MeasuredProof.of(
+        mergeForBlock(stateAtBlockSlot, new AttestationForkChecker(spec, stateAtBlockSlot)));
+  }
+
+  /**
+   * A proof made for a PQ timing experiment, which is never published.
+   *
+   * @param statements what the proof proves, to verify it
+   * @param claims the attesters it proves
+   * @param records the attestations it covers
+   * @param round how many merges built it, 0 for a committee proof
+   */
+  public record MeasuredProof(
+      List<XmssAggregateStatement> statements, Bytes proof, int claims, int records, int round) {
+
+    private static Optional<MeasuredProof> of(final MergeResult merged) {
+      if (merged.proof().isEmpty()) {
+        return Optional.empty();
+      }
+      final List<SelectedCommittee> committees =
+          merged.included().stream().flatMap(data -> data.committees().stream()).toList();
+      return Optional.of(
+          new MeasuredProof(
+              committees.stream().map(SelectedCommittee::statement).toList(),
+              merged.proof(),
+              committees.stream().mapToInt(committee -> committee.claims().size()).sum(),
+              merged.included().size(),
+              merged.round()));
+    }
   }
 
   /**
@@ -532,8 +695,14 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
               synchronized (this) {
                 selected = candidate.select(state);
               }
+              final UInt64 slot = candidate.committee().data.getSlot();
+              final Map<String, Object> fields = new LinkedHashMap<>();
+              fields.put("committee", selected.committeeIndex());
+              fields.put("signatures", selected.signatures().size());
+              fields.put("committee_size", selected.committeeSize());
               return new PqAggregate(
-                  candidate.toAttestation(getAttestationSchema(candidate)), prove(selected));
+                  candidate.toAttestation(getAttestationSchema(candidate)),
+                  prove(selected, PqTiming.job("committee", slot, slot), fields));
             });
   }
 
@@ -668,7 +837,10 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
 
   private record SelectedData(AttestationData data, List<SelectedCommittee> committees) {}
 
-  private record MergeResult(List<SelectedData> included, Bytes proof) {}
+  /**
+   * @param round how many merges built the proof, 0 when there was nothing to merge
+   */
+  private record MergeResult(List<SelectedData> included, Bytes proof, int round) {}
 
   /**
    * A committee's attesters chosen for a block or an aggregate, with what proves them: a network

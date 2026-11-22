@@ -92,6 +92,6 @@ class MergedProofCacheTest {
   }
 
   private static MergedProof proof(final Claim... claims) {
-    return new MergedProof(Set.of(claims), List.of(), Bytes.random(4));
+    return new MergedProof(Set.of(claims), List.of(), Bytes.random(4), 1);
   }
 }

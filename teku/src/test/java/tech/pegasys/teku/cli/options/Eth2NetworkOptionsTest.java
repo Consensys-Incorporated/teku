@@ -20,6 +20,7 @@ import static tech.pegasys.teku.networks.Eth2NetworkConfiguration.FINALIZED_STAT
 import static tech.pegasys.teku.networks.Eth2NetworkConfiguration.GENESIS_STATE_URL_PATH;
 
 import java.math.BigInteger;
+import java.nio.file.Path;
 import java.util.Optional;
 import java.util.OptionalLong;
 import org.apache.tuweni.bytes.Bytes32;
@@ -31,6 +32,7 @@ import tech.pegasys.teku.cli.AbstractBeaconNodeCommandTest;
 import tech.pegasys.teku.config.TekuConfiguration;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networks.Eth2NetworkConfiguration;
+import tech.pegasys.teku.networks.PqTimingConfig;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 
@@ -40,6 +42,35 @@ class Eth2NetworkOptionsTest extends AbstractBeaconNodeCommandTest {
     final TekuConfiguration config = getTekuConfigurationFromArguments();
     final Spec spec = config.eth2NetworkConfiguration().getSpec();
     assertThat(spec.getForkSchedule().getHighestSupportedMilestone()).isEqualTo(SpecMilestone.FULU);
+  }
+
+  @Test
+  void shouldNotRecordPqTimingByDefault() {
+    final TekuConfiguration config = getTekuConfigurationFromArguments();
+    assertThat(config.eth2NetworkConfiguration().getPqTiming()).isEmpty();
+  }
+
+  @Test
+  void shouldRecordPqTimingToTheGivenDirectory() {
+    final TekuConfiguration config =
+        getTekuConfigurationFromArguments("--Xpq-timing-output", "/pq-timing");
+    assertThat(config.eth2NetworkConfiguration().getPqTiming())
+        .contains(new PqTimingConfig(Optional.of(Path.of("/pq-timing")), false));
+  }
+
+  @Test
+  void shouldAcceptTheOtherClientsPqTimingFlags() {
+    final TekuConfiguration config =
+        getTekuConfigurationFromArguments("--pq-measurement", "--pq-timing-output", "/pq-timing");
+    assertThat(config.eth2NetworkConfiguration().getPqTiming())
+        .contains(new PqTimingConfig(Optional.of(Path.of("/pq-timing")), true));
+  }
+
+  @Test
+  void shouldRunPqMeasurementWithTheDefaultDirectory() {
+    final TekuConfiguration config = getTekuConfigurationFromArguments("--Xpq-measurement");
+    assertThat(config.eth2NetworkConfiguration().getPqTiming())
+        .contains(new PqTimingConfig(Optional.empty(), true));
   }
 
   @Test
