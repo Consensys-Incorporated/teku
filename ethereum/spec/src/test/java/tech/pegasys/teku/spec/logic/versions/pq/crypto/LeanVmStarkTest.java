@@ -114,6 +114,12 @@ class LeanVmStarkTest {
   }
 
   @Test
+  void onlyRecursiveProofsAreIncrementallyMergeable() {
+    assertThat(stark.isIncrementallyMergeable()).isTrue();
+    assertThat(StarkProver.CONCATENATED.isIncrementallyMergeable()).isFalse();
+  }
+
+  @Test
   void backend_switchesVerifiersAndProversMadeBeforeTheSwitch() {
     // The spec builds its verifier before the node starts its sidecar
     final StarkProofVerifier verifier =
@@ -130,6 +136,7 @@ class LeanVmStarkTest {
     assertThat(StarkBackend.isLeanVm()).isTrue();
     assertThat(verifier.verifyAggregates(statements, RecordingAggregator.PROOF)).isTrue();
     assertThat(prover.isMergedProofSizeTheSumOfChildren()).isFalse();
+    assertThat(prover.isIncrementallyMergeable()).isTrue();
     assertThat(prover.proveAggregates(statements, List.of(List.of(Bytes.fromHexString("0xaa")))))
         .isEqualTo(RecordingAggregator.PROOF);
 
@@ -137,6 +144,7 @@ class LeanVmStarkTest {
 
     assertThat(StarkBackend.isLeanVm()).isFalse();
     assertThat(prover.isMergedProofSizeTheSumOfChildren()).isTrue();
+    assertThat(prover.isIncrementallyMergeable()).isFalse();
   }
 
   private static XmssAggregateStatement statement(final Bytes32 message, final Bytes32... keys) {
