@@ -87,10 +87,16 @@ public abstract class AggregatingAttestationPool implements SlotEventsChannel {
    * A PQ aggregate of one committee with the proof of its signatures, as an aggregator publishes
    * it. Empty if this pool doesn't keep PQ attestations or has none for the data and committee.
    */
-  public Optional<PqAggregate> createPqAggregateFor(
+  public SafeFuture<Optional<PqAggregate>> createPqAggregateFor(
       final Bytes32 attestationHashTreeRoot, final UInt64 committeeIndex) {
-    return Optional.empty();
+    return SafeFuture.completedFuture(Optional.empty());
   }
+
+  /**
+   * Notes that a local validator aggregates committee {@code committeeIndex} at {@code slot}, so
+   * that a pool which proves aggregates can prove it ahead of the aggregate due time.
+   */
+  public void onLocalAggregationDuty(final UInt64 slot, final UInt64 committeeIndex) {}
 
   /**
    * Ensures that the committees size is set in the attestation. This is needed for the

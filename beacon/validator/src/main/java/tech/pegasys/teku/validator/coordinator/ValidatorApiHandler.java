@@ -795,16 +795,18 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
     if (isSyncActive()) {
       return NodeSyncingException.failedFuture();
     }
-    return SafeFuture.completedFuture(
-        attestationPool
-            .createPqAggregateFor(attestationHashTreeRoot, committeeIndex)
-            .filter(aggregate -> aggregate.attestation().getData().getSlot().equals(slot))
-            .map(
-                aggregate ->
-                    SchemaDefinitionsPq.required(spec.atSlot(slot).getSchemaDefinitions())
-                        .getPqAttestationSchemas()
-                        .getAttestationAndProofSchema()
-                        .create(aggregate.attestation(), aggregate.proof())));
+    return attestationPool
+        .createPqAggregateFor(attestationHashTreeRoot, committeeIndex)
+        .thenApply(
+            maybeAggregate ->
+                maybeAggregate
+                    .filter(aggregate -> aggregate.attestation().getData().getSlot().equals(slot))
+                    .map(
+                        aggregate ->
+                            SchemaDefinitionsPq.required(spec.atSlot(slot).getSchemaDefinitions())
+                                .getPqAttestationSchemas()
+                                .getAttestationAndProofSchema()
+                                .create(aggregate.attestation(), aggregate.proof())));
   }
 
   @Override
@@ -890,6 +892,9 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
           if (request.isAggregator()) {
             attestationTopicSubscriber.subscribeToCommitteeForAggregation(
                 request.getCommitteeIndex(), request.getCommitteesAtSlot(), request.getSlot());
+            // A PQ aggregate's proof takes long enough to start it before the aggregate is due
+            attestationPool.onLocalAggregationDuty(
+                request.getSlot(), UInt64.valueOf(request.getCommitteeIndex()));
           }
         });
   }

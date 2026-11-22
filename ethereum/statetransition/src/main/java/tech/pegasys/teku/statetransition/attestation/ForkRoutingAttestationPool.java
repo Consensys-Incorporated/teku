@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.StreamSupport;
 import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -95,9 +96,14 @@ public class ForkRoutingAttestationPool extends AggregatingAttestationPool {
   }
 
   @Override
-  public Optional<PqAggregate> createPqAggregateFor(
+  public SafeFuture<Optional<PqAggregate>> createPqAggregateFor(
       final Bytes32 attestationHashTreeRoot, final UInt64 committeeIndex) {
     return pqPool.createPqAggregateFor(attestationHashTreeRoot, committeeIndex);
+  }
+
+  @Override
+  public void onLocalAggregationDuty(final UInt64 slot, final UInt64 committeeIndex) {
+    poolForSlot(slot).onLocalAggregationDuty(slot, committeeIndex);
   }
 
   @Override
