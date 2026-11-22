@@ -339,6 +339,7 @@ public class Eth2NetworkOptions {
               + " subnet, and every three slots prove one committee and merge one block proof from"
               + " live gossip, without publishing them.",
       fallbackValue = "true",
+      showDefaultValue = Visibility.ALWAYS,
       arity = "0..1")
   private boolean pqMeasurement = false;
 
