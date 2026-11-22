@@ -441,7 +441,8 @@ public class ValidatorClientService extends Service {
                     config.getValidatorConfig().isPqKeysDerivedFromBlsKey()
                         ? Optional.of(getDerivedPqKeysVrfCachePath(services.getDataDirLayout()))
                         : Optional.empty(),
-                    config.getValidatorConfig().getPqVrfStateUrl()))
+                    config.getValidatorConfig().getPqVrfStateUrl(),
+                    config.getValidatorConfig().getPqXmssCacheUrl()))
             : Optional.empty();
     final SlashingProtectionLogger slashingProtectionLogger =
         new SlashingProtectionLogger(

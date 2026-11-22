@@ -130,6 +130,18 @@ public class ValidatorKeysOptions {
       arity = "1")
   private String pqVrfStateUrl = null;
 
+  @CommandLine.Option(
+      names = {"--Xvalidators-pq-xmss-cache-url"},
+      paramLabel = "<URL>",
+      description =
+          "For PQ devnet-0: a file of pregenerated leanXMSS trees of the genesis keys"
+              + " (ethereum-package xmss_cache_url, a URL or a local path), from which keys take"
+              + " their trees instead of building them on their first start. Keys save their"
+              + " trees locally either way, so later starts are fast without it.",
+      hidden = true,
+      arity = "1")
+  private String pqXmssCacheUrl = null;
+
   public void configure(final TekuConfiguration.Builder builder) {
     builder.validator(
         config ->
@@ -147,7 +159,8 @@ public class ValidatorKeysOptions {
                 .validatorExternalSignerTruststorePasswordFile(
                     convertToPath(validatorExternalSignerTruststorePasswordFile))
                 .pqKeysDerivedFromBlsKey(pqKeysDerivedFromBlsKey)
-                .pqVrfStateUrl(parsePqVrfStateUrl()));
+                .pqVrfStateUrl(parsePqVrfStateUrl())
+                .pqXmssCacheUrl(parseUri(pqXmssCacheUrl, "PQ XMSS cache URL")));
   }
 
   private Optional<URI> parsePqVrfStateUrl() {
@@ -159,6 +172,18 @@ public class ValidatorKeysOptions {
     } catch (final URISyntaxException e) {
       throw new InvalidConfigurationException(
           "Invalid configuration. PQ VRF state URL has invalid syntax", e);
+    }
+  }
+
+  private static Optional<URI> parseUri(final String value, final String description) {
+    if (Strings.isNullOrEmpty(value)) {
+      return Optional.empty();
+    }
+    try {
+      return Optional.of(new URI(value));
+    } catch (final URISyntaxException e) {
+      throw new InvalidConfigurationException(
+          "Invalid configuration. " + description + " has invalid syntax", e);
     }
   }
 
