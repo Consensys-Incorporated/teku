@@ -27,11 +27,21 @@ import tech.pegasys.teku.spec.signatures.xmss.XmssLeafProtector;
  *     in this directory; when empty, such a validator has no PQ keys
  * @param vrfStateUrl where derived keys can find precomputed VRF states (a devnet {@code
  *     vrf_state_url} file) instead of deriving each VRF tree in full
+ * @param xmssCacheUrl where devnet genesis keys can find pregenerated leanXMSS trees (a devnet
+ *     {@code xmss_cache_url} file) instead of building them on their first start
  */
 public record PqKeyLoadingConfig(
     XmssLeafProtector leafProtector,
     Optional<Path> derivedKeysVrfCacheDirectory,
-    Optional<URI> vrfStateUrl) {
+    Optional<URI> vrfStateUrl,
+    Optional<URI> xmssCacheUrl) {
+
+  public PqKeyLoadingConfig(
+      final XmssLeafProtector leafProtector,
+      final Optional<Path> derivedKeysVrfCacheDirectory,
+      final Optional<URI> vrfStateUrl) {
+    this(leafProtector, derivedKeysVrfCacheDirectory, vrfStateUrl, Optional.empty());
+  }
 
   public PqKeyLoadingConfig(
       final XmssLeafProtector leafProtector, final Optional<Path> derivedKeysVrfCacheDirectory) {

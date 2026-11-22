@@ -96,6 +96,26 @@ public class ValidatorOptionsTest extends AbstractBeaconNodeCommandTest {
   }
 
   @Test
+  void pqXmssCacheUrl_shouldBeEmptyByDefault() {
+    assertThat(
+            getTekuConfigurationFromArguments()
+                .validatorClient()
+                .getValidatorConfig()
+                .getPqXmssCacheUrl())
+        .isEmpty();
+  }
+
+  @Test
+  void pqXmssCacheUrl_shouldBeReadFromFlag() {
+    final String url = "https://example.com/uploads/b9dec4e1daa17dfe.xmss";
+    final ValidatorConfig config =
+        getTekuConfigurationFromArguments("--Xvalidators-pq-xmss-cache-url=" + url)
+            .validatorClient()
+            .getValidatorConfig();
+    assertThat(config.getPqXmssCacheUrl()).contains(URI.create(url));
+  }
+
+  @Test
   public void graffiti_shouldBeEmptyByDefault() {
     final ValidatorConfig config =
         getTekuConfigurationFromArguments().validatorClient().getValidatorConfig();

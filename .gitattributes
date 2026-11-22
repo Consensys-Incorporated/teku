@@ -10,3 +10,5 @@
 *.ssz binary
 *.ssz_snappy binary
 storage/src/integration-test/resources/tech/pegasys/teku/storage/client/compatibility/** binary
+*.bin binary
+*.xmss binary

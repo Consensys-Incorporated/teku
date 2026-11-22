@@ -138,6 +138,7 @@ public class ValidatorConfig {
   private final List<URL> builderUrls;
   private final boolean pqKeysDerivedFromBlsKey;
   private final Optional<URI> pqVrfStateUrl;
+  private final Optional<URI> pqXmssCacheUrl;
 
   private ValidatorConfig(
       final List<String> validatorKeys,
@@ -189,7 +190,8 @@ public class ValidatorConfig {
       final UInt64 builderMaxExecutionPayment,
       final List<URL> builderUrls,
       final boolean pqKeysDerivedFromBlsKey,
-      final Optional<URI> pqVrfStateUrl) {
+      final Optional<URI> pqVrfStateUrl,
+      final Optional<URI> pqXmssCacheUrl) {
     this.validatorKeys = validatorKeys;
     this.validatorExternalSignerPublicKeySources = validatorExternalSignerPublicKeySources;
     this.validatorExternalSignerUrl = validatorExternalSignerUrl;
@@ -245,6 +247,7 @@ public class ValidatorConfig {
     this.builderUrls = builderUrls;
     this.pqKeysDerivedFromBlsKey = pqKeysDerivedFromBlsKey;
     this.pqVrfStateUrl = pqVrfStateUrl;
+    this.pqXmssCacheUrl = pqXmssCacheUrl;
 
     LOG.debug(
         "Executor queue - {} threads, max queue size {} ", executorThreads, executorMaxQueueSize);
@@ -476,6 +479,14 @@ public class ValidatorConfig {
     return pqVrfStateUrl;
   }
 
+  /**
+   * Where PQ devnet genesis keys find their pregenerated leanXMSS trees, if the devnet publishes
+   * them (ethereum-package {@code xmss_cache_url}), to save building them on the first start.
+   */
+  public Optional<URI> getPqXmssCacheUrl() {
+    return pqXmssCacheUrl;
+  }
+
   public static final class Builder {
     private List<String> validatorKeys = new ArrayList<>();
     private List<String> validatorExternalSignerPublicKeySources = new ArrayList<>();
@@ -540,6 +551,7 @@ public class ValidatorConfig {
     private List<URL> builderUrls = new ArrayList<>();
     private boolean pqKeysDerivedFromBlsKey = DEFAULT_PQ_KEYS_DERIVED_FROM_BLS_KEY;
     private Optional<URI> pqVrfStateUrl = Optional.empty();
+    private Optional<URI> pqXmssCacheUrl = Optional.empty();
 
     private Builder() {}
 
@@ -871,6 +883,11 @@ public class ValidatorConfig {
       return this;
     }
 
+    public Builder pqXmssCacheUrl(final Optional<URI> pqXmssCacheUrl) {
+      this.pqXmssCacheUrl = pqXmssCacheUrl;
+      return this;
+    }
+
     public ValidatorConfig build() {
       validateExternalSignerUrlAndPublicKeys();
       validateExternalSignerKeystoreAndPasswordFileConfig();
@@ -926,7 +943,8 @@ public class ValidatorConfig {
           builderMaxExecutionPayment,
           builderUrls,
           pqKeysDerivedFromBlsKey,
-          pqVrfStateUrl);
+          pqVrfStateUrl,
+          pqXmssCacheUrl);
     }
 
     private void validateExternalSignerUrlAndPublicKeys() {

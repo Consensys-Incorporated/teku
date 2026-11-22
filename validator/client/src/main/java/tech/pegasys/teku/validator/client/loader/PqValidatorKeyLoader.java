@@ -83,6 +83,7 @@ public class PqValidatorKeyLoader {
   private final XmssLeafProtector leafProtector;
   private final Optional<Path> derivedKeysVrfCacheDirectory;
   private final Optional<URI> vrfStateUrl;
+  private final Optional<DevnetXmssCacheSource> xmssCacheSource;
   // Fetched at most once, when the first derived key without a saved VRF tree or state needs it
   private final Supplier<Optional<Bytes>> fetchedVrfStates;
   private final Map<Path, SyncDataAccessor> dataAccessors = new ConcurrentHashMap<>();
@@ -128,6 +129,7 @@ public class PqValidatorKeyLoader {
     this.leafProtector = config.leafProtector();
     this.derivedKeysVrfCacheDirectory = config.derivedKeysVrfCacheDirectory();
     this.vrfStateUrl = config.vrfStateUrl();
+    this.xmssCacheSource = config.xmssCacheUrl().map(DevnetXmssCacheSource::new);
     this.fetchedVrfStates =
         Suppliers.memoize(() -> vrfStateUrl.flatMap(PqValidatorKeyLoader::fetchVrfStates));
     this.asyncRunner = asyncRunner;
@@ -180,7 +182,10 @@ public class PqValidatorKeyLoader {
     final VrfProver vrfProver =
         loadDerivedVrfProver(secrets.vrfSeed(), blsPublicKey, vrfCacheDirectory);
     final XmssSigningKey signingKey =
-        Xmss.loadSigningKey(XmssSecretKey.fromBytes(secrets.xmssSeed()));
+        loadSigningKey(
+            XmssSecretKey.fromBytes(secrets.xmssSeed()),
+            derivedXmssCachePath(vrfCacheDirectory, blsPublicKey),
+            Optional.empty());
     LOG.info(
         "Using PQ keys derived from BLS key {}: XMSS public key {}, VRF root {}",
         blsPublicKey,
@@ -275,6 +280,35 @@ public class PqValidatorKeyLoader {
     }
   }
 
+  /**
+   * Loads a leanXMSS key from the first of: its trees saved in {@code cachePath}, its pregenerated
+   * devnet trees, or its seed. Its trees are saved to {@code cachePath} then, and again whenever a
+   * signature builds a new bottom tree, so the next start loads in milliseconds.
+   *
+   * @param expectedPublicKey the key's declared public key, which cached trees must be of
+   */
+  private XmssSigningKey loadSigningKey(
+      final XmssSecretKey secretKey,
+      final Path cachePath,
+      final Optional<XmssPublicKey> expectedPublicKey) {
+    final XmssTreeCacheFile cacheFile =
+        new XmssTreeCacheFile(cachePath, secretKey, this::saveDerivedFile);
+    final XmssSigningKey signingKey =
+        cacheFile
+            .read(expectedPublicKey)
+            .or(() -> xmssCacheSource.flatMap(source -> source.load(secretKey, expectedPublicKey)))
+            .orElseGet(() -> Xmss.loadSigningKey(secretKey));
+    cacheFile.writeIfChanged(signingKey);
+    signingKey.onBottomTreeBuilt(() -> cacheFile.writeIfChanged(signingKey));
+    return signingKey;
+  }
+
+  /** Where the leanXMSS trees of the keys derived for {@code blsPublicKey} are saved. */
+  static Path derivedXmssCachePath(final Path vrfCacheDirectory, final BLSPublicKey blsPublicKey) {
+    return vrfCacheDirectory.resolve(
+        blsPublicKey.toBytesCompressed().toUnprefixedHexString() + XmssTreeCacheFile.SUFFIX);
+  }
+
   /** Where the VRF tree of the keys derived for {@code blsPublicKey} is saved. */
   static Path derivedVrfCachePath(final Path vrfCacheDirectory, final BLSPublicKey blsPublicKey) {
     return vrfCacheDirectory.resolve(
@@ -315,9 +349,12 @@ public class PqValidatorKeyLoader {
       final String password) {
     final PqKeyStoreSecrets secrets = decrypt(keystorePath, keyStoreData, password);
     final VrfTree vrfTree = loadVrfTree(keystorePath, keyStoreData, vrfCachePath, secrets);
-    final XmssSigningKey signingKey =
-        Xmss.loadSigningKey(XmssSecretKey.fromBytes(secrets.xmssSeed()));
     final XmssPublicKey declaredPublicKey = XmssPublicKey.fromBytes(keyStoreData.getXmssPubkey());
+    final XmssSigningKey signingKey =
+        loadSigningKey(
+            XmssSecretKey.fromBytes(secrets.xmssSeed()),
+            PqKeyFiles.xmssCachePath(vrfCachePath),
+            Optional.of(declaredPublicKey));
     if (!signingKey.getPublicKey().equals(declaredPublicKey)) {
       signingKey.close();
       throw new InvalidConfigurationException(

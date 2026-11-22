@@ -26,6 +26,7 @@ public final class PqKeyFiles {
 
   public static final String KEYSTORE_SUFFIX = ".pq-keystore";
   public static final String VRF_CACHE_SUFFIX = ".vrf-cache";
+  public static final String XMSS_CACHE_SUFFIX = ".xmss-cache";
   private static final String JSON_SUFFIX = ".json";
 
   private PqKeyFiles() {}
@@ -33,6 +34,19 @@ public final class PqKeyFiles {
   /** The PQ keystore of the validator whose BLS keystore is {@code blsKeystorePath}. */
   public static Path keystorePath(final Path blsKeystorePath) {
     return blsKeystorePath.resolveSibling(baseName(blsKeystorePath) + KEYSTORE_SUFFIX);
+  }
+
+  /**
+   * Where the leanXMSS trees of the key whose VRF cache is {@code vrfCachePath} are saved: next to
+   * it, with its name.
+   */
+  public static Path xmssCachePath(final Path vrfCachePath) {
+    final String name = vrfCachePath.getFileName().toString();
+    final String baseName =
+        name.endsWith(VRF_CACHE_SUFFIX)
+            ? name.substring(0, name.length() - VRF_CACHE_SUFFIX.length())
+            : name;
+    return vrfCachePath.resolveSibling(baseName + XMSS_CACHE_SUFFIX);
   }
 
   /** The VRF cache of the validator whose BLS keystore is {@code blsKeystorePath}. */
