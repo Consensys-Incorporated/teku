@@ -93,6 +93,15 @@ public interface StarkProver {
   }
 
   /**
+   * Whether a proof proves a set of claims, whatever their order or grouping, so a merged proof can
+   * be merged again with more proofs, and gives the same claims as merging all of them at once. A
+   * recursive proof does; the concatenation stand-in proves its statements in order, so it doesn't.
+   */
+  default boolean isIncrementallyMergeable() {
+    return false;
+  }
+
+  /**
    * {@code stark.MergeProofs}: one proof of the concatenation of the proofs' statements. Each proof
    * comes with its statements, which a recursive prover needs to fold it in.
    */

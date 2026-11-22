@@ -76,6 +76,11 @@ public final class StarkBackend {
       }
 
       @Override
+      public boolean isIncrementallyMergeable() {
+        return current().isIncrementallyMergeable();
+      }
+
+      @Override
       public Bytes mergeProofs(final List<ProvenStatements> proofs) {
         return current().mergeProofs(proofs);
       }

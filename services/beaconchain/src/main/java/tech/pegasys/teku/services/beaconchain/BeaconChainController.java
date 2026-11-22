@@ -2490,7 +2490,12 @@ public class BeaconChainController extends Service implements BeaconChainControl
                 spec,
                 recentChainData,
                 blsAttestationPool,
-                new AggregatingAttestationPoolPq(spec, recentChainData, StarkBackend.prover()))
+                new AggregatingAttestationPoolPq(
+                    spec,
+                    recentChainData,
+                    StarkBackend.prover(),
+                    // Merging block proofs ahead of proposals takes seconds
+                    asyncRunnerFactory.create("blockProofMerge", 1)))
             : blsAttestationPool;
 
     eventChannels.subscribe(SlotEventsChannel.class, aggregatingAttestationPool);

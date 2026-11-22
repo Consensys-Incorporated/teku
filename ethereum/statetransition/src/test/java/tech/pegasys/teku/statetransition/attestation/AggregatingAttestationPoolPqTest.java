@@ -20,10 +20,13 @@ import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -296,6 +299,220 @@ class AggregatingAttestationPoolPqTest {
     return proven.proof().equals(Bytes.fromHexString("0x5afe"))
         ? attestationData(0)
         : attestationData(1);
+  }
+
+  @Test
+  void shouldMergeOnlyNewProofsIntoAnEarlierMergedProof() {
+    final RecursiveProver prover = new RecursiveProver();
+    pool = new AggregatingAttestationPoolPq(spec, storageSystem.recentChainData(), prover);
+    final Bytes proof0 = randomProof(1);
+    final Bytes proof1 = randomProof(1);
+    pool.add(networkAggregate(attestationData(0), 0, proof0, 0));
+    pool.add(networkAggregate(attestationData(1), 1, proof1, 0));
+    final UInt64 blockSlot = attestationSlot.plus(2);
+
+    final PqBlockAttestations first = blockAttestations(blockSlot);
+
+    assertThat(prover.merges).hasSize(1);
+    assertThat(prover.merges.getFirst().stream().map(ProvenStatements::proof))
+        .containsExactlyInAnyOrder(proof0, proof1);
+    assertThat(first.proof()).isEqualTo(RecursiveProver.mergedProof(1));
+
+    // An aggregate of committee 1 with one more attester replaces the one merged
+    final Bytes betterProof1 = randomProof(2);
+    pool.add(networkAggregate(attestationData(1), 1, betterProof1, 0, 1));
+
+    final PqBlockAttestations second = blockAttestations(blockSlot);
+
+    // Only the new aggregate is merged into the earlier proof, which proves both committees
+    assertThat(prover.merges).hasSize(2);
+    final List<ProvenStatements> children = prover.merges.get(1);
+    assertThat(children.stream().map(ProvenStatements::proof))
+        .containsExactly(first.proof(), betterProof1);
+    assertThat(children.getFirst().statements()).hasSize(2);
+    assertThat(second.proof()).isEqualTo(RecursiveProver.mergedProof(2));
+    assertThat(attesterCount(second)).isEqualTo(3);
+
+    // Nothing new: the last merged proof is the block's
+    final PqBlockAttestations third = blockAttestations(blockSlot);
+    assertThat(prover.merges).hasSize(2);
+    assertThat(third.proof()).isEqualTo(second.proof());
+    assertThat(attesterCount(third)).isEqualTo(3);
+  }
+
+  @Test
+  void shouldLeaveOutProofsBeyondTheMergeLimit() {
+    final RecursiveProver prover = new RecursiveProver();
+    pool =
+        new AggregatingAttestationPoolPq(
+            spec, storageSystem.recentChainData(), prover, Optional.empty(), 1);
+    // Committee 0's attestation adds more attesters, so it comes first
+    final Bytes proof0 = randomProof(2);
+    pool.add(networkAggregate(attestationData(0), 0, proof0, 0, 1));
+    pool.add(networkAggregate(attestationData(1), 1, randomProof(1), 0));
+    final UInt64 blockSlot = attestationSlot.plus(2);
+
+    final PqBlockAttestations first = blockAttestations(blockSlot);
+
+    assertThat(first.attestations()).hasSize(1);
+    assertThat(first.attestations().get(0).getData()).isEqualTo(attestationData(0));
+    assertThat(first.proof()).isEqualTo(proof0);
+
+    // The earlier proof fills the merge, so committee 1 still waits
+    final PqBlockAttestations second = blockAttestations(blockSlot);
+
+    assertThat(second.attestations()).hasSize(1);
+    assertThat(second.proof()).isEqualTo(proof0);
+    assertThat(prover.merges).isEmpty();
+  }
+
+  @Test
+  void shouldNotHoldThePoolLockWhileMerging() {
+    final List<Integer> sizesSeenWhileMerging = new ArrayList<>();
+    final RecursiveProver prover =
+        new RecursiveProver() {
+          @Override
+          public Bytes mergeProofs(final List<ProvenStatements> proofs) {
+            try {
+              // Waits forever if this thread holds the pool's lock
+              sizesSeenWhileMerging.add(
+                  CompletableFuture.supplyAsync(pool::getSize).get(10, TimeUnit.SECONDS));
+            } catch (final Exception e) {
+              throw new IllegalStateException(e);
+            }
+            return super.mergeProofs(proofs);
+          }
+        };
+    pool = new AggregatingAttestationPoolPq(spec, storageSystem.recentChainData(), prover);
+    pool.add(networkAggregate(attestationData(0), 0, randomProof(1), 0));
+    pool.add(networkAggregate(attestationData(1), 1, randomProof(1), 0));
+
+    blockAttestations(attestationSlot.plus(2));
+
+    assertThat(sizesSeenWhileMerging).containsExactly(2);
+  }
+
+  @Test
+  void shouldMergeTimelyProofsAheadOfALocalProposal() {
+    final RecursiveProver prover = new RecursiveProver();
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner();
+    pool =
+        new AggregatingAttestationPoolPq(
+            spec, storageSystem.recentChainData(), prover, asyncRunner);
+    final Bytes proof0 = randomProof(1);
+    final Bytes proof1 = randomProof(1);
+    pool.add(networkAggregate(attestationData(0), 0, proof0, 0));
+    pool.add(networkAggregate(attestationData(1), 1, proof1, 0));
+    final UInt64 blockSlot = attestationSlot.plus(2);
+
+    pool.onSlot(blockSlot.minus(1));
+    assertThat(prover.merges).isEmpty();
+    asyncRunner.executeQueuedActions();
+
+    assertThat(prover.merges).hasSize(1);
+    assertThat(prover.merges.getFirst().stream().map(ProvenStatements::proof))
+        .containsExactlyInAnyOrder(proof0, proof1);
+
+    // Block production finds nothing new to merge
+    final PqBlockAttestations block = blockAttestations(blockSlot);
+
+    assertThat(prover.merges).hasSize(1);
+    assertThat(block.proof()).isEqualTo(RecursiveProver.mergedProof(1));
+    assertThat(attesterCount(block)).isEqualTo(2);
+  }
+
+  @Test
+  void shouldNotMergeAheadOfPqOrWithoutTimelyAggregates() {
+    final RecursiveProver prover = new RecursiveProver();
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner();
+    pool =
+        new AggregatingAttestationPoolPq(
+            spec, storageSystem.recentChainData(), prover, asyncRunner);
+    pool.add(networkAggregate(attestationData(0), 0, randomProof(1), 0));
+    pool.add(networkAggregate(attestationData(1), 1, randomProof(1), 0));
+
+    // Before the fork, and for a block whose timely slot has no aggregates
+    pool.onSlot(UInt64.ZERO);
+    pool.onSlot(attestationSlot.plus(2));
+    asyncRunner.executeQueuedActions();
+
+    assertThat(prover.merges).isEmpty();
+  }
+
+  @Test
+  void shouldForgetMergedProofsOnceTheirSlotHasPassed() {
+    final RecursiveProver prover = new RecursiveProver();
+    pool = new AggregatingAttestationPoolPq(spec, storageSystem.recentChainData(), prover);
+    pool.add(networkAggregate(attestationData(0), 0, randomProof(1), 0));
+    pool.add(networkAggregate(attestationData(1), 1, randomProof(1), 0));
+    final UInt64 blockSlot = attestationSlot.plus(2);
+    blockAttestations(blockSlot);
+
+    pool.onSlot(blockSlot.plus(1));
+    blockAttestations(blockSlot);
+
+    assertThat(prover.merges).hasSize(2);
+    assertThat(prover.merges.get(1)).hasSize(2);
+  }
+
+  @Test
+  void shouldNotMergeAheadWithTheConcatenationStandIn() {
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner();
+    pool =
+        new AggregatingAttestationPoolPq(
+            spec, storageSystem.recentChainData(), StarkProver.CONCATENATED, asyncRunner);
+
+    pool.onSlot(attestationSlot.plus(1));
+
+    assertThat(asyncRunner.hasDelayedActions()).isFalse();
+  }
+
+  private static int attesterCount(final PqBlockAttestations blockAttestations) {
+    return blockAttestations.attestations().stream()
+        .mapToInt(attestation -> attestation.getAggregationBits().getBitCount())
+        .sum();
+  }
+
+  /**
+   * A recursive prover, which merges proofs incrementally: records each merge's children and names
+   * its proof by how many merges came before. A single proof merges to itself, as leanVM's does.
+   */
+  private static class RecursiveProver implements StarkProver {
+    final List<List<ProvenStatements>> merges = new ArrayList<>();
+
+    static Bytes mergedProof(final int merge) {
+      return Bytes.ofUnsignedInt(merge);
+    }
+
+    @Override
+    public Bytes proveAggregates(
+        final List<XmssAggregateStatement> statements, final List<List<Bytes>> signatures) {
+      return Bytes.fromHexString("0x5afe");
+    }
+
+    @Override
+    public long proofSizeOf(final int signatureCount) {
+      return 0;
+    }
+
+    @Override
+    public boolean isMergedProofSizeTheSumOfChildren() {
+      return false;
+    }
+
+    @Override
+    public boolean isIncrementallyMergeable() {
+      return true;
+    }
+
+    @Override
+    public Bytes mergeProofs(final List<ProvenStatements> proofs) {
+      if (proofs.size() == 1) {
+        return proofs.getFirst().proof();
+      }
+      merges.add(List.copyOf(proofs));
+      return mergedProof(merges.size());
+    }
   }
 
   @Test

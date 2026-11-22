@@ -82,6 +82,11 @@ public class LeanVmStark implements StarkProver, StarkProofVerifier {
   }
 
   @Override
+  public boolean isIncrementallyMergeable() {
+    return true;
+  }
+
+  @Override
   public Bytes mergeProofs(final List<ProvenStatements> proofs) {
     return aggregator.merge(
         proofs.stream()
