@@ -16,6 +16,7 @@ package tech.pegasys.teku.validator.client.duties;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFuture.completedFuture;
@@ -37,6 +38,7 @@ import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationPq;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.PqAttestationSchemas;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.spec.signatures.Signer;
@@ -118,5 +120,68 @@ class AggregationDutyPqTest {
                 schemas
                     .getSignedAggregateAndProofSchema()
                     .create(aggregateAndProof, signature.toBytes())));
+  }
+
+  @Test
+  void shouldPublishEachAggregateOnceSigned() {
+    final XmssSigner otherSigner = mock(XmssSigner.class);
+    final Validator otherValidator =
+        new Validator(
+            dataStructureUtil.randomPublicKey(),
+            mock(Signer.class),
+            Optional::empty,
+            false,
+            Optional.of(otherSigner));
+    final SafeFuture<XmssSignature> signing = new SafeFuture<>();
+    final SafeFuture<XmssSignature> otherSigning = new SafeFuture<>();
+    final SignedAggregateAndProofPq signed = prepareAggregate(xmssSigner, 7, 2, signing);
+    final SignedAggregateAndProofPq otherSigned = prepareAggregate(otherSigner, 8, 3, otherSigning);
+    duty.addValidator(
+        validator,
+        7,
+        BLSSignature.empty(),
+        2,
+        completedFuture(Optional.of(signed.getMessage().getAggregate().getData())));
+    duty.addValidator(
+        otherValidator,
+        8,
+        BLSSignature.empty(),
+        3,
+        completedFuture(Optional.of(otherSigned.getMessage().getAggregate().getData())));
+
+    final SafeFuture<DutyResult> result = duty.performDuty();
+    otherSigning.complete(XmssSignature.fromBytes(otherSigned.getSignature()));
+
+    // The second is published without waiting for the first
+    verify(validatorApiChannel).sendPqAggregateAndProofs(List.of(otherSigned));
+    verify(validatorApiChannel, never()).sendPqAggregateAndProofs(List.of(signed));
+    assertThat(result).isNotDone();
+
+    signing.complete(XmssSignature.fromBytes(signed.getSignature()));
+    verify(validatorApiChannel).sendPqAggregateAndProofs(List.of(signed));
+    assertThat(result).isCompleted();
+  }
+
+  /** Mocks the beacon node's aggregate for the committee, and its signing with {@code signer}. */
+  private SignedAggregateAndProofPq prepareAggregate(
+      final XmssSigner signer,
+      final int aggregatorIndex,
+      final int committeeIndex,
+      final SafeFuture<XmssSignature> signing) {
+    final AttestationPq aggregate = (AttestationPq) dataStructureUtil.randomAttestation();
+    final Bytes proof = dataStructureUtil.randomBytes(64);
+    when(validatorApiChannel.createPqAggregate(
+            SLOT, aggregate.getData().hashTreeRoot(), UInt64.valueOf(committeeIndex)))
+        .thenReturn(
+            completedFuture(
+                Optional.of(schemas.getAttestationAndProofSchema().create(aggregate, proof))));
+    final AggregateAndProofPq aggregateAndProof =
+        schemas
+            .getAggregateAndProofSchema()
+            .create(UInt64.valueOf(aggregatorIndex), aggregate, proof);
+    when(signer.signAggregateAndProof(aggregateAndProof, fork)).thenReturn(signing);
+    return schemas
+        .getSignedAggregateAndProofSchema()
+        .create(aggregateAndProof, dataStructureUtil.randomXmssSignature().getBytes());
   }
 }
