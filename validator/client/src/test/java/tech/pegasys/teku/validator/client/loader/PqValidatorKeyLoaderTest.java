@@ -51,10 +51,13 @@ import tech.pegasys.teku.infrastructure.io.SyncDataAccessor;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.versions.pq.ValidatorPq;
 import tech.pegasys.teku.spec.signatures.xmss.LocalXmssLeafProtector;
 import tech.pegasys.teku.spec.signatures.xmss.VrfTree;
 import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.validator.client.loader.DevnetXmssCacheSource.RegisteredKey;
 import tech.pegasys.teku.xmss.Xmss;
 import tech.pegasys.teku.xmss.XmssPublicKey;
 import tech.pegasys.teku.xmss.XmssSecretKey;
@@ -548,6 +551,37 @@ class PqValidatorKeyLoaderTest {
 
   private static Bytes32 noSecretKey() {
     throw new AssertionError("The BLS secret key should not be needed");
+  }
+
+  @Test
+  void readRegisteredKeys_readsTheGenesisValidatorsPqKeys() throws IOException {
+    final BeaconState genesis = dataStructureUtil.randomBeaconState(4);
+    final Path genesisFile = tempDir.resolve("genesis.ssz");
+    Files.write(genesisFile, genesis.sszSerialize().toArrayUnsafe());
+
+    assertThat(PqValidatorKeyLoader.readRegisteredKeys(spec, genesisFile.toString()))
+        .contains(
+            genesis.getValidators().stream()
+                .map(ValidatorPq.class::cast)
+                .map(
+                    validator ->
+                        new RegisteredKey(
+                            XmssPublicKey.fromBytes(validator.getXmssPublicKey()),
+                            validator.getVrfRoot()))
+                .toList());
+  }
+
+  @Test
+  void readRegisteredKeys_isEmptyForAMissingOrPrePqGenesisState() throws IOException {
+    assertThat(PqValidatorKeyLoader.readRegisteredKeys(spec, tempDir.resolve("missing").toString()))
+        .isEmpty();
+
+    final Spec altair = TestSpecFactory.createMinimalAltair();
+    final Path genesisFile = tempDir.resolve("altair-genesis.ssz");
+    Files.write(
+        genesisFile,
+        new DataStructureUtil(altair).randomBeaconState(4).sszSerialize().toArrayUnsafe());
+    assertThat(PqValidatorKeyLoader.readRegisteredKeys(altair, genesisFile.toString())).isEmpty();
   }
 
   private void writeKeystore(

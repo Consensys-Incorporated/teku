@@ -258,6 +258,9 @@ public class TekuConfiguration {
           b -> b.bootnodesDefault(eth2NetworkConfiguration.getDiscoveryBootnodes()));
       restApiBuilder.eth1DepositContractAddressDefault(depositContractAddress);
 
+      // PQ keys find their records in a devnet's XMSS cache by the genesis validators
+      validatorConfigBuilder.pqGenesisState(
+          eth2NetworkConfiguration.getNetworkBoostrapConfig().getGenesisState());
       final ValidatorConfig validatorConfig = validatorConfigBuilder.build();
 
       final P2PConfig p2PConfig = p2pConfigBuilder.build();

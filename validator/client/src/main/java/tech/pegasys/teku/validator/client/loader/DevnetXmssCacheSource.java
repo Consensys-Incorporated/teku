@@ -41,6 +41,8 @@ import java.util.regex.Pattern;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.spec.signatures.xmss.VrfLeafZeroState;
 import tech.pegasys.teku.xmss.Xmss;
 import tech.pegasys.teku.xmss.XmssConstants;
 import tech.pegasys.teku.xmss.XmssPublicKey;
@@ -61,12 +63,20 @@ import tech.pegasys.teku.xmss.XmssSigningKey;
  * and a few recent blocks are kept for the keys that follow.
  *
  * <p>A key's record is found by its public parameter, which is cheap to derive from the seed, among
- * the genesis public keys of the cache's key set. Those are read from the key set's {@code .bin}
- * file next to the cache ({@code <name>.bin} for {@code <name>.xmss}), as Lighthouse does: one
- * 64-byte record per key in the cache's order, the key's XMSS public key first. Without that file,
- * the keys of PQ devnet-0's key set are used, which ship with Teku (ethereum-package d4c9a8ace9
- * {@code static_files/xmss-keys/b9dec4e1daa17dfe.bin}). The record's trees are then checked against
- * the public key, so the cache needn't be trusted.
+ * the genesis public keys of the cache's key set, as Lighthouse finds it. They come from the first
+ * of:
+ *
+ * <ul>
+ *   <li>the key set's {@code .bin} file next to the cache ({@code <name>.bin} for {@code
+ *       <name>.xmss}): one 64-byte record per key in the cache's order, the key's XMSS public key
+ *       first;
+ *   <li>the network's genesis state, each validator's key at the index of its VRF root in the
+ *       devnet's {@code vrf_state_url} file, which is in the cache's order;
+ *   <li>the keys of PQ devnet-0's key set, which ship with Teku (ethereum-package d4c9a8ace9 {@code
+ *       static_files/xmss-keys/b9dec4e1daa17dfe.bin}).
+ * </ul>
+ *
+ * The record's trees are then checked against the public key, so the cache needn't be trusted.
  */
 class DevnetXmssCacheSource {
 
@@ -111,14 +121,37 @@ class DevnetXmssCacheSource {
               });
 
   DevnetXmssCacheSource(final URI source) {
+    this(source, Optional::empty, Optional::empty);
+  }
+
+  /**
+   * A cache whose keys are found by the first of: the key list next to it, the {@code
+   * registeredKeys} of the genesis state placed by their VRF roots in {@code vrfStates} (the
+   * devnet's {@code vrf_state_url} file, in the cache's order), or PQ devnet-0's genesis keys.
+   */
+  DevnetXmssCacheSource(
+      final URI source,
+      final Supplier<Optional<List<RegisteredKey>>> registeredKeys,
+      final Supplier<Optional<Bytes>> vrfStates) {
     this.source = source;
     this.genesisKeys =
         Suppliers.memoize(
             () ->
                 readKeySetPublicKeys(source)
                     .map(DevnetXmssCacheSource::genesisKeysByParameter)
-                    .orElseGet(DEVNET_GENESIS_KEYS));
+                    .or(() -> genesisKeysByVrfRoot(source, registeredKeys, vrfStates))
+                    .orElseGet(
+                        () -> {
+                          LOG.info(
+                              "Finding keys in the leanXMSS tree cache {} by PQ devnet-0's genesis"
+                                  + " keys, which ship with Teku",
+                              source);
+                          return DEVNET_GENESIS_KEYS.get();
+                        }));
   }
+
+  /** A validator's keys as the genesis state registers them. */
+  record RegisteredKey(XmssPublicKey publicKey, Bytes32 vrfRoot) {}
 
   @VisibleForTesting
   DevnetXmssCacheSource(
@@ -295,19 +328,14 @@ class DevnetXmssCacheSource {
       records = readKeySet(keySet);
     } catch (final IOException | RuntimeException e) {
       LOG.info(
-          "No key list for the leanXMSS tree cache {} at {} ({}). Using PQ devnet-0's genesis keys,"
-              + " which ship with Teku.",
-          source,
-          keySet,
-          e.getMessage());
+          "No key list for the leanXMSS tree cache {} at {} ({})", source, keySet, e.getMessage());
       return Optional.empty();
     }
     if (records.isEmpty()
         || records.size() % GENESIS_KEY_RECORD_SIZE != 0
         || records.size() > KEY_COUNT * GENESIS_KEY_RECORD_SIZE) {
       LOG.warn(
-          "Invalid key list {} of {} bytes for the leanXMSS tree cache {}. Using PQ devnet-0's"
-              + " genesis keys, which ship with Teku.",
+          "Ignoring the key list {} of {} bytes for the leanXMSS tree cache {}: not whole records",
           keySet,
           records.size(),
           source);
@@ -374,6 +402,78 @@ class DevnetXmssCacheSource {
     }
   }
 
+  /**
+   * The genesis validators' keys by public parameter, each at the index of its VRF root in {@code
+   * vrfStates}, which is in the cache's order, as Lighthouse finds them without a key list. Empty
+   * if either is missing or no key's VRF root is found.
+   */
+  private static Optional<Map<Bytes, Optional<GenesisKey>>> genesisKeysByVrfRoot(
+      final URI source,
+      final Supplier<Optional<List<RegisteredKey>>> registeredKeys,
+      final Supplier<Optional<Bytes>> vrfStates) {
+    final Optional<List<RegisteredKey>> keys = registeredKeys.get();
+    if (keys.isEmpty()) {
+      return Optional.empty();
+    }
+    final Optional<Bytes> states = vrfStates.get();
+    if (states.isEmpty()) {
+      LOG.info(
+          "No VRF states to place the genesis validators' keys in the leanXMSS tree cache {}",
+          source);
+      return Optional.empty();
+    }
+    final Map<Bytes, Optional<GenesisKey>> genesisKeys =
+        genesisKeysByVrfRoot(keys.get(), states.get());
+    if (genesisKeys.isEmpty()) {
+      LOG.warn(
+          "None of the {} genesis validators' VRF roots is in the VRF states, so they can't be"
+              + " found in the leanXMSS tree cache {}",
+          keys.get().size(),
+          source);
+      return Optional.empty();
+    }
+    LOG.info(
+        "Finding keys in the leanXMSS tree cache {} by the genesis state: {} of its {} validators"
+            + " have their VRF root in the VRF states",
+        source,
+        genesisKeys.size(),
+        keys.get().size());
+    return Optional.of(genesisKeys);
+  }
+
+  /**
+   * The keys by public parameter, each at the index of the record of {@code vrfStates} that starts
+   * with its VRF root. A parameter or VRF root two keys share identifies neither.
+   */
+  @VisibleForTesting
+  static Map<Bytes, Optional<GenesisKey>> genesisKeysByVrfRoot(
+      final List<RegisteredKey> keys, final Bytes vrfStates) {
+    final int recordSize = VrfLeafZeroState.SERIALIZED_SIZE;
+    final Map<Bytes32, Optional<Integer>> indexByRoot = new HashMap<>();
+    for (int index = 0; (index + 1) * recordSize <= vrfStates.size(); index++) {
+      indexByRoot.merge(
+          Bytes32.wrap(vrfStates.slice(index * recordSize, Bytes32.SIZE)),
+          Optional.of(index),
+          (existing, added) -> Optional.empty());
+    }
+    final Map<Bytes, Optional<GenesisKey>> genesisKeys = new HashMap<>();
+    for (final RegisteredKey key : keys) {
+      indexByRoot
+          .getOrDefault(key.vrfRoot(), Optional.empty())
+          .ifPresent(
+              index ->
+                  genesisKeys.merge(
+                      publicParameter(key.publicKey()),
+                      Optional.of(new GenesisKey(index, key.publicKey())),
+                      (existing, added) -> Optional.empty()));
+    }
+    return genesisKeys;
+  }
+
+  private static Bytes publicParameter(final XmssPublicKey publicKey) {
+    return publicKey.toBytes().slice(XmssConstants.PUBLIC_KEY_SIZE - Xmss.PUBLIC_PARAMETER_SIZE);
+  }
+
   /** The genesis keys by public parameter; a parameter two keys share identifies neither. */
   @VisibleForTesting
   static Map<Bytes, Optional<GenesisKey>> genesisKeysByParameter(final Bytes publicKeys) {
@@ -383,8 +483,7 @@ class DevnetXmssCacheSource {
           XmssPublicKey.fromBytes(
               publicKeys.slice(
                   index * XmssConstants.PUBLIC_KEY_SIZE, XmssConstants.PUBLIC_KEY_SIZE));
-      final Bytes parameter =
-          publicKey.toBytes().slice(XmssConstants.PUBLIC_KEY_SIZE - Xmss.PUBLIC_PARAMETER_SIZE);
+      final Bytes parameter = publicParameter(publicKey);
       final GenesisKey key = new GenesisKey(index, publicKey);
       keys.merge(parameter, Optional.of(key), (existing, added) -> Optional.empty());
     }

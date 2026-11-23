@@ -45,6 +45,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tech.pegasys.teku.bls.keystore.pq.PqKeyStoreSecrets;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.spec.signatures.xmss.VrfLeafZeroState;
+import tech.pegasys.teku.validator.client.loader.DevnetXmssCacheSource.GenesisKey;
+import tech.pegasys.teku.validator.client.loader.DevnetXmssCacheSource.RegisteredKey;
 import tech.pegasys.teku.xmss.Xmss;
 import tech.pegasys.teku.xmss.XmssPublicKey;
 import tech.pegasys.teku.xmss.XmssSecretKey;
@@ -231,6 +234,91 @@ class XmssTreeCacheTest {
     } finally {
       server.stop(0);
     }
+  }
+
+  @Test
+  void devnetSourceFindsKeysByTheGenesisValidatorsVrfRootsWithoutAKeyList() throws IOException {
+    // A key set whose second key is devnet key 0, with no key list next to its cache
+    final Path cacheFile = tempDir.resolve("other-set.xmss");
+    Files.write(
+        cacheFile,
+        Bytes.concatenate(Bytes.random(devnetRecord0.size()), devnetRecord0).toArrayUnsafe());
+    final Bytes32 otherRoot = Bytes32.random();
+    final Bytes32 key0Root = Bytes32.random();
+    final List<RegisteredKey> genesisValidators =
+        List.of(
+            new RegisteredKey(XmssPublicKey.fromBytes(Bytes32.random()), otherRoot),
+            new RegisteredKey(DEVNET_KEY_0_PUBLIC_KEY, key0Root));
+    final Bytes vrfStates = Bytes.concatenate(vrfState(otherRoot), vrfState(key0Root));
+
+    try (XmssSigningKey key =
+        new DevnetXmssCacheSource(
+                cacheFile.toUri(),
+                () -> Optional.of(genesisValidators),
+                () -> Optional.of(vrfStates))
+            .load(DEVNET_KEY_0, Optional.empty())
+            .orElseThrow()) {
+      assertThat(key.getPublicKey()).isEqualTo(DEVNET_KEY_0_PUBLIC_KEY);
+    }
+
+    // without the VRF states, PQ devnet-0's keys are used, which put key 0 at index 0
+    assertThat(
+            new DevnetXmssCacheSource(
+                    cacheFile.toUri(), () -> Optional.of(genesisValidators), Optional::empty)
+                .load(DEVNET_KEY_0, Optional.empty()))
+        .isEmpty();
+  }
+
+  @Test
+  void devnetSourcePrefersTheKeyListToTheGenesisValidators() throws IOException {
+    final Path cacheFile = tempDir.resolve("other-set.xmss");
+    Files.write(
+        cacheFile,
+        Bytes.concatenate(Bytes.random(devnetRecord0.size()), devnetRecord0).toArrayUnsafe());
+    Files.write(tempDir.resolve("other-set.bin"), keyList(1).toArrayUnsafe());
+    final Bytes32 key0Root = Bytes32.random();
+
+    // the VRF states would put key 0 at index 0, which holds random bytes
+    try (XmssSigningKey key =
+        new DevnetXmssCacheSource(
+                cacheFile.toUri(),
+                () -> Optional.of(List.of(new RegisteredKey(DEVNET_KEY_0_PUBLIC_KEY, key0Root))),
+                () -> Optional.of(vrfState(key0Root)))
+            .load(DEVNET_KEY_0, Optional.empty())
+            .orElseThrow()) {
+      assertThat(key.getPublicKey()).isEqualTo(DEVNET_KEY_0_PUBLIC_KEY);
+    }
+  }
+
+  @Test
+  void genesisKeysAreAtTheIndexOfTheirVrfRoot() {
+    final XmssPublicKey keyA = XmssPublicKey.fromBytes(Bytes32.random());
+    final XmssPublicKey keyB = XmssPublicKey.fromBytes(Bytes32.random());
+    final XmssPublicKey keyC = XmssPublicKey.fromBytes(Bytes32.random());
+    final Bytes32 rootA = Bytes32.random();
+    final Bytes32 sharedRoot = Bytes32.random();
+    final Bytes vrfStates =
+        Bytes.concatenate(
+            vrfState(sharedRoot),
+            vrfState(Bytes32.random()),
+            vrfState(rootA),
+            vrfState(sharedRoot));
+
+    assertThat(
+            DevnetXmssCacheSource.genesisKeysByVrfRoot(
+                List.of(
+                    new RegisteredKey(keyA, rootA),
+                    // two records share its root, so neither identifies it
+                    new RegisteredKey(keyB, sharedRoot),
+                    // no record has its root
+                    new RegisteredKey(keyC, Bytes32.random())),
+                vrfStates))
+        .containsExactly(Map.entry(keyA.toBytes().slice(16), Optional.of(new GenesisKey(2, keyA))));
+  }
+
+  /** A VRF state record of the {@code vrf_state_url} file: the root, then the state. */
+  private static Bytes vrfState(final Bytes32 root) {
+    return Bytes.concatenate(root, Bytes.random(VrfLeafZeroState.SERIALIZED_SIZE - Bytes32.SIZE));
   }
 
   @Test

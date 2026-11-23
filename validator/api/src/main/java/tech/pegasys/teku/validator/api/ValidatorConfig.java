@@ -139,6 +139,7 @@ public class ValidatorConfig {
   private final boolean pqKeysDerivedFromBlsKey;
   private final Optional<URI> pqVrfStateUrl;
   private final Optional<URI> pqXmssCacheUrl;
+  private final Optional<String> pqGenesisState;
 
   private ValidatorConfig(
       final List<String> validatorKeys,
@@ -191,7 +192,8 @@ public class ValidatorConfig {
       final List<URL> builderUrls,
       final boolean pqKeysDerivedFromBlsKey,
       final Optional<URI> pqVrfStateUrl,
-      final Optional<URI> pqXmssCacheUrl) {
+      final Optional<URI> pqXmssCacheUrl,
+      final Optional<String> pqGenesisState) {
     this.validatorKeys = validatorKeys;
     this.validatorExternalSignerPublicKeySources = validatorExternalSignerPublicKeySources;
     this.validatorExternalSignerUrl = validatorExternalSignerUrl;
@@ -248,6 +250,7 @@ public class ValidatorConfig {
     this.pqKeysDerivedFromBlsKey = pqKeysDerivedFromBlsKey;
     this.pqVrfStateUrl = pqVrfStateUrl;
     this.pqXmssCacheUrl = pqXmssCacheUrl;
+    this.pqGenesisState = pqGenesisState;
 
     LOG.debug(
         "Executor queue - {} threads, max queue size {} ", executorThreads, executorMaxQueueSize);
@@ -487,6 +490,15 @@ public class ValidatorConfig {
     return pqXmssCacheUrl;
   }
 
+  /**
+   * The network's genesis state (a file or URL), whose validators' leanXMSS public keys and VRF
+   * roots find each key's record in the {@link #getPqXmssCacheUrl() XMSS cache} when the cache has
+   * no key list next to it.
+   */
+  public Optional<String> getPqGenesisState() {
+    return pqGenesisState;
+  }
+
   public static final class Builder {
     private List<String> validatorKeys = new ArrayList<>();
     private List<String> validatorExternalSignerPublicKeySources = new ArrayList<>();
@@ -552,6 +564,7 @@ public class ValidatorConfig {
     private boolean pqKeysDerivedFromBlsKey = DEFAULT_PQ_KEYS_DERIVED_FROM_BLS_KEY;
     private Optional<URI> pqVrfStateUrl = Optional.empty();
     private Optional<URI> pqXmssCacheUrl = Optional.empty();
+    private Optional<String> pqGenesisState = Optional.empty();
 
     private Builder() {}
 
@@ -888,6 +901,11 @@ public class ValidatorConfig {
       return this;
     }
 
+    public Builder pqGenesisState(final Optional<String> pqGenesisState) {
+      this.pqGenesisState = pqGenesisState;
+      return this;
+    }
+
     public ValidatorConfig build() {
       validateExternalSignerUrlAndPublicKeys();
       validateExternalSignerKeystoreAndPasswordFileConfig();
@@ -944,7 +962,8 @@ public class ValidatorConfig {
           builderUrls,
           pqKeysDerivedFromBlsKey,
           pqVrfStateUrl,
-          pqXmssCacheUrl);
+          pqXmssCacheUrl,
+          pqGenesisState);
     }
 
     private void validateExternalSignerUrlAndPublicKeys() {
