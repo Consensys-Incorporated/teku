@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -158,6 +159,51 @@ class XmssKeyWarmerTest {
 
     preparing.get(1).complete(2);
     assertThat(preparing).hasSize(3);
+  }
+
+  @Test
+  void onSlot_warnsWhenKeysAreStillPreparingTheTreesOfTheSlotThatStartsUsingThem() {
+    final XmssKeyWarmer warmer = createWarmer(spec, 2);
+    final List<SafeFuture<Integer>> preparing = new ArrayList<>();
+    addValidator(slowSigner(preparing));
+    addValidator(signer1);
+    final UInt64 boundary = UInt64.valueOf(SECOND_PER_SLOT_TREE_START);
+
+    warmer.onSlot(boundary.minus(LOOKAHEAD + 1));
+    preparing.getFirst().complete(2);
+    warmer.onSlot(boundary.minus(LOOKAHEAD));
+    // the slow key is still preparing the next per-slot tree
+
+    try (LogCaptor logCaptor = LogCaptor.forClass(XmssKeyWarmer.class)) {
+      warmer.onSlot(boundary.minus(1));
+      assertThat(logCaptor.getWarnLogs()).isEmpty();
+
+      warmer.onSlot(boundary);
+      logCaptor.assertWarnLog(
+          "1 of 2 leanXMSS keys are still building the bottom trees [0, 24577] first used at slot"
+              + " 4096");
+
+      // warned once
+      warmer.onSlot(boundary.plus(1));
+      assertThat(logCaptor.getWarnLogs()).hasSize(1);
+    }
+  }
+
+  @Test
+  void onSlot_doesNotWarnWhenEveryKeyPreparedTheTreesInTime() {
+    final XmssKeyWarmer warmer = createWarmer(spec, 2);
+    final List<SafeFuture<Integer>> preparing = new ArrayList<>();
+    addValidator(slowSigner(preparing));
+    final UInt64 boundary = UInt64.valueOf(SECOND_PER_SLOT_TREE_START);
+
+    warmer.onSlot(boundary.minus(LOOKAHEAD + 1));
+    warmer.onSlot(boundary.minus(LOOKAHEAD));
+    preparing.forEach(prepared -> prepared.complete(1));
+
+    try (LogCaptor logCaptor = LogCaptor.forClass(XmssKeyWarmer.class)) {
+      warmer.onSlot(boundary);
+      assertThat(logCaptor.getWarnLogs()).isEmpty();
+    }
   }
 
   private XmssKeyWarmer createWarmer(final Spec spec, final int maxKeysAtOnce) {

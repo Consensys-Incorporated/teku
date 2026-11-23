@@ -16,7 +16,9 @@ package tech.pegasys.teku.validator.client;
 import com.google.common.annotations.VisibleForTesting;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -46,10 +48,13 @@ public class XmssKeyWarmer implements ValidatorTimingChannel {
   private static final Logger LOG = LogManager.getLogger();
 
   /**
-   * How far ahead of a new bottom tree's first slot to start building it. 1000 keys on two threads
-   * take about 100 slots at a few seconds per tree.
+   * How far ahead of a new bottom tree's first slot to start building it. A tree takes about 2.4 s
+   * on a fast machine, but an estimated 20 s or more on the 8-core machines of a PQ devnet, where
+   * 625 keys on two threads would need about 2 hours: 600 slots of 12 s. The per-slot leaves move
+   * to a new tree only every 8192 slots, so starting a quarter of that ahead costs nothing and
+   * covers slow machines.
    */
-  public static final int LOOKAHEAD_SLOTS = 256;
+  public static final int LOOKAHEAD_SLOTS = 2048;
 
   private final Spec spec;
   private final OwnedValidators validators;
@@ -59,6 +64,11 @@ public class XmssKeyWarmer implements ValidatorTimingChannel {
 
   // The bottom trees every key has been asked to prepare
   private Set<Long> warmedTrees = Set.of();
+  // The warm-up for the trees of a slot ahead, until that slot comes
+  private Optional<WarmUp> warmUpAhead = Optional.empty();
+
+  /** A warm-up of {@code keys} keys for {@code trees}, of which {@code remaining} are not done. */
+  private record WarmUp(List<Long> trees, int keys, AtomicInteger remaining) {}
 
   public XmssKeyWarmer(
       final Spec spec, final OwnedValidators validators, final TimeProvider timeProvider) {
@@ -89,12 +99,19 @@ public class XmssKeyWarmer implements ValidatorTimingChannel {
     final UInt64 slotAhead = slot.plus(lookaheadSlots);
     final List<Long> currentTrees = XmssLeafLayout.bottomTreesAt(spec, slot);
     final List<Long> treesAhead = XmssLeafLayout.bottomTreesAt(spec, slotAhead);
+    warmUpAhead
+        .filter(warmUp -> currentTrees.containsAll(warmUp.trees()))
+        .ifPresent(
+            warmUp -> {
+              warnIfUnfinished(warmUp, slot);
+              warmUpAhead = Optional.empty();
+            });
     // The current slot first: its trees are needed now
     if (!warmedTrees.containsAll(currentTrees)) {
       warmUp(slot);
     }
     if (!warmedTrees.containsAll(treesAhead) && !currentTrees.containsAll(treesAhead)) {
-      warmUp(slotAhead);
+      warmUpAhead = warmUp(slotAhead);
     }
     final Set<Long> warmed = new HashSet<>(currentTrees);
     warmed.addAll(treesAhead);
@@ -108,16 +125,33 @@ public class XmssKeyWarmer implements ValidatorTimingChannel {
     warmedTrees = Set.of();
   }
 
-  private void warmUp(final UInt64 slot) {
+  private static void warnIfUnfinished(final WarmUp warmUp, final UInt64 slot) {
+    final int unfinished = warmUp.remaining().get();
+    if (unfinished > 0) {
+      LOG.warn(
+          "{} of {} leanXMSS keys are still building the bottom trees {} first used at slot {}."
+              + " Their duties there build them first, which can make them late.",
+          unfinished,
+          warmUp.keys(),
+          warmUp.trees(),
+          slot);
+    }
+  }
+
+  /** Asks every key to prepare for {@code slot}; empty if there are no keys. */
+  private Optional<WarmUp> warmUp(final UInt64 slot) {
     final List<XmssSigner> signers =
         validators.getValidators().stream()
             .flatMap(validator -> validator.getXmssSigner().stream())
             .toList();
     if (signers.isEmpty()) {
-      return;
+      return Optional.empty();
     }
+    final AtomicInteger remaining = new AtomicInteger(signers.size());
     final UInt64 startMillis = timeProvider.getTimeInMillis();
-    SafeFuture.collectAll(signers.stream().map(signer -> prepare(signer, slot)))
+    SafeFuture.collectAll(
+            signers.stream()
+                .map(signer -> prepare(signer, slot).alwaysRun(remaining::decrementAndGet)))
         .thenAccept(
             treesPerKey -> {
               final int trees = treesPerKey.stream().mapToInt(Integer::intValue).sum();
@@ -132,6 +166,8 @@ public class XmssKeyWarmer implements ValidatorTimingChannel {
               }
             })
         .finishError(LOG);
+    return Optional.of(
+        new WarmUp(XmssLeafLayout.bottomTreesAt(spec, slot), signers.size(), remaining));
   }
 
   private SafeFuture<Integer> prepare(final XmssSigner signer, final UInt64 slot) {
