@@ -29,12 +29,23 @@ import tech.pegasys.teku.spec.signatures.xmss.XmssLeafProtector;
  *     vrf_state_url} file) instead of deriving each VRF tree in full
  * @param xmssCacheUrl where devnet genesis keys can find pregenerated leanXMSS trees (a devnet
  *     {@code xmss_cache_url} file) instead of building them on their first start
+ * @param genesisState the network's genesis state, whose validators find their records in the XMSS
+ *     cache when it has no key list
  */
 public record PqKeyLoadingConfig(
     XmssLeafProtector leafProtector,
     Optional<Path> derivedKeysVrfCacheDirectory,
     Optional<URI> vrfStateUrl,
-    Optional<URI> xmssCacheUrl) {
+    Optional<URI> xmssCacheUrl,
+    Optional<String> genesisState) {
+
+  public PqKeyLoadingConfig(
+      final XmssLeafProtector leafProtector,
+      final Optional<Path> derivedKeysVrfCacheDirectory,
+      final Optional<URI> vrfStateUrl,
+      final Optional<URI> xmssCacheUrl) {
+    this(leafProtector, derivedKeysVrfCacheDirectory, vrfStateUrl, xmssCacheUrl, Optional.empty());
+  }
 
   public PqKeyLoadingConfig(
       final XmssLeafProtector leafProtector,

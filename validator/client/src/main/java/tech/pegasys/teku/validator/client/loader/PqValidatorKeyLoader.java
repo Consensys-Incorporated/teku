@@ -21,6 +21,7 @@ import java.net.URI;
 import java.net.URLConnection;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -40,12 +41,15 @@ import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException
 import tech.pegasys.teku.infrastructure.io.SyncDataAccessor;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.constants.PqConstants;
+import tech.pegasys.teku.spec.datastructures.state.versions.pq.ValidatorPq;
+import tech.pegasys.teku.spec.datastructures.util.ChainDataLoader;
 import tech.pegasys.teku.spec.signatures.xmss.LocalXmssSigner;
 import tech.pegasys.teku.spec.signatures.xmss.VrfLeafZeroState;
 import tech.pegasys.teku.spec.signatures.xmss.VrfProver;
 import tech.pegasys.teku.spec.signatures.xmss.VrfTree;
 import tech.pegasys.teku.spec.signatures.xmss.XmssLeafProtector;
 import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
+import tech.pegasys.teku.validator.client.loader.DevnetXmssCacheSource.RegisteredKey;
 import tech.pegasys.teku.xmss.Xmss;
 import tech.pegasys.teku.xmss.XmssPublicKey;
 import tech.pegasys.teku.xmss.XmssSecretKey;
@@ -129,9 +133,18 @@ public class PqValidatorKeyLoader {
     this.leafProtector = config.leafProtector();
     this.derivedKeysVrfCacheDirectory = config.derivedKeysVrfCacheDirectory();
     this.vrfStateUrl = config.vrfStateUrl();
-    this.xmssCacheSource = config.xmssCacheUrl().map(DevnetXmssCacheSource::new);
     this.fetchedVrfStates =
         Suppliers.memoize(() -> vrfStateUrl.flatMap(PqValidatorKeyLoader::fetchVrfStates));
+    final Supplier<Optional<List<RegisteredKey>>> registeredKeys =
+        Suppliers.memoize(
+            () ->
+                config
+                    .genesisState()
+                    .flatMap(genesisState -> readRegisteredKeys(spec, genesisState)));
+    this.xmssCacheSource =
+        config
+            .xmssCacheUrl()
+            .map(url -> new DevnetXmssCacheSource(url, registeredKeys, fetchedVrfStates));
     this.asyncRunner = asyncRunner;
     this.vrfTreeDepth = vrfTreeDepth;
     this.vrfCachedHeight = vrfCachedHeight;
@@ -233,6 +246,39 @@ public class PqValidatorKeyLoader {
           vrfStateUrl.get());
     }
     return state;
+  }
+
+  /**
+   * The genesis validators' leanXMSS public keys and VRF roots, or empty if the genesis state can't
+   * be read or is not a PQ state (logged).
+   */
+  @VisibleForTesting
+  static Optional<List<RegisteredKey>> readRegisteredKeys(
+      final Spec spec, final String genesisState) {
+    final List<RegisteredKey> keys;
+    try {
+      keys =
+          ChainDataLoader.loadState(spec, genesisState).getValidators().stream()
+              .filter(ValidatorPq.class::isInstance)
+              .map(ValidatorPq.class::cast)
+              .map(
+                  validator ->
+                      new RegisteredKey(
+                          XmssPublicKey.fromBytes(validator.getXmssPublicKey()),
+                          validator.getVrfRoot()))
+              .toList();
+    } catch (final IOException | RuntimeException e) {
+      LOG.warn(
+          "Unable to read the genesis validators' PQ keys from {}: {}",
+          genesisState,
+          e.getMessage());
+      return Optional.empty();
+    }
+    if (keys.isEmpty()) {
+      LOG.info("The genesis state {} has no PQ validators", genesisState);
+      return Optional.empty();
+    }
+    return Optional.of(keys);
   }
 
   /** Fetches the whole {@code vrf_state_url} file, or empty if it can't be read. */
