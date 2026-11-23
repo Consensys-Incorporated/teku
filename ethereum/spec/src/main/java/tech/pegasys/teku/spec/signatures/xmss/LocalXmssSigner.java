@@ -19,7 +19,10 @@ import static tech.pegasys.teku.spec.constants.PqConstants.LEAF_OFFSET_EXECUTION
 import static tech.pegasys.teku.spec.constants.PqConstants.LEAF_OFFSET_PROPOSER_PREFERENCES;
 import static tech.pegasys.teku.spec.constants.PqConstants.LEAF_OFFSET_PTC_ATTESTER;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
@@ -42,7 +45,7 @@ import tech.pegasys.teku.xmss.XmssSigningKey;
 /**
  * Signs with a leanXMSS key held in this process. Every signature is first recorded with the {@link
  * XmssLeafProtector}, so a leaf is never used for two different messages, even across restarts.
- * Signing and VRF proofs run on the async runner, as both are CPU-heavy.
+ * Signing, preparing trees and VRF proofs run on the async runner, as all are CPU-heavy.
  */
 public class LocalXmssSigner implements XmssSigner {
 
@@ -52,6 +55,11 @@ public class LocalXmssSigner implements XmssSigner {
   private final XmssLeafProtector leafProtector;
   private final AsyncRunner asyncRunner;
   private final SigningRootUtil signingRootUtil;
+
+  // The bottom trees prepareForSlot is building now, so requests that overlap share one build.
+  // Finished trees are not remembered: the key knows which trees it holds, and asking it again
+  // keeps them among the ones it used last.
+  private final Map<Long, SafeFuture<Boolean>> treesBeingPrepared = new ConcurrentHashMap<>();
 
   public LocalXmssSigner(
       final Spec spec,
@@ -136,6 +144,43 @@ public class LocalXmssSigner implements XmssSigner {
                 leaf.map(leafIndex -> signAtRecordedLeaf(leafIndex, signingRoot))
                     .orElseGet(
                         () -> SafeFuture.failedFuture(new XmssLeafReuseException(getPublicKey()))));
+  }
+
+  @Override
+  public SafeFuture<Integer> prepareForSlot(final UInt64 slot) {
+    final List<SafeFuture<Boolean>> trees = new ArrayList<>();
+    // One tree after the other, so preparing a key keeps a single thread busy. A tree that fails
+    // does not stop the next one
+    SafeFuture<Void> previousTree = SafeFuture.COMPLETE;
+    for (final long bottomTree : XmssLeafLayout.bottomTreesAt(spec, slot)) {
+      final SafeFuture<Boolean> tree =
+          previousTree.thenCompose(__ -> prepareBottomTree(bottomTree));
+      trees.add(tree);
+      previousTree = tree.handle((built, error) -> null);
+    }
+    return SafeFuture.collectAll(trees.stream())
+        .thenApply(built -> (int) built.stream().filter(Boolean::booleanValue).count());
+  }
+
+  /**
+   * Asks the key for {@code bottomTree}, on the async runner. True if the key had to build it,
+   * false if it held the tree already, for example from its saved tree cache, or if another request
+   * is building it.
+   */
+  private SafeFuture<Boolean> prepareBottomTree(final long bottomTree) {
+    final SafeFuture<Boolean> preparing = new SafeFuture<>();
+    final SafeFuture<Boolean> alreadyPreparing =
+        treesBeingPrepared.putIfAbsent(bottomTree, preparing);
+    if (alreadyPreparing != null) {
+      return alreadyPreparing.thenApply(__ -> false);
+    }
+    asyncRunner
+        .runAsync(
+            () ->
+                SafeFuture.completedFuture(
+                    signingKey.prepare(XmssSigningKey.firstLeafOfBottomTree(bottomTree))))
+        .propagateTo(preparing);
+    return preparing.alwaysRun(() -> treesBeingPrepared.remove(bottomTree, preparing));
   }
 
   @Override

@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Arrays;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterEach;
@@ -91,6 +92,58 @@ class XmssTest {
       final XmssSignature otherSignature = key.sign(otherLeaf, message);
       assertThat(otherSignature.getLeafIndex()).isEqualTo(otherLeaf);
       assertThat(Xmss.verify(publicKey, otherLeaf, message, otherSignature)).isTrue();
+    }
+  }
+
+  @Test
+  void shouldSignWhileAnotherBottomTreeIsBeingPrepared() throws Exception {
+    final UInt64 leafInFirstTree = UInt64.valueOf(7);
+    final UInt64 leafInSecondTree = XmssSigningKey.firstLeafOfBottomTree(1);
+    try (XmssSigningKey key = Xmss.loadSigningKey(secretKey)) {
+      key.prepare(leafInFirstTree);
+      final Thread prepareSecondTree = new Thread(() -> key.prepare(leafInSecondTree));
+      prepareSecondTree.start();
+      // Wait until the build is under way in the native key, past any lock prepare takes
+      while (!isInNativePrepare(prepareSecondTree)) {
+        assertThat(prepareSecondTree.isAlive()).isTrue();
+        Thread.onSpinWait();
+      }
+
+      final XmssSignature signed = key.sign(leafInFirstTree, message);
+
+      // Building a tree takes seconds and signing a fraction of that, so signing finished first
+      // unless it had to wait
+      assertThat(prepareSecondTree.isAlive()).isTrue();
+      assertThat(Xmss.verify(publicKey, leafInFirstTree, message, signed)).isTrue();
+      prepareSecondTree.join();
+    }
+  }
+
+  private static boolean isInNativePrepare(final Thread thread) {
+    return Arrays.stream(thread.getStackTrace())
+        .anyMatch(
+            frame ->
+                frame.getClassName().equals(org.ethereum.leanpq.XmssSecretKey.class.getName())
+                    && frame.getMethodName().equals("prepare"));
+  }
+
+  @Test
+  void shouldGroupLeavesIntoBottomTreesOf65536() {
+    assertThat(XmssSigningKey.bottomTreeOf(UInt64.ZERO)).isZero();
+    assertThat(XmssSigningKey.bottomTreeOf(UInt64.valueOf(65535))).isZero();
+    assertThat(XmssSigningKey.bottomTreeOf(UInt64.valueOf(65536))).isEqualTo(1);
+    assertThat(XmssSigningKey.bottomTreeOf(XmssConstants.MAX_LEAF_INDEX)).isEqualTo(65535);
+    assertThat(XmssSigningKey.firstLeafOfBottomTree(1)).isEqualTo(UInt64.valueOf(65536));
+    assertThat(XmssSigningKey.firstLeafOfBottomTree(65535))
+        .isEqualTo(XmssConstants.MAX_LEAF_INDEX.minus(65535));
+  }
+
+  @Test
+  void prepare_reportsWhetherItBuiltTheTree() {
+    final UInt64 leaf = UInt64.valueOf(3);
+    try (XmssSigningKey key = Xmss.loadSigningKey(secretKey)) {
+      assertThat(key.prepare(leaf)).isTrue();
+      assertThat(key.prepare(leaf.plus(1))).isFalse();
     }
   }
 

@@ -15,10 +15,10 @@ package tech.pegasys.teku.xmss;
 
 import java.nio.ByteOrder;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.ethereum.leanpq.LeanPqException;
@@ -37,6 +37,12 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
  * <p>This class signs whatever leaf it is given. Never sign two different messages at the same
  * leaf: that reveals enough of the key to forge signatures. Callers must record a leaf as used
  * before publishing any signature made with it.
+ *
+ * <p>Safe to share between threads: the native key guards its own trees. Calls do not wait for each
+ * other, so a slow {@link #prepare} of one bottom tree does not delay a {@link #sign} in another.
+ * The cost: two calls that need the same missing bottom tree each build it, and the key keeps one.
+ * Closing is safe while calls are in progress: the key is freed once they return, and later calls
+ * fail.
  */
 public final class XmssSigningKey implements AutoCloseable {
 
@@ -58,7 +64,7 @@ public final class XmssSigningKey implements AutoCloseable {
   private final org.ethereum.leanpq.XmssSecretKey key;
   private final XmssPublicKey publicKey;
   // The bottom trees this key has built or loaded, so a newly built one can be reported
-  private final Set<Long> bottomTrees = new HashSet<>();
+  private final Set<Long> bottomTrees = ConcurrentHashMap.newKeySet();
   private volatile Runnable onBottomTreeBuilt = () -> {};
 
   XmssSigningKey(final XmssSecretKey secretKey) {
@@ -128,6 +134,11 @@ public final class XmssSigningKey implements AutoCloseable {
     return leafIndex.longValue() / BOTTOM_TREE_LEAVES;
   }
 
+  /** The first leaf of bottom tree {@code bottomTree}. */
+  public static UInt64 firstLeafOfBottomTree(final long bottomTree) {
+    return UInt64.valueOf(bottomTree * BOTTOM_TREE_LEAVES);
+  }
+
   public XmssPublicKey getPublicKey() {
     return publicKey;
   }
@@ -141,40 +152,41 @@ public final class XmssSigningKey implements AutoCloseable {
   }
 
   /** The key's cached trees, which hold no secret. See {@link #fromCache}. */
-  public synchronized Bytes cacheToBytes() {
+  public Bytes cacheToBytes() {
     return Bytes.wrap(key.cacheToBytes());
   }
 
-  /** Precomputes the signing state for {@code leafIndex} so a later {@link #sign} is fast. */
-  public void prepare(final UInt64 leafIndex) {
+  /**
+   * Builds the bottom tree that holds {@code leafIndex}, so a later {@link #sign} in it is fast.
+   * Building takes seconds; it does nothing if the key already holds that tree.
+   *
+   * @return whether this key hadn't built or loaded that tree before
+   */
+  public boolean prepare(final UInt64 leafIndex) {
     XmssSignature.encodeLeafIndex(leafIndex);
-    final boolean built;
-    synchronized (this) {
-      key.prepare(leafIndex.longValue());
-      built = bottomTrees.add(bottomTreeOf(leafIndex));
-    }
-    if (built) {
-      onBottomTreeBuilt.run();
-    }
+    key.prepare(leafIndex.longValue());
+    return recordBottomTree(leafIndex);
   }
 
   public XmssSignature sign(final UInt64 leafIndex, final Bytes32 message) {
     XmssSignature.encodeLeafIndex(leafIndex);
-    final XmssSignature signature;
-    final boolean built;
-    synchronized (this) {
-      signature =
-          XmssSignature.fromBytes(Bytes.wrap(key.sign(message.toArray(), leafIndex.longValue())));
-      built = bottomTrees.add(bottomTreeOf(leafIndex));
-    }
-    if (built) {
-      onBottomTreeBuilt.run();
-    }
+    final XmssSignature signature =
+        XmssSignature.fromBytes(Bytes.wrap(key.sign(message.toArray(), leafIndex.longValue())));
+    recordBottomTree(leafIndex);
     return signature;
   }
 
+  /** Notes that the key holds the bottom tree of {@code leafIndex}. True if that is new. */
+  private boolean recordBottomTree(final UInt64 leafIndex) {
+    final boolean built = bottomTrees.add(bottomTreeOf(leafIndex));
+    if (built) {
+      onBottomTreeBuilt.run();
+    }
+    return built;
+  }
+
   @Override
-  public synchronized void close() {
+  public void close() {
     key.close();
   }
 }

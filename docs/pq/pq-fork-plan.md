@@ -547,6 +547,7 @@ Modelled on `infrastructure/bls` and `infrastructure/kzg`. `DepCheckPlugin` laye
   - stub mode returns an empty proof and accepts everything.
 - **Signer-side helpers** (could sit in `validator/client` instead):
   - `XmssKeyCache`: top-tree and bottom-tree LRU, `prepare(leaf)` warm-up;
+    - **Done differently:** lean-pq keeps the trees itself (the top tree and the last 4 bottom trees), and `XmssTreeCacheFile` saves them between starts, so Teku has no in-memory cache class. `XmssLeafLayout.bottomTreesAt(spec, slot)` names the bottom trees a validator signs from, `XmssSigner.prepareForSlot(slot)` builds them, and `XmssKeyWarmer` in `validator/client` calls it ahead of time (§3.15 item 10).
   - `VrfTree`: derivation, root, `proof(slot)`, persistent cache of level-k nodes.
 - **Tests:** KATs from `xmss_kat.json` and the leanVM ethlib vectors; property tests for leaf parsing.
 
@@ -842,6 +843,11 @@ The pool aggregates BLS signatures today (`AggregatingAttestationPoolV2`, `Match
     - Bottom trees are about 2 MiB each (2^17 × 16 B); keep two per key hot (the attestation region and the current per-slot tree).
       - At 1,000 keys that is about 4 GiB, too much. Use a smarter auth-path strategy or compute on demand, with `prepare(leaf)` ahead of time.
     - The per-slot bottom tree rolls every 8,192 slots (about 27 h). Precompute the next one in the background.
+    - **Done (warm-up):** `XmssKeyWarmer` prepares every owned key for the current slot once keys are loaded, and for the slot 256 ahead whenever that slot signs from a bottom tree the current one does not. So no signature builds a tree on the duty path. It prepares a quarter of the cores' worth of keys at once, to leave threads for signing.
+      - The first per-slot tree holds only 4,096 slots, because the per-slot leaves start in the middle of bottom tree 24576. The rollovers are at slot 4,096 and every 8,192 slots after.
+      - `XmssSigningKey.prepare` and `sign` no longer hold a common lock, so building the next tree does not delay signing in the current one. The native key guards its own trees: lean-pq takes it by shared reference and locks its tree cache internally.
+      - Exits and preregistrations sign at reserved leaves, which share bottom tree 0 with the first 32,768 attestation epochs; they are not prepared separately.
+      - Keys loaded from a saved or pregenerated tree cache already hold bottom trees 0 and 24576, so the first warm-up builds nothing for them. A tree the warm-up does build is saved by the loader's `onBottomTreeBuilt` listener, so each tree is built once per key.
 
 ### 3.16 Storage
 
