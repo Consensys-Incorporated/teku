@@ -85,8 +85,10 @@ import tech.pegasys.teku.storage.client.RecentChainData;
  *   <li>With a recursive prover, a block's proof is merged incrementally. When a local validator
  *       proposes the next slot, the pool merges the timely committees' proofs at the start of this
  *       one, then, once this slot's aggregates are proven, every committee the block can include,
- *       pass after pass until nothing is left out or the slot ends. Block production merges only
- *       what's new into that, at most {@link #MAX_PROOFS_PER_MERGE} proofs.
+ *       pass after pass until nothing is left out or the slot ends. Block production then takes the
+ *       largest proof merged ahead as it is, and proves and merges nothing, so the block is never
+ *       late for the prover: a merge takes seconds on a small machine, and the sidecar proves one
+ *       request at a time, so a merge still running would hold the block up too.
  * </ul>
  *
  * <p>A leanVM sidecar proves one request at a time, whichever connection it comes from, so a second
@@ -277,21 +279,53 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
   }
 
   /**
-   * The block's attestations and proof. When the pool merges ahead, block production proves
-   * nothing: proving a committee's single attestations takes up to about 700 ms each, and a block
-   * can have dozens. It includes proven aggregates only, network ones or those proven ahead, and
-   * merges what the merges ahead lack; later blocks include attesters it leaves out.
+   * The block's attestations and proof. When the pool merges ahead, block production proves and
+   * merges nothing, see {@link #mergedAhead}; later blocks include the attesters it leaves out.
    */
   private MergeResult mergeForBlock(
       final BeaconState stateAtBlockSlot, final AttestationForkChecker forkChecker) {
     final UInt64 blockSlot = stateAtBlockSlot.getSlot();
+    final boolean mergesAhead = mergesAhead();
     final List<SelectedData> selected;
     synchronized (this) {
-      selected = selectForBlock(stateAtBlockSlot, forkChecker, mergesAhead());
+      selected = selectForBlock(stateAtBlockSlot, forkChecker, mergesAhead);
     }
-    final MergeResult merged = merge(blockSlot, selected);
+    final MergeResult merged =
+        mergesAhead ? mergedAhead(blockSlot, selected) : merge(blockSlot, selected);
     recordProposalSnapshot(blockSlot, merged);
     return merged;
+  }
+
+  /**
+   * The block's attestations when the pool merges ahead, without proving or merging: those of the
+   * largest proof merged ahead whose claims are all among the {@code selected} committees', as it
+   * merged them, or else the first selected committee, on its own proof.
+   *
+   * <p>Proving a committee's single attestations takes up to about 700 ms each, and a merge a
+   * second on 16 cores but several on a devnet's 8, where blocks that merged at production were
+   * published 5 to 10 s into their slot, after the attestations, and were orphaned.
+   */
+  private MergeResult mergedAhead(final UInt64 blockSlot, final List<SelectedData> selected) {
+    final Set<Claim> available = new HashSet<>();
+    selected.forEach(data -> data.committees().forEach(c -> available.addAll(c.claims())));
+    final Optional<MergedProof> ahead = mergedProofs.findLargestWithin(blockSlot, available);
+    if (ahead.isPresent()) {
+      return new MergeResult(
+          ahead.get().included(), ahead.get().proof(), 0, ahead.get().round(), 0);
+    }
+    for (final SelectedData data : selected) {
+      for (final SelectedCommittee committee : data.committees()) {
+        if (committee.networkProof().isPresent()) {
+          return new MergeResult(
+              List.of(new SelectedData(data.data(), List.of(committee))),
+              committee.networkProof().get(),
+              0,
+              0,
+              0);
+        }
+      }
+    }
+    return new MergeResult(List.of(), Bytes.EMPTY, 0, 0, 0);
   }
 
   private List<SelectedData> selectForBlock(
@@ -471,7 +505,7 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
 
     final int round = earlier.map(MergedProof::round).orElse(0) + 1;
     final Bytes proof = mergeProofs(blockSlot, round, children, included.size());
-    mergedProofs.add(blockSlot, new MergedProof(claims, statements, proof, round));
+    mergedProofs.add(blockSlot, new MergedProof(claims, statements, proof, round, included));
     return new MergeResult(included, proof, fresh, round, leftOut);
   }
 
@@ -1224,7 +1258,7 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
   /** A single attestation's XMSS signature and the validator who made it. */
   private record SingleSignature(int attesterIndex, Bytes signature) {}
 
-  private record SelectedData(AttestationData data, List<SelectedCommittee> committees) {}
+  record SelectedData(AttestationData data, List<SelectedCommittee> committees) {}
 
   /**
    * @param merged the committee proofs merged, into an earlier merged proof or not
@@ -1244,7 +1278,7 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
    * A committee's attesters chosen for a block or an aggregate, with what proves them: a network
    * aggregate's proof, or the single attestations' signatures to prove.
    */
-  private record SelectedCommittee(
+  record SelectedCommittee(
       CommitteeAttestations source,
       int committeeIndex,
       int committeeSize,
