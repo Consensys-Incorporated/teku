@@ -281,11 +281,15 @@ public class PqValidatorKeyLoader {
     return Optional.of(keys);
   }
 
-  /** Fetches the whole {@code vrf_state_url} file, or empty if it can't be read. */
+  /**
+   * Fetches the whole {@code vrf_state_url} file, or empty if it can't be read. A plain path, with
+   * no scheme, is a local file, as for the XMSS cache URL.
+   */
   private static Optional<Bytes> fetchVrfStates(final URI url) {
     LOG.info("Fetching precomputed VRF states from {}", url);
     try {
-      final URLConnection connection = url.toURL().openConnection();
+      final URI source = url.isAbsolute() ? url : Path.of(url.getPath()).toUri();
+      final URLConnection connection = source.toURL().openConnection();
       connection.setConnectTimeout(VRF_STATE_CONNECT_TIMEOUT_MILLIS);
       connection.setReadTimeout(VRF_STATE_READ_TIMEOUT_MILLIS);
       try (InputStream in = connection.getInputStream()) {
