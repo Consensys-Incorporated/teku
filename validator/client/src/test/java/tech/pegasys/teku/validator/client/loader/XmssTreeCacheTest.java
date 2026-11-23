@@ -14,6 +14,7 @@
 package tech.pegasys.teku.validator.client.loader;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -28,6 +29,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.function.BiConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -70,6 +75,9 @@ class XmssTreeCacheTest {
   // Lighthouse's copy of the devnet-0 xmss_cache_url record of key 0
   private static Bytes devnetRecord0;
   private static XmssSigningKey devnetKey0;
+
+  private static final int BLOCK_SIZE =
+      DevnetXmssCacheSource.BLOCK_RECORDS * DevnetXmssCacheSource.RECORD_SIZE;
 
   @TempDir Path tempDir;
 
@@ -178,6 +186,79 @@ class XmssTreeCacheTest {
   }
 
   @Test
+  void devnetSourceFindsKeysByTheKeyListNextToTheCache() throws IOException {
+    // A key set whose second key is devnet key 0, unlike PQ devnet-0's where it is the first
+    final Path cacheFile = tempDir.resolve("other-set.xmss");
+    Files.write(
+        cacheFile,
+        Bytes.concatenate(Bytes.random(devnetRecord0.size()), devnetRecord0).toArrayUnsafe());
+    Files.write(tempDir.resolve("other-set.bin"), keyList(1).toArrayUnsafe());
+
+    for (final URI source : List.of(cacheFile.toUri(), URI.create(cacheFile.toString()))) {
+      try (XmssSigningKey key =
+          new DevnetXmssCacheSource(source).load(DEVNET_KEY_0, Optional.empty()).orElseThrow()) {
+        assertThat(key.getPublicKey()).isEqualTo(DEVNET_KEY_0_PUBLIC_KEY);
+      }
+    }
+
+    // a key list of the wrong size isn't used, so key 0 is looked for at index 0
+    Files.write(tempDir.resolve("other-set.bin"), keyList(1).slice(1).toArrayUnsafe());
+    assertThat(new DevnetXmssCacheSource(cacheFile.toUri()).load(DEVNET_KEY_0, Optional.empty()))
+        .isEmpty();
+  }
+
+  @Test
+  void devnetSourceReadsTheKeyListNextToACacheUrl() throws IOException {
+    final Bytes file = Bytes.concatenate(Bytes.random(devnetRecord0.size()), devnetRecord0);
+    final List<String> ranges = new CopyOnWriteArrayList<>();
+    final HttpServer server = rangeServer(file, ranges);
+    server.createContext(
+        "/cache.bin",
+        exchange -> {
+          final Bytes keyList = keyList(1);
+          exchange.sendResponseHeaders(200, keyList.size());
+          try (OutputStream out = exchange.getResponseBody()) {
+            out.write(keyList.toArrayUnsafe());
+          }
+        });
+    try {
+      final URI source =
+          URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/cache.xmss");
+      try (XmssSigningKey key =
+          new DevnetXmssCacheSource(source).load(DEVNET_KEY_0, Optional.empty()).orElseThrow()) {
+        assertThat(key.getPublicKey()).isEqualTo(DEVNET_KEY_0_PUBLIC_KEY);
+      }
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void keyListIsTheCachesNameWithTheBinExtension() {
+    assertThat(DevnetXmssCacheSource.keySetUri(URI.create("https://host/uploads/abc.xmss")))
+        .isEqualTo(URI.create("https://host/uploads/abc.bin"));
+    assertThat(DevnetXmssCacheSource.keySetUri(URI.create("/pq-keys/abc.xmss")))
+        .isEqualTo(URI.create("/pq-keys/abc.bin"));
+    assertThat(DevnetXmssCacheSource.keySetUri(URI.create("file:///pq-keys/abc.xmss")))
+        .isEqualTo(URI.create("file:///pq-keys/abc.bin"));
+    assertThat(DevnetXmssCacheSource.keySetUri(URI.create("/pq.keys/abc")))
+        .isEqualTo(URI.create("/pq.keys/abc.bin"));
+  }
+
+  /** A key set's .bin file in which devnet key 0 is at {@code index}, after random keys. */
+  private static Bytes keyList(final int index) {
+    final List<Bytes> records = new ArrayList<>();
+    for (int i = 0; i < index; i++) {
+      records.add(Bytes.random(DevnetXmssCacheSource.GENESIS_KEY_RECORD_SIZE));
+    }
+    records.add(
+        Bytes.concatenate(
+            DEVNET_KEY_0_PUBLIC_KEY.toBytes(),
+            Bytes.random(DevnetXmssCacheSource.GENESIS_KEY_RECORD_SIZE - 32)));
+    return Bytes.concatenate(records);
+  }
+
+  @Test
   void devnetSourceRejectsIncompleteFiles() throws IOException {
     final Path cacheFile = tempDir.resolve("devnet.xmss");
     Files.write(cacheFile, devnetRecord0.slice(0, devnetRecord0.size() - 1).toArrayUnsafe());
@@ -192,8 +273,94 @@ class XmssTreeCacheTest {
 
   @Test
   void devnetSourceReadsAKeysRecordWithARangeRequest() throws IOException {
-    final Bytes file = Bytes.concatenate(devnetRecord0, devnetRecord0);
-    final List<String> ranges = new ArrayList<>();
+    final List<String> ranges = new CopyOnWriteArrayList<>();
+    final HttpServer server = rangeServer(Bytes.concatenate(devnetRecord0, devnetRecord0), ranges);
+    try {
+      final URI source =
+          URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/cache.xmss");
+      try (XmssSigningKey key =
+          new DevnetXmssCacheSource(source).load(DEVNET_KEY_0, Optional.empty()).orElseThrow()) {
+        assertThat(key.getPublicKey()).isEqualTo(DEVNET_KEY_0_PUBLIC_KEY);
+      }
+      // the first block, of which the file holds two records
+      assertThat(ranges).containsExactly("bytes=0-" + (BLOCK_SIZE - 1));
+
+      // a server that ignores the range isn't read in full
+      assertThat(
+              new DevnetXmssCacheSource(
+                      URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/missing"))
+                  .load(DEVNET_KEY_0, Optional.empty()))
+          .isEmpty();
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void devnetSourceReadsEachBlockOfRecordsOnce() throws Exception {
+    // 70 records: a full block, then a block of 6
+    final int recordCount = DevnetXmssCacheSource.BLOCK_RECORDS + 6;
+    final Bytes file = Bytes.random(recordCount * DevnetXmssCacheSource.RECORD_SIZE);
+    final List<String> ranges = new CopyOnWriteArrayList<>();
+    final HttpServer server = rangeServer(file, ranges);
+    try {
+      final DevnetXmssCacheSource source =
+          new DevnetXmssCacheSource(
+              URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/cache.xmss"));
+
+      // keys loading in parallel share their block's request
+      final ExecutorService executor = Executors.newFixedThreadPool(8);
+      try {
+        final List<Future<Bytes>> records = new ArrayList<>();
+        for (int index = 0; index < DevnetXmssCacheSource.BLOCK_RECORDS; index++) {
+          final int recordIndex = index;
+          records.add(executor.submit(() -> source.readRecord(recordIndex)));
+        }
+        for (int index = 0; index < records.size(); index++) {
+          assertThat(records.get(index).get()).isEqualTo(record(file, index));
+        }
+      } finally {
+        executor.shutdownNow();
+      }
+      assertThat(ranges).containsExactly("bytes=0-" + (BLOCK_SIZE - 1));
+
+      // the last block is as much of it as the file holds
+      assertThat(source.readRecord(recordCount - 1)).isEqualTo(record(file, recordCount - 1));
+      assertThat(source.readRecord(DevnetXmssCacheSource.BLOCK_RECORDS))
+          .isEqualTo(record(file, DevnetXmssCacheSource.BLOCK_RECORDS));
+      assertThat(ranges)
+          .containsExactly(
+              "bytes=0-" + (BLOCK_SIZE - 1), "bytes=" + BLOCK_SIZE + "-" + (2 * BLOCK_SIZE - 1));
+
+      // a record past the end of the file's last block, or of the file
+      assertThatThrownBy(() -> source.readRecord(recordCount))
+          .isInstanceOf(IOException.class)
+          .hasMessageContaining("no record at index");
+      assertThatThrownBy(() -> source.readRecord(2 * DevnetXmssCacheSource.BLOCK_RECORDS))
+          .isInstanceOf(IOException.class)
+          .hasMessageContaining("HTTP 416");
+      // nor asked for past the last genesis key's block
+      assertThatThrownBy(
+              () ->
+                  source.readRecord(
+                      DevnetXmssCacheSource.KEY_COUNT + DevnetXmssCacheSource.BLOCK_RECORDS))
+          .isInstanceOf(IOException.class)
+          .hasMessageContaining("no record at offset");
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  private static Bytes record(final Bytes file, final int index) {
+    return file.slice(index * DevnetXmssCacheSource.RECORD_SIZE, DevnetXmssCacheSource.RECORD_SIZE);
+  }
+
+  /**
+   * Serves {@code file} at {@code /cache.xmss}, answering a range as a server does: cut at the end
+   * of the file, and HTTP 416 if it starts past the end.
+   */
+  private static HttpServer rangeServer(final Bytes file, final List<String> ranges)
+      throws IOException {
     final HttpServer server =
         HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
     server.createContext(
@@ -210,7 +377,13 @@ class XmssTreeCacheTest {
             return;
           }
           final int start = Integer.parseInt(matcher.group(1));
-          final int end = Integer.parseInt(matcher.group(2));
+          if (start >= file.size()) {
+            exchange.getResponseHeaders().add("Content-Range", "bytes */" + file.size());
+            exchange.sendResponseHeaders(416, -1);
+            exchange.close();
+            return;
+          }
+          final int end = Math.min(Integer.parseInt(matcher.group(2)), file.size() - 1);
           exchange
               .getResponseHeaders()
               .add("Content-Range", "bytes " + start + "-" + end + "/" + file.size());
@@ -220,24 +393,7 @@ class XmssTreeCacheTest {
           }
         });
     server.start();
-    try {
-      final URI source =
-          URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/cache.xmss");
-      try (XmssSigningKey key =
-          new DevnetXmssCacheSource(source).load(DEVNET_KEY_0, Optional.empty()).orElseThrow()) {
-        assertThat(key.getPublicKey()).isEqualTo(DEVNET_KEY_0_PUBLIC_KEY);
-      }
-      assertThat(ranges).containsExactly("bytes=0-" + (DevnetXmssCacheSource.RECORD_SIZE - 1));
-
-      // a server that ignores the range isn't read in full
-      assertThat(
-              new DevnetXmssCacheSource(
-                      URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/missing"))
-                  .load(DEVNET_KEY_0, Optional.empty()))
-          .isEmpty();
-    } finally {
-      server.stop(0);
-    }
+    return server;
   }
 
   @Test
