@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tech.pegasys.teku.infrastructure.async.Waiter;
 import tech.pegasys.teku.statetransition.pq.timing.PqTimingRecorder.EventClass;
 
 class PqTimingRecorderTest {
@@ -73,6 +74,32 @@ class PqTimingRecorderTest {
       assertThat(files.map(path -> path.getFileName().toString()))
           .containsExactlyInAnyOrder("run.json", "events-000001.jsonl.zst");
     }
+  }
+
+  @Test
+  void openChunkCanBeReadAfterEachStatus() throws IOException {
+    final PqTimingRecorder recorder =
+        open(PqTimingRecorder.QUEUE_SIZE, PqTimingRecorder.ROTATE_BYTES);
+    final Path openChunk = recorder.getDirectory().resolve("events-000001.jsonl.partial");
+
+    recorder.emit(EventClass.RECEIPT, "message_received", Map.of("slot", 9));
+    // the writer has taken the event, but no status is due
+    Waiter.waitFor(() -> assertThat(openChunk).exists());
+    assertThat(openChunk).isEmptyFile();
+
+    monoNanos.addAndGet(PqTimingRecorder.STATUS_NANOS);
+    recorder.emit(EventClass.VALIDATION, "validated", Map.of("outcome", "accepted"));
+
+    Waiter.waitFor(
+        () ->
+            assertThat(Files.readAllLines(openChunk))
+                .map(line -> JSON.readTree(line).get("kind").asText())
+                .containsExactly("message_received", "validated"));
+    assertThat(readManifest(recorder).get("chunks")).isEmpty();
+
+    recorder.close();
+    assertThat(openChunk).doesNotExist();
+    assertThat(readEvents(recorder, "events-000001.jsonl.zst")).hasSize(2);
   }
 
   @Test

@@ -19,6 +19,7 @@ import com.google.common.annotations.VisibleForTesting;
 import io.airlift.compress.v3.zstd.ZstdOutputStream;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -44,6 +45,11 @@ import org.apache.logging.log4j.Logger;
 /**
  * Writes PQ timing events to a run directory in the format of the Lighthouse pq-measurement reports
  * (schema version 1): a run.json manifest plus zstd-compressed JSON lines chunks.
+ *
+ * <p>The open chunk is written as plain JSON lines ({@code events-NNNNNN.jsonl.partial}), flushed
+ * with every status, and compressed when it is finished: the zstd stream holds megabytes before
+ * writing a block and can't flush one, so a compressed open chunk would stay empty for minutes, and
+ * all of it would be lost if the node were killed.
  *
  * <p>Emitting never blocks. A full queue drops the event and counts it in the manifest, so gossip
  * validation and proving are never held up by the disk.
@@ -286,7 +292,7 @@ public class PqTimingRecorder {
     long evictedChunks = 0;
     long evictedFirst = 0;
     long evictedLast = 0;
-    long lastStatus = monoNanos.getAsLong();
+    long lastStatus = originMonoNanos;
     while (true) {
       final Entry entry =
           queue.poll(
@@ -321,6 +327,9 @@ public class PqTimingRecorder {
         }
       }
       if (rotate || closing || monoNanos.getAsLong() - lastStatus >= STATUS_NANOS) {
+        if (current != null) {
+          current.flush();
+        }
         final Map<String, Object> status = status();
         status.put("evicted_chunks", evictedChunks);
         if (evictedChunks != 0) {
@@ -370,10 +379,14 @@ public class PqTimingRecorder {
     static Chunk create(final Path directory, final int number, final long startedMonoNanos)
         throws IOException {
       final String name = String.format("events-%06d.jsonl.zst", number);
-      final Path partial = directory.resolve(name + ".partial");
-      final OutputStream stream =
-          new ZstdOutputStream(new BufferedOutputStream(Files.newOutputStream(partial)));
+      final Path partial = directory.resolve(String.format("events-%06d.jsonl.partial", number));
+      final OutputStream stream = new BufferedOutputStream(Files.newOutputStream(partial));
       return new Chunk(name, partial, stream, startedMonoNanos);
+    }
+
+    /** Writes the events so far to the open chunk, where they can be read. */
+    void flush() throws IOException {
+      stream.flush();
     }
 
     void write(final Map<String, Object> event) throws IOException {
@@ -386,10 +399,18 @@ public class PqTimingRecorder {
       bytes += line.length + 1;
     }
 
+    /** Compresses the chunk into its final name, then removes the open chunk. */
     ChunkInfo finish(final Path directory) throws IOException {
       stream.close();
-      final long size = Files.size(partial);
-      Files.move(partial, directory.resolve(name), StandardCopyOption.ATOMIC_MOVE);
+      final Path compressing = directory.resolve(name + ".partial");
+      try (InputStream in = Files.newInputStream(partial);
+          OutputStream out =
+              new ZstdOutputStream(new BufferedOutputStream(Files.newOutputStream(compressing)))) {
+        in.transferTo(out);
+      }
+      final long size = Files.size(compressing);
+      Files.move(compressing, directory.resolve(name), StandardCopyOption.ATOMIC_MOVE);
+      Files.delete(partial);
       return new ChunkInfo(name, size, first, last);
     }
   }
