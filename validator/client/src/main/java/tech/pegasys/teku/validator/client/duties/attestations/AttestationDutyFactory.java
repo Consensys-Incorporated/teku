@@ -17,6 +17,8 @@ import static tech.pegasys.teku.infrastructure.logging.ValidatorLogger.VALIDATOR
 
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
+import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 import tech.pegasys.teku.validator.client.ForkProvider;
 import tech.pegasys.teku.validator.client.Validator;
@@ -53,8 +55,18 @@ public class AttestationDutyFactory
         slot,
         forkProvider,
         validatorApiChannel,
-        new BatchAttestationSendingStrategy<>(validatorApiChannel::sendSignedAttestations),
+        createAttestationSendingStrategy(slot),
         validatorDutyMetrics);
+  }
+
+  /**
+   * PQ attestations are sent as each is signed: leanXMSS signing is slow enough that a slot's batch
+   * would otherwise be sent late.
+   */
+  private SendingStrategy<Attestation> createAttestationSendingStrategy(final UInt64 slot) {
+    return spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ)
+        ? new IndividualSendingStrategy<>(validatorApiChannel::sendSignedAttestations)
+        : new BatchAttestationSendingStrategy<>(validatorApiChannel::sendSignedAttestations);
   }
 
   @Override

@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 import java.util.stream.Stream;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -50,6 +51,23 @@ class AttestationDutyFactoryTest {
         attestationDutyFactory.createAggregationDuty(slot, validator);
 
     assertThat(aggregationDuty.getAggregators()).isInstanceOf(expectedAggregatorClass);
+  }
+
+  @Test
+  void shouldSendPqAttestationsAsEachIsSignedAndEarlierOnesInABatch() {
+    final Spec pqSpec = TestSpecFactory.createMinimalWithPqForkEpoch(UInt64.ONE);
+    final UInt64 pqSlot = pqSpec.computeStartSlotAtEpoch(UInt64.ONE);
+    final AttestationDutyFactory attestationDutyFactory =
+        new AttestationDutyFactory(
+            pqSpec, forkProvider, validatorApiChannel, validatorDutyMetrics, false);
+
+    assertThat(
+            attestationDutyFactory
+                .createProductionDuty(pqSlot.decrement(), validator)
+                .getSendingStrategy())
+        .isInstanceOf(BatchAttestationSendingStrategy.class);
+    assertThat(attestationDutyFactory.createProductionDuty(pqSlot, validator).getSendingStrategy())
+        .isInstanceOf(IndividualSendingStrategy.class);
   }
 
   private static Stream<Arguments> aggregatorTypeArgs() {

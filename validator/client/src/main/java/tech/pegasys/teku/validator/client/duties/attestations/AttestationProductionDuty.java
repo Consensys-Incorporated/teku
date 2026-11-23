@@ -16,6 +16,7 @@ package tech.pegasys.teku.validator.client.duties.attestations;
 import static com.google.common.base.Preconditions.checkArgument;
 import static tech.pegasys.teku.infrastructure.metrics.Validator.ValidatorDutyMetricsSteps.CREATE_TOTAL;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Suppliers;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
@@ -80,6 +81,11 @@ public class AttestationProductionDuty implements Duty {
   @Override
   public DutyType getType() {
     return DutyType.ATTESTATION_PRODUCTION;
+  }
+
+  @VisibleForTesting
+  SendingStrategy<Attestation> getSendingStrategy() {
+    return sendingStrategy;
   }
 
   /**

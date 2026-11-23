@@ -110,8 +110,8 @@ public class AggregationDuty implements Duty {
     }
     if (spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ)) {
       // PQ: aggregators come from the aggregation committee, and the beacon node proves the
-      // aggregate's signatures
-      return new BatchAttestationSendingStrategy<SignedAggregateAndProofPq>(
+      // aggregate's signatures. Each is sent once signed, as leanXMSS signing is slow.
+      return new IndividualSendingStrategy<SignedAggregateAndProofPq>(
               validatorApiChannel::sendPqAggregateAndProofs)
           .send(aggregators.streamAggregators().map(this::aggregatePqCommittee));
     }
