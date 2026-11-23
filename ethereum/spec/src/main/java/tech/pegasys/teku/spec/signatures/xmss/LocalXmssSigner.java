@@ -19,9 +19,10 @@ import static tech.pegasys.teku.spec.constants.PqConstants.LEAF_OFFSET_EXECUTION
 import static tech.pegasys.teku.spec.constants.PqConstants.LEAF_OFFSET_PROPOSER_PREFERENCES;
 import static tech.pegasys.teku.spec.constants.PqConstants.LEAF_OFFSET_PTC_ATTESTER;
 
-import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
@@ -48,10 +49,6 @@ import tech.pegasys.teku.xmss.XmssSigningKey;
  */
 public class LocalXmssSigner implements XmssSigner {
 
-  // Fewer than the key keeps, so a tree this signer remembers preparing is one the key still has.
-  // A validator signs from two bottom trees, and prepares a third ahead of a rollover.
-  private static final int MAX_PREPARED_TREES = XmssSigningKey.MAX_CACHED_BOTTOM_TREES - 1;
-
   private final Spec spec;
   private final XmssSigningKey signingKey;
   private final VrfProver vrfProver;
@@ -59,14 +56,10 @@ public class LocalXmssSigner implements XmssSigner {
   private final AsyncRunner asyncRunner;
   private final SigningRootUtil signingRootUtil;
 
-  // The bottom trees prepareForSlot has asked the key for, most recently used last
-  private final Map<Long, SafeFuture<Boolean>> preparedTrees =
-      new LinkedHashMap<>(MAX_PREPARED_TREES + 1, 0.75f, true) {
-        @Override
-        protected boolean removeEldestEntry(final Map.Entry<Long, SafeFuture<Boolean>> eldest) {
-          return size() > MAX_PREPARED_TREES;
-        }
-      };
+  // The bottom trees prepareForSlot is building now, so requests that overlap share one build.
+  // Finished trees are not remembered: the key knows which trees it holds, and asking it again
+  // keeps them among the ones it used last.
+  private final Map<Long, SafeFuture<Boolean>> treesBeingPrepared = new ConcurrentHashMap<>();
 
   public LocalXmssSigner(
       final Spec spec,
@@ -155,45 +148,39 @@ public class LocalXmssSigner implements XmssSigner {
 
   @Override
   public SafeFuture<Integer> prepareForSlot(final UInt64 slot) {
-    SafeFuture<Integer> prepared = SafeFuture.completedFuture(0);
-    // One tree after the other, so preparing a key keeps a single thread busy
+    final List<SafeFuture<Boolean>> trees = new ArrayList<>();
+    // One tree after the other, so preparing a key keeps a single thread busy. A tree that fails
+    // does not stop the next one
+    SafeFuture<Void> previousTree = SafeFuture.COMPLETE;
     for (final long bottomTree : XmssLeafLayout.bottomTreesAt(spec, slot)) {
-      prepared =
-          prepared.thenCompose(
-              count -> prepareBottomTree(bottomTree).thenApply(built -> built ? count + 1 : count));
+      final SafeFuture<Boolean> tree =
+          previousTree.thenCompose(__ -> prepareBottomTree(bottomTree));
+      trees.add(tree);
+      previousTree = tree.handle((built, error) -> null);
     }
-    return prepared;
+    return SafeFuture.collectAll(trees.stream())
+        .thenApply(built -> (int) built.stream().filter(Boolean::booleanValue).count());
   }
 
   /**
-   * Builds {@code bottomTree} unless this signer already asked for it. True if the key had to build
-   * it, false if it held the tree already, for example from its saved tree cache.
+   * Asks the key for {@code bottomTree}, on the async runner. True if the key had to build it,
+   * false if it held the tree already, for example from its saved tree cache, or if another request
+   * is building it.
    */
   private SafeFuture<Boolean> prepareBottomTree(final long bottomTree) {
-    final SafeFuture<Boolean> building = new SafeFuture<>();
-    final SafeFuture<Boolean> alreadyRequested;
-    synchronized (preparedTrees) {
-      alreadyRequested = preparedTrees.get(bottomTree);
-      if (alreadyRequested == null) {
-        preparedTrees.put(bottomTree, building);
-      }
-    }
-    if (alreadyRequested != null) {
-      return alreadyRequested.thenApply(__ -> false);
+    final SafeFuture<Boolean> preparing = new SafeFuture<>();
+    final SafeFuture<Boolean> alreadyPreparing =
+        treesBeingPrepared.putIfAbsent(bottomTree, preparing);
+    if (alreadyPreparing != null) {
+      return alreadyPreparing.thenApply(__ -> false);
     }
     asyncRunner
         .runAsync(
             () ->
                 SafeFuture.completedFuture(
                     signingKey.prepare(XmssSigningKey.firstLeafOfBottomTree(bottomTree))))
-        .propagateTo(building);
-    return building.whenException(
-        error -> {
-          // Forget the failure, so a later call tries again
-          synchronized (preparedTrees) {
-            preparedTrees.remove(bottomTree, building);
-          }
-        });
+        .propagateTo(preparing);
+    return preparing.alwaysRun(() -> treesBeingPrepared.remove(bottomTree, preparing));
   }
 
   @Override

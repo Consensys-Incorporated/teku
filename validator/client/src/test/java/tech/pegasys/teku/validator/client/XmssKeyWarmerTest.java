@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.validator.client;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -20,6 +21,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -141,26 +144,20 @@ class XmssKeyWarmerTest {
   @Test
   void onSlot_preparesNoMoreKeysAtOnceThanAllowed() {
     final XmssKeyWarmer warmer = createWarmer(spec, 1);
-    final SafeFuture<Integer> firstKeyPrepared = new SafeFuture<>();
-    final XmssSigner slowSigner = mock(XmssSigner.class);
-    when(slowSigner.prepareForSlot(any())).thenReturn(firstKeyPrepared);
-    addValidator(slowSigner);
-    addValidator(signer1);
-    addValidator(signer2);
+    // The keys being prepared, in the order the warmer asked, which is not the order added
+    final List<SafeFuture<Integer>> preparing = new ArrayList<>();
+    for (int i = 0; i < 3; i++) {
+      addValidator(slowSigner(preparing));
+    }
 
     warmer.onSlot(UInt64.ZERO);
+    assertThat(preparing).hasSize(1);
 
-    final XmssSigner[] waiting = {signer1, signer2};
-    verify(slowSigner).prepareForSlot(UInt64.ZERO);
-    for (final XmssSigner signer : waiting) {
-      verify(signer, never()).prepareForSlot(any());
-    }
+    preparing.get(0).complete(2);
+    assertThat(preparing).hasSize(2);
 
-    firstKeyPrepared.complete(2);
-
-    for (final XmssSigner signer : waiting) {
-      verify(signer).prepareForSlot(UInt64.ZERO);
-    }
+    preparing.get(1).complete(2);
+    assertThat(preparing).hasSize(3);
   }
 
   private XmssKeyWarmer createWarmer(final Spec spec, final int maxKeysAtOnce) {
@@ -175,6 +172,19 @@ class XmssKeyWarmerTest {
             Optional::empty,
             true,
             Optional.of(xmssSigner)));
+  }
+
+  /** A signer whose preparation stays pending, and is added to {@code preparing} when asked. */
+  private static XmssSigner slowSigner(final List<SafeFuture<Integer>> preparing) {
+    final XmssSigner signer = mock(XmssSigner.class);
+    when(signer.prepareForSlot(any()))
+        .thenAnswer(
+            __ -> {
+              final SafeFuture<Integer> prepared = new SafeFuture<>();
+              preparing.add(prepared);
+              return prepared;
+            });
+    return signer;
   }
 
   private static XmssSigner readySigner() {

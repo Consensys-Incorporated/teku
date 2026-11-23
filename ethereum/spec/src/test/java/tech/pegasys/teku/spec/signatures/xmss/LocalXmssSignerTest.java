@@ -17,9 +17,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
@@ -29,7 +29,9 @@ import static tech.pegasys.teku.spec.constants.PqConstants.LEAF_OFFSET_BEACON_PR
 import static tech.pegasys.teku.spec.constants.PqConstants.LEAF_OFFSET_PROPOSER_PREFERENCES;
 
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterAll;
@@ -37,6 +39,9 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tech.pegasys.teku.infrastructure.async.AsyncRunner;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.io.SyncDataAccessor;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
@@ -222,23 +227,54 @@ class LocalXmssSignerTest {
   }
 
   @Test
-  void prepareForSlot_preparesTheAttestationAndPerSlotTreesOnce() {
-    final XmssSigningKey key = keyThatBuildsEveryTree();
+  void prepareForSlot_preparesTheAttestationAndPerSlotTrees() {
+    final XmssSigningKey key = keyThatBuildsEachTreeOnce();
     final LocalXmssSigner preparingSigner = createSigner(SPEC, key);
 
     assertThat(safeJoin(preparingSigner.prepareForSlot(UInt64.valueOf(12)))).isEqualTo(2);
 
     verify(key).prepare(XmssSigningKey.firstLeafOfBottomTree(ATTESTATION_TREE));
     verify(key).prepare(XmssSigningKey.firstLeafOfBottomTree(FIRST_PER_SLOT_TREE));
-
-    // Slot 13 signs from the same two trees
-    assertThat(safeJoin(preparingSigner.prepareForSlot(UInt64.valueOf(13)))).isZero();
-    verifyNoMoreInteractions(key);
   }
 
   @Test
-  void prepareForSlot_preparesOnlyTheNewTreeWhenThePerSlotLeavesMoveOn() {
-    final XmssSigningKey key = keyThatBuildsEveryTree();
+  void prepareForSlot_asksTheKeyAgainForTreesItHolds() {
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner();
+    final XmssSigningKey key = keyThatBuildsEachTreeOnce();
+    final LocalXmssSigner preparingSigner = createSigner(SPEC, key, asyncRunner);
+    final SafeFuture<Integer> prepared = preparingSigner.prepareForSlot(UInt64.valueOf(12));
+    asyncRunner.executeUntilDone();
+    assertThat(safeJoin(prepared)).isEqualTo(2);
+
+    // Slot 13 signs from the same two trees. The key is still asked, on the async runner, so it
+    // keeps them among the trees it used last
+    final SafeFuture<Integer> preparedAgain = preparingSigner.prepareForSlot(UInt64.valueOf(13));
+    assertThat(preparedAgain).isNotDone();
+    asyncRunner.executeUntilDone();
+
+    assertThat(safeJoin(preparedAgain)).isZero();
+    verify(key, times(2)).prepare(XmssSigningKey.firstLeafOfBottomTree(ATTESTATION_TREE));
+    verify(key, times(2)).prepare(XmssSigningKey.firstLeafOfBottomTree(FIRST_PER_SLOT_TREE));
+  }
+
+  @Test
+  void prepareForSlot_buildsATreeOnceForRequestsThatOverlap() {
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner();
+    final XmssSigningKey key = keyThatBuildsEachTreeOnce();
+    final LocalXmssSigner preparingSigner = createSigner(SPEC, key, asyncRunner);
+
+    final SafeFuture<Integer> first = preparingSigner.prepareForSlot(UInt64.valueOf(12));
+    final SafeFuture<Integer> second = preparingSigner.prepareForSlot(UInt64.valueOf(13));
+    asyncRunner.executeUntilDone();
+
+    assertThat(safeJoin(first) + safeJoin(second)).isEqualTo(2);
+    verify(key).prepare(XmssSigningKey.firstLeafOfBottomTree(ATTESTATION_TREE));
+    verify(key).prepare(XmssSigningKey.firstLeafOfBottomTree(FIRST_PER_SLOT_TREE));
+  }
+
+  @Test
+  void prepareForSlot_buildsOnlyTheNewTreeWhenThePerSlotLeavesMoveOn() {
+    final XmssSigningKey key = keyThatBuildsEachTreeOnce();
     final LocalXmssSigner preparingSigner = createSigner(SPEC, key);
     safeJoin(preparingSigner.prepareForSlot(UInt64.valueOf(4095)));
 
@@ -260,7 +296,7 @@ class LocalXmssSignerTest {
 
   @Test
   void prepareForSlot_triesAgainAfterAFailure() {
-    final XmssSigningKey key = keyThatBuildsEveryTree();
+    final XmssSigningKey key = keyThatBuildsEachTreeOnce();
     when(key.prepare(XmssSigningKey.firstLeafOfBottomTree(ATTESTATION_TREE)))
         .thenThrow(new IllegalStateException("native failure"))
         .thenReturn(true);
@@ -268,8 +304,11 @@ class LocalXmssSignerTest {
 
     assertThatSafeFuture(preparingSigner.prepareForSlot(UInt64.valueOf(12)))
         .isCompletedExceptionallyWith(IllegalStateException.class);
+    // The failure did not stop the per-slot tree
+    verify(key).prepare(XmssSigningKey.firstLeafOfBottomTree(FIRST_PER_SLOT_TREE));
 
-    assertThat(safeJoin(preparingSigner.prepareForSlot(UInt64.valueOf(12)))).isEqualTo(2);
+    assertThat(safeJoin(preparingSigner.prepareForSlot(UInt64.valueOf(12)))).isEqualTo(1);
+    verify(key, times(2)).prepare(XmssSigningKey.firstLeafOfBottomTree(ATTESTATION_TREE));
   }
 
   @Test
@@ -283,9 +322,13 @@ class LocalXmssSignerTest {
     verifyNoInteractions(key);
   }
 
-  private static XmssSigningKey keyThatBuildsEveryTree() {
+  /** A key with no trees yet: preparing a tree is true the first time, as for a real key. */
+  private static XmssSigningKey keyThatBuildsEachTreeOnce() {
     final XmssSigningKey key = mock(XmssSigningKey.class);
-    when(key.prepare(any())).thenReturn(true);
+    final Set<Long> builtTrees = new HashSet<>();
+    when(key.prepare(any()))
+        .thenAnswer(
+            invocation -> builtTrees.add(XmssSigningKey.bottomTreeOf(invocation.getArgument(0))));
     return key;
   }
 
@@ -294,12 +337,17 @@ class LocalXmssSignerTest {
   }
 
   private LocalXmssSigner createSigner(final Spec spec, final XmssSigningKey key) {
+    return createSigner(spec, key, SYNC_RUNNER);
+  }
+
+  private LocalXmssSigner createSigner(
+      final Spec spec, final XmssSigningKey key, final AsyncRunner asyncRunner) {
     return new LocalXmssSigner(
         spec,
         key,
         vrfTree,
         new LocalXmssLeafProtector(SyncDataAccessor.create(dir), dir),
-        SYNC_RUNNER);
+        asyncRunner);
   }
 
   private void assertVerifies(

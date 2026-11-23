@@ -40,6 +40,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
  *
  * <p>Safe to share between threads: the native key guards its own trees. Calls do not wait for each
  * other, so a slow {@link #prepare} of one bottom tree does not delay a {@link #sign} in another.
+ * The cost: two calls that need the same missing bottom tree each build it, and the key keeps one.
  * Closing is safe while calls are in progress: the key is freed once they return, and later calls
  * fail.
  */

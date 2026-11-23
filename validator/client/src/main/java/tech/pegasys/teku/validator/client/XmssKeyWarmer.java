@@ -103,7 +103,7 @@ public class XmssKeyWarmer implements ValidatorTimingChannel {
 
   @Override
   public synchronized void onValidatorsAdded() {
-    // New keys have no trees yet. Keys that do are asked again on the next slot, which costs
+    // New keys have no trees yet. Keys that do are asked again on the next slot, which builds
     // nothing
     warmedTrees = Set.of();
   }

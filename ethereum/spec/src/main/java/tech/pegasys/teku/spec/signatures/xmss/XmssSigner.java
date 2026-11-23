@@ -74,9 +74,11 @@ public interface XmssSigner {
   /**
    * Gets the key ready to sign at {@code slot} without delay, by building the bottom trees its
    * leaves are in ({@link XmssLeafLayout#bottomTreesAt}). Building a tree takes seconds, so call
-   * this ahead of the slot. Does nothing for trees the key already holds, and before the PQ fork.
+   * this ahead of the slot. Builds nothing for trees the key already holds, and does nothing before
+   * the PQ fork.
    *
-   * @return how many trees the key had to build
+   * @return how many trees the key had to build; fails if a tree could not be prepared, after
+   *     trying the others
    */
   SafeFuture<Integer> prepareForSlot(UInt64 slot);
 

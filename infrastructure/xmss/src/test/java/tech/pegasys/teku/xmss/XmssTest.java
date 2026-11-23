@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.util.concurrent.CountDownLatch;
+import java.util.Arrays;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterEach;
@@ -101,25 +101,30 @@ class XmssTest {
     final UInt64 leafInSecondTree = XmssSigningKey.firstLeafOfBottomTree(1);
     try (XmssSigningKey key = Xmss.loadSigningKey(secretKey)) {
       key.prepare(leafInFirstTree);
-      final CountDownLatch preparing = new CountDownLatch(1);
-      final Thread prepareSecondTree =
-          new Thread(
-              () -> {
-                preparing.countDown();
-                key.prepare(leafInSecondTree);
-              });
+      final Thread prepareSecondTree = new Thread(() -> key.prepare(leafInSecondTree));
       prepareSecondTree.start();
-      preparing.await();
-      // Building a tree takes seconds; give it time to get under way
-      Thread.sleep(100);
+      // Wait until the build is under way in the native key, past any lock prepare takes
+      while (!isInNativePrepare(prepareSecondTree)) {
+        assertThat(prepareSecondTree.isAlive()).isTrue();
+        Thread.onSpinWait();
+      }
 
       final XmssSignature signed = key.sign(leafInFirstTree, message);
 
-      // Signing takes a fraction of a tree build, so it finished first unless it had to wait
+      // Building a tree takes seconds and signing a fraction of that, so signing finished first
+      // unless it had to wait
       assertThat(prepareSecondTree.isAlive()).isTrue();
       assertThat(Xmss.verify(publicKey, leafInFirstTree, message, signed)).isTrue();
       prepareSecondTree.join();
     }
+  }
+
+  private static boolean isInNativePrepare(final Thread thread) {
+    return Arrays.stream(thread.getStackTrace())
+        .anyMatch(
+            frame ->
+                frame.getClassName().equals(org.ethereum.leanpq.XmssSecretKey.class.getName())
+                    && frame.getMethodName().equals("prepare"));
   }
 
   @Test
