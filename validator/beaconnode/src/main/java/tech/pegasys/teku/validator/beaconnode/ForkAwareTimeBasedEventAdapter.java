@@ -44,6 +44,15 @@ import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
  * silently without triggering a transition.
  */
 public class ForkAwareTimeBasedEventAdapter implements BeaconChainEventAdapter {
+
+  /**
+   * The runner the duty timers should run on, with one thread of its own. On the validator client's
+   * shared runner, timers queue behind signing, and a backlog of a slot or more makes them skip
+   * every duty they were due for ("unexpected delay in slot processing"). The timers only publish
+   * events, so one thread keeps them on time; the duties still run on their own runners.
+   */
+  public static final String DUTY_TIMER_RUNNER_NAME = "validatorDutyTimer";
+
   private static final Logger LOG = LogManager.getLogger();
 
   private final GenesisDataProvider genesisDataProvider;
