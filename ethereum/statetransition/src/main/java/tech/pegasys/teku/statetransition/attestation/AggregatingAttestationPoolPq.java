@@ -17,6 +17,7 @@ import it.unimi.dsi.fastutil.ints.Int2ObjectAVLTreeMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectSortedMap;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Comparator;
@@ -35,9 +36,12 @@ import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
+import tech.pegasys.teku.infrastructure.async.ExceptionThrowingSupplier;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBitlist;
+import tech.pegasys.teku.infrastructure.time.SystemTimeProvider;
+import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -50,6 +54,8 @@ import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationP
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SingleAttestationPq;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.XmssAggregateStatement;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.EpochProcessingException;
+import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.SlotProcessingException;
 import tech.pegasys.teku.spec.logic.versions.pq.crypto.ProvenStatements;
 import tech.pegasys.teku.spec.logic.versions.pq.crypto.StarkProver;
 import tech.pegasys.teku.spec.logic.versions.pq.helpers.BeaconStateAccessorsPq;
@@ -70,10 +76,23 @@ import tech.pegasys.teku.storage.client.RecentChainData;
  * block takes one aggregate per committee, the one adding the most attesters not yet on chain.
  *
  * <p>Proving and merging take a recursive prover seconds, so they happen outside the pool's lock.
- * With a recursive prover, a block's proof is also merged incrementally: when a local validator
- * proposes the next slot, the pool merges the timely committees' proofs at the start of this one,
- * and block production merges only what's new into that, at most {@link #MAX_PROOFS_PER_MERGE}
- * proofs.
+ * Given an async runner, the pool also proves and merges ahead of the deadlines:
+ *
+ * <ul>
+ *   <li>It proves each committee a local validator aggregates at the collection cutoff, {@link
+ *       #AGGREGATION_CUTOFF_BPS} into the slot, so the aggregator's proof is ready when its
+ *       aggregate is due rather than started then.
+ *   <li>With a recursive prover, a block's proof is merged incrementally. When a local validator
+ *       proposes the next slot, the pool merges the timely committees' proofs at the start of this
+ *       one, then, once this slot's aggregates are proven, every committee the block can include,
+ *       pass after pass until nothing is left out or the slot ends. Block production merges only
+ *       what's new into that, at most {@link #MAX_PROOFS_PER_MERGE} proofs.
+ * </ul>
+ *
+ * <p>A leanVM sidecar proves one request at a time, whichever connection it comes from, so a second
+ * proving connection would not prove anything sooner. Instead, all of this runs on one runner, and
+ * block proofs are merged outside the window between the collection cutoff and the aggregate due
+ * time, which is left to the aggregates' proofs.
  */
 public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
 
@@ -89,28 +108,56 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
    */
   static final int MAX_PROOFS_PER_MERGE = 16;
 
+  /**
+   * AGGREGATION_CUTOFF_BPS (consensus-specs 4595f0fc9): an aggregator aggregates the attestations
+   * it has at 40% of the slot, so its proof is ready by the aggregate due time.
+   */
+  static final int AGGREGATION_CUTOFF_BPS = 4000;
+
   private final StarkProver starkProver;
   private final Optional<AsyncRunner> asyncRunner;
+  private final TimeProvider timeProvider;
   private final int maxProofsPerMerge;
   private final MergedProofCache mergedProofs = new MergedProofCache();
+  // The committees local validators aggregate, by slot
+  private final NavigableMap<UInt64, Set<Integer>> localAggregationDuties = new TreeMap<>();
+  // Aggregates proven at the collection cutoff, by slot
+  private final NavigableMap<UInt64, Map<PreparedKey, PreparedAggregate>> preparedAggregates =
+      new TreeMap<>();
   private final NavigableMap<UInt64, Set<Bytes32>> dataRootsBySlot = new TreeMap<>();
   private final Map<Bytes32, Map<Integer, CommitteeAttestations>> committeesByDataRoot =
       new HashMap<>();
   private int size = 0;
 
-  /** A pool that doesn't merge block proofs ahead of time. */
+  /** A pool that proves and merges only when asked to. */
   public AggregatingAttestationPoolPq(
       final Spec spec, final RecentChainData recentChainData, final StarkProver starkProver) {
-    this(spec, recentChainData, starkProver, Optional.empty(), MAX_PROOFS_PER_MERGE);
+    this(
+        spec,
+        recentChainData,
+        starkProver,
+        Optional.empty(),
+        new SystemTimeProvider(),
+        MAX_PROOFS_PER_MERGE);
   }
 
-  /** A pool that merges block proofs ahead of local proposals on {@code asyncRunner}. */
+  /**
+   * A pool that proves local aggregators' committees at the collection cutoff, and merges block
+   * proofs ahead of local proposals, on {@code asyncRunner}, which should run one task at a time.
+   */
   public AggregatingAttestationPoolPq(
       final Spec spec,
       final RecentChainData recentChainData,
       final StarkProver starkProver,
-      final AsyncRunner asyncRunner) {
-    this(spec, recentChainData, starkProver, Optional.of(asyncRunner), MAX_PROOFS_PER_MERGE);
+      final AsyncRunner asyncRunner,
+      final TimeProvider timeProvider) {
+    this(
+        spec,
+        recentChainData,
+        starkProver,
+        Optional.of(asyncRunner),
+        timeProvider,
+        MAX_PROOFS_PER_MERGE);
   }
 
   AggregatingAttestationPoolPq(
@@ -118,10 +165,12 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
       final RecentChainData recentChainData,
       final StarkProver starkProver,
       final Optional<AsyncRunner> asyncRunner,
+      final TimeProvider timeProvider,
       final int maxProofsPerMerge) {
     super(spec, recentChainData);
     this.starkProver = starkProver;
     this.asyncRunner = asyncRunner;
+    this.timeProvider = timeProvider;
     this.maxProofsPerMerge = maxProofsPerMerge;
   }
 
@@ -307,7 +356,8 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
                     new ProvenStatements(
                         List.of(committee.statement()), proveForBlock(blockSlot, committee)))
             .toList();
-    return new MergeResult(selected, mergeProofs(blockSlot, 1, proofs, selected.size()), 1);
+    return new MergeResult(
+        selected, mergeProofs(blockSlot, 1, proofs, selected.size()), proofs.size(), 1, 0);
   }
 
   /**
@@ -361,7 +411,9 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
       return new MergeResult(
           included,
           earlier.map(MergedProof::proof).orElse(Bytes.EMPTY),
-          earlier.map(MergedProof::round).orElse(0));
+          0,
+          earlier.map(MergedProof::round).orElse(0),
+          0);
     }
 
     final List<ProvenStatements> children = new ArrayList<>();
@@ -382,7 +434,7 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
     final int round = earlier.map(MergedProof::round).orElse(0) + 1;
     final Bytes proof = mergeProofs(blockSlot, round, children, included.size());
     mergedProofs.add(blockSlot, new MergedProof(claims, statements, proof, round));
-    return new MergeResult(included, proof, round);
+    return new MergeResult(included, proof, fresh.size(), round, leftOut);
   }
 
   /** Merges the proofs, timed as merge round {@code round} for the block when there are several. */
@@ -459,15 +511,25 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
   }
 
   /**
-   * Merges the proofs of the timely committees for a block at {@code blockSlot}, if a local
-   * validator proposes it, so that block production only merges what arrives after. Called at the
-   * start of the slot before: the timely committees' aggregates are in by then, and the block in
-   * between can't include them, so the merged proof stays usable.
+   * Merges the proofs for a block at {@code blockSlot} ahead of it, if a local validator proposes
+   * it, so that block production only merges what arrives after. Called at the start of the slot
+   * before, on the async runner.
+   *
+   * <ol>
+   *   <li>At once, the timely committees': their aggregates are in by then, and the block in
+   *       between can't include them, so the merged proof stays usable.
+   *   <li>Once this slot's aggregates are due, and so proven, every committee the block can
+   *       include, built on the first merge. The block in between is in by then, so what it
+   *       included is left out. Each pass merges at most {@link #maxProofsPerMerge} proofs, and
+   *       passes go on while one left committees out and another fits before the block's slot.
+   * </ol>
    */
   SafeFuture<Void> prepareBlockProof(final UInt64 blockSlot) {
-    if (!spec.atSlot(blockSlot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ)) {
+    if (asyncRunner.isEmpty() || !isPq(blockSlot)) {
       return SafeFuture.COMPLETE;
     }
+    final AsyncRunner runner = asyncRunner.get();
+    final UInt64 slot = blockSlot.decrement();
     return recentChainData
         .isBlockProposerConnected(blockSlot)
         .thenCompose(
@@ -475,29 +537,92 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
               if (!isProposing) {
                 return SafeFuture.COMPLETE;
               }
-              return recentChainData
-                  .getBestState()
-                  .map(state -> state.thenAccept(head -> prepareBlockProof(blockSlot, head)))
-                  .orElse(SafeFuture.COMPLETE);
+              return withHeadState(
+                      headState -> {
+                        final List<SelectedData> timely;
+                        synchronized (this) {
+                          timely = selectTimely(blockSlot, headState);
+                        }
+                        return mergeAhead(blockSlot, timely).leftOut();
+                      })
+                  .thenCompose(
+                      __ ->
+                          runner.getDelayedFuture(
+                              untilSlotOffset(slot, spec.getAggregateDueMillis(slot))))
+                  .thenCompose(__ -> mergeAheadUntilTheBlock(blockSlot));
             });
   }
 
-  private MergeResult prepareBlockProof(final UInt64 blockSlot, final BeaconState headState) {
-    final List<SelectedData> timely;
-    synchronized (this) {
-      timely = selectTimely(blockSlot, headState);
-    }
-    if (timely.isEmpty()) {
-      return new MergeResult(List.of(), Bytes.EMPTY, 0);
+  /** Merges passes of every committee the block can include until none is left out. */
+  private SafeFuture<Void> mergeAheadUntilTheBlock(final UInt64 blockSlot) {
+    final long start = timeProvider.getTimeInMillis().longValue();
+    return withHeadState(
+            headState -> {
+              return mergeAhead(blockSlot, selectForBlockAhead(blockSlot, headState)).leftOut();
+            })
+        .thenCompose(
+            leftOut -> {
+              final long now = timeProvider.getTimeInMillis().longValue();
+              final long blockSlotStart = slotStartMillis(blockSlot);
+              // Another pass would take about as long as this one
+              if (leftOut > 0 && now + (now - start) < blockSlotStart) {
+                return mergeAheadUntilTheBlock(blockSlot);
+              }
+              return SafeFuture.COMPLETE;
+            });
+  }
+
+  /**
+   * Runs {@code merge} with the head state on the async runner, so that merges happen in order with
+   * the aggregates' proofs, and gives the committees it left out.
+   */
+  private SafeFuture<Integer> withHeadState(final MergeWithHeadState merge) {
+    final AsyncRunner runner = asyncRunner.orElseThrow();
+    return recentChainData
+        .getBestState()
+        .map(
+            state ->
+                state.thenCompose(
+                    headState ->
+                        runner.runAsync(
+                            (ExceptionThrowingSupplier<Integer>) () -> merge.merge(headState))))
+        .orElse(SafeFuture.completedFuture(0));
+  }
+
+  @FunctionalInterface
+  private interface MergeWithHeadState {
+    /** Merges, and gives the committees left out. */
+    int merge(BeaconState headState) throws Exception;
+  }
+
+  private MergeResult mergeAhead(final UInt64 blockSlot, final List<SelectedData> selected) {
+    if (selected.isEmpty()) {
+      return new MergeResult(List.of(), Bytes.EMPTY, 0, 0, 0);
     }
     final long start = System.currentTimeMillis();
-    final MergeResult merged = mergeIncrementally(blockSlot, timely);
-    LOG.info(
-        "Merged {} committee proofs ahead of the block at slot {} in {} ms",
-        merged.included().stream().mapToInt(data -> data.committees().size()).sum(),
-        blockSlot,
-        System.currentTimeMillis() - start);
+    final MergeResult merged = mergeIncrementally(blockSlot, selected);
+    if (merged.merged() > 0) {
+      LOG.info(
+          "Merged {} committee proofs ahead of the block at slot {}, {} in all, in {} ms",
+          merged.merged(),
+          blockSlot,
+          merged.included().stream().mapToInt(data -> data.committees().size()).sum(),
+          System.currentTimeMillis() - start);
+    }
     return merged;
+  }
+
+  /** Every committee a block at {@code blockSlot} can include, from the head state. */
+  private List<SelectedData> selectForBlockAhead(
+      final UInt64 blockSlot, final BeaconState headState)
+      throws SlotProcessingException, EpochProcessingException {
+    final BeaconState stateAtBlockSlot =
+        headState.getSlot().isLessThan(blockSlot)
+            ? spec.processSlots(headState, blockSlot)
+            : headState;
+    synchronized (this) {
+      return selectForBlock(stateAtBlockSlot, new AttestationForkChecker(spec, stateAtBlockSlot));
+    }
   }
 
   /**
@@ -546,7 +671,29 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
    */
   public Optional<MeasuredProof> mergeAheadForMeasurement(
       final UInt64 blockSlot, final BeaconState headState) {
-    return MeasuredProof.of(prepareBlockProof(blockSlot, headState));
+    final List<SelectedData> timely;
+    synchronized (this) {
+      timely = selectTimely(blockSlot, headState);
+    }
+    return MeasuredProof.of(mergeAhead(blockSlot, timely));
+  }
+
+  /**
+   * For PQ timing experiments: one pass of the merge of every committee the block at {@code
+   * blockSlot} can include, as the pool makes once the aggregates are due. Empty when there is
+   * nothing new to merge.
+   */
+  public Optional<MeasuredProof> mergeEveryCommitteeAheadForMeasurement(
+      final UInt64 blockSlot, final BeaconState headState) {
+    final List<SelectedData> selected;
+    try {
+      selected = selectForBlockAhead(blockSlot, headState);
+    } catch (final SlotProcessingException | EpochProcessingException e) {
+      LOG.debug("Could not process the head state to slot {}", blockSlot, e);
+      return Optional.empty();
+    }
+    final MergeResult merged = mergeAhead(blockSlot, selected);
+    return merged.merged() > 0 ? MeasuredProof.of(merged) : Optional.empty();
   }
 
   /**
@@ -673,21 +820,55 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
 
   /**
    * The best aggregate for the data and committee with the proof of its signatures, as an
-   * aggregator publishes it: a network aggregate, or one built from the single attestations.
+   * aggregator publishes it: a network aggregate, the one proven at the collection cutoff, or one
+   * built now from the single attestations.
+   *
+   * <p>The one proven at the cutoff is preferred to proving again with attestations that came
+   * after, which would miss the aggregate due time, unless a network aggregate has as many
+   * attesters.
    */
   @Override
-  public Optional<PqAggregate> createPqAggregateFor(
+  public SafeFuture<Optional<PqAggregate>> createPqAggregateFor(
       final Bytes32 attestationHashTreeRoot, final UInt64 committeeIndex) {
     final Optional<CommitteeCandidate> maybeCandidate;
+    final Optional<PreparedAggregate> prepared;
     synchronized (this) {
       maybeCandidate =
           findCommittee(attestationHashTreeRoot, Optional.of(committeeIndex))
               .flatMap(committee -> committee.getBestCandidate(false));
+      prepared =
+          maybeCandidate.flatMap(
+              candidate ->
+                  Optional.ofNullable(preparedAggregates.get(candidate.committee().data.getSlot()))
+                      .map(
+                          bySlot ->
+                              bySlot.get(
+                                  new PreparedKey(
+                                      attestationHashTreeRoot, committeeIndex.intValue()))));
     }
     if (maybeCandidate.isEmpty()) {
-      return Optional.empty();
+      return SafeFuture.completedFuture(Optional.empty());
     }
     final CommitteeCandidate candidate = maybeCandidate.get();
+    final boolean networkAggregateIsBetter =
+        candidate.networkProof.isPresent()
+            && prepared.map(p -> candidate.attesterCount() >= p.attesterCount()).orElse(true);
+    if (prepared.isEmpty() || networkAggregateIsBetter) {
+      return SafeFuture.of(() -> proveAggregate(candidate));
+    }
+    return prepared
+        .get()
+        .aggregate()
+        .thenApply(Optional::of)
+        .exceptionallyCompose(
+            error -> {
+              LOG.debug("Proving an aggregate at the collection cutoff failed", error);
+              return SafeFuture.of(() -> proveAggregate(candidate));
+            });
+  }
+
+  /** The candidate's aggregate with its proof, proven now unless it's a network aggregate. */
+  private Optional<PqAggregate> proveAggregate(final CommitteeCandidate candidate) {
     return retrieveStateForAttestation(candidate.committee().data)
         .map(
             state -> {
@@ -704,6 +885,71 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
                   candidate.toAttestation(getAttestationSchema(candidate)),
                   prove(selected, PqTiming.job("committee", slot, slot), fields));
             });
+  }
+
+  @Override
+  public synchronized void onLocalAggregationDuty(final UInt64 slot, final UInt64 committeeIndex) {
+    localAggregationDuties
+        .computeIfAbsent(slot, __ -> new HashSet<>())
+        .add(committeeIndex.intValue());
+  }
+
+  /**
+   * At the collection cutoff of {@code slot}, proves the aggregate of each committee a local
+   * validator aggregates, from the single attestations of the data most of the committee voted for,
+   * unless a network aggregate is as good. {@link #createPqAggregateFor} then gives it, or waits
+   * for it, rather than proving again.
+   */
+  void prepareAggregates(final UInt64 slot) {
+    final List<CommitteeCandidate> candidates = new ArrayList<>();
+    final List<SafeFuture<PqAggregate>> futures = new ArrayList<>();
+    synchronized (this) {
+      for (final int committeeIndex : localAggregationDuties.getOrDefault(slot, Set.of())) {
+        final Optional<Map.Entry<Bytes32, CommitteeCandidate>> best =
+            dataRootsBySlot.getOrDefault(slot, Set.of()).stream()
+                .flatMap(
+                    dataRoot ->
+                        Optional.ofNullable(committeesByDataRoot.get(dataRoot))
+                            .map(committees -> committees.get(committeeIndex))
+                            .flatMap(committee -> committee.getBestCandidate(false))
+                            .map(candidate -> Map.entry(dataRoot, candidate))
+                            .stream())
+                .max(Comparator.comparingInt(entry -> entry.getValue().attesterCount()));
+        if (best.isEmpty() || best.get().getValue().networkProof.isPresent()) {
+          continue;
+        }
+        final SafeFuture<PqAggregate> future = new SafeFuture<>();
+        preparedAggregates
+            .computeIfAbsent(slot, __ -> new HashMap<>())
+            .put(
+                new PreparedKey(best.get().getKey(), committeeIndex),
+                new PreparedAggregate(best.get().getValue().attesterCount(), future));
+        candidates.add(best.get().getValue());
+        futures.add(future);
+      }
+    }
+    for (int i = 0; i < candidates.size(); i++) {
+      final CommitteeCandidate candidate = candidates.get(i);
+      final SafeFuture<PqAggregate> future = futures.get(i);
+      try {
+        final long start = System.currentTimeMillis();
+        final Optional<PqAggregate> aggregate = proveAggregate(candidate);
+        if (aggregate.isEmpty()) {
+          future.completeExceptionally(
+              new IllegalStateException("No state for the attestation's committee"));
+          continue;
+        }
+        future.complete(aggregate.get());
+        LOG.debug(
+            "Proved the aggregate of committee {} at slot {} with {} attesters in {} ms",
+            candidate.committee().committeeIndex,
+            slot,
+            candidate.attesterCount(),
+            System.currentTimeMillis() - start);
+      } catch (final RuntimeException e) {
+        future.completeExceptionally(e);
+      }
+    }
   }
 
   private Optional<CommitteeAttestations> findCommittee(
@@ -804,12 +1050,51 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
   public void onSlot(final UInt64 slot) {
     pruneExpired(slot);
     mergedProofs.prune(slot);
-    if (asyncRunner.isPresent() && starkProver.isIncrementallyMergeable()) {
-      asyncRunner.get().runAsync(() -> prepareBlockProof(slot.increment())).finishError(LOG);
+    if (asyncRunner.isEmpty()) {
+      return;
+    }
+    final AsyncRunner runner = asyncRunner.get();
+    if (isPq(slot) && hasLocalAggregationDuties(slot)) {
+      runner
+          .runAfterDelay(
+              () -> prepareAggregates(slot), untilSlotOffset(slot, aggregationCutoffMillis(slot)))
+          .finishError(LOG);
+    }
+    if (starkProver.isIncrementallyMergeable()) {
+      runner.runAsync(() -> prepareBlockProof(slot.increment())).finishError(LOG);
     }
   }
 
+  private synchronized boolean hasLocalAggregationDuties(final UInt64 slot) {
+    return localAggregationDuties.containsKey(slot);
+  }
+
+  private boolean isPq(final UInt64 slot) {
+    return spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ);
+  }
+
+  /** The collection cutoff, before the aggregate due time. */
+  private long aggregationCutoffMillis(final UInt64 slot) {
+    return Math.min(
+        (long) spec.getSlotDurationMillis(slot) * AGGREGATION_CUTOFF_BPS / 10_000L,
+        spec.getAggregateDueMillis(slot));
+  }
+
+  private long slotStartMillis(final UInt64 slot) {
+    return spec.computeTimeMillisAtSlot(slot, recentChainData.getGenesisTimeMillis()).longValue();
+  }
+
+  /** The time from now until {@code offsetMillis} into {@code slot}, or none once it's passed. */
+  private Duration untilSlotOffset(final UInt64 slot, final long offsetMillis) {
+    return Duration.ofMillis(
+        Math.max(
+            0, slotStartMillis(slot) + offsetMillis - timeProvider.getTimeInMillis().longValue()));
+  }
+
   private synchronized void pruneExpired(final UInt64 slot) {
+    localAggregationDuties.headMap(slot, false).clear();
+    // An aggregate is due in its slot; the slot before is kept for an aggregator running late
+    preparedAggregates.headMap(slot.minusMinZero(1), false).clear();
     if (slot.isLessThan(ATTESTATION_RETENTION_SLOTS)) {
       return;
     }
@@ -838,9 +1123,18 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
   private record SelectedData(AttestationData data, List<SelectedCommittee> committees) {}
 
   /**
+   * @param merged the committee proofs merged, into an earlier merged proof or not
    * @param round how many merges built the proof, 0 when there was nothing to merge
+   * @param leftOut the committees a merge left out to stay within {@link #maxProofsPerMerge}, which
+   *     a later merge can add; 0 when nothing new was merged
    */
-  private record MergeResult(List<SelectedData> included, Bytes proof, int round) {}
+  private record MergeResult(
+      List<SelectedData> included, Bytes proof, int merged, int round, int leftOut) {}
+
+  private record PreparedKey(Bytes32 dataRoot, int committeeIndex) {}
+
+  /** An aggregate being proven at the collection cutoff, of {@code attesterCount} attesters. */
+  private record PreparedAggregate(int attesterCount, SafeFuture<PqAggregate> aggregate) {}
 
   /**
    * A committee's attesters chosen for a block or an aggregate, with what proves them: a network

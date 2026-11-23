@@ -50,8 +50,10 @@ import tech.pegasys.teku.storage.client.RecentChainData;
  *
  * <ul>
  *   <li>committee_only: proves a committee of the anchor slot at the collection cutoff.
- *   <li>proposer_only: merges the anchor slot's committee proofs for a block two slots later, ahead
- *       of it and then as block production does.
+ *   <li>proposer_only: merges committee proofs for a block two slots after the anchor slot as the
+ *       pool does ahead of a local proposal (the anchor slot's at the start of the slot before,
+ *       then every committee the block can include once that slot's aggregates are due), and then
+ *       as block production does.
  *   <li>combined: both, with the committee proof one slot later so it overlaps the merging.
  * </ul>
  */
@@ -309,6 +311,11 @@ public class PqTimingController implements SlotEventsChannel {
                       () -> attestationPool.mergeAheadForMeasurement(target, headState))
                   .ifPresent(proof -> ready(scoped, target, experiment.id(), "initial", proof));
             })
+        .thenCompose(
+            __ ->
+                atWallNanos(
+                    slotStartWallNanos(before) + spec.getAggregateDueMillis(before) * 1_000_000L))
+        .thenCompose(__ -> mergeEveryCommitteeAhead(experiment, scoped, target))
         .thenCompose(__ -> atWallNanos(slotStartWallNanos(target)))
         .thenCompose(
             __ ->
@@ -338,6 +345,38 @@ public class PqTimingController implements SlotEventsChannel {
               outcome(experiment, target, "initial", "missing_context");
               LOG.debug("PQ timing experiment {} could not merge", experiment.id(), error);
               return null;
+            });
+  }
+
+  /**
+   * As the pool does ahead of a local proposal once the aggregates are due: passes of the merge of
+   * every committee the block can include, while one merges something and another fits before the
+   * block's slot.
+   */
+  private SafeFuture<Void> mergeEveryCommitteeAhead(
+      final Experiment experiment, final Experiment scoped, final UInt64 target) {
+    return recentChainData
+        .getBestState()
+        .orElse(SafeFuture.failedFuture(new IllegalStateException("No head state")))
+        .thenCompose(
+            headState -> {
+              final long start = PqTiming.nowWallNanos().orElse(0L);
+              final Optional<MeasuredProof> proof =
+                  PqTiming.inExperiment(
+                      Optional.of(scoped),
+                      1,
+                      () ->
+                          attestationPool.mergeEveryCommitteeAheadForMeasurement(
+                              target, headState));
+              if (proof.isEmpty()) {
+                return SafeFuture.COMPLETE;
+              }
+              ready(scoped, target, experiment.id(), "initial", proof.get());
+              final long now = PqTiming.nowWallNanos().orElse(0L);
+              if (now + (now - start) < slotStartWallNanos(target)) {
+                return mergeEveryCommitteeAhead(experiment, scoped, target);
+              }
+              return SafeFuture.COMPLETE;
             });
   }
 

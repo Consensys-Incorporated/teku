@@ -1229,7 +1229,7 @@ class ValidatorApiHandlerTest {
     final Bytes32 dataRoot = attestation.getData().hashTreeRoot();
     final UInt64 slot = attestation.getData().getSlot();
     when(attestationPool.createPqAggregateFor(dataRoot, ONE))
-        .thenReturn(Optional.of(new PqAggregate(attestation, proof)));
+        .thenReturn(SafeFuture.completedFuture(Optional.of(new PqAggregate(attestation, proof))));
 
     assertThat(validatorApiHandler.createPqAggregate(slot, dataRoot, ONE))
         .isCompletedWithValueMatching(
@@ -1276,6 +1276,8 @@ class ValidatorApiHandlerTest {
     verify(attestationTopicSubscriptions)
         .subscribeToCommitteeForAggregation(committeeIndex, committeesAtSlot, aggregationSlot);
     verify(activeValidatorTracker).onCommitteeSubscriptionRequest(validatorIndex, aggregationSlot);
+    // So that a PQ aggregate can be proven before it is due
+    verify(attestationPool).onLocalAggregationDuty(aggregationSlot, UInt64.valueOf(committeeIndex));
   }
 
   @Test
@@ -1294,6 +1296,7 @@ class ValidatorApiHandlerTest {
     assertThat(result).isCompleted();
     verifyNoInteractions(attestationTopicSubscriptions);
     verify(activeValidatorTracker).onCommitteeSubscriptionRequest(validatorIndex, aggregationSlot);
+    verify(attestationPool, never()).onLocalAggregationDuty(any(), any());
   }
 
   @Test

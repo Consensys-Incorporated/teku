@@ -2545,8 +2545,10 @@ public class BeaconChainController extends Service implements BeaconChainControl
               spec,
               recentChainData,
               StarkBackend.prover(),
-              // Merging block proofs ahead of proposals takes seconds
-              asyncRunnerFactory.create("blockProofMerge", 1));
+              // Proves aggregates and merges block proofs ahead of time, one at a time, as the
+              // leanVM sidecar does
+              asyncRunnerFactory.create("pqProving", 1),
+              timeProvider);
       aggregatingAttestationPool =
           new ForkRoutingAttestationPool(
               spec, recentChainData, blsAttestationPool, pqAttestationPool);

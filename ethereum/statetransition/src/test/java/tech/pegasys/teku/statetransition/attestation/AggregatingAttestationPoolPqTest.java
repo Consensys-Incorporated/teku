@@ -14,6 +14,9 @@
 package tech.pegasys.teku.statetransition.attestation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
 import static tech.pegasys.teku.spec.datastructures.type.SszXmssSignatureSchema.XMSS_SIGNATURE_SIZE;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -29,7 +32,9 @@ import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
+import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -52,6 +57,7 @@ import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.attestation.AggregatingAttestationPoolPq.MeasuredProof;
 import tech.pegasys.teku.statetransition.pq.timing.PqTiming;
 import tech.pegasys.teku.statetransition.pq.timing.PqTimingEvents;
+import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystemBuilder;
 import tech.pegasys.teku.storage.storageSystem.StorageSystem;
 
@@ -62,6 +68,7 @@ class AggregatingAttestationPoolPqTest {
   private final Spec spec = TestSpecFactory.createMinimalWithPqForkEpoch(PQ_FORK_EPOCH);
   private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
   private final StorageSystem storageSystem = InMemoryStorageSystemBuilder.buildDefault(64, spec);
+  private final StubTimeProvider timeProvider = StubTimeProvider.withTimeInMillis(0);
 
   private AggregatingAttestationPoolPq pool;
   private SignedBlockAndState head;
@@ -92,7 +99,7 @@ class AggregatingAttestationPoolPqTest {
     pool.add(second);
 
     final Optional<PqAggregate> aggregate =
-        pool.createPqAggregateFor(data.hashTreeRoot(), UInt64.ZERO);
+        pool.createPqAggregateFor(data.hashTreeRoot(), UInt64.ZERO).getImmediately();
 
     assertThat(aggregate).isPresent();
     assertThat(aggregate.get().attestation().getAggregationBits().getAllSetBits().toIntArray())
@@ -120,7 +127,7 @@ class AggregatingAttestationPoolPqTest {
     recordingPool.add(singleAttestation(laterState, data, 0, committee.getInt(0)));
 
     final Optional<PqAggregate> aggregate =
-        recordingPool.createPqAggregateFor(data.hashTreeRoot(), UInt64.ZERO);
+        recordingPool.createPqAggregateFor(data.hashTreeRoot(), UInt64.ZERO).getImmediately();
 
     assertThat(aggregate).isPresent();
     // The statement get_attestation_statements gives with an up-to-date state
@@ -139,11 +146,209 @@ class AggregatingAttestationPoolPqTest {
     pool.add(networkAggregate(data, 0, proof, 1, 2));
 
     final Optional<PqAggregate> aggregate =
-        pool.createPqAggregateFor(data.hashTreeRoot(), UInt64.ZERO);
+        pool.createPqAggregateFor(data.hashTreeRoot(), UInt64.ZERO).getImmediately();
 
     assertThat(aggregate.orElseThrow().proof()).isEqualTo(proof);
     assertThat(aggregate.get().attestation().getAggregationBits().getAllSetBits().toIntArray())
         .containsExactly(1, 2);
+  }
+
+  @Test
+  void shouldProveALocalAggregatorsCommitteeAtTheCollectionCutoff() {
+    final List<List<XmssAggregateStatement>> provenStatements = new ArrayList<>();
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
+    pool = provingPool(recordingProver(provenStatements), asyncRunner);
+    final AttestationData data = attestationData(0);
+    final IntList committee = committee(0);
+    final ValidatableAttestation first = singleAttestation(data, 0, committee.getInt(0));
+    final ValidatableAttestation second = singleAttestation(data, 0, committee.getInt(1));
+    pool.add(first);
+    pool.add(second);
+    pool.onLocalAggregationDuty(attestationSlot, UInt64.ZERO);
+
+    advanceTimeTo(attestationSlot, 0);
+    pool.onSlot(attestationSlot);
+    advanceTimeTo(attestationSlot, cutoffMillis() - 1);
+    asyncRunner.executeDueActionsRepeatedly();
+    assertThat(provenStatements).isEmpty();
+
+    advanceTimeTo(attestationSlot, cutoffMillis());
+    asyncRunner.executeDueActionsRepeatedly();
+    assertThat(provenStatements).hasSize(1);
+
+    // An attestation after the cutoff doesn't hold the aggregate up to prove it again
+    pool.add(singleAttestation(data, 0, committee.getInt(2)));
+    final SafeFuture<Optional<PqAggregate>> aggregate =
+        pool.createPqAggregateFor(data.hashTreeRoot(), UInt64.ZERO);
+
+    assertThat(aggregate).isCompleted();
+    assertThat(provenStatements).hasSize(1);
+    final PqAggregate result = aggregate.getImmediately().orElseThrow();
+    assertThat(result.attestation().getAggregationBits().getAllSetBits().toIntArray())
+        .containsExactly(0, 1);
+    assertThat(result.proof())
+        .isEqualTo(Bytes.concatenate(signatureOf(first), signatureOf(second)));
+  }
+
+  @Test
+  void shouldWaitForAnAggregateBeingProvenAtTheCollectionCutoff() {
+    final List<SafeFuture<Optional<PqAggregate>>> askedWhileProving = new ArrayList<>();
+    final AttestationData data = attestationData(0);
+    final List<List<XmssAggregateStatement>> provenStatements = new ArrayList<>();
+    final StarkProver recording = recordingProver(provenStatements);
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
+    pool =
+        provingPool(
+            new DelegatingProver(recording) {
+              @Override
+              public Bytes proveAggregates(
+                  final List<XmssAggregateStatement> statements,
+                  final List<List<Bytes>> signatures) {
+                if (askedWhileProving.isEmpty()) {
+                  askedWhileProving.add(
+                      pool.createPqAggregateFor(data.hashTreeRoot(), UInt64.ZERO));
+                }
+                return super.proveAggregates(statements, signatures);
+              }
+            },
+            asyncRunner);
+    pool.add(singleAttestation(data, 0, committee(0).getInt(0)));
+    pool.onLocalAggregationDuty(attestationSlot, UInt64.ZERO);
+
+    advanceTimeTo(attestationSlot, 0);
+    pool.onSlot(attestationSlot);
+    advanceTimeTo(attestationSlot, cutoffMillis());
+    asyncRunner.executeDueActionsRepeatedly();
+
+    // Asked while it was being proven, it waited for that proof rather than proving again
+    assertThat(askedWhileProving).hasSize(1);
+    assertThat(provenStatements).hasSize(1);
+    assertThat(askedWhileProving.getFirst()).isCompletedWithValueMatching(Optional::isPresent);
+  }
+
+  @Test
+  void shouldPreferANetworkAggregateWithAsManyAttestersToTheOneProvenAtTheCutoff() {
+    final List<List<XmssAggregateStatement>> provenStatements = new ArrayList<>();
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
+    pool = provingPool(recordingProver(provenStatements), asyncRunner);
+    final AttestationData data = attestationData(0);
+    final IntList committee = committee(0);
+    pool.add(singleAttestation(data, 0, committee.getInt(0)));
+    pool.add(singleAttestation(data, 0, committee.getInt(1)));
+    pool.onLocalAggregationDuty(attestationSlot, UInt64.ZERO);
+    advanceTimeTo(attestationSlot, 0);
+    pool.onSlot(attestationSlot);
+    advanceTimeTo(attestationSlot, cutoffMillis());
+    asyncRunner.executeDueActionsRepeatedly();
+
+    final Bytes networkProof = randomProof(2);
+    pool.add(networkAggregate(data, 0, networkProof, 2, 3));
+
+    assertThat(pool.createPqAggregateFor(data.hashTreeRoot(), UInt64.ZERO).getImmediately())
+        .hasValueSatisfying(aggregate -> assertThat(aggregate.proof()).isEqualTo(networkProof));
+    assertThat(provenStatements).hasSize(1);
+  }
+
+  @Test
+  void shouldProveOnDemandWhenProvingAtTheCutoffFailed() {
+    final List<List<XmssAggregateStatement>> provenStatements = new ArrayList<>();
+    final StarkProver recording = recordingProver(provenStatements);
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
+    pool =
+        provingPool(
+            new DelegatingProver(recording) {
+              private boolean failed;
+
+              @Override
+              public Bytes proveAggregates(
+                  final List<XmssAggregateStatement> statements,
+                  final List<List<Bytes>> signatures) {
+                if (!failed) {
+                  failed = true;
+                  throw new IllegalStateException("Sidecar unavailable");
+                }
+                return super.proveAggregates(statements, signatures);
+              }
+            },
+            asyncRunner);
+    final AttestationData data = attestationData(0);
+    pool.add(singleAttestation(data, 0, committee(0).getInt(0)));
+    pool.onLocalAggregationDuty(attestationSlot, UInt64.ZERO);
+    advanceTimeTo(attestationSlot, 0);
+    pool.onSlot(attestationSlot);
+    advanceTimeTo(attestationSlot, cutoffMillis());
+    asyncRunner.executeDueActionsRepeatedly();
+    assertThat(provenStatements).isEmpty();
+
+    assertThat(pool.createPqAggregateFor(data.hashTreeRoot(), UInt64.ZERO))
+        .isCompletedWithValueMatching(Optional::isPresent);
+    assertThat(provenStatements).hasSize(1);
+  }
+
+  @Test
+  void shouldProveAtTheCutoffOnlyForLocalAggregatorsAtTheSlot() {
+    final List<List<XmssAggregateStatement>> provenStatements = new ArrayList<>();
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
+    pool = provingPool(recordingProver(provenStatements), asyncRunner);
+    pool.add(singleAttestation(attestationData(0), 0, committee(0).getInt(0)));
+    pool.add(singleAttestation(attestationData(1), 1, committee(1).getInt(0)));
+    // Committee 1 is aggregated locally, but a slot later
+    pool.onLocalAggregationDuty(attestationSlot, UInt64.ZERO);
+    pool.onLocalAggregationDuty(attestationSlot.plus(1), UInt64.ONE);
+
+    advanceTimeTo(attestationSlot, 0);
+    pool.onSlot(attestationSlot);
+    advanceTimeTo(attestationSlot, cutoffMillis());
+    asyncRunner.executeDueActionsRepeatedly();
+
+    assertThat(provenStatements).hasSize(1);
+    assertThat(provenStatements.getFirst().getFirst().pubkeys()).hasSize(1);
+    // No local aggregator at the next slot has attestations to prove
+    advanceTimeTo(attestationSlot.plus(1), 0);
+    pool.onSlot(attestationSlot.plus(1));
+    advanceTimeTo(attestationSlot.plus(1), cutoffMillis());
+    asyncRunner.executeDueActionsRepeatedly();
+    assertThat(provenStatements).hasSize(1);
+    // Nor any at the slot after
+    pool.onSlot(attestationSlot.plus(2));
+    assertThat(asyncRunner.hasDelayedActions()).isFalse();
+  }
+
+  private AggregatingAttestationPoolPq provingPool(
+      final StarkProver prover, final StubAsyncRunner asyncRunner) {
+    return new AggregatingAttestationPoolPq(
+        spec, storageSystem.recentChainData(), prover, asyncRunner, timeProvider);
+  }
+
+  private long cutoffMillis() {
+    return spec.getSlotDurationMillis(attestationSlot)
+        * AggregatingAttestationPoolPq.AGGREGATION_CUTOFF_BPS
+        / 10_000L;
+  }
+
+  /** A prover that defers to another. */
+  private static class DelegatingProver implements StarkProver {
+    private final StarkProver delegate;
+
+    DelegatingProver(final StarkProver delegate) {
+      this.delegate = delegate;
+    }
+
+    @Override
+    public Bytes proveAggregates(
+        final List<XmssAggregateStatement> statements, final List<List<Bytes>> signatures) {
+      return delegate.proveAggregates(statements, signatures);
+    }
+
+    @Override
+    public long proofSizeOf(final int signatureCount) {
+      return delegate.proofSizeOf(signatureCount);
+    }
+
+    @Override
+    public Bytes mergeProofs(final List<ProvenStatements> proofs) {
+      return delegate.mergeProofs(proofs);
+    }
   }
 
   @Test
@@ -351,7 +556,7 @@ class AggregatingAttestationPoolPqTest {
     final RecursiveProver prover = new RecursiveProver();
     pool =
         new AggregatingAttestationPoolPq(
-            spec, storageSystem.recentChainData(), prover, Optional.empty(), 1);
+            spec, storageSystem.recentChainData(), prover, Optional.empty(), timeProvider, 1);
     // Committee 0's attestation adds more attesters, so it comes first
     final Bytes proof0 = randomProof(2);
     pool.add(networkAggregate(attestationData(0), 0, proof0, 0, 1));
@@ -401,23 +606,29 @@ class AggregatingAttestationPoolPqTest {
   @Test
   void shouldMergeTimelyProofsAheadOfALocalProposal() {
     final RecursiveProver prover = new RecursiveProver();
-    final StubAsyncRunner asyncRunner = new StubAsyncRunner();
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
     pool =
         new AggregatingAttestationPoolPq(
-            spec, storageSystem.recentChainData(), prover, asyncRunner);
+            spec, storageSystem.recentChainData(), prover, asyncRunner, timeProvider);
     final Bytes proof0 = randomProof(1);
     final Bytes proof1 = randomProof(1);
     pool.add(networkAggregate(attestationData(0), 0, proof0, 0));
     pool.add(networkAggregate(attestationData(1), 1, proof1, 0));
     final UInt64 blockSlot = attestationSlot.plus(2);
 
+    advanceTimeTo(blockSlot.minus(1), 0);
     pool.onSlot(blockSlot.minus(1));
     assertThat(prover.merges).isEmpty();
-    asyncRunner.executeQueuedActions();
+    asyncRunner.executeDueActionsRepeatedly();
 
     assertThat(prover.merges).hasSize(1);
     assertThat(prover.merges.getFirst().stream().map(ProvenStatements::proof))
         .containsExactlyInAnyOrder(proof0, proof1);
+
+    // Nothing more to merge once the aggregates are due
+    advanceTimeTo(blockSlot.minus(1), spec.getAggregateDueMillis(blockSlot.minus(1)));
+    asyncRunner.executeDueActionsRepeatedly();
+    assertThat(prover.merges).hasSize(1);
 
     // Block production finds nothing new to merge
     final PqBlockAttestations block = blockAttestations(blockSlot);
@@ -428,19 +639,181 @@ class AggregatingAttestationPoolPqTest {
   }
 
   @Test
-  void shouldNotMergeAheadOfPqOrWithoutTimelyAggregates() {
+  void shouldMergeEveryCommitteeTheBlockCanIncludeOnceTheAggregatesAreDue() {
     final RecursiveProver prover = new RecursiveProver();
-    final StubAsyncRunner asyncRunner = new StubAsyncRunner();
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
     pool =
         new AggregatingAttestationPoolPq(
-            spec, storageSystem.recentChainData(), prover, asyncRunner);
+            spec, storageSystem.recentChainData(), prover, asyncRunner, timeProvider);
+    final UInt64 timelySlot = attestationSlot.plus(1);
+    final UInt64 blockSlot = timelySlot.plus(2);
+    // Older aggregates, which the block can include but which aren't timely
+    final Bytes older0 = randomProof(1);
+    final Bytes older1 = randomProof(1);
+    pool.add(networkAggregate(attestationData(0), 0, older0, 0));
+    pool.add(networkAggregate(attestationData(1), 1, older1, 0));
+    final Bytes timely0 = randomProof(1);
+    final Bytes timely1 = randomProof(1);
+    pool.add(networkAggregate(attestationData(timelySlot, 0), 0, timely0, 0));
+    pool.add(networkAggregate(attestationData(timelySlot, 1), 1, timely1, 0));
+    final UInt64 slot = blockSlot.minus(1);
+
+    // At the start of the slot before, the timely committees only: the block in between may
+    // include the others
+    advanceTimeTo(slot, 0);
+    pool.onSlot(slot);
+    asyncRunner.executeDueActionsRepeatedly();
+
+    assertThat(prover.merges).hasSize(1);
+    assertThat(prover.merges.getFirst().stream().map(ProvenStatements::proof))
+        .containsExactlyInAnyOrder(timely0, timely1);
+
+    // Not while this slot's aggregates are proven
+    advanceTimeTo(slot, spec.getAggregateDueMillis(slot) - 1);
+    asyncRunner.executeDueActionsRepeatedly();
+    assertThat(prover.merges).hasSize(1);
+
+    // Then the rest, into the first merge
+    advanceTimeTo(slot, spec.getAggregateDueMillis(slot));
+    asyncRunner.executeDueActionsRepeatedly();
+
+    assertThat(prover.merges).hasSize(2);
+    final List<ProvenStatements> children = prover.merges.get(1);
+    assertThat(children.getFirst().proof()).isEqualTo(RecursiveProver.mergedProof(1));
+    assertThat(children.stream().skip(1).map(ProvenStatements::proof))
+        .containsExactlyInAnyOrder(older0, older1);
+
+    // Block production finds nothing new to merge
+    final PqBlockAttestations block = blockAttestations(blockSlot);
+
+    assertThat(prover.merges).hasSize(2);
+    assertThat(block.proof()).isEqualTo(RecursiveProver.mergedProof(2));
+    assertThat(attesterCount(block)).isEqualTo(4);
+  }
+
+  @Test
+  void shouldMergeAheadPassAfterPassWhileCommitteesAreLeftOut() {
+    final RecursiveProver prover = new RecursiveProver();
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
+    // An earlier merge and one more proof per merge
+    pool =
+        new AggregatingAttestationPoolPq(
+            spec,
+            storageSystem.recentChainData(),
+            prover,
+            Optional.of(asyncRunner),
+            timeProvider,
+            2);
+    final UInt64 timelySlot = attestationSlot.plus(1);
+    final UInt64 blockSlot = timelySlot.plus(2);
+    final Bytes timely = randomProof(1);
+    final Bytes older0 = randomProof(1);
+    final Bytes older1 = randomProof(1);
+    pool.add(networkAggregate(attestationData(timelySlot, 0), 0, timely, 0));
+    pool.add(networkAggregate(attestationData(0), 0, older0, 0));
+    pool.add(networkAggregate(attestationData(1), 1, older1, 0));
+    final UInt64 slot = blockSlot.minus(1);
+
+    advanceTimeTo(slot, spec.getAggregateDueMillis(slot));
+    pool.onSlot(slot);
+    asyncRunner.executeDueActionsRepeatedly();
+
+    // The timely proof alone needs no merge; then one proof per pass, each into the last
+    assertThat(prover.merges).hasSize(2);
+    final List<Bytes> first = prover.merges.get(0).stream().map(ProvenStatements::proof).toList();
+    final List<Bytes> second = prover.merges.get(1).stream().map(ProvenStatements::proof).toList();
+    assertThat(first).hasSize(2).first().isEqualTo(timely);
+    assertThat(second).hasSize(2).first().isEqualTo(RecursiveProver.mergedProof(1));
+    assertThat(List.of(first.get(1), second.get(1))).containsExactlyInAnyOrder(older0, older1);
+    final PqBlockAttestations block = blockAttestations(blockSlot);
+    assertThat(prover.merges).hasSize(2);
+    assertThat(block.proof()).isEqualTo(RecursiveProver.mergedProof(2));
+    assertThat(attesterCount(block)).isEqualTo(3);
+  }
+
+  @Test
+  void shouldNotStartAMergeAheadPassThatWouldRunIntoTheBlockSlot() {
+    final UInt64 blockSlot = attestationSlot.plus(3);
+    final UInt64 slot = blockSlot.minus(1);
+    final long aggregateDue = spec.getAggregateDueMillis(slot);
+    // Each merge takes most of what's left of the slot
+    final long mergeMillis = (spec.getSlotDurationMillis(slot) - aggregateDue) * 2 / 3;
+    final RecursiveProver prover =
+        new RecursiveProver() {
+          @Override
+          public Bytes mergeProofs(final List<ProvenStatements> proofs) {
+            timeProvider.advanceTimeByMillis(mergeMillis);
+            return super.mergeProofs(proofs);
+          }
+        };
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
+    pool =
+        new AggregatingAttestationPoolPq(
+            spec,
+            storageSystem.recentChainData(),
+            prover,
+            Optional.of(asyncRunner),
+            timeProvider,
+            2);
+    // A timely proof and two older ones: two merges after the timely one
+    pool.add(networkAggregate(attestationData(attestationSlot.plus(1), 0), 0, randomProof(1), 0));
     pool.add(networkAggregate(attestationData(0), 0, randomProof(1), 0));
     pool.add(networkAggregate(attestationData(1), 1, randomProof(1), 0));
 
-    // Before the fork, and for a block whose timely slot has no aggregates
+    advanceTimeTo(slot, 0);
+    pool.onSlot(slot);
+    asyncRunner.executeDueActionsRepeatedly();
+    // The timely committee alone needs no merge
+    assertThat(prover.merges).isEmpty();
+    advanceTimeTo(slot, aggregateDue);
+    asyncRunner.executeDueActionsRepeatedly();
+
+    // One pass, which leaves a committee out, and no time for another
+    assertThat(prover.merges).hasSize(1);
+    assertThat(asyncRunner.hasDelayedActions()).isFalse();
+  }
+
+  @Test
+  void shouldNotMergeAheadOfPqOrWithoutAggregates() {
+    final RecursiveProver prover = new RecursiveProver();
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
+    pool =
+        new AggregatingAttestationPoolPq(
+            spec, storageSystem.recentChainData(), prover, asyncRunner, timeProvider);
+
+    // Before the fork
+    pool.add(networkAggregate(attestationData(0), 0, randomProof(1), 0));
+    pool.add(networkAggregate(attestationData(1), 1, randomProof(1), 0));
     pool.onSlot(UInt64.ZERO);
-    pool.onSlot(attestationSlot.plus(2));
-    asyncRunner.executeQueuedActions();
+    asyncRunner.executeUntilDone();
+    assertThat(prover.merges).isEmpty();
+
+    // Nor for a block that can't include them yet
+    advanceTimeTo(attestationSlot, 0);
+    pool.onSlot(attestationSlot);
+    advanceTimeTo(attestationSlot, spec.getSlotDurationMillis(attestationSlot));
+    asyncRunner.executeDueActionsRepeatedly();
+
+    assertThat(prover.merges).isEmpty();
+  }
+
+  @Test
+  void shouldNotMergeAheadWithoutALocalProposer() {
+    final RecursiveProver prover = new RecursiveProver();
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
+    final RecentChainData recentChainData = spy(storageSystem.recentChainData());
+    doReturn(SafeFuture.completedFuture(false))
+        .when(recentChainData)
+        .isBlockProposerConnected(any());
+    pool =
+        new AggregatingAttestationPoolPq(spec, recentChainData, prover, asyncRunner, timeProvider);
+    pool.add(networkAggregate(attestationData(0), 0, randomProof(1), 0));
+    pool.add(networkAggregate(attestationData(1), 1, randomProof(1), 0));
+
+    advanceTimeTo(attestationSlot.plus(1), 0);
+    pool.onSlot(attestationSlot.plus(1));
+    advanceTimeTo(attestationSlot.plus(2), 0);
+    asyncRunner.executeDueActionsRepeatedly();
 
     assertThat(prover.merges).isEmpty();
   }
@@ -466,7 +839,11 @@ class AggregatingAttestationPoolPqTest {
     final StubAsyncRunner asyncRunner = new StubAsyncRunner();
     pool =
         new AggregatingAttestationPoolPq(
-            spec, storageSystem.recentChainData(), StarkProver.CONCATENATED, asyncRunner);
+            spec,
+            storageSystem.recentChainData(),
+            StarkProver.CONCATENATED,
+            asyncRunner,
+            timeProvider);
 
     pool.onSlot(attestationSlot.plus(1));
 
@@ -487,7 +864,7 @@ class AggregatingAttestationPoolPqTest {
       final UInt64 blockSlot = attestationSlot.plus(2);
 
       // An aggregator's proof of the single attestations
-      pool.createPqAggregateFor(data0.hashTreeRoot(), UInt64.ZERO);
+      assertThat(pool.createPqAggregateFor(data0.hashTreeRoot(), UInt64.ZERO)).isCompleted();
       // Proves committee 0 again and merges it with committee 1's aggregate
       blockAttestations(blockSlot);
       // Merges a better aggregate of committee 1 into the first merge
@@ -607,6 +984,29 @@ class AggregatingAttestationPoolPqTest {
     assertThat(block.get().claims()).isEqualTo(3);
   }
 
+  @Test
+  void shouldMergeEveryCommitteeAheadForMeasurement() {
+    final RecursiveProver prover = new RecursiveProver();
+    pool = new AggregatingAttestationPoolPq(spec, storageSystem.recentChainData(), prover);
+    final UInt64 timelySlot = attestationSlot.plus(1);
+    final UInt64 blockSlot = timelySlot.plus(2);
+    pool.add(networkAggregate(attestationData(timelySlot, 0), 0, randomProof(1), 0));
+    pool.add(networkAggregate(attestationData(timelySlot, 1), 1, randomProof(1), 0));
+    pool.add(networkAggregate(attestationData(0), 0, randomProof(1), 0));
+    assertThat(pool.mergeAheadForMeasurement(blockSlot, head.getState())).isPresent();
+
+    // The older committee goes into the timely committees' merge
+    final Optional<MeasuredProof> every =
+        pool.mergeEveryCommitteeAheadForMeasurement(blockSlot, head.getState());
+
+    assertThat(every).isPresent();
+    assertThat(every.get().proof()).isEqualTo(RecursiveProver.mergedProof(2));
+    assertThat(every.get().round()).isEqualTo(2);
+    assertThat(every.get().claims()).isEqualTo(3);
+    // Then there is nothing new
+    assertThat(pool.mergeEveryCommitteeAheadForMeasurement(blockSlot, head.getState())).isEmpty();
+  }
+
   private static int attesterCount(final PqBlockAttestations blockAttestations) {
     return blockAttestations.attestations().stream()
         .mapToInt(attestation -> attestation.getAggregationBits().getBitCount())
@@ -691,7 +1091,23 @@ class AggregatingAttestationPoolPqTest {
     assertThat(pool.getSize()).isEqualTo(1);
     assertThat(blsPool.getSize()).isZero();
     assertThat(routingPool.getSize()).isEqualTo(1);
-    assertThat(routingPool.createPqAggregateFor(data.hashTreeRoot(), UInt64.ZERO)).isPresent();
+    assertThat(routingPool.createPqAggregateFor(data.hashTreeRoot(), UInt64.ZERO))
+        .isCompletedWithValueMatching(Optional::isPresent);
+
+    // Local aggregation duties at PQ slots go to the PQ pool, which proves them at the cutoff
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
+    final AggregatingAttestationPoolPq pqPool =
+        new AggregatingAttestationPoolPq(
+            spec,
+            storageSystem.recentChainData(),
+            StarkProver.CONCATENATED,
+            asyncRunner,
+            timeProvider);
+    final ForkRoutingAttestationPool routingToProvingPool =
+        new ForkRoutingAttestationPool(spec, storageSystem.recentChainData(), blsPool, pqPool);
+    routingToProvingPool.onLocalAggregationDuty(attestationSlot, UInt64.ZERO);
+    pqPool.onSlot(attestationSlot);
+    assertThat(asyncRunner.hasDelayedActions()).isTrue();
   }
 
   private PqBlockAttestations blockAttestations(final UInt64 blockSlot) {
@@ -705,8 +1121,20 @@ class AggregatingAttestationPoolPqTest {
   }
 
   private AttestationData attestationData(final int committeeIndex) {
+    return attestationData(attestationSlot, committeeIndex);
+  }
+
+  private AttestationData attestationData(final UInt64 slot, final int committeeIndex) {
     return spec.getGenericAttestationData(
-        attestationSlot, head.getState(), head, UInt64.valueOf(committeeIndex));
+        slot, head.getState(), head, UInt64.valueOf(committeeIndex));
+  }
+
+  private void advanceTimeTo(final UInt64 slot, final long millisIntoSlot) {
+    final long target =
+        spec.computeTimeMillisAtSlot(slot, storageSystem.recentChainData().getGenesisTimeMillis())
+                .longValue()
+            + millisIntoSlot;
+    timeProvider.advanceTimeByMillis(target - timeProvider.getTimeInMillis().longValue());
   }
 
   private IntList committee(final int committeeIndex) {
@@ -783,8 +1211,11 @@ class AggregatingAttestationPoolPqTest {
         SchemaDefinitionsPq.required(spec.atSlot(attestationSlot).getSchemaDefinitions())
             .getPqAttestationSchemas()
             .getAttestationSchema();
+    final int committeeSize =
+        spec.getBeaconCommittee(head.getState(), data.getSlot(), UInt64.valueOf(committeeIndex))
+            .size();
     return schema.create(
-        schema.getAggregationBitsSchema().ofBits(committee(committeeIndex).size(), positions),
+        schema.getAggregationBitsSchema().ofBits(committeeSize, positions),
         data,
         schema.getCommitteeBitsSchema().orElseThrow().ofBits(committeeIndex));
   }
