@@ -16,6 +16,7 @@ dependencies {
 	implementation project(':infrastructure:async')
 	implementation project(':infrastructure:bls')
 	implementation project(':infrastructure:collections')
+	implementation project(':infrastructure:crypto')
 	implementation project(':infrastructure:exceptions')
 	implementation project(':infrastructure:logging')
 	implementation project(':infrastructure:metrics')
@@ -29,6 +30,8 @@ dependencies {
 	implementation 'io.consensys.tuweni:tuweni-units'
 	implementation 'org.hyperledger.besu.internal:besu-metrics-core'
 	implementation 'io.libp2p:jvm-libp2p'
+	implementation 'com.fasterxml.jackson.core:jackson-databind'
+	implementation 'io.airlift:aircompressor-v3'
 
 	testImplementation project(':infrastructure:xmss')
 	testImplementation testFixtures(project(':ethereum:spec'))
@@ -57,6 +60,9 @@ dependencies {
 	testFixturesImplementation testFixtures(project(':infrastructure:metrics'))
 	testFixturesImplementation testFixtures(project(':infrastructure:time'))
 	testFixturesImplementation 'org.apache.logging.log4j:log4j-core'
+	testFixturesImplementation 'com.fasterxml.jackson.core:jackson-databind'
+	testFixturesImplementation 'io.airlift:aircompressor-v3'
+	testFixturesImplementation project(':infrastructure:unsigned')
 
 	jmhImplementation testFixtures(project(':infrastructure:bls'))
 	jmhImplementation testFixtures(project(':ethereum:spec'))

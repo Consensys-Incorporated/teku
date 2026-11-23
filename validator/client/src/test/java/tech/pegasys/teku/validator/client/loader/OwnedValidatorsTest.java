@@ -15,15 +15,21 @@ package tech.pegasys.teku.validator.client.loader;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.spec.generator.signatures.NoOpLocalSigner.NO_OP_SIGNER;
 
 import java.util.List;
 import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.signatures.Signer;
+import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.client.Validator;
+import tech.pegasys.teku.xmss.XmssPublicKey;
 
 class OwnedValidatorsTest {
   private final DataStructureUtil dataStructureUtil =
@@ -65,5 +71,24 @@ class OwnedValidatorsTest {
     List<Validator> validatorList = validators.getValidators();
 
     assertThat(validatorList).contains(validator);
+  }
+
+  @Test
+  void shouldFindValidatorBySigningKey() {
+    final DataStructureUtil util = new DataStructureUtil(TestSpecFactory.createMinimalPq());
+    final BLSPublicKey blsKey = util.randomPublicKey();
+    final Bytes32 xmssKey = util.randomBytes32();
+    final XmssSigner xmssSigner = mock(XmssSigner.class);
+    when(xmssSigner.getPublicKey()).thenReturn(XmssPublicKey.fromBytes(xmssKey));
+    final Validator validator =
+        new Validator(blsKey, mock(Signer.class), Optional::empty, false, Optional.of(xmssSigner));
+    final OwnedValidators ownedValidators = new OwnedValidators();
+    ownedValidators.addValidator(validator);
+
+    // A duty names the validator by its BLS key, or from PQ by its XMSS key
+    assertThat(ownedValidators.getValidatorBySigningKey(blsKey.toBytesCompressed()))
+        .contains(validator);
+    assertThat(ownedValidators.getValidatorBySigningKey(xmssKey)).contains(validator);
+    assertThat(ownedValidators.getValidatorBySigningKey(util.randomBytes32())).isEmpty();
   }
 }

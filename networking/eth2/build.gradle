@@ -26,6 +26,7 @@ dependencies {
 	testImplementation testFixtures(project(':infrastructure:metrics'))
 	testImplementation testFixtures(project(':ethereum:spec'))
 	testImplementation testFixtures(project(':ethereum:statetransition'))
+	testImplementation 'com.fasterxml.jackson.core:jackson-databind'
 	testImplementation testFixtures(project(':ethereum:networks'))
 	testImplementation project(':ethereum:networks')
 	testImplementation testFixtures(project(':infrastructure:async'))

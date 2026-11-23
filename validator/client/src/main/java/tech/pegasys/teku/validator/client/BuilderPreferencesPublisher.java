@@ -62,12 +62,12 @@ public class BuilderPreferencesPublisher extends AbstractPreferencesPublisher {
         ownedProposerDuties.stream()
             .map(
                 duty -> {
-                  final BLSPublicKey proposerPubkey = duty.getPublicKey();
                   final Optional<Validator> validator =
-                      ownedValidators.getValidator(proposerPubkey);
+                      ownedValidators.getValidatorBySigningKey(duty.getPublicKeyBytes());
                   if (validator.isEmpty()) {
                     return SafeFuture.completedFuture(List.of());
                   }
+                  final BLSPublicKey proposerPubkey = validator.get().getPublicKey();
                   return builderConfigProvider
                       .getBuilderConfig(validator.get(), duty.getSlot())
                       .thenApply(

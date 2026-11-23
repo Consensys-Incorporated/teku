@@ -16,8 +16,11 @@ package tech.pegasys.teku.spec.datastructures.state.versions.pq;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import org.apache.tuweni.bytes.Bytes48;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 
@@ -105,6 +108,20 @@ class PqStateContainersTest {
         .isEqualTo(UInt64.ONE);
     assertThat(builder.copyWithNewBalance(UInt64.ONE).getXmssPublicKey())
         .isEqualTo(builder.getXmssPublicKey());
+  }
+
+  @Test
+  void builderIsNamedByTheXmssKeyAfterTheExitRequestPrefix() {
+    // process_builder_exit_request, modified in PQ: request.pubkey[16:]
+    final BLSPublicKey requestPubkey =
+        BLSPublicKey.fromBytesCompressed(
+            Bytes48.wrap(Bytes.concatenate(Bytes.wrap(new byte[16]), Bytes32.repeat((byte) 1))));
+    final BLSPublicKey otherPubkey =
+        BLSPublicKey.fromBytesCompressed(
+            Bytes48.wrap(Bytes.concatenate(Bytes.wrap(new byte[16]), Bytes32.repeat((byte) 2))));
+
+    assertThat(builder.isNamedByExitRequestPubkey(requestPubkey)).isTrue();
+    assertThat(builder.isNamedByExitRequestPubkey(otherPubkey)).isFalse();
   }
 
   @Test

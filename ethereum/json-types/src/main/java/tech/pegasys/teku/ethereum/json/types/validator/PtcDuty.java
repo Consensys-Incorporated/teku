@@ -13,21 +13,38 @@
 
 package tech.pegasys.teku.ethereum.json.types.validator;
 
-import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.PUBLIC_KEY_TYPE;
+import static tech.pegasys.teku.ethereum.json.types.beacon.ValidatorTypeDefinition.VALIDATOR_PUBKEY_TYPE;
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.UINT64_TYPE;
 
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes48;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 
-public record PtcDuty(BLSPublicKey publicKey, UInt64 validatorIndex, UInt64 slot) {
+/**
+ * A payload timeliness committee duty. {@code pubkey} is the validator's signing key: a BLS key, or
+ * from PQ its 32-byte XMSS key.
+ */
+public record PtcDuty(Bytes pubkey, UInt64 validatorIndex, UInt64 slot) {
+
+  public PtcDuty(final BLSPublicKey publicKey, final UInt64 validatorIndex, final UInt64 slot) {
+    this(publicKey.toBytesCompressed(), validatorIndex, slot);
+  }
+
+  /**
+   * @throws IllegalArgumentException for a PQ validator, which is named by its XMSS key
+   */
+  public BLSPublicKey publicKey() {
+    return BLSPublicKey.fromBytesCompressed(Bytes48.wrap(pubkey));
+  }
 
   public static final DeserializableTypeDefinition<PtcDuty> PTC_DUTY_TYPE_DEFINITION =
       DeserializableTypeDefinition.object(PtcDuty.class, PtcDuty.Builder.class)
           .name("PtcDuty")
           .initializer(PtcDuty.Builder::new)
           .finisher(PtcDuty.Builder::build)
-          .withField("pubkey", PUBLIC_KEY_TYPE, PtcDuty::publicKey, PtcDuty.Builder::publicKey)
+          .withField("pubkey", VALIDATOR_PUBKEY_TYPE, PtcDuty::pubkey, PtcDuty.Builder::publicKey)
           .withField(
               "validator_index",
               UINT64_TYPE,
@@ -38,11 +55,11 @@ public record PtcDuty(BLSPublicKey publicKey, UInt64 validatorIndex, UInt64 slot
 
   public static class Builder {
 
-    private BLSPublicKey publicKey;
+    private Bytes publicKey;
     private UInt64 validatorIndex;
     private UInt64 slot;
 
-    public Builder publicKey(final BLSPublicKey publicKey) {
+    public Builder publicKey(final Bytes publicKey) {
       this.publicKey = publicKey;
       return this;
     }

@@ -33,7 +33,9 @@ import com.google.common.base.Throwables;
 import it.unimi.dsi.fastutil.ints.IntSet;
 import java.io.IOException;
 import java.net.BindException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.Map;
@@ -92,6 +94,7 @@ import tech.pegasys.teku.infrastructure.metrics.SettableLabelledGauge;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.infrastructure.version.VersionProvider;
 import tech.pegasys.teku.kzg.KZG;
 import tech.pegasys.teku.networking.eth2.Eth2P2PNetwork;
 import tech.pegasys.teku.networking.eth2.Eth2P2PNetworkBuilder;
@@ -113,6 +116,8 @@ import tech.pegasys.teku.networking.eth2.peers.DataColumnPeerManagerImpl;
 import tech.pegasys.teku.networking.eth2.peers.MetadataDasPeerCustodyTracker;
 import tech.pegasys.teku.networking.p2p.discovery.DiscoveryConfig;
 import tech.pegasys.teku.networks.Eth2NetworkConfiguration;
+import tech.pegasys.teku.networks.LeanVmSidecarConfig;
+import tech.pegasys.teku.networks.PqTimingConfig;
 import tech.pegasys.teku.networks.StateBoostrapConfig;
 import tech.pegasys.teku.service.serviceutils.Service;
 import tech.pegasys.teku.service.serviceutils.ServiceConfig;
@@ -147,6 +152,7 @@ import tech.pegasys.teku.spec.logic.common.statetransition.availability.Availabi
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.spec.logic.common.util.BlockRewardCalculatorUtil;
 import tech.pegasys.teku.spec.logic.versions.deneb.helpers.MiscHelpersDeneb;
+import tech.pegasys.teku.spec.logic.versions.pq.crypto.StarkBackend;
 import tech.pegasys.teku.spec.networks.Eth2Network;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsElectra;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsFulu;
@@ -158,8 +164,10 @@ import tech.pegasys.teku.statetransition.OperationPool;
 import tech.pegasys.teku.statetransition.OperationsReOrgManager;
 import tech.pegasys.teku.statetransition.SimpleOperationPool;
 import tech.pegasys.teku.statetransition.attestation.AggregatingAttestationPool;
+import tech.pegasys.teku.statetransition.attestation.AggregatingAttestationPoolPq;
 import tech.pegasys.teku.statetransition.attestation.AggregatingAttestationPoolV2;
 import tech.pegasys.teku.statetransition.attestation.AttestationManager;
+import tech.pegasys.teku.statetransition.attestation.ForkRoutingAttestationPool;
 import tech.pegasys.teku.statetransition.attestation.utils.AggregatingAttestationPoolProfiler;
 import tech.pegasys.teku.statetransition.attestation.utils.AggregatingAttestationPoolProfilerCSV;
 import tech.pegasys.teku.statetransition.blobs.BlobSidecarManager;
@@ -245,6 +253,7 @@ import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
 import tech.pegasys.teku.statetransition.payloadattestation.AggregatingPayloadAttestationPool;
 import tech.pegasys.teku.statetransition.payloadattestation.PayloadAttestationMessageGossipValidator;
 import tech.pegasys.teku.statetransition.payloadattestation.PayloadAttestationPool;
+import tech.pegasys.teku.statetransition.pq.timing.PqTimingController;
 import tech.pegasys.teku.statetransition.synccommittee.SignedContributionAndProofValidator;
 import tech.pegasys.teku.statetransition.synccommittee.SyncCommitteeContributionPool;
 import tech.pegasys.teku.statetransition.synccommittee.SyncCommitteeMessagePool;
@@ -334,6 +343,7 @@ import tech.pegasys.teku.validator.coordinator.publisher.ExecutionPayloadPublish
 import tech.pegasys.teku.validator.coordinator.publisher.MilestoneBasedBlockPublisher;
 import tech.pegasys.teku.weaksubjectivity.WeakSubjectivityCalculator;
 import tech.pegasys.teku.weaksubjectivity.WeakSubjectivityValidator;
+import tech.pegasys.teku.xmss.LeanVmSidecar;
 
 /**
  * The central class which assembles together and initializes Beacon Chain components
@@ -436,6 +446,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
   protected volatile Optional<DasCustodyBackfiller> dasCustodyBackfiller = Optional.empty();
   protected volatile Optional<DataColumnSidecarRetriever> recoveringSidecarRetriever =
       Optional.empty();
+  protected volatile Optional<LeanVmSidecar> leanVmSidecar = Optional.empty();
+  protected volatile Optional<PqTimingController> pqTimingController = Optional.empty();
   protected volatile Optional<DataColumnSidecarRetriever> simpleSidecarRetriever = Optional.empty();
   protected volatile AvailabilityCheckerFactory<UInt64> dasSamplerManager;
   protected volatile DasSamplerBasic dasSamplerBasic = DasSamplerBasic.NOOP;
@@ -649,7 +661,106 @@ public class BeaconChainController extends Service implements BeaconChainControl
                   terminalPowBlockMonitor.ifPresent(TerminalPowBlockMonitor::stop);
                   recoveringSidecarRetriever.ifPresent(DataColumnSidecarRetriever::stop);
                 }))
-        .thenRun(forkChoiceExecutor::stop);
+        .thenRun(forkChoiceExecutor::stop)
+        .thenRun(() -> pqTimingController.ifPresent(PqTimingController::stop))
+        .thenRun(
+            () ->
+                leanVmSidecar.ifPresent(
+                    sidecar -> {
+                      StarkBackend.useConcatenation();
+                      sidecar.close();
+                    }));
+  }
+
+  /**
+   * Proves and verifies PQ attestation proofs with a leanVM sidecar when one is configured, as PQ
+   * devnet clients do, in place of the specification's concatenation stand-in.
+   */
+  protected void initLeanVmSidecar() {
+    final Optional<LeanVmSidecarConfig> config =
+        beaconConfig.eth2NetworkConfig().getLeanVmSidecar();
+    if (config.isEmpty() || !spec.isMilestoneSupported(SpecMilestone.PQ)) {
+      return;
+    }
+    final Path socket = config.get().socket().orElseGet(this::defaultLeanVmSidecarSocket);
+    try {
+      final LeanVmSidecar sidecar =
+          config
+              .get()
+              .binary()
+              .map(binary -> LeanVmSidecar.start(binary, socket, 0))
+              .orElseGet(() -> LeanVmSidecar.connect(socket));
+      leanVmSidecar = Optional.of(sidecar);
+      StarkBackend.useLeanVm(sidecar);
+    } catch (final RuntimeException e) {
+      throw new InvalidConfigurationException(
+          "Unable to use the leanVM sidecar on " + socket + ": " + e.getMessage(), e);
+    }
+  }
+
+  /**
+   * Records PQ gossip and proving timings, and in observer mode runs proving experiments, when the
+   * PQ timing export is on.
+   */
+  protected void initPqTiming(final AggregatingAttestationPoolPq pqAttestationPool) {
+    final Optional<PqTimingConfig> config = beaconConfig.eth2NetworkConfig().getPqTiming();
+    if (config.isEmpty()) {
+      return;
+    }
+    final PqTimingController controller =
+        new PqTimingController(
+            spec,
+            recentChainData,
+            pqAttestationPool,
+            // Experiments wait for their slot times and prove while the next one is planned
+            asyncRunnerFactory.create("pqTiming", 2),
+            config.get().output().orElseGet(() -> beaconDataDirectory.resolve("pq-timing")),
+            config.get().measurement(),
+            beaconConfig
+                .eth2NetworkConfig()
+                .getEth2Network()
+                .map(Object::toString)
+                .orElse("custom"),
+            VersionProvider.VERSION,
+            leanVmSidecar
+                .filter(
+                    __ ->
+                        beaconConfig
+                            .eth2NetworkConfig()
+                            .getLeanVmSidecar()
+                            .orElseThrow()
+                            .binary()
+                            .isPresent())
+                .map(__ -> Runtime.getRuntime().availableProcessors()),
+            () -> syncService == null || !syncService.getCurrentSyncState().isInSync(),
+            () -> p2pNetwork == null ? 0 : p2pNetwork.getPeerCount());
+    pqTimingController = Optional.of(controller);
+    eventChannels.subscribe(SlotEventsChannel.class, controller);
+  }
+
+  /** Observer mode joins every attestation subnet, as --p2p-subscribe-all-subnets-enabled does. */
+  private boolean isSubscribeAllSubnetsEnabled() {
+    return beaconConfig.p2pConfig().isSubscribeAllSubnetsEnabled()
+        || beaconConfig
+            .eth2NetworkConfig()
+            .getPqTiming()
+            .map(PqTimingConfig::measurement)
+            .orElse(false);
+  }
+
+  /** In the beacon data directory, which the sidecar needs private to the node's user. */
+  private Path defaultLeanVmSidecarSocket() {
+    final Path directory = beaconDataDirectory.resolve("leanvm");
+    try {
+      Files.createDirectories(directory);
+      if (directory.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+        Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("rwx------"));
+      }
+    } catch (final IOException e) {
+      throw new InvalidConfigurationException(
+          "Unable to create the leanVM sidecar directory " + directory, e);
+    }
+    return directory.resolve("sidecar.sock");
   }
 
   protected SafeFuture<?> initialize() {
@@ -758,6 +869,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
   }
 
   public void initAll() {
+    // Before anything verifies or builds a PQ attestation proof
+    initLeanVmSidecar();
     initKeyValueStore();
     initExecutionLayer();
     initExecutionLayerBlockProductionManager();
@@ -1859,7 +1972,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
 
   protected void initSubnetSubscriber() {
     LOG.debug("BeaconChainController.initSubnetSubscriber");
-    if (beaconConfig.p2pConfig().isSubscribeAllSubnetsEnabled()) {
+    if (isSubscribeAllSubnetsEnabled()) {
       LOG.info("Subscribing to all attestation subnets");
       this.stableSubnetSubscriber =
           AllSubnetsSubscriber.create(attestationTopicSubscriber, spec.getNetworkingConfig());
@@ -1933,7 +2046,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
                 metricsSystem,
                 timeProvider));
     syncCommitteeSubscriptionManager =
-        beaconConfig.p2pConfig().isSubscribeAllSubnetsEnabled()
+        isSubscribeAllSubnetsEnabled()
             ? new AllSyncCommitteeSubscriptions(p2pNetwork, spec)
             : new SyncCommitteeSubscriptionManager(p2pNetwork);
     final BlockImportChannel blockImportChannel =
@@ -2052,7 +2165,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
 
     eventChannels.subscribe(SlotEventsChannel.class, syncCommitteeSubscriptionManager);
 
-    if (!beaconConfig.p2pConfig().isSubscribeAllSubnetsEnabled()) {
+    if (!isSubscribeAllSubnetsEnabled()) {
       eventChannels.subscribe(SlotEventsChannel.class, attestationTopicSubscriber);
     }
   }
@@ -2307,6 +2420,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
         new LocalOperationAcceptedFilter<>(p2pNetwork::publishSignedBlsToExecutionChange));
     payloadAttestationPool.subscribeOperationAdded(
         new LocalOperationAcceptedFilter<>(p2pNetwork::publishPayloadAttestationMessage));
+    payloadAttestationPool.subscribePqOperationAdded(
+        new LocalOperationAcceptedFilter<>(p2pNetwork::publishPqPayloadAttestationMessage));
     proposerPreferencesManager.subscribeOperationAdded(
         new LocalOperationAcceptedFilter<>(p2pNetwork::publishProposerPreferences));
     executionPayloadBidManager.subscribeOperationAdded(
@@ -2413,7 +2528,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
             ? new AggregatingAttestationPoolProfilerCSV(debugDataDirectory)
             : AggregatingAttestationPoolProfiler.NOOP;
 
-    aggregatingAttestationPool =
+    final AggregatingAttestationPool blsAttestationPool =
         new AggregatingAttestationPoolV2(
             spec,
             recentChainData,
@@ -2423,6 +2538,24 @@ public class BeaconChainController extends Service implements BeaconChainControl
             eth2NetworkConfiguration.getAggregatingAttestationPoolV2BlockAggregationTimeLimit(),
             eth2NetworkConfiguration
                 .getAggregatingAttestationPoolV2TotalBlockAggregationTimeLimit());
+    // PQ attestations carry XMSS signatures and STARK proofs, so they have their own pool
+    if (spec.isMilestoneSupported(SpecMilestone.PQ)) {
+      final AggregatingAttestationPoolPq pqAttestationPool =
+          new AggregatingAttestationPoolPq(
+              spec,
+              recentChainData,
+              StarkBackend.prover(),
+              // Proves aggregates and merges block proofs ahead of time, one at a time, as the
+              // leanVM sidecar does
+              asyncRunnerFactory.create("pqProving", 1),
+              timeProvider);
+      aggregatingAttestationPool =
+          new ForkRoutingAttestationPool(
+              spec, recentChainData, blsAttestationPool, pqAttestationPool);
+      initPqTiming(pqAttestationPool);
+    } else {
+      aggregatingAttestationPool = blsAttestationPool;
+    }
 
     eventChannels.subscribe(SlotEventsChannel.class, aggregatingAttestationPool);
     blockImporter.subscribeToVerifiedBlockAttestations(

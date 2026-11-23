@@ -25,7 +25,9 @@ import tech.pegasys.teku.reference.TestExecutor;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
+import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing.ProposerSlashingSchema;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 import tech.pegasys.teku.statetransition.validation.ProposerSlashingValidator;
 
@@ -43,10 +45,14 @@ public class GossipProposerSlashingTestExecutor implements TestExecutor {
     final ProposerSlashingValidator validator =
         new ProposerSlashingValidator(spec, ctx.recentChainData);
 
+    // PQ's block headers are signed with XMSS
+    final ProposerSlashingSchema schema =
+        spec.getGenesisSchemaDefinitions() instanceof SchemaDefinitionsPq
+            ? ProposerSlashing.SSZ_SCHEMA_PQ
+            : ProposerSlashing.SSZ_SCHEMA;
     for (final GossipProposerSlashingMetaData.Message message : metaData.getMessages()) {
       final ProposerSlashing slashing =
-          loadSsz(
-              testDefinition, message.getMessage() + ".ssz_snappy", ProposerSlashing.SSZ_SCHEMA);
+          loadSsz(testDefinition, message.getMessage() + ".ssz_snappy", schema);
       final InternalValidationResult result = safeJoin(validator.validateForGossip(slashing));
 
       GossipTestContext.assertValidationResult(

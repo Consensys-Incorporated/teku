@@ -32,11 +32,16 @@ import static tech.pegasys.teku.infrastructure.http.RestApiConstants.SLOT;
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMetadataErrorResponse;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
 import static tech.pegasys.teku.spec.SpecMilestone.GLOAS;
+import static tech.pegasys.teku.spec.SpecMilestone.PQ;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import java.util.List;
 import java.util.Optional;
+import java.util.stream.IntStream;
 import java.util.stream.StreamSupport;
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerTest;
@@ -65,7 +70,10 @@ public class PostNewBlockV4Test extends AbstractMigratedBeaconHandlerTest {
     specMilestone = specContext.getSpecMilestone();
     setHandler(new PostNewBlockV4(validatorDataProvider, schemaDefinitionCache));
     request.setPathParameter(SLOT, "1");
-    request.setQueryParameter(RANDAO_REVEAL, signature.toBytesCompressed().toHexString());
+    // From PQ, the RANDAO reveal is a VRF proof, which the PQ tests set
+    if (specMilestone.isLessThan(PQ)) {
+      request.setQueryParameter(RANDAO_REVEAL, signature.toBytesCompressed().toHexString());
+    }
     when(validatorDataProvider.getMilestoneAtSlot(UInt64.ONE)).thenReturn(specMilestone);
   }
 
@@ -81,7 +89,7 @@ public class PostNewBlockV4Test extends AbstractMigratedBeaconHandlerTest {
 
   @TestTemplate
   void shouldHandleWhenBlockContainerAndMetaDataIsProduced() throws Exception {
-    assumeThat(specMilestone).isGreaterThanOrEqualTo(GLOAS);
+    assumeThat(specMilestone).isGreaterThanOrEqualTo(GLOAS).isLessThan(PQ);
     request.setQueryParameter(INCLUDE_PAYLOAD, "true");
     final String builderUrl = "https://example.com";
     final BlockContainerAndMetaData blockContainerAndMetaData =
@@ -125,7 +133,7 @@ public class PostNewBlockV4Test extends AbstractMigratedBeaconHandlerTest {
 
   @TestTemplate
   void shouldThrowExceptionWhenEmptyBlock() throws Exception {
-    assumeThat(specMilestone).isGreaterThanOrEqualTo(GLOAS);
+    assumeThat(specMilestone).isGreaterThanOrEqualTo(GLOAS).isLessThan(PQ);
     request.setQueryParameter(INCLUDE_PAYLOAD, "false");
     request.setRequestBody(BuilderConfig.NO_OP);
     doReturn(SafeFuture.completedFuture(Optional.empty()))
@@ -135,6 +143,39 @@ public class PostNewBlockV4Test extends AbstractMigratedBeaconHandlerTest {
     handler.handleRequest(request);
     assertThat(request.getResponseCode()).isEqualTo(SC_INTERNAL_SERVER_ERROR);
     assertThat(request.getResponseBody().toString()).contains("Unable to produce a block");
+  }
+
+  @TestTemplate
+  void shouldProducePqBlockWithVrfReveal() throws Exception {
+    assumeThat(specMilestone).isGreaterThanOrEqualTo(PQ);
+    final List<Bytes32> vrfProof =
+        IntStream.range(0, 32).mapToObj(__ -> dataStructureUtil.randomBytes32()).toList();
+    request.setQueryParameter(
+        RANDAO_REVEAL, Bytes.concatenate(vrfProof.toArray(Bytes[]::new)).toHexString());
+    request.setQueryParameter(INCLUDE_PAYLOAD, "false");
+    request.setRequestBody(BuilderConfig.NO_OP);
+    final BlockContainerAndMetaData blockContainerAndMetaData =
+        dataStructureUtil.randomBlockContainerAndMetaData(ONE);
+    doReturn(SafeFuture.completedFuture(Optional.of(blockContainerAndMetaData)))
+        .when(validatorDataProvider)
+        .produceBlockWithVrfReveal(ONE, vrfProof, Optional.empty(), false, BuilderConfig.NO_OP);
+
+    handler.handleRequest(request);
+
+    assertThat(request.getResponseCode()).isEqualTo(HttpStatusCodes.SC_OK);
+  }
+
+  @TestTemplate
+  void shouldRejectBlsRandaoRevealForPq() throws Exception {
+    assumeThat(specMilestone).isGreaterThanOrEqualTo(PQ);
+    request.setQueryParameter(RANDAO_REVEAL, signature.toBytesCompressed().toHexString());
+    request.setQueryParameter(INCLUDE_PAYLOAD, "false");
+    request.setRequestBody(BuilderConfig.NO_OP);
+
+    handler.handleRequest(request);
+
+    assertThat(request.getResponseCode()).isEqualTo(SC_BAD_REQUEST);
+    assertThat(request.getResponseBody().toString()).contains("must be 1024 bytes");
   }
 
   @TestTemplate

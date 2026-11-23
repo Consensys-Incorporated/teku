@@ -24,7 +24,6 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.BlockContainer;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
-import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodyGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.versions.gloas.BlockContentsGloas;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
@@ -60,10 +59,11 @@ public class BlockFactoryGloas extends BlockFactoryPhase0 {
             blockAndState -> {
               final BeaconBlock block = blockAndState.getBlock();
               final BeaconState state = blockAndState.getState();
+              // Not BeaconBlockBodyGloas.required: a PQ body carries a bid but isn't a Gloas body
               final SignedExecutionPayloadBid bid =
-                  BeaconBlockBodyGloas.required(block.getBody()).getSignedExecutionPayloadBid();
-              // G2-point-at-infinity signature means we self-built the payload
-              final boolean selfBuilt = bid.getSignature().isInfinity();
+                  block.getBody().getOptionalSignedExecutionPayloadBid().orElseThrow();
+              // The empty signature (G2-point-at-infinity, or empty XMSS) means we self-built
+              final boolean selfBuilt = bid.isSelfBuilt();
               // include_payload=false or builder bid → return beacon block only
               if (!blockProductionContext.includePayload() || !selfBuilt) {
                 return SafeFuture.completedFuture(

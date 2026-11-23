@@ -62,6 +62,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
@@ -70,6 +71,8 @@ import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SignedContributionAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeContribution;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeMessage;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationAndProofPq;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.datastructures.validator.SubnetSubscription;
@@ -136,6 +139,14 @@ public class FailoverValidatorApiHandler implements ValidatorApiChannel {
   }
 
   @Override
+  public SafeFuture<Optional<Map<Bytes32, Integer>>> getValidatorIndicesByXmssKey(
+      final Collection<Bytes32> xmssPublicKeys) {
+    return tryRequestUntilSuccess(
+        apiChannel -> apiChannel.getValidatorIndicesByXmssKey(xmssPublicKeys),
+        BeaconNodeRequestLabels.GET_VALIDATOR_INDICES_METHOD);
+  }
+
+  @Override
   public SafeFuture<Optional<Map<BLSPublicKey, StateValidatorData>>> getValidatorStatuses(
       final Collection<BLSPublicKey> validatorIdentifiers) {
     return tryRequestUntilSuccess(
@@ -188,10 +199,31 @@ public class FailoverValidatorApiHandler implements ValidatorApiChannel {
       final Optional<Bytes32> graffiti,
       final boolean includePayload,
       final Optional<BuilderConfig> builderConfig) {
+    return createUnsignedBlock(
+        apiChannel ->
+            apiChannel.createUnsignedBlock(
+                slot, randaoReveal, graffiti, includePayload, builderConfig));
+  }
+
+  @Override
+  public SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlockWithVrfReveal(
+      final UInt64 slot,
+      final List<Bytes32> vrfRandaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final Optional<BuilderConfig> builderConfig) {
+    return createUnsignedBlock(
+        apiChannel ->
+            apiChannel.createUnsignedBlockWithVrfReveal(
+                slot, vrfRandaoReveal, graffiti, includePayload, builderConfig));
+  }
+
+  private SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlock(
+      final ValidatorApiChannelRequest<Optional<BlockContainerAndMetaData>> createBlock) {
     final ValidatorApiChannelRequest<Optional<BlockContainerAndMetaData>> request =
         apiChannel ->
-            apiChannel
-                .createUnsignedBlock(slot, randaoReveal, graffiti, includePayload, builderConfig)
+            createBlock
+                .run(apiChannel)
                 .thenPeek(
                     maybeBlockContainerAndMetaData -> {
                       if (failoverDelegates.isEmpty()) {
@@ -301,6 +333,23 @@ public class FailoverValidatorApiHandler implements ValidatorApiChannel {
   }
 
   @Override
+  public SafeFuture<Optional<AttestationAndProofPq>> createPqAggregate(
+      final UInt64 slot, final Bytes32 attestationHashTreeRoot, final UInt64 committeeIndex) {
+    return tryRequestUntilSuccess(
+        apiChannel -> apiChannel.createPqAggregate(slot, attestationHashTreeRoot, committeeIndex),
+        BeaconNodeRequestLabels.CREATE_AGGREGATE_METHOD);
+  }
+
+  @Override
+  public SafeFuture<List<SubmitDataError>> sendPqAggregateAndProofs(
+      final List<SignedAggregateAndProofPq> aggregateAndProofs) {
+    return relayRequest(
+        apiChannel -> apiChannel.sendPqAggregateAndProofs(aggregateAndProofs),
+        BeaconNodeRequestLabels.PUBLISH_AGGREGATE_AND_PROOFS_METHOD,
+        failoversPublishSignedDuties);
+  }
+
+  @Override
   public SafeFuture<SendSignedBlockResult> sendSignedBlock(
       final SignedBlockContainer blockContainer,
       final BroadcastValidationLevel broadcastValidationLevel,
@@ -346,6 +395,15 @@ public class FailoverValidatorApiHandler implements ValidatorApiChannel {
       final List<PayloadAttestationMessage> payloadAttestationMessages) {
     return relayRequest(
         apiChannel -> apiChannel.sendPayloadAttestationMessages(payloadAttestationMessages),
+        BeaconNodeRequestLabels.SEND_PAYLOAD_ATTESTATION_MESSAGES_METHOD,
+        failoversPublishSignedDuties);
+  }
+
+  @Override
+  public SafeFuture<List<SubmitDataError>> sendPqPayloadAttestationMessages(
+      final List<PayloadAttestationMessagePq> payloadAttestationMessages) {
+    return relayRequest(
+        apiChannel -> apiChannel.sendPqPayloadAttestationMessages(payloadAttestationMessages),
         BeaconNodeRequestLabels.SEND_PAYLOAD_ATTESTATION_MESSAGES_METHOD,
         failoversPublishSignedDuties);
   }

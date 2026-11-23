@@ -38,6 +38,7 @@ import com.google.common.net.MediaType;
 import java.io.IOException;
 import java.math.BigInteger;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import okhttp3.HttpUrl;
@@ -163,6 +164,30 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
       final boolean includePayload,
       final BuilderConfig builderConfig,
       final SpecMilestone milestone) {
+    return submitV4(randaoReveal.toString(), graffiti, includePayload, builderConfig, milestone);
+  }
+
+  /** PQ: the RANDAO reveal is the proposer's VRF proof, its roots concatenated in hex. */
+  public Optional<BlockContainerAndMetaData> submitV4WithVrfReveal(
+      final List<Bytes32> vrfRandaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final BuilderConfig builderConfig,
+      final SpecMilestone milestone) {
+    return submitV4(
+        Bytes.concatenate(vrfRandaoReveal.toArray(Bytes[]::new)).toHexString(),
+        graffiti,
+        includePayload,
+        builderConfig,
+        milestone);
+  }
+
+  private Optional<BlockContainerAndMetaData> submitV4(
+      final String randaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final BuilderConfig builderConfig,
+      final SpecMilestone milestone) {
     final Map<String, String> urlParams = Map.of("slot", slot.toString());
     final Map<String, String> queryParams =
         buildQueryParamsV4(randaoReveal, graffiti, includePayload);
@@ -183,25 +208,24 @@ public class ProduceBlockRequest extends AbstractTypeDefRequest {
       final BLSSignature randaoReveal,
       final Optional<Bytes32> graffiti,
       final Optional<UInt64> requestedBuilderBoostFactor) {
-    final Map<String, String> queryParams = buildCommonQueryParams(randaoReveal, graffiti);
+    final Map<String, String> queryParams =
+        buildCommonQueryParams(randaoReveal.toString(), graffiti);
     requestedBuilderBoostFactor.ifPresent(
         builderBoostFactor -> queryParams.put(BUILDER_BOOST_FACTOR, builderBoostFactor.toString()));
     return queryParams;
   }
 
   private Map<String, String> buildQueryParamsV4(
-      final BLSSignature randaoReveal,
-      final Optional<Bytes32> graffiti,
-      final boolean includePayload) {
+      final String randaoReveal, final Optional<Bytes32> graffiti, final boolean includePayload) {
     final Map<String, String> queryParams = buildCommonQueryParams(randaoReveal, graffiti);
     queryParams.put(INCLUDE_PAYLOAD, Boolean.toString(includePayload));
     return queryParams;
   }
 
   private Map<String, String> buildCommonQueryParams(
-      final BLSSignature randaoReveal, final Optional<Bytes32> graffiti) {
+      final String randaoReveal, final Optional<Bytes32> graffiti) {
     final Map<String, String> queryParams = new HashMap<>();
-    queryParams.put(RANDAO_REVEAL, randaoReveal.toString());
+    queryParams.put(RANDAO_REVEAL, randaoReveal);
     graffiti.ifPresent(bytes32 -> queryParams.put(GRAFFITI, bytes32.toHexString()));
     return queryParams;
   }

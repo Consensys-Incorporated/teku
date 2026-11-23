@@ -43,6 +43,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.plugin.services.metrics.OperationTimer;
 import tech.pegasys.teku.api.ChainDataProvider;
@@ -94,6 +95,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
@@ -105,6 +107,8 @@ import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SignedCo
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeContribution;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeMessage;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.ValidatableSyncCommitteeMessage;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationAndProofPq;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
@@ -112,6 +116,7 @@ import tech.pegasys.teku.spec.datastructures.validator.SubnetSubscription;
 import tech.pegasys.teku.spec.logic.common.util.BlockProposalUtil;
 import tech.pegasys.teku.spec.logic.common.util.SyncCommitteeUtil;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.statetransition.attestation.AggregatingAttestationPool;
 import tech.pegasys.teku.statetransition.attestation.AttestationManager;
 import tech.pegasys.teku.statetransition.datacolumns.DataAvailabilitySampler;
@@ -289,6 +294,29 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
   }
 
   @Override
+  public SafeFuture<Optional<Map<Bytes32, Integer>>> getValidatorIndicesByXmssKey(
+      final Collection<Bytes32> xmssPublicKeys) {
+    if (xmssPublicKeys.isEmpty()) {
+      return SafeFuture.completedFuture(Optional.of(Map.of()));
+    }
+    return combinedChainDataClient
+        .getBestState()
+        .map(
+            beaconStateSafeFuture ->
+                beaconStateSafeFuture.thenApply(
+                    state -> {
+                      @SuppressWarnings("UseFastutil")
+                      final Map<Bytes32, Integer> results = new HashMap<>();
+                      xmssPublicKeys.forEach(
+                          xmssPublicKey ->
+                              spec.getValidatorIndexByXmssKey(state, xmssPublicKey)
+                                  .ifPresent(index -> results.put(xmssPublicKey, index)));
+                      return Optional.of(results);
+                    }))
+        .orElseGet(() -> SafeFuture.completedFuture(Optional.empty()));
+  }
+
+  @Override
   public SafeFuture<Optional<AttesterDuties>> getAttestationDuties(
       final UInt64 epoch, final IntCollection validatorIndices) {
 
@@ -432,13 +460,13 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
           final UInt64 payloadTimelinessCommitteeDutySlot =
               validatorIndexToPayloadTimelinessCommitteeAssignmentMap.get(i);
           final UInt64 validatorIndex = UInt64.valueOf(i);
-          if (payloadTimelinessCommitteeDutySlot != null) {
-            spec.getValidatorPubKey(state, validatorIndex)
-                .ifPresent(
-                    publicKey ->
-                        duties.add(
-                            new PtcDuty(
-                                publicKey, validatorIndex, payloadTimelinessCommitteeDutySlot)));
+          if (payloadTimelinessCommitteeDutySlot != null && i < state.getValidators().size()) {
+            // The signing key: a BLS key, or from PQ an XMSS key
+            duties.add(
+                new PtcDuty(
+                    state.getValidators().get(i).getSigningKeyBytes(),
+                    validatorIndex,
+                    payloadTimelinessCommitteeDutySlot));
           }
         });
     return new PayloadTimelinessCommitteeDuties(
@@ -481,12 +509,40 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
       final Optional<Bytes32> graffiti,
       final boolean includePayload,
       final Optional<BuilderConfig> builderConfig) {
+    return createUnsignedBlock(
+        slot, randaoReveal, Optional.empty(), graffiti, includePayload, builderConfig);
+  }
+
+  /** PQ: the RANDAO reveal is the proposer's VRF proof, so there is no BLS reveal. */
+  @Override
+  public SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlockWithVrfReveal(
+      final UInt64 slot,
+      final List<Bytes32> vrfRandaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final Optional<BuilderConfig> builderConfig) {
+    return createUnsignedBlock(
+        slot,
+        BLSSignature.empty(),
+        Optional.of(vrfRandaoReveal),
+        graffiti,
+        includePayload,
+        builderConfig);
+  }
+
+  private SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlock(
+      final UInt64 slot,
+      final BLSSignature randaoReveal,
+      final Optional<List<Bytes32>> vrfRandaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final Optional<BuilderConfig> builderConfig) {
     return blockProductionBySlotCache
         .computeIfAbsent(
             slot,
             __ ->
                 createUnsignedBlockInternal(
-                    slot, randaoReveal, graffiti, includePayload, builderConfig))
+                    slot, randaoReveal, vrfRandaoReveal, graffiti, includePayload, builderConfig))
         .whenException(
             __ -> {
               // allow further block production attempts for this slot, including a new preparation
@@ -529,6 +585,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
   private SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlockInternal(
       final UInt64 slot,
       final BLSSignature randaoReveal,
+      final Optional<List<Bytes32>> vrfRandaoReveal,
       final Optional<Bytes32> graffiti,
       final boolean includePayload,
       final Optional<BuilderConfig> builderConfig) {
@@ -545,6 +602,7 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
 
     return blockProductionPreparationContext
         .toBlockProductionContext(spec, slot, randaoReveal, graffiti, includePayload, builderConfig)
+        .thenApply(context -> vrfRandaoReveal.map(context::withVrfRandaoReveal).orElse(context))
         .thenCompose(this::createBlock)
         .thenPeek(
             maybeBlock ->
@@ -732,6 +790,53 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
   }
 
   @Override
+  public SafeFuture<Optional<AttestationAndProofPq>> createPqAggregate(
+      final UInt64 slot, final Bytes32 attestationHashTreeRoot, final UInt64 committeeIndex) {
+    if (isSyncActive()) {
+      return NodeSyncingException.failedFuture();
+    }
+    return attestationPool
+        .createPqAggregateFor(attestationHashTreeRoot, committeeIndex)
+        .thenApply(
+            maybeAggregate ->
+                maybeAggregate
+                    .filter(aggregate -> aggregate.attestation().getData().getSlot().equals(slot))
+                    .map(
+                        aggregate ->
+                            SchemaDefinitionsPq.required(spec.atSlot(slot).getSchemaDefinitions())
+                                .getPqAttestationSchemas()
+                                .getAttestationAndProofSchema()
+                                .create(aggregate.attestation(), aggregate.proof())));
+  }
+
+  @Override
+  public SafeFuture<List<SubmitDataError>> sendPqAggregateAndProofs(
+      final List<SignedAggregateAndProofPq> aggregateAndProofs) {
+    return SafeFuture.collectAll(
+            aggregateAndProofs.stream()
+                .map(
+                    aggregateAndProof ->
+                        attestationManager
+                            .addAggregate(
+                                ValidatableAttestation.pqAggregateFromValidator(
+                                    spec, aggregateAndProof),
+                                Optional.empty())
+                            .thenPeek(
+                                result -> {
+                                  if (result.isReject()) {
+                                    VALIDATOR_LOGGER.producedInvalidAggregate(
+                                        aggregateAndProof
+                                            .getMessage()
+                                            .getAggregate()
+                                            .getData()
+                                            .getSlot(),
+                                        result.getDescription().orElse("Unknown reason"));
+                                  }
+                                })))
+        .thenApply(this::convertInternalValidationResults);
+  }
+
+  @Override
   public SafeFuture<Optional<SyncCommitteeContribution>> createSyncCommitteeContribution(
       final UInt64 slot, final int subcommitteeIndex, final Bytes32 beaconBlockRoot) {
     if (isSyncActive()) {
@@ -787,6 +892,9 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
           if (request.isAggregator()) {
             attestationTopicSubscriber.subscribeToCommitteeForAggregation(
                 request.getCommitteeIndex(), request.getCommitteesAtSlot(), request.getSlot());
+            // A PQ aggregate's proof takes long enough to start it before the aggregate is due
+            attestationPool.onLocalAggregationDuty(
+                request.getSlot(), UInt64.valueOf(request.getCommitteeIndex()));
           }
         });
   }
@@ -1011,6 +1119,14 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
       final List<PayloadAttestationMessage> payloadAttestationMessages) {
     return SafeFuture.collectAll(
             payloadAttestationMessages.stream().map(payloadAttestationPool::addLocal))
+        .thenApply(this::convertInternalValidationResults);
+  }
+
+  @Override
+  public SafeFuture<List<SubmitDataError>> sendPqPayloadAttestationMessages(
+      final List<PayloadAttestationMessagePq> payloadAttestationMessages) {
+    return SafeFuture.collectAll(
+            payloadAttestationMessages.stream().map(payloadAttestationPool::addLocalPq))
         .thenApply(this::convertInternalValidationResults);
   }
 
@@ -1319,8 +1435,8 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
     final List<ProposerDuty> proposerSlots = new ArrayList<>();
     for (UInt64 slot = startSlot; slot.compareTo(endSlot) < 0; slot = slot.plus(UInt64.ONE)) {
       final int proposerIndex = spec.getBeaconProposerIndex(state, slot);
-      final BLSPublicKey publicKey =
-          spec.getValidatorPubKey(state, UInt64.valueOf(proposerIndex)).orElseThrow();
+      // The signing key: a BLS key, or from PQ an XMSS key
+      final Bytes publicKey = state.getValidators().get(proposerIndex).getSigningKeyBytes();
       proposerSlots.add(new ProposerDuty(publicKey, proposerIndex, slot));
     }
     return proposerSlots;

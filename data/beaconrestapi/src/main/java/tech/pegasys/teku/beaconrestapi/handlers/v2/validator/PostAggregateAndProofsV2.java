@@ -38,14 +38,19 @@ import tech.pegasys.teku.infrastructure.restapi.endpoints.EndpointMetadata;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
 import tech.pegasys.teku.infrastructure.restapi.openapi.request.OneOfArrayJsonRequestContentTypeDefinition;
+import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszSchema;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.constants.ValidatorConstants;
 import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.validator.api.SubmitDataError;
 
 public class PostAggregateAndProofsV2 extends RestApiEndpoint {
@@ -69,9 +74,19 @@ public class PostAggregateAndProofsV2 extends RestApiEndpoint {
 
   @Override
   public void handleRequest(final RestApiRequest request) throws JsonProcessingException {
-    final List<SignedAggregateAndProof> signedAggregateAndProofs = request.getRequestBody();
+    final List<SszData> signedAggregateAndProofs = request.getRequestBody();
+    // From PQ, aggregates carry the proof of their signatures, and the header selects the type
     final SafeFuture<List<SubmitDataError>> future =
-        provider.sendAggregateAndProofs(signedAggregateAndProofs);
+        !signedAggregateAndProofs.isEmpty()
+                && signedAggregateAndProofs.getFirst() instanceof SignedAggregateAndProofPq
+            ? provider.sendPqAggregateAndProofs(
+                signedAggregateAndProofs.stream()
+                    .map(SignedAggregateAndProofPq.class::cast)
+                    .toList())
+            : provider.sendAggregateAndProofs(
+                signedAggregateAndProofs.stream()
+                    .map(SignedAggregateAndProof.class::cast)
+                    .toList());
 
     request.respondAsync(
         future.thenApply(
@@ -84,50 +99,66 @@ public class PostAggregateAndProofsV2 extends RestApiEndpoint {
             }));
   }
 
+  /** The milestone's signed aggregate schema: from PQ, the XMSS-signed one with a proof. */
+  @SuppressWarnings("unchecked")
+  private static SszSchema<SszData> getSignedAggregateAndProofSchema(
+      final SchemaDefinitions schemaDefinitions) {
+    return (SszSchema<SszData>)
+        (SszSchema<?>)
+            (schemaDefinitions instanceof SchemaDefinitionsPq schemaDefinitionsPq
+                ? schemaDefinitionsPq.getPqAttestationSchemas().getSignedAggregateAndProofSchema()
+                : schemaDefinitions.getSignedAggregateAndProofSchema());
+  }
+
+  private static UInt64 getAggregateSlot(final SszData signedAggregateAndProof) {
+    return signedAggregateAndProof instanceof SignedAggregateAndProofPq pqAggregate
+        ? pqAggregate.getMessage().getAggregate().getData().getSlot()
+        : ((SignedAggregateAndProof) signedAggregateAndProof)
+            .getMessage()
+            .getAggregate()
+            .getData()
+            .getSlot();
+  }
+
   private static EndpointMetadata createMetadata(
       final Spec spec, final SchemaDefinitionCache schemaDefinitionCache) {
 
-    final BiPredicate<SignedAggregateAndProof, SpecMilestone>
-        signedAggregateAndProofSchemaPredicate =
-            (signedAggregateAndProof, milestone) ->
-                schemaDefinitionCache
-                    .milestoneAtSlot(
-                        signedAggregateAndProof.getMessage().getAggregate().getData().getSlot())
-                    .equals(milestone);
+    final BiPredicate<SszData, SpecMilestone> signedAggregateAndProofSchemaPredicate =
+        (signedAggregateAndProof, milestone) ->
+            schemaDefinitionCache
+                .milestoneAtSlot(getAggregateSlot(signedAggregateAndProof))
+                .equals(milestone);
 
-    final SerializableOneOfTypeDefinition<SignedAggregateAndProof>
-        signedAggregateAndProofSchemaDefinition =
-            getSchemaDefinitionForAllSupportedMilestones(
-                schemaDefinitionCache,
-                "SignedAggregateAndProof",
-                SchemaDefinitions::getSignedAggregateAndProofSchema,
-                signedAggregateAndProofSchemaPredicate);
+    final SerializableOneOfTypeDefinition<SszData> signedAggregateAndProofSchemaDefinition =
+        getSchemaDefinitionForAllSupportedMilestones(
+            schemaDefinitionCache,
+            "SignedAggregateAndProof",
+            PostAggregateAndProofsV2::getSignedAggregateAndProofSchema,
+            signedAggregateAndProofSchemaPredicate);
 
-    final OneOfArrayJsonRequestContentTypeDefinition.BodyTypeSelector<SignedAggregateAndProof>
+    final OneOfArrayJsonRequestContentTypeDefinition.BodyTypeSelector<SszData>
         aggregateAndProofBodySelector =
             context ->
                 headerBasedSelector(
                     context.getHeaders(),
                     schemaDefinitionCache,
-                    SchemaDefinitions::getSignedAggregateAndProofSchema);
+                    PostAggregateAndProofsV2::getSignedAggregateAndProofSchema);
 
-    final BiFunction<Bytes, Optional<String>, List<SignedAggregateAndProof>>
-        milestoneSpecificOctetStreamParser =
-            (bytes, headerConsensusVersion) ->
-                headerBasedSelector(
-                    schemaDefinitionCache,
-                    headerConsensusVersion,
-                    (milestone, schemaDefinitions) -> {
-                      final SpecConfig specConfig = spec.forMilestone(milestone).getConfig();
-                      return SszListSchema.create(
-                              schemaDefinitionCache
-                                  .getSchemaDefinition(milestone)
-                                  .getSignedAggregateAndProofSchema(),
-                              (long) specConfig.getMaxCommitteesPerSlot()
-                                  * ValidatorConstants.TARGET_AGGREGATORS_PER_COMMITTEE)
-                          .sszDeserialize(bytes)
-                          .asList();
-                    });
+    final BiFunction<Bytes, Optional<String>, List<SszData>> milestoneSpecificOctetStreamParser =
+        (bytes, headerConsensusVersion) ->
+            headerBasedSelector(
+                schemaDefinitionCache,
+                headerConsensusVersion,
+                (milestone, schemaDefinitions) -> {
+                  final SpecConfig specConfig = spec.forMilestone(milestone).getConfig();
+                  return SszListSchema.create(
+                          getSignedAggregateAndProofSchema(
+                              schemaDefinitionCache.getSchemaDefinition(milestone)),
+                          (long) specConfig.getMaxCommitteesPerSlot()
+                              * ValidatorConstants.TARGET_AGGREGATORS_PER_COMMITTEE)
+                      .sszDeserialize(bytes)
+                      .asList();
+                });
 
     return EndpointMetadata.post(ROUTE)
         .operationId("publishAggregateAndProofsV2")

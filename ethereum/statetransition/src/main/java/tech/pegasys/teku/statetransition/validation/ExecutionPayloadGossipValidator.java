@@ -30,8 +30,10 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.collections.LimitedSet;
+import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.BlockRootAndBuilderIndex;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
@@ -40,6 +42,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
@@ -48,6 +51,7 @@ public class ExecutionPayloadGossipValidator {
 
   private static final Logger LOG = LogManager.getLogger();
 
+  private final Spec spec;
   private final GossipValidationHelper gossipValidationHelper;
   private final BlockGossipValidator blockGossipValidator;
   private final SigningRootUtil signingRootUtil;
@@ -63,6 +67,7 @@ public class ExecutionPayloadGossipValidator {
       final GossipValidationHelper gossipValidationHelper,
       final BlockGossipValidator blockGossipValidator,
       final Map<Bytes32, BlockImportResult> invalidBlockRoots) {
+    this.spec = spec;
     this.gossipValidationHelper = gossipValidationHelper;
     this.blockGossipValidator = blockGossipValidator;
     this.invalidBlockRoots = invalidBlockRoots;
@@ -185,10 +190,16 @@ public class ExecutionPayloadGossipValidator {
                         "Invalid builder index. Execution payload envelope had %s but the block execution payload bid had %s",
                         envelope.getBuilderIndex(), bid.getBuilderIndex()));
               }
+              final ExecutionPayload payload = envelope.getPayload();
+              final Optional<InternalValidationResult> bidResult =
+                  validatePayloadAgainstBid(envelope, beaconBlock, bid);
+              if (bidResult.isPresent()) {
+                return bidResult;
+              }
+
               /*
                * [REJECT] The payload's block hash matches the bid's block hash
                */
-              final ExecutionPayload payload = envelope.getPayload();
               final Bytes32 payloadBlockHash = payload.getBlockHash();
               final Bytes32 bidBlockHash = bid.getBlockHash();
               if (!payloadBlockHash.equals(bidBlockHash)) {
@@ -301,15 +312,111 @@ public class ExecutionPayloadGossipValidator {
                     envelope.getBeaconBlockRoot());
                 return SAVE_FOR_FUTURE;
               }
+              final BeaconState state = maybeState.get();
+              final Optional<InternalValidationResult> payloadResult =
+                  validatePayloadAgainstState(envelope.getMessage(), state);
+              if (payloadResult.isPresent()) {
+                return payloadResult.get();
+              }
               /*
                * [REJECT] The envelope signature is valid
                */
-              if (!isSignatureValid(envelope, maybeState.get())) {
+              if (!isSignatureValid(envelope, state)) {
                 LOG.trace("Invalid signed execution payload envelope signature. Rejecting");
                 return reject("Invalid signed execution payload envelope signature");
               }
               return ACCEPT;
             });
+  }
+
+  /**
+   * The rules consensus-specs added after v1.7.0-beta.4, which apply from PQ on. Gloas takes them
+   * with its next release.
+   */
+  private boolean hasPayloadConsistencyRules(final UInt64 slot) {
+    return spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ);
+  }
+
+  private Optional<InternalValidationResult> validatePayloadAgainstBid(
+      final ExecutionPayloadEnvelope envelope,
+      final BeaconBlock beaconBlock,
+      final ExecutionPayloadBid bid) {
+    if (!hasPayloadConsistencyRules(envelope.getSlot())) {
+      return Optional.empty();
+    }
+    final ExecutionPayload payload = envelope.getPayload();
+    /*
+     * [REJECT] The envelope's parent beacon block root matches the block's parent root
+     */
+    if (!envelope.getParentBeaconBlockRoot().equals(beaconBlock.getParentRoot())) {
+      return Optional.of(
+          reject(
+              "Execution payload envelope's parent beacon block root %s does not match the block's parent root %s",
+              envelope.getParentBeaconBlockRoot(), beaconBlock.getParentRoot()));
+    }
+    /*
+     * [REJECT] The payload's previous randao matches the bid's previous randao
+     */
+    if (!payload.getPrevRandao().equals(bid.getPrevRandao())) {
+      return Optional.of(
+          reject(
+              "Payload's previous randao %s does not match the bid's %s",
+              payload.getPrevRandao(), bid.getPrevRandao()));
+    }
+    /*
+     * [REJECT] The payload's gas limit matches the bid's gas limit
+     */
+    if (!payload.getGasLimit().equals(bid.getGasLimit())) {
+      return Optional.of(
+          reject(
+              "Payload's gas limit %s does not match the bid's %s",
+              payload.getGasLimit(), bid.getGasLimit()));
+    }
+    return Optional.empty();
+  }
+
+  private Optional<InternalValidationResult> validatePayloadAgainstState(
+      final ExecutionPayloadEnvelope envelope, final BeaconState state) {
+    if (!hasPayloadConsistencyRules(envelope.getSlot())) {
+      return Optional.empty();
+    }
+    final ExecutionPayload payload = envelope.getPayload();
+    final BeaconStateGloas stateGloas = BeaconStateGloas.required(state);
+    /*
+     * [REJECT] The payload builds on the execution head of the block's post-state
+     */
+    if (!payload.getParentHash().equals(stateGloas.getLatestBlockHash())) {
+      return Optional.of(
+          reject(
+              "Payload's parent hash %s does not match the latest block hash %s",
+              payload.getParentHash(), stateGloas.getLatestBlockHash()));
+    }
+    /*
+     * [REJECT] The payload's timestamp is correct with respect to the slot
+     */
+    final UInt64 expectedTimestamp = spec.computeTimeAtSlot(state, envelope.getSlot());
+    if (!payload.getTimestamp().equals(expectedTimestamp)) {
+      return Optional.of(
+          reject(
+              "Payload's timestamp %s does not match the slot's time %s",
+              payload.getTimestamp(), expectedTimestamp));
+    }
+    /*
+     * [REJECT] The payload contains no empty transactions
+     */
+    if (payload.getTransactions().stream().anyMatch(transaction -> transaction.size() == 0)) {
+      return Optional.of(reject("Payload contains an empty transaction"));
+    }
+    /*
+     * [REJECT] The payload's withdrawals match the withdrawals expected by the block's post-state
+     */
+    final Optional<Bytes32> withdrawalsRoot =
+        payload.getOptionalWithdrawals().map(SszList::hashTreeRoot);
+    if (!withdrawalsRoot.equals(
+        Optional.of(stateGloas.getPayloadExpectedWithdrawals().hashTreeRoot()))) {
+      return Optional.of(reject("Payload's withdrawals do not match the expected withdrawals"));
+    }
+    return Optional.empty();
   }
 
   private boolean isSignatureValid(

@@ -27,7 +27,6 @@ import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
-import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.ethereum.events.SlotEventsChannel;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionPerformance;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -338,9 +337,7 @@ public class DefaultExecutionPayloadBidManager
             .getExecutionPayloadBidSchema()
             .createLocalSelfBuiltBid(
                 parentRoot, slot, executionPayload, blobKzgCommitments, executionRequestsRoot);
-    // Using G2_POINT_AT_INFINITY as signature for self-builds
-    return schemaDefinitions
-        .getSignedExecutionPayloadBidSchema()
-        .create(bid, BLSSignature.infinity());
+    // Self-builds carry the empty signature: G2_POINT_AT_INFINITY, or the empty XMSS signature
+    return schemaDefinitions.getSignedExecutionPayloadBidSchema().createSelfBuilt(bid);
   }
 }

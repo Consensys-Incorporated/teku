@@ -44,10 +44,13 @@ import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
 import tech.pegasys.teku.spec.signatures.Signer;
+import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.api.SubmitDataError;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 import tech.pegasys.teku.validator.client.loader.OwnedValidators;
+import tech.pegasys.teku.xmss.XmssPublicKey;
+import tech.pegasys.teku.xmss.XmssSignature;
 
 // The validator client signs with BLS: EIP-8483 is the latest milestone it can sign for until it
 // signs with XMSS in PQ
@@ -224,6 +227,49 @@ public class ProposerPreferencesPublisherTest {
     assertThat(published).hasSize(1);
     assertThat(published.getFirst().getMessage().getValidatorIndex())
         .isEqualTo(UInt64.valueOf(successfulValidatorIndex));
+  }
+
+  @Test
+  void shouldSignPqPreferencesWithXmss() {
+    final Spec pqSpec = TestSpecFactory.createMinimalPq();
+    final DataStructureUtil pqData = new DataStructureUtil(pqSpec);
+    setUp(pqSpec, pqData);
+    final XmssSigner xmssSigner = mock(XmssSigner.class);
+    final XmssPublicKey xmssPublicKey = XmssPublicKey.fromBytes(pqData.randomBytes32());
+    when(xmssSigner.getPublicKey()).thenReturn(xmssPublicKey);
+    final XmssSignature xmssSignature =
+        XmssSignature.fromBytes(pqData.randomXmssSignature().getBytes());
+    when(xmssSigner.signProposerPreferences(any(), any()))
+        .thenReturn(SafeFuture.completedFuture(xmssSignature));
+    final Validator pqValidator =
+        new Validator(publicKey, signer, Optional::empty, false, Optional.of(xmssSigner));
+    publisher =
+        new ProposerPreferencesPublisher(
+            new OwnedValidators(Map.of(publicKey, pqValidator)),
+            pqSpec,
+            validatorApiChannel,
+            proposerConfigPropertiesProvider,
+            forkProvider);
+    final UInt64 epoch = UInt64.valueOf(6);
+    final UInt64 slot = pqSpec.computeStartSlotAtEpoch(epoch);
+
+    // From PQ, the duty names the validator by its XMSS key
+    publisher.onProposerDutiesLoaded(
+        epoch,
+        new ProposerDuties(
+            pqData.randomBytes32(),
+            List.of(new ProposerDuty(xmssPublicKey.toBytes(), 42, slot)),
+            false));
+
+    @SuppressWarnings("unchecked")
+    final ArgumentCaptor<List<SignedProposerPreferences>> captor =
+        ArgumentCaptor.forClass(List.class);
+    verify(validatorApiChannel).sendSignedProposerPreferences(captor.capture());
+    final SignedProposerPreferences published = captor.getValue().getFirst();
+    assertThat(published.isXmssSigned()).isTrue();
+    assertThat(published.getXmssSignature()).isEqualTo(xmssSignature.toBytes());
+    assertThat(published.getMessage().getProposalSlot()).isEqualTo(slot);
+    verify(signer, never()).signProposerPreferences(any(), any());
   }
 
   @Test

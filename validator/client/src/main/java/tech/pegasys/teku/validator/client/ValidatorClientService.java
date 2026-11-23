@@ -53,7 +53,6 @@ import tech.pegasys.teku.spec.signatures.LocalSlashingProtector;
 import tech.pegasys.teku.spec.signatures.LocalSlashingProtectorConcurrentAccess;
 import tech.pegasys.teku.spec.signatures.SlashingProtector;
 import tech.pegasys.teku.spec.signatures.xmss.LocalXmssLeafProtector;
-import tech.pegasys.teku.spec.signatures.xmss.XmssLeafProtector;
 import tech.pegasys.teku.validator.api.GraffitiManager;
 import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 import tech.pegasys.teku.validator.api.ValidatorConfig;
@@ -75,6 +74,7 @@ import tech.pegasys.teku.validator.client.duties.synccommittee.ChainHeadTracker;
 import tech.pegasys.teku.validator.client.duties.synccommittee.SyncCommitteeScheduledDuties;
 import tech.pegasys.teku.validator.client.loader.HttpClientExternalSignerFactory;
 import tech.pegasys.teku.validator.client.loader.OwnedValidators;
+import tech.pegasys.teku.validator.client.loader.PqKeyLoadingConfig;
 import tech.pegasys.teku.validator.client.loader.PublicKeyLoader;
 import tech.pegasys.teku.validator.client.loader.SlashingProtectionLogger;
 import tech.pegasys.teku.validator.client.loader.ValidatorLoader;
@@ -432,11 +432,17 @@ public class ValidatorClientService extends Service {
             : new LocalSlashingProtectorConcurrentAccess(
                 SyncDataAccessor.create(slashingProtectionPath), slashingProtectionPath);
     // PQ keys sign with leanXMSS, whose leaves are recorded next to the slashing protection data
-    final Optional<XmssLeafProtector> xmssLeafProtector =
+    final Optional<PqKeyLoadingConfig> pqKeyLoadingConfig =
         config.getSpec().isMilestoneSupported(SpecMilestone.PQ)
             ? Optional.of(
-                new LocalXmssLeafProtector(
-                    SyncDataAccessor.create(slashingProtectionPath), slashingProtectionPath))
+                new PqKeyLoadingConfig(
+                    new LocalXmssLeafProtector(
+                        SyncDataAccessor.create(slashingProtectionPath), slashingProtectionPath),
+                    config.getValidatorConfig().isPqKeysDerivedFromBlsKey()
+                        ? Optional.of(getDerivedPqKeysVrfCachePath(services.getDataDirLayout()))
+                        : Optional.empty(),
+                    config.getValidatorConfig().getPqVrfStateUrl(),
+                    config.getValidatorConfig().getPqXmssCacheUrl()))
             : Optional.empty();
     final SlashingProtectionLogger slashingProtectionLogger =
         new SlashingProtectionLogger(
@@ -449,7 +455,7 @@ public class ValidatorClientService extends Service {
         config.getInteropConfig(),
         externalSignerHttpClientFactory,
         slashingProtector,
-        xmssLeafProtector,
+        pqKeyLoadingConfig,
         slashingProtectionLogger,
         new PublicKeyLoader(
             externalSignerHttpClientFactory,
@@ -662,6 +668,11 @@ public class ValidatorClientService extends Service {
 
   public static Path getSlashingProtectionPath(final DataDirLayout dataDirLayout) {
     return dataDirLayout.getValidatorDataDirectory().resolve("slashprotection");
+  }
+
+  /** Where the VRF trees of PQ keys derived from BLS keys are saved. */
+  public static Path getDerivedPqKeysVrfCachePath(final DataDirLayout dataDirLayout) {
+    return dataDirLayout.getValidatorDataDirectory().resolve("pq-derived-vrf-cache");
   }
 
   public static Path getManagedLocalKeystorePath(final DataDirLayout dataDirLayout) {

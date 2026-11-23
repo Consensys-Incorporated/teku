@@ -39,10 +39,14 @@ import tech.pegasys.teku.infrastructure.restapi.endpoints.AsyncApiResponse;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.EndpointMetadata;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
+import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationAndProofPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 
 public class GetAggregateAttestationV2 extends RestApiEndpoint {
 
@@ -91,8 +95,15 @@ public class GetAggregateAttestationV2 extends RestApiEndpoint {
     final UInt64 slot = request.getQueryParameter(SLOT_PARAMETER);
     final UInt64 committeeIndex = request.getQueryParameter(COMMITTEE_INDEX_PARAMETER);
 
-    final SafeFuture<Optional<ObjectAndMetaData<Attestation>>> future =
-        provider.createAggregateAndMetaData(slot, beaconBlockRoot, committeeIndex);
+    // From PQ, the aggregator also needs the proof of the aggregate's signatures
+    final SafeFuture<Optional<ObjectAndMetaData<SszData>>> future =
+        provider.getMilestoneAtSlot(slot).isGreaterThanOrEqualTo(SpecMilestone.PQ)
+            ? provider
+                .createPqAggregateAndMetaData(slot, beaconBlockRoot, committeeIndex)
+                .thenApply(GetAggregateAttestationV2::asSszData)
+            : provider
+                .createAggregateAndMetaData(slot, beaconBlockRoot, committeeIndex)
+                .thenApply(GetAggregateAttestationV2::asSszData);
 
     request.respondAsync(
         future.thenApply(
@@ -108,33 +119,48 @@ public class GetAggregateAttestationV2 extends RestApiEndpoint {
                     .orElseGet(AsyncApiResponse::respondNotFound)));
   }
 
-  private static SerializableTypeDefinition<ObjectAndMetaData<Attestation>> getResponseType(
+  /** Widens the data's type for the one-of response, which tells the types apart. */
+  @SuppressWarnings("unchecked")
+  private static <T extends SszData> Optional<ObjectAndMetaData<SszData>> asSszData(
+      final Optional<ObjectAndMetaData<T>> maybeData) {
+    return maybeData.map(data -> (ObjectAndMetaData<SszData>) (ObjectAndMetaData<?>) data);
+  }
+
+  private static SerializableTypeDefinition<ObjectAndMetaData<SszData>> getResponseType(
       final SchemaDefinitionCache schemaDefinitionCache) {
 
-    final SerializableOneOfTypeDefinition<Attestation> oneOfTypeDefinition =
-        new SerializableOneOfTypeDefinitionBuilder<Attestation>()
+    final SerializableOneOfTypeDefinitionBuilder<SszData> builder =
+        new SerializableOneOfTypeDefinitionBuilder<SszData>()
             .withType(
                 electraAttestationPredicate(),
                 BeaconRestApiTypes.electraAttestationTypeDef(schemaDefinitionCache))
             .withType(
                 phase0AttestationPredicate(),
-                BeaconRestApiTypes.phase0AttestationTypeDef(schemaDefinitionCache))
-            .build();
+                BeaconRestApiTypes.phase0AttestationTypeDef(schemaDefinitionCache));
+    if (schemaDefinitionCache.getSupportedMilestones().contains(SpecMilestone.PQ)) {
+      builder.withType(
+          data -> data instanceof AttestationAndProofPq,
+          SchemaDefinitionsPq.required(schemaDefinitionCache.getSchemaDefinition(SpecMilestone.PQ))
+              .getPqAttestationSchemas()
+              .getAttestationAndProofSchema()
+              .getJsonTypeDefinition());
+    }
+    final SerializableOneOfTypeDefinition<SszData> oneOfTypeDefinition = builder.build();
 
-    return SerializableTypeDefinition.<ObjectAndMetaData<Attestation>>object()
+    return SerializableTypeDefinition.<ObjectAndMetaData<SszData>>object()
         .name("GetAggregatedAttestationResponseV2")
         .withField("version", MILESTONE_TYPE, ObjectAndMetaData::getMilestone)
         .withField("data", oneOfTypeDefinition, ObjectAndMetaData::getData)
         .build();
   }
 
-  private static Predicate<Attestation> phase0AttestationPredicate() {
+  private static Predicate<SszData> phase0AttestationPredicate() {
     // Before Electra attestations do not require committee bits
-    return attestation -> !attestation.requiresCommitteeBits();
+    return data -> data instanceof Attestation attestation && !attestation.requiresCommitteeBits();
   }
 
-  private static Predicate<Attestation> electraAttestationPredicate() {
+  private static Predicate<SszData> electraAttestationPredicate() {
     // Only once we are in Electra attestations will have committee bits
-    return Attestation::requiresCommitteeBits;
+    return data -> data instanceof Attestation attestation && attestation.requiresCommitteeBits();
   }
 }

@@ -36,6 +36,9 @@ import tech.pegasys.teku.validator.client.loader.OwnedValidators;
  * #LOOKAHEAD_SLOTS} ahead whenever that slot uses a tree the current one does not: the per-slot
  * leaves move to a new tree every 8192 slots, and the attestation leaves every 65536 epochs.
  *
+ * <p>Keys that already hold the trees, for example from their saved tree cache, have nothing to
+ * build. A tree built here is saved to that cache by the key loader, so it is built once.
+ *
  * <p>Only a few keys are prepared at once, so warming up leaves threads free to sign duties.
  */
 public class XmssKeyWarmer implements ValidatorTimingChannel {
@@ -120,7 +123,7 @@ public class XmssKeyWarmer implements ValidatorTimingChannel {
               final int trees = treesPerKey.stream().mapToInt(Integer::intValue).sum();
               if (trees > 0) {
                 LOG.info(
-                    "Prepared {} leanXMSS bottom trees for {} validators to sign at slot {}, in {}"
+                    "Built {} leanXMSS bottom trees for {} validators to sign at slot {}, in {}"
                         + " ms",
                     trees,
                     signers.size(),

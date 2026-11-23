@@ -58,6 +58,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -111,6 +112,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloa
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationData;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
@@ -123,14 +125,19 @@ import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SignedContributionAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeContribution;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeMessage;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationPq;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.CheckpointState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.versions.pq.ValidatorPq;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.logic.common.util.SyncCommitteeUtil;
+import tech.pegasys.teku.spec.logic.versions.pq.util.AttestationUtilPq;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.attestation.AggregatingAttestationPool;
 import tech.pegasys.teku.statetransition.attestation.AttestationManager;
+import tech.pegasys.teku.statetransition.attestation.PqAggregate;
 import tech.pegasys.teku.statetransition.datacolumns.DataAvailabilitySampler;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadBidManager;
 import tech.pegasys.teku.statetransition.execution.ExecutionPayloadManager;
@@ -145,6 +152,8 @@ import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 import tech.pegasys.teku.statetransition.validation.ValidationResultCode;
 import tech.pegasys.teku.storage.client.ChainHead;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
+import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystemBuilder;
+import tech.pegasys.teku.storage.storageSystem.StorageSystem;
 import tech.pegasys.teku.storage.store.UpdatableStore;
 import tech.pegasys.teku.validator.api.CommitteeSubscriptionRequest;
 import tech.pegasys.teku.validator.api.NodeSyncingException;
@@ -342,6 +351,18 @@ class ValidatorApiHandlerTest {
   }
 
   @Test
+  public void getValidatorIndicesByXmssKey_shouldFindPqValidators() {
+    setUp(TestSpecFactory.createMinimalPq());
+    final BeaconState state = createStateWithActiveValidators();
+    when(chainDataClient.getBestState()).thenReturn(Optional.of(completedFuture(state)));
+    final Bytes32 validator3Key = ((ValidatorPq) state.getValidators().get(3)).getXmssPublicKey();
+    final Bytes32 unknownKey = dataStructureUtil.randomBytes32();
+
+    assertThat(validatorApiHandler.getValidatorIndicesByXmssKey(List.of(validator3Key, unknownKey)))
+        .isCompletedWithValue(Optional.of(Map.of(validator3Key, 3)));
+  }
+
+  @Test
   public void getAttestationDuties_shouldFailWhenNodeIsSyncing() {
     nodeIsSyncing();
     final SafeFuture<Optional<AttesterDuties>> duties =
@@ -401,6 +422,63 @@ class ValidatorApiHandlerTest {
     final Optional<AttesterDuties> duties = assertCompletedSuccessfully(result);
     assertThat(duties.orElseThrow().getDuties())
         .containsExactly(new AttesterDuty(validator1Key, 1, 4, 0, 1, 1, UInt64.valueOf(108)));
+  }
+
+  @Test
+  public void getAttestationDuties_shouldNameValidatorsByXmssKeyAndSayIfTheyAggregateFromPq() {
+    final UInt64 pqEpoch = UInt64.valueOf(2);
+    setUp(TestSpecFactory.createMinimalWithPqForkEpoch(ONE));
+    // A chain's PQ state, whose aggregation committee window is filled in
+    final StorageSystem storageSystem = InMemoryStorageSystemBuilder.buildDefault(64, spec);
+    storageSystem.chainUpdater().initializeGenesis();
+    final BeaconState state =
+        storageSystem.chainUpdater().advanceChain(spec.computeStartSlotAtEpoch(pqEpoch)).getState();
+    when(chainDataClient.getStateAtSlotExact(any()))
+        .thenReturn(completedFuture(Optional.of(state)));
+    when(chainDataClient.getCurrentEpoch()).thenReturn(pqEpoch);
+
+    final List<AttesterDuty> duties =
+        assertCompletedSuccessfully(
+                validatorApiHandler.getAttestationDuties(
+                    pqEpoch, IntList.of(IntStream.range(0, 64).toArray())))
+            .orElseThrow()
+            .getDuties();
+
+    assertThat(duties).hasSize(64);
+    final AttestationUtilPq attestationUtil =
+        (AttestationUtilPq) spec.atEpoch(pqEpoch).getAttestationUtil();
+    assertThat(duties)
+        .allSatisfy(
+            duty -> {
+              assertThat(duty.getPublicKeyBytes())
+                  .isEqualTo(
+                      ((ValidatorPq) state.getValidators().get(duty.getValidatorIndex()))
+                          .getXmssPublicKey());
+              assertThat(duty.getIsAggregator())
+                  .contains(
+                      attestationUtil.isAggregator(
+                          state,
+                          duty.getSlot(),
+                          UInt64.valueOf(duty.getCommitteeIndex()),
+                          UInt64.valueOf(duty.getValidatorIndex())));
+            });
+    assertThat(duties).anySatisfy(duty -> assertThat(duty.getIsAggregator()).contains(true));
+  }
+
+  @Test
+  public void getAttestationDuties_shouldNotSayWhetherValidatorsAggregateBeforePq() {
+    final BeaconState state = createStateWithActiveValidators();
+    when(chainDataClient.getStateAtSlotExact(previousEpochStartSlot))
+        .thenReturn(completedFuture(Optional.of(state)));
+    when(chainDataClient.getCurrentEpoch()).thenReturn(EPOCH.minus(ONE));
+
+    final AttesterDuty duty =
+        assertCompletedSuccessfully(validatorApiHandler.getAttestationDuties(EPOCH, IntList.of(1)))
+            .orElseThrow()
+            .getDuties()
+            .getFirst();
+
+    assertThat(duty.getIsAggregator()).isEmpty();
   }
 
   @Test
@@ -491,6 +569,30 @@ class ValidatorApiHandlerTest {
         validatorApiHandler.getProposerDuties(EPOCH, false);
     final Optional<ProposerDuties> duties = assertCompletedSuccessfully(result);
     assertThat(duties.orElseThrow().getDuties().size()).isEqualTo(spec.slotsPerEpoch(EPOCH));
+  }
+
+  @Test
+  public void getProposerDuties_shouldNameProposersByXmssKeyFromPq() {
+    setUp(TestSpecFactory.createMinimalPq());
+    final BeaconState state = createStateWithActiveValidators(epochStartSlot);
+    when(chainDataClient.getStateAtSlotExact(epochStartSlot))
+        .thenReturn(completedFuture(Optional.of(state)));
+    when(chainDataClient.getCurrentEpoch()).thenReturn(EPOCH);
+    when(chainDataClient.getBestBlockRoot())
+        .thenReturn(Optional.of(dataStructureUtil.randomBytes32()));
+
+    final ProposerDuties duties =
+        assertCompletedSuccessfully(validatorApiHandler.getProposerDuties(EPOCH, true))
+            .orElseThrow();
+
+    assertThat(duties.getDuties()).hasSize(spec.slotsPerEpoch(EPOCH));
+    assertThat(duties.getDuties())
+        .allSatisfy(
+            duty ->
+                assertThat(duty.getPublicKeyBytes())
+                    .isEqualTo(
+                        ((ValidatorPq) state.getValidators().get(duty.getValidatorIndex()))
+                            .getXmssPublicKey()));
   }
 
   @Test
@@ -642,6 +744,29 @@ class ValidatorApiHandlerTest {
     verify(performanceTracker)
         .saveProducedBlock(
             blockContainerAndMetaData.blockContainer().getBlock().getSlotAndBlockRoot());
+  }
+
+  @Test
+  public void createUnsignedBlockWithVrfReveal_shouldPassTheVrfProofToTheBlockFactory() {
+    final UInt64 newSlot = UInt64.valueOf(25);
+    final BeaconState blockSlotState = dataStructureUtil.randomBeaconState(newSlot);
+    final List<Bytes32> vrfProof =
+        List.of(dataStructureUtil.randomBytes32(), dataStructureUtil.randomBytes32());
+    final BlockContainerAndMetaData blockContainerAndMetaData =
+        dataStructureUtil.randomBlockContainerAndMetaData(newSlot);
+    mockRequiredMethodsForBlockProduction(blockSlotState, newSlot);
+    when(blockFactory.createUnsignedBlock(any()))
+        .thenReturn(SafeFuture.completedFuture(blockContainerAndMetaData));
+
+    final SafeFuture<Optional<BlockContainerAndMetaData>> result =
+        validatorApiHandler.createUnsignedBlockWithVrfReveal(
+            newSlot, vrfProof, Optional.empty(), false, Optional.empty());
+
+    assertThat(result).isCompletedWithValue(Optional.of(blockContainerAndMetaData));
+    final ArgumentCaptor<BlockProductionContext> blockProductionContextCaptor =
+        ArgumentCaptor.forClass(BlockProductionContext.class);
+    verify(blockFactory).createUnsignedBlock(blockProductionContextCaptor.capture());
+    assertThat(blockProductionContextCaptor.getValue().vrfRandaoReveal()).contains(vrfProof);
   }
 
   @Test
@@ -1097,6 +1222,44 @@ class ValidatorApiHandlerTest {
   }
 
   @Test
+  public void createPqAggregate_shouldReturnAggregateWithProofFromAttestationPool() {
+    setUp(TestSpecFactory.createMinimalPq());
+    final AttestationPq attestation = (AttestationPq) dataStructureUtil.randomAttestation();
+    final Bytes proof = dataStructureUtil.randomBytes(64);
+    final Bytes32 dataRoot = attestation.getData().hashTreeRoot();
+    final UInt64 slot = attestation.getData().getSlot();
+    when(attestationPool.createPqAggregateFor(dataRoot, ONE))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(new PqAggregate(attestation, proof))));
+
+    assertThat(validatorApiHandler.createPqAggregate(slot, dataRoot, ONE))
+        .isCompletedWithValueMatching(
+            maybeAggregate ->
+                maybeAggregate.orElseThrow().getAggregate().equals(attestation)
+                    && maybeAggregate.get().getProof().equals(proof));
+    // An aggregate for another slot is not the one asked for
+    assertThat(validatorApiHandler.createPqAggregate(slot.plus(1), dataRoot, ONE))
+        .isCompletedWithValue(Optional.empty());
+  }
+
+  @Test
+  public void sendPqAggregateAndProofs_shouldAddAggregateFromValidator() {
+    setUp(TestSpecFactory.createMinimalPq());
+    final SignedAggregateAndProofPq aggregateAndProof =
+        dataStructureUtil.randomSignedAggregateAndProofPq();
+    when(attestationManager.addAggregate(any(ValidatableAttestation.class), any()))
+        .thenReturn(completedFuture(InternalValidationResult.ACCEPT));
+
+    assertThat(validatorApiHandler.sendPqAggregateAndProofs(List.of(aggregateAndProof)))
+        .isCompletedWithValue(emptyList());
+
+    final ArgumentCaptor<ValidatableAttestation> attestationCaptor =
+        ArgumentCaptor.forClass(ValidatableAttestation.class);
+    verify(attestationManager).addAggregate(attestationCaptor.capture(), eq(Optional.empty()));
+    assertThat(attestationCaptor.getValue().getPqAggregate()).contains(aggregateAndProof);
+    assertThat(attestationCaptor.getValue().isProducedLocally()).isTrue();
+  }
+
+  @Test
   public void subscribeToBeaconCommittee_shouldSubscribeViaAttestationTopicSubscriptions() {
     final int committeeIndex = 10;
     final UInt64 aggregationSlot = UInt64.valueOf(13);
@@ -1113,6 +1276,8 @@ class ValidatorApiHandlerTest {
     verify(attestationTopicSubscriptions)
         .subscribeToCommitteeForAggregation(committeeIndex, committeesAtSlot, aggregationSlot);
     verify(activeValidatorTracker).onCommitteeSubscriptionRequest(validatorIndex, aggregationSlot);
+    // So that a PQ aggregate can be proven before it is due
+    verify(attestationPool).onLocalAggregationDuty(aggregationSlot, UInt64.valueOf(committeeIndex));
   }
 
   @Test
@@ -1131,6 +1296,7 @@ class ValidatorApiHandlerTest {
     assertThat(result).isCompleted();
     verifyNoInteractions(attestationTopicSubscriptions);
     verify(activeValidatorTracker).onCommitteeSubscriptionRequest(validatorIndex, aggregationSlot);
+    verify(attestationPool, never()).onLocalAggregationDuty(any(), any());
   }
 
   @Test
@@ -1772,6 +1938,31 @@ class ValidatorApiHandlerTest {
   }
 
   @Test
+  public void getPtcDuties_shouldNameValidatorsByXmssKeyFromPq() {
+    setUp(TestSpecFactory.createMinimalPq());
+    final BeaconState state = createStateWithActiveValidatorsAndInitialisedPtcWindow();
+    when(chainDataClient.getStateAtSlotExact(previousEpochStartSlot))
+        .thenReturn(completedFuture(Optional.of(state)));
+    when(chainDataClient.getCurrentEpoch()).thenReturn(EPOCH.minus(ONE));
+    final IntList allValidators = IntList.of(IntStream.range(0, 32).toArray());
+
+    final PayloadTimelinessCommitteeDuties duties =
+        assertCompletedSuccessfully(
+                validatorApiHandler.getPayloadTimelinessCommitteeDuties(EPOCH, allValidators))
+            .orElseThrow();
+
+    // Before, PQ validators had no BLS key and so no PTC duties
+    assertThat(duties.duties()).isNotEmpty();
+    assertThat(duties.duties())
+        .allSatisfy(
+            duty ->
+                assertThat(duty.pubkey())
+                    .isEqualTo(
+                        ((ValidatorPq) state.getValidators().get(duty.validatorIndex().intValue()))
+                            .getXmssPublicKey()));
+  }
+
+  @Test
   public void getPtcDuties_shouldUsePreviousEpochStateAndDependentRootAfterGloasForkEpoch() {
     setUp(TestSpecFactory.createMinimalWithGloasForkEpoch(PREVIOUS_EPOCH));
     final BeaconState state = createGloasStateWithInitialisedPtcWindow(previousEpochStartSlot);
@@ -1890,6 +2081,21 @@ class ValidatorApiHandlerTest {
     final SafeFuture<List<SubmitDataError>> result =
         validatorApiHandler.sendPayloadAttestationMessages(List.of(payloadAttestationMessage));
     assertThat(result).isCompletedWithValue(List.of());
+  }
+
+  @Test
+  void sendPqPayloadAttestationMessages_shouldAddThemToPoolAsLocal() {
+    final PayloadAttestationMessagePq accepted = mock(PayloadAttestationMessagePq.class);
+    final PayloadAttestationMessagePq rejected = mock(PayloadAttestationMessagePq.class);
+    when(payloadAttestationPool.addLocalPq(accepted))
+        .thenReturn(SafeFuture.completedFuture(InternalValidationResult.ACCEPT));
+    when(payloadAttestationPool.addLocalPq(rejected))
+        .thenReturn(SafeFuture.completedFuture(InternalValidationResult.reject("bad leaf")));
+
+    final SafeFuture<List<SubmitDataError>> result =
+        validatorApiHandler.sendPqPayloadAttestationMessages(List.of(accepted, rejected));
+
+    assertThat(result).isCompletedWithValue(List.of(new SubmitDataError(UInt64.ONE, "bad leaf")));
   }
 
   private void mockRequiredMethodsForBlockProduction(

@@ -127,7 +127,7 @@ public class OperationsReOrgManager implements ChainHeadChannel, LateBlockReorgP
                               final BeaconBlockBody blockBody = maybeBlock.get().getBody();
                               proposerSlashingPool.addAll(blockBody.getProposerSlashings());
                               attesterSlashingPool.addAll(blockBody.getAttesterSlashings());
-                              exitPool.addAll(blockBody.getVoluntaryExits());
+                              blockBody.getOptionalVoluntaryExits().ifPresent(exitPool::addAll);
                               blockBody
                                   .getOptionalBlsToExecutionChanges()
                                   .ifPresent(blsToExecutionOperationPool::addAll);
@@ -196,7 +196,7 @@ public class OperationsReOrgManager implements ChainHeadChannel, LateBlockReorgP
                             final BeaconBlockBody blockBody = block.getBody();
                             proposerSlashingPool.removeAll(blockBody.getProposerSlashings());
                             attesterSlashingPool.removeAll(blockBody.getAttesterSlashings());
-                            exitPool.removeAll(blockBody.getVoluntaryExits());
+                            blockBody.getOptionalVoluntaryExits().ifPresent(exitPool::removeAll);
                             attestationPool.onAttestationsIncludedInBlock(
                                 block.getSlot(), blockBody.getAttestations());
                             blockBody

@@ -18,7 +18,6 @@ import static com.google.common.base.Preconditions.checkArgument;
 import java.util.Objects;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
-import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.config.SpecConfig;
@@ -81,7 +80,7 @@ public class AnchorPoint extends StateAndBlockSummary {
 
     final BeaconBlock genesisBlock = BeaconBlock.fromGenesisState(spec, genesisState);
     final SignedBeaconBlock signedGenesisBlock =
-        SignedBeaconBlock.create(spec, genesisBlock, BLSSignature.empty());
+        SignedBeaconBlock.createUnsigned(spec, genesisBlock);
 
     final Bytes32 genesisBlockRoot = genesisBlock.hashTreeRoot();
     final Bytes32 stateBodyRoot = genesisState.getLatestBlockHeader().getBodyRoot();

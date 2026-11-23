@@ -18,6 +18,8 @@ import static tech.pegasys.teku.networks.Eth2NetworkConfiguration.DEFAULT_ASYNC_
 import static tech.pegasys.teku.networks.Eth2NetworkConfiguration.DEFAULT_ASYNC_P2P_MAX_THREADS;
 import static tech.pegasys.teku.spec.constants.NetworkConstants.DEFAULT_SAFE_SLOTS_TO_IMPORT_OPTIMISTICALLY;
 
+import java.nio.file.Path;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.function.Consumer;
@@ -37,6 +39,8 @@ import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.p2p.network.config.NetworkConfig;
 import tech.pegasys.teku.networks.Eth2NetworkConfiguration;
+import tech.pegasys.teku.networks.LeanVmSidecarConfig;
+import tech.pegasys.teku.networks.PqTimingConfig;
 
 public class Eth2NetworkOptions {
 
@@ -290,6 +294,54 @@ public class Eth2NetworkOptions {
           "Override the PQ fork version (4 bytes hex). Needed when the network config has no PQ_FORK_VERSION.",
       arity = "1")
   private String pqForkVersion;
+
+  @Option(
+      names = {"--Xpq-leanvm-sidecar-binary"},
+      hidden = true,
+      paramLabel = "<path>",
+      description =
+          "Prove and verify PQ attestation proofs with leanVM, as PQ devnet clients do, launching"
+              + " this leanvm-sidecar executable. It must be built from the network's leanVM"
+              + " revision; the Docker image has one at /usr/local/bin/leanvm-sidecar. Without it or"
+              + " --Xpq-leanvm-sidecar-socket, proofs are the specification's concatenation"
+              + " stand-in.",
+      arity = "1")
+  private Path leanVmSidecarBinary;
+
+  @Option(
+      names = {"--Xpq-leanvm-sidecar-socket"},
+      hidden = true,
+      paramLabel = "<path>",
+      description =
+          "The Unix socket of the leanVM sidecar: the one to connect to, or with"
+              + " --Xpq-leanvm-sidecar-binary, the one to launch it on (default: in the beacon"
+              + " node's data directory).",
+      arity = "1")
+  private Path leanVmSidecarSocket;
+
+  @Option(
+      names = {"--Xpq-timing-output", "--pq-timing-output"},
+      hidden = true,
+      paramLabel = "<directory>",
+      description =
+          "Record PQ gossip arrival and proving timings in this directory, one folder per run, in"
+              + " the format of the Lighthouse and Prysm pq-measurement reports. With"
+              + " --Xpq-measurement it defaults to pq-timing in the beacon node's data directory.",
+      arity = "1")
+  private Path pqTimingOutput;
+
+  @Option(
+      names = {"--Xpq-measurement", "--pq-measurement"},
+      hidden = true,
+      paramLabel = "<BOOLEAN>",
+      description =
+          "Run PQ timing experiments on a beacon node with no validators: join every attestation"
+              + " subnet, and every three slots prove one committee and merge one block proof from"
+              + " live gossip, without publishing them.",
+      fallbackValue = "true",
+      showDefaultValue = Visibility.ALWAYS,
+      arity = "0..1")
+  private boolean pqMeasurement = false;
 
   @Option(
       names = {"--Xnetwork-heze-fork-epoch"},
@@ -600,6 +652,10 @@ public class Eth2NetworkOptions {
         implicitEpochDefault(gloasForkEpoch, builder::gloasForkEpoch);
       }
     }
+    builder.leanVmSidecar(
+        LeanVmSidecarConfig.of(
+            Optional.ofNullable(leanVmSidecarBinary), Optional.ofNullable(leanVmSidecarSocket)));
+    builder.pqTiming(PqTimingConfig.of(Optional.ofNullable(pqTimingOutput), pqMeasurement));
     if (pqForkVersion != null) {
       builder.pqForkVersion(Bytes4.fromHexString(pqForkVersion));
     }

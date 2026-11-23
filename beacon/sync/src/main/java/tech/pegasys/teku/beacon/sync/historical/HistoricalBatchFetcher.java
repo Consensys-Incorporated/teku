@@ -56,6 +56,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.BlindedExecutio
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadBlockHashCalculator;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadHeader;
@@ -561,11 +562,12 @@ public class HistoricalBatchFetcher {
   }
 
   private Optional<ExecutionPayloadBid> getExecutionPayloadBid(final SignedBeaconBlock block) {
+    // Not toVersionGloas(): a PQ body carries a bid but isn't a Gloas body
     return block
         .getMessage()
         .getBody()
-        .toVersionGloas()
-        .map(body -> body.getSignedExecutionPayloadBid().getMessage());
+        .getOptionalSignedExecutionPayloadBid()
+        .map(SignedExecutionPayloadBid::getMessage);
   }
 
   private void assertPreviousEnvelopePresentIfDelivered(
@@ -596,18 +598,14 @@ public class HistoricalBatchFetcher {
     final Bytes32 blockRoot = envelope.getBeaconBlockRoot();
     requireEqual("slot", envelope.getSlot(), block.getSlot(), blockRoot);
     final ExecutionPayloadBid bid =
-        block
-            .getMessage()
-            .getBody()
-            .toVersionGloas()
+        getExecutionPayloadBid(block)
             .orElseThrow(
                 () ->
                     new IllegalArgumentException(
                         String.format(
-                            "Block with root %s at slot %s does not contain a Gloas body",
-                            block.getRoot(), block.getSlot())))
-            .getSignedExecutionPayloadBid()
-            .getMessage();
+                            "Block with root %s at slot %s does not contain an execution payload"
+                                + " bid",
+                            block.getRoot(), block.getSlot())));
     final ExecutionPayloadHeader payloadHeader = envelope.getPayloadHeader();
     requireEqual("builder index", envelope.getBuilderIndex(), bid.getBuilderIndex(), blockRoot);
     requireEqual(

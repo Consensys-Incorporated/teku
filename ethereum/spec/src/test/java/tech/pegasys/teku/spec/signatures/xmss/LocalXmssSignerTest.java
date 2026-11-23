@@ -15,12 +15,12 @@ package tech.pegasys.teku.spec.signatures.xmss;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.doThrow;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import static tech.pegasys.teku.infrastructure.async.SyncAsyncRunner.SYNC_RUNNER;
@@ -54,7 +54,6 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.xmss.Xmss;
-import tech.pegasys.teku.xmss.XmssConstants;
 import tech.pegasys.teku.xmss.XmssSecretKey;
 import tech.pegasys.teku.xmss.XmssSignature;
 import tech.pegasys.teku.xmss.XmssSigningKey;
@@ -224,13 +223,13 @@ class LocalXmssSignerTest {
 
   @Test
   void prepareForSlot_preparesTheAttestationAndPerSlotTreesOnce() {
-    final XmssSigningKey key = mock(XmssSigningKey.class);
+    final XmssSigningKey key = keyThatBuildsEveryTree();
     final LocalXmssSigner preparingSigner = createSigner(SPEC, key);
 
     assertThat(safeJoin(preparingSigner.prepareForSlot(UInt64.valueOf(12)))).isEqualTo(2);
 
-    verify(key).prepare(XmssConstants.firstLeafOfBottomTree(ATTESTATION_TREE));
-    verify(key).prepare(XmssConstants.firstLeafOfBottomTree(FIRST_PER_SLOT_TREE));
+    verify(key).prepare(XmssSigningKey.firstLeafOfBottomTree(ATTESTATION_TREE));
+    verify(key).prepare(XmssSigningKey.firstLeafOfBottomTree(FIRST_PER_SLOT_TREE));
 
     // Slot 13 signs from the same two trees
     assertThat(safeJoin(preparingSigner.prepareForSlot(UInt64.valueOf(13)))).isZero();
@@ -239,24 +238,32 @@ class LocalXmssSignerTest {
 
   @Test
   void prepareForSlot_preparesOnlyTheNewTreeWhenThePerSlotLeavesMoveOn() {
-    final XmssSigningKey key = mock(XmssSigningKey.class);
+    final XmssSigningKey key = keyThatBuildsEveryTree();
     final LocalXmssSigner preparingSigner = createSigner(SPEC, key);
     safeJoin(preparingSigner.prepareForSlot(UInt64.valueOf(4095)));
 
     assertThat(safeJoin(preparingSigner.prepareForSlot(UInt64.valueOf(4096)))).isEqualTo(1);
 
-    verify(key).prepare(XmssConstants.firstLeafOfBottomTree(FIRST_PER_SLOT_TREE + 1));
+    verify(key).prepare(XmssSigningKey.firstLeafOfBottomTree(FIRST_PER_SLOT_TREE + 1));
+  }
+
+  @Test
+  void prepareForSlot_countsOnlyTheTreesTheKeyHadToBuild() {
+    // A key loaded from its tree cache holds the attestation tree already
+    final XmssSigningKey key = mock(XmssSigningKey.class);
+    when(key.prepare(XmssSigningKey.firstLeafOfBottomTree(ATTESTATION_TREE))).thenReturn(false);
+    when(key.prepare(XmssSigningKey.firstLeafOfBottomTree(FIRST_PER_SLOT_TREE))).thenReturn(true);
+    final LocalXmssSigner preparingSigner = createSigner(SPEC, key);
+
+    assertThat(safeJoin(preparingSigner.prepareForSlot(UInt64.valueOf(12)))).isEqualTo(1);
   }
 
   @Test
   void prepareForSlot_triesAgainAfterAFailure() {
-    final XmssSigningKey key = mock(XmssSigningKey.class);
-    final UInt64 attestationTreeLeaf = XmssConstants.firstLeafOfBottomTree(ATTESTATION_TREE);
-    doThrow(new IllegalStateException("native failure"))
-        .doNothing()
-        .when(key)
-        .prepare(attestationTreeLeaf);
-    doNothing().when(key).prepare(XmssConstants.firstLeafOfBottomTree(FIRST_PER_SLOT_TREE));
+    final XmssSigningKey key = keyThatBuildsEveryTree();
+    when(key.prepare(XmssSigningKey.firstLeafOfBottomTree(ATTESTATION_TREE)))
+        .thenThrow(new IllegalStateException("native failure"))
+        .thenReturn(true);
     final LocalXmssSigner preparingSigner = createSigner(SPEC, key);
 
     assertThatSafeFuture(preparingSigner.prepareForSlot(UInt64.valueOf(12)))
@@ -274,6 +281,12 @@ class LocalXmssSignerTest {
     assertThat(safeJoin(preForkSigner.prepareForSlot(UInt64.ZERO))).isZero();
 
     verifyNoInteractions(key);
+  }
+
+  private static XmssSigningKey keyThatBuildsEveryTree() {
+    final XmssSigningKey key = mock(XmssSigningKey.class);
+    when(key.prepare(any())).thenReturn(true);
+    return key;
   }
 
   private LocalXmssSigner createSigner(final Spec spec) {

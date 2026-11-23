@@ -19,6 +19,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import tech.pegasys.teku.infrastructure.collections.LimitedMap;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszBitSet;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszBitlist;
 
 public class SeenAggregatesCache<KeyT> {
 
@@ -46,6 +47,18 @@ public class SeenAggregatesCache<KeyT> {
 
   private boolean isAlreadySeen(
       final Set<SszBitSet> seenAggregates, final SszBitSet aggregationBits) {
-    return seenAggregates.stream().anyMatch(seen -> seen.isSuperSetOf(aggregationBits));
+    return seenAggregates.stream()
+        .anyMatch(
+            seen -> isSameLength(seen, aggregationBits) && seen.isSuperSetOf(aggregationBits));
+  }
+
+  /**
+   * A bitlist of a different length cannot be a superset (is_non_strict_superset): the new one is
+   * then for a different committee size, and is rejected by later checks rather than ignored.
+   */
+  private static boolean isSameLength(final SszBitSet seen, final SszBitSet aggregationBits) {
+    return !(seen instanceof SszBitlist seenBitlist)
+        || !(aggregationBits instanceof SszBitlist bitlist)
+        || seenBitlist.size() == bitlist.size();
   }
 }

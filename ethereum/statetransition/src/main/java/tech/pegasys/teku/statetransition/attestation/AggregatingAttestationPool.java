@@ -74,6 +74,31 @@ public abstract class AggregatingAttestationPool implements SlotEventsChannel {
   public abstract void onReorg(UInt64 commonAncestorSlot);
 
   /**
+   * The attestations for a PQ block, with the proof of their signatures.
+   *
+   * @throws UnsupportedOperationException if this pool doesn't keep PQ attestations
+   */
+  public PqBlockAttestations getPqAttestationsForBlock(
+      final BeaconState stateAtBlockSlot, final AttestationForkChecker forkChecker) {
+    throw new UnsupportedOperationException("This pool does not keep PQ attestations");
+  }
+
+  /**
+   * A PQ aggregate of one committee with the proof of its signatures, as an aggregator publishes
+   * it. Empty if this pool doesn't keep PQ attestations or has none for the data and committee.
+   */
+  public SafeFuture<Optional<PqAggregate>> createPqAggregateFor(
+      final Bytes32 attestationHashTreeRoot, final UInt64 committeeIndex) {
+    return SafeFuture.completedFuture(Optional.empty());
+  }
+
+  /**
+   * Notes that a local validator aggregates committee {@code committeeIndex} at {@code slot}, so
+   * that a pool which proves aggregates can prove it ahead of the aggregate due time.
+   */
+  public void onLocalAggregationDuty(final UInt64 slot, final UInt64 committeeIndex) {}
+
+  /**
    * Ensures that the committees size is set in the attestation. This is needed for the
    *
    * @return false if it was not possible to set the committees size but was required, true

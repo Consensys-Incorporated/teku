@@ -56,6 +56,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
@@ -64,6 +65,8 @@ import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SignedContributionAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeContribution;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeMessage;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationAndProofPq;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.datastructures.validator.SubnetSubscription;
@@ -105,6 +108,14 @@ public class MetricRecordingValidatorApiChannel implements ValidatorApiChannel {
       final Collection<BLSPublicKey> publicKeys) {
     return countOptionalDataRequest(
         delegate.getValidatorIndices(publicKeys),
+        BeaconNodeRequestLabels.GET_VALIDATOR_INDICES_METHOD);
+  }
+
+  @Override
+  public SafeFuture<Optional<Map<Bytes32, Integer>>> getValidatorIndicesByXmssKey(
+      final Collection<Bytes32> xmssPublicKeys) {
+    return countOptionalDataRequest(
+        delegate.getValidatorIndicesByXmssKey(xmssPublicKeys),
         BeaconNodeRequestLabels.GET_VALIDATOR_INDICES_METHOD);
   }
 
@@ -163,6 +174,19 @@ public class MetricRecordingValidatorApiChannel implements ValidatorApiChannel {
       final Optional<BuilderConfig> builderConfig) {
     return countOptionalDataRequest(
         delegate.createUnsignedBlock(slot, randaoReveal, graffiti, includePayload, builderConfig),
+        BeaconNodeRequestLabels.CREATE_UNSIGNED_BLOCK_METHOD);
+  }
+
+  @Override
+  public SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlockWithVrfReveal(
+      final UInt64 slot,
+      final List<Bytes32> vrfRandaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final Optional<BuilderConfig> builderConfig) {
+    return countOptionalDataRequest(
+        delegate.createUnsignedBlockWithVrfReveal(
+            slot, vrfRandaoReveal, graffiti, includePayload, builderConfig),
         BeaconNodeRequestLabels.CREATE_UNSIGNED_BLOCK_METHOD);
   }
 
@@ -244,6 +268,22 @@ public class MetricRecordingValidatorApiChannel implements ValidatorApiChannel {
   }
 
   @Override
+  public SafeFuture<Optional<AttestationAndProofPq>> createPqAggregate(
+      final UInt64 slot, final Bytes32 attestationHashTreeRoot, final UInt64 committeeIndex) {
+    return countOptionalDataRequest(
+        delegate.createPqAggregate(slot, attestationHashTreeRoot, committeeIndex),
+        BeaconNodeRequestLabels.CREATE_AGGREGATE_METHOD);
+  }
+
+  @Override
+  public SafeFuture<List<SubmitDataError>> sendPqAggregateAndProofs(
+      final List<SignedAggregateAndProofPq> aggregateAndProofs) {
+    return countSendRequest(
+        delegate.sendPqAggregateAndProofs(aggregateAndProofs),
+        BeaconNodeRequestLabels.PUBLISH_AGGREGATE_AND_PROOFS_METHOD);
+  }
+
+  @Override
   public SafeFuture<SendSignedBlockResult> sendSignedBlock(
       final SignedBlockContainer blockContainer,
       final BroadcastValidationLevel broadcastValidationLevel,
@@ -274,6 +314,14 @@ public class MetricRecordingValidatorApiChannel implements ValidatorApiChannel {
       final List<PayloadAttestationMessage> payloadAttestationMessages) {
     return countSendRequest(
         delegate.sendPayloadAttestationMessages(payloadAttestationMessages),
+        BeaconNodeRequestLabels.SEND_PAYLOAD_ATTESTATION_MESSAGES_METHOD);
+  }
+
+  @Override
+  public SafeFuture<List<SubmitDataError>> sendPqPayloadAttestationMessages(
+      final List<PayloadAttestationMessagePq> payloadAttestationMessages) {
+    return countSendRequest(
+        delegate.sendPqPayloadAttestationMessages(payloadAttestationMessages),
         BeaconNodeRequestLabels.SEND_PAYLOAD_ATTESTATION_MESSAGES_METHOD);
   }
 

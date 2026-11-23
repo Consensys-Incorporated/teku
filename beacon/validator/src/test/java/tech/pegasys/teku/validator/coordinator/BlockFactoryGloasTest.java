@@ -17,17 +17,28 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 
+import java.util.Optional;
+import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
+import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionPerformance;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockPublishingPerformance;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
+import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.BlockContainer;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodyGloas;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.pq.BeaconBlockBodyPq;
 import tech.pegasys.teku.spec.datastructures.blocks.versions.gloas.BlockContentsGloas;
+import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
+import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 public class BlockFactoryGloasTest extends AbstractBlockFactoryTest {
@@ -60,6 +71,44 @@ public class BlockFactoryGloasTest extends AbstractBlockFactoryTest {
     assertThat(blockContainer).isInstanceOf(BlockContentsGloas.class);
     assertThat(blockContainer.getExecutionPayloadEnvelope()).isPresent();
     assertThat(blockContainer.getBlock().getBody()).isInstanceOf(BeaconBlockBodyGloas.class);
+  }
+
+  @Test
+  void shouldReturnPqBlock() {
+    // A PQ body carries a bid but isn't a Gloas body
+    final Spec pqSpec = TestSpecFactory.createMinimalPq();
+    final DataStructureUtil pqData = new DataStructureUtil(pqSpec);
+    final BeaconBlock pqBlock = pqData.randomBeaconBlock();
+    assertThat(pqBlock.getBody()).isInstanceOf(BeaconBlockBodyPq.class);
+    final BeaconState state = pqData.randomBeaconState();
+    final BeaconBlockAndState blockAndState = mock(BeaconBlockAndState.class);
+    when(blockAndState.getBlock()).thenReturn(pqBlock);
+    when(blockAndState.getState()).thenReturn(state);
+    final BlockFactoryGloas blockFactory =
+        new BlockFactoryGloas(pqSpec, mock(BlockOperationSelectorFactory.class)) {
+          @Override
+          protected SafeFuture<BeaconBlockAndState> createNewUnsignedBlock(
+              final BlockProductionContext blockProductionContext) {
+            return SafeFuture.completedFuture(blockAndState);
+          }
+        };
+
+    final BlockContainerAndMetaData result =
+        safeJoin(
+            blockFactory.createUnsignedBlock(
+                new BlockProductionContext(
+                    pqBlock.getSlot(),
+                    state,
+                    mock(ForkChoiceNode.class),
+                    Bytes32.ZERO,
+                    BLSSignature.empty(),
+                    Optional.empty(),
+                    false,
+                    Optional.empty(),
+                    BlockProductionPerformance.NOOP)));
+
+    assertThat(result.blockContainer()).isSameAs(pqBlock);
+    assertThat(result.payloadIncluded()).isFalse();
   }
 
   @Test

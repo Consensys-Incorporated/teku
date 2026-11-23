@@ -18,7 +18,7 @@ import java.util.stream.Stream;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.logic.versions.pq.helpers.MiscHelpersPq;
-import tech.pegasys.teku.xmss.XmssConstants;
+import tech.pegasys.teku.xmss.XmssSigningKey;
 
 /** Which leanXMSS bottom trees a validator signs from, given the spec's leaf assignment. */
 public final class XmssLeafLayout {
@@ -42,7 +42,7 @@ public final class XmssLeafLayout {
     // A slot's leaves start at a multiple of their count, so they share one bottom tree
     final UInt64 firstSlotLeaf = miscHelpers.computeXmssLeafIndex(slot, UInt64.ZERO);
     return Stream.of(attestationLeaf, firstSlotLeaf)
-        .map(XmssConstants::bottomTreeIndex)
+        .map(XmssSigningKey::bottomTreeOf)
         .distinct()
         .sorted()
         .toList();

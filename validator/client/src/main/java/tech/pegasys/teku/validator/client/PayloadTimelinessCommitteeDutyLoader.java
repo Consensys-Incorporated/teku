@@ -69,7 +69,7 @@ public class PayloadTimelinessCommitteeDutyLoader
       final SlotBasedScheduledDuties<PayloadAttestationProductionDuty, Duty> scheduledDuties,
       final PtcDuty duty) {
     validators
-        .getValidator(duty.publicKey())
+        .getValidatorBySigningKey(duty.pubkey())
         .ifPresent(
             validator ->
                 scheduledDuties.scheduleProduction(

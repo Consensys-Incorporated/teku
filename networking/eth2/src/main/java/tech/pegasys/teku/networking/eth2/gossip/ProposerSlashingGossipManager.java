@@ -22,6 +22,7 @@ import tech.pegasys.teku.networking.eth2.gossip.topics.OperationProcessor;
 import tech.pegasys.teku.networking.p2p.gossip.GossipNetwork;
 import tech.pegasys.teku.spec.config.NetworkingSpecConfig;
 import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
+import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing.ProposerSlashingSchema;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.statetransition.util.DebugDataDumper;
 import tech.pegasys.teku.storage.client.RecentChainData;
@@ -38,6 +39,33 @@ public class ProposerSlashingGossipManager extends AbstractGossipManager<Propose
       final OperationProcessor<ProposerSlashing> processor,
       final NetworkingSpecConfig networkingConfig,
       final DebugDataDumper debugDataDumper) {
+    this(
+        recentChainData,
+        asyncRunner,
+        gossipNetwork,
+        gossipEncoding,
+        forkInfo,
+        forkDigest,
+        processor,
+        ProposerSlashing.SSZ_SCHEMA,
+        networkingConfig,
+        debugDataDumper);
+  }
+
+  /**
+   * @param schema the topic's message schema: from PQ on, the headers are signed with XMSS
+   */
+  public ProposerSlashingGossipManager(
+      final RecentChainData recentChainData,
+      final AsyncRunner asyncRunner,
+      final GossipNetwork gossipNetwork,
+      final GossipEncoding gossipEncoding,
+      final ForkInfo forkInfo,
+      final Bytes4 forkDigest,
+      final OperationProcessor<ProposerSlashing> processor,
+      final ProposerSlashingSchema schema,
+      final NetworkingSpecConfig networkingConfig,
+      final DebugDataDumper debugDataDumper) {
     super(
         recentChainData,
         GossipTopicName.PROPOSER_SLASHING,
@@ -47,7 +75,7 @@ public class ProposerSlashingGossipManager extends AbstractGossipManager<Propose
         forkInfo,
         forkDigest,
         processor,
-        ProposerSlashing.SSZ_SCHEMA,
+        schema,
         message -> Optional.of(message.getHeader1().getMessage().getSlot()),
         // A validator stays slashable however old the offence is, so slashings are always
         // considered to match the fork of the topic they arrived on (ie disable fork checking at

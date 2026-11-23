@@ -1002,7 +1002,7 @@ class ValidatorLoaderTest {
         disabledInteropConfig,
         httpClientFactory,
         slashingProtector,
-        Optional.of(mock(XmssLeafProtector.class)),
+        Optional.of(PqKeyLoadingConfig.keystoresOnly(mock(XmssLeafProtector.class))),
         slashingProtectionLogger,
         publicKeyLoader,
         asyncRunner,

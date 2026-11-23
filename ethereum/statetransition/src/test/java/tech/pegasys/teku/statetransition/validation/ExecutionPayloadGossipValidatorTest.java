@@ -34,6 +34,7 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -41,14 +42,20 @@ import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
+import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBody;
 import tech.pegasys.teku.spec.datastructures.epbs.BlockRootAndBuilderIndex;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBidSchema;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
+import tech.pegasys.teku.spec.datastructures.execution.versions.capella.Withdrawal;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.logic.common.helpers.MiscHelpers;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 @TestSpecContext(milestone = {SpecMilestone.GLOAS})
@@ -79,18 +86,32 @@ public class ExecutionPayloadGossipValidatorTest {
     envelope = signedEnvelope.getMessage();
     slot = envelope.getSlot();
     blockRoot = envelope.getBeaconBlockRoot();
-    postState = dataStructureUtil.randomBeaconState();
+    final ExecutionPayload payload = envelope.getPayload();
+    // The post-state the payload builds on, as the PQ rules check
+    postState =
+        stateMatching(payload.getParentHash(), payload.getOptionalWithdrawals().orElseThrow());
 
+    final ExecutionPayloadBidSchema bidSchema =
+        SchemaDefinitionsGloas.required(specContext.getSpec().atSlot(slot).getSchemaDefinitions())
+            .getExecutionPayloadBidSchema();
     final SignedExecutionPayloadBid matchingBid =
         dataStructureUtil.randomSignedExecutionPayloadBid(
-            dataStructureUtil.randomExecutionPayloadBid(
-                slot,
+            bidSchema.create(
+                payload.getParentHash(),
+                dataStructureUtil.randomBytes32(),
+                payload.getBlockHash(),
+                payload.getPrevRandao(),
+                dataStructureUtil.randomEth1Address(),
+                payload.getGasLimit(),
                 envelope.getBuilderIndex(),
-                envelope.getPayload().getBlockHash(),
+                slot,
+                UInt64.ZERO,
+                UInt64.ZERO,
+                bidSchema.getBlobKzgCommitmentsSchema().of(),
                 envelope.getExecutionRequests().hashTreeRoot()));
     beaconBlock =
-        dataStructureUtil.randomBeaconBlock(
-            slot,
+        blockWithParentRoot(
+            envelope.getParentBeaconBlockRoot(),
             dataStructureUtil.randomBeaconBlockBody(
                 builder -> builder.signedExecutionPayloadBid(matchingBid)));
 
@@ -109,6 +130,9 @@ public class ExecutionPayloadGossipValidatorTest {
     // Real config so the execution request and withdrawal limit rules see actual limits
     when(specVersion.getConfig()).thenReturn(specContext.getSpec().atSlot(slot).getConfig());
     when(spec.atSlot(slot)).thenReturn(specVersion);
+    when(specVersion.getMilestone()).thenReturn(SpecMilestone.GLOAS);
+    when(spec.computeTimeAtSlot(any(BeaconState.class), eq(slot)))
+        .thenReturn(payload.getTimestamp());
     when(gossipValidationHelper.isSignatureValidWithRespectToBuilderIndex(
             any(), any(), any(), any()))
         .thenReturn(true);
@@ -372,6 +396,102 @@ public class ExecutionPayloadGossipValidatorTest {
             validator.validate(
                 signedEnvelope, Optional.of(BroadcastValidationLevel.CONSENSUS_AND_EQUIVOCATION)))
         .isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldAcceptPayloadMatchingBidAndStateFromPq() {
+    whenRulesFromPqApply();
+
+    assertThatSafeFuture(validator.validate(signedEnvelope)).isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldRejectParentBeaconBlockRootMismatchFromPq() {
+    whenRulesFromPqApply();
+    beaconBlock = blockWithParentRoot(dataStructureUtil.randomBytes32(), beaconBlock.getBody());
+    when(gossipValidationHelper.retrieveBlockByRoot(blockRoot))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(beaconBlock)));
+
+    assertRejected("parent beacon block root");
+  }
+
+  @TestTemplate
+  void shouldRejectPayloadNotBuildingOnLatestBlockHashFromPq() {
+    whenRulesFromPqApply();
+    postState =
+        stateMatching(
+            dataStructureUtil.randomBytes32(),
+            envelope.getPayload().getOptionalWithdrawals().orElseThrow());
+    when(gossipValidationHelper.getStateAtBlockRoot(any(Bytes32.class)))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(postState)));
+
+    assertRejected("parent hash");
+  }
+
+  @TestTemplate
+  void shouldRejectIncorrectTimestampFromPq() {
+    whenRulesFromPqApply();
+    when(spec.computeTimeAtSlot(any(BeaconState.class), eq(slot)))
+        .thenReturn(envelope.getPayload().getTimestamp().plus(1));
+
+    assertRejected("timestamp");
+  }
+
+  @TestTemplate
+  void shouldRejectUnexpectedWithdrawalsFromPq() {
+    whenRulesFromPqApply();
+    final SszList<Withdrawal> withdrawals =
+        envelope.getPayload().getOptionalWithdrawals().orElseThrow();
+    postState = stateMatching(envelope.getPayload().getParentHash(), withdrawals.getSchema().of());
+    when(gossipValidationHelper.getStateAtBlockRoot(any(Bytes32.class)))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(postState)));
+
+    assertRejected("withdrawals");
+  }
+
+  @TestTemplate
+  void shouldNotApplyRulesFromPqToGloas() {
+    when(spec.computeTimeAtSlot(any(BeaconState.class), eq(slot)))
+        .thenReturn(envelope.getPayload().getTimestamp().plus(1));
+
+    assertThatSafeFuture(validator.validate(signedEnvelope)).isCompletedWithValue(ACCEPT);
+  }
+
+  private void whenRulesFromPqApply() {
+    when(spec.atSlot(slot).getMilestone()).thenReturn(SpecMilestone.PQ);
+  }
+
+  private void assertRejected(final String reasonFragment) {
+    assertThatSafeFuture(validator.validate(signedEnvelope))
+        .isCompletedWithValueMatching(
+            result ->
+                result.isReject() && result.getDescription().orElse("").contains(reasonFragment));
+  }
+
+  private BeaconBlock blockWithParentRoot(final Bytes32 parentRoot, final BeaconBlockBody body) {
+    return new BeaconBlock(
+        dataStructureUtil.getSpec().atSlot(slot).getSchemaDefinitions().getBeaconBlockSchema(),
+        slot,
+        dataStructureUtil.randomUInt64(),
+        parentRoot,
+        dataStructureUtil.randomBytes32(),
+        body);
+  }
+
+  private BeaconState stateMatching(
+      final Bytes32 latestBlockHash, final SszList<Withdrawal> expectedWithdrawals) {
+    return dataStructureUtil
+        .randomBeaconState()
+        .updated(
+            state -> {
+              final MutableBeaconStateGloas stateGloas = MutableBeaconStateGloas.required(state);
+              stateGloas.setLatestBlockHash(latestBlockHash);
+              stateGloas.setPayloadExpectedWithdrawals(
+                  stateGloas
+                      .getPayloadExpectedWithdrawals()
+                      .getSchema()
+                      .createFromElements(expectedWithdrawals.asList()));
+            });
   }
 
   private SignedExecutionPayloadEnvelope createSignedEnvelopeWithBlockRoot(final Bytes32 root) {

@@ -46,6 +46,7 @@ import tech.pegasys.teku.networking.p2p.gossip.TopicHandler;
 import tech.pegasys.teku.networking.p2p.libp2p.config.LibP2PParamsFactory;
 import tech.pegasys.teku.service.serviceutils.ServiceCapacityExceededException;
 import tech.pegasys.teku.spec.config.NetworkingSpecConfig;
+import tech.pegasys.teku.statetransition.pq.timing.PqTiming;
 import tech.pegasys.teku.statetransition.util.DebugDataDumper;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 import tech.pegasys.teku.storage.client.RecentChainData;
@@ -64,6 +65,7 @@ public class Eth2TopicHandler<MessageT extends SszData> implements TopicHandler 
   private final String topic;
   private final DecodedPrefixFilter decodedPrefixFilter;
   private final GossipInFlightLimiter inFlightLimiter;
+  private final Optional<PqGossipTiming<MessageT>> pqGossipTiming;
   final TimeProvider timeProvider;
 
   // every slot of mainnet config
@@ -114,7 +116,41 @@ public class Eth2TopicHandler<MessageT extends SszData> implements TopicHandler 
       final DebugDataDumper debugDataDumper,
       final DecodedPrefixFilter decodedPrefixFilter,
       final GossipInFlightLimiter inFlightLimiter) {
+    this(
+        recentChainData,
+        asyncRunner,
+        processor,
+        gossipEncoding,
+        forkDigest,
+        topicName,
+        forkValidator,
+        messageType,
+        networkingConfig,
+        debugDataDumper,
+        decodedPrefixFilter,
+        inFlightLimiter,
+        Optional.empty());
+  }
+
+  /**
+   * @param pqGossipTiming describes each decoded message for the PQ timing export, when it is on
+   */
+  public Eth2TopicHandler(
+      final RecentChainData recentChainData,
+      final AsyncRunner asyncRunner,
+      final OperationProcessor<MessageT> processor,
+      final GossipEncoding gossipEncoding,
+      final Bytes4 forkDigest,
+      final String topicName,
+      final OperationValidator<MessageT> forkValidator,
+      final SszSchema<MessageT> messageType,
+      final NetworkingSpecConfig networkingConfig,
+      final DebugDataDumper debugDataDumper,
+      final DecodedPrefixFilter decodedPrefixFilter,
+      final GossipInFlightLimiter inFlightLimiter,
+      final Optional<PqGossipTiming<MessageT>> pqGossipTiming) {
     this.decodedPrefixFilter = decodedPrefixFilter;
+    this.pqGossipTiming = pqGossipTiming;
     this.inFlightLimiter = inFlightLimiter;
     this.asyncRunner = asyncRunner;
     this.processor = processor;
@@ -157,6 +193,9 @@ public class Eth2TopicHandler<MessageT extends SszData> implements TopicHandler 
 
   @Override
   public SafeFuture<ValidationResult> handleMessage(final PreparedGossipMessage message) {
+    // stamped after the seen cache and before decoding, where the other clients stamp receipts
+    final PqTiming.Receipt receipt =
+        pqGossipTiming.isPresent() ? PqTiming.receipt() : PqTiming.noReceipt();
     // kept from computing the message id, so this doesn't uncompress the payload again
     final Optional<DecodedMessagePrefix> decodedMessagePrefix = message.getDecodedMessagePrefix();
     // a message that can't be uncompressed is still queued, so decoding rejects it
@@ -182,15 +221,20 @@ public class Eth2TopicHandler<MessageT extends SszData> implements TopicHandler 
                   inFlightLimiter.getMaxInFlightBytes()));
       return SafeFuture.completedFuture(ValidationResult.Ignore);
     }
-    return queueForProcessing(message).alwaysRun(() -> inFlightLimiter.release(messageBytes));
+    return queueForProcessing(message, messageBytes, receipt)
+        .alwaysRun(() -> inFlightLimiter.release(messageBytes));
   }
 
-  private SafeFuture<ValidationResult> queueForProcessing(final PreparedGossipMessage message) {
+  private SafeFuture<ValidationResult> queueForProcessing(
+      final PreparedGossipMessage message,
+      final long messageBytes,
+      final PqTiming.Receipt receipt) {
     // SSZ decode on the async runner to avoid blocking the single gossipsub event thread
     return asyncRunner
         .runAsync(
             () -> {
               final MessageT deserialized = deserialize(message);
+              recordReceipt(receipt, deserialized, message, messageBytes);
               if (!forkValidator.isValid(deserialized)) {
                 return SafeFuture.completedFuture(
                     GossipSubValidationUtil.fromInternalValidationResult(
@@ -200,12 +244,40 @@ public class Eth2TopicHandler<MessageT extends SszData> implements TopicHandler 
                   .process(deserialized, message.getArrivalTimestamp())
                   .thenApply(
                       internalValidation -> {
+                        receipt.validated(timingOutcome(internalValidation));
                         processMessage(internalValidation, message);
                         return GossipSubValidationUtil.fromInternalValidationResult(
                             internalValidation);
                       });
             })
         .exceptionally(error -> handleMessageProcessingError(message, error));
+  }
+
+  private void recordReceipt(
+      final PqTiming.Receipt receipt,
+      final MessageT deserialized,
+      final PreparedGossipMessage message,
+      final long messageBytes) {
+    if (pqGossipTiming.isEmpty() || !PqTiming.isEnabled()) {
+      return;
+    }
+    try {
+      pqGossipTiming
+          .get()
+          .received(receipt, deserialized, message.getMessageId(), (int) messageBytes);
+    } catch (final RuntimeException e) {
+      // a malformed message is left for validation to reject
+      LOG.trace("Could not describe a message for the PQ timing export", e);
+    }
+  }
+
+  private static String timingOutcome(final InternalValidationResult result) {
+    return switch (result.code()) {
+      case ACCEPT -> "accepted";
+      case REJECT -> "rejected";
+      case IGNORE -> "ignored";
+      case SAVE_FOR_FUTURE -> "deferred";
+    };
   }
 
   private void processMessage(

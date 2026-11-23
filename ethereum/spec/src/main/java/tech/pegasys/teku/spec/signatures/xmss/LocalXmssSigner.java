@@ -37,7 +37,6 @@ import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AggregateAnd
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.logic.versions.pq.helpers.MiscHelpersPq;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
-import tech.pegasys.teku.xmss.XmssConstants;
 import tech.pegasys.teku.xmss.XmssPublicKey;
 import tech.pegasys.teku.xmss.XmssSignature;
 import tech.pegasys.teku.xmss.XmssSigningKey;
@@ -49,22 +48,22 @@ import tech.pegasys.teku.xmss.XmssSigningKey;
  */
 public class LocalXmssSigner implements XmssSigner {
 
-  // Fewer than the key's own cache holds, so a tree this signer remembers preparing is one the
-  // key still has
-  private static final int MAX_PREPARED_TREES = 4;
+  // Fewer than the key keeps, so a tree this signer remembers preparing is one the key still has.
+  // A validator signs from two bottom trees, and prepares a third ahead of a rollover.
+  private static final int MAX_PREPARED_TREES = XmssSigningKey.MAX_CACHED_BOTTOM_TREES - 1;
 
   private final Spec spec;
   private final XmssSigningKey signingKey;
-  private final VrfTree vrfTree;
+  private final VrfProver vrfProver;
   private final XmssLeafProtector leafProtector;
   private final AsyncRunner asyncRunner;
   private final SigningRootUtil signingRootUtil;
 
   // The bottom trees prepareForSlot has asked the key for, most recently used last
-  private final Map<Long, SafeFuture<Void>> preparedTrees =
+  private final Map<Long, SafeFuture<Boolean>> preparedTrees =
       new LinkedHashMap<>(MAX_PREPARED_TREES + 1, 0.75f, true) {
         @Override
-        protected boolean removeEldestEntry(final Map.Entry<Long, SafeFuture<Void>> eldest) {
+        protected boolean removeEldestEntry(final Map.Entry<Long, SafeFuture<Boolean>> eldest) {
           return size() > MAX_PREPARED_TREES;
         }
       };
@@ -72,12 +71,12 @@ public class LocalXmssSigner implements XmssSigner {
   public LocalXmssSigner(
       final Spec spec,
       final XmssSigningKey signingKey,
-      final VrfTree vrfTree,
+      final VrfProver vrfProver,
       final XmssLeafProtector leafProtector,
       final AsyncRunner asyncRunner) {
     this.spec = spec;
     this.signingKey = signingKey;
-    this.vrfTree = vrfTree;
+    this.vrfProver = vrfProver;
     this.leafProtector = leafProtector;
     this.asyncRunner = asyncRunner;
     this.signingRootUtil = new SigningRootUtil(spec);
@@ -161,15 +160,18 @@ public class LocalXmssSigner implements XmssSigner {
     for (final long bottomTree : XmssLeafLayout.bottomTreesAt(spec, slot)) {
       prepared =
           prepared.thenCompose(
-              count -> prepareBottomTree(bottomTree).thenApply(isNew -> isNew ? count + 1 : count));
+              count -> prepareBottomTree(bottomTree).thenApply(built -> built ? count + 1 : count));
     }
     return prepared;
   }
 
-  /** Builds {@code bottomTree} unless this signer already asked for it. True if it was new. */
+  /**
+   * Builds {@code bottomTree} unless this signer already asked for it. True if the key had to build
+   * it, false if it held the tree already, for example from its saved tree cache.
+   */
   private SafeFuture<Boolean> prepareBottomTree(final long bottomTree) {
-    final SafeFuture<Void> building = new SafeFuture<>();
-    final SafeFuture<Void> alreadyRequested;
+    final SafeFuture<Boolean> building = new SafeFuture<>();
+    final SafeFuture<Boolean> alreadyRequested;
     synchronized (preparedTrees) {
       alreadyRequested = preparedTrees.get(bottomTree);
       if (alreadyRequested == null) {
@@ -180,22 +182,23 @@ public class LocalXmssSigner implements XmssSigner {
       return alreadyRequested.thenApply(__ -> false);
     }
     asyncRunner
-        .runAsync(() -> signingKey.prepare(XmssConstants.firstLeafOfBottomTree(bottomTree)))
+        .runAsync(
+            () ->
+                SafeFuture.completedFuture(
+                    signingKey.prepare(XmssSigningKey.firstLeafOfBottomTree(bottomTree))))
         .propagateTo(building);
-    return building
-        .whenException(
-            error -> {
-              // Forget the failure, so a later call tries again
-              synchronized (preparedTrees) {
-                preparedTrees.remove(bottomTree, building);
-              }
-            })
-        .thenApply(__ -> true);
+    return building.whenException(
+        error -> {
+          // Forget the failure, so a later call tries again
+          synchronized (preparedTrees) {
+            preparedTrees.remove(bottomTree, building);
+          }
+        });
   }
 
   @Override
   public SafeFuture<List<Bytes32>> computeVrfProof(final UInt64 slot) {
-    return asyncRunner.runAsync(() -> SafeFuture.completedFuture(vrfTree.computeProof(slot)));
+    return asyncRunner.runAsync(() -> SafeFuture.completedFuture(vrfProver.computeProof(slot)));
   }
 
   @Override

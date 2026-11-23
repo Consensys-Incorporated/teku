@@ -46,6 +46,7 @@ import tech.pegasys.teku.spec.logic.versions.gloas.util.ValidatorsUtilGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.weaksubjectivity.WeakSubjectivityCalculatorGloas;
 import tech.pegasys.teku.spec.logic.versions.gloas.withdrawals.WithdrawalsHelpersGloas;
 import tech.pegasys.teku.spec.logic.versions.pq.block.BlockProcessorPq;
+import tech.pegasys.teku.spec.logic.versions.pq.crypto.StarkBackend;
 import tech.pegasys.teku.spec.logic.versions.pq.crypto.StarkProofVerifier;
 import tech.pegasys.teku.spec.logic.versions.pq.crypto.XmssSignatureVerifier;
 import tech.pegasys.teku.spec.logic.versions.pq.execution.ExecutionPayloadVerifierPq;
@@ -140,8 +141,8 @@ public class SpecLogicPq extends AbstractSpecLogic {
     final OperationSignatureVerifierPq operationSignatureVerifier =
         new OperationSignatureVerifierPq(
             miscHelpers, beaconStateAccessors, predicates, xmssSignatureVerifier);
-    final StarkProofVerifier starkProofVerifier =
-        StarkProofVerifier.concatenated(xmssSignatureVerifier);
+    // The concatenation stand-in, or leanVM proofs once the node has a leanVM sidecar
+    final StarkProofVerifier starkProofVerifier = StarkBackend.verifier(xmssSignatureVerifier);
 
     // Weak subjectivity
     final WeakSubjectivityCalculatorGloas weakSubjectivityCalculator =

@@ -41,6 +41,7 @@ import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
@@ -48,7 +49,9 @@ import tech.pegasys.teku.spec.logic.common.statetransition.results.ExecutionPayl
 import tech.pegasys.teku.spec.logic.common.statetransition.results.ExecutionPayloadImportResult.FailureReason;
 import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.statetransition.validation.AggregateAttestationValidator;
+import tech.pegasys.teku.statetransition.validation.AggregateAttestationValidatorPq;
 import tech.pegasys.teku.statetransition.validation.AttestationValidator;
 import tech.pegasys.teku.statetransition.validation.BlockBroadcastValidator;
 import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
@@ -199,37 +202,59 @@ public class GossipBeaconAggregateAndProofTestExecutor implements TestExecutor {
     // imported after their slot starts, while a message may be validated just before that slot
     // starts, and the spec does not require message times to be monotonic.
     final UInt64[] validationTimeMs = {UInt64.ZERO};
+    final GossipValidationHelper gossipValidationHelper =
+        createGossipValidationHelper(
+            spec,
+            ctx.recentChainData,
+            ctx.metricsSystem,
+            customFinalizedCheckpoint,
+            () -> validationTimeMs[0]);
     final AttestationValidator attestationValidator =
         new AttestationValidator(
             spec,
             AsyncBLSSignatureVerifier.wrap(blsVerifier),
-            createGossipValidationHelper(
-                spec,
-                ctx.recentChainData,
-                ctx.metricsSystem,
-                customFinalizedCheckpoint,
-                () -> validationTimeMs[0]),
+            gossipValidationHelper,
             invalidBlockRoots,
             blockRootsWithInvalidExecutionPayload);
     final AggregateAttestationValidator aggregateValidator =
         new AggregateAttestationValidator(
             spec, attestationValidator, AsyncBLSSignatureVerifier.wrap(blsVerifier));
+    final AggregateAttestationValidatorPq pqAggregateValidator =
+        new AggregateAttestationValidatorPq(spec, attestationValidator, gossipValidationHelper);
+    final boolean isPq = spec.getGenesisSchemaDefinitions() instanceof SchemaDefinitionsPq;
 
     for (final GossipBeaconAggregateAndProofMetaData.Message message : metaData.getMessages()) {
       final UInt64 messageTimeMs = UInt64.valueOf(message.getCurrentTimeMs());
       validationTimeMs[0] = messageTimeMs;
       ctx.forkChoice.onTick(messageTimeMs, Optional.empty());
 
-      final SignedAggregateAndProof signedAggregateAndProof =
-          loadSsz(
-              testDefinition,
-              message.getMessage() + ".ssz_snappy",
-              spec.getGenesisSchemaDefinitions().getSignedAggregateAndProofSchema());
-
-      final ValidatableAttestation validatableAttestation =
-          ValidatableAttestation.aggregateFromNetwork(spec, signedAggregateAndProof);
-      final InternalValidationResult result =
-          aggregateValidator.validate(validatableAttestation).join();
+      final InternalValidationResult result;
+      if (isPq) {
+        final SignedAggregateAndProofPq signedAggregate =
+            loadSsz(
+                testDefinition,
+                message.getMessage() + ".ssz_snappy",
+                SchemaDefinitionsPq.required(spec.getGenesisSchemaDefinitions())
+                    .getPqAttestationSchemas()
+                    .getSignedAggregateAndProofSchema());
+        result =
+            pqAggregateValidator
+                .validate(
+                    signedAggregate,
+                    ValidatableAttestation.pqAggregateFromNetwork(spec, signedAggregate))
+                .join();
+      } else {
+        final SignedAggregateAndProof signedAggregateAndProof =
+            loadSsz(
+                testDefinition,
+                message.getMessage() + ".ssz_snappy",
+                spec.getGenesisSchemaDefinitions().getSignedAggregateAndProofSchema());
+        result =
+            aggregateValidator
+                .validate(
+                    ValidatableAttestation.aggregateFromNetwork(spec, signedAggregateAndProof))
+                .join();
+      }
 
       GossipTestContext.assertValidationResult(
           "aggregate " + message.getMessage(), message.getExpected(), result);

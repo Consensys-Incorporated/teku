@@ -59,6 +59,16 @@ public interface PayloadAttestationPool {
         }
 
         @Override
+        public SafeFuture<InternalValidationResult> addLocalPq(
+            final PayloadAttestationMessagePq payloadAttestationMessage) {
+          return SafeFuture.completedFuture(InternalValidationResult.ACCEPT);
+        }
+
+        @Override
+        public void subscribePqOperationAdded(
+            final OperationAddedSubscriber<PayloadAttestationMessagePq> subscriber) {}
+
+        @Override
         public SszList<PayloadAttestation> getPayloadAttestationsForBlock(
             final BeaconState blockSlotState, final Bytes32 parentRoot) {
           return null;
@@ -87,6 +97,16 @@ public interface PayloadAttestationPool {
    */
   SafeFuture<InternalValidationResult> addRemotePq(
       PayloadAttestationMessagePq payloadAttestationMessage, Optional<UInt64> arrivalTimestamp);
+
+  /** PQ: a payload attestation message from a local validator, handled like one from gossip. */
+  SafeFuture<InternalValidationResult> addLocalPq(
+      PayloadAttestationMessagePq payloadAttestationMessage);
+
+  /**
+   * PQ: subscribes to the PQ payload attestation messages the pool accepts, local and remote, e.g.
+   * to publish the local ones.
+   */
+  void subscribePqOperationAdded(OperationAddedSubscriber<PayloadAttestationMessagePq> subscriber);
 
   SszList<PayloadAttestation> getPayloadAttestationsForBlock(
       BeaconState blockSlotState, Bytes32 parentRoot);

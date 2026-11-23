@@ -17,6 +17,7 @@ import static java.nio.file.Files.createTempFile;
 import static java.nio.file.Files.writeString;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -28,6 +29,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -35,6 +37,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import tech.pegasys.techu.service.serviceutils.layout.SimpleDataDirLayout;
 import tech.pegasys.teku.bls.BLS;
 import tech.pegasys.teku.bls.BLSKeyPair;
@@ -307,7 +310,10 @@ class LocalValidatorSourceTest {
     when(keyStoreFilesLocator.parse()).thenReturn(List.of(Pair.of(pbkdf2Keystore, passwordFile)));
     final PqValidatorKeyLoader pqValidatorKeyLoader = mock(PqValidatorKeyLoader.class);
     final XmssSigner xmssSigner = mock(XmssSigner.class);
-    when(pqValidatorKeyLoader.load(pbkdf2Keystore, EXPECTED_PASSWORD, PBKDF2_PUBKEY))
+    @SuppressWarnings("unchecked")
+    final ArgumentCaptor<Supplier<Bytes32>> blsSecretKey = ArgumentCaptor.forClass(Supplier.class);
+    when(pqValidatorKeyLoader.load(
+            eq(pbkdf2Keystore), eq(EXPECTED_PASSWORD), eq(PBKDF2_PUBKEY), blsSecretKey.capture()))
         .thenReturn(Optional.of(xmssSigner));
     final LocalValidatorSource source =
         new LocalValidatorSource(
@@ -323,6 +329,8 @@ class LocalValidatorSourceTest {
     final ValidatorProvider provider = source.getAvailableValidators().getFirst();
 
     assertThat(provider.createXmssSigner()).contains(xmssSigner);
+    // Supplies the decrypted BLS key, in case the PQ keys are to be derived from it
+    assertThat(blsSecretKey.getValue().get()).isEqualTo(BLS_PRIVATE_KEY);
   }
 
   @Test

@@ -31,6 +31,7 @@ import tech.pegasys.teku.networking.eth2.gossip.topics.OperationProcessor;
 import tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers.DecodedPrefixFilter;
 import tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers.Eth2TopicHandler;
 import tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers.GossipInFlightLimiter;
+import tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers.PqGossipTiming;
 import tech.pegasys.teku.networking.p2p.gossip.GossipNetwork;
 import tech.pegasys.teku.networking.p2p.gossip.TopicChannel;
 import tech.pegasys.teku.spec.config.NetworkingSpecConfig;
@@ -101,6 +102,44 @@ public abstract class AbstractGossipManager<T extends SszData> implements Gossip
       final DebugDataDumper debugDataDumper,
       final DecodedPrefixFilter decodedPrefixFilter,
       final GossipInFlightLimiter inFlightLimiter) {
+    this(
+        recentChainData,
+        topicName,
+        asyncRunner,
+        gossipNetwork,
+        gossipEncoding,
+        forkInfo,
+        forkDigest,
+        processor,
+        gossipType,
+        getSlotForMessage,
+        getEpochForMessage,
+        networkingConfig,
+        gossipFailureLogger,
+        debugDataDumper,
+        decodedPrefixFilter,
+        inFlightLimiter,
+        Optional.empty());
+  }
+
+  protected AbstractGossipManager(
+      final RecentChainData recentChainData,
+      final GossipTopicName topicName,
+      final AsyncRunner asyncRunner,
+      final GossipNetwork gossipNetwork,
+      final GossipEncoding gossipEncoding,
+      final ForkInfo forkInfo,
+      final Bytes4 forkDigest,
+      final OperationProcessor<T> processor,
+      final SszSchema<T> gossipType,
+      final Function<T, Optional<UInt64>> getSlotForMessage,
+      final Function<T, UInt64> getEpochForMessage,
+      final NetworkingSpecConfig networkingConfig,
+      final GossipFailureLogger gossipFailureLogger,
+      final DebugDataDumper debugDataDumper,
+      final DecodedPrefixFilter decodedPrefixFilter,
+      final GossipInFlightLimiter inFlightLimiter,
+      final Optional<PqGossipTiming<T>> pqGossipTiming) {
     this.gossipNetwork = gossipNetwork;
     this.topicHandler =
         new Eth2TopicHandler<>(
@@ -116,7 +155,8 @@ public abstract class AbstractGossipManager<T extends SszData> implements Gossip
             networkingConfig,
             debugDataDumper,
             decodedPrefixFilter,
-            inFlightLimiter);
+            inFlightLimiter,
+            pqGossipTiming);
     this.gossipEncoding = gossipEncoding;
     this.gossipFailureLogger = gossipFailureLogger;
     this.getSlotForMessage = getSlotForMessage;

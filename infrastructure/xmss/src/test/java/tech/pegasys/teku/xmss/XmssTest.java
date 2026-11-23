@@ -98,7 +98,7 @@ class XmssTest {
   @Test
   void shouldSignWhileAnotherBottomTreeIsBeingPrepared() throws Exception {
     final UInt64 leafInFirstTree = UInt64.valueOf(7);
-    final UInt64 leafInSecondTree = XmssConstants.firstLeafOfBottomTree(1);
+    final UInt64 leafInSecondTree = XmssSigningKey.firstLeafOfBottomTree(1);
     try (XmssSigningKey key = Xmss.loadSigningKey(secretKey)) {
       key.prepare(leafInFirstTree);
       final CountDownLatch preparing = new CountDownLatch(1);
@@ -124,13 +124,22 @@ class XmssTest {
 
   @Test
   void shouldGroupLeavesIntoBottomTreesOf65536() {
-    assertThat(XmssConstants.bottomTreeIndex(UInt64.ZERO)).isZero();
-    assertThat(XmssConstants.bottomTreeIndex(UInt64.valueOf(65535))).isZero();
-    assertThat(XmssConstants.bottomTreeIndex(UInt64.valueOf(65536))).isEqualTo(1);
-    assertThat(XmssConstants.bottomTreeIndex(XmssConstants.MAX_LEAF_INDEX)).isEqualTo(65535);
-    assertThat(XmssConstants.firstLeafOfBottomTree(1)).isEqualTo(UInt64.valueOf(65536));
-    assertThat(XmssConstants.firstLeafOfBottomTree(65535))
+    assertThat(XmssSigningKey.bottomTreeOf(UInt64.ZERO)).isZero();
+    assertThat(XmssSigningKey.bottomTreeOf(UInt64.valueOf(65535))).isZero();
+    assertThat(XmssSigningKey.bottomTreeOf(UInt64.valueOf(65536))).isEqualTo(1);
+    assertThat(XmssSigningKey.bottomTreeOf(XmssConstants.MAX_LEAF_INDEX)).isEqualTo(65535);
+    assertThat(XmssSigningKey.firstLeafOfBottomTree(1)).isEqualTo(UInt64.valueOf(65536));
+    assertThat(XmssSigningKey.firstLeafOfBottomTree(65535))
         .isEqualTo(XmssConstants.MAX_LEAF_INDEX.minus(65535));
+  }
+
+  @Test
+  void prepare_reportsWhetherItBuiltTheTree() {
+    final UInt64 leaf = UInt64.valueOf(3);
+    try (XmssSigningKey key = Xmss.loadSigningKey(secretKey)) {
+      assertThat(key.prepare(leaf)).isTrue();
+      assertThat(key.prepare(leaf.plus(1))).isFalse();
+    }
   }
 
   @Test

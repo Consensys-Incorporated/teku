@@ -15,10 +15,11 @@ package tech.pegasys.teku.beaconrestapi.handlers.v4.validator;
 
 import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.GRAFFITI_PARAMETER;
 import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.INCLUDE_PAYLOAD_PARAMETER;
-import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.RANDAO_PARAMETER;
+import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.RANDAO_OR_VRF_REVEAL_PARAMETER;
 import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.SKIP_RANDAO_VERIFICATION_PARAMETER;
 import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.SLOT_PARAMETER;
 import static tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.MilestoneDependentTypesUtil.getMultipleSchemaDefinitionFromMilestone;
+import static tech.pegasys.teku.bls.BLSSignature.SSZ_BLS_SIGNATURE_SIZE;
 import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.ETH_CONSENSUS_HEADER_TYPE;
 import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.ETH_HEADER_BUILDER_URL_TYPE;
 import static tech.pegasys.teku.ethereum.json.types.EthereumTypes.ETH_HEADER_CONSENSUS_BLOCK_VALUE_TYPE;
@@ -42,11 +43,14 @@ import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_VALIDAT
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_VALIDATOR_REQUIRED;
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.BOOLEAN_TYPE;
 import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.UINT256_TYPE;
+import static tech.pegasys.teku.spec.constants.PqConstants.VRF_TREE_DEPTH;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.IntStream;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,6 +78,9 @@ public class PostNewBlockV4 extends RestApiEndpoint {
   private static final Logger LOG = LoggerFactory.getLogger(PostNewBlockV4.class);
 
   public static final String ROUTE = "/eth/v4/validator/blocks/{slot}";
+
+  /** A VRF proof: the {@code VRF_TREE_DEPTH + 1} roots of compute_vrf_proof, concatenated. */
+  static final int VRF_PROOF_SIZE = (VRF_TREE_DEPTH + 1) * Bytes32.SIZE;
 
   protected final ValidatorDataProvider validatorDataProvider;
 
@@ -126,7 +133,7 @@ public class PostNewBlockV4 extends RestApiEndpoint {
               """)
         .tags(TAG_VALIDATOR, TAG_VALIDATOR_REQUIRED)
         .pathParam(SLOT_PARAMETER.withDescription(SLOT_PATH_DESCRIPTION))
-        .queryParamRequired(RANDAO_PARAMETER)
+        .queryParamRequired(RANDAO_OR_VRF_REVEAL_PARAMETER)
         .queryParam(GRAFFITI_PARAMETER)
         .queryParamAllowsEmpty(SKIP_RANDAO_VERIFICATION_PARAMETER)
         .queryParamRequired(INCLUDE_PAYLOAD_PARAMETER)
@@ -152,7 +159,18 @@ public class PostNewBlockV4 extends RestApiEndpoint {
       request.respondError(SC_BAD_REQUEST, "produceBlockV4 is only supported from Gloas onwards");
       return;
     }
-    final BLSSignature randao = request.getQueryParameter(RANDAO_PARAMETER);
+    final Bytes randaoReveal = request.getQueryParameter(RANDAO_OR_VRF_REVEAL_PARAMETER);
+    final boolean isPq =
+        validatorDataProvider.getMilestoneAtSlot(slot).isGreaterThanOrEqualTo(SpecMilestone.PQ);
+    final int expectedRandaoRevealSize = isPq ? VRF_PROOF_SIZE : SSZ_BLS_SIGNATURE_SIZE;
+    if (randaoReveal.size() != expectedRandaoRevealSize) {
+      request.respondError(
+          SC_BAD_REQUEST,
+          String.format(
+              "randao_reveal must be %s bytes at slot %s, but was %s",
+              expectedRandaoRevealSize, slot, randaoReveal.size()));
+      return;
+    }
     final Optional<Bytes32> graffiti = request.getOptionalQueryParameter(GRAFFITI_PARAMETER);
     final boolean includePayload = request.getQueryParameter(INCLUDE_PAYLOAD_PARAMETER);
     final BuilderConfig builderConfig = request.getRequestBody();
@@ -165,8 +183,17 @@ public class PostNewBlockV4 extends RestApiEndpoint {
         builderConfig,
         requestTimeMs);
 
+    // From PQ, the RANDAO reveal is the proposer's VRF proof
     final SafeFuture<Optional<BlockContainerAndMetaData>> result =
-        validatorDataProvider.produceBlock(slot, randao, graffiti, includePayload, builderConfig);
+        isPq
+            ? validatorDataProvider.produceBlockWithVrfReveal(
+                slot, toVrfProof(randaoReveal), graffiti, includePayload, builderConfig)
+            : validatorDataProvider.produceBlock(
+                slot,
+                BLSSignature.fromBytesCompressed(randaoReveal),
+                graffiti,
+                includePayload,
+                builderConfig);
 
     request.respondAsync(
         result.thenApply(
@@ -206,6 +233,12 @@ public class PostNewBlockV4 extends RestApiEndpoint {
                         () ->
                             AsyncApiResponse.respondWithError(
                                 SC_INTERNAL_SERVER_ERROR, "Unable to produce a block"))));
+  }
+
+  private static List<Bytes32> toVrfProof(final Bytes vrfProof) {
+    return IntStream.range(0, VRF_TREE_DEPTH + 1)
+        .mapToObj(i -> Bytes32.wrap(vrfProof.slice(i * Bytes32.SIZE, Bytes32.SIZE)))
+        .toList();
   }
 
   private static SerializableTypeDefinition<BlockContainerAndMetaData> getResponseType(

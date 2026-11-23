@@ -404,6 +404,9 @@ PQ is an emergency fork for when elliptic-curve cryptography can no longer be tr
     - The socket's directory must be private (mode 0700).
     - A sidecar serves at most 16 connections, so share one `Sidecar` per process. Its calls run one at a time.
   - **leanXMSS signing and single-signature verification still run in-process,** and they are all Teku uses today. The EthLib vectors and the spec KAT still pass through `infrastructure/xmss` on 0.13.0.
+- **Update 2026-11-21, v0.14.0** (released 2026-11-20, leanVM #802). Teku uses it.
+  - **Smaller keys.** A loaded key stores 2^10 nodes per tree instead of every node: 16 KiB instead of 2 MiB for the top tree and for each cached bottom tree. Signing recomputes 2^6 leaves per path, at most about 3 ms more per signature. Signatures are unchanged byte for byte.
+  - **Saved tree caches.** `XmssSecretKey.cacheToBytes()` and `XmssSecretKey.fromCacheBytes(seed, publicKey, cache)` save and reload a key's trees (16 KiB plus 17 KiB per bottom tree, no secret in them), so a validator client can skip building them at startup. `fromCacheBytes` throws unless the cache matches the public key. Teku doesn't use these yet.
 - **Packaging (as of v0.10.1):** on Maven Central as `io.github.crate-crypto:lean-pq`, versions 0.6.1 to 0.11.0, jar SHA-1 `3b098870…`. The jar is 7.5 MB and bundles natives for linux-x86_64 and linux-aarch64 (glibc ≥ 2.17; x86_64 needs AVX2 and PCLMULQDQ), macOS universal, and windows-x86_64. There is no musl or Windows arm64 build. The library is the named module `org.ethereum.leanpq`.
 - **FFM, not JNI:** the JVM needs `--enable-native-access=ALL-UNNAMED`, because Teku runs on the class path. Add it to the start scripts, the Docker image and test JVM args, the same way `java-eth-kzg` is handled. On Linux and macOS the native library is copied into `java.io.tmpdir`, which must allow executable mappings. `-Dlean.pq.native.path` overrides it.
 - **API:**
@@ -544,7 +547,7 @@ Modelled on `infrastructure/bls` and `infrastructure/kzg`. `DepCheckPlugin` laye
   - stub mode returns an empty proof and accepts everything.
 - **Signer-side helpers** (could sit in `validator/client` instead):
   - `XmssKeyCache`: top-tree and bottom-tree LRU, `prepare(leaf)` warm-up;
-    - **Done differently:** lean-pq keeps the trees itself (the top tree and the last 8 bottom trees), so Teku has no cache class. `XmssLeafLayout.bottomTreesAt(spec, slot)` names the bottom trees a validator signs from, `XmssSigner.prepareForSlot(slot)` builds them, and `XmssKeyWarmer` in `validator/client` calls it ahead of time (§3.15 item 10).
+    - **Done differently:** lean-pq keeps the trees itself (the top tree and the last 4 bottom trees), and `XmssTreeCacheFile` saves them between starts, so Teku has no in-memory cache class. `XmssLeafLayout.bottomTreesAt(spec, slot)` names the bottom trees a validator signs from, `XmssSigner.prepareForSlot(slot)` builds them, and `XmssKeyWarmer` in `validator/client` calls it ahead of time (§3.15 item 10).
   - `VrfTree`: derivation, root, `proof(slot)`, persistent cache of level-k nodes.
 - **Tests:** KATs from `xmss_kat.json` and the leanVM ethlib vectors; property tests for leaf parsing.
 
@@ -842,9 +845,9 @@ The pool aggregates BLS signatures today (`AggregatingAttestationPoolV2`, `Match
     - The per-slot bottom tree rolls every 8,192 slots (about 27 h). Precompute the next one in the background.
     - **Done (warm-up):** `XmssKeyWarmer` prepares every owned key for the current slot once keys are loaded, and for the slot 256 ahead whenever that slot signs from a bottom tree the current one does not. So no signature builds a tree on the duty path. It prepares a quarter of the cores' worth of keys at once, to leave threads for signing.
       - The first per-slot tree holds only 4,096 slots, because the per-slot leaves start in the middle of bottom tree 24576. The rollovers are at slot 4,096 and every 8,192 slots after.
-      - `XmssSigningKey.prepare` and `sign` no longer hold a common lock, so building the next tree does not delay signing in the current one.
+      - `XmssSigningKey.prepare` and `sign` no longer hold a common lock, so building the next tree does not delay signing in the current one. The native key guards its own trees: lean-pq takes it by shared reference and locks its tree cache internally.
       - Exits and preregistrations sign at reserved leaves, which share bottom tree 0 with the first 32,768 attestation epochs; they are not prepared separately.
-    - **Still to do (startup and memory):** each start rebuilds every key's top tree, and each tree is held whole. [leanVM #802](https://github.com/leanEthereum/leanVM/pull/802) (open on 2026-11-20) cuts a tree to 16 KiB and adds a tree cache a key can be saved to and loaded from. Once a lean-pq release has it: save the cache as `<name>.xmss-cache` next to the keystore, load keys from it, rewrite it after each warm-up, and write it from `generate-pq-keys`.
+      - Keys loaded from a saved or pregenerated tree cache already hold bottom trees 0 and 24576, so the first warm-up builds nothing for them. A tree the warm-up does build is saved by the loader's `onBottomTreeBuilt` listener, so each tree is built once per key.
 
 ### 3.16 Storage
 

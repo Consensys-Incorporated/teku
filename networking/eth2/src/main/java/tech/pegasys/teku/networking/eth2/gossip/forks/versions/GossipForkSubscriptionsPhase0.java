@@ -43,6 +43,7 @@ import tech.pegasys.teku.spec.datastructures.operations.ProposerSlashing;
 import tech.pegasys.teku.spec.datastructures.operations.SignedVoluntaryExit;
 import tech.pegasys.teku.spec.datastructures.state.Fork;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.statetransition.util.DebugDataDumper;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
@@ -66,6 +67,7 @@ public class GossipForkSubscriptionsPhase0 implements GossipForkSubscriptions {
 
   private AttestationGossipManager attestationGossipManager;
   private AggregateGossipManager aggregateGossipManager;
+  private PqAggregateGossipManager pqAggregateGossipManager;
   private BlockGossipManager blockGossipManager;
   private VoluntaryExitGossipManager voluntaryExitGossipManager;
   private ProposerSlashingGossipManager proposerSlashingGossipManager;
@@ -172,7 +174,7 @@ public class GossipForkSubscriptionsPhase0 implements GossipForkSubscriptions {
 
   /** PQ's aggregates (SignedAggregateAndProofPq), to the same aggregate processor. */
   void addPqAggregateGossipManager(final ForkInfo forkInfo, final Bytes4 forkDigest) {
-    addGossipManager(
+    pqAggregateGossipManager =
         new PqAggregateGossipManager(
             spec,
             recentChainData,
@@ -182,7 +184,8 @@ public class GossipForkSubscriptionsPhase0 implements GossipForkSubscriptions {
             forkInfo,
             forkDigest,
             aggregateProcessor,
-            debugDataDumper));
+            debugDataDumper);
+    addGossipManager(pqAggregateGossipManager);
   }
 
   void addVoluntaryExitGossipManager(final ForkInfo forkInfo, final Bytes4 forkDigest) {
@@ -210,6 +213,11 @@ public class GossipForkSubscriptionsPhase0 implements GossipForkSubscriptions {
             forkInfo,
             forkDigest,
             proposerSlashingProcessor,
+            spec.atEpoch(forkInfo.getFork().getEpoch()).getSchemaDefinitions()
+                    instanceof SchemaDefinitionsPq
+                // PQ's block headers are signed with XMSS
+                ? ProposerSlashing.SSZ_SCHEMA_PQ
+                : ProposerSlashing.SSZ_SCHEMA,
             spec.getNetworkingConfig(),
             debugDataDumper);
     addGossipManager(proposerSlashingGossipManager);
@@ -261,6 +269,9 @@ public class GossipForkSubscriptionsPhase0 implements GossipForkSubscriptions {
     // PQ has its own aggregate type, so its forks have no BLS aggregate topic
     if (aggregateGossipManager != null) {
       aggregateGossipManager.onNewAggregate(attestation);
+    }
+    if (pqAggregateGossipManager != null) {
+      pqAggregateGossipManager.onNewAggregate(attestation);
     }
   }
 

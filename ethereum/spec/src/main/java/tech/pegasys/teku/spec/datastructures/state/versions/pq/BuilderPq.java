@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.spec.datastructures.state.versions.pq;
 
+import static tech.pegasys.teku.spec.constants.PqConstants.XMSS_DEPOSIT_PREFIX;
+
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
@@ -88,6 +90,18 @@ public class BuilderPq
   @Override
   public BLSPublicKey getPublicKey() {
     throw new UnsupportedOperationException("A PQ builder has no BLS public key");
+  }
+
+  /**
+   * A PQ builder exit request carries the builder's XMSS key after a 16-byte prefix:
+   * process_builder_exit_request, modified in PQ, reads {@code request.pubkey[16:]}.
+   */
+  @Override
+  public boolean isNamedByExitRequestPubkey(final BLSPublicKey requestPubkey) {
+    return requestPubkey
+        .toBytesCompressed()
+        .slice(XMSS_DEPOSIT_PREFIX.size())
+        .equals(getXmssPublicKey());
   }
 
   @Override

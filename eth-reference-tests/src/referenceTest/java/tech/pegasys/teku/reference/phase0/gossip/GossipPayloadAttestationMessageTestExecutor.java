@@ -37,10 +37,12 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessageSchema;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.statetransition.payloadattestation.PayloadAttestationMessageGossipValidator;
 import tech.pegasys.teku.statetransition.payloadattestation.ValidatablePayloadAttestationMessage;
 import tech.pegasys.teku.statetransition.validation.BlockBroadcastValidator;
@@ -152,12 +154,25 @@ public class GossipPayloadAttestationMessageTestExecutor implements TestExecutor
       validationTimeMs[0] = UInt64.valueOf(message.getCurrentTimeMs());
       ctx.forkChoice.onTick(UInt64.valueOf(message.getCurrentTimeMs()), Optional.empty());
 
-      final PayloadAttestationMessage payloadAttestationMessage =
-          loadSsz(testDefinition, message.getMessage() + ".ssz_snappy", schema::sszDeserialize);
-      final InternalValidationResult result =
-          safeJoin(
-              validator.validate(
-                  ValidatablePayloadAttestationMessage.fromNetwork(payloadAttestationMessage)));
+      final ValidatablePayloadAttestationMessage validatableMessage;
+      if (spec.forMilestone(schemaMilestone).getSchemaDefinitions()
+          instanceof SchemaDefinitionsPq schemaDefinitionsPq) {
+        // PQ payload attestation messages are signed with XMSS
+        final PayloadAttestationMessagePq payloadAttestationMessage =
+            loadSsz(
+                testDefinition,
+                message.getMessage() + ".ssz_snappy",
+                schemaDefinitionsPq.getPqAttestationSchemas().getPayloadAttestationMessageSchema()
+                    ::sszDeserialize);
+        validatableMessage =
+            ValidatablePayloadAttestationMessage.fromNetworkPq(spec, payloadAttestationMessage);
+      } else {
+        final PayloadAttestationMessage payloadAttestationMessage =
+            loadSsz(testDefinition, message.getMessage() + ".ssz_snappy", schema::sszDeserialize);
+        validatableMessage =
+            ValidatablePayloadAttestationMessage.fromNetwork(payloadAttestationMessage);
+      }
+      final InternalValidationResult result = safeJoin(validator.validate(validatableMessage));
 
       GossipTestContext.assertValidationResult(
           "payload attestation message " + message.getMessage(), message.getExpected(), result);

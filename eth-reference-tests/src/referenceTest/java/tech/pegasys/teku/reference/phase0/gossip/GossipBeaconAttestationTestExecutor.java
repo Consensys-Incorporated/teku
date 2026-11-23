@@ -43,6 +43,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationSchema;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SingleAttestationPq;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
@@ -51,6 +52,7 @@ import tech.pegasys.teku.spec.logic.common.statetransition.results.ExecutionPayl
 import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsElectra;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.statetransition.validation.AttestationValidator;
 import tech.pegasys.teku.statetransition.validation.BlockBroadcastValidator;
 import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
@@ -237,6 +239,10 @@ public class GossipBeaconAttestationTestExecutor implements TestExecutor {
 
   private static AttestationSchema<? extends Attestation> getGossipAttestationSchema(
       final Spec spec) {
+    if (spec.getGenesisSchemaDefinitions() instanceof SchemaDefinitionsPq) {
+      // PQ single attestations are signed with XMSS
+      return SingleAttestationPq.SSZ_SCHEMA;
+    }
     if (spec.getGenesisSpec().getMilestone().isGreaterThanOrEqualTo(SpecMilestone.ELECTRA)) {
       return SchemaDefinitionsElectra.required(spec.getGenesisSchemaDefinitions())
           .getSingleAttestationSchema();

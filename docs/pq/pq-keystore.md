@@ -80,6 +80,20 @@ The signer is available as `Validator.getXmssSigner()`. Any mismatch fails valid
 
 On networks without a PQ fork, PQ files are ignored and nothing touches the native leanXMSS library.
 
+## Keys derived from the BLS key (devnets)
+
+The PQ devnet genesis tool (ethpandaops `eth-beacon-genesis`, `pq` branch, used by the `ethereum-genesis-generator` `pq` image) doesn't write PQ keystores. It derives each genesis validator's PQ keys from the validator's BLS secret key `sk` (32 bytes, big-endian), at `m/12381/3600/i/0/0` for a mnemonic:
+
+- XMSS seed: `sha256("leanxmss-seed" ‖ sk)`;
+- VRF seed: `sha256("vrf-seed" ‖ sk)`, with the spec's depth-31 Keccak-256 VRF tree.
+
+The hidden flag `--Xvalidators-pq-keys-derived-from-bls-key` makes Teku do the same for any local BLS keystore that has no `.pq-keystore` next to it (`PqKeyStoreSecrets.deriveFromBlsSecretKey`). A `.pq-keystore`, where present, still wins. The flag is off by default: with it, anyone who has the BLS key has the PQ keys too, so it is for devnets only.
+
+- There are no declared public values to check derived keys against. A key that doesn't match the genesis just finds no validator index, and the validator gets no PQ duties.
+- The VRF tree of each derived key is saved in `<validator data dir>/pq-derived-vrf-cache/<bls pubkey>.vrf-cache`, not next to the keystore, which may be read-only. The first start derives it: about 2^32 Keccak-256 hashes, roughly 75 seconds per key on a 16-core machine (`VrfKeccak`). Later starts read it back.
+- **Precomputed VRF states** (`--Xvalidators-pq-vrf-state-url`, ethereum-package's `vrf_state_url`) save that derivation. The file holds 1028 bytes per genesis validator index: the VRF root, a 4-byte slot (0), then the 31 siblings of leaf 0 from height 0 up. Teku fetches the whole file once (10 MB for the package's 10,000 keys) when a derived key has neither a saved tree nor a saved state, picks each key's entry by checking that the entry's siblings open the key's own leaf 0 to the entry's root, and saves it as `<bls pubkey>.vrf-state` next to the trees. `VrfLeafZeroState` then builds a slot's proof from the stored siblings, the path of leaf 0, and the subtrees right of leaf 0 below the slot's top bit: about `slot` hashes at most, which stays cheap on a young devnet but grows with the slot. If the file can't be fetched or holds no entry for a key, that key's tree is derived as before. A key without the flag still reads a saved state.
+- Checked against a real genesis: for the generator's test mnemonic, the derived XMSS public key of validator 0 is the one its genesis registered, and the VRF seed is the one its VRF test pins (`PqValidatorKeyLoaderTest`, `PqKeyStoreSecretsTest`, `VrfTreeTest`).
+
 ## Not covered yet
 
 - Checking `vrf_root` and `xmss_pubkey` against the validator's registration in the beacon state (`validator_pq_registrations`, or the PQ `Validator` after the fork). That belongs with the duties work (9c) and the pre-fork registration warning.

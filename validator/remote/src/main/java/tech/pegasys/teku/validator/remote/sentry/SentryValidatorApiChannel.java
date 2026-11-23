@@ -46,6 +46,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
@@ -54,6 +55,8 @@ import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SignedContributionAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeContribution;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeMessage;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationAndProofPq;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.datastructures.validator.SubnetSubscription;
@@ -87,6 +90,12 @@ public class SentryValidatorApiChannel implements ValidatorApiChannel {
   public SafeFuture<Optional<Map<BLSPublicKey, Integer>>> getValidatorIndices(
       final Collection<BLSPublicKey> publicKeys) {
     return dutiesProviderChannel.getValidatorIndices(publicKeys);
+  }
+
+  @Override
+  public SafeFuture<Optional<Map<Bytes32, Integer>>> getValidatorIndicesByXmssKey(
+      final Collection<Bytes32> xmssPublicKeys) {
+    return dutiesProviderChannel.getValidatorIndicesByXmssKey(xmssPublicKeys);
   }
 
   @Override
@@ -134,6 +143,19 @@ public class SentryValidatorApiChannel implements ValidatorApiChannel {
     return blockHandlerChannel
         .orElse(dutiesProviderChannel)
         .createUnsignedBlock(slot, randaoReveal, graffiti, includePayload, builderConfig);
+  }
+
+  @Override
+  public SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlockWithVrfReveal(
+      final UInt64 slot,
+      final List<Bytes32> vrfRandaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final Optional<BuilderConfig> builderConfig) {
+    return blockHandlerChannel
+        .orElse(dutiesProviderChannel)
+        .createUnsignedBlockWithVrfReveal(
+            slot, vrfRandaoReveal, graffiti, includePayload, builderConfig);
   }
 
   @Override
@@ -209,6 +231,22 @@ public class SentryValidatorApiChannel implements ValidatorApiChannel {
   }
 
   @Override
+  public SafeFuture<Optional<AttestationAndProofPq>> createPqAggregate(
+      final UInt64 slot, final Bytes32 attestationHashTreeRoot, final UInt64 committeeIndex) {
+    return attestationPublisherChannel
+        .orElse(dutiesProviderChannel)
+        .createPqAggregate(slot, attestationHashTreeRoot, committeeIndex);
+  }
+
+  @Override
+  public SafeFuture<List<SubmitDataError>> sendPqAggregateAndProofs(
+      final List<SignedAggregateAndProofPq> aggregateAndProofs) {
+    return attestationPublisherChannel
+        .orElse(dutiesProviderChannel)
+        .sendPqAggregateAndProofs(aggregateAndProofs);
+  }
+
+  @Override
   public SafeFuture<SendSignedBlockResult> sendSignedBlock(
       final SignedBlockContainer blockContainer,
       final BroadcastValidationLevel broadcastValidationLevel,
@@ -240,6 +278,14 @@ public class SentryValidatorApiChannel implements ValidatorApiChannel {
     return attestationPublisherChannel
         .orElse(dutiesProviderChannel)
         .sendPayloadAttestationMessages(payloadAttestationMessages);
+  }
+
+  @Override
+  public SafeFuture<List<SubmitDataError>> sendPqPayloadAttestationMessages(
+      final List<PayloadAttestationMessagePq> payloadAttestationMessages) {
+    return attestationPublisherChannel
+        .orElse(dutiesProviderChannel)
+        .sendPqPayloadAttestationMessages(payloadAttestationMessages);
   }
 
   @Override

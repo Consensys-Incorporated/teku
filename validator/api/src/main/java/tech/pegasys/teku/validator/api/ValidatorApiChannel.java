@@ -47,6 +47,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
@@ -55,6 +56,8 @@ import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SignedContributionAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeContribution;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeMessage;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationAndProofPq;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.datastructures.validator.SubnetSubscription;
@@ -289,6 +292,15 @@ public interface ValidatorApiChannel extends BuilderApiChannel, ChannelInterface
   SafeFuture<Optional<Map<BLSPublicKey, Integer>>> getValidatorIndices(
       Collection<BLSPublicKey> publicKeys);
 
+  /**
+   * PQ: the indices of validators by their XMSS public keys. A PQ state has no BLS keys, so a
+   * validator client finds its PQ validators by the XMSS keys of their signers.
+   */
+  default SafeFuture<Optional<Map<Bytes32, Integer>>> getValidatorIndicesByXmssKey(
+      final Collection<Bytes32> xmssPublicKeys) {
+    return SafeFuture.completedFuture(Optional.of(Map.of()));
+  }
+
   SafeFuture<Optional<Map<BLSPublicKey, StateValidatorData>>> getValidatorStatuses(
       Collection<BLSPublicKey> validatorIdentifiers);
 
@@ -326,10 +338,48 @@ public interface ValidatorApiChannel extends BuilderApiChannel, ChannelInterface
       boolean includePayload,
       Optional<BuilderConfig> builderConfig);
 
+  /**
+   * From PQ, the RANDAO reveal is the proposer's VRF proof for the slot, {@code compute_vrf_proof},
+   * rather than a BLS signature.
+   */
+  default SafeFuture<Optional<BlockContainerAndMetaData>> createUnsignedBlockWithVrfReveal(
+      final UInt64 slot,
+      final List<Bytes32> vrfRandaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final Optional<BuilderConfig> builderConfig) {
+    return SafeFuture.failedFuture(
+        new UnsupportedOperationException("Producing blocks with a VRF reveal is not supported"));
+  }
+
   SafeFuture<Optional<AttestationData>> createAttestationData(UInt64 slot, int committeeIndex);
 
   SafeFuture<Optional<Attestation>> createAggregate(
       UInt64 slot, Bytes32 attestationHashTreeRoot, Optional<UInt64> committeeIndex);
+
+  /**
+   * PQ: the best aggregate of the committee's attestations with the proof of their signatures,
+   * which an aggregator signs as an {@code AggregateAndProofPq}.
+   */
+  default SafeFuture<Optional<AttestationAndProofPq>> createPqAggregate(
+      final UInt64 slot, final Bytes32 attestationHashTreeRoot, final UInt64 committeeIndex) {
+    return SafeFuture.failedFuture(
+        new UnsupportedOperationException("PQ aggregates are not supported"));
+  }
+
+  /** PQ: publishes aggregators' signed aggregates with their proofs. */
+  default SafeFuture<List<SubmitDataError>> sendPqAggregateAndProofs(
+      final List<SignedAggregateAndProofPq> aggregateAndProofs) {
+    return SafeFuture.failedFuture(
+        new UnsupportedOperationException("PQ aggregates are not supported"));
+  }
+
+  /** PQ: publishes PTC members' payload attestation messages, signed with leanXMSS. */
+  default SafeFuture<List<SubmitDataError>> sendPqPayloadAttestationMessages(
+      final List<PayloadAttestationMessagePq> payloadAttestationMessages) {
+    return SafeFuture.failedFuture(
+        new UnsupportedOperationException("PQ payload attestation messages are not supported"));
+  }
 
   SafeFuture<Optional<SyncCommitteeContribution>> createSyncCommitteeContribution(
       UInt64 slot, int subcommitteeIndex, Bytes32 beaconBlockRoot);

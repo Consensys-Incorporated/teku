@@ -50,6 +50,8 @@ import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SignedContributionAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeContribution;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeMessage;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationAndProofPq;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsAltair;
@@ -106,6 +108,18 @@ public class ValidatorDataProvider {
     checkBlockProducingParameters(slot, randao);
     return validatorApiChannel.createUnsignedBlock(
         slot, randao, graffiti, includePayload, Optional.of(builderConfig));
+  }
+
+  /** From PQ, the RANDAO reveal is the proposer's VRF proof for the slot. */
+  public SafeFuture<Optional<BlockContainerAndMetaData>> produceBlockWithVrfReveal(
+      final UInt64 slot,
+      final List<Bytes32> vrfRandaoReveal,
+      final Optional<Bytes32> graffiti,
+      final boolean includePayload,
+      final BuilderConfig builderConfig) {
+    checkBlockProducingParameters(slot, BLSSignature.empty());
+    return validatorApiChannel.createUnsignedBlockWithVrfReveal(
+        slot, vrfRandaoReveal, graffiti, includePayload, Optional.of(builderConfig));
   }
 
   private void checkBlockProducingParameters(final UInt64 slot, final BLSSignature randao) {
@@ -237,6 +251,25 @@ public class ValidatorDataProvider {
       final UInt64 slot, final Bytes32 attestationHashTreeRoot, final UInt64 committeeIndex) {
     return createAggregate(slot, attestationHashTreeRoot, Optional.of(committeeIndex))
         .thenApply(maybeAttestation -> maybeAttestation.map(this::lookUpMetadata));
+  }
+
+  /** PQ: the aggregate with the proof of its signatures, which the aggregator signs. */
+  public SafeFuture<Optional<ObjectAndMetaData<AttestationAndProofPq>>>
+      createPqAggregateAndMetaData(
+          final UInt64 slot, final Bytes32 attestationHashTreeRoot, final UInt64 committeeIndex) {
+    return validatorApiChannel
+        .createPqAggregate(slot, attestationHashTreeRoot, committeeIndex)
+        .thenApply(
+            maybeAggregate ->
+                maybeAggregate.map(
+                    aggregate ->
+                        new ObjectAndMetaData<>(
+                            aggregate, spec.atSlot(slot).getMilestone(), false, false, false)));
+  }
+
+  public SafeFuture<List<SubmitDataError>> sendPqAggregateAndProofs(
+      final List<SignedAggregateAndProofPq> aggregateAndProofs) {
+    return validatorApiChannel.sendPqAggregateAndProofs(aggregateAndProofs);
   }
 
   public SafeFuture<List<SubmitDataError>> sendAggregateAndProofs(

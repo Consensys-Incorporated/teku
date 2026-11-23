@@ -38,6 +38,11 @@ public class AttestationForkChecker {
     }
   }
 
+  /** Whether attestations shuffled with this seed are for committees of the block's chain. */
+  public boolean isFromCorrectFork(final Bytes32 committeeShufflingSeed) {
+    return validCommitteeShufflingSeeds.contains(committeeShufflingSeed);
+  }
+
   public boolean areAttestationsFromCorrectForkV2(
       final MatchingDataAttestationGroupV2 attestationGroup) {
     return attestationGroup.matchesCommitteeShufflingSeed(validCommitteeShufflingSeeds);
