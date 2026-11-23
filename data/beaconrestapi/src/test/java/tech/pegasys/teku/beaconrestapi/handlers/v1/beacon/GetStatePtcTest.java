@@ -26,16 +26,18 @@ import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMe
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMetadataErrorResponse;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.api.exceptions.BadRequestException;
-import tech.pegasys.teku.api.migrated.StatePtcData;
 import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerWithChainDataProviderTest;
 import tech.pegasys.teku.infrastructure.restapi.StubRestApiRequest;
 import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszUInt64VectorSchema;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
+import tech.pegasys.teku.spec.schemas.api.StatePtcData;
+import tech.pegasys.teku.spec.schemas.api.StatePtcDataSchema;
 
 class GetStatePtcTest extends AbstractMigratedBeaconHandlerWithChainDataProviderTest {
 
@@ -64,8 +66,8 @@ class GetStatePtcTest extends AbstractMigratedBeaconHandlerWithChainDataProvider
     assertThat(request.getResponseCode()).isEqualTo(SC_OK);
     final StatePtcData data =
         (StatePtcData) ((ObjectAndMetaData<?>) request.getResponseBody()).getData();
-    assertThat(data.slot()).isEqualTo(UInt64.ONE);
-    assertThat(data.validators())
+    assertThat(data.getSlot()).isEqualTo(UInt64.ONE);
+    assertThat(data.getValidators())
         .hasSize(
             spec.getGenesisSpecConfig()
                 .toVersionGloas()
@@ -92,10 +94,10 @@ class GetStatePtcTest extends AbstractMigratedBeaconHandlerWithChainDataProvider
   void metadata_shouldHandle200() throws JsonProcessingException {
     final ObjectAndMetaData<StatePtcData> responseData =
         new ObjectAndMetaData<>(
-            new StatePtcData(
-                UInt64.valueOf(5),
-                SszUInt64VectorSchema.create(3)
-                    .of(UInt64.valueOf(9), UInt64.valueOf(2), UInt64.valueOf(9))),
+            new StatePtcDataSchema(SszUInt64VectorSchema.create(3))
+                .create(
+                    UInt64.valueOf(5),
+                    List.of(UInt64.valueOf(9), UInt64.valueOf(2), UInt64.valueOf(9))),
             SpecMilestone.GLOAS,
             false,
             true,

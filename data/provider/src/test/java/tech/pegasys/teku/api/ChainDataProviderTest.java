@@ -56,7 +56,6 @@ import tech.pegasys.teku.api.migrated.BlockHeadersResponse;
 import tech.pegasys.teku.api.migrated.BlockRewardData;
 import tech.pegasys.teku.api.migrated.BuilderStatus;
 import tech.pegasys.teku.api.migrated.StateBuilderData;
-import tech.pegasys.teku.api.migrated.StatePtcData;
 import tech.pegasys.teku.api.migrated.StateSyncCommitteesData;
 import tech.pegasys.teku.api.migrated.StateValidatorIdentity;
 import tech.pegasys.teku.api.migrated.SyncCommitteeRewardData;
@@ -100,6 +99,7 @@ import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.generator.AttestationGenerator;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.logic.common.statetransition.epoch.EpochProcessor;
+import tech.pegasys.teku.spec.schemas.api.StatePtcData;
 import tech.pegasys.teku.spec.util.BeaconStateBuilderCapella;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
@@ -1080,8 +1080,8 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
             .orElseThrow()
             .getData();
 
-    assertThat(ptc.slot()).isEqualTo(UInt64.valueOf(19));
-    assertThat(ptc.validators().asListUnboxed())
+    assertThat(ptc.getSlot()).isEqualTo(UInt64.valueOf(19));
+    assertThat(ptc.getValidators().asListUnboxed())
         .isEqualTo(BeaconStateGloas.required(state).getPtcWindow().get(11).asListUnboxed());
   }
 
@@ -1102,7 +1102,7 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
                   .getStatePtc(stateAndMetaData, slot)
                   .orElseThrow()
                   .getData()
-                  .validators()
+                  .getValidators()
                   .asListUnboxed())
           .isEqualTo(
               gloasSpec

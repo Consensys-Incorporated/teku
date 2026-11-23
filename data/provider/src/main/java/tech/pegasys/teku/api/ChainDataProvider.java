@@ -47,7 +47,6 @@ import tech.pegasys.teku.api.migrated.BlockRewardData;
 import tech.pegasys.teku.api.migrated.BuilderStatus;
 import tech.pegasys.teku.api.migrated.GetAttestationRewardsResponse;
 import tech.pegasys.teku.api.migrated.StateBuilderData;
-import tech.pegasys.teku.api.migrated.StatePtcData;
 import tech.pegasys.teku.api.migrated.StateSyncCommitteesData;
 import tech.pegasys.teku.api.migrated.StateValidatorIdentity;
 import tech.pegasys.teku.api.migrated.SyncCommitteeRewardData;
@@ -61,7 +60,6 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.infrastructure.ssz.Merkleizable;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
-import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszUInt64VectorSchema;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -98,6 +96,7 @@ import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.EpochProce
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.SlotProcessingException;
 import tech.pegasys.teku.spec.logic.versions.gloas.helpers.PredicatesGloas;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.schemas.api.StatePtcData;
 import tech.pegasys.teku.spec.schemas.api.StateValidatorBalanceData;
 import tech.pegasys.teku.statetransition.lightclient.LightClientBootstrapProvider;
 import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
@@ -857,19 +856,16 @@ public class ChainDataProvider {
                 state -> {
                   final UInt64 slot = maybeSlot.orElse(state.getSlot());
                   final SpecVersion specVersion = spec.atSlot(state.getSlot());
-                  final SszUInt64VectorSchema<?> ptcSchema =
-                      SchemaDefinitionsGloas.required(specVersion.getSchemaDefinitions())
-                          .getPtcWindowSchema()
-                          .getPayloadTimelinessCommitteeSchema();
-                  return new StatePtcData(
-                      slot,
-                      ptcSchema.of(
+                  return SchemaDefinitionsGloas.required(specVersion.getSchemaDefinitions())
+                      .getStatePtcDataSchema()
+                      .create(
+                          slot,
                           specVersion
                               .beaconStateAccessors()
                               .getPtc(state, slot)
                               .intStream()
                               .mapToObj(UInt64::valueOf)
-                              .toList()));
+                              .toList());
                 }));
   }
 

@@ -27,7 +27,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import java.util.Collections;
 import tech.pegasys.teku.api.ChainDataProvider;
 import tech.pegasys.teku.api.DataProvider;
-import tech.pegasys.teku.api.migrated.StatePtcData;
 import tech.pegasys.teku.infrastructure.json.types.SerializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.AsyncApiResponse;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.EndpointMetadata;
@@ -35,8 +34,8 @@ import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
 import tech.pegasys.teku.infrastructure.restapi.openapi.response.OctetStreamResponseContentTypeDefinition;
 import tech.pegasys.teku.infrastructure.restapi.openapi.response.ResponseContentTypeDefinition;
-import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
+import tech.pegasys.teku.spec.schemas.api.StatePtcData;
 
 public class GetStatePtc extends RestApiEndpoint {
   public static final String ROUTE = "/eth/v1/beacon/states/{state_id}/ptc";
@@ -70,11 +69,11 @@ public class GetStatePtc extends RestApiEndpoint {
                     .withField(
                         "data",
                         SerializableTypeDefinition.object(StatePtcData.class)
-                            .withField("slot", UINT64_TYPE, StatePtcData::slot)
+                            .withField("slot", UINT64_TYPE, StatePtcData::getSlot)
                             .withField(
                                 "validators",
                                 listOf(UINT64_TYPE),
-                                data -> data.validators().asListUnboxed())
+                                data -> data.getValidators().asListUnboxed())
                             .build(),
                         ObjectAndMetaData::getData)
                     .build(),
@@ -88,11 +87,7 @@ public class GetStatePtc extends RestApiEndpoint {
 
   private static ResponseContentTypeDefinition<ObjectAndMetaData<StatePtcData>> sszResponseType() {
     return new OctetStreamResponseContentTypeDefinition<>(
-        (data, out) -> {
-          SszUInt64.of(data.getData().slot()).sszSerialize(out);
-          data.getData().validators().sszSerialize(out);
-        },
-        __ -> Collections.emptyMap());
+        (data, out) -> data.getData().sszSerialize(out), __ -> Collections.emptyMap());
   }
 
   @Override
