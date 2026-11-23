@@ -63,8 +63,7 @@ public class GetExecutionPayloadBid extends RestApiEndpoint {
         EndpointMetadata.get(ROUTE)
             .operationId("getExecutionPayloadBid")
             .summary("Get execution payload bid")
-            .description(
-                "Retrieves execution payload bid for a given slot and builder. Depending on `Accept` header, it can be returned either as json or as bytes serialized by SSZ.")
+            .description("Retrieves execution payload bid for a given slot and builder.")
             .tags(TAG_VALIDATOR)
             .pathParam(SLOT_PARAM)
             .pathParam(BUILDER_INDEX_PARAM)

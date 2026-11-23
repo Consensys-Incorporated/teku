@@ -14,6 +14,7 @@
 package tech.pegasys.teku.beaconrestapi.v1.beacon;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_ACCEPTABLE;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -23,8 +24,12 @@ import java.util.Map;
 import okhttp3.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import tech.pegasys.teku.beaconrestapi.AbstractDataBackedRestAPIIntegrationTest;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.GetStateValidatorBalances;
+import tech.pegasys.teku.infrastructure.http.ContentTypes;
 
 public class GetStateValidatorBalancesIntegrationTest
     extends AbstractDataBackedRestAPIIntegrationTest {
@@ -60,6 +65,35 @@ public class GetStateValidatorBalancesIntegrationTest
     assertThat(response.code()).isEqualTo(SC_OK);
     final JsonNode data = getResponseData(response);
     assertThat(data).hasSize(16);
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"text/plain", "application/ssz", "application/json;q=0"})
+  public void shouldReturnNotAcceptableWhenAcceptHeaderMatchesNoSupportedType(
+      final String acceptHeader) throws IOException {
+    final Response response = get("head", Collections.emptyMap(), acceptHeader);
+    assertThat(response.code()).isEqualTo(SC_NOT_ACCEPTABLE);
+    assertThat(response.header("Content-Type")).startsWith(ContentTypes.JSON);
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+    "application/json, application/json",
+    "*/*, application/json",
+    "application/octet-stream, application/octet-stream",
+  })
+  public void shouldRespondWithMatchingContentType(
+      final String acceptHeader, final String expectedContentType) throws IOException {
+    final Response response = get("head", Collections.emptyMap(), acceptHeader);
+    assertThat(response.code()).isEqualTo(SC_OK);
+    assertThat(response.header("Content-Type")).startsWith(expectedContentType);
+  }
+
+  public Response get(
+      final String stateIdString, final Map<String, String> query, final String acceptHeader)
+      throws IOException {
+    return getResponse(
+        GetStateValidatorBalances.ROUTE.replace("{state_id}", stateIdString), query, acceptHeader);
   }
 
   public Response get(final String stateIdString, final Map<String, String> query)

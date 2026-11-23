@@ -177,6 +177,60 @@ class EndpointMetadataTest {
         .isInstanceOf(IllegalStateException.class);
   }
 
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "",
+        " ",
+        "*/*",
+        "application/*",
+        "application/json",
+        "application/octet-stream",
+        "application/octet-stream;q=1.0,application/json;q=0.9",
+        "application/octet-stream;q=0.9, application/json;q=0.4",
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      })
+  void isAcceptable_shouldAcceptHeadersMatchingSuccessResponseContentTypes(
+      final String acceptHeader) {
+    assertThat(jsonAndSszEndpointDeclaringNotAcceptable().isAcceptable(Optional.of(acceptHeader)))
+        .isTrue();
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"text/plain", "application/ssz", "application/json;q=0", "not a type"})
+  void isAcceptable_shouldRejectHeadersNotMatchingSuccessResponseContentTypes(
+      final String acceptHeader) {
+    assertThat(jsonAndSszEndpointDeclaringNotAcceptable().isAcceptable(Optional.of(acceptHeader)))
+        .isFalse();
+  }
+
+  @Test
+  void isAcceptable_shouldAcceptMissingHeader() {
+    assertThat(jsonAndSszEndpointDeclaringNotAcceptable().isAcceptable(Optional.empty())).isTrue();
+  }
+
+  @Test
+  void isAcceptable_shouldAcceptAnyHeaderWhenNotAcceptableIsNotDeclared() {
+    final EndpointMetadata metadata =
+        validBuilder()
+            .response(SC_OK, "Success", List.of(json(STRING_TYPE), octetStream(STRING_TYPE)))
+            .build();
+    assertThat(metadata.isAcceptable(Optional.of("text/plain"))).isTrue();
+  }
+
+  @Test
+  void getSupportedResponseContentTypes_shouldReturnContentTypesOfResponse() {
+    assertThat(jsonAndSszEndpointDeclaringNotAcceptable().getSupportedResponseContentTypes(SC_OK))
+        .containsExactlyInAnyOrder(ContentTypes.JSON, ContentTypes.OCTET_STREAM);
+  }
+
+  private EndpointMetadata jsonAndSszEndpointDeclaringNotAcceptable() {
+    return validBuilder()
+        .response(SC_OK, "Success", List.of(json(STRING_TYPE), octetStream(STRING_TYPE)))
+        .withNotAcceptableResponse()
+        .build();
+  }
+
   @Test
   void pathParam_shouldSerializeOpenApiDoc() throws IOException {
     final EndpointMetadata metadata =
