@@ -168,6 +168,7 @@ public class Eth2NetworkConfiguration {
   private final int dataColumnSidecarExtensionRetentionEpochs;
   private final int pendingPayloadAttestationsMaxQueue;
   private final Optional<LeanVmSidecarConfig> leanVmSidecar;
+  private final Optional<PqTimingConfig> pqTiming;
 
   private Eth2NetworkConfiguration(
       final Spec spec,
@@ -214,7 +215,8 @@ public class Eth2NetworkConfiguration {
       final int attestationWaitLimitMillis,
       final int dataColumnSidecarExtensionRetentionEpochs,
       final int pendingPayloadAttestationsMaxQueue,
-      final Optional<LeanVmSidecarConfig> leanVmSidecar) {
+      final Optional<LeanVmSidecarConfig> leanVmSidecar,
+      final Optional<PqTimingConfig> pqTiming) {
     this.spec = spec;
     this.stateBoostrapConfig = stateBoostrapConfig;
     this.startupTargetPeerCount = startupTargetPeerCount;
@@ -266,6 +268,7 @@ public class Eth2NetworkConfiguration {
     this.dataColumnSidecarExtensionRetentionEpochs = dataColumnSidecarExtensionRetentionEpochs;
     this.pendingPayloadAttestationsMaxQueue = pendingPayloadAttestationsMaxQueue;
     this.leanVmSidecar = leanVmSidecar;
+    this.pqTiming = pqTiming;
 
     LOG.debug("Attestation wait time limit in ratchet: {} ms", attestationWaitLimitMillis);
 
@@ -389,6 +392,11 @@ public class Eth2NetworkConfiguration {
     return leanVmSidecar;
   }
 
+  /** The PQ timing export, or empty when it is off. */
+  public Optional<PqTimingConfig> getPqTiming() {
+    return pqTiming;
+  }
+
   public boolean isLightClientServerEnabled() {
     return lightClientServerEnabled;
   }
@@ -472,6 +480,7 @@ public class Eth2NetworkConfiguration {
             == that.dataColumnSidecarExtensionRetentionEpochs
         && rustKzgEnabled == that.rustKzgEnabled
         && Objects.equals(leanVmSidecar, that.leanVmSidecar)
+        && Objects.equals(pqTiming, that.pqTiming)
         && Objects.equals(spec, that.spec)
         && Objects.equals(stateBoostrapConfig, that.stateBoostrapConfig)
         && Objects.equals(discoveryBootnodes, that.discoveryBootnodes)
@@ -536,7 +545,8 @@ public class Eth2NetworkConfiguration {
         forkChoiceUpdatedAlwaysSendPayloadAttributes,
         rustKzgEnabled,
         dataColumnSidecarExtensionRetentionEpochs,
-        leanVmSidecar);
+        leanVmSidecar,
+        pqTiming);
   }
 
   public static class Builder {
@@ -598,6 +608,7 @@ public class Eth2NetworkConfiguration {
     private int attestationWaitLimitMillis = DEFAULT_ATTESTATION_WAIT_TIMEOUT_MILLIS;
     private OptionalInt pendingPayloadAttestationsMaxQueue = OptionalInt.empty();
     private Optional<LeanVmSidecarConfig> leanVmSidecar = Optional.empty();
+    private Optional<PqTimingConfig> pqTiming = Optional.empty();
 
     public void spec(final Spec spec) {
       this.spec = spec;
@@ -710,7 +721,8 @@ public class Eth2NetworkConfiguration {
           attestationWaitLimitMillis,
           dataColumnSidecarExtensionRetentionEpochs,
           pendingPayloadAttestationsMaxQueue.orElse(DEFAULT_MAX_QUEUE_PENDING_PAYLOAD_ATTESTATIONS),
-          leanVmSidecar);
+          leanVmSidecar,
+          pqTiming);
     }
 
     private boolean resolvePrepareBlockProductionAbility(
@@ -1398,6 +1410,11 @@ public class Eth2NetworkConfiguration {
 
     public Builder leanVmSidecar(final Optional<LeanVmSidecarConfig> leanVmSidecar) {
       this.leanVmSidecar = leanVmSidecar;
+      return this;
+    }
+
+    public Builder pqTiming(final Optional<PqTimingConfig> pqTiming) {
+      this.pqTiming = pqTiming;
       return this;
     }
 

@@ -17,19 +17,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import io.libp2p.core.pubsub.ValidationResult;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import tech.pegasys.teku.bls.BLSKeyGenerator;
 import tech.pegasys.teku.bls.BLSKeyPair;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers.Eth2TopicHandler;
 import tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers.SingleAttestationTopicHandler;
+import tech.pegasys.teku.networking.p2p.gossip.PreparedGossipMessage;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.generator.AttestationGenerator;
+import tech.pegasys.teku.statetransition.pq.timing.PqTimingEvents;
 import tech.pegasys.teku.statetransition.util.DebugDataDumper;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 
@@ -41,6 +46,10 @@ public class SingleAttestationTopicHandlerTest
 
   @Override
   protected Eth2TopicHandler<?> createHandler() {
+    return createHandler(false);
+  }
+
+  private Eth2TopicHandler<?> createHandler(final boolean recordPqTiming) {
     return SingleAttestationTopicHandler.createHandler(
         recentChainData,
         asyncRunner,
@@ -51,7 +60,71 @@ public class SingleAttestationTopicHandlerTest
         GossipTopicName.getAttestationSubnetTopicName(SUBNET_ID),
         spec.getGenesisSchemaDefinitions().getAttestationSchema(),
         SUBNET_ID,
-        DebugDataDumper.NOOP);
+        DebugDataDumper.NOOP,
+        recordPqTiming);
+  }
+
+  @Test
+  public void handleMessage_recordsPqTimingWhenAsked(@TempDir final Path timingRoot)
+      throws Exception {
+    final Eth2TopicHandler<?> timedHandler = createHandler(true);
+    final AttestationGenerator attestationGenerator = new AttestationGenerator(spec, validatorKeys);
+    final ValidatableAttestation attestation =
+        ValidatableAttestation.fromNetwork(
+            spec, attestationGenerator.validAttestation(getChainHead()), SUBNET_ID);
+    when(processor.process(attestation, Optional.empty()))
+        .thenReturn(SafeFuture.completedFuture(InternalValidationResult.IGNORE));
+    final PreparedGossipMessage message =
+        timedHandler.prepareMessage(
+            gossipEncoding.encode(attestation.getAttestation()), Optional.empty());
+    PqTimingEvents.start(timingRoot, false);
+
+    final SafeFuture<ValidationResult> result = timedHandler.handleMessage(message);
+    asyncRunner.executeQueuedActions();
+
+    assertThat(result).isCompletedWithValue(ValidationResult.Ignore);
+    final List<JsonNode> events = PqTimingEvents.stopAndRead(timingRoot);
+    assertThat(events).hasSize(2);
+    final JsonNode received = events.get(0);
+    assertThat(received.get("kind").asText()).isEqualTo("message_received");
+    assertThat(received.get("message_kind").asText()).isEqualTo("individual");
+    assertThat(received.get("message_id").asText()).isEqualTo(message.getMessageId().toHexString());
+    assertThat(received.get("slot").asLong())
+        .isEqualTo(attestation.getData().getSlot().longValue());
+    assertThat(received.get("committee").asLong())
+        .isEqualTo(attestation.getData().getIndex().longValue());
+    assertThat(received.get("subnet").asInt()).isEqualTo(SUBNET_ID);
+    assertThat(received.get("signer_count").asInt()).isEqualTo(1);
+    assertThat(received.get("message_bytes").asInt())
+        .isEqualTo(attestation.getAttestation().sszSerialize().size());
+    assertThat(received.get("vote_data_root").asText())
+        .isEqualTo(attestation.getData().hashTreeRoot().toHexString());
+    final JsonNode validated = events.get(1);
+    assertThat(validated.get("kind").asText()).isEqualTo("validated");
+    assertThat(validated.get("message_id").asText())
+        .isEqualTo(message.getMessageId().toHexString());
+    assertThat(validated.get("outcome").asText()).isEqualTo("ignored");
+  }
+
+  @Test
+  public void handleMessage_recordsNoPqTimingUnlessAsked(@TempDir final Path timingRoot)
+      throws Exception {
+    final AttestationGenerator attestationGenerator = new AttestationGenerator(spec, validatorKeys);
+    final ValidatableAttestation attestation =
+        ValidatableAttestation.fromNetwork(
+            spec, attestationGenerator.validAttestation(getChainHead()), SUBNET_ID);
+    when(processor.process(attestation, Optional.empty()))
+        .thenReturn(SafeFuture.completedFuture(InternalValidationResult.ACCEPT));
+    PqTimingEvents.start(timingRoot, false);
+
+    final SafeFuture<ValidationResult> result =
+        topicHandler.handleMessage(
+            topicHandler.prepareMessage(
+                gossipEncoding.encode(attestation.getAttestation()), Optional.empty()));
+    asyncRunner.executeQueuedActions();
+
+    assertThat(result).isCompletedWithValue(ValidationResult.Valid);
+    assertThat(PqTimingEvents.stopAndRead(timingRoot)).isEmpty();
   }
 
   @Test

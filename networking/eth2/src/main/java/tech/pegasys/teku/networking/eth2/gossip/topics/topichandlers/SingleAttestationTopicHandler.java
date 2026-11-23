@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers;
 
+import java.util.Optional;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.networking.eth2.gossip.encoding.GossipEncoding;
@@ -38,7 +39,8 @@ public class SingleAttestationTopicHandler {
       final String topicName,
       final AttestationSchema<? extends Attestation> attestationSchema,
       final int subnetId,
-      final DebugDataDumper debugDataDumper) {
+      final DebugDataDumper debugDataDumper,
+      final boolean recordPqTiming) {
     final Spec spec = recentChainData.getSpec();
     final OperationProcessor<Attestation> convertingProcessor =
         (attMessage, arrivalTimestamp) ->
@@ -57,6 +59,9 @@ public class SingleAttestationTopicHandler {
             message -> spec.computeEpochAtSlot(message.getData().getSlot())),
         attestationSchema.castTypeToAttestationSchema(),
         spec.getNetworkingConfig(),
-        debugDataDumper);
+        debugDataDumper,
+        DecodedPrefixFilter.ACCEPT_ALL,
+        GossipInFlightLimiter.UNLIMITED,
+        recordPqTiming ? Optional.of(PqGossipTiming.individual(subnetId)) : Optional.empty());
   }
 }

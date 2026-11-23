@@ -19,6 +19,9 @@ import tech.pegasys.teku.infrastructure.bytes.Bytes4;
 import tech.pegasys.teku.networking.eth2.gossip.encoding.GossipEncoding;
 import tech.pegasys.teku.networking.eth2.gossip.topics.GossipTopicName;
 import tech.pegasys.teku.networking.eth2.gossip.topics.OperationProcessor;
+import tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers.DecodedPrefixFilter;
+import tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers.GossipInFlightLimiter;
+import tech.pegasys.teku.networking.eth2.gossip.topics.topichandlers.PqGossipTiming;
 import tech.pegasys.teku.networking.p2p.gossip.GossipNetwork;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
@@ -66,7 +69,10 @@ public class PqAggregateGossipManager extends AbstractGossipManager<SignedAggreg
         spec.getNetworkingConfig(),
         GossipFailureLogger.createSuppressing(
             GossipTopicName.BEACON_AGGREGATE_AND_PROOF.toString()),
-        debugDataDumper);
+        debugDataDumper,
+        DecodedPrefixFilter.ACCEPT_ALL,
+        GossipInFlightLimiter.UNLIMITED,
+        Optional.of(PqGossipTiming.aggregate()));
   }
 
   /** Publishes an aggregate from this node's validator client, once. */
