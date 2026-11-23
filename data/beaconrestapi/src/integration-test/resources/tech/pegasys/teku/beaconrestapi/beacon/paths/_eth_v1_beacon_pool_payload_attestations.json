@@ -3,7 +3,7 @@
     "tags" : [ "Beacon" ],
     "operationId" : "getPoolPayloadAttestations",
     "summary" : "Get PayloadAttestations from operations pool",
-    "description" : "Retrieves payload attestations known by the node but not necessarily incorporated into any block.",
+    "description" : "Retrieves payload attestations known by the node but not necessarily incorporated into any block. Depending on `Accept` header, they can be returned either as json or as bytes serialized by SSZ.",
     "parameters" : [ {
       "name" : "slot",
       "in" : "query",
@@ -32,6 +32,12 @@
           "application/json" : {
             "schema" : {
               "$ref" : "#/components/schemas/GetPoolPayloadAttestationsResponse"
+            }
+          },
+          "application/octet-stream" : {
+            "schema" : {
+              "type" : "string",
+              "format" : "binary"
             }
           }
         }
