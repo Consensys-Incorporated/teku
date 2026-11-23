@@ -41,6 +41,7 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.validator.api.ValidatorConfig;
 import tech.pegasys.teku.validator.beaconnode.BeaconNodeApi;
+import tech.pegasys.teku.validator.beaconnode.ForkAwareTimeBasedEventAdapter;
 
 class RemoteBeaconNodeApiTest {
 
@@ -75,6 +76,15 @@ class RemoteBeaconNodeApiTest {
     verify(serviceConfig).createAsyncRunner("validatorBeaconAPI", 5, MAX_API_EXECUTOR_QUEUE_SIZE);
 
     verify(serviceConfig, times(1)).createAsyncRunner(anyString(), anyInt(), anyInt());
+  }
+
+  @Test
+  void shouldRunDutyTimersOnTheirOwnThread() throws URISyntaxException {
+    RemoteBeaconNodeApi.create(
+        serviceConfig, validatorConfig, spec, List.of(new URI("https://localhost")));
+
+    verify(serviceConfig)
+        .createAsyncRunner(ForkAwareTimeBasedEventAdapter.DUTY_TIMER_RUNNER_NAME, 1);
   }
 
   @Test

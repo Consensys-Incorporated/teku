@@ -187,7 +187,10 @@ public class SentryBeaconNodeApi implements BeaconNodeApi {
             ValidatorLogger.VALIDATOR_LOGGER,
             new ForkAwareTimeBasedEventAdapter(
                 new GenesisDataProvider(asyncRunner, dutiesProviderValidatorApi),
-                new RepeatingTaskScheduler(asyncRunner, services.getTimeProvider()),
+                new RepeatingTaskScheduler(
+                    services.createAsyncRunner(
+                        ForkAwareTimeBasedEventAdapter.DUTY_TIMER_RUNNER_NAME, 1),
+                    services.getTimeProvider()),
                 services.getTimeProvider(),
                 validatorTimingChannel,
                 spec),
