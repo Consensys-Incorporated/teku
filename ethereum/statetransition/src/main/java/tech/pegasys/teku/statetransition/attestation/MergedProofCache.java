@@ -78,7 +78,12 @@ final class MergedProofCache {
    *
    * @param round how many merges built the proof: 1 for a merge of committee proofs, one more for
    *     each merge into an earlier merged proof
+   * @param included the attestations the proof proves, which a block takes as they are
    */
   record MergedProof(
-      Set<Claim> claims, List<XmssAggregateStatement> statements, Bytes proof, int round) {}
+      Set<Claim> claims,
+      List<XmssAggregateStatement> statements,
+      Bytes proof,
+      int round,
+      List<AggregatingAttestationPoolPq.SelectedData> included) {}
 }

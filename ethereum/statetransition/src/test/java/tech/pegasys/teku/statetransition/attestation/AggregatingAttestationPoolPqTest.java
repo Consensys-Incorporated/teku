@@ -639,6 +639,52 @@ class AggregatingAttestationPoolPqTest {
   }
 
   @Test
+  void shouldTakeTheProofMergedAheadAsItIsAndLeaveLaterAggregatesToLaterBlocks() {
+    final RecursiveProver prover = new RecursiveProver();
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
+    pool =
+        new AggregatingAttestationPoolPq(
+            spec, storageSystem.recentChainData(), prover, asyncRunner, timeProvider);
+    final AttestationData data0 = attestationData(0);
+    pool.add(networkAggregate(data0, 0, randomProof(1), 0));
+    pool.add(networkAggregate(attestationData(1), 1, randomProof(1), 0));
+    final UInt64 blockSlot = attestationSlot.plus(2);
+    advanceTimeTo(blockSlot.minus(1), 0);
+    pool.onSlot(blockSlot.minus(1));
+    asyncRunner.executeDueActionsRepeatedly();
+    assertThat(prover.merges).hasSize(1);
+
+    // After the merge ahead: another committee, and a larger aggregate of one merged
+    pool.add(networkAggregate(attestationData(2), 2, randomProof(1), 0));
+    pool.add(networkAggregate(data0, 0, randomProof(2), 0, 1));
+    final PqBlockAttestations block = blockAttestations(blockSlot);
+
+    // The block takes the merged proof and its attestations, without merging again
+    assertThat(prover.merges).hasSize(1);
+    assertThat(block.proof()).isEqualTo(RecursiveProver.mergedProof(1));
+    assertThat(attesterCount(block)).isEqualTo(2);
+  }
+
+  @Test
+  void shouldTakeTheFirstCommitteeOnItsOwnProofWhenNothingWasMergedAhead() {
+    final RecursiveProver prover = new RecursiveProver();
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
+    pool =
+        new AggregatingAttestationPoolPq(
+            spec, storageSystem.recentChainData(), prover, asyncRunner, timeProvider);
+    final Bytes proof0 = randomProof(2);
+    pool.add(networkAggregate(attestationData(0), 0, proof0, 0, 1));
+    pool.add(networkAggregate(attestationData(1), 1, randomProof(1), 0));
+
+    final PqBlockAttestations block = blockAttestations(attestationSlot.plus(2));
+
+    // No merge: the committee with the most attesters, as its aggregate proved it
+    assertThat(prover.merges).isEmpty();
+    assertThat(block.proof()).isEqualTo(proof0);
+    assertThat(attesterCount(block)).isEqualTo(2);
+  }
+
+  @Test
   void shouldMergeEveryCommitteeTheBlockCanIncludeOnceTheAggregatesAreDue() {
     final RecursiveProver prover = new RecursiveProver();
     final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
