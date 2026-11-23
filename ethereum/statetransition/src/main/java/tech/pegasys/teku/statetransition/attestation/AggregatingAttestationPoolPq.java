@@ -114,6 +114,13 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
    */
   static final int AGGREGATION_CUTOFF_BPS = 4000;
 
+  /**
+   * Proving single attestations ahead of a block stops this long before its deadline, the
+   * collection cutoff or the block's slot, leaving time to merge what was proven: a committee of 32
+   * takes up to about 700 ms to prove, and a full merge about a second.
+   */
+  static final long AHEAD_PROVING_MARGIN_MILLIS = 1500;
+
   private final StarkProver starkProver;
   private final Optional<AsyncRunner> asyncRunner;
   private final TimeProvider timeProvider;
@@ -269,12 +276,18 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
         merged.proof());
   }
 
+  /**
+   * The block's attestations and proof. When the pool merges ahead, block production proves
+   * nothing: proving a committee's single attestations takes up to about 700 ms each, and a block
+   * can have dozens. It includes proven aggregates only, network ones or those proven ahead, and
+   * merges what the merges ahead lack; later blocks include attesters it leaves out.
+   */
   private MergeResult mergeForBlock(
       final BeaconState stateAtBlockSlot, final AttestationForkChecker forkChecker) {
     final UInt64 blockSlot = stateAtBlockSlot.getSlot();
     final List<SelectedData> selected;
     synchronized (this) {
-      selected = selectForBlock(stateAtBlockSlot, forkChecker);
+      selected = selectForBlock(stateAtBlockSlot, forkChecker, mergesAhead());
     }
     final MergeResult merged = merge(blockSlot, selected);
     recordProposalSnapshot(blockSlot, merged);
@@ -282,7 +295,9 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
   }
 
   private List<SelectedData> selectForBlock(
-      final BeaconState stateAtBlockSlot, final AttestationForkChecker forkChecker) {
+      final BeaconState stateAtBlockSlot,
+      final AttestationForkChecker forkChecker,
+      final boolean provenOnly) {
     final UInt64 blockSlot = stateAtBlockSlot.getSlot();
     final SpecConfigPq config = SpecConfigPq.required(spec.atSlot(blockSlot).getConfig());
     final List<DataCandidate> candidates = new ArrayList<>();
@@ -303,7 +318,8 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
                                   forkChecker,
                                   timelySlot,
                                   committeesByDataRoot.get(dataRoot),
-                                  true)
+                                  true,
+                                  provenOnly)
                               .ifPresent(candidates::add)));
     }
     candidates.sort(
@@ -346,7 +362,7 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
   /** The block's proof of the selected committees, and those it proves. */
   private MergeResult merge(final UInt64 blockSlot, final List<SelectedData> selected) {
     if (starkProver.isIncrementallyMergeable()) {
-      return mergeIncrementally(blockSlot, selected);
+      return mergeIncrementally(blockSlot, selected, Optional.empty());
     }
     final List<ProvenStatements> proofs =
         selected.stream()
@@ -366,9 +382,15 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
    * claims with that earlier proof must go in, or it would prove attesters the block leaves out;
    * other fresh proofs go in, in order, while the merge has fewer than {@link #maxProofsPerMerge}
    * proofs, and the rest are left out of the block.
+   *
+   * <p>Single attestations are proven only until {@code provingDeadlineMillis}, if given; a
+   * committee not proven by then is left out, or, if the earlier proof partly proves it, nothing is
+   * merged. Each proof made is kept as an aggregate of its committee, for later merges and blocks.
    */
   private MergeResult mergeIncrementally(
-      final UInt64 blockSlot, final List<SelectedData> selected) {
+      final UInt64 blockSlot,
+      final List<SelectedData> selected,
+      final Optional<Long> provingDeadlineMillis) {
     final Set<Claim> available = new HashSet<>();
     selected.forEach(data -> data.committees().forEach(c -> available.addAll(c.claims())));
     final Optional<MergedProof> earlier = mergedProofs.findLargestWithin(blockSlot, available);
@@ -382,40 +404,6 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
         Math.max(0, maxProofsPerMerge - (earlier.isPresent() ? 1 : 0) - overlapping);
 
     final List<SelectedData> included = new ArrayList<>();
-    final List<SelectedCommittee> fresh = new ArrayList<>();
-    int leftOut = 0;
-    for (final SelectedData data : selected) {
-      final List<SelectedCommittee> committees = new ArrayList<>();
-      for (final SelectedCommittee committee : data.committees()) {
-        if (earlierClaims.containsAll(committee.claims())) {
-          committees.add(committee);
-        } else if (isPartlyIn(committee.claims(), earlierClaims) || optionalLeft-- > 0) {
-          committees.add(committee);
-          fresh.add(committee);
-        } else {
-          leftOut++;
-        }
-      }
-      if (!committees.isEmpty()) {
-        included.add(new SelectedData(data.data(), committees));
-      }
-    }
-    if (leftOut > 0) {
-      LOG.debug(
-          "Leaving {} committee proofs out of the block at slot {} to merge at most {}",
-          leftOut,
-          blockSlot,
-          maxProofsPerMerge);
-    }
-    if (fresh.isEmpty()) {
-      return new MergeResult(
-          included,
-          earlier.map(MergedProof::proof).orElse(Bytes.EMPTY),
-          0,
-          earlier.map(MergedProof::round).orElse(0),
-          0);
-    }
-
     final List<ProvenStatements> children = new ArrayList<>();
     final Set<Claim> claims = new HashSet<>(earlierClaims);
     final List<XmssAggregateStatement> statements = new ArrayList<>();
@@ -424,17 +412,109 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
           children.add(new ProvenStatements(proof.statements(), proof.proof()));
           statements.addAll(proof.statements());
         });
-    for (final SelectedCommittee committee : fresh) {
-      children.add(
-          new ProvenStatements(
-              List.of(committee.statement()), proveForBlock(blockSlot, committee)));
-      claims.addAll(committee.claims());
-      statements.add(committee.statement());
+    int fresh = 0;
+    int leftOut = 0;
+    int unproven = 0;
+    for (final SelectedData data : selected) {
+      final List<SelectedCommittee> committees = new ArrayList<>();
+      for (final SelectedCommittee committee : data.committees()) {
+        if (earlierClaims.containsAll(committee.claims())) {
+          committees.add(committee);
+          continue;
+        }
+        final boolean required = isPartlyIn(committee.claims(), earlierClaims);
+        if (!required && optionalLeft <= 0) {
+          leftOut++;
+          continue;
+        }
+        final Optional<Bytes> proof = proofFor(blockSlot, committee, provingDeadlineMillis);
+        if (proof.isEmpty()) {
+          if (required) {
+            LOG.debug(
+                "Not merging ahead of the block at slot {}: out of time to prove a committee",
+                blockSlot);
+            return new MergeResult(List.of(), Bytes.EMPTY, 0, 0, 0);
+          }
+          unproven++;
+          continue;
+        }
+        if (!required) {
+          optionalLeft--;
+        }
+        committees.add(committee);
+        children.add(new ProvenStatements(List.of(committee.statement()), proof.get()));
+        claims.addAll(committee.claims());
+        statements.add(committee.statement());
+        fresh++;
+      }
+      if (!committees.isEmpty()) {
+        included.add(new SelectedData(data.data(), committees));
+      }
     }
+    if (leftOut > 0 || unproven > 0) {
+      LOG.debug(
+          "Leaving {} committee proofs out of the block at slot {} to merge at most {}, and {}"
+              + " out of time to prove",
+          leftOut,
+          blockSlot,
+          maxProofsPerMerge,
+          unproven);
+    }
+    if (fresh == 0) {
+      return new MergeResult(
+          included,
+          earlier.map(MergedProof::proof).orElse(Bytes.EMPTY),
+          0,
+          earlier.map(MergedProof::round).orElse(0),
+          0);
+    }
+
     final int round = earlier.map(MergedProof::round).orElse(0) + 1;
     final Bytes proof = mergeProofs(blockSlot, round, children, included.size());
     mergedProofs.add(blockSlot, new MergedProof(claims, statements, proof, round));
-    return new MergeResult(included, proof, fresh.size(), round, leftOut);
+    return new MergeResult(included, proof, fresh, round, leftOut);
+  }
+
+  /**
+   * A committee's proof for a block: its network proof, or proved now from its single attestations
+   * and kept as an aggregate, unless {@code provingDeadlineMillis} has passed.
+   */
+  private Optional<Bytes> proofFor(
+      final UInt64 blockSlot,
+      final SelectedCommittee committee,
+      final Optional<Long> provingDeadlineMillis) {
+    if (committee.networkProof().isPresent()) {
+      return committee.networkProof();
+    }
+    if (provingDeadlineMillis.isPresent()
+        && timeProvider.getTimeInMillis().longValue() >= provingDeadlineMillis.get()) {
+      return Optional.empty();
+    }
+    final Bytes proof = proveForBlock(blockSlot, committee);
+    keepProvenAggregate(committee, proof);
+    return Optional.of(proof);
+  }
+
+  /**
+   * Keeps the proof of a committee's single attestations as an aggregate, so later merges and
+   * blocks include it without proving it again, unless the committee has since been pruned.
+   */
+  private synchronized void keepProvenAggregate(
+      final SelectedCommittee committee, final Bytes proof) {
+    final CommitteeAttestations source = committee.source();
+    final Map<Integer, CommitteeAttestations> committees =
+        committeesByDataRoot.get(source.data.hashTreeRoot());
+    // CommitteeAttestations is compared by identity: a pruned one may have been replaced
+    if (committees == null || !source.equals(committees.get(source.committeeIndex))) {
+      return;
+    }
+    size +=
+        source.addAggregate(new ProvenAggregate(source.toAggregationBits(committee.bits()), proof));
+  }
+
+  /** Whether block proofs are merged ahead of local proposals, so block production proves none. */
+  private boolean mergesAhead() {
+    return asyncRunner.isPresent() && starkProver.isIncrementallyMergeable();
   }
 
   /** Merges the proofs, timed as merge round {@code round} for the block when there are several. */
@@ -523,6 +603,10 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
    *       included is left out. Each pass merges at most {@link #maxProofsPerMerge} proofs, and
    *       passes go on while one left committees out and another fits before the block's slot.
    * </ol>
+   *
+   * <p>Single attestations are proven only until {@link #AHEAD_PROVING_MARGIN_MILLIS} before the
+   * collection cutoff in the first step, so the aggregates are proven on time, and before the
+   * block's slot in the second, so block production doesn't wait for the prover.
    */
   SafeFuture<Void> prepareBlockProof(final UInt64 blockSlot) {
     if (asyncRunner.isEmpty() || !isPq(blockSlot)) {
@@ -543,7 +627,13 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
                         synchronized (this) {
                           timely = selectTimely(blockSlot, headState);
                         }
-                        return mergeAhead(blockSlot, timely).leftOut();
+                        return mergeAhead(
+                                blockSlot,
+                                timely,
+                                slotStartMillis(slot)
+                                    + aggregationCutoffMillis(slot)
+                                    - AHEAD_PROVING_MARGIN_MILLIS)
+                            .leftOut();
                       })
                   .thenCompose(
                       __ ->
@@ -557,9 +647,12 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
   private SafeFuture<Void> mergeAheadUntilTheBlock(final UInt64 blockSlot) {
     final long start = timeProvider.getTimeInMillis().longValue();
     return withHeadState(
-            headState -> {
-              return mergeAhead(blockSlot, selectForBlockAhead(blockSlot, headState)).leftOut();
-            })
+            headState ->
+                mergeAhead(
+                        blockSlot,
+                        selectForBlockAhead(blockSlot, headState),
+                        slotStartMillis(blockSlot) - AHEAD_PROVING_MARGIN_MILLIS)
+                    .leftOut())
         .thenCompose(
             leftOut -> {
               final long now = timeProvider.getTimeInMillis().longValue();
@@ -595,12 +688,20 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
     int merge(BeaconState headState) throws Exception;
   }
 
-  private MergeResult mergeAhead(final UInt64 blockSlot, final List<SelectedData> selected) {
+  private MergeResult mergeAhead(
+      final UInt64 blockSlot, final List<SelectedData> selected, final long provingDeadlineMillis) {
+    return mergeAhead(blockSlot, selected, Optional.of(provingDeadlineMillis));
+  }
+
+  private MergeResult mergeAhead(
+      final UInt64 blockSlot,
+      final List<SelectedData> selected,
+      final Optional<Long> provingDeadlineMillis) {
     if (selected.isEmpty()) {
       return new MergeResult(List.of(), Bytes.EMPTY, 0, 0, 0);
     }
     final long start = System.currentTimeMillis();
-    final MergeResult merged = mergeIncrementally(blockSlot, selected);
+    final MergeResult merged = mergeIncrementally(blockSlot, selected, provingDeadlineMillis);
     if (merged.merged() > 0) {
       LOG.info(
           "Merged {} committee proofs ahead of the block at slot {}, {} in all, in {} ms",
@@ -621,7 +722,8 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
             ? spec.processSlots(headState, blockSlot)
             : headState;
     synchronized (this) {
-      return selectForBlock(stateAtBlockSlot, new AttestationForkChecker(spec, stateAtBlockSlot));
+      return selectForBlock(
+          stateAtBlockSlot, new AttestationForkChecker(spec, stateAtBlockSlot), false);
     }
   }
 
@@ -675,7 +777,7 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
     synchronized (this) {
       timely = selectTimely(blockSlot, headState);
     }
-    return MeasuredProof.of(mergeAhead(blockSlot, timely));
+    return MeasuredProof.of(mergeAhead(blockSlot, timely, Optional.empty()));
   }
 
   /**
@@ -692,7 +794,7 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
       LOG.debug("Could not process the head state to slot {}", blockSlot, e);
       return Optional.empty();
     }
-    final MergeResult merged = mergeAhead(blockSlot, selected);
+    final MergeResult merged = mergeAhead(blockSlot, selected, Optional.empty());
     return merged.merged() > 0 ? MeasuredProof.of(merged) : Optional.empty();
   }
 
@@ -750,6 +852,7 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
                         forkChecker,
                         timelySlot,
                         committeesByDataRoot.get(dataRoot),
+                        false,
                         false)
                     .ifPresent(candidates::add));
     candidates.sort(Comparator.comparingInt(DataCandidate::newAttesterCount).reversed());
@@ -761,7 +864,8 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
       final AttestationForkChecker forkChecker,
       final UInt64 timelySlot,
       final Map<Integer, CommitteeAttestations> committees,
-      final boolean validate) {
+      final boolean validate,
+      final boolean provenOnly) {
     if (committees == null || committees.isEmpty()) {
       return Optional.empty();
     }
@@ -775,7 +879,7 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
       if (!forkChecker.isFromCorrectFork(committee.shufflingSeed)) {
         continue;
       }
-      final Optional<CommitteeCandidate> best = committee.getBestCandidate(true);
+      final Optional<CommitteeCandidate> best = committee.getBestCandidate(true, provenOnly);
       if (best.isPresent()) {
         committeeCandidates.add(best.get());
         newAttesters += best.get().newAttesterCount();
@@ -1141,6 +1245,7 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
    * aggregate's proof, or the single attestations' signatures to prove.
    */
   private record SelectedCommittee(
+      CommitteeAttestations source,
       int committeeIndex,
       int committeeSize,
       BitSet bits,
@@ -1205,6 +1310,7 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
       }
       final XmssAggregateStatement statement = statement(state);
       return new SelectedCommittee(
+          committee,
           committee.committeeIndex,
           committee.committeeSize,
           bits,
@@ -1271,6 +1377,14 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
       return singleSignatures.size() + aggregates.size();
     }
 
+    SszBitlist toAggregationBits(final BitSet bits) {
+      return SchemaDefinitionsPq.required(spec.atSlot(data.getSlot()).getSchemaDefinitions())
+          .getPqAttestationSchemas()
+          .getAttestationSchema()
+          .getAggregationBitsSchema()
+          .ofBits(committeeSize, bits.stream().toArray());
+    }
+
     /** Adds an aggregate unless one already kept covers it, and returns the change in size. */
     int addAggregate(final ProvenAggregate aggregate) {
       if (aggregates.stream().anyMatch(kept -> kept.bits().isSuperSetOf(aggregate.bits()))) {
@@ -1301,13 +1415,19 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
       return candidates;
     }
 
-    /**
-     * The candidate with the most attesters, or the most not yet on chain. A network aggregate wins
-     * a tie, as its proof is already built.
-     */
     Optional<CommitteeCandidate> getBestCandidate(final boolean newAttestersOnly) {
+      return getBestCandidate(newAttestersOnly, false);
+    }
+
+    /**
+     * The candidate with the most attesters, or the most not yet on chain, of those with a proof
+     * already if {@code provenOnly}. A network aggregate wins a tie, as its proof is already built.
+     */
+    Optional<CommitteeCandidate> getBestCandidate(
+        final boolean newAttestersOnly, final boolean provenOnly) {
       return getAllCandidates().stream()
           .filter(candidate -> !newAttestersOnly || candidate.newAttesterCount() > 0)
+          .filter(candidate -> !provenOnly || candidate.networkProof.isPresent())
           .max(
               Comparator.comparingInt(
                       (CommitteeCandidate candidate) ->

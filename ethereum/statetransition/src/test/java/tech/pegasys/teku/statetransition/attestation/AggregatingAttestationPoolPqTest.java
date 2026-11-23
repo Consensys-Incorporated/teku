@@ -774,6 +774,107 @@ class AggregatingAttestationPoolPqTest {
   }
 
   @Test
+  void shouldNotProveSingleAttestationsForABlockWhenMergingAhead() {
+    final List<Integer> proved = new ArrayList<>();
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
+    pool = provingPool(countingProver(proved, 0), asyncRunner);
+    final AttestationData data = attestationData(0);
+    final IntList committee = committee(0);
+    // A network aggregate of one attester, and single attestations of more, which came after
+    final Bytes networkProof = randomProof(1);
+    pool.add(networkAggregate(data, 0, networkProof, 0));
+    pool.add(singleAttestation(data, 0, committee.getInt(0)));
+    pool.add(singleAttestation(data, 0, committee.getInt(1)));
+
+    final PqBlockAttestations block = blockAttestations(attestationSlot.plus(2));
+
+    // The network aggregate, rather than proving the single attestations now
+    assertThat(proved).isEmpty();
+    assertThat(attesterCount(block)).isEqualTo(1);
+    assertThat(block.proof()).isEqualTo(networkProof);
+  }
+
+  @Test
+  void shouldKeepSingleAttestationsProvenAheadForTheBlock() {
+    final List<Integer> proved = new ArrayList<>();
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
+    pool = provingPool(countingProver(proved, 0), asyncRunner);
+    final AttestationData data = attestationData(0);
+    final IntList committee = committee(0);
+    pool.add(singleAttestation(data, 0, committee.getInt(0)));
+    pool.add(singleAttestation(data, 0, committee.getInt(1)));
+    final UInt64 blockSlot = attestationSlot.plus(2);
+
+    advanceTimeTo(blockSlot.minus(1), 0);
+    pool.onSlot(blockSlot.minus(1));
+    asyncRunner.executeDueActionsRepeatedly();
+    assertThat(proved).containsExactly(2);
+
+    final PqBlockAttestations block = blockAttestations(blockSlot);
+
+    // Block production uses the proof made ahead
+    assertThat(proved).containsExactly(2);
+    assertThat(attesterCount(block)).isEqualTo(2);
+    assertThat(block.proof()).isEqualTo(RecursiveProver.SINGLES_PROOF);
+    // which the pool keeps as an aggregate, beside the single attestations
+    assertThat(pool.getAttestations(Optional.of(attestationSlot), Optional.of(UInt64.ZERO)))
+        .hasSize(2);
+  }
+
+  @Test
+  void shouldStopProvingAheadAtTheDeadlineAndProveTheRestInTheNextPass() {
+    // Each proof takes until the first pass's deadline
+    final long proveMillis =
+        cutoffMillis() - AggregatingAttestationPoolPq.AHEAD_PROVING_MARGIN_MILLIS;
+    final UInt64 blockSlot = attestationSlot.plus(2);
+    final UInt64 slot = blockSlot.minus(1);
+    final long aggregateDue = spec.getAggregateDueMillis(slot);
+    // The second pass has time for one more proof
+    assertThat(aggregateDue + proveMillis)
+        .isLessThan(
+            spec.getSlotDurationMillis(slot)
+                - AggregatingAttestationPoolPq.AHEAD_PROVING_MARGIN_MILLIS);
+    final List<Integer> proved = new ArrayList<>();
+    final RecursiveProver prover = countingProver(proved, proveMillis);
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
+    pool = provingPool(prover, asyncRunner);
+    pool.add(singleAttestation(attestationData(0), 0, committee(0).getInt(0)));
+    pool.add(singleAttestation(attestationData(1), 1, committee(1).getInt(0)));
+
+    // The first pass proves one committee, then is out of time
+    advanceTimeTo(slot, 0);
+    pool.onSlot(slot);
+    asyncRunner.executeDueActionsRepeatedly();
+    assertThat(proved).containsExactly(1);
+    assertThat(prover.merges).isEmpty();
+
+    // The next proves the other, and merges it into the first
+    advanceTimeTo(slot, aggregateDue);
+    asyncRunner.executeDueActionsRepeatedly();
+    assertThat(proved).containsExactly(1, 1);
+    assertThat(prover.merges).hasSize(1);
+
+    final PqBlockAttestations block = blockAttestations(blockSlot);
+    assertThat(proved).hasSize(2);
+    assertThat(prover.merges).hasSize(1);
+    assertThat(attesterCount(block)).isEqualTo(2);
+    assertThat(block.proof()).isEqualTo(RecursiveProver.mergedProof(1));
+  }
+
+  /** A recursive prover recording each committee proof's signature count, taking proveMillis. */
+  private RecursiveProver countingProver(final List<Integer> proved, final long proveMillis) {
+    return new RecursiveProver() {
+      @Override
+      public Bytes proveAggregates(
+          final List<XmssAggregateStatement> statements, final List<List<Bytes>> signatures) {
+        proved.add(signatures.getFirst().size());
+        timeProvider.advanceTimeByMillis(proveMillis);
+        return super.proveAggregates(statements, signatures);
+      }
+    };
+  }
+
+  @Test
   void shouldNotMergeAheadOfPqOrWithoutAggregates() {
     final RecursiveProver prover = new RecursiveProver();
     final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
@@ -1018,6 +1119,8 @@ class AggregatingAttestationPoolPqTest {
    * its proof by how many merges came before. A single proof merges to itself, as leanVM's does.
    */
   private static class RecursiveProver implements StarkProver {
+    static final Bytes SINGLES_PROOF = Bytes.fromHexString("0x5afe");
+
     final List<List<ProvenStatements>> merges = new ArrayList<>();
 
     static Bytes mergedProof(final int merge) {
@@ -1027,7 +1130,7 @@ class AggregatingAttestationPoolPqTest {
     @Override
     public Bytes proveAggregates(
         final List<XmssAggregateStatement> statements, final List<List<Bytes>> signatures) {
-      return Bytes.fromHexString("0x5afe");
+      return SINGLES_PROOF;
     }
 
     @Override
