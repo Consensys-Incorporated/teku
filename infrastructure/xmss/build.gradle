@@ -1,4 +1,6 @@
 dependencies {
+	implementation project(':infrastructure:crypto')
+	implementation project(':infrastructure:unsigned')
 	implementation 'com.google.guava:guava'
 	implementation 'io.consensys.tuweni:tuweni-bytes'
 	implementation 'io.github.crate-crypto:lean-pq'

@@ -59,6 +59,7 @@ import tech.pegasys.teku.xmss.Xmss;
 import tech.pegasys.teku.xmss.XmssPublicKey;
 import tech.pegasys.teku.xmss.XmssSecretKey;
 import tech.pegasys.teku.xmss.XmssSignature;
+import tech.pegasys.teku.xmss.XmssSigningKey;
 
 class PqValidatorKeyLoaderTest {
 
@@ -271,6 +272,69 @@ class PqValidatorKeyLoaderTest {
         .isEqualTo(expectedVrfTree.getRoot());
     assertThat(derivedVrfCachePath())
         .hasBinaryContent(expectedVrfTree.getCachedNodes().toArrayUnsafe());
+  }
+
+  @Test
+  void load_derivedKeysSaveTheirTreesAndLoadThemNextTime() throws IOException {
+    final Path treeCache =
+        PqValidatorKeyLoader.derivedXmssCachePath(
+            derivedVrfCacheDir(), GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY);
+
+    final XmssSigner first =
+        derivingLoader()
+            .load(
+                blsKeystorePath,
+                PASSWORD,
+                GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY,
+                () -> GENESIS_VALIDATOR_0_BLS_SECRET_KEY)
+            .orElseThrow();
+    assertThat(treeCache).exists();
+    final byte[] savedTrees = Files.readAllBytes(treeCache);
+    first.delete();
+
+    final XmssSigner second =
+        derivingLoader()
+            .load(
+                blsKeystorePath,
+                PASSWORD,
+                GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY,
+                () -> GENESIS_VALIDATOR_0_BLS_SECRET_KEY)
+            .orElseThrow();
+    assertThat(second.getPublicKey()).isEqualTo(GENESIS_VALIDATOR_0_XMSS_PUBLIC_KEY);
+    // loaded, not rebuilt and saved again
+    assertThat(treeCache).hasBinaryContent(savedTrees);
+    second.delete();
+  }
+
+  @Test
+  void load_replacesATreeCacheThatDoesNotLoad() throws IOException {
+    final Path treeCache =
+        PqValidatorKeyLoader.derivedXmssCachePath(
+            derivedVrfCacheDir(), GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY);
+    writeFile(treeCache, Bytes.of(1, 2, 3));
+
+    derivingLoader()
+        .load(
+            blsKeystorePath,
+            PASSWORD,
+            GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY,
+            () -> GENESIS_VALIDATOR_0_BLS_SECRET_KEY)
+        .orElseThrow()
+        .delete();
+
+    assertThat(Files.size(treeCache)).isGreaterThan(XmssSigningKey.CACHE_TOP_TREE_SIZE);
+  }
+
+  @Test
+  void load_keystoreKeysSaveTheirTreesNextToTheVrfCache() {
+    writeKeystore(xmssPublicKey.toBytes(), VRF_TREE.getRoot(), Optional.empty());
+    writeVrfCache(VRF_TREE.getCachedNodes());
+
+    loader.load(blsKeystorePath, PASSWORD, blsPublicKey).orElseThrow().delete();
+
+    assertThat(PqKeyFiles.xmssCachePath(PqKeyFiles.vrfCachePath(blsKeystorePath))).exists();
+    assertThat(PqKeyFiles.xmssCachePath(PqKeyFiles.vrfCachePath(blsKeystorePath)).getFileName())
+        .hasToString("validator_1.xmss-cache");
   }
 
   @Test
