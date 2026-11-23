@@ -17,7 +17,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_ACCEPTABLE;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_SERVICE_UNAVAILABLE;
@@ -117,11 +116,6 @@ public abstract class AbstractGetStateFieldTest<T extends SszCollection<?>>
   @Test
   void metadata_shouldHandle404() throws JsonProcessingException {
     verifyMetadataErrorResponse(handler, SC_NOT_FOUND);
-  }
-
-  @Test
-  void metadata_shouldHandle406() throws JsonProcessingException {
-    verifyMetadataErrorResponse(handler, SC_NOT_ACCEPTABLE);
   }
 
   @Test

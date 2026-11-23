@@ -20,11 +20,9 @@ import static java.util.Collections.emptyList;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_FORBIDDEN;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_ACCEPTABLE;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_IMPLEMENTED;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NO_CONTENT;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_SERVICE_UNAVAILABLE;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_UNAUTHORIZED;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_UNSUPPORTED_MEDIA_TYPE;
@@ -252,28 +250,6 @@ public class EndpointMetadata {
   public String getContentType(final int statusCode, final Optional<String> acceptHeader) {
     final OpenApiResponse openApiResponse = responses.get(Integer.toString(statusCode));
     return selectContentType(openApiResponse, acceptHeader);
-  }
-
-  /**
-   * Returns false when the endpoint declares a 406 response and the accept header matches none of
-   * the content types of its 200 response. A missing or blank accept header is always acceptable.
-   */
-  public boolean isAcceptable(final Optional<String> acceptHeader) {
-    final OpenApiResponse okResponse = responses.get(Integer.toString(SC_OK));
-    final Optional<String> nonBlankAcceptHeader = acceptHeader.filter(h -> !h.isBlank());
-    if (nonBlankAcceptHeader.isEmpty()
-        || okResponse == null
-        || !responses.containsKey(Integer.toString(SC_NOT_ACCEPTABLE))) {
-      return true;
-    }
-    return ContentTypes.getResponseContentType(
-            okResponse.getSupportedContentTypes(), nonBlankAcceptHeader)
-        .isPresent();
-  }
-
-  public List<String> getSupportedResponseContentTypes(final int statusCode) {
-    final OpenApiResponse openApiResponse = responses.get(Integer.toString(statusCode));
-    return openApiResponse == null ? emptyList() : openApiResponse.getSupportedContentTypes();
   }
 
   private String selectContentType(
@@ -758,8 +734,14 @@ public class EndpointMetadata {
       return response(SC_NOT_FOUND, "Not found", HTTP_ERROR_RESPONSE_TYPE);
     }
 
+    /**
+     * Intentionally a no-op. The beacon-APIs spec lists a 406 Not Acceptable response for these
+     * endpoints, but Teku falls back to the default content type (JSON) when the Accept header
+     * matches none of the supported ones, so it never returns 406 and doesn't advertise it. Kept so
+     * endpoints still show where the spec expects 406.
+     */
     public EndpointMetaDataBuilder withNotAcceptableResponse() {
-      return response(SC_NOT_ACCEPTABLE, "Not acceptable", HTTP_ERROR_RESPONSE_TYPE);
+      return this;
     }
 
     public EndpointMetaDataBuilder withServiceUnavailableResponse() {

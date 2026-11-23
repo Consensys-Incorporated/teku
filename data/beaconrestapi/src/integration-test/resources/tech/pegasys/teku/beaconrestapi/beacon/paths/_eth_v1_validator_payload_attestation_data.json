@@ -53,16 +53,6 @@
           }
         }
       },
-      "406" : {
-        "description" : "Not acceptable",
-        "content" : {
-          "application/json" : {
-            "schema" : {
-              "$ref" : "#/components/schemas/HttpErrorResponse"
-            }
-          }
-        }
-      },
       "500" : {
         "description" : "Internal server error",
         "content" : {

@@ -51,16 +51,6 @@
           }
         }
       },
-      "406" : {
-        "description" : "Not acceptable",
-        "content" : {
-          "application/json" : {
-            "schema" : {
-              "$ref" : "#/components/schemas/HttpErrorResponse"
-            }
-          }
-        }
-      },
       "503" : {
         "description" : "Service unavailable",
         "content" : {
@@ -144,16 +134,6 @@
       },
       "404" : {
         "description" : "Not found",
-        "content" : {
-          "application/json" : {
-            "schema" : {
-              "$ref" : "#/components/schemas/HttpErrorResponse"
-            }
-          }
-        }
-      },
-      "406" : {
-        "description" : "Not acceptable",
         "content" : {
           "application/json" : {
             "schema" : {

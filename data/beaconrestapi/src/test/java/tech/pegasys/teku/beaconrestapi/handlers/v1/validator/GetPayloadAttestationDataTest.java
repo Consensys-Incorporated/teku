@@ -18,7 +18,6 @@ import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.http.ContentTypes.JSON;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
-import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_ACCEPTABLE;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NO_CONTENT;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
@@ -112,11 +111,6 @@ class GetPayloadAttestationDataTest extends AbstractMigratedBeaconHandlerTest {
   @Test
   void metadata_shouldHandle204() throws JsonProcessingException {
     verifyMetadataEmptyResponse(handler, SC_NO_CONTENT);
-  }
-
-  @Test
-  void metadata_shouldHandle406() throws JsonProcessingException {
-    verifyMetadataErrorResponse(handler, SC_NOT_ACCEPTABLE);
   }
 
   @Test

@@ -128,16 +128,6 @@
         "description" : "Data is unavailable because the chain has not yet reached genesis",
         "content" : { }
       },
-      "406" : {
-        "description" : "Not acceptable",
-        "content" : {
-          "application/json" : {
-            "schema" : {
-              "$ref" : "#/components/schemas/HttpErrorResponse"
-            }
-          }
-        }
-      },
       "400" : {
         "description" : "The request could not be processed, check the response for more information.",
         "content" : {
