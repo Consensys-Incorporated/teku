@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.infrastructure.ssz.impl;
 
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import tech.pegasys.teku.infrastructure.ssz.SszContainer;
@@ -68,8 +69,9 @@ public class SszContainerImpl extends AbstractSszComposite<SszData> implements S
   }
 
   @Override
-  protected IntCache<SszData> createCache() {
-    return new ArrayIntCache<>(size());
+  protected Supplier<IntCache<SszData>> createCacheFactory() {
+    final int fieldCount = size();
+    return () -> new ArrayIntCache<>(fieldCount);
   }
 
   @Override

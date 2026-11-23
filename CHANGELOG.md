@@ -1,13 +1,13 @@
 # Changelog
 
 ## Upcoming Breaking Changes
- - Teku will stop publishing the `-jdk26` Docker images in a future release, because Java 26 is end of life and no longer receives security fixes. Use the `-jdk25` tags instead.
 
 ## Current Releases
 
 ## Unreleased Changes
 
 ### Breaking Changes
+ - Teku no longer publishes the `-jdk26` Docker images, because Java 26 is end of life and no longer receives security fixes. Use the new `-jdk27` tags instead, or the default `-jdk25` ones.
 
 ### Additions and Improvements
  - Removed the Gloas fork schedule for the HOODI network (previously epoch 132352, 26 Oct 2026); Gloas is unscheduled on HOODI again.
@@ -18,11 +18,14 @@
  - Teku-generated Gloas genesis states now follow the consensus-specs and eth-beacon-genesis layout: the genesis execution payload bid's block hash is zero, so the genesis block is EMPTY and interop genesis states are interchangeable with those produced for Kurtosis. The synthetic genesis execution payload Teku seeded at startup is no longer needed and has been removed. Gloas genesis states and beacon node databases created by earlier Teku versions (interop devnets) use the previous layout and must be regenerated; a node started on one now stops at startup with a message saying so. [#11545](https://github.com/Consensys-Incorporated/teku/issues/11545)
  - Added the Gloas beacon API endpoints `GET /eth/v1/beacon/states/{state_id}/builder_pending_withdrawals` and `GET /eth/v1/beacon/states/{state_id}/builder_pending_payments`. [#11544](https://github.com/Consensys-Incorporated/teku/pull/11544)
  - Added the `GET /eth/v1/beacon/proposer_preferences` Gloas Beacon API endpoint, which returns the signed proposer preferences known by the node, optionally filtered by `slot` and `dependent_root`. [#11548](https://github.com/Consensys-Incorporated/teku/pull/11548)
+ - Applying a batch of changes to an SSZ tree no longer wraps and boxes the list of changes at every tree level, which lowers the time of the epoch transition. [#11634](https://github.com/Consensys-Incorporated/teku/pull/11634)
+ - Reduced the time of the epoch transition by about a third on mainnet: changes to SSZ lists are now tracked in a paged array instead of a sorted map, so reading and writing balances during epoch processing takes constant time. [#11633](https://github.com/Consensys-Incorporated/teku/pull/11633)
  - `teku slashing-protection repair --update-all-enabled` now also creates a slashing protection record for every validator key that doesn't have one. Without a record, the validator client treats a key as never having signed, for example after migrating validators without their slashing protection data. Keys are read from the key-manager directories, from `--validator-keys` and from public keys listed in `--validators-external-signer-public-keys`, including from `--config-file`. Keystores are not decrypted, and public keys given as a URL or as `external-signer` are not fetched and are reported as not checked. Without `--update-all-enabled`, keys without a record are only listed. `repair --help` no longer lists options that `repair` accepts but doesn't use, such as the external signer URL and TLS options. [#11622](https://github.com/Consensys-Incorporated/teku/pull/11622)
  - `Validator` views of the registry are now read straight from its packed SSZ bytes and are no longer cached. On mainnet this lowers the live heap of a running node by about 2 GB (about 7.2 million cached `Validator` views are no longer kept).
 
 ### Bug Fixes
  - Beacon API endpoints that document a `406 Not Acceptable` response now return it when the `Accept` header matches none of the content types the endpoint can return, such as `text/plain` or `application/ssz`, instead of responding with JSON. Requests without an `Accept` header, or whose `Accept` header includes `application/json` or `*/*`, are unaffected. [#11546](https://github.com/Consensys-Incorporated/teku/issues/11546)
+ - Reduced retained memory by allowing the first beacon state in a sequence of derived states to be garbage collected while later states remain in use.
  - Importing slashing protection data (`teku slashing-protection import` or the key manager API) now rejects a validator whose history contains a block slot or attestation epoch of 18446744073709551615 (the largest unsigned 64-bit value), reporting an error for that validator instead of silently dropping the value. Teku's slashing protection records cannot store this value, so dropping it left the validator unprotected against signing a slashable attestation. [#11643](https://github.com/Consensys-Incorporated/teku/pull/11643)
  - Importing slashing protection data now rejects a validator with a signed attestation whose source epoch is after its target epoch. Importing such data could stop the validator from ever attesting again. [#11606](https://github.com/Consensys-Incorporated/teku/issues/11606)
  - Importing slashing protection data without a genesis validators root no longer removes the root from existing records, which disabled the check that stops a validator signing on the wrong chain.
