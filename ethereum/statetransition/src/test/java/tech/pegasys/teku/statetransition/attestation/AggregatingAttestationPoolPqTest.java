@@ -265,7 +265,7 @@ class AggregatingAttestationPoolPqTest {
                   final List<List<Bytes>> signatures) {
                 if (!failed) {
                   failed = true;
-                  throw new IllegalStateException("Sidecar unavailable");
+                  throw new IllegalStateException("leanVM unavailable");
                 }
                 return super.proveAggregates(statements, signatures);
               }

@@ -167,7 +167,7 @@ public class Eth2NetworkConfiguration {
   private final int attestationWaitLimitMillis;
   private final int dataColumnSidecarExtensionRetentionEpochs;
   private final int pendingPayloadAttestationsMaxQueue;
-  private final Optional<LeanVmSidecarConfig> leanVmSidecar;
+  private final Optional<LeanVmConfig> leanVm;
   private final Optional<PqTimingConfig> pqTiming;
 
   private Eth2NetworkConfiguration(
@@ -215,7 +215,7 @@ public class Eth2NetworkConfiguration {
       final int attestationWaitLimitMillis,
       final int dataColumnSidecarExtensionRetentionEpochs,
       final int pendingPayloadAttestationsMaxQueue,
-      final Optional<LeanVmSidecarConfig> leanVmSidecar,
+      final Optional<LeanVmConfig> leanVm,
       final Optional<PqTimingConfig> pqTiming) {
     this.spec = spec;
     this.stateBoostrapConfig = stateBoostrapConfig;
@@ -267,7 +267,7 @@ public class Eth2NetworkConfiguration {
     this.attestationWaitLimitMillis = attestationWaitLimitMillis;
     this.dataColumnSidecarExtensionRetentionEpochs = dataColumnSidecarExtensionRetentionEpochs;
     this.pendingPayloadAttestationsMaxQueue = pendingPayloadAttestationsMaxQueue;
-    this.leanVmSidecar = leanVmSidecar;
+    this.leanVm = leanVm;
     this.pqTiming = pqTiming;
 
     LOG.debug("Attestation wait time limit in ratchet: {} ms", attestationWaitLimitMillis);
@@ -385,11 +385,11 @@ public class Eth2NetworkConfiguration {
   }
 
   /**
-   * The leanVM sidecar that proves and verifies PQ attestation proofs, as PQ devnet clients do;
-   * empty for the specification's concatenation stand-in.
+   * leanVM, which proves and verifies PQ attestation proofs, as PQ devnet clients do; empty for the
+   * specification's concatenation stand-in.
    */
-  public Optional<LeanVmSidecarConfig> getLeanVmSidecar() {
-    return leanVmSidecar;
+  public Optional<LeanVmConfig> getLeanVm() {
+    return leanVm;
   }
 
   /** The PQ timing export, or empty when it is off. */
@@ -479,7 +479,7 @@ public class Eth2NetworkConfiguration {
         && dataColumnSidecarExtensionRetentionEpochs
             == that.dataColumnSidecarExtensionRetentionEpochs
         && rustKzgEnabled == that.rustKzgEnabled
-        && Objects.equals(leanVmSidecar, that.leanVmSidecar)
+        && Objects.equals(leanVm, that.leanVm)
         && Objects.equals(pqTiming, that.pqTiming)
         && Objects.equals(spec, that.spec)
         && Objects.equals(stateBoostrapConfig, that.stateBoostrapConfig)
@@ -545,7 +545,7 @@ public class Eth2NetworkConfiguration {
         forkChoiceUpdatedAlwaysSendPayloadAttributes,
         rustKzgEnabled,
         dataColumnSidecarExtensionRetentionEpochs,
-        leanVmSidecar,
+        leanVm,
         pqTiming);
   }
 
@@ -607,7 +607,7 @@ public class Eth2NetworkConfiguration {
         DEFAULT_AGGREGATING_ATTESTATION_POOL_V2_TOTAL_BLOCK_AGGREGATION_TIME_LIMIT_MILLIS;
     private int attestationWaitLimitMillis = DEFAULT_ATTESTATION_WAIT_TIMEOUT_MILLIS;
     private OptionalInt pendingPayloadAttestationsMaxQueue = OptionalInt.empty();
-    private Optional<LeanVmSidecarConfig> leanVmSidecar = Optional.empty();
+    private Optional<LeanVmConfig> leanVm = Optional.empty();
     private Optional<PqTimingConfig> pqTiming = Optional.empty();
 
     public void spec(final Spec spec) {
@@ -721,7 +721,7 @@ public class Eth2NetworkConfiguration {
           attestationWaitLimitMillis,
           dataColumnSidecarExtensionRetentionEpochs,
           pendingPayloadAttestationsMaxQueue.orElse(DEFAULT_MAX_QUEUE_PENDING_PAYLOAD_ATTESTATIONS),
-          leanVmSidecar,
+          leanVm,
           pqTiming);
     }
 
@@ -1408,8 +1408,8 @@ public class Eth2NetworkConfiguration {
       return this;
     }
 
-    public Builder leanVmSidecar(final Optional<LeanVmSidecarConfig> leanVmSidecar) {
-      this.leanVmSidecar = leanVmSidecar;
+    public Builder leanVm(final Optional<LeanVmConfig> leanVm) {
+      this.leanVm = leanVm;
       return this;
     }
 

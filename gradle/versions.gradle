@@ -50,8 +50,8 @@ dependencyManagement {
 		dependency 'tech.pegasys:jblst:0.3.18'
 		dependency 'io.consensys.protocols:jc-kzg-4844:2.1.8'
 		dependency 'io.github.crate-crypto:java-eth-kzg:0.10.0'
-		// The Docker images build leanvm-sidecar from the same leanVM release (LEANVM_TAG in docker/*/Dockerfile)
-		dependency 'io.github.crate-crypto:lean-pq:0.16.0'
+		// Every node of a PQ network must be on the same leanVM release: proofs of another one don't verify
+		dependency 'io.github.crate-crypto:lean-pq:0.17.0'
 
 		dependency 'org.hdrhistogram:HdrHistogram:2.2.2'
 

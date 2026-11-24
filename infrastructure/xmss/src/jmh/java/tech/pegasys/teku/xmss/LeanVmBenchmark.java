@@ -13,9 +13,6 @@
 
 package tech.pegasys.teku.xmss;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -34,49 +31,37 @@ import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
-import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.annotations.Warmup;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
-import tech.pegasys.teku.xmss.LeanVmSidecar.Claim;
-import tech.pegasys.teku.xmss.LeanVmSidecar.ProofOfClaims;
-import tech.pegasys.teku.xmss.LeanVmSidecar.SignedClaim;
+import tech.pegasys.teku.xmss.XmssAggregator.Claim;
+import tech.pegasys.teku.xmss.XmssAggregator.ProofOfClaims;
+import tech.pegasys.teku.xmss.XmssAggregator.SignedClaim;
 
 /**
- * leanVM aggregate proofs through a {@code leanvm-sidecar} over its Unix socket.
+ * leanVM aggregate proofs, proven and verified inside the benchmark's process, the way the beacon
+ * node uses them.
  *
  * <pre>
- * LEANVM_SIDECAR_BINARY=/usr/local/bin/leanvm-sidecar \
- *   ./gradlew :infrastructure:xmss:jmh --args="LeanVmSidecarBenchmark"
- * LEANVM_SIDECAR_SOCKET=/run/leanvm.sock \
- *   ./gradlew :infrastructure:xmss:jmh --args="LeanVmSidecarBenchmark.prove -p signatures=64"
+ * ./gradlew :infrastructure:xmss:jmh --args="LeanVmBenchmark"
+ * LEANVM_THREADS=8 ./gradlew :infrastructure:xmss:jmh --args="LeanVmBenchmark.prove -p signatures=64"
  * </pre>
  *
- * <p>With {@code LEANVM_SIDECAR_SOCKET} the benchmark connects to a sidecar already listening
- * there; otherwise it starts {@code LEANVM_SIDECAR_BINARY} (default {@code
- * /usr/local/bin/leanvm-sidecar}, the Docker image's) on a socket of its own, with {@code
- * LEANVM_SIDECAR_THREADS} proving threads (default 0: one per core).
+ * <p>The prover runs with {@code LEANVM_THREADS} threads (default 0: one per core).
  *
  * <p>Signatures are from distinct keys over one message, as in a committee's attestations. Proof
  * sizes are printed during setup.
  */
 @Fork(value = 1, jvmArgsAppend = "--enable-native-access=ALL-UNNAMED")
-public class LeanVmSidecarBenchmark {
+public class LeanVmBenchmark {
 
   private static final Bytes32 MESSAGE = Bytes32.fromHexString("0x" + "ef".repeat(32));
 
-  private static LeanVmSidecar openSidecar(final Path socketDir) {
-    final Optional<String> socket = env("LEANVM_SIDECAR_SOCKET");
-    if (socket.isPresent()) {
-      return LeanVmSidecar.connect(Path.of(socket.get()));
-    }
-    return LeanVmSidecar.start(
-        Path.of(env("LEANVM_SIDECAR_BINARY").orElse("/usr/local/bin/leanvm-sidecar")),
-        socketDir.resolve("leanvm.sock"),
-        Integer.parseInt(env("LEANVM_SIDECAR_THREADS").orElse("0")));
-  }
-
-  private static Optional<String> env(final String name) {
-    return Optional.ofNullable(System.getenv(name)).filter(value -> !value.isBlank());
+  private static LeanVmAggregator startLeanVm() {
+    return LeanVmAggregator.start(
+        Integer.parseInt(
+            Optional.ofNullable(System.getenv("LEANVM_THREADS"))
+                .filter(value -> !value.isBlank())
+                .orElse("0")));
   }
 
   /** {@code count} keys, from seeds {@code firstSeed} on, loaded in parallel. */
@@ -106,30 +91,13 @@ public class LeanVmSidecarBenchmark {
     return signedClaims.stream().map(SignedClaim::claim).toList();
   }
 
-  private static Path createSocketDir() {
-    try {
-      return Files.createTempDirectory("leanvm-bench");
-    } catch (final IOException e) {
-      throw new IllegalStateException(e);
-    }
-  }
-
-  private static void deleteSocketDir(final Path socketDir) {
-    try (var paths = Files.walk(socketDir)) {
-      paths.sorted((a, b) -> b.compareTo(a)).forEach(path -> path.toFile().delete());
-    } catch (final IOException e) {
-      // Best effort
-    }
-  }
-
-  /** One sidecar, {@code signatures} signed claims and a proof of them. */
+  /** {@code signatures} signed claims and a proof of them. */
   @State(Scope.Benchmark)
   public static class Signed {
     @Param({"1", "16", "64", "128"})
     int signatures;
 
-    Path socketDir;
-    LeanVmSidecar sidecar;
+    LeanVmAggregator leanVm;
     List<SignedClaim> signedClaims;
     List<Claim> claims;
     Bytes proof;
@@ -143,19 +111,12 @@ public class LeanVmSidecarBenchmark {
         keys.forEach(XmssSigningKey::close);
       }
       claims = claimsOf(signedClaims);
-      socketDir = createSocketDir();
-      sidecar = openSidecar(socketDir);
-      proof = sidecar.prove(signedClaims);
-      if (!sidecar.verify(claims, proof)) {
+      leanVm = startLeanVm();
+      proof = leanVm.prove(signedClaims);
+      if (!leanVm.verify(claims, proof)) {
         throw new IllegalStateException("Proof of " + signatures + " signatures doesn't verify");
       }
       System.out.printf("%nProof of %d signatures: %,d bytes%n", signatures, proof.size());
-    }
-
-    @TearDown(Level.Trial)
-    public void tearDown() {
-      sidecar.close();
-      deleteSocketDir(socketDir);
     }
   }
 
@@ -166,7 +127,7 @@ public class LeanVmSidecarBenchmark {
   @Warmup(iterations = 1)
   @Measurement(iterations = 5)
   public Bytes prove(final Signed state) {
-    return state.sidecar.prove(state.signedClaims);
+    return state.leanVm.prove(state.signedClaims);
   }
 
   /** Verifying a proof of {@code signatures} signatures. */
@@ -176,12 +137,12 @@ public class LeanVmSidecarBenchmark {
   @Warmup(iterations = 2, time = 2)
   @Measurement(iterations = 5, time = 2)
   public boolean verify(final Signed state) {
-    return state.sidecar.verify(state.claims, state.proof);
+    return state.leanVm.verify(state.claims, state.proof);
   }
 
   /**
-   * One sidecar and {@code children} proofs of {@value #SIGNATURES_PER_CHILD} signatures each, over
-   * different messages, as when a block's attestations for several committees are merged.
+   * {@code children} proofs of {@value #SIGNATURES_PER_CHILD} signatures each, over different
+   * messages, as when a block's attestations for several committees are merged.
    */
   @State(Scope.Benchmark)
   public static class Children {
@@ -190,40 +151,32 @@ public class LeanVmSidecarBenchmark {
     @Param({"2", "4", "16"})
     int children;
 
-    Path socketDir;
-    LeanVmSidecar sidecar;
+    LeanVmAggregator leanVm;
     List<ProofOfClaims> proofs;
 
     @Setup(Level.Trial)
     public void setUp() {
       final List<XmssSigningKey> keys = loadKeys(1000, SIGNATURES_PER_CHILD);
-      socketDir = createSocketDir();
-      sidecar = openSidecar(socketDir);
+      leanVm = startLeanVm();
       proofs = new ArrayList<>();
       try {
         for (int child = 0; child < children; child++) {
           final Bytes32 message = Bytes32.leftPad(Bytes.ofUnsignedInt(child + 1L));
           final List<SignedClaim> signedClaims = sign(keys, child, message);
-          proofs.add(new ProofOfClaims(claimsOf(signedClaims), sidecar.prove(signedClaims)));
+          proofs.add(new ProofOfClaims(claimsOf(signedClaims), leanVm.prove(signedClaims)));
         }
       } finally {
         keys.forEach(XmssSigningKey::close);
       }
-      final Bytes merged = sidecar.merge(proofs);
+      final Bytes merged = leanVm.merge(proofs);
       final List<Claim> allClaims =
           proofs.stream().flatMap(proof -> proof.claims().stream()).toList();
-      if (!sidecar.verify(allClaims, merged)) {
+      if (!leanVm.verify(allClaims, merged)) {
         throw new IllegalStateException("Merge of " + children + " proofs doesn't verify");
       }
       System.out.printf(
           "%nMerge of %d proofs of %d signatures: %,d bytes%n",
           children, SIGNATURES_PER_CHILD, merged.size());
-    }
-
-    @TearDown(Level.Trial)
-    public void tearDown() {
-      sidecar.close();
-      deleteSocketDir(socketDir);
     }
   }
 
@@ -234,6 +187,6 @@ public class LeanVmSidecarBenchmark {
   @Warmup(iterations = 1)
   @Measurement(iterations = 5)
   public Bytes merge(final Children state) {
-    return state.sidecar.merge(state.proofs);
+    return state.leanVm.merge(state.proofs);
   }
 }

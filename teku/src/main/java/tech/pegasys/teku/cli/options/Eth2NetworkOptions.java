@@ -39,7 +39,7 @@ import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networking.p2p.network.config.NetworkConfig;
 import tech.pegasys.teku.networks.Eth2NetworkConfiguration;
-import tech.pegasys.teku.networks.LeanVmSidecarConfig;
+import tech.pegasys.teku.networks.LeanVmConfig;
 import tech.pegasys.teku.networks.PqTimingConfig;
 
 public class Eth2NetworkOptions {
@@ -296,15 +296,36 @@ public class Eth2NetworkOptions {
   private String pqForkVersion;
 
   @Option(
+      names = {"--Xpq-leanvm-enabled"},
+      hidden = true,
+      paramLabel = "<BOOLEAN>",
+      description =
+          "Prove and verify PQ attestation proofs with leanVM, inside this process, as PQ devnet"
+              + " clients do. Every node of a network must run the same leanVM release. Without"
+              + " it, proofs are the specification's concatenation stand-in.",
+      fallbackValue = "true",
+      showDefaultValue = Visibility.ALWAYS,
+      arity = "0..1")
+  private boolean leanVmEnabled = false;
+
+  @Option(
+      names = {"--Xpq-leanvm-threads"},
+      hidden = true,
+      paramLabel = "<NUMBER>",
+      description =
+          "The leanVM prover's threads; 0 is one per core. More than the machine runs in parallel"
+              + " fails at startup.",
+      showDefaultValue = Visibility.ALWAYS,
+      arity = "1")
+  private int leanVmThreads = LeanVmConfig.DEFAULT_THREADS;
+
+  @Option(
       names = {"--Xpq-leanvm-sidecar-binary"},
       hidden = true,
       paramLabel = "<path>",
       description =
-          "Prove and verify PQ attestation proofs with leanVM, as PQ devnet clients do, launching"
-              + " this leanvm-sidecar executable. It must be built from the network's leanVM"
-              + " revision; the Docker image has one at /usr/local/bin/leanvm-sidecar. Without it or"
-              + " --Xpq-leanvm-sidecar-socket, proofs are the specification's concatenation"
-              + " stand-in.",
+          "Deprecated: leanVM runs inside this process and there is no sidecar. Giving this"
+              + " enables leanVM, as --Xpq-leanvm-enabled does; the path is ignored.",
       arity = "1")
   private Path leanVmSidecarBinary;
 
@@ -313,9 +334,8 @@ public class Eth2NetworkOptions {
       hidden = true,
       paramLabel = "<path>",
       description =
-          "The Unix socket of the leanVM sidecar: the one to connect to, or with"
-              + " --Xpq-leanvm-sidecar-binary, the one to launch it on (default: in the beacon"
-              + " node's data directory).",
+          "Deprecated: leanVM runs inside this process and there is no sidecar. Giving this"
+              + " enables leanVM, as --Xpq-leanvm-enabled does; the path is ignored.",
       arity = "1")
   private Path leanVmSidecarSocket;
 
@@ -652,9 +672,16 @@ public class Eth2NetworkOptions {
         implicitEpochDefault(gloasForkEpoch, builder::gloasForkEpoch);
       }
     }
-    builder.leanVmSidecar(
-        LeanVmSidecarConfig.of(
-            Optional.ofNullable(leanVmSidecarBinary), Optional.ofNullable(leanVmSidecarSocket)));
+    final boolean deprecatedSidecarFlagGiven =
+        leanVmSidecarBinary != null || leanVmSidecarSocket != null;
+    if (leanVmThreads < 0) {
+      throw new InvalidConfigurationException("--Xpq-leanvm-threads must not be negative");
+    }
+    builder.leanVm(
+        LeanVmConfig.of(
+            leanVmEnabled || deprecatedSidecarFlagGiven,
+            leanVmThreads,
+            deprecatedSidecarFlagGiven));
     builder.pqTiming(PqTimingConfig.of(Optional.ofNullable(pqTimingOutput), pqMeasurement));
     if (pqForkVersion != null) {
       builder.pqForkVersion(Bytes4.fromHexString(pqForkVersion));
