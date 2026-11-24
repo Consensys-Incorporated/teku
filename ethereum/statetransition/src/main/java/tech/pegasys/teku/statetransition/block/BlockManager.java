@@ -373,7 +373,12 @@ public class BlockManager extends Service
       final Optional<RemoteOrigin> origin,
       final boolean needsGossipValidationOnRetry) {
     blockEventsListener.onNewBlock(block, origin);
-    preImportBlockSubscribers.deliver(l -> l.onNewBlock(block, origin));
+    // Only blocks that passed gossip validation have a verified proposer and signature at this
+    // point. Blocks from RPC or retries are only checked by the state transition below, so they
+    // must not trigger pre-import side effects such as data column recovery and publishing.
+    if (origin.equals(Optional.of(RemoteOrigin.GOSSIP))) {
+      preImportBlockSubscribers.deliver(l -> l.onNewBlock(block, origin));
+    }
 
     return blockImporter
         .importBlock(block, blockImportPerformance, blockBroadcastValidator)
