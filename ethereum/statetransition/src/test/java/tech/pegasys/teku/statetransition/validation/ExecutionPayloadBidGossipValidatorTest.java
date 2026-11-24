@@ -313,7 +313,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
   }
 
   @TestTemplate
-  void shouldNotDeriveRootBeforeParentStateIsAvailable() {
+  void shouldDeriveRootBeforeParentStateIsAvailable() {
     final SafeFuture<Optional<BeaconState>> stateFuture = new SafeFuture<>();
     when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
         .thenReturn(stateFuture);
@@ -321,7 +321,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
     final SafeFuture<InternalValidationResult> result = bidValidator.validate(signedBid);
 
     assertThat(result).isNotDone();
-    verify(gossipValidationHelper, never()).getShufflingDependentRoot(parentBlockRoot, slot);
+    verify(gossipValidationHelper).getShufflingDependentRoot(parentBlockRoot, slot);
+    verify(proposerPreferencesManager).getProposerPreferences(slot, dependentRoot);
     stateFuture.complete(Optional.empty());
     assertThatSafeFuture(result)
         .isCompletedWithValue(
@@ -330,8 +331,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
                 "state for parent block root %s at slot %s is unavailable; saving for future processing",
                 parentBlockRoot,
                 slot.decrement()));
-    verify(gossipValidationHelper, never()).getShufflingDependentRoot(parentBlockRoot, slot);
-    verify(proposerPreferencesManager, never()).getProposerPreferences(any(), any());
+    verify(gossipValidationHelper).getShufflingDependentRoot(parentBlockRoot, slot);
+    verify(proposerPreferencesManager).getProposerPreferences(slot, dependentRoot);
   }
 
   @TestTemplate
@@ -373,7 +374,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
     manager.onOperationAdded(unrelated, ACCEPT, true);
     verify(gossipValidationHelper)
         .getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot);
-    verify(gossipValidationHelper, never()).getShufflingDependentRoot(parentBlockRoot, slot);
+    verify(gossipValidationHelper).getShufflingDependentRoot(parentBlockRoot, slot);
     verify(forkChoiceStrategy).getAncestor(eq(parentBlockRoot), any());
     assertThat(pool.size()).isEqualTo(1);
 
@@ -381,7 +382,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .thenReturn(SafeFuture.completedFuture(Optional.of(postState)));
     manager.onSlot(slot);
     assertThat(pool.size()).isZero();
-    verify(gossipValidationHelper).getShufflingDependentRoot(parentBlockRoot, slot);
+    verify(gossipValidationHelper, times(2)).getShufflingDependentRoot(parentBlockRoot, slot);
   }
 
   @TestTemplate
@@ -416,15 +417,16 @@ public class ExecutionPayloadBidGossipValidatorTest {
     final SafeFuture<Optional<BeaconState>> stateFuture = new SafeFuture<>();
     when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
         .thenReturn(stateFuture);
+    when(proposerPreferencesManager.getProposerPreferences(slot, dependentRoot))
+        .thenReturn(Optional.of(matching.getMessage()));
     manager.onOperationAdded(matching, ACCEPT, true);
     manager.onOperationAdded(matching, ACCEPT, true);
     manager.onSlot(slot);
     assertThat(pool.size()).isZero();
-    verify(gossipValidationHelper, times(2))
+    verify(gossipValidationHelper)
         .getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot);
     stateFuture.complete(Optional.of(postState));
-    assertThat(pool.get(signedBid.hashTreeRoot()).orElseThrow().dependentRoot())
-        .contains(dependentRoot);
+    assertThat(pool.size()).isZero();
     verify(gossipValidationHelper, times(2)).getShufflingDependentRoot(parentBlockRoot, slot);
   }
 
@@ -482,12 +484,28 @@ public class ExecutionPayloadBidGossipValidatorTest {
   void shouldReject_whenExecutionPaymentIsNonZero() {
     final SignedExecutionPayloadBid bidWithPayment =
         dataStructureUtil.randomSignedExecutionPayloadBid(UInt64.ONE);
+    when(gossipValidationHelper.isSlotCurrentOrNext(bidWithPayment.getMessage().getSlot()))
+        .thenReturn(true);
     assertThatSafeFuture(bidValidator.validate(bidWithPayment))
         .isCompletedWithValue(
             rejectBid(
                 bidWithPayment,
                 "execution payment should be 0 but was %s",
                 bidWithPayment.getMessage().getExecutionPayment()));
+  }
+
+  @TestTemplate
+  void shouldIgnoreOutOfTimeBidBeforeRejectingExecutionPayment() {
+    final SignedExecutionPayloadBid bidWithPayment =
+        dataStructureUtil.randomSignedExecutionPayloadBid(UInt64.ONE);
+    final UInt64 bidSlot = bidWithPayment.getMessage().getSlot();
+    when(gossipValidationHelper.isSlotCurrentOrNext(bidSlot)).thenReturn(false);
+
+    assertThatSafeFuture(bidValidator.validate(bidWithPayment))
+        .isCompletedWithValue(
+            ignoreBid(
+                bidWithPayment, "must be for current or next slot but was for slot %s", bidSlot));
+    verify(gossipValidationHelper, never()).getParentStateInBlockEpoch(any(), any(), any());
   }
 
   @TestTemplate
@@ -569,6 +587,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .isCompletedWithValue(
             saveBidForFuture(
                 signedBid, "no proposer preferences available; saving for future processing"));
+    verify(gossipValidationHelper, never()).getParentStateInBlockEpoch(any(), any(), any());
   }
 
   @TestTemplate
@@ -581,6 +600,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
             saveBidForFuture(
                 signedBid,
                 "shuffling dependent root is unavailable; saving for future processing"));
+    verify(gossipValidationHelper, never()).getParentStateInBlockEpoch(any(), any(), any());
   }
 
   @TestTemplate
@@ -609,6 +629,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
                 "fee recipient %s does not match proposer preferences fee recipient %s",
                 bid.getFeeRecipient(),
                 mismatchedPreferences.getFeeRecipient()));
+    verify(gossipValidationHelper, never()).getParentStateInBlockEpoch(any(), any(), any());
   }
 
   @TestTemplate
@@ -629,6 +650,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
                 bidWithGasLimit.getMessage().getGasLimit(),
                 parentGasLimit,
                 targetGasLimit));
+    verify(gossipValidationHelper, never()).getParentStateInBlockEpoch(any(), any(), any());
   }
 
   @TestTemplate
@@ -693,6 +715,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
       assertThat(logCaptor.getTraceLogs().getFirst())
           .isEqualTo(formatBidValidationLog(expectedResult));
     }
+    verify(gossipValidationHelper, never()).getParentStateInBlockEpoch(any(), any(), any());
   }
 
   @TestTemplate
@@ -812,6 +835,62 @@ public class ExecutionPayloadBidGossipValidatorTest {
       assertThat(logCaptor.getTraceLogs().getFirst())
           .isEqualTo(formatBidValidationLog(ignore(expectedMessage)));
     }
+    verify(gossipValidationHelper, never()).getParentStateInBlockEpoch(any(), any(), any());
+  }
+
+  @TestTemplate
+  void shouldIgnoreBidsForDistinctPreviousEpochRootsWithoutRequestingState(
+      final TestSpecInvocationContextProvider.SpecContext specContext) {
+    final Spec testSpec = specContext.getSpec();
+    final UInt64 bidSlot = testSpec.computeStartSlotAtEpoch(UInt64.valueOf(2));
+    final UInt64 previousEpochStartSlot = testSpec.computeStartSlotAtEpoch(UInt64.ONE);
+    final int slotsPerEpoch = testSpec.getSlotsPerEpoch(bidSlot);
+    when(gossipValidationHelper.isBidCompatibleWithHead(any())).thenReturn(false);
+    when(gossipValidationHelper.getParentStateInBlockEpoch(any(), any(), any()))
+        .thenReturn(new SafeFuture<>());
+
+    for (int rootIndex = 0; rootIndex < 32; rootIndex++) {
+      final Bytes32 previousEpochRoot = dataStructureUtil.randomBytes32();
+      final SignedExecutionPayloadBid offHeadBid =
+          signedBidForParent(
+              parentBlockHash, previousEpochRoot, bidSlot, builderIndex, bid.getValue());
+      mockBidValidation(offHeadBid);
+      when(gossipValidationHelper.getSlotForBlockRoot(previousEpochRoot))
+          .thenReturn(Optional.of(previousEpochStartSlot.plus(rootIndex % slotsPerEpoch)));
+
+      assertThatSafeFuture(bidValidator.validate(offHeadBid))
+          .isCompletedWithValue(
+              ignoreBid(
+                  offHeadBid,
+                  "is not compatible with the current head branch (parent block hash %s, parent block root %s)",
+                  parentBlockHash,
+                  previousEpochRoot));
+    }
+
+    verify(gossipValidationHelper, never()).getParentStateInBlockEpoch(any(), any(), any());
+    verify(gossipValidationHelper, never())
+        .isSignatureValidWithRespectToBuilderIndex(any(), any(), any(), any());
+  }
+
+  @TestTemplate
+  void shouldIgnore_whenHeadChangesWhileRetrievingState() {
+    final SafeFuture<Optional<BeaconState>> stateFuture = new SafeFuture<>();
+    when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
+        .thenReturn(stateFuture);
+
+    final SafeFuture<InternalValidationResult> result = bidValidator.validate(signedBid);
+
+    assertThat(result).isNotDone();
+    when(gossipValidationHelper.isBidCompatibleWithHead(bid)).thenReturn(false);
+    stateFuture.complete(Optional.of(postState));
+
+    assertThatSafeFuture(result)
+        .isCompletedWithValue(
+            ignoreBid(
+                signedBid,
+                "is not compatible with the current head branch (parent block hash %s, parent block root %s)",
+                parentBlockHash,
+                parentBlockRoot));
   }
 
   @TestTemplate
@@ -1015,6 +1094,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
                 parentBlockHash,
                 parentBlockRoot,
                 builderIndex));
+    verify(gossipValidationHelper, never()).getParentStateInBlockEpoch(any(), any(), any());
   }
 
   @TestTemplate
@@ -1067,11 +1147,50 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .isCompletedWithValue(
             ignoreBid(
                 signedBid,
-                "already received valid bid for slot %s, parent block hash %s, parent block root %s, and builder index %s",
-                slot,
+                "another bid for parent block hash %s and parent block root %s was processed concurrently",
                 parentBlockHash,
-                parentBlockRoot,
-                builderIndex));
+                parentBlockRoot));
+  }
+
+  @TestTemplate
+  void shouldNotOverwriteHigherBidAcceptedWhileRetrievingState() {
+    final SignedExecutionPayloadBid lowerBid = bidFromBuilder(builderIndex, UInt64.valueOf(10_000));
+    mockBidValidation(lowerBid);
+    final SafeFuture<Optional<BeaconState>> stateFuture = new SafeFuture<>();
+    when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
+        .thenReturn(stateFuture);
+
+    final SafeFuture<InternalValidationResult> lowerBidResult = bidValidator.validate(lowerBid);
+    assertThat(lowerBidResult).isNotDone();
+
+    final SignedExecutionPayloadBid higherBid =
+        bidFromBuilder(builderIndex.plus(1), UInt64.valueOf(11_000));
+    mockBidValidation(higherBid);
+    assertThatSafeFuture(bidValidator.validate(higherBid)).isCompletedWithValue(ACCEPT);
+
+    stateFuture.complete(Optional.of(postState));
+    assertThatSafeFuture(lowerBidResult)
+        .isCompletedWithValue(
+            ignoreBid(
+                lowerBid,
+                "does not meet minimum increment threshold (%s%%) after a concurrent update; current highest is %s ETH and minimum required is %s ETH",
+                MIN_BID_INCREMENT_PERCENTAGE,
+                gweiToEth(UInt64.valueOf(11_000)),
+                gweiToEth(UInt64.valueOf(11_110))));
+
+    final SignedExecutionPayloadBid intermediateBid =
+        bidFromBuilder(builderIndex.plus(2), UInt64.valueOf(11_050));
+    mockBidValidation(intermediateBid);
+    clearInvocations(gossipValidationHelper);
+    assertThatSafeFuture(bidValidator.validate(intermediateBid))
+        .isCompletedWithValue(
+            ignoreBid(
+                intermediateBid,
+                "does not meet minimum increment threshold (%s%%); current highest is %s ETH and minimum required is %s ETH",
+                MIN_BID_INCREMENT_PERCENTAGE,
+                gweiToEth(UInt64.valueOf(11_000)),
+                gweiToEth(UInt64.valueOf(11_110))));
+    verify(gossipValidationHelper, never()).getParentStateInBlockEpoch(any(), any(), any());
   }
 
   @TestTemplate
@@ -1160,6 +1279,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
     final UInt64 minRequiredBid = firstBidValue.plus(minIncrement);
 
     mockBidValidation(secondBid, differentBuilderIndex, secondBidValue);
+    clearInvocations(gossipValidationHelper);
     assertThatSafeFuture(bidValidator.validate(secondBid))
         .isCompletedWithValue(
             ignoreBid(
@@ -1168,6 +1288,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
                 MIN_BID_INCREMENT_PERCENTAGE,
                 gweiToEth(firstBidValue),
                 gweiToEth(minRequiredBid)));
+    verify(gossipValidationHelper, never()).getParentStateInBlockEpoch(any(), any(), any());
   }
 
   @TestTemplate
