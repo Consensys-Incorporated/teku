@@ -23,6 +23,10 @@ import java.util.function.Function;
 public class OptionalDeserializableFieldDefinition<TObject, TBuilder, TField>
     extends OptionalSerializableFieldDefinition<TObject, TField>
     implements DeserializableFieldDefinition<TObject, TBuilder> {
+
+  // Computed on first use. The definition is immutable, so the hash never changes; a race only
+  // computes it twice
+  private int cachedHashCode;
   private final BiConsumer<TBuilder, Optional<TField>> setter;
   private final DeserializableTypeDefinition<TField> deserializableType;
 
@@ -69,6 +73,13 @@ public class OptionalDeserializableFieldDefinition<TObject, TBuilder, TField>
 
   @Override
   public int hashCode() {
-    return Objects.hash(super.hashCode(), deserializableType);
+    // Cached: hashing walks the whole nested type, and building the OpenAPI docs hashes the same
+    // types again and again while collecting the types each endpoint references
+    int hash = cachedHashCode;
+    if (hash == 0) {
+      hash = Objects.hash(super.hashCode(), deserializableType);
+      cachedHashCode = hash;
+    }
+    return hash;
   }
 }

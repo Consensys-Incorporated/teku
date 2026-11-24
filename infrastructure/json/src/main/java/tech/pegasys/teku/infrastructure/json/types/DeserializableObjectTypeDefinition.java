@@ -36,6 +36,10 @@ import tech.pegasys.teku.infrastructure.json.exceptions.MissingRequiredFieldExce
 class DeserializableObjectTypeDefinition<TObject, TBuilder>
     extends SerializableObjectTypeDefinition<TObject>
     implements DeserializableTypeDefinition<TObject> {
+
+  // Computed on first use. The definition is immutable, so the hash never changes; a race only
+  // computes it twice
+  private int cachedHashCode;
   private static final Logger LOG = LogManager.getLogger();
   private final Map<String, DeserializableFieldDefinition<TObject, TBuilder>> deserializableFields;
   private final Supplier<TBuilder> initializer;
@@ -140,6 +144,13 @@ class DeserializableObjectTypeDefinition<TObject, TBuilder>
 
   @Override
   public int hashCode() {
-    return Objects.hash(super.hashCode(), deserializableFields);
+    // Cached: hashing walks the whole nested type, and building the OpenAPI docs hashes the same
+    // types again and again while collecting the types each endpoint references
+    int hash = cachedHashCode;
+    if (hash == 0) {
+      hash = Objects.hash(super.hashCode(), deserializableFields);
+      cachedHashCode = hash;
+    }
+    return hash;
   }
 }

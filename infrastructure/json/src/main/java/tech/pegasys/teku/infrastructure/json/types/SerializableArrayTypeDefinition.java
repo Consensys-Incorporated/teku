@@ -22,6 +22,10 @@ import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException
 
 public class SerializableArrayTypeDefinition<ItemT, CollectionT extends Iterable<ItemT>>
     implements SerializableTypeDefinition<CollectionT> {
+
+  // Computed on first use. The definition is immutable, so the hash never changes; a race only
+  // computes it twice
+  private int cachedHashCode;
   private final SerializableTypeDefinition<ItemT> itemType;
   private final Optional<String> description;
   protected final Optional<Integer> minItems;
@@ -111,6 +115,13 @@ public class SerializableArrayTypeDefinition<ItemT, CollectionT extends Iterable
 
   @Override
   public int hashCode() {
-    return Objects.hash(itemType, description);
+    // Cached: hashing walks the whole nested type, and building the OpenAPI docs hashes the same
+    // types again and again while collecting the types each endpoint references
+    int hash = cachedHashCode;
+    if (hash == 0) {
+      hash = Objects.hash(itemType, description);
+      cachedHashCode = hash;
+    }
+    return hash;
   }
 }
