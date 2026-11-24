@@ -301,7 +301,7 @@ public class ValidatorClientService extends Service {
                   .runAsync(
                       () ->
                           validatorClientService.scheduleValidatorsDuties(
-                              config, validatorApiChannel, genesisDataProvider, asyncRunner))
+                              config, validatorApiChannel, asyncRunner))
                   .propagateTo(validatorClientService.initializationComplete);
               return SafeFuture.COMPLETE;
             })
@@ -480,7 +480,6 @@ public class ValidatorClientService extends Service {
   private void scheduleValidatorsDuties(
       final ValidatorClientConfiguration config,
       final ValidatorApiChannel validatorApiChannel,
-      final GenesisDataProvider genesisDataProvider,
       final AsyncRunner asyncRunner) {
     validatorTimingChannels.add(validatorStatusProvider);
     final OwnedValidators validators = validatorLoader.getOwnedValidators();
@@ -652,16 +651,11 @@ public class ValidatorClientService extends Service {
     validatorTimingChannels.add(validatorStatusLogger);
 
     if (spec.isMilestoneSupported(SpecMilestone.PQ)) {
-      final XmssKeyWarmer xmssKeyWarmer = new XmssKeyWarmer(spec, validators, timeProvider);
-      validatorTimingChannels.add(xmssKeyWarmer);
-      // Slot events only start at genesis, so prepare the keys for the current slot right away
-      genesisDataProvider
-          .getGenesisTime()
-          .thenAccept(
-              genesisTime ->
-                  xmssKeyWarmer.onSlot(
-                      spec.getCurrentSlot(timeProvider.getTimeInSeconds(), genesisTime)))
-          .finishError(LOG);
+      // Warms up on slot events. It must not ask the beacon node for genesis data here: this runs
+      // while the validator client is built, before an in-process beacon node subscribes to the
+      // validator API channel, so the request would never complete, and the genesis data
+      // provider, which keeps that request, would hold every duty's fork info back for good.
+      validatorTimingChannels.add(new XmssKeyWarmer(spec, validators, timeProvider));
     }
 
     addValidatorCountMetric(metricsSystem, validators);
