@@ -19,7 +19,6 @@ import static tech.pegasys.teku.infrastructure.http.RestApiConstants.ATTESTATION
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.BEACON_BLOCK_ROOT;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.BLOCK_ROOT;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.BUILDER_BOOST_FACTOR_DESCRIPTION;
-import static tech.pegasys.teku.infrastructure.http.RestApiConstants.BUILDER_INDEX;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.COMMITTEE_INDEX;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.COMMITTEE_INDEX_QUERY_DESCRIPTION;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.COUNT;
@@ -98,12 +97,6 @@ public class BeaconRestApiTypes {
           .description("ValidatorStatus string")
           .format("string")
           .build();
-
-  public static final ParameterMetadata<UInt64> PARAMETER_BUILDER_INDEX =
-      new ParameterMetadata<>(
-          BUILDER_INDEX,
-          CoreTypes.UINT64_TYPE.withDescription(
-              "`uint64` value representing index of the builder from which the execution payload bid is requested."));
 
   public static final ParameterMetadata<String> PARAMETER_STATE_ID =
       new ParameterMetadata<>(PARAM_STATE_ID, CoreTypes.string(PARAM_STATE_ID_DESCRIPTION, "head"));

@@ -24,6 +24,7 @@ import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_ACCEP
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_IMPLEMENTED;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NO_CONTENT;
+import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_SERVICE_UNAVAILABLE;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_UNAUTHORIZED;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_UNSUPPORTED_MEDIA_TYPE;
@@ -251,6 +252,28 @@ public class EndpointMetadata {
   public String getContentType(final int statusCode, final Optional<String> acceptHeader) {
     final OpenApiResponse openApiResponse = responses.get(Integer.toString(statusCode));
     return selectContentType(openApiResponse, acceptHeader);
+  }
+
+  /**
+   * Returns false when the endpoint declares a 406 response and the accept header matches none of
+   * the content types of its 200 response. A missing or blank accept header is always acceptable.
+   */
+  public boolean isAcceptable(final Optional<String> acceptHeader) {
+    final OpenApiResponse okResponse = responses.get(Integer.toString(SC_OK));
+    final Optional<String> nonBlankAcceptHeader = acceptHeader.filter(h -> !h.isBlank());
+    if (nonBlankAcceptHeader.isEmpty()
+        || okResponse == null
+        || !responses.containsKey(Integer.toString(SC_NOT_ACCEPTABLE))) {
+      return true;
+    }
+    return ContentTypes.getResponseContentType(
+            okResponse.getSupportedContentTypes(), nonBlankAcceptHeader)
+        .isPresent();
+  }
+
+  public List<String> getSupportedResponseContentTypes(final int statusCode) {
+    final OpenApiResponse openApiResponse = responses.get(Integer.toString(statusCode));
+    return openApiResponse == null ? emptyList() : openApiResponse.getSupportedContentTypes();
   }
 
   private String selectContentType(

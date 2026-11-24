@@ -13,8 +13,13 @@
 
 package tech.pegasys.teku.infrastructure.restapi.endpoints;
 
+import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_ACCEPTABLE;
+import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_ACCEPT;
+
 import io.javalin.http.Context;
 import io.javalin.http.Handler;
+import java.util.Optional;
 
 public class JavalinEndpointAdapter implements Handler {
 
@@ -26,7 +31,15 @@ public class JavalinEndpointAdapter implements Handler {
 
   @Override
   public void handle(final Context ctx) throws Exception {
-    final RestApiRequest request = new JavalinRestApiRequest(ctx, endpoint.getMetadata());
+    final EndpointMetadata metadata = endpoint.getMetadata();
+    final RestApiRequest request = new JavalinRestApiRequest(ctx, metadata);
+    if (!metadata.isAcceptable(Optional.ofNullable(ctx.header(HEADER_ACCEPT)))) {
+      request.respondError(
+          SC_NOT_ACCEPTABLE,
+          "Accept header is not supported. Must match one of: "
+              + metadata.getSupportedResponseContentTypes(SC_OK));
+      return;
+    }
     endpoint.handleRequest(request);
   }
 }

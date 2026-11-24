@@ -41,7 +41,6 @@ public class RestApiConstants {
   public static final String TOPICS = "topics";
   public static final String START_PERIOD = "start_period";
   public static final String COUNT = "count";
-  public static final String BUILDER_INDEX = "builder_index";
 
   public static final String BLOCK_ROOT = "block_root";
   public static final String PARENT_ROOT = "parent_root";
