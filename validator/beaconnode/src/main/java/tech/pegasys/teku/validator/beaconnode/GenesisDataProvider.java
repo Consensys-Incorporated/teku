@@ -16,6 +16,9 @@ package tech.pegasys.teku.validator.beaconnode;
 import static tech.pegasys.teku.spec.config.Constants.GENESIS_DATA_RETRY_DELAY;
 
 import com.google.common.base.Suppliers;
+import com.google.common.base.Throwables;
+import java.time.Duration;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -28,6 +31,15 @@ import tech.pegasys.teku.validator.api.ValidatorApiChannel;
 
 public class GenesisDataProvider {
   private static final Logger LOG = LogManager.getLogger();
+
+  /**
+   * How long to wait for the beacon node to answer a request for genesis data. A request made
+   * before an in-process beacon node subscribes to the validator API channel is never answered, and
+   * this provider keeps the request it makes first, so without a timeout every caller would wait
+   * for good.
+   */
+  static final Duration GENESIS_DATA_REQUEST_TIMEOUT = Duration.ofSeconds(30);
+
   private final ValidatorApiChannel validatorApiChannel;
   private final AsyncRunner asyncRunner;
   private final Supplier<SafeFuture<GenesisData>> genesisData =
@@ -58,7 +70,11 @@ public class GenesisDataProvider {
                 new GenesisData(response.getGenesisTime(), response.getGenesisValidatorsRoot()))
         .exceptionallyCompose(
             error -> {
-              LOG.error("Failed to retrieve genesis data. Retrying after delay", error);
+              if (Throwables.getRootCause(error) instanceof TimeoutException) {
+                LOG.info("No answer from the beacon node to a request for genesis data. Retrying");
+              } else {
+                LOG.error("Failed to retrieve genesis data. Retrying after delay", error);
+              }
               return asyncRunner.runAfterDelay(this::fetchGenesisData, GENESIS_DATA_RETRY_DELAY);
             });
   }
@@ -66,6 +82,7 @@ public class GenesisDataProvider {
   private SafeFuture<GenesisData> requestGenesisData() {
     return validatorApiChannel
         .getGenesisData()
+        .orTimeout(asyncRunner, GENESIS_DATA_REQUEST_TIMEOUT)
         .thenCompose(
             maybeGenesisData ->
                 maybeGenesisData
