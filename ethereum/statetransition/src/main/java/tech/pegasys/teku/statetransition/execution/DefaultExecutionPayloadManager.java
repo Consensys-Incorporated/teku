@@ -31,7 +31,6 @@ import tech.pegasys.teku.infrastructure.subscribers.Subscribers;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
-import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodyGloas;
 import tech.pegasys.teku.spec.datastructures.epbs.BlockRootAndBuilderIndex;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
@@ -304,12 +303,12 @@ public class DefaultExecutionPayloadManager
 
   @Override
   public void onBlockImported(final SignedBeaconBlock block, final boolean executionOptimistic) {
-    // Process pending execution payload
+    // Process pending execution payload. Not toVersionGloas(): a PQ body carries a bid but isn't a
+    // Gloas body, and its payloads received before their block would never be imported
     block
         .getMessage()
         .getBody()
-        .toVersionGloas()
-        .map(BeaconBlockBodyGloas::getSignedExecutionPayloadBid)
+        .getOptionalSignedExecutionPayloadBid()
         .map(
             bid ->
                 new BlockRootAndBuilderIndex(block.getRoot(), bid.getMessage().getBuilderIndex()))
