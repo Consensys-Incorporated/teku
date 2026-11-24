@@ -142,7 +142,6 @@ import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.capella.B
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.capella.BlindedBeaconBlockBodySchemaCapella;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.deneb.BeaconBlockBodyDeneb;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.deneb.BeaconBlockBodySchemaDeneb;
-import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodyGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.gloas.BeaconBlockBodySchemaGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.pq.BeaconBlockBodyPq;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.pq.BeaconBlockBodySchemaPq;
@@ -3840,8 +3839,12 @@ public final class DataStructureUtil {
         .create(
             randomExecutionPayload(block.getSlot()),
             randomExecutionRequests(block.getSlot()),
-            BeaconBlockBodyGloas.required(block.getBody())
-                .getSignedExecutionPayloadBid()
+            // A PQ body carries a bid but isn't a Gloas body
+            block
+                .getBody()
+                .getOptionalSignedExecutionPayloadBid()
+                .orElseThrow(
+                    () -> new IllegalArgumentException("Block has no execution payload bid"))
                 .getMessage()
                 .getBuilderIndex(),
             block.getRoot(),

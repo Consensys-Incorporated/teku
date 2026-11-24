@@ -34,7 +34,7 @@ import java.util.Optional;
 import java.util.Set;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestTemplate;
 import org.mockito.ArgumentCaptor;
 import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -42,7 +42,9 @@ import tech.pegasys.teku.infrastructure.async.SafeFutureAssert;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
-import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.SpecMilestone;
+import tech.pegasys.teku.spec.TestSpecContext;
+import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
@@ -57,10 +59,11 @@ import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.storage.store.UpdatableStore;
 
+@TestSpecContext(milestone = {SpecMilestone.GLOAS, SpecMilestone.PQ})
 class DefaultExecutionPayloadManagerTest {
 
-  private final Spec spec = TestSpecFactory.createMinimalGloas();
-  private final DataStructureUtil dataStructureUtil = new DataStructureUtil(spec);
+  private Spec spec;
+  private DataStructureUtil dataStructureUtil;
 
   private final StubAsyncRunner asyncRunner = new StubAsyncRunner();
 
@@ -77,39 +80,41 @@ class DefaultExecutionPayloadManagerTest {
 
   private Optional<SignedExecutionPayloadEnvelope> publishedExecutionPayload = Optional.empty();
 
-  private final DefaultExecutionPayloadManager executionPayloadManager =
-      new DefaultExecutionPayloadManager(
-          spec,
-          asyncRunner,
-          executionPayloadGossipValidator,
-          forkChoice,
-          executionLayer,
-          receivedExecutionPayloadEventsChannelPublisher,
-          recentChainData,
-          blockRootsWithInvalidExecutionPayload,
-          executionPayload -> {
-            publishedExecutionPayload = Optional.of(executionPayload);
-            return SafeFuture.COMPLETE;
-          });
-
-  private final SignedExecutionPayloadEnvelope signedExecutionPayload =
-      dataStructureUtil.randomSignedExecutionPayloadEnvelope(42);
+  private DefaultExecutionPayloadManager executionPayloadManager;
+  private SignedExecutionPayloadEnvelope signedExecutionPayload;
 
   @BeforeEach
-  void setUp() {
+  void setUp(final SpecContext specContext) {
+    spec = specContext.getSpec();
+    dataStructureUtil = specContext.getDataStructureUtil();
+    executionPayloadManager =
+        new DefaultExecutionPayloadManager(
+            spec,
+            asyncRunner,
+            executionPayloadGossipValidator,
+            forkChoice,
+            executionLayer,
+            receivedExecutionPayloadEventsChannelPublisher,
+            recentChainData,
+            blockRootsWithInvalidExecutionPayload,
+            executionPayload -> {
+              publishedExecutionPayload = Optional.of(executionPayload);
+              return SafeFuture.COMPLETE;
+            });
+    signedExecutionPayload = dataStructureUtil.randomSignedExecutionPayloadEnvelope(42);
     when(recentChainData.getGenesisTimeMillis()).thenReturn(UInt64.ZERO);
     when(recentChainData.getStore()).thenReturn(store);
     when(store.getTimeInMillis()).thenReturn(UInt64.ZERO);
   }
 
-  @Test
+  @TestTemplate
   public void shouldDelegateIsExecutionPayloadRecentlySeenToTheGossipValidator() {
     final Bytes32 beaconBlockRoot = dataStructureUtil.randomBytes32();
     when(executionPayloadGossipValidator.isPayloadSeen(beaconBlockRoot)).thenReturn(true);
     assertThat(executionPayloadManager.isExecutionPayloadRecentlySeen(beaconBlockRoot)).isTrue();
   }
 
-  @Test
+  @TestTemplate
   public void getParentExecutionRequests_shouldReturnImportedRequestsForFullParent() {
     final UInt64 slot = UInt64.valueOf(42);
     final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
@@ -126,7 +131,7 @@ class DefaultExecutionPayloadManagerTest {
     verify(recentChainData).retrieveSignedBlindedExecutionPayloadByBlockRoot(parentRoot);
   }
 
-  @Test
+  @TestTemplate
   public void getParentExecutionRequestsForBlock_shouldReturnDefaultRequestsForNonFullParent() {
     final UInt64 slot = UInt64.valueOf(42);
     final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
@@ -143,7 +148,7 @@ class DefaultExecutionPayloadManagerTest {
     verify(recentChainData, never()).retrieveSignedBlindedExecutionPayloadByBlockRoot(parentRoot);
   }
 
-  @Test
+  @TestTemplate
   public void getParentExecutionRequestsForBlock_shouldThrowForFullParentWhenPayloadIsMissing() {
     final UInt64 slot = UInt64.valueOf(42);
     final Bytes32 parentRoot = dataStructureUtil.randomBytes32();
@@ -161,7 +166,7 @@ class DefaultExecutionPayloadManagerTest {
     verify(recentChainData).retrieveSignedBlindedExecutionPayloadByBlockRoot(parentRoot);
   }
 
-  @Test
+  @TestTemplate
   public void shouldValidateAndImport() {
     givenValidationResult(signedExecutionPayload, ACCEPT);
     givenSuccessfulImport(signedExecutionPayload);
@@ -180,7 +185,7 @@ class DefaultExecutionPayloadManagerTest {
     assertExecutionPayloadSeenBeforeDeadline(signedExecutionPayload);
   }
 
-  @Test
+  @TestTemplate
   public void shouldNotMarkExecutionPayloadSeenBeforeDeadlineWhenReceivedAfterTheDeadline() {
     givenValidationResult(signedExecutionPayload, ACCEPT);
     givenSuccessfulImport(signedExecutionPayload);
@@ -195,7 +200,7 @@ class DefaultExecutionPayloadManagerTest {
     assertExecutionPayloadNotSeenBeforeDeadline(signedExecutionPayload);
   }
 
-  @Test
+  @TestTemplate
   public void shouldNotImportIfValidationFails() {
     final InternalValidationResult rejectedResult = reject("oopsy");
     givenValidationResult(signedExecutionPayload, rejectedResult);
@@ -209,7 +214,7 @@ class DefaultExecutionPayloadManagerTest {
     assertThat(resultFuture).isCompletedWithValue(rejectedResult);
   }
 
-  @Test
+  @TestTemplate
   public void shouldHandleInternalErrorsWhileImporting() {
     givenValidationResult(signedExecutionPayload, ACCEPT);
     when(forkChoice.onExecutionPayloadEnvelope(
@@ -227,7 +232,7 @@ class DefaultExecutionPayloadManagerTest {
     assertThat(resultFuture).isCompletedWithValue(ACCEPT);
   }
 
-  @Test
+  @TestTemplate
   public void shouldPreferPendingExecutionPayloadReceivedBeforeDeadlineOverEarlierLatePayload() {
     final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(42);
     final SignedExecutionPayloadEnvelope lateExecutionPayload =
@@ -257,7 +262,7 @@ class DefaultExecutionPayloadManagerTest {
     assertExecutionPayloadSeenBeforeDeadline(earlyExecutionPayload);
   }
 
-  @Test
+  @TestTemplate
   public void shouldNotReplacePendingExecutionPayloadReceivedBeforeDeadlineWithLatePayload() {
     final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(42);
     final SignedExecutionPayloadEnvelope earlyExecutionPayload =
@@ -287,7 +292,7 @@ class DefaultExecutionPayloadManagerTest {
     assertExecutionPayloadSeenBeforeDeadline(earlyExecutionPayload);
   }
 
-  @Test
+  @TestTemplate
   public void shouldReplacePendingExecutionPayloadReceivedBeforeDeadlineWithLaterBeforeDeadline() {
     final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(42);
     final SignedExecutionPayloadEnvelope firstExecutionPayload =
@@ -317,7 +322,7 @@ class DefaultExecutionPayloadManagerTest {
     assertExecutionPayloadSeenBeforeDeadline(secondExecutionPayload);
   }
 
-  @Test
+  @TestTemplate
   public void shouldProcessExecutionPayloadWhichHasBeenReceivedBeforeTheBlock() {
     final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(42);
     final SignedExecutionPayloadEnvelope signedExecutionPayload =
@@ -341,7 +346,7 @@ class DefaultExecutionPayloadManagerTest {
     assertExecutionPayloadSeenBeforeDeadline(signedExecutionPayload);
   }
 
-  @Test
+  @TestTemplate
   public void shouldCacheInvalidExecutionPayloadWhenImportFailsVerification() {
     final ExecutionPayloadImportResult failedImportResult =
         ExecutionPayloadImportResult.failedVerification(new RuntimeException("invalid"));
@@ -358,7 +363,7 @@ class DefaultExecutionPayloadManagerTest {
         .contains(signedExecutionPayload.getBeaconBlockRoot());
   }
 
-  @Test
+  @TestTemplate
   public void shouldCacheInvalidExecutionPayloadWhenDataAvailabilityCheckIsInvalid() {
     final ExecutionPayloadImportResult failedImportResult =
         ExecutionPayloadImportResult.failedDataAvailabilityCheckInvalid(
@@ -376,7 +381,7 @@ class DefaultExecutionPayloadManagerTest {
         .contains(signedExecutionPayload.getBeaconBlockRoot());
   }
 
-  @Test
+  @TestTemplate
   public void shouldRecordPayloadReportedAvailableBeforeDeadlineAsSeen() {
     // a payload which did not arrive over gossip, for example one fetched by root, is recorded
     // when fork choice reports it available, which it only does once it verified the envelope
@@ -390,7 +395,7 @@ class DefaultExecutionPayloadManagerTest {
         .onExecutionPayloadAvailable(signedExecutionPayload);
   }
 
-  @Test
+  @TestTemplate
   public void shouldNotRecordPayloadReportedAvailableAfterDeadlineAsSeen() {
     final UInt64 afterDeadline = payloadDueDeadlineMillis(signedExecutionPayload).plus(1);
     when(store.getTimeInMillis()).thenReturn(afterDeadline);
@@ -400,7 +405,7 @@ class DefaultExecutionPayloadManagerTest {
     assertExecutionPayloadNotSeenBeforeDeadline(signedExecutionPayload);
   }
 
-  @Test
+  @TestTemplate
   public void shouldRecordPayloadSeenBeforeDeadlineEvenWhenCheckingItTookPastTheDeadline() {
     // the data availability check can take long enough to put an on time payload past its
     // deadline, so the time it arrived is what counts
@@ -413,7 +418,7 @@ class DefaultExecutionPayloadManagerTest {
     assertExecutionPayloadSeenBeforeDeadline(signedExecutionPayload);
   }
 
-  @Test
+  @TestTemplate
   public void shouldNotRecordPayloadAsSeenBeforeForkChoiceReportsItAvailable() {
     // the envelope has not been verified at this point, so a forged one must not be recorded
     final UInt64 beforeDeadline = payloadDueDeadlineMillis(signedExecutionPayload).minus(1);
@@ -430,7 +435,7 @@ class DefaultExecutionPayloadManagerTest {
     assertExecutionPayloadNotSeenBeforeDeadline(signedExecutionPayload);
   }
 
-  @Test
+  @TestTemplate
   public void shouldNotCacheInvalidExecutionPayloadWhenCommitmentNotVerified() {
     final ExecutionPayloadImportResult failedImportResult =
         ExecutionPayloadImportResult.failedVerification(new RuntimeException("invalid"));
