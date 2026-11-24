@@ -27,6 +27,10 @@ public class DeserializableArrayTypeDefinition<ItemT, CollectionT extends Iterab
     extends SerializableArrayTypeDefinition<ItemT, CollectionT>
     implements DeserializableTypeDefinition<CollectionT> {
 
+  // Computed on first use. The definition is immutable, so the hash never changes; a race only
+  // computes it twice
+  private int cachedHashCode;
+
   private final DeserializableTypeDefinition<ItemT> itemType;
   private final Function<List<ItemT>, CollectionT> createFromList;
 
@@ -102,6 +106,13 @@ public class DeserializableArrayTypeDefinition<ItemT, CollectionT extends Iterab
 
   @Override
   public int hashCode() {
-    return Objects.hash(itemType);
+    // Cached: hashing walks the whole nested type, and building the OpenAPI docs hashes the same
+    // types again and again while collecting the types each endpoint references
+    int hash = cachedHashCode;
+    if (hash == 0) {
+      hash = Objects.hash(itemType);
+      cachedHashCode = hash;
+    }
+    return hash;
   }
 }

@@ -26,6 +26,10 @@ import java.util.function.Predicate;
 
 public class SerializableOneOfTypeDefinition<TObject>
     implements SerializableTypeDefinition<TObject> {
+
+  // Computed on first use. The definition is immutable, so the hash never changes; a race only
+  // computes it twice
+  private int cachedHashCode;
   private final Map<Predicate<TObject>, ? extends SerializableTypeDefinition<? extends TObject>>
       types;
   private final Optional<String> name;
@@ -133,6 +137,13 @@ public class SerializableOneOfTypeDefinition<TObject>
 
   @Override
   public int hashCode() {
-    return Objects.hash(types, name, title, description);
+    // Cached: hashing walks the whole nested type, and building the OpenAPI docs hashes the same
+    // types again and again while collecting the types each endpoint references
+    int hash = cachedHashCode;
+    if (hash == 0) {
+      hash = Objects.hash(types, name, title, description);
+      cachedHashCode = hash;
+    }
+    return hash;
   }
 }

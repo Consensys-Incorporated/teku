@@ -25,6 +25,10 @@ import java.util.Optional;
 
 class SerializableObjectTypeDefinition<TObject> implements SerializableTypeDefinition<TObject> {
 
+  // Computed on first use. The definition is immutable, so the hash never changes; a race only
+  // computes it twice
+  private int cachedHashCode;
+
   private final Optional<String> name;
   private final Optional<String> title;
   private final Optional<String> description;
@@ -134,6 +138,13 @@ class SerializableObjectTypeDefinition<TObject> implements SerializableTypeDefin
 
   @Override
   public int hashCode() {
-    return Objects.hash(name, title, description, fields);
+    // Cached: hashing walks the whole nested type, and building the OpenAPI docs hashes the same
+    // types again and again while collecting the types each endpoint references
+    int hash = cachedHashCode;
+    if (hash == 0) {
+      hash = Objects.hash(name, title, description, fields);
+      cachedHashCode = hash;
+    }
+    return hash;
   }
 }
