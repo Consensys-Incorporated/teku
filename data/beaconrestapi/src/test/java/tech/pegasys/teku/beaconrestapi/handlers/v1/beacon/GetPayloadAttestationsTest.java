@@ -13,12 +13,15 @@
 
 package tech.pegasys.teku.beaconrestapi.handlers.v1.beacon;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.getResponseSszFromMetadata;
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.getResponseStringFromMetadata;
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMetadataErrorResponse;
@@ -29,15 +32,24 @@ import java.util.stream.IntStream;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.teku.api.exceptions.BadRequestException;
 import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerTest;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszProgressiveListSchema;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 
 class GetPayloadAttestationsTest extends AbstractMigratedBeaconHandlerTest {
+
+  private static final Spec SPEC_WITH_LATER_GLOAS_FORK =
+      TestSpecFactory.createMinimalWithGloasForkEpoch(UInt64.ONE);
+  private static final UInt64 GLOAS_FORK_SLOT =
+      SPEC_WITH_LATER_GLOAS_FORK.computeStartSlotAtEpoch(UInt64.ONE);
 
   @BeforeEach
   void setUp() {
@@ -59,6 +71,20 @@ class GetPayloadAttestationsTest extends AbstractMigratedBeaconHandlerTest {
 
     assertThat(request.getResponseCode()).isEqualTo(SC_OK);
     assertThat(request.getResponseBody()).isEqualTo(responseWithMetaData);
+  }
+
+  @Test
+  void shouldReturnBadRequestForSlotPriorToGloasWithoutQueryingProvider() {
+    final GetPayloadAttestations handlerWithLaterGloasFork =
+        new GetPayloadAttestations(
+            nodeDataProvider, new SchemaDefinitionCache(SPEC_WITH_LATER_GLOAS_FORK));
+    request.setOptionalQueryParameter("slot", GLOAS_FORK_SLOT.minus(1).toString());
+
+    assertThatThrownBy(() -> handlerWithLaterGloasFork.handleRequest(request))
+        .isInstanceOf(BadRequestException.class)
+        .hasMessage("Cannot request payload attestations for slots prior to Gloas fork.");
+    verifyNoInteractions(nodeDataProvider);
+    assertThat(request.getResponseHeaders(HEADER_CONSENSUS_VERSION)).isNull();
   }
 
   @Test
