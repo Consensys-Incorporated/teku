@@ -29,13 +29,14 @@ import tech.pegasys.teku.validator.api.ValidatorTimingChannel;
 
 /**
  * Coordinates per-milestone {@link TimeBasedEventAdapter} instances stored in an {@link EnumMap}
- * keyed by the milestone that introduces a timing change (PHASE0, ALTAIR, GLOAS). Only three timing
+ * keyed by the milestone that introduces a timing change (PHASE0, ALTAIR, GLOAS, PQ). Four timing
  * profiles exist today:
  *
  * <ul>
  *   <li>PHASE0 (attestation, aggregation)
  *   <li>ALTAIR–FULU (adds sync committee, contribution)
  *   <li>GLOAS (changes offsets, adds payload attestation)
+ *   <li>PQ (moves the aggregate due time, AGGREGATE_DUE_BPS_PQ)
  * </ul>
  *
  * <p>Each adapter schedules all of its events (including the slot event) with an expiry at the next
@@ -61,7 +62,7 @@ public class ForkAwareTimeBasedEventAdapter implements BeaconChainEventAdapter {
 
   private UInt64 genesisTimeMillis;
 
-  // Keyed by the milestone that introduces a timing change: PHASE0, ALTAIR, GLOAS
+  // Keyed by the milestone that introduces a timing change: PHASE0, ALTAIR, GLOAS, PQ
   private final EnumMap<SpecMilestone, TimeBasedEventAdapter> adapters =
       new EnumMap<>(SpecMilestone.class);
 
@@ -90,7 +91,15 @@ public class ForkAwareTimeBasedEventAdapter implements BeaconChainEventAdapter {
     if (spec.isMilestoneSupported(SpecMilestone.GLOAS)) {
       adapters.put(
           SpecMilestone.GLOAS,
-          new GloasTimeBasedEventAdapter(taskScheduler, validatorTimingChannel, () -> {}, spec));
+          new GloasTimeBasedEventAdapter(
+              taskScheduler, validatorTimingChannel, this::activatePq, spec));
+    }
+
+    if (spec.isMilestoneSupported(SpecMilestone.PQ)) {
+      adapters.put(
+          SpecMilestone.PQ,
+          new GloasTimeBasedEventAdapter(
+              taskScheduler, validatorTimingChannel, () -> {}, spec, SpecMilestone.PQ));
     }
   }
 
@@ -106,7 +115,12 @@ public class ForkAwareTimeBasedEventAdapter implements BeaconChainEventAdapter {
   }
 
   private void activateGloas() {
-    activateAdapter(adapters.get(SpecMilestone.GLOAS), Optional.empty());
+    activateAdapter(
+        adapters.get(SpecMilestone.GLOAS), Optional.ofNullable(adapters.get(SpecMilestone.PQ)));
+  }
+
+  private void activatePq() {
+    activateAdapter(adapters.get(SpecMilestone.PQ), Optional.empty());
   }
 
   @Override
@@ -131,7 +145,8 @@ public class ForkAwareTimeBasedEventAdapter implements BeaconChainEventAdapter {
     switch (currentMilestone) {
       case PHASE0 -> activatePhase0();
       case ALTAIR, BELLATRIX, CAPELLA, DENEB, ELECTRA, FULU -> activateAltair();
-      case GLOAS, EIP8483, PQ, HEZE -> activateGloas();
+      case GLOAS, EIP8483 -> activateGloas();
+      case PQ, HEZE -> activatePq();
     }
   }
 

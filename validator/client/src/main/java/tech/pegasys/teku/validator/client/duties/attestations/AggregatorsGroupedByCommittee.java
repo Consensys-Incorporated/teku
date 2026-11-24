@@ -36,16 +36,21 @@ public class AggregatorsGroupedByCommittee implements AggregationDutyAggregators
       final int validatorIndex,
       final BLSSignature proof,
       final int attestationCommitteeIndex,
+      final int aggregatorPosition,
       final SafeFuture<Optional<AttestationData>> unsignedAttestationFuture) {
-    aggregatorsByCommitteeIndex.computeIfAbsent(
+    // From PQ, the earliest of a committee's aggregators here, by aggregation committee position,
+    // aggregates for it: its aggregate is the first that proposers can include
+    aggregatorsByCommitteeIndex.merge(
         attestationCommitteeIndex,
-        committeeIndex ->
-            new CommitteeAggregator(
-                validator,
-                UInt64.valueOf(validatorIndex),
-                UInt64.valueOf(attestationCommitteeIndex),
-                proof,
-                unsignedAttestationFuture));
+        new CommitteeAggregator(
+            validator,
+            UInt64.valueOf(validatorIndex),
+            UInt64.valueOf(attestationCommitteeIndex),
+            proof,
+            aggregatorPosition,
+            unsignedAttestationFuture),
+        (existing, added) ->
+            added.aggregatorPosition() < existing.aggregatorPosition() ? added : existing);
   }
 
   @Override

@@ -14,10 +14,12 @@
 package tech.pegasys.teku.validator.client.duties.attestations;
 
 import com.google.common.annotations.VisibleForTesting;
+import java.time.Duration;
 import java.util.Optional;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.bls.BLSSignature;
+import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.logging.ValidatorLogger;
 import tech.pegasys.teku.infrastructure.metrics.Validator.DutyType;
@@ -33,6 +35,7 @@ import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AggregateAnd
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationAndProofPq;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.PqAttestationSchemas;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
+import tech.pegasys.teku.spec.logic.common.util.ForkChoiceUtil;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitions;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
@@ -55,6 +58,7 @@ public class AggregationDuty implements Duty {
   private final ValidatorLogger validatorLogger;
   private final SendingStrategy<SignedAggregateAndProof> sendingStrategy;
   private final ValidatorDutyMetrics validatorDutyMetrics;
+  private final Optional<AsyncRunner> asyncRunner;
 
   public AggregationDuty(
       final Spec spec,
@@ -65,6 +69,32 @@ public class AggregationDuty implements Duty {
       final ValidatorLogger validatorLogger,
       final SendingStrategy<SignedAggregateAndProof> sendingStrategy,
       final ValidatorDutyMetrics validatorDutyMetrics) {
+    this(
+        spec,
+        slot,
+        validatorApiChannel,
+        aggregators,
+        forkProvider,
+        validatorLogger,
+        sendingStrategy,
+        validatorDutyMetrics,
+        Optional.empty());
+  }
+
+  /**
+   * @param asyncRunner delays each PQ aggregator by its position in the aggregation committee;
+   *     without it, every aggregator aggregates when the duty runs
+   */
+  public AggregationDuty(
+      final Spec spec,
+      final UInt64 slot,
+      final ValidatorApiChannel validatorApiChannel,
+      final AggregationDutyAggregators aggregators,
+      final ForkProvider forkProvider,
+      final ValidatorLogger validatorLogger,
+      final SendingStrategy<SignedAggregateAndProof> sendingStrategy,
+      final ValidatorDutyMetrics validatorDutyMetrics,
+      final Optional<AsyncRunner> asyncRunner) {
     this.spec = spec;
     this.slot = slot;
     this.validatorApiChannel = validatorApiChannel;
@@ -73,6 +103,7 @@ public class AggregationDuty implements Duty {
     this.validatorLogger = validatorLogger;
     this.sendingStrategy = sendingStrategy;
     this.validatorDutyMetrics = validatorDutyMetrics;
+    this.asyncRunner = asyncRunner;
   }
 
   @Override
@@ -98,8 +129,28 @@ public class AggregationDuty implements Duty {
       final BLSSignature proof,
       final int attestationCommitteeIndex,
       final SafeFuture<Optional<AttestationData>> unsignedAttestationFuture) {
+    addValidator(
+        validator, validatorIndex, proof, attestationCommitteeIndex, 0, unsignedAttestationFuture);
+  }
+
+  /**
+   * Adds a validator to this duty, at {@code aggregatorPosition} in its aggregation committee from
+   * PQ, which delays its aggregate by that many AGGREGATOR_DELAY_BPS.
+   */
+  public void addValidator(
+      final Validator validator,
+      final int validatorIndex,
+      final BLSSignature proof,
+      final int attestationCommitteeIndex,
+      final int aggregatorPosition,
+      final SafeFuture<Optional<AttestationData>> unsignedAttestationFuture) {
     aggregators.addValidator(
-        validator, validatorIndex, proof, attestationCommitteeIndex, unsignedAttestationFuture);
+        validator,
+        validatorIndex,
+        proof,
+        attestationCommitteeIndex,
+        aggregatorPosition,
+        unsignedAttestationFuture);
   }
 
   @Override
@@ -113,9 +164,30 @@ public class AggregationDuty implements Duty {
       // aggregate's signatures. Each is sent once signed, as leanXMSS signing is slow.
       return new IndividualSendingStrategy<SignedAggregateAndProofPq>(
               validatorApiChannel::sendPqAggregateAndProofs)
-          .send(aggregators.streamAggregators().map(this::aggregatePqCommittee));
+          .send(
+              aggregators
+                  .streamAggregators()
+                  .map(
+                      aggregator ->
+                          afterAggregatorDelay(aggregator)
+                              .thenCompose(__ -> aggregatePqCommittee(aggregator))));
     }
     return sendingStrategy.send(aggregators.streamAggregators().map(this::aggregateCommittee));
+  }
+
+  /**
+   * The duty runs when the first aggregator's aggregate is due (get_aggregate_due_ms(0)); the
+   * aggregator at position p is due p AGGREGATOR_DELAY_BPS later.
+   */
+  private SafeFuture<Void> afterAggregatorDelay(final CommitteeAggregator aggregator) {
+    if (aggregator.aggregatorPosition() == 0 || asyncRunner.isEmpty()) {
+      return SafeFuture.COMPLETE;
+    }
+    final ForkChoiceUtil forkChoiceUtil = spec.atSlot(slot).getForkChoiceUtil();
+    final int delayMillis =
+        forkChoiceUtil.getAggregateDueMillis(aggregator.aggregatorPosition())
+            - forkChoiceUtil.getAggregateDueMillis(0);
+    return asyncRunner.get().getDelayedFuture(Duration.ofMillis(delayMillis));
   }
 
   private SafeFuture<ProductionResult<SignedAggregateAndProofPq>> aggregatePqCommittee(
@@ -150,8 +222,13 @@ public class AggregationDuty implements Duty {
                   .thenCompose(
                       maybeAggregate -> {
                         if (maybeAggregate.isEmpty()) {
-                          validatorLogger.aggregationSkipped(
-                              slot, aggregator.attestationCommitteeIndex());
+                          // Usually another aggregator's aggregate already includes all of this
+                          // one's attesters (should_broadcast_aggregate), which staggered
+                          // aggregators expect, so it's no warning; the beacon node logs why
+                          LOG.debug(
+                              "No PQ aggregate to publish for committee {} at slot {}",
+                              aggregator.attestationCommitteeIndex(),
+                              slot);
                           return SafeFuture.completedFuture(
                               ProductionResult.<SignedAggregateAndProofPq>noop(
                                   aggregator.validator().getPublicKey()));

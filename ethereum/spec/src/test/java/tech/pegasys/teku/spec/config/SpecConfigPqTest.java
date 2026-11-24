@@ -94,6 +94,9 @@ public class SpecConfigPqTest {
         dataStructureUtil.randomPositiveInt(),
         dataStructureUtil.randomPositiveInt(),
         dataStructureUtil.randomPositiveInt(),
+        dataStructureUtil.randomPositiveInt(),
+        dataStructureUtil.randomPositiveInt(),
+        dataStructureUtil.randomPositiveInt(),
         dataStructureUtil.randomPositiveInt()) {};
   }
 }

@@ -33,6 +33,9 @@ public class SpecConfigPqImpl extends DelegatingSpecConfigEip8483 implements Spe
   private final int maxSignedExecutionPayloadBidSizePq;
   private final int unregisteredValidatorWithdrawabilityDelay;
   private final int attestationSubnetCountPq;
+  private final int aggregationCutoffBps;
+  private final int aggregateDueBpsPq;
+  private final int aggregatorDelayBps;
 
   public SpecConfigPqImpl(
       final SpecConfigEip8483 specConfig,
@@ -49,7 +52,10 @@ public class SpecConfigPqImpl extends DelegatingSpecConfigEip8483 implements Spe
       final int maxAttesterSlashingSizePq,
       final int maxSignedExecutionPayloadBidSizePq,
       final int unregisteredValidatorWithdrawabilityDelay,
-      final int attestationSubnetCountPq) {
+      final int attestationSubnetCountPq,
+      final int aggregationCutoffBps,
+      final int aggregateDueBpsPq,
+      final int aggregatorDelayBps) {
     super(specConfig);
     this.maxCommitteesPerSlotPq = maxCommitteesPerSlotPq;
     this.minAttestationInclusionDelayPq = minAttestationInclusionDelayPq;
@@ -66,6 +72,9 @@ public class SpecConfigPqImpl extends DelegatingSpecConfigEip8483 implements Spe
     this.maxSignedExecutionPayloadBidSizePq = maxSignedExecutionPayloadBidSizePq;
     this.unregisteredValidatorWithdrawabilityDelay = unregisteredValidatorWithdrawabilityDelay;
     this.attestationSubnetCountPq = attestationSubnetCountPq;
+    this.aggregationCutoffBps = aggregationCutoffBps;
+    this.aggregateDueBpsPq = aggregateDueBpsPq;
+    this.aggregatorDelayBps = aggregatorDelayBps;
   }
 
   @Override
@@ -143,6 +152,27 @@ public class SpecConfigPqImpl extends DelegatingSpecConfigEip8483 implements Spe
     return attestationSubnetCountPq;
   }
 
+  /** AGGREGATE_DUE_BPS_PQ replaces AGGREGATE_DUE_BPS_GLOAS: the first aggregator's due time. */
+  @Override
+  public int getAggregateDueBps() {
+    return aggregateDueBpsPq;
+  }
+
+  @Override
+  public int getAggregationCutoffBps() {
+    return aggregationCutoffBps;
+  }
+
+  @Override
+  public int getAggregateDueBpsPq() {
+    return aggregateDueBpsPq;
+  }
+
+  @Override
+  public int getAggregatorDelayBps() {
+    return aggregatorDelayBps;
+  }
+
   @Override
   public Optional<SpecConfigPq> toVersionPq() {
     return Optional.of(this);
@@ -173,7 +203,10 @@ public class SpecConfigPqImpl extends DelegatingSpecConfigEip8483 implements Spe
         && maxSignedExecutionPayloadBidSizePq == that.maxSignedExecutionPayloadBidSizePq
         && unregisteredValidatorWithdrawabilityDelay
             == that.unregisteredValidatorWithdrawabilityDelay
-        && attestationSubnetCountPq == that.attestationSubnetCountPq;
+        && attestationSubnetCountPq == that.attestationSubnetCountPq
+        && aggregationCutoffBps == that.aggregationCutoffBps
+        && aggregateDueBpsPq == that.aggregateDueBpsPq
+        && aggregatorDelayBps == that.aggregatorDelayBps;
   }
 
   @Override
@@ -193,6 +226,9 @@ public class SpecConfigPqImpl extends DelegatingSpecConfigEip8483 implements Spe
         maxAttesterSlashingSizePq,
         maxSignedExecutionPayloadBidSizePq,
         unregisteredValidatorWithdrawabilityDelay,
-        attestationSubnetCountPq);
+        attestationSubnetCountPq,
+        aggregationCutoffBps,
+        aggregateDueBpsPq,
+        aggregatorDelayBps);
   }
 }

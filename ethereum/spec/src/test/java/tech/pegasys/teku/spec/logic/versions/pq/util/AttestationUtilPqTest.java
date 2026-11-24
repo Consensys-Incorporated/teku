@@ -269,6 +269,34 @@ class AttestationUtilPqTest {
     return new SingleAttestationPq(data.getIndex(), UInt64.valueOf(attester), data, signature);
   }
 
+  @Test
+  void givesEachAggregatorItsPositionInTheAggregationCommittee() throws Exception {
+    final BeaconStatePq state = fixtureGenesis();
+    final UInt64 slot = state.getSlot();
+    final IntList aggregators =
+        ((BeaconStateAccessorsPq) spec.atSlot(slot).beaconStateAccessors())
+            .getAggregationCommittee(state, slot, UInt64.ZERO);
+    assertThat(aggregators.size()).isPositive();
+
+    for (int position = 0; position < aggregators.size(); position++) {
+      final UInt64 aggregator = UInt64.valueOf(aggregators.getInt(position));
+      assertThat(attestationUtil.getAggregatorPosition(state, slot, UInt64.ZERO, aggregator))
+          .contains(position);
+      assertThat(attestationUtil.isAggregator(state, slot, UInt64.ZERO, aggregator)).isTrue();
+    }
+    final UInt64 notAnAggregator =
+        IntStream.range(0, state.getValidators().size())
+            .filter(index -> !aggregators.contains(index))
+            .mapToObj(UInt64::valueOf)
+            .findFirst()
+            .orElseThrow();
+    assertThat(attestationUtil.getAggregatorPosition(state, slot, UInt64.ZERO, notAnAggregator))
+        .isEmpty();
+    assertThat(attestationUtil.isAggregator(state, slot, UInt64.ZERO, notAnAggregator)).isFalse();
+    assertThat(attestationUtil.getAggregatorPosition(state, slot, UInt64.ZERO, UInt64.MAX_VALUE))
+        .isEmpty();
+  }
+
   private BeaconStatePq fixtureGenesis() throws Exception {
     return BeaconStatePq.required(
         schemaDefinitions

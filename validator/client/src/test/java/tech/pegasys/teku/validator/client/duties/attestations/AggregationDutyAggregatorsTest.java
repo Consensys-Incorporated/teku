@@ -68,6 +68,7 @@ abstract class AggregationDutyAggregatorsTest {
         committeeAggregator.validatorIndex().intValue(),
         committeeAggregator.proof(),
         committeeAggregator.attestationCommitteeIndex().intValue(),
+        committeeAggregator.aggregatorPosition(),
         committeeAggregator.unsignedAttestationFuture());
   }
 
@@ -76,6 +77,11 @@ abstract class AggregationDutyAggregatorsTest {
   }
 
   protected CommitteeAggregator randomCommitteeAggregator(final int committeeIndex) {
+    return randomCommitteeAggregator(committeeIndex, 0);
+  }
+
+  protected CommitteeAggregator randomCommitteeAggregator(
+      final int committeeIndex, final int aggregatorPosition) {
     final BLSKeyPair keyPair = dataStructureUtil.randomKeyPair();
     final Validator validator =
         new Validator(keyPair.getPublicKey(), NO_OP_REMOTE_SIGNER, Optional::empty, true);
@@ -86,6 +92,7 @@ abstract class AggregationDutyAggregatorsTest {
         validatorIndex,
         UInt64.valueOf(committeeIndex),
         dataStructureUtil.randomSignature(),
+        aggregatorPosition,
         SafeFuture.completedFuture(Optional.of(dataStructureUtil.randomAttestationData())));
   }
 }

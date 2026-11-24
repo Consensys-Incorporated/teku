@@ -16,6 +16,7 @@ package tech.pegasys.teku.spec.logic.versions.pq.util;
 import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.bls.BLSSignature;
@@ -145,10 +146,27 @@ public class AttestationUtilPq extends AttestationUtilGloas {
       final UInt64 slot,
       final UInt64 committeeIndex,
       final UInt64 validatorIndex) {
-    return validatorIndex.isLessThan(Integer.MAX_VALUE)
-        && beaconStateAccessorsPq
+    return getAggregatorPosition(state, slot, committeeIndex, validatorIndex).isPresent();
+  }
+
+  /**
+   * The validator's position in the aggregation committee, which staggers its collection cutoff and
+   * aggregate due time (get_aggregation_cutoff_ms, get_aggregate_due_ms), or empty when it isn't an
+   * aggregator.
+   */
+  public Optional<Integer> getAggregatorPosition(
+      final BeaconState state,
+      final UInt64 slot,
+      final UInt64 committeeIndex,
+      final UInt64 validatorIndex) {
+    if (!validatorIndex.isLessThan(Integer.MAX_VALUE)) {
+      return Optional.empty();
+    }
+    final int position =
+        beaconStateAccessorsPq
             .getAggregationCommittee(state, slot, committeeIndex)
-            .contains(validatorIndex.intValue());
+            .indexOf(validatorIndex.intValue());
+    return position < 0 ? Optional.empty() : Optional.of(position);
   }
 
   /**

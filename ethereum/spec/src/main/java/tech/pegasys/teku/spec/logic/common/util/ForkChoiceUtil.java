@@ -28,6 +28,7 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.config.SpecConfig;
 import tech.pegasys.teku.spec.config.SpecConfigAltair;
 import tech.pegasys.teku.spec.config.SpecConfigBellatrix;
+import tech.pegasys.teku.spec.config.SpecConfigPq;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
@@ -853,6 +854,26 @@ public class ForkChoiceUtil {
 
   public int getAggregateDueMillis() {
     return getSlotComponentDurationMillis(specConfig.getAggregateDueBps());
+  }
+
+  /**
+   * get_aggregate_due_ms (PQ): how far into the slot the aggregator at {@code position} in its
+   * aggregation committee broadcasts its aggregate.
+   */
+  public int getAggregateDueMillis(final int position) {
+    final SpecConfigPq configPq = SpecConfigPq.required(specConfig);
+    return getSlotComponentDurationMillis(configPq.getAggregateDueBpsPq())
+        + position * getSlotComponentDurationMillis(configPq.getAggregatorDelayBps());
+  }
+
+  /**
+   * get_aggregation_cutoff_ms (PQ): how far into the slot the aggregator at {@code position} in its
+   * aggregation committee stops collecting attestations.
+   */
+  public int getAggregationCutoffMillis(final int position) {
+    final SpecConfigPq configPq = SpecConfigPq.required(specConfig);
+    return getSlotComponentDurationMillis(configPq.getAggregationCutoffBps())
+        + position * getSlotComponentDurationMillis(configPq.getAggregatorDelayBps());
   }
 
   public int getContributionDueMillis() {

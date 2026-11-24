@@ -45,6 +45,33 @@ class PqDutiesJsonTest {
   }
 
   @Test
+  void attesterDutyShouldRoundTripWithAggregatorPosition() throws Exception {
+    final AttesterDuty duty =
+        new AttesterDuty(
+            xmssKey, 3, 16, 1, 2, 5, UInt64.valueOf(42), Optional.of(true), Optional.of(2));
+
+    final String json = JsonUtil.serialize(duty, AttesterDutyBuilder.ATTESTER_DUTY_TYPE);
+
+    assertThat(json).contains("\"aggregator_position\":\"2\"");
+    final AttesterDuty parsed = JsonUtil.parse(json, AttesterDutyBuilder.ATTESTER_DUTY_TYPE);
+    assertThat(parsed).isEqualTo(duty);
+    assertThat(parsed.getAggregatorPosition()).contains(2);
+  }
+
+  @Test
+  void attesterDutyWithoutAggregatorPositionShouldParseAsUnknown() throws Exception {
+    // From a beacon node that doesn't say, which the validator client takes as the first position
+    final AttesterDuty duty =
+        new AttesterDuty(xmssKey, 3, 16, 1, 2, 5, UInt64.valueOf(42), Optional.of(true));
+
+    final String json = JsonUtil.serialize(duty, AttesterDutyBuilder.ATTESTER_DUTY_TYPE);
+
+    assertThat(json).doesNotContain("aggregator_position");
+    assertThat(JsonUtil.parse(json, AttesterDutyBuilder.ATTESTER_DUTY_TYPE).getAggregatorPosition())
+        .isEmpty();
+  }
+
+  @Test
   void attesterDutyBeforePqShouldOmitAggregatorFlag() throws Exception {
     final AttesterDuty duty =
         new AttesterDuty(

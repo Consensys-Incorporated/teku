@@ -102,8 +102,9 @@ public class ForkRoutingAttestationPool extends AggregatingAttestationPool {
   }
 
   @Override
-  public void onLocalAggregationDuty(final UInt64 slot, final UInt64 committeeIndex) {
-    poolForSlot(slot).onLocalAggregationDuty(slot, committeeIndex);
+  public void onLocalAggregationDuty(
+      final UInt64 slot, final UInt64 committeeIndex, final Optional<UInt64> validatorIndex) {
+    poolForSlot(slot).onLocalAggregationDuty(slot, committeeIndex, validatorIndex);
   }
 
   @Override

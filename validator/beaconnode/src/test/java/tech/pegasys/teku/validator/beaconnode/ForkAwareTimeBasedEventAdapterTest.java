@@ -73,7 +73,11 @@ class ForkAwareTimeBasedEventAdapterTest {
             (Supplier<Spec>) () -> TestSpecFactory.createMinimalWithAltairForkEpoch(UInt64.ONE)),
         Arguments.of(
             "Altair to Gloas",
-            (Supplier<Spec>) () -> TestSpecFactory.createMinimalWithGloasForkEpoch(UInt64.ONE)));
+            (Supplier<Spec>) () -> TestSpecFactory.createMinimalWithGloasForkEpoch(UInt64.ONE)),
+        // PQ moves the aggregate due time (AGGREGATE_DUE_BPS_PQ)
+        Arguments.of(
+            "Gloas to PQ",
+            (Supplier<Spec>) () -> TestSpecFactory.createMinimalWithPqForkEpoch(UInt64.ONE)));
   }
 
   @ParameterizedTest(name = "{0}")

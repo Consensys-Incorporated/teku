@@ -35,6 +35,7 @@ public class UngroupedAggregators implements AggregationDutyAggregators {
       final int validatorIndex,
       final BLSSignature proof,
       final int attestationCommitteeIndex,
+      final int aggregatorPosition,
       final SafeFuture<Optional<AttestationData>> unsignedAttestationFuture) {
     aggregators.add(
         new CommitteeAggregator(
@@ -42,6 +43,7 @@ public class UngroupedAggregators implements AggregationDutyAggregators {
             UInt64.valueOf(validatorIndex),
             UInt64.valueOf(attestationCommitteeIndex),
             proof,
+            aggregatorPosition,
             unsignedAttestationFuture));
   }
 

@@ -511,7 +511,8 @@ public class ValidatorClientService extends Service {
             forkProvider,
             validatorApiChannel,
             validatorDutyMetrics,
-            dvtSelectionsEndpointEnabled);
+            dvtSelectionsEndpointEnabled,
+            Optional.of(asyncRunner));
     final BeaconCommitteeSubscriptions beaconCommitteeSubscriptions =
         new BeaconCommitteeSubscriptions(validatorApiChannel);
     final Function<Bytes32, SlotBasedScheduledDuties<AttestationProductionDuty, AggregationDuty>>

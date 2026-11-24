@@ -24,12 +24,27 @@ import tech.pegasys.teku.validator.client.Validator;
 
 public interface AggregationDutyAggregators {
 
-  void addValidator(
+  default void addValidator(
       final Validator validator,
       final int validatorIndex,
       final BLSSignature proof,
       final int attestationCommitteeIndex,
-      final SafeFuture<Optional<AttestationData>> unsignedAttestationFuture);
+      final SafeFuture<Optional<AttestationData>> unsignedAttestationFuture) {
+    addValidator(
+        validator, validatorIndex, proof, attestationCommitteeIndex, 0, unsignedAttestationFuture);
+  }
+
+  /**
+   * @param aggregatorPosition from PQ, the validator's position in the aggregation committee, which
+   *     delays its aggregate by that many AGGREGATOR_DELAY_BPS; 0 before PQ
+   */
+  void addValidator(
+      Validator validator,
+      int validatorIndex,
+      BLSSignature proof,
+      int attestationCommitteeIndex,
+      int aggregatorPosition,
+      SafeFuture<Optional<AttestationData>> unsignedAttestationFuture);
 
   boolean hasAggregators();
 
@@ -40,6 +55,7 @@ public interface AggregationDutyAggregators {
       UInt64 validatorIndex,
       UInt64 attestationCommitteeIndex,
       BLSSignature proof,
+      int aggregatorPosition,
       SafeFuture<Optional<AttestationData>> unsignedAttestationFuture) {
 
     @Override
@@ -49,6 +65,7 @@ public interface AggregationDutyAggregators {
           .add("validatorIndex", validatorIndex)
           .add("attestationCommitteeIndex", attestationCommitteeIndex)
           .add("proof", proof)
+          .add("aggregatorPosition", aggregatorPosition)
           .add("unsignedAttestationFuture", unsignedAttestationFuture)
           .toString();
     }

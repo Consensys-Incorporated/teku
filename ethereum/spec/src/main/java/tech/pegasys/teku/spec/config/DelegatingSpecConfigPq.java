@@ -94,6 +94,21 @@ public class DelegatingSpecConfigPq extends DelegatingSpecConfigEip8483 implemen
   }
 
   @Override
+  public int getAggregationCutoffBps() {
+    return delegate.getAggregationCutoffBps();
+  }
+
+  @Override
+  public int getAggregateDueBpsPq() {
+    return delegate.getAggregateDueBpsPq();
+  }
+
+  @Override
+  public int getAggregatorDelayBps() {
+    return delegate.getAggregatorDelayBps();
+  }
+
+  @Override
   public Optional<SpecConfigPq> toVersionPq() {
     return Optional.of(this);
   }

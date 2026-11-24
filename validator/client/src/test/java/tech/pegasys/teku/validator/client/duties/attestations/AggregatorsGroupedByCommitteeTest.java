@@ -46,4 +46,20 @@ class AggregatorsGroupedByCommitteeTest extends AggregationDutyAggregatorsTest {
     assertThat(aggregatorsByCommitteeIndex)
         .containsValues(committeeAggregator1, committeeAggregator3);
   }
+
+  @Test
+  public void keepsTheEarliestPqAggregatorOfACommittee() {
+    final CommitteeAggregator second = randomCommitteeAggregator(1, 2);
+    final CommitteeAggregator first = randomCommitteeAggregator(1, 0);
+    final CommitteeAggregator third = randomCommitteeAggregator(1, 3);
+
+    addValidator(second);
+    addValidator(first);
+    addValidator(third);
+
+    assertThat(
+            ((AggregatorsGroupedByCommittee) aggregationDutyAggregators)
+                .getAggregatorsByCommitteeIndex())
+        .containsExactly(Map.entry(1, first));
+  }
 }

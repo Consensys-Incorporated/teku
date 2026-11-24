@@ -124,6 +124,8 @@ abstract class AbstractAttestationDutySchedulingStrategy
                     duty.getValidatorIndex(),
                     BLSSignature.empty(),
                     duty.getCommitteeIndex(),
+                    // A beacon node that doesn't say has the aggregator go first
+                    duty.getAggregatorPosition().orElse(0),
                     unsignedAttestationFuture));
       }
       return SafeFuture.COMPLETE;

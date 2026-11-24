@@ -93,10 +93,12 @@ public abstract class AggregatingAttestationPool implements SlotEventsChannel {
   }
 
   /**
-   * Notes that a local validator aggregates committee {@code committeeIndex} at {@code slot}, so
-   * that a pool which proves aggregates can prove it ahead of the aggregate due time.
+   * Notes that local validator {@code validatorIndex}, when known, aggregates committee {@code
+   * committeeIndex} at {@code slot}, so that a pool which proves aggregates can prove it ahead of
+   * the aggregator's aggregate due time.
    */
-  public void onLocalAggregationDuty(final UInt64 slot, final UInt64 committeeIndex) {}
+  public void onLocalAggregationDuty(
+      final UInt64 slot, final UInt64 committeeIndex, final Optional<UInt64> validatorIndex) {}
 
   /**
    * Ensures that the committees size is set in the attestation. This is needed for the

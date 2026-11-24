@@ -13,7 +13,9 @@
 
 package tech.pegasys.teku.spec.config.builder;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
+import static tech.pegasys.teku.spec.constants.PqConstants.AGGREGATORS_PER_COMMITTEE;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -40,6 +42,11 @@ public class PqBuilder extends BaseForkBuilder
   private Integer maxSignedExecutionPayloadBidSizePq;
   private Integer unregisteredValidatorWithdrawabilityDelay;
   private Integer attestationSubnetCountPq;
+  // The staggered aggregator timing (consensus-specs 4595f0fc) defaults to the specification's
+  // values, since PQ devnet configs written before it don't have them
+  private Integer aggregationCutoffBps = 4000;
+  private Integer aggregateDueBpsPq = 6000;
+  private Integer aggregatorDelayBps = 500;
 
   PqBuilder() {}
 
@@ -62,7 +69,10 @@ public class PqBuilder extends BaseForkBuilder
             maxAttesterSlashingSizePq,
             maxSignedExecutionPayloadBidSizePq,
             unregisteredValidatorWithdrawabilityDelay,
-            attestationSubnetCountPq),
+            attestationSubnetCountPq,
+            aggregationCutoffBps,
+            aggregateDueBpsPq,
+            aggregatorDelayBps),
         specConfigAndParent);
   }
 
@@ -157,10 +167,37 @@ public class PqBuilder extends BaseForkBuilder
     return this;
   }
 
+  public PqBuilder aggregationCutoffBps(final Integer aggregationCutoffBps) {
+    checkNotNull(aggregationCutoffBps);
+    this.aggregationCutoffBps = aggregationCutoffBps;
+    return this;
+  }
+
+  public PqBuilder aggregateDueBpsPq(final Integer aggregateDueBpsPq) {
+    checkNotNull(aggregateDueBpsPq);
+    this.aggregateDueBpsPq = aggregateDueBpsPq;
+    return this;
+  }
+
+  public PqBuilder aggregatorDelayBps(final Integer aggregatorDelayBps) {
+    checkNotNull(aggregatorDelayBps);
+    this.aggregatorDelayBps = aggregatorDelayBps;
+    return this;
+  }
+
   @Override
   public void validate() {
     defaultValuesIfRequired(this);
     validateConstants();
+    // The config invariants of consensus-specs 4595f0fc: each aggregator stops collecting before it
+    // broadcasts, and the last one broadcasts within the slot
+    checkArgument(
+        aggregationCutoffBps < aggregateDueBpsPq,
+        "AGGREGATION_CUTOFF_BPS must be less than AGGREGATE_DUE_BPS_PQ");
+    checkArgument(
+        aggregateDueBpsPq + (AGGREGATORS_PER_COMMITTEE - 1) * aggregatorDelayBps <= 10_000,
+        "The last aggregator's AGGREGATE_DUE_BPS_PQ plus AGGREGATOR_DELAY_BPS offset must be"
+            + " within the slot");
   }
 
   @Override
@@ -184,6 +221,9 @@ public class PqBuilder extends BaseForkBuilder
     constants.put(
         "unregisteredValidatorWithdrawabilityDelay", unregisteredValidatorWithdrawabilityDelay);
     constants.put("attestationSubnetCountPq", attestationSubnetCountPq);
+    constants.put("aggregationCutoffBps", aggregationCutoffBps);
+    constants.put("aggregateDueBpsPq", aggregateDueBpsPq);
+    constants.put("aggregatorDelayBps", aggregatorDelayBps);
     return constants;
   }
 
