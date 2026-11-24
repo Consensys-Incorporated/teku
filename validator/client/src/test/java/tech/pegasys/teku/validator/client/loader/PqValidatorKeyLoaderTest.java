@@ -407,6 +407,31 @@ class PqValidatorKeyLoaderTest {
   }
 
   @Test
+  void load_derivedKeysTakeTheirVrfStateFromAPlainPath() {
+    final Path statesFile = tempDir.resolve("states.vrf");
+    writeFile(statesFile, vrfStateOf(GENESIS_VALIDATOR_0_VRF_SEED));
+
+    // A path with no scheme, as --Xvalidators-pq-vrf-state-url=/pq-keys/<id>.vrf gives
+    final XmssSigner signer =
+        derivingLoader(Optional.of(URI.create(statesFile.toString())))
+            .load(
+                blsKeystorePath,
+                PASSWORD,
+                GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY,
+                () -> GENESIS_VALIDATOR_0_BLS_SECRET_KEY)
+            .orElseThrow();
+
+    final UInt64 slot = UInt64.valueOf(201);
+    assertThat(safeJoin(signer.computeVrfProof(slot)))
+        .isEqualTo(
+            VrfTree.derive(GENESIS_VALIDATOR_0_VRF_SEED, VRF_DEPTH, VRF_CACHED_HEIGHT)
+                .computeProof(slot));
+    assertThat(derivedVrfStatePath())
+        .hasBinaryContent(vrfStateOf(GENESIS_VALIDATOR_0_VRF_SEED).toArrayUnsafe());
+    assertThat(derivedVrfCachePath()).doesNotExist();
+  }
+
+  @Test
   void load_derivedKeysLoadedInParallelAllSaveTheirVrfStates() {
     // Keys load in parallel, and each saves its state as soon as it is found
     final List<Bytes32> blsSecretKeys =
