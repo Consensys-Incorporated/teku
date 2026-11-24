@@ -87,14 +87,14 @@ import tech.pegasys.teku.storage.client.RecentChainData;
  *       one, then, once this slot's aggregates are proven, every committee the block can include,
  *       pass after pass until nothing is left out or the slot ends. Block production then takes the
  *       largest proof merged ahead as it is, and proves and merges nothing, so the block is never
- *       late for the prover: a merge takes seconds on a small machine, and the sidecar proves one
+ *       late for the prover: a merge takes seconds on a small machine, and leanVM proves one
  *       request at a time, so a merge still running would hold the block up too.
  * </ul>
  *
- * <p>A leanVM sidecar proves one request at a time, whichever connection it comes from, so a second
- * proving connection would not prove anything sooner. Instead, all of this runs on one runner, and
- * block proofs are merged outside the window between the collection cutoff and the aggregate due
- * time, which is left to the aggregates' proofs.
+ * <p>leanVM proves one request at a time, whichever thread it comes from, so a second proving
+ * thread would not prove anything sooner. Instead, all of this runs on one runner, and block proofs
+ * are merged outside the window between the collection cutoff and the aggregate due time, which is
+ * left to the aggregates' proofs.
  */
 public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
 
@@ -105,7 +105,7 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
 
   /**
    * The most proofs a recursive prover merges for a block, counting an earlier merge as one: one
-   * leanVM aggregation ({@code LeanVmSidecar.MAX_CHILDREN_PER_AGGREGATE}), about a second on 16
+   * leanVM aggregation ({@code LeanVmAggregator.MAX_CHILDREN_PER_AGGREGATE}), about a second on 16
    * cores. Committees beyond it wait for a later block.
    */
   static final int MAX_PROOFS_PER_MERGE = 16;

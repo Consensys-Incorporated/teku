@@ -24,10 +24,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.XmssAggregateStatement;
-import tech.pegasys.teku.xmss.LeanVmSidecar.Claim;
-import tech.pegasys.teku.xmss.LeanVmSidecar.ProofOfClaims;
-import tech.pegasys.teku.xmss.LeanVmSidecar.SignedClaim;
 import tech.pegasys.teku.xmss.XmssAggregator;
+import tech.pegasys.teku.xmss.XmssAggregator.Claim;
+import tech.pegasys.teku.xmss.XmssAggregator.ProofOfClaims;
+import tech.pegasys.teku.xmss.XmssAggregator.SignedClaim;
 
 class LeanVmStarkTest {
 
@@ -121,7 +121,7 @@ class LeanVmStarkTest {
 
   @Test
   void backend_switchesVerifiersAndProversMadeBeforeTheSwitch() {
-    // The spec builds its verifier before the node starts its sidecar
+    // The spec builds its verifier before the node starts leanVM
     final StarkProofVerifier verifier =
         StarkBackend.verifier((pubkey, leafIndex, message, signature) -> false);
     final StarkProver prover = StarkBackend.prover();

@@ -20,10 +20,10 @@ import java.util.List;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.XmssAggregateStatement;
-import tech.pegasys.teku.xmss.LeanVmSidecar.Claim;
-import tech.pegasys.teku.xmss.LeanVmSidecar.ProofOfClaims;
-import tech.pegasys.teku.xmss.LeanVmSidecar.SignedClaim;
 import tech.pegasys.teku.xmss.XmssAggregator;
+import tech.pegasys.teku.xmss.XmssAggregator.Claim;
+import tech.pegasys.teku.xmss.XmssAggregator.ProofOfClaims;
+import tech.pegasys.teku.xmss.XmssAggregator.SignedClaim;
 
 /**
  * {@code stark.ProveAggregates}, {@code stark.MergeProofs} and {@code stark.VerifyAggregates} as PQ

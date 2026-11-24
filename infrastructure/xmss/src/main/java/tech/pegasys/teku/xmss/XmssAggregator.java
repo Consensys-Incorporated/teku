@@ -15,9 +15,7 @@ package tech.pegasys.teku.xmss;
 
 import java.util.List;
 import org.apache.tuweni.bytes.Bytes;
-import tech.pegasys.teku.xmss.LeanVmSidecar.Claim;
-import tech.pegasys.teku.xmss.LeanVmSidecar.ProofOfClaims;
-import tech.pegasys.teku.xmss.LeanVmSidecar.SignedClaim;
+import org.apache.tuweni.bytes.Bytes32;
 
 /** Proves, merges and verifies aggregate proofs of leanXMSS signatures, such as leanVM's. */
 public interface XmssAggregator {
@@ -30,4 +28,13 @@ public interface XmssAggregator {
 
   /** Whether {@code proof} proves exactly {@code claims}; no claims need an empty proof. */
   boolean verify(List<Claim> claims, Bytes proof);
+
+  /** A public key and the message it signed. */
+  record Claim(Bytes32 publicKey, Bytes32 message) {}
+
+  /** A claim with the leanXMSS signature that backs it. */
+  record SignedClaim(Claim claim, Bytes signature) {}
+
+  /** A proof and the claims it proves. */
+  record ProofOfClaims(List<Claim> claims, Bytes proof) {}
 }

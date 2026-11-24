@@ -141,7 +141,7 @@ public class SpecLogicPq extends AbstractSpecLogic {
     final OperationSignatureVerifierPq operationSignatureVerifier =
         new OperationSignatureVerifierPq(
             miscHelpers, beaconStateAccessors, predicates, xmssSignatureVerifier);
-    // The concatenation stand-in, or leanVM proofs once the node has a leanVM sidecar
+    // The concatenation stand-in, or leanVM proofs once the node has started leanVM
     final StarkProofVerifier starkProofVerifier = StarkBackend.verifier(xmssSignatureVerifier);
 
     // Weak subjectivity

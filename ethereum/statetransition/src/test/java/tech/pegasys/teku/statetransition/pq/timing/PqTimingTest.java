@@ -201,7 +201,7 @@ class PqTimingTest {
                     .run(
                         Map.of(),
                         () -> {
-                          throw new IllegalStateException("sidecar gone");
+                          throw new IllegalStateException("prover gone");
                         }))
         .isInstanceOf(IllegalStateException.class);
 

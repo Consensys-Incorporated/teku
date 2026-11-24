@@ -22,9 +22,9 @@ import tech.pegasys.teku.xmss.XmssAggregator;
 /**
  * Which STARK implementation PQ attestation proofs use: the specification's concatenation stand-in,
  * the default and what the reference tests expect, or recursive leanVM proofs ({@link LeanVmStark})
- * once a node has a leanVM sidecar, as PQ devnet clients use. Like {@code XmssConstants}, it is a
- * process-wide switch: the spec is built before the node starts its sidecar, so its verifier reads
- * the choice at each call.
+ * once a node has started leanVM, as PQ devnet clients use. Like {@code XmssConstants}, it is a
+ * process-wide switch: the spec is built before the node starts leanVM, so its verifier reads the
+ * choice at each call.
  */
 public final class StarkBackend {
 

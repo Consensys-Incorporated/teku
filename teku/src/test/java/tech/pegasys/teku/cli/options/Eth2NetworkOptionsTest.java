@@ -32,6 +32,7 @@ import tech.pegasys.teku.cli.AbstractBeaconNodeCommandTest;
 import tech.pegasys.teku.config.TekuConfiguration;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.networks.Eth2NetworkConfiguration;
+import tech.pegasys.teku.networks.LeanVmConfig;
 import tech.pegasys.teku.networks.PqTimingConfig;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -42,6 +43,48 @@ class Eth2NetworkOptionsTest extends AbstractBeaconNodeCommandTest {
     final TekuConfiguration config = getTekuConfigurationFromArguments();
     final Spec spec = config.eth2NetworkConfiguration().getSpec();
     assertThat(spec.getForkSchedule().getHighestSupportedMilestone()).isEqualTo(SpecMilestone.FULU);
+  }
+
+  @Test
+  void shouldNotUseLeanVmByDefault() {
+    final TekuConfiguration config = getTekuConfigurationFromArguments();
+    assertThat(config.eth2NetworkConfiguration().getLeanVm()).isEmpty();
+  }
+
+  @Test
+  void shouldUseLeanVmWithOneThreadPerCoreWhenEnabled() {
+    final TekuConfiguration config = getTekuConfigurationFromArguments("--Xpq-leanvm-enabled");
+    assertThat(config.eth2NetworkConfiguration().getLeanVm())
+        .contains(new LeanVmConfig(LeanVmConfig.DEFAULT_THREADS, false));
+  }
+
+  @Test
+  void shouldUseLeanVmWithTheGivenThreads() {
+    final TekuConfiguration config =
+        getTekuConfigurationFromArguments("--Xpq-leanvm-enabled", "--Xpq-leanvm-threads", "6");
+    assertThat(config.eth2NetworkConfiguration().getLeanVm()).contains(new LeanVmConfig(6, false));
+  }
+
+  @Test
+  void shouldNotUseLeanVmWhenOnlyItsThreadsAreGiven() {
+    final TekuConfiguration config = getTekuConfigurationFromArguments("--Xpq-leanvm-threads", "6");
+    assertThat(config.eth2NetworkConfiguration().getLeanVm()).isEmpty();
+  }
+
+  @Test
+  void shouldRejectNegativeLeanVmThreads() {
+    final int exitCode =
+        beaconNodeCommand.parse(new String[] {"--Xpq-leanvm-enabled", "--Xpq-leanvm-threads=-1"});
+    assertThat(exitCode).isNotZero();
+    assertThat(getCommandLineOutput()).contains("--Xpq-leanvm-threads must not be negative");
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"--Xpq-leanvm-sidecar-binary", "--Xpq-leanvm-sidecar-socket"})
+  void shouldUseLeanVmWhenADeprecatedSidecarFlagIsGiven(final String flag) {
+    final TekuConfiguration config = getTekuConfigurationFromArguments(flag, "/ignored/path");
+    assertThat(config.eth2NetworkConfiguration().getLeanVm())
+        .contains(new LeanVmConfig(LeanVmConfig.DEFAULT_THREADS, true));
   }
 
   @Test
