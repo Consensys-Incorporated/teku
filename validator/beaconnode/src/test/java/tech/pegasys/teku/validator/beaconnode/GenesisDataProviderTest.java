@@ -107,4 +107,26 @@ class GenesisDataProviderTest {
     verify(validatorApiChannel, times(2)).getGenesisData();
     assertThat(result).isCompletedWithValue(GENESIS_TIME);
   }
+
+  @Test
+  void shouldRetryWhenARequestIsNeverAnswered() {
+    // As a request made before an in-process beacon node subscribes to the validator API channel
+    when(validatorApiChannel.getGenesisData())
+        .thenReturn(new SafeFuture<>())
+        .thenReturn(
+            completedFuture(Optional.of(new GenesisData(GENESIS_TIME, GENESIS_VALIDATORS_ROOT))));
+
+    final SafeFuture<UInt64> result = genesisDataProvider.getGenesisTime();
+    verify(validatorApiChannel).getGenesisData();
+    assertThat(result).isNotDone();
+
+    // The request times out, then a retry is scheduled
+    asyncRunner.executeQueuedActions();
+    assertThat(result).isNotDone();
+    Assertions.assertThat(asyncRunner.hasDelayedActions()).isTrue();
+
+    asyncRunner.executeQueuedActions();
+    verify(validatorApiChannel, times(2)).getGenesisData();
+    assertThat(result).isCompletedWithValue(GENESIS_TIME);
+  }
 }
