@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.IntFunction;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.TestContainers.ContainerReadImpl;
@@ -28,6 +29,19 @@ import tech.pegasys.teku.infrastructure.ssz.TestContainers.WritableContainer;
 import tech.pegasys.teku.infrastructure.ssz.cache.IntCache;
 
 public class AbstractSszCompositeTest {
+
+  @Test
+  public void shouldCreateChildrenCacheUsingFactory() {
+    final SszContainerImpl container =
+        new SszContainerImpl(WritableContainer.SSZ_SCHEMA) {
+          @Override
+          protected Supplier<IntCache<SszData>> createCacheFactory() {
+            return TrackingIntCache::new;
+          }
+        };
+
+    assertThat(container.transferCache()).isInstanceOf(TrackingIntCache.class);
+  }
 
   @Test
   public void getUsesCachedLookupAndStoresMissWithoutCallback() {
