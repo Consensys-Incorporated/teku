@@ -26,6 +26,10 @@ public class DeserializableMapTypeDefinition<TKey, TValue>
     extends SerializableObjectTypeDefinition<Map<TKey, TValue>>
     implements DeserializableTypeDefinition<Map<TKey, TValue>> {
 
+  // Computed on first use. The definition is immutable, so the hash never changes; a race only
+  // computes it twice
+  private int cachedHashCode;
+
   private final StringValueTypeDefinition<TKey> keyType;
   private final DeserializableTypeDefinition<TValue> valueType;
   private final Supplier<? extends Map<TKey, TValue>> mapConstructor;
@@ -119,6 +123,13 @@ public class DeserializableMapTypeDefinition<TKey, TValue>
 
   @Override
   public int hashCode() {
-    return Objects.hash(super.hashCode(), keyType, valueType);
+    // Cached: hashing walks the whole nested type, and building the OpenAPI docs hashes the same
+    // types again and again while collecting the types each endpoint references
+    int hash = cachedHashCode;
+    if (hash == 0) {
+      hash = Objects.hash(super.hashCode(), keyType, valueType);
+      cachedHashCode = hash;
+    }
+    return hash;
   }
 }
