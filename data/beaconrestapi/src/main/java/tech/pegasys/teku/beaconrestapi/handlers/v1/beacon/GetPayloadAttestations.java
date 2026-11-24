@@ -25,14 +25,19 @@ import static tech.pegasys.teku.infrastructure.json.types.SerializableTypeDefini
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import io.javalin.http.Header;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import tech.pegasys.teku.api.DataProvider;
 import tech.pegasys.teku.api.NodeDataProvider;
+import tech.pegasys.teku.api.exceptions.BadRequestException;
 import tech.pegasys.teku.infrastructure.json.types.SerializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.EndpointMetadata;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
+import tech.pegasys.teku.infrastructure.restapi.openapi.response.OctetStreamResponseContentTypeDefinition;
+import tech.pegasys.teku.infrastructure.restapi.openapi.response.ResponseContentTypeDefinition;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszProgressiveListSchema;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestation;
@@ -44,6 +49,7 @@ public class GetPayloadAttestations extends RestApiEndpoint {
   public static final String ROUTE = "/eth/v1/beacon/pool/payload_attestations";
 
   private final NodeDataProvider nodeDataProvider;
+  private final SchemaDefinitionCache schemaDefinitionCache;
 
   public GetPayloadAttestations(
       final DataProvider dataProvider, final SchemaDefinitionCache schemaDefinitionCache) {
@@ -57,16 +63,18 @@ public class GetPayloadAttestations extends RestApiEndpoint {
             .operationId("getPoolPayloadAttestations")
             .summary("Get PayloadAttestations from operations pool")
             .description(
-                "Retrieves payload attestations known by the node but not necessarily incorporated into any block.")
+                "Retrieves payload attestations known by the node but not necessarily incorporated into any block. Depending on `Accept` header, they can be returned either as json or as bytes serialized by SSZ.")
             .tags(TAG_BEACON)
             .queryParam(SLOT_PARAMETER.withDescription(SLOT_QUERY_DESCRIPTION))
             .response(
                 SC_OK,
                 "Request successful",
                 getResponseType(schemaDefinitionCache),
+                getSszResponseType(schemaDefinitionCache),
                 ETH_CONSENSUS_HEADER_TYPE)
             .build());
     this.nodeDataProvider = provider;
+    this.schemaDefinitionCache = schemaDefinitionCache;
   }
 
   @Override
@@ -74,11 +82,32 @@ public class GetPayloadAttestations extends RestApiEndpoint {
     request.header(Header.CACHE_CONTROL, CACHE_NONE);
     final Optional<UInt64> slot =
         request.getOptionalQueryParameter(SLOT_PARAMETER.withDescription(SLOT_QUERY_DESCRIPTION));
+    if (slot.isPresent()
+        && schemaDefinitionCache.milestoneAtSlot(slot.get()).isLessThan(SpecMilestone.GLOAS)) {
+      throw new BadRequestException(
+          "Cannot request payload attestations for slots prior to Gloas fork.");
+    }
     final ObjectAndMetaData<List<PayloadAttestation>> payloadAttestationsAndMetaData =
         nodeDataProvider.getPayloadAttestationsAndMetaData(slot);
     request.header(
         HEADER_CONSENSUS_VERSION, payloadAttestationsAndMetaData.getMilestone().lowerCaseName());
     request.respondOk(payloadAttestationsAndMetaData);
+  }
+
+  // The pool can hold payload attestations for several slots and block roots, so the SSZ response
+  // is
+  // a ProgressiveList[PayloadAttestation] rather than a list bounded by MAX_PAYLOAD_ATTESTATIONS
+  private static ResponseContentTypeDefinition<ObjectAndMetaData<List<PayloadAttestation>>>
+      getSszResponseType(final SchemaDefinitionCache schemaDefinitionCache) {
+    final SszProgressiveListSchema<PayloadAttestation> payloadAttestationsSchema =
+        SszProgressiveListSchema.create(
+            SchemaDefinitionsGloas.required(
+                    schemaDefinitionCache.getSchemaDefinition(SpecMilestone.GLOAS))
+                .getPayloadAttestationSchema());
+    return new OctetStreamResponseContentTypeDefinition<>(
+        (data, out) ->
+            payloadAttestationsSchema.createFromElements(data.getData()).sszSerialize(out),
+        __ -> Collections.emptyMap());
   }
 
   private static SerializableTypeDefinition<ObjectAndMetaData<List<PayloadAttestation>>>
