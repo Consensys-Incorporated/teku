@@ -79,6 +79,8 @@ public class AttesterDutiesGenerator {
     }
     // The signing key: a BLS key, or from PQ an XMSS key
     final Bytes publicKey = state.getValidators().get(validatorIndex).getSigningKeyBytes();
+    final Optional<Optional<Integer>> aggregatorPosition =
+        aggregatorPosition(state, committeeAssignment, validatorIndex);
     return Optional.of(
         new AttesterDuty(
             publicKey,
@@ -88,15 +90,18 @@ public class AttesterDutiesGenerator {
             committeeCountPerSlot.intValue(),
             committeeAssignment.committee().indexOf(validatorIndex),
             committeeAssignment.slot(),
-            isAggregator(state, committeeAssignment, validatorIndex)));
+            aggregatorPosition.map(Optional::isPresent),
+            aggregatorPosition.flatMap(position -> position)));
   }
 
   /**
    * From PQ, aggregators are the aggregation committee's members (is_aggregator), which a PQ state
-   * holds for the previous epoch through the seed lookahead. Before PQ, aggregators select
-   * themselves with a selection proof, so the duty doesn't say.
+   * holds for the previous epoch through the seed lookahead, and their position in it staggers when
+   * they aggregate. Before PQ, aggregators select themselves with a selection proof, so the duty
+   * doesn't say: empty then, and from PQ the position or empty for a validator that doesn't
+   * aggregate.
    */
-  private Optional<Boolean> isAggregator(
+  private Optional<Optional<Integer>> aggregatorPosition(
       final BeaconState state,
       final CommitteeAssignment committeeAssignment,
       final int validatorIndex) {
@@ -106,7 +111,7 @@ public class AttesterDutiesGenerator {
     return spec.atSlot(committeeAssignment.slot()).getAttestationUtil()
             instanceof AttestationUtilPq attestationUtil
         ? Optional.of(
-            attestationUtil.isAggregator(
+            attestationUtil.getAggregatorPosition(
                 state,
                 committeeAssignment.slot(),
                 committeeAssignment.committeeIndex(),

@@ -220,6 +220,32 @@ public class SpecConfigLoaderTest {
             "The specified network configuration had missing or invalid values for constants");
   }
 
+  @Test
+  public void shouldDefaultThePqAggregatorTimingWhenMissing(@TempDir final Path tempDir)
+      throws Exception {
+    // PQ devnet configs written before staggered aggregators (consensus-specs 4595f0fc) lack it
+    final Path file = tempDir.resolve("mainnet.yml");
+    try (final InputStream inputStream = getMainnetConfigAsStream();
+        final FileWriter writer = new FileWriter(file.toFile(), StandardCharsets.UTF_8)) {
+      final BufferedReader reader =
+          new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8));
+      String line;
+      while ((line = reader.readLine()) != null) {
+        if (!line.startsWith("AGGREGATION_CUTOFF_BPS")
+            && !line.startsWith("AGGREGATE_DUE_BPS_PQ")
+            && !line.startsWith("AGGREGATOR_DELAY_BPS")) {
+          writer.write(line + "\n");
+        }
+      }
+    }
+    final SpecConfigPq config =
+        SpecConfigPq.required(
+            SpecConfigLoader.loadConfig(file.toString(), true, true, __ -> {}).specConfig());
+    assertThat(config.getAggregationCutoffBps()).isEqualTo(4000);
+    assertThat(config.getAggregateDueBpsPq()).isEqualTo(6000);
+    assertThat(config.getAggregatorDelayBps()).isEqualTo(500);
+  }
+
   @ParameterizedTest
   @ValueSource(
       strings = {

@@ -66,6 +66,11 @@ public class AttesterDutyBuilder {
               BOOLEAN_TYPE,
               AttesterDuty::getIsAggregator,
               AttesterDutyBuilder::isAggregator)
+          .withOptionalField(
+              "aggregator_position",
+              INTEGER_TYPE,
+              AttesterDuty::getAggregatorPosition,
+              AttesterDutyBuilder::aggregatorPosition)
           .build();
 
   private Bytes publicKey;
@@ -77,6 +82,7 @@ public class AttesterDutyBuilder {
   private UInt64 slot;
 
   private Optional<Boolean> isAggregator = Optional.empty();
+  private Optional<Integer> aggregatorPosition = Optional.empty();
 
   public AttesterDutyBuilder publicKey(final Bytes publicKey) {
     this.publicKey = publicKey;
@@ -89,6 +95,11 @@ public class AttesterDutyBuilder {
 
   public AttesterDutyBuilder isAggregator(final Optional<Boolean> isAggregator) {
     this.isAggregator = isAggregator;
+    return this;
+  }
+
+  public AttesterDutyBuilder aggregatorPosition(final Optional<Integer> aggregatorPosition) {
+    this.aggregatorPosition = aggregatorPosition;
     return this;
   }
 
@@ -131,6 +142,7 @@ public class AttesterDutyBuilder {
         committeesAtSlot,
         validatorCommitteeIndex,
         slot,
-        isAggregator);
+        isAggregator,
+        aggregatorPosition);
   }
 }

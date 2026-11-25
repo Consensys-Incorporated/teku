@@ -24,7 +24,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 /**
  * An attester duty. From PQ the validator is named by its 32-byte XMSS public key, and the duty
  * says whether the validator is in its committee's aggregation committee, as there are no selection
- * proofs.
+ * proofs, and at which position, which staggers when it aggregates.
  */
 public class AttesterDuty {
 
@@ -40,6 +40,7 @@ public class AttesterDuty {
   private final int validatorCommitteeIndex;
   private final UInt64 slot;
   private final Optional<Boolean> isAggregator;
+  private final Optional<Integer> aggregatorPosition;
 
   public AttesterDuty(
       final BLSPublicKey publicKey,
@@ -74,6 +75,31 @@ public class AttesterDuty {
       final int validatorCommitteeIndex,
       final UInt64 slot,
       final Optional<Boolean> isAggregator) {
+    this(
+        publicKey,
+        validatorIndex,
+        committeeLength,
+        committeeIndex,
+        committeesAtSlot,
+        validatorCommitteeIndex,
+        slot,
+        isAggregator,
+        Optional.empty());
+  }
+
+  /**
+   * @param aggregatorPosition from PQ, the aggregator's position in the aggregation committee
+   */
+  public AttesterDuty(
+      final Bytes publicKey,
+      final int validatorIndex,
+      final int committeeLength,
+      final int committeeIndex,
+      final int committeesAtSlot,
+      final int validatorCommitteeIndex,
+      final UInt64 slot,
+      final Optional<Boolean> isAggregator,
+      final Optional<Integer> aggregatorPosition) {
     this.publicKey = publicKey;
     this.validatorIndex = validatorIndex;
     this.committeeLength = committeeLength;
@@ -82,6 +108,7 @@ public class AttesterDuty {
     this.validatorCommitteeIndex = validatorCommitteeIndex;
     this.slot = slot;
     this.isAggregator = isAggregator;
+    this.aggregatorPosition = aggregatorPosition;
   }
 
   /**
@@ -99,6 +126,15 @@ public class AttesterDuty {
   /** From PQ, whether the validator aggregates for its committee. */
   public Optional<Boolean> getIsAggregator() {
     return isAggregator;
+  }
+
+  /**
+   * From PQ, the aggregator's position in the aggregation committee: the aggregator at position p
+   * stops collecting and broadcasts p AGGREGATOR_DELAY_BPS after the first. Empty for a validator
+   * that doesn't aggregate, or from a beacon node that doesn't say, which is taken as the first.
+   */
+  public Optional<Integer> getAggregatorPosition() {
+    return aggregatorPosition;
   }
 
   public int getValidatorIndex() {
@@ -141,7 +177,8 @@ public class AttesterDuty {
         && validatorCommitteeIndex == that.validatorCommitteeIndex
         && Objects.equals(publicKey, that.publicKey)
         && Objects.equals(slot, that.slot)
-        && Objects.equals(isAggregator, that.isAggregator);
+        && Objects.equals(isAggregator, that.isAggregator)
+        && Objects.equals(aggregatorPosition, that.aggregatorPosition);
   }
 
   @Override
@@ -154,7 +191,8 @@ public class AttesterDuty {
         committeesAtSlot,
         validatorCommitteeIndex,
         slot,
-        isAggregator);
+        isAggregator,
+        aggregatorPosition);
   }
 
   @Override
@@ -168,6 +206,7 @@ public class AttesterDuty {
         .add("validatorCommitteeIndex", validatorCommitteeIndex)
         .add("slot", slot)
         .add("isAggregator", isAggregator)
+        .add("aggregatorPosition", aggregatorPosition)
         .toString();
   }
 }

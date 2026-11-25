@@ -30,9 +30,21 @@ public class GloasTimeBasedEventAdapter extends TimeBasedEventAdapter {
       final ValidatorTimingChannel validatorTimingChannel,
       final Runnable onLastSlot,
       final Spec spec) {
+    this(taskScheduler, validatorTimingChannel, onLastSlot, spec, SpecMilestone.GLOAS);
+  }
+
+  /**
+   * The Gloas duties from {@code milestone} on, at its offsets: PQ keeps Gloas's duties but moves
+   * the aggregate due time (AGGREGATE_DUE_BPS_PQ).
+   */
+  public GloasTimeBasedEventAdapter(
+      final RepeatingTaskScheduler taskScheduler,
+      final ValidatorTimingChannel validatorTimingChannel,
+      final Runnable onLastSlot,
+      final Spec spec,
+      final SpecMilestone milestone) {
     super(
-        spec.computeStartSlotAtEpoch(
-            spec.getForkSchedule().getFork(SpecMilestone.GLOAS).getEpoch()),
+        spec.computeStartSlotAtEpoch(spec.getForkSchedule().getFork(milestone).getEpoch()),
         taskScheduler,
         validatorTimingChannel,
         onLastSlot,

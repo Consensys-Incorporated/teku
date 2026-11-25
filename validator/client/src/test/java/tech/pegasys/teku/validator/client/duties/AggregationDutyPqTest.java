@@ -29,8 +29,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.logging.ValidatorLogger;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
+import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -40,6 +42,7 @@ import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationP
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.PqAttestationSchemas;
 import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
+import tech.pegasys.teku.spec.logic.common.util.ForkChoiceUtil;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.spec.signatures.Signer;
 import tech.pegasys.teku.spec.signatures.xmss.XmssSigner;
@@ -160,6 +163,83 @@ class AggregationDutyPqTest {
     signing.complete(XmssSignature.fromBytes(signed.getSignature()));
     verify(validatorApiChannel).sendPqAggregateAndProofs(List.of(signed));
     assertThat(result).isCompleted();
+  }
+
+  @Test
+  void shouldNotWarnWhenThereIsNoAggregateToPublish() {
+    // Usually another aggregator's aggregate already includes all its attesters
+    final AttestationData attestationData = dataStructureUtil.randomAttestationData();
+    when(validatorApiChannel.createPqAggregate(
+            SLOT, attestationData.hashTreeRoot(), UInt64.valueOf(2)))
+        .thenReturn(completedFuture(Optional.empty()));
+    duty.addValidator(
+        validator, 7, BLSSignature.empty(), 2, completedFuture(Optional.of(attestationData)));
+
+    assertThat(duty.performDuty()).isCompleted();
+
+    verify(validatorLogger, never()).aggregationSkipped(any(), any());
+    verify(validatorApiChannel, never()).sendPqAggregateAndProofs(any());
+  }
+
+  @Test
+  void shouldAggregateAtTheAggregatorsPositionsDueTime() {
+    final StubTimeProvider timeProvider = StubTimeProvider.withTimeInMillis(0);
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner(timeProvider);
+    duty =
+        new AggregationDuty(
+            spec,
+            SLOT,
+            validatorApiChannel,
+            new AggregatorsGroupedByCommittee(),
+            forkProvider,
+            validatorLogger,
+            new BatchAttestationSendingStrategy<>(validatorApiChannel::sendAggregateAndProofs),
+            ValidatorDutyMetrics.create(new StubMetricsSystem()),
+            Optional.of(asyncRunner));
+    final SignedAggregateAndProofPq signed = prepareAggregate(xmssSigner, 7, 2, new SafeFuture<>());
+    final AttestationData data = signed.getMessage().getAggregate().getData();
+    duty.addValidator(validator, 7, BLSSignature.empty(), 2, 3, completedFuture(Optional.of(data)));
+
+    // The duty runs at the first aggregator's due time; the one at position 3 is due 3 delays on
+    final SafeFuture<DutyResult> result = duty.performDuty();
+    verify(validatorApiChannel, never()).createPqAggregate(any(), any(), any());
+    final ForkChoiceUtil forkChoiceUtil = spec.getGenesisSpec().getForkChoiceUtil();
+    final int delayMillis =
+        forkChoiceUtil.getAggregateDueMillis(3) - forkChoiceUtil.getAggregateDueMillis(0);
+    assertThat(delayMillis).isPositive();
+    timeProvider.advanceTimeByMillis(delayMillis - 1);
+    asyncRunner.executeDueActions();
+    verify(validatorApiChannel, never()).createPqAggregate(any(), any(), any());
+
+    timeProvider.advanceTimeByMillis(1);
+    asyncRunner.executeDueActions();
+    verify(validatorApiChannel).createPqAggregate(SLOT, data.hashTreeRoot(), UInt64.valueOf(2));
+    assertThat(result).isNotDone();
+  }
+
+  @Test
+  void shouldAggregateAtOnceAtTheFirstPosition() {
+    final StubAsyncRunner asyncRunner = new StubAsyncRunner();
+    duty =
+        new AggregationDuty(
+            spec,
+            SLOT,
+            validatorApiChannel,
+            new AggregatorsGroupedByCommittee(),
+            forkProvider,
+            validatorLogger,
+            new BatchAttestationSendingStrategy<>(validatorApiChannel::sendAggregateAndProofs),
+            ValidatorDutyMetrics.create(new StubMetricsSystem()),
+            Optional.of(asyncRunner));
+    final SignedAggregateAndProofPq signed = prepareAggregate(xmssSigner, 7, 2, new SafeFuture<>());
+    final AttestationData data = signed.getMessage().getAggregate().getData();
+    duty.addValidator(validator, 7, BLSSignature.empty(), 2, 0, completedFuture(Optional.of(data)));
+
+    final SafeFuture<DutyResult> result = duty.performDuty();
+
+    verify(validatorApiChannel).createPqAggregate(SLOT, data.hashTreeRoot(), UInt64.valueOf(2));
+    assertThat(asyncRunner.hasDelayedActions()).isFalse();
+    assertThat(result).isNotDone();
   }
 
   /** Mocks the beacon node's aggregate for the committee, and its signing with {@code signer}. */

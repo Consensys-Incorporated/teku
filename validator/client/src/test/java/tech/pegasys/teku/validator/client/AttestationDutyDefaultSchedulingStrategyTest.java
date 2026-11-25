@@ -28,9 +28,11 @@ import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Consumer;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuties;
 import tech.pegasys.teku.ethereum.json.types.validator.AttesterDuty;
@@ -192,6 +194,46 @@ class AttestationDutyDefaultSchedulingStrategyTest {
             new CommitteeSubscriptionRequest(validatorIndex, 3, UInt64.valueOf(4), slot, true));
     verify(scheduledDuties).scheduleAggregation(eq(slot), eq(pqValidator), any());
     verify(signer, never()).signAggregationSlot(any(), any());
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void shouldAddPqAggregatorAtItsAggregationCommitteePosition() {
+    final Spec pqSpec = TestSpecFactory.createMinimalPq();
+    final DataStructureUtil pqData = new DataStructureUtil(pqSpec);
+    final Bytes32 xmssKey = pqData.randomBytes32();
+    final XmssSigner xmssSigner = mock(XmssSigner.class);
+    when(xmssSigner.getPublicKey()).thenReturn(XmssPublicKey.fromBytes(xmssKey));
+    final Validator pqValidator =
+        new Validator(validatorKey, signer, Optional::empty, false, Optional.of(xmssSigner));
+    final AttestationDutyDefaultSchedulingStrategy pqStrategy =
+        new AttestationDutyDefaultSchedulingStrategy(
+            pqSpec,
+            forkProvider,
+            dependentRoot -> scheduledDuties,
+            new OwnedValidators(Map.of(validatorKey, pqValidator)),
+            beaconCommitteeSubscriptions,
+            validatorApiChannel,
+            false);
+    final UInt64 slot = UInt64.ONE;
+    final int validatorIndex = VALIDATOR_INDICES.getInt(0);
+    final AttesterDuty duty =
+        new AttesterDuty(
+            xmssKey, validatorIndex, 16, 3, 4, 0, slot, Optional.of(true), Optional.of(2));
+    when(scheduledDuties.scheduleProduction(any(), any(), any())).thenReturn(new SafeFuture<>());
+
+    assertThat(
+            pqStrategy.scheduleAllDuties(
+                UInt64.ONE, new AttesterDuties(false, pqData.randomBytes32(), List.of(duty))))
+        .isCompleted();
+
+    final ArgumentCaptor<Consumer<AggregationDuty>> addToDuty =
+        ArgumentCaptor.forClass(Consumer.class);
+    verify(scheduledDuties).scheduleAggregation(eq(slot), eq(pqValidator), addToDuty.capture());
+    final AggregationDuty aggregationDuty = mock(AggregationDuty.class);
+    addToDuty.getValue().accept(aggregationDuty);
+    verify(aggregationDuty)
+        .addValidator(eq(pqValidator), eq(validatorIndex), any(), eq(3), eq(2), any());
   }
 
   @Test

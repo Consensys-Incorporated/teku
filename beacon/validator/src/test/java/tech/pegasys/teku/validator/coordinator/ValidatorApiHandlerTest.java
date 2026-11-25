@@ -461,8 +461,21 @@ class ValidatorApiHandlerTest {
                           duty.getSlot(),
                           UInt64.valueOf(duty.getCommitteeIndex()),
                           UInt64.valueOf(duty.getValidatorIndex())));
+              // The position staggers when the aggregator aggregates
+              assertThat(duty.getAggregatorPosition())
+                  .isEqualTo(
+                      attestationUtil.getAggregatorPosition(
+                          state,
+                          duty.getSlot(),
+                          UInt64.valueOf(duty.getCommitteeIndex()),
+                          UInt64.valueOf(duty.getValidatorIndex())));
             });
     assertThat(duties).anySatisfy(duty -> assertThat(duty.getIsAggregator()).contains(true));
+    assertThat(duties)
+        .anySatisfy(
+            duty ->
+                assertThat(duty.getAggregatorPosition())
+                    .hasValueSatisfying(position -> assertThat(position).isPositive()));
   }
 
   @Test
@@ -479,6 +492,7 @@ class ValidatorApiHandlerTest {
             .getFirst();
 
     assertThat(duty.getIsAggregator()).isEmpty();
+    assertThat(duty.getAggregatorPosition()).isEmpty();
   }
 
   @Test
@@ -1276,8 +1290,12 @@ class ValidatorApiHandlerTest {
     verify(attestationTopicSubscriptions)
         .subscribeToCommitteeForAggregation(committeeIndex, committeesAtSlot, aggregationSlot);
     verify(activeValidatorTracker).onCommitteeSubscriptionRequest(validatorIndex, aggregationSlot);
-    // So that a PQ aggregate can be proven before it is due
-    verify(attestationPool).onLocalAggregationDuty(aggregationSlot, UInt64.valueOf(committeeIndex));
+    // So that a PQ aggregate can be proven before it is due, at the aggregator's cutoff
+    verify(attestationPool)
+        .onLocalAggregationDuty(
+            aggregationSlot,
+            UInt64.valueOf(committeeIndex),
+            Optional.of(UInt64.valueOf(validatorIndex)));
   }
 
   @Test
@@ -1296,7 +1314,7 @@ class ValidatorApiHandlerTest {
     assertThat(result).isCompleted();
     verifyNoInteractions(attestationTopicSubscriptions);
     verify(activeValidatorTracker).onCommitteeSubscriptionRequest(validatorIndex, aggregationSlot);
-    verify(attestationPool, never()).onLocalAggregationDuty(any(), any());
+    verify(attestationPool, never()).onLocalAggregationDuty(any(), any(), any());
   }
 
   @Test

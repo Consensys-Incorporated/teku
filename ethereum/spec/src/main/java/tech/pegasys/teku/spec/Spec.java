@@ -747,6 +747,16 @@ public class Spec {
     return atSlot(slot).getForkChoiceUtil().getAggregateDueMillis();
   }
 
+  /** From PQ, when the aggregator at {@code position} broadcasts its aggregate in {@code slot}. */
+  public int getAggregateDueMillis(final UInt64 slot, final int position) {
+    return atSlot(slot).getForkChoiceUtil().getAggregateDueMillis(position);
+  }
+
+  /** From PQ, when the aggregator at {@code position} stops collecting attestations. */
+  public int getAggregationCutoffMillis(final UInt64 slot, final int position) {
+    return atSlot(slot).getForkChoiceUtil().getAggregationCutoffMillis(position);
+  }
+
   public int getProposerReorgCutoffMillis(final UInt64 slot) {
     return atSlot(slot).getForkChoiceUtil().getProposerReorgCutoffMillis();
   }

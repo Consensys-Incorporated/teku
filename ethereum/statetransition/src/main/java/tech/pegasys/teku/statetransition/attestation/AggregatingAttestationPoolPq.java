@@ -59,6 +59,7 @@ import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.SlotProces
 import tech.pegasys.teku.spec.logic.versions.pq.crypto.ProvenStatements;
 import tech.pegasys.teku.spec.logic.versions.pq.crypto.StarkProver;
 import tech.pegasys.teku.spec.logic.versions.pq.helpers.BeaconStateAccessorsPq;
+import tech.pegasys.teku.spec.logic.versions.pq.util.AttestationUtilPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.statetransition.attestation.MergedProofCache.Claim;
 import tech.pegasys.teku.statetransition.attestation.MergedProofCache.MergedProof;
@@ -79,9 +80,10 @@ import tech.pegasys.teku.storage.client.RecentChainData;
  * Given an async runner, the pool also proves and merges ahead of the deadlines:
  *
  * <ul>
- *   <li>It proves each committee a local validator aggregates at the collection cutoff, {@link
- *       #AGGREGATION_CUTOFF_BPS} into the slot, so the aggregator's proof is ready when its
- *       aggregate is due rather than started then.
+ *   <li>It proves each committee a local validator aggregates at its collection cutoff
+ *       (get_aggregation_cutoff_ms of the local aggregator's position in the aggregation
+ *       committee), so the aggregator's proof is ready when its aggregate is due rather than
+ *       started then.
  *   <li>With a recursive prover, a block's proof is merged incrementally. When a local validator
  *       proposes the next slot, the pool merges the timely committees' proofs at the start of this
  *       one, then, once this slot's aggregates are proven, every committee the block can include,
@@ -111,12 +113,6 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
   static final int MAX_PROOFS_PER_MERGE = 16;
 
   /**
-   * AGGREGATION_CUTOFF_BPS (consensus-specs 4595f0fc9): an aggregator aggregates the attestations
-   * it has at 40% of the slot, so its proof is ready by the aggregate due time.
-   */
-  static final int AGGREGATION_CUTOFF_BPS = 4000;
-
-  /**
    * Proving single attestations ahead of a block stops this long before its deadline, the
    * collection cutoff or the block's slot, leaving time to merge what was proven: a committee of 32
    * takes up to about 700 ms to prove, and a full merge about a second.
@@ -128,8 +124,9 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
   private final TimeProvider timeProvider;
   private final int maxProofsPerMerge;
   private final MergedProofCache mergedProofs = new MergedProofCache();
-  // The committees local validators aggregate, by slot
-  private final NavigableMap<UInt64, Set<Integer>> localAggregationDuties = new TreeMap<>();
+  // The committees local validators aggregate, by slot, with the aggregators when known
+  private final NavigableMap<UInt64, Map<Integer, Set<UInt64>>> localAggregationDuties =
+      new TreeMap<>();
   // Aggregates proven at the collection cutoff, by slot
   private final NavigableMap<UInt64, Map<PreparedKey, PreparedAggregate>> preparedAggregates =
       new TreeMap<>();
@@ -957,42 +954,58 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
   }
 
   /**
-   * The best aggregate for the data and committee with the proof of its signatures, as an
-   * aggregator publishes it: a network aggregate, the one proven at the collection cutoff, or one
-   * built now from the single attestations.
+   * The aggregate for the data and committee with the proof of its signatures, as an aggregator
+   * publishes it: the one proven at the collection cutoff, or else one proven now from the single
+   * attestations.
    *
-   * <p>The one proven at the cutoff is preferred to proving again with attestations that came
-   * after, which would miss the aggregate due time, unless a network aggregate has as many
-   * attesters.
+   * <p>Empty when it would be redundant (should_broadcast_aggregate): a network aggregate with the
+   * same data and committee already includes all of its attesters, so gossip would ignore it. The
+   * pool drops a network aggregate that another kept one includes, so the check loses nothing
+   * there; one dropped beyond {@link #MAX_AGGREGATES_PER_COMMITTEE} can let a redundant aggregate
+   * through, which gossip then ignores. Empty too with no single attestations to aggregate.
    */
   @Override
   public SafeFuture<Optional<PqAggregate>> createPqAggregateFor(
       final Bytes32 attestationHashTreeRoot, final UInt64 committeeIndex) {
-    final Optional<CommitteeCandidate> maybeCandidate;
+    final Optional<CommitteeCandidate> singles;
     final Optional<PreparedAggregate> prepared;
     synchronized (this) {
-      maybeCandidate =
-          findCommittee(attestationHashTreeRoot, Optional.of(committeeIndex))
-              .flatMap(committee -> committee.getBestCandidate(false));
+      final Optional<CommitteeAttestations> committee =
+          findCommittee(attestationHashTreeRoot, Optional.of(committeeIndex));
+      if (committee.isEmpty()) {
+        LOG.debug(
+            "No aggregate for committee {}: no attestations for data {}",
+            committeeIndex,
+            attestationHashTreeRoot);
+        return SafeFuture.completedFuture(Optional.empty());
+      }
+      singles = committee.get().getSinglesCandidate();
       prepared =
-          maybeCandidate.flatMap(
-              candidate ->
-                  Optional.ofNullable(preparedAggregates.get(candidate.committee().data.getSlot()))
-                      .map(
-                          bySlot ->
-                              bySlot.get(
-                                  new PreparedKey(
-                                      attestationHashTreeRoot, committeeIndex.intValue()))));
+          Optional.ofNullable(preparedAggregates.get(committee.get().data.getSlot()))
+              .map(
+                  bySlot ->
+                      bySlot.get(
+                          new PreparedKey(attestationHashTreeRoot, committeeIndex.intValue())));
+      final Optional<BitSet> attesters =
+          prepared.map(PreparedAggregate::bits).or(() -> singles.map(c -> c.bits));
+      if (attesters.isEmpty()) {
+        LOG.debug(
+            "No aggregate for committee {} at slot {}: no single attestations",
+            committeeIndex,
+            committee.get().data.getSlot());
+        return SafeFuture.completedFuture(Optional.empty());
+      }
+      if (committee.get().hasAggregateCovering(attesters.get())) {
+        LOG.debug(
+            "No aggregate for committee {} at slot {}: a received one includes its {} attesters",
+            committeeIndex,
+            committee.get().data.getSlot(),
+            attesters.get().cardinality());
+        return SafeFuture.completedFuture(Optional.empty());
+      }
     }
-    if (maybeCandidate.isEmpty()) {
-      return SafeFuture.completedFuture(Optional.empty());
-    }
-    final CommitteeCandidate candidate = maybeCandidate.get();
-    final boolean networkAggregateIsBetter =
-        candidate.networkProof.isPresent()
-            && prepared.map(p -> candidate.attesterCount() >= p.attesterCount()).orElse(true);
-    if (prepared.isEmpty() || networkAggregateIsBetter) {
-      return SafeFuture.of(() -> proveAggregate(candidate));
+    if (prepared.isEmpty()) {
+      return SafeFuture.of(() -> proveAggregate(singles.orElseThrow()));
     }
     return prepared
         .get()
@@ -1001,7 +1014,9 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
         .exceptionallyCompose(
             error -> {
               LOG.debug("Proving an aggregate at the collection cutoff failed", error);
-              return SafeFuture.of(() -> proveAggregate(candidate));
+              return singles.isPresent()
+                  ? SafeFuture.of(() -> proveAggregate(singles.get()))
+                  : SafeFuture.completedFuture(Optional.empty());
             });
   }
 
@@ -1025,35 +1040,121 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
             });
   }
 
+  /**
+   * @param validatorIndex the aggregator, whose position in the aggregation committee sets its
+   *     collection cutoff; when unknown, the aggregator is taken to be the first
+   */
   @Override
-  public synchronized void onLocalAggregationDuty(final UInt64 slot, final UInt64 committeeIndex) {
-    localAggregationDuties
-        .computeIfAbsent(slot, __ -> new HashSet<>())
-        .add(committeeIndex.intValue());
+  public synchronized void onLocalAggregationDuty(
+      final UInt64 slot, final UInt64 committeeIndex, final Optional<UInt64> validatorIndex) {
+    final Set<UInt64> aggregators =
+        localAggregationDuties
+            .computeIfAbsent(slot, __ -> new HashMap<>())
+            .computeIfAbsent(committeeIndex.intValue(), __ -> new HashSet<>());
+    validatorIndex.ifPresent(aggregators::add);
   }
 
   /**
-   * At the collection cutoff of {@code slot}, proves the aggregate of each committee a local
-   * validator aggregates, from the single attestations of the data most of the committee voted for,
-   * unless a network aggregate is as good. {@link #createPqAggregateFor} then gives it, or waits
-   * for it, rather than proving again.
+   * The committees local validators aggregate in {@code slot}, by the collection cutoff position of
+   * each: the earliest position of its local aggregators, as the validator client aggregates a
+   * committee with its earliest aggregator. 0 when no aggregator is known or the state can't say.
    */
+  private Map<Integer, Set<Integer>> localCommitteesByPosition(
+      final UInt64 slot, final Optional<BeaconState> state) {
+    final Map<Integer, Set<UInt64>> duties;
+    synchronized (this) {
+      duties = new HashMap<>(localAggregationDuties.getOrDefault(slot, Map.of()));
+    }
+    final Optional<AttestationUtilPq> attestationUtil =
+        spec.atSlot(slot).getAttestationUtil() instanceof AttestationUtilPq util
+            ? Optional.of(util)
+            : Optional.empty();
+    final Map<Integer, Set<Integer>> byPosition = new TreeMap<>();
+    duties.forEach(
+        (committeeIndex, aggregators) -> {
+          int position = 0;
+          if (state.isPresent() && attestationUtil.isPresent() && !aggregators.isEmpty()) {
+            try {
+              position =
+                  aggregators.stream()
+                      .flatMap(
+                          aggregator ->
+                              attestationUtil
+                                  .get()
+                                  .getAggregatorPosition(
+                                      state.get(), slot, UInt64.valueOf(committeeIndex), aggregator)
+                                  .stream())
+                      .min(Integer::compare)
+                      .orElse(0);
+            } catch (final IllegalArgumentException e) {
+              LOG.debug("No aggregation committee for slot {} in the head state", slot, e);
+            }
+          }
+          byPosition.computeIfAbsent(position, __ -> new HashSet<>()).add(committeeIndex);
+        });
+    return byPosition;
+  }
+
+  /**
+   * Schedules each committee a local validator aggregates in {@code slot} to be proven at its
+   * collection cutoff, get_aggregation_cutoff_ms of its aggregator's position.
+   */
+  private void scheduleAggregatePreparation(final AsyncRunner runner, final UInt64 slot) {
+    recentChainData
+        .getBestState()
+        .map(state -> state.thenApply(Optional::of))
+        .orElse(SafeFuture.completedFuture(Optional.empty()))
+        .exceptionally(
+            error -> {
+              LOG.debug("No head state for the aggregators' positions at slot {}", slot, error);
+              return Optional.empty();
+            })
+        .thenAccept(
+            state ->
+                localCommitteesByPosition(slot, state)
+                    .forEach(
+                        (position, committees) ->
+                            runner
+                                .runAfterDelay(
+                                    () -> prepareAggregates(slot, committees),
+                                    untilSlotOffset(
+                                        slot, spec.getAggregationCutoffMillis(slot, position)))
+                                .finishError(LOG)))
+        .finishError(LOG);
+  }
+
+  /** {@link #prepareAggregates(UInt64, Set)} for every committee local validators aggregate. */
   void prepareAggregates(final UInt64 slot) {
+    final Set<Integer> committees;
+    synchronized (this) {
+      committees = Set.copyOf(localAggregationDuties.getOrDefault(slot, Map.of()).keySet());
+    }
+    prepareAggregates(slot, committees);
+  }
+
+  /**
+   * At a collection cutoff of {@code slot}, proves the aggregate of each of the {@code committees},
+   * from the single attestations of the data most of the committee voted for, unless a network
+   * aggregate already includes all of them (should_broadcast_aggregate). {@link
+   * #createPqAggregateFor} then gives it, or waits for it, rather than proving again.
+   */
+  void prepareAggregates(final UInt64 slot, final Set<Integer> committees) {
     final List<CommitteeCandidate> candidates = new ArrayList<>();
     final List<SafeFuture<PqAggregate>> futures = new ArrayList<>();
     synchronized (this) {
-      for (final int committeeIndex : localAggregationDuties.getOrDefault(slot, Set.of())) {
+      for (final int committeeIndex : committees) {
         final Optional<Map.Entry<Bytes32, CommitteeCandidate>> best =
             dataRootsBySlot.getOrDefault(slot, Set.of()).stream()
                 .flatMap(
                     dataRoot ->
                         Optional.ofNullable(committeesByDataRoot.get(dataRoot))
-                            .map(committees -> committees.get(committeeIndex))
-                            .flatMap(committee -> committee.getBestCandidate(false))
+                            .map(byCommitteeIndex -> byCommitteeIndex.get(committeeIndex))
+                            .flatMap(CommitteeAttestations::getSinglesCandidate)
                             .map(candidate -> Map.entry(dataRoot, candidate))
                             .stream())
                 .max(Comparator.comparingInt(entry -> entry.getValue().attesterCount()));
-        if (best.isEmpty() || best.get().getValue().networkProof.isPresent()) {
+        if (best.isEmpty()
+            || best.get().getValue().committee().hasAggregateCovering(best.get().getValue().bits)) {
           continue;
         }
         final SafeFuture<PqAggregate> future = new SafeFuture<>();
@@ -1061,7 +1162,7 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
             .computeIfAbsent(slot, __ -> new HashMap<>())
             .put(
                 new PreparedKey(best.get().getKey(), committeeIndex),
-                new PreparedAggregate(best.get().getValue().attesterCount(), future));
+                new PreparedAggregate((BitSet) best.get().getValue().bits.clone(), future));
         candidates.add(best.get().getValue());
         futures.add(future);
       }
@@ -1193,10 +1294,7 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
     }
     final AsyncRunner runner = asyncRunner.get();
     if (isPq(slot) && hasLocalAggregationDuties(slot)) {
-      runner
-          .runAfterDelay(
-              () -> prepareAggregates(slot), untilSlotOffset(slot, aggregationCutoffMillis(slot)))
-          .finishError(LOG);
+      scheduleAggregatePreparation(runner, slot);
     }
     if (starkProver.isIncrementallyMergeable()) {
       runner.runAsync(() -> prepareBlockProof(slot.increment())).finishError(LOG);
@@ -1211,11 +1309,9 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
     return spec.atSlot(slot).getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ);
   }
 
-  /** The collection cutoff, before the aggregate due time. */
+  /** The first aggregator's collection cutoff, get_aggregation_cutoff_ms(0). */
   private long aggregationCutoffMillis(final UInt64 slot) {
-    return Math.min(
-        (long) spec.getSlotDurationMillis(slot) * AGGREGATION_CUTOFF_BPS / 10_000L,
-        spec.getAggregateDueMillis(slot));
+    return spec.getAggregationCutoffMillis(slot, 0);
   }
 
   private long slotStartMillis(final UInt64 slot) {
@@ -1271,8 +1367,8 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
 
   private record PreparedKey(Bytes32 dataRoot, int committeeIndex) {}
 
-  /** An aggregate being proven at the collection cutoff, of {@code attesterCount} attesters. */
-  private record PreparedAggregate(int attesterCount, SafeFuture<PqAggregate> aggregate) {}
+  /** An aggregate being proven at the collection cutoff, of the attesters at {@code bits}. */
+  private record PreparedAggregate(BitSet bits, SafeFuture<PqAggregate> aggregate) {}
 
   /**
    * A committee's attesters chosen for a block or an aggregate, with what proves them: a network
@@ -1434,13 +1530,30 @@ public class AggregatingAttestationPoolPq extends AggregatingAttestationPool {
       return aggregates.size() - before;
     }
 
+    /** The single attestations as a candidate to prove, if there are any. */
+    Optional<CommitteeCandidate> getSinglesCandidate() {
+      if (singleSignatures.isEmpty()) {
+        return Optional.empty();
+      }
+      final BitSet bits = new BitSet(committeeSize);
+      singleSignatures.keySet().forEach(bits::set);
+      return Optional.of(new CommitteeCandidate(this, bits, Optional.empty()));
+    }
+
+    /**
+     * Whether a network aggregate kept includes all the {@code attesters}, which makes an aggregate
+     * of them redundant (should_broadcast_aggregate, is_non_strict_superset).
+     */
+    boolean hasAggregateCovering(final BitSet attesters) {
+      return aggregates.stream()
+          .anyMatch(
+              aggregate ->
+                  attesters.stream().allMatch(position -> aggregate.bits().isSet(position)));
+    }
+
     List<CommitteeCandidate> getAllCandidates() {
       final List<CommitteeCandidate> candidates = new ArrayList<>();
-      if (!singleSignatures.isEmpty()) {
-        final BitSet bits = new BitSet(committeeSize);
-        singleSignatures.keySet().forEach(bits::set);
-        candidates.add(new CommitteeCandidate(this, bits, Optional.empty()));
-      }
+      getSinglesCandidate().ifPresent(candidates::add);
       for (final ProvenAggregate aggregate : aggregates) {
         final BitSet bits = new BitSet(committeeSize);
         aggregate.bits().streamAllSetBits().forEach(bits::set);

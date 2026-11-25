@@ -58,6 +58,15 @@ public interface SpecConfigPq extends SpecConfigEip8483 {
 
   int getAttestationSubnetCountPq();
 
+  /** AGGREGATION_CUTOFF_BPS: when the first aggregator of a committee stops collecting. */
+  int getAggregationCutoffBps();
+
+  /** AGGREGATE_DUE_BPS_PQ: when the first aggregator of a committee broadcasts. */
+  int getAggregateDueBpsPq();
+
+  /** AGGREGATOR_DELAY_BPS: how much later each aggregator in turn collects and broadcasts. */
+  int getAggregatorDelayBps();
+
   @Override
   Optional<SpecConfigPq> toVersionPq();
 }

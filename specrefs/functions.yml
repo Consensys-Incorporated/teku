@@ -2511,9 +2511,9 @@
 - name: get_aggregate_due_ms#phase0
   sources:
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/Spec.java
-      search: public int getAggregateDueMillis(
+      search: public int getAggregateDueMillis(final UInt64 slot) {
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/util/ForkChoiceUtil.java
-      search: public int getAggregateDueMillis(
+      search: public int getAggregateDueMillis() {
   spec: |
     <spec fn="get_aggregate_due_ms" fork="phase0" hash="f04ecc41">
     def get_aggregate_due_ms() -> Uint64:
@@ -2523,7 +2523,7 @@
 - name: get_aggregate_due_ms#gloas
   sources:
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/Spec.java
-      search: public int getAggregateDueMillis(
+      search: public int getAggregateDueMillis(final UInt64 slot) {
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/config/SpecConfigGloasImpl.java
       search: private final int aggregateDueBps;
   spec: |

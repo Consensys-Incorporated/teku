@@ -47,6 +47,12 @@
     },
     "is_aggregator" : {
       "type" : "boolean"
+    },
+    "aggregator_position" : {
+      "type" : "string",
+      "description" : "integer string",
+      "example" : "1",
+      "format" : "integer"
     }
   }
 }

@@ -15,6 +15,8 @@ package tech.pegasys.teku.validator.client.duties.attestations;
 
 import static tech.pegasys.teku.infrastructure.logging.ValidatorLogger.VALIDATOR_LOGGER;
 
+import java.util.Optional;
+import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -33,6 +35,7 @@ public class AttestationDutyFactory
   private final ValidatorApiChannel validatorApiChannel;
   private final ValidatorDutyMetrics validatorDutyMetrics;
   private final boolean isDvtEnabled;
+  private final Optional<AsyncRunner> asyncRunner;
 
   public AttestationDutyFactory(
       final Spec spec,
@@ -40,11 +43,31 @@ public class AttestationDutyFactory
       final ValidatorApiChannel validatorApiChannel,
       final ValidatorDutyMetrics validatorDutyMetrics,
       final boolean isDvtEnabled) {
+    this(
+        spec,
+        forkProvider,
+        validatorApiChannel,
+        validatorDutyMetrics,
+        isDvtEnabled,
+        Optional.empty());
+  }
+
+  /**
+   * @param asyncRunner staggers PQ aggregators by their aggregation committee position
+   */
+  public AttestationDutyFactory(
+      final Spec spec,
+      final ForkProvider forkProvider,
+      final ValidatorApiChannel validatorApiChannel,
+      final ValidatorDutyMetrics validatorDutyMetrics,
+      final boolean isDvtEnabled,
+      final Optional<AsyncRunner> asyncRunner) {
     this.spec = spec;
     this.forkProvider = forkProvider;
     this.validatorApiChannel = validatorApiChannel;
     this.validatorDutyMetrics = validatorDutyMetrics;
     this.isDvtEnabled = isDvtEnabled;
+    this.asyncRunner = asyncRunner;
   }
 
   @Override
@@ -79,7 +102,8 @@ public class AttestationDutyFactory
         forkProvider,
         VALIDATOR_LOGGER,
         new BatchAttestationSendingStrategy<>(validatorApiChannel::sendAggregateAndProofs),
-        validatorDutyMetrics);
+        validatorDutyMetrics,
+        asyncRunner);
   }
 
   @Override

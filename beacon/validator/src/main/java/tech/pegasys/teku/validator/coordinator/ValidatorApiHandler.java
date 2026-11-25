@@ -892,9 +892,14 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
           if (request.isAggregator()) {
             attestationTopicSubscriber.subscribeToCommitteeForAggregation(
                 request.getCommitteeIndex(), request.getCommitteesAtSlot(), request.getSlot());
-            // A PQ aggregate's proof takes long enough to start it before the aggregate is due
+            // A PQ aggregate's proof takes long enough to start it before the aggregate is due,
+            // at the aggregator's collection cutoff
             attestationPool.onLocalAggregationDuty(
-                request.getSlot(), UInt64.valueOf(request.getCommitteeIndex()));
+                request.getSlot(),
+                UInt64.valueOf(request.getCommitteeIndex()),
+                request.getValidatorIndex() == UNKNOWN_VALIDATOR_ID
+                    ? Optional.empty()
+                    : Optional.of(UInt64.valueOf(request.getValidatorIndex())));
           }
         });
   }
