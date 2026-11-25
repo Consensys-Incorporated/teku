@@ -16,19 +16,17 @@ package tech.pegasys.teku.api.blobselector;
 import static tech.pegasys.teku.spec.config.SpecConfig.GENESIS_SLOT;
 
 import com.google.common.annotations.VisibleForTesting;
-import java.util.Collection;
-import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.api.AbstractSelectorFactory;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
-import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.kzg.KZGCommitment;
 import tech.pegasys.teku.spec.Spec;
@@ -125,7 +123,7 @@ public class BlobSelectorFactory extends AbstractSelectorFactory<BlobSelector> {
     if (maybeSignedBlock.isEmpty() || maybeChainHead.isEmpty()) {
       return SafeFuture.completedFuture(Optional.empty());
     }
-    final Collection<SlotAndBlockRootAndBlobIndex> identifiers =
+    final List<SlotAndBlockRootAndBlobIndex> identifiers =
         toBlobIdentifiers(versionedHashes, maybeSignedBlock);
     final ChainHead chainHead = maybeChainHead.get();
     final BeaconBlock block = maybeSignedBlock.get().getMessage();
@@ -165,46 +163,57 @@ public class BlobSelectorFactory extends AbstractSelectorFactory<BlobSelector> {
   @VisibleForTesting
   Map<Bytes32, SlotAndBlockRootAndBlobIndex> blockToVersionedHashBlobs(
       final Optional<SignedBeaconBlock> block) {
-    if (block.isEmpty()
-        || spec.atSlot(block.get().getSlot()).getMilestone().isLessThan(SpecMilestone.DENEB)) {
-      return Collections.emptyMap();
-    }
-
-    final SszList<SszKZGCommitment> blobKzgCommitments =
-        BeaconBlockBodyDeneb.required(block.get().getMessage().getBody()).getBlobKzgCommitments();
+    final List<SszKZGCommitment> blobKzgCommitments = getBlobKzgCommitments(block);
     return IntStream.range(0, blobKzgCommitments.size())
-        .mapToObj(index -> Pair.of(index, blobKzgCommitments.get(index)))
+        .boxed()
         .collect(
-            Collectors.toConcurrentMap(
-                commitmentPair ->
-                    commitmentToVersionedHash.apply(commitmentPair.getValue().getKZGCommitment()),
-                commitmentPair ->
-                    new SlotAndBlockRootAndBlobIndex(
-                        block.get().getSlot(),
-                        block.get().getRoot(),
-                        UInt64.valueOf(commitmentPair.getKey())),
-                // we often have duplicates in testnets
-                (existing, replacement) -> replacement));
+            Collectors.toMap(
+                index ->
+                    commitmentToVersionedHash.apply(
+                        blobKzgCommitments.get(index).getKZGCommitment()),
+                index -> toBlobIdentifier(block.orElseThrow(), index),
+                // A block may repeat a commitment (common on testnets). Keep its first occurrence:
+                // blobs are ordered by the first occurrence of their commitment in the block.
+                (first, repeated) -> first));
   }
 
+  /**
+   * Returns the identifiers of the blobs to serve, in block order. Without versioned hashes this is
+   * every blob in the block, repeated commitments included. Otherwise it is one blob per requested
+   * versioned hash found in the block, at the first occurrence of its commitment.
+   */
   @VisibleForTesting
-  Collection<SlotAndBlockRootAndBlobIndex> toBlobIdentifiers(
+  List<SlotAndBlockRootAndBlobIndex> toBlobIdentifiers(
       final List<Bytes32> versionedHashes, final Optional<SignedBeaconBlock> block) {
+    if (versionedHashes.isEmpty()) {
+      return IntStream.range(0, getBlobKzgCommitments(block).size())
+          .mapToObj(index -> toBlobIdentifier(block.orElseThrow(), index))
+          .toList();
+    }
+
     final Map<Bytes32, SlotAndBlockRootAndBlobIndex> blockToVersionedHashBlobs =
         blockToVersionedHashBlobs(block);
-    if (blockToVersionedHashBlobs.isEmpty()) {
-      return Collections.emptyList();
-    }
-
-    if (versionedHashes.isEmpty()) {
-      return blockToVersionedHashBlobs.values();
-    }
-
     return versionedHashes.stream()
-        .map(key -> Optional.ofNullable(blockToVersionedHashBlobs.get(key)))
-        .filter(Optional::isPresent)
-        .map(Optional::get)
-        .collect(Collectors.toList());
+        .map(blockToVersionedHashBlobs::get)
+        .filter(Objects::nonNull)
+        .sorted(Comparator.comparing(SlotAndBlockRootAndBlobIndex::getBlobIndex))
+        .toList();
+  }
+
+  private List<SszKZGCommitment> getBlobKzgCommitments(final Optional<SignedBeaconBlock> block) {
+    if (block.isEmpty()
+        || spec.atSlot(block.get().getSlot()).getMilestone().isLessThan(SpecMilestone.DENEB)) {
+      return List.of();
+    }
+    return BeaconBlockBodyDeneb.required(block.get().getMessage().getBody())
+        .getBlobKzgCommitments()
+        .asList();
+  }
+
+  private static SlotAndBlockRootAndBlobIndex toBlobIdentifier(
+      final SignedBeaconBlock block, final int index) {
+    return new SlotAndBlockRootAndBlobIndex(
+        block.getSlot(), block.getRoot(), UInt64.valueOf(index));
   }
 
   private Optional<BlobsAndMetaData> addMetaData(

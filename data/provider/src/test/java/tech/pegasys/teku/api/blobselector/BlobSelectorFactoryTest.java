@@ -24,7 +24,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -52,6 +51,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.deneb.BeaconBlockBodyDeneb;
 import tech.pegasys.teku.spec.datastructures.metadata.BlobsAndMetaData;
+import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
 import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
 import tech.pegasys.teku.spec.logic.versions.deneb.helpers.MiscHelpersDeneb;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
@@ -288,11 +288,11 @@ public class BlobSelectorFactoryTest {
     final SignedBeaconBlock signedBeaconBlock = dataStructureUtil1.randomSignedBeaconBlock();
     final BlobSelectorFactory blobSelectorFactory =
         new BlobSelectorFactory(ctx.getSpec(), client, blobReconstructionProvider);
-    final Collection<SlotAndBlockRootAndBlobIndex> blobIdentifiers =
+    final List<SlotAndBlockRootAndBlobIndex> blobIdentifiers =
         blobSelectorFactory.toBlobIdentifiers(List.of(), Optional.of(signedBeaconBlock));
     if (ctx.getSpec().isMilestoneSupported(SpecMilestone.DENEB)) {
       assertThat(blobIdentifiers)
-          .containsExactlyInAnyOrderElementsOf(
+          .containsExactlyElementsOf(
               IntStream.range(
                       0,
                       signedBeaconBlock
@@ -307,7 +307,7 @@ public class BlobSelectorFactoryTest {
                               signedBeaconBlock.getSlot(),
                               signedBeaconBlock.getRoot(),
                               UInt64.valueOf(index)))
-                  .collect(Collectors.toSet()));
+                  .toList());
     } else {
       assertThat(blobIdentifiers).isEmpty();
     }
@@ -326,10 +326,144 @@ public class BlobSelectorFactoryTest {
         blobSelectorFactory.blockToVersionedHashBlobs(Optional.of(signedBeaconBlock));
     final Map.Entry<Bytes32, SlotAndBlockRootAndBlobIndex> first =
         blockToVersionedHashBlobs.entrySet().stream().findFirst().get();
-    final Collection<SlotAndBlockRootAndBlobIndex> blobIdentifiers =
+    final List<SlotAndBlockRootAndBlobIndex> blobIdentifiers =
         blobSelectorFactory.toBlobIdentifiers(
             List.of(first.getKey()), Optional.of(signedBeaconBlock));
 
     assertThat(blobIdentifiers).containsExactly(first.getValue());
+  }
+
+  @Test
+  public void blockToVersionedHashBlobs_shouldMapRepeatedCommitmentToFirstOccurrence() {
+    final SszKZGCommitment commitmentA = dataStructureUtil.randomSszKZGCommitment();
+    final SszKZGCommitment commitmentB = dataStructureUtil.randomSszKZGCommitment();
+    final SignedBeaconBlock blockWithRepeatedCommitment =
+        blockWithCommitments(commitmentA, commitmentB, commitmentA);
+
+    assertThat(
+            blobSelectorFactory.blockToVersionedHashBlobs(Optional.of(blockWithRepeatedCommitment)))
+        .containsExactlyInAnyOrderEntriesOf(
+            Map.of(
+                versionedHash(commitmentA), blobIdentifier(blockWithRepeatedCommitment, 0),
+                versionedHash(commitmentB), blobIdentifier(blockWithRepeatedCommitment, 1)));
+  }
+
+  @Test
+  public void toBlobIdentifiers_shouldReturnAllBlobsIncludingRepeatedCommitments() {
+    final SszKZGCommitment commitmentA = dataStructureUtil.randomSszKZGCommitment();
+    final SszKZGCommitment commitmentB = dataStructureUtil.randomSszKZGCommitment();
+    final SignedBeaconBlock blockWithRepeatedCommitment =
+        blockWithCommitments(commitmentA, commitmentB, commitmentA);
+
+    assertThat(
+            blobSelectorFactory.toBlobIdentifiers(
+                List.of(), Optional.of(blockWithRepeatedCommitment)))
+        .containsExactly(
+            blobIdentifier(blockWithRepeatedCommitment, 0),
+            blobIdentifier(blockWithRepeatedCommitment, 1),
+            blobIdentifier(blockWithRepeatedCommitment, 2));
+  }
+
+  @Test
+  public void toBlobIdentifiers_shouldOrderByFirstOccurrenceOfRepeatedCommitment() {
+    final SszKZGCommitment commitmentA = dataStructureUtil.randomSszKZGCommitment();
+    final SszKZGCommitment commitmentB = dataStructureUtil.randomSszKZGCommitment();
+    final SignedBeaconBlock blockWithRepeatedCommitment =
+        blockWithCommitments(commitmentA, commitmentB, commitmentA);
+    final List<SlotAndBlockRootAndBlobIndex> expected =
+        List.of(
+            blobIdentifier(blockWithRepeatedCommitment, 0),
+            blobIdentifier(blockWithRepeatedCommitment, 1));
+
+    assertThat(
+            blobSelectorFactory.toBlobIdentifiers(
+                List.of(versionedHash(commitmentA), versionedHash(commitmentB)),
+                Optional.of(blockWithRepeatedCommitment)))
+        .containsExactlyElementsOf(expected);
+    assertThat(
+            blobSelectorFactory.toBlobIdentifiers(
+                List.of(versionedHash(commitmentB), versionedHash(commitmentA)),
+                Optional.of(blockWithRepeatedCommitment)))
+        .containsExactlyElementsOf(expected);
+  }
+
+  @Test
+  public void toBlobIdentifiers_shouldSkipVersionedHashesNotInBlock() {
+    final SszKZGCommitment commitmentA = dataStructureUtil.randomSszKZGCommitment();
+    final SszKZGCommitment commitmentB = dataStructureUtil.randomSszKZGCommitment();
+    final SignedBeaconBlock blockWithRepeatedCommitment =
+        blockWithCommitments(commitmentA, commitmentB, commitmentA);
+
+    assertThat(
+            blobSelectorFactory.toBlobIdentifiers(
+                List.of(dataStructureUtil.randomBytes32(), versionedHash(commitmentB)),
+                Optional.of(blockWithRepeatedCommitment)))
+        .containsExactly(blobIdentifier(blockWithRepeatedCommitment, 1));
+  }
+
+  @Test
+  public void blockRootSelector_shouldRequestAllIndicesWhenBlockRepeatsCommitment()
+      throws ExecutionException, InterruptedException {
+    final SszKZGCommitment commitmentA = dataStructureUtil.randomSszKZGCommitment();
+    final SszKZGCommitment commitmentB = dataStructureUtil.randomSszKZGCommitment();
+    final SignedBeaconBlock blockWithRepeatedCommitment =
+        blockWithCommitments(commitmentA, commitmentB, commitmentA);
+    when(client.getChainHead())
+        .thenReturn(Optional.of(ChainHead.create(dataStructureUtil.randomBlockAndState(123))));
+    when(client.getBlockByBlockRoot(blockWithRepeatedCommitment.getRoot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(blockWithRepeatedCommitment)));
+    when(client.getBlobSidecars(any(SlotAndBlockRoot.class), anyList()))
+        .thenReturn(SafeFuture.completedFuture(List.of()));
+
+    blobSelectorFactory
+        .blockRootSelector(blockWithRepeatedCommitment.getRoot())
+        .getBlobs(List.of())
+        .get();
+
+    verify(client)
+        .getBlobSidecars(
+            blockWithRepeatedCommitment.getSlotAndBlockRoot(),
+            List.of(UInt64.ZERO, UInt64.ONE, UInt64.valueOf(2)));
+  }
+
+  @Test
+  public void blockRootSelector_shouldRequestFirstOccurrenceOfRepeatedCommitment()
+      throws ExecutionException, InterruptedException {
+    final SszKZGCommitment commitmentA = dataStructureUtil.randomSszKZGCommitment();
+    final SszKZGCommitment commitmentB = dataStructureUtil.randomSszKZGCommitment();
+    final SignedBeaconBlock blockWithRepeatedCommitment =
+        blockWithCommitments(commitmentA, commitmentB, commitmentA);
+    when(client.getChainHead())
+        .thenReturn(Optional.of(ChainHead.create(dataStructureUtil.randomBlockAndState(123))));
+    when(client.getBlockByBlockRoot(blockWithRepeatedCommitment.getRoot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(blockWithRepeatedCommitment)));
+    when(client.getBlobSidecars(any(SlotAndBlockRoot.class), anyList()))
+        .thenReturn(SafeFuture.completedFuture(List.of()));
+
+    blobSelectorFactory
+        .blockRootSelector(blockWithRepeatedCommitment.getRoot())
+        .getBlobs(List.of(versionedHash(commitmentA), versionedHash(commitmentB)))
+        .get();
+
+    verify(client)
+        .getBlobSidecars(
+            blockWithRepeatedCommitment.getSlotAndBlockRoot(), List.of(UInt64.ZERO, UInt64.ONE));
+  }
+
+  private SignedBeaconBlock blockWithCommitments(final SszKZGCommitment... commitments) {
+    return dataStructureUtil.randomSignedBeaconBlockWithCommitments(
+        dataStructureUtil.getBlobKzgCommitmentsSchema().of(commitments));
+  }
+
+  private Bytes32 versionedHash(final SszKZGCommitment commitment) {
+    return MiscHelpersDeneb.required(spec.forMilestone(SpecMilestone.DENEB).miscHelpers())
+        .kzgCommitmentToVersionedHash(commitment.getKZGCommitment())
+        .get();
+  }
+
+  private static SlotAndBlockRootAndBlobIndex blobIdentifier(
+      final SignedBeaconBlock block, final int index) {
+    return new SlotAndBlockRootAndBlobIndex(
+        block.getSlot(), block.getRoot(), UInt64.valueOf(index));
   }
 }
