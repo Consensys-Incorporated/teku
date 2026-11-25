@@ -257,12 +257,23 @@ public class ConnectionManager extends Service {
             peer -> {
               LOG.trace("Successfully connected to peer {}", peer.getId());
               peer.subscribeDisconnect(
-                  (reason, locallyInitiated) -> peerPools.forgetPeer(peer.getId()));
+                  (reason, locallyInitiated) -> forgetDiscoveredPeer(peer.getId()));
             },
             error -> {
               LOG.trace(() -> "Failed to connect to peer: " + peerAddress.getId(), error);
-              peerPools.forgetPeer(peerAddress.getId());
+              forgetDiscoveredPeer(peerAddress.getId());
             });
+  }
+
+  /**
+   * A peer may become static while a discovery dial to it is pending or after discovery connected
+   * to it. Its pool membership then belongs to the static connection loop, so the discovery
+   * bookkeeping must not drop it.
+   */
+  private void forgetDiscoveredPeer(final NodeId nodeId) {
+    if (!staticPeerIds.contains(nodeId)) {
+      peerPools.forgetPeer(nodeId);
+    }
   }
 
   private void onPeerConnected(final Peer peer) {

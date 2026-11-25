@@ -326,6 +326,41 @@ class ConnectionManagerTest {
   }
 
   @Test
+  public void shouldKeepStaticPoolMembershipWhenPeerIsAddedDuringDiscoveryDialThatFails() {
+    final ConnectionManager manager = createManager();
+    // The static connection attempt joins the discovery dial that is already in progress
+    final SafeFuture<Peer> sharedDial = new SafeFuture<>();
+    when(discoveryService.streamKnownPeers()).thenReturn(Stream.of(DISCOVERY_PEER1));
+    when(network.connect(PEER1)).thenReturn(sharedDial);
+    manager.start().join();
+    asyncRunner.executeDueActionsRepeatedly();
+    verify(network).connect(PEER1);
+
+    manager.addStaticPeer(PEER1);
+    sharedDial.completeExceptionally(new RuntimeException("Nope"));
+
+    assertThat(peerPools.getPeerConnectionType(PEER1.getId())).isEqualTo(PeerConnectionType.STATIC);
+  }
+
+  @Test
+  public void shouldKeepStaticPoolMembershipWhenPeerAddedDuringDiscoveryDialDisconnects() {
+    final ConnectionManager manager = createManager();
+    final SafeFuture<Peer> sharedDial = new SafeFuture<>();
+    when(discoveryService.streamKnownPeers()).thenReturn(Stream.of(DISCOVERY_PEER1));
+    when(network.connect(PEER1)).thenReturn(sharedDial);
+    manager.start().join();
+    asyncRunner.executeDueActionsRepeatedly();
+    verify(network).connect(PEER1);
+
+    manager.addStaticPeer(PEER1);
+    final StubPeer peer = new StubPeer(PEER1.getId());
+    sharedDial.complete(peer);
+    peer.disconnectImmediately(Optional.empty(), false);
+
+    assertThat(peerPools.getPeerConnectionType(PEER1.getId())).isEqualTo(PeerConnectionType.STATIC);
+  }
+
+  @Test
   public void shouldConnectToKnownPeersWhenStarted() {
     final ConnectionManager manager = createManager();
     when(discoveryService.streamKnownPeers())
