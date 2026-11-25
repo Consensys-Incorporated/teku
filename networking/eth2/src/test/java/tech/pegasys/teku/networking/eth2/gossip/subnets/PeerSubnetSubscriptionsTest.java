@@ -389,10 +389,16 @@ class PeerSubnetSubscriptionsTest {
   }
 
   private PeerSubnetSubscriptions createPeerSubnetSubscriptions() {
+    // The same snapshot the peer selection strategy takes
+    final Map<String, Collection<NodeId>> subscribersByTopic =
+        gossipNetwork.getSubscribersByTopic();
+    final List<Peer> connectedPeers =
+        gossipNetwork.streamPeers().filter(Peer::isConnected).toList();
     return PeerSubnetSubscriptions.create(
         currentSpecVersionSupplier.get(),
         NodeIdToDataColumnSidecarSubnetsCalculator.NOOP,
-        gossipNetwork,
+        subscribersByTopic,
+        connectedPeers,
         peerLookup,
         attestationTopicProvider,
         syncCommitteeTopicProvider,

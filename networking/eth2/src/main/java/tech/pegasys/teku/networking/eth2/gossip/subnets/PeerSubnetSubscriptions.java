@@ -29,8 +29,10 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 import org.apache.tuweni.units.bigints.UInt256;
 import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
 import tech.pegasys.teku.infrastructure.metrics.SettableLabelledGauge;
@@ -39,7 +41,6 @@ import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszBitvectorSchem
 import tech.pegasys.teku.networking.eth2.SubnetSubscriptionService;
 import tech.pegasys.teku.networking.eth2.peers.PeerLookup;
 import tech.pegasys.teku.networking.eth2.peers.PeerScorer;
-import tech.pegasys.teku.networking.p2p.network.P2PNetwork;
 import tech.pegasys.teku.networking.p2p.peer.NodeId;
 import tech.pegasys.teku.networking.p2p.peer.Peer;
 import tech.pegasys.teku.spec.SpecVersion;
@@ -71,7 +72,8 @@ public class PeerSubnetSubscriptions {
   public static PeerSubnetSubscriptions create(
       final SpecVersion currentVersion,
       final NodeIdToDataColumnSidecarSubnetsCalculator nodeIdToDataColumnSidecarSubnetsCalculator,
-      final P2PNetwork<?> network,
+      final Map<String, Collection<NodeId>> subscribersByTopic,
+      final Collection<? extends Peer> connectedPeers,
       final PeerLookup peerLookup,
       final AttestationSubnetTopicProvider attestationTopicProvider,
       final SyncCommitteeSubnetTopicProvider syncCommitteeSubnetTopicProvider,
@@ -81,14 +83,20 @@ public class PeerSubnetSubscriptions {
       final int targetSubnetSubscriberCount,
       final SettableLabelledGauge subnetPeerCountGauge,
       final SyncCommitteeSubnetPeerCountLogger syncCommitteeSubnetPeerCountLogger) {
-    final Map<String, Collection<NodeId>> subscribersByTopic = liveSubscribersByTopic(network);
+    // Only connected peers provide subnet coverage. The gossip layer still lists a peer that is
+    // being disconnected until its goodbye completes, and may list one whose connection has just
+    // closed, so subscribers are kept only if they are among the connected peers.
+    final Set<NodeId> connectedPeerIds =
+        connectedPeers.stream().map(Peer::getId).collect(Collectors.toSet());
+    final Function<String, Stream<NodeId>> liveSubscribers =
+        topic ->
+            subscribersByTopic.getOrDefault(topic, Collections.emptySet()).stream()
+                .filter(connectedPeerIds::contains);
     // Peers without a derivable discovery node id (e.g. non-secp256k1 identities) cannot be mapped
     // to DAS custody columns, so they provide no data column sidecar value and are excluded from
     // data column subnet scoring below.
     final Set<NodeId> peersWithoutDiscoveryNodeId =
-        network
-            .streamPeers()
-            .map(Peer::getId)
+        connectedPeerIds.stream()
             .filter(
                 nodeId ->
                     peerLookup
@@ -117,10 +125,9 @@ public class PeerSubnetSubscriptions {
                         .forEach(
                             attestationSubnet -> {
                               b.addRelevantSubnet(attestationSubnet);
-                              subscribersByTopic
-                                  .getOrDefault(
-                                      attestationTopicProvider.getTopicForSubnet(attestationSubnet),
-                                      Collections.emptySet())
+                              liveSubscribers
+                                  .apply(
+                                      attestationTopicProvider.getTopicForSubnet(attestationSubnet))
                                   .forEach(
                                       subscriber -> b.addSubscriber(attestationSubnet, subscriber));
                             }))
@@ -132,11 +139,10 @@ public class PeerSubnetSubscriptions {
                         .forEach(
                             syncCommitteeSubnet -> {
                               b.addRelevantSubnet(syncCommitteeSubnet);
-                              subscribersByTopic
-                                  .getOrDefault(
+                              liveSubscribers
+                                  .apply(
                                       syncCommitteeSubnetTopicProvider.getTopicForSubnet(
-                                          syncCommitteeSubnet),
-                                      Collections.emptySet())
+                                          syncCommitteeSubnet))
                                   .forEach(
                                       subscriber ->
                                           b.addSubscriber(syncCommitteeSubnet, subscriber));
@@ -148,12 +154,10 @@ public class PeerSubnetSubscriptions {
                         .forEach(
                             columnSubnet -> {
                               b.addRelevantSubnet(columnSubnet);
-                              subscribersByTopic
-                                  .getOrDefault(
+                              liveSubscribers
+                                  .apply(
                                       dataColumnSidecarSubnetTopicProvider.getTopicForSubnet(
-                                          columnSubnet),
-                                      Collections.emptySet())
-                                  .stream()
+                                          columnSubnet))
                                   .filter(
                                       subscriber ->
                                           !peersWithoutDiscoveryNodeId.contains(subscriber))
@@ -165,8 +169,7 @@ public class PeerSubnetSubscriptions {
         subnetPeerCountGauge,
         subscriptions,
         dataColumnSidecarSubnetCount);
-    syncCommitteeSubnetPeerCountLogger.onSubscriptionsUpdated(
-        subscriptions, network.getPeerCount());
+    syncCommitteeSubnetPeerCountLogger.onSubscriptionsUpdated(subscriptions, connectedPeers.size());
     return subscriptions;
   }
 
@@ -213,27 +216,6 @@ public class PeerSubnetSubscriptions {
       final SchemaDefinitionsSupplier currentSchemaDefinitions,
       final SszBitvectorSchema<?> dataColumnSidecarSubnetBitmaskSchema) {
     return new Builder(currentSchemaDefinitions, dataColumnSidecarSubnetBitmaskSchema);
-  }
-
-  /**
-   * Only connected peers provide subnet coverage. The gossip layer still lists a peer that is being
-   * disconnected until its goodbye completes, and may list one whose connection has just closed, so
-   * subscribers are kept only if they are connected peers.
-   */
-  private static Map<String, Collection<NodeId>> liveSubscribersByTopic(
-      final P2PNetwork<?> network) {
-    final Map<String, Collection<NodeId>> subscribersByTopic = network.getSubscribersByTopic();
-    final Set<NodeId> connectedPeers =
-        network
-            .streamPeers()
-            .filter(Peer::isConnected)
-            .map(Peer::getId)
-            .collect(Collectors.toSet());
-    return subscribersByTopic.entrySet().stream()
-        .collect(
-            Collectors.toMap(
-                Map.Entry::getKey,
-                entry -> entry.getValue().stream().filter(connectedPeers::contains).toList()));
   }
 
   @VisibleForTesting
@@ -316,13 +298,16 @@ public class PeerSubnetSubscriptions {
   public interface Factory {
 
     /**
-     * Creates a new PeerSubnetSubscriptions which reports the subscriptions from the supplied
-     * network at time of creation.
+     * Creates a new PeerSubnetSubscriptions which reports the subscriptions of the supplied peers.
      *
-     * @param network the network to load subscriptions from
+     * @param subscribersByTopic the gossip subscribers of each topic
+     * @param connectedPeers the peers that count as subscribers, captured after the subscribers
+     *     were looked up; subscribers that are not among them are ignored
      * @return the new PeerSubnetSubscriptions
      */
-    PeerSubnetSubscriptions create(P2PNetwork<?> network);
+    PeerSubnetSubscriptions create(
+        Map<String, Collection<NodeId>> subscribersByTopic,
+        Collection<? extends Peer> connectedPeers);
   }
 
   public static class SubnetSubscriptions {

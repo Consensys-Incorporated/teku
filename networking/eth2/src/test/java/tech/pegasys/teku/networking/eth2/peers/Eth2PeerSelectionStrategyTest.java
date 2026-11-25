@@ -23,6 +23,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -67,8 +68,12 @@ class Eth2PeerSelectionStrategyTest {
   private final StubPeerScorer peerScorer = new StubPeerScorer();
   private final PeerSubnetSubscriptions peerSubnetSubscriptions =
       mock(PeerSubnetSubscriptions.class);
+  private List<Peer> peersCountedAsSubscribers;
   private final PeerSubnetSubscriptions.Factory peerSubnetSubscriptionsFactory =
-      network -> peerSubnetSubscriptions;
+      (subscribersByTopic, connectedPeers) -> {
+        peersCountedAsSubscribers = List.copyOf(connectedPeers);
+        return peerSubnetSubscriptions;
+      };
   private final ReputationManager reputationManager = mock(ReputationManager.class);
 
   private Shuffler shuffler = list -> {};
@@ -370,6 +375,43 @@ class Eth2PeerSelectionStrategyTest {
     when(network.streamPeers()).thenReturn(Stream.of(peer1, peer2, peer3, departingPeer));
 
     assertThat(strategy.selectPeersToDisconnect(network, peerPools)).containsExactly(peer1);
+  }
+
+  @Test
+  void selectPeersToDisconnect_shouldIgnorePeerThatStartsDisconnectingDuringSubscriberLookup() {
+    final Eth2PeerSelectionStrategy strategy = createStrategy(0, 2, 0);
+    final StubPeer peer1 = new StubPeer(new MockNodeId(1));
+    final StubPeer peer2 = new StubPeer(new MockNodeId(2));
+    final StubPeer departingPeer = new StubPeer(new MockNodeId(3));
+    peerScorer.setScore(peer1.getId(), 100);
+    peerScorer.setScore(peer2.getId(), 200);
+    peerScorer.setScore(departingPeer.getId(), 1000);
+    when(network.getPeerCount()).thenReturn(3);
+    when(network.streamPeers()).thenAnswer(__ -> Stream.of(peer1, peer2, departingPeer));
+    // The lookup waits on the gossip thread, long enough for a peer to start disconnecting
+    when(network.getSubscribersByTopic())
+        .thenAnswer(
+            __ -> {
+              departingPeer.disconnectCleanly(DisconnectReason.TOO_MANY_PEERS).finishStackTrace();
+              return Map.of();
+            });
+
+    // The same peers are counted for eviction and for subnet coverage
+    assertThat(strategy.selectPeersToDisconnect(network, peerPools)).isEmpty();
+    assertThat(peersCountedAsSubscribers).containsExactly(peer1, peer2);
+  }
+
+  @Test
+  void selectPeersToConnect_shouldNotCountDisconnectingPeerAsSubscriber() {
+    final Eth2PeerSelectionStrategy strategy = createStrategy();
+    final StubPeer peer1 = new StubPeer(new MockNodeId(11));
+    final StubPeer departingPeer = new StubPeer(new MockNodeId(12));
+    departingPeer.disconnectCleanly(DisconnectReason.TOO_MANY_PEERS).finishStackTrace();
+    when(network.streamPeers()).thenAnswer(__ -> Stream.of(peer1, departingPeer));
+
+    strategy.selectPeersToConnect(network, peerPools, () -> List.of(DISCOVERY_PEER1));
+
+    assertThat(peersCountedAsSubscribers).containsExactly(peer1);
   }
 
   @Test

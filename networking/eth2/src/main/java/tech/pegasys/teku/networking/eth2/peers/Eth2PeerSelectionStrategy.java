@@ -67,8 +67,10 @@ public class Eth2PeerSelectionStrategy implements PeerSelectionStrategy {
       final P2PNetwork<?> network,
       final PeerPools peerPools,
       final Supplier<? extends Collection<DiscoveryPeer>> candidates) {
+    final Map<String, Collection<NodeId>> subscribersByTopic = network.getSubscribersByTopic();
+    final List<Peer> peers = connectedPeers(network);
     final PeerSubnetSubscriptions peerSubnetSubscriptions =
-        peerSubnetSubscriptionsFactory.create(network);
+        peerSubnetSubscriptionsFactory.create(subscribersByTopic, peers);
     final int peersRequiredForPeerCount =
         targetPeerCountRange.getPeersToAdd(network.getPeerCount());
     final int randomlySelectedPeerCount = getCurrentRandomlySelectedPeerCount(network, peerPools);
@@ -167,11 +169,10 @@ public class Eth2PeerSelectionStrategy implements PeerSelectionStrategy {
   @Override
   public List<Peer> selectPeersToDisconnect(
       final P2PNetwork<?> network, final PeerPools peerPools) {
-    // A peer being disconnected stays in the network's peer list until its goodbye completes
-    final List<Peer> peers =
-        network.streamPeers().filter(Peer::isConnected).map(Peer.class::cast).toList();
+    final Map<String, Collection<NodeId>> subscribersByTopic = network.getSubscribersByTopic();
+    final List<Peer> peers = connectedPeers(network);
     final PeerSubnetSubscriptions peerSubnetSubscriptions =
-        peerSubnetSubscriptionsFactory.create(network);
+        peerSubnetSubscriptionsFactory.create(subscribersByTopic, peers);
     final int totalOutboundRequirement =
         targetPeerCountRange.getMinimumRandomlySelectedPeerCount()
             + peerSubnetSubscriptions.getSubscribersRequired();
@@ -242,6 +243,15 @@ public class Eth2PeerSelectionStrategy implements PeerSelectionStrategy {
         locallyInitiatedRandomPeersEligibleForDisconnection::size,
         () -> totalOutboundRequirement);
     return List.copyOf(peersBeingDropped);
+  }
+
+  /**
+   * A peer being disconnected stays in the network's peer list until its goodbye completes. Call
+   * this after looking up the gossip subscribers: that lookup waits on the gossip thread, and a
+   * peer that starts disconnecting meanwhile must count neither as a peer nor as a subscriber.
+   */
+  private static List<Peer> connectedPeers(final P2PNetwork<?> network) {
+    return network.streamPeers().filter(Peer::isConnected).map(Peer.class::cast).toList();
   }
 
   private int calculateRemotelyInitiatedPeersToDropCount(
