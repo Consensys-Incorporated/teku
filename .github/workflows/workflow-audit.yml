@@ -7,10 +7,10 @@ name: workflow-audit
 on:
   push:
     branches:
-      - ci/consensys-incorporated-github-actions
+      - master
   pull_request:
     branches:
-      - ci/consensys-incorporated-github-actions
+      - master
   workflow_dispatch:
 
 permissions: {}
