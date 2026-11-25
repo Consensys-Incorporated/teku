@@ -150,16 +150,21 @@ public class KvStoreDatabase implements Database {
       final StateStorageMode stateStorageMode,
       final boolean storeNonCanonicalBlocks,
       final Spec spec,
-      final MetricsSystem metricsSystem) {
+      final MetricsSystem metricsSystem,
+      final boolean prunedSlotCompactionEnabled) {
     this.dao = dao;
     checkNotNull(spec);
     this.stateStorageMode = stateStorageMode;
     this.storeNonCanonicalBlocks = storeNonCanonicalBlocks;
     this.spec = spec;
+    this.prunedSlotRangeCompactors = new EnumMap<>(SlotKeyedColumn.class);
+    if (!prunedSlotCompactionEnabled) {
+      // Pruning then leaves its tombstones to background compaction
+      return;
+    }
     final PrunedSlotRangeCompactor.Gauges compactorGauges =
         PrunedSlotRangeCompactor.Gauges.create(metricsSystem);
     final TimeProvider timeProvider = new SystemTimeProvider();
-    this.prunedSlotRangeCompactors = new EnumMap<>(SlotKeyedColumn.class);
     for (final SlotKeyedColumn column : SlotKeyedColumn.values()) {
       prunedSlotRangeCompactors.put(
           column,
@@ -182,7 +187,8 @@ public class KvStoreDatabase implements Database {
       final StateStorageMode stateStorageMode,
       final long stateStorageFrequency,
       final boolean storeNonCanonicalBlocks,
-      final Spec spec) {
+      final Spec spec,
+      final boolean prunedSlotCompactionEnabled) {
     final V4FinalizedStateSnapshotStorageLogic<SchemaFinalizedSnapshotStateAdapter>
         finalizedStateStorageLogic =
             new V4FinalizedStateSnapshotStorageLogic<>(stateStorageFrequency);
@@ -192,7 +198,13 @@ public class KvStoreDatabase implements Database {
             hotDao,
             new V4FinalizedKvStoreDao(
                 metricsSystem, finalizedDb, schemaFinalized, finalizedStateStorageLogic));
-    return new KvStoreDatabase(dao, stateStorageMode, storeNonCanonicalBlocks, spec, metricsSystem);
+    return new KvStoreDatabase(
+        dao,
+        stateStorageMode,
+        storeNonCanonicalBlocks,
+        spec,
+        metricsSystem,
+        prunedSlotCompactionEnabled);
   }
 
   public static Database createWithStateSnapshots(
@@ -202,7 +214,8 @@ public class KvStoreDatabase implements Database {
       final long stateStorageFrequency,
       final boolean storeNonCanonicalBlocks,
       final Spec spec,
-      final MetricsSystem metricsSystem) {
+      final MetricsSystem metricsSystem,
+      final boolean prunedSlotCompactionEnabled) {
     final V4FinalizedStateSnapshotStorageLogic<SchemaCombinedSnapshotState>
         finalizedStateStorageLogic =
             new V4FinalizedStateSnapshotStorageLogic<>(stateStorageFrequency);
@@ -213,7 +226,8 @@ public class KvStoreDatabase implements Database {
         storeNonCanonicalBlocks,
         spec,
         finalizedStateStorageLogic,
-        metricsSystem);
+        metricsSystem,
+        prunedSlotCompactionEnabled);
   }
 
   public static Database createWithStateTree(
@@ -223,7 +237,8 @@ public class KvStoreDatabase implements Database {
       final StateStorageMode stateStorageMode,
       final boolean storeNonCanonicalBlocks,
       final int maxKnownNodeCacheSize,
-      final Spec spec) {
+      final Spec spec,
+      final boolean prunedSlotCompactionEnabled) {
     final V4FinalizedStateTreeStorageLogic finalizedStateStorageLogic =
         new V4FinalizedStateTreeStorageLogic(metricsSystem, spec, maxKnownNodeCacheSize);
     return create(
@@ -233,7 +248,8 @@ public class KvStoreDatabase implements Database {
         storeNonCanonicalBlocks,
         spec,
         finalizedStateStorageLogic,
-        metricsSystem);
+        metricsSystem,
+        prunedSlotCompactionEnabled);
   }
 
   private static <S extends SchemaCombined> KvStoreDatabase create(
@@ -243,10 +259,17 @@ public class KvStoreDatabase implements Database {
       final boolean storeNonCanonicalBlocks,
       final Spec spec,
       final V4FinalizedStateStorageLogic<S> finalizedStateStorageLogic,
-      final MetricsSystem metricsSystem) {
+      final MetricsSystem metricsSystem,
+      final boolean prunedSlotCompactionEnabled) {
     final CombinedKvStoreDao<S> dao =
         new CombinedKvStoreDao<>(db, schema, finalizedStateStorageLogic, metricsSystem);
-    return new KvStoreDatabase(dao, stateStorageMode, storeNonCanonicalBlocks, spec, metricsSystem);
+    return new KvStoreDatabase(
+        dao,
+        stateStorageMode,
+        storeNonCanonicalBlocks,
+        spec,
+        metricsSystem,
+        prunedSlotCompactionEnabled);
   }
 
   @MustBeClosed
@@ -1856,11 +1879,17 @@ public class KvStoreDatabase implements Database {
   }
 
   private void compactPrunedSlots(final SlotKeyedColumn column, final UInt64 lastPrunedSlot) {
-    prunedSlotRangeCompactors.get(column).onPruned(lastPrunedSlot);
+    final PrunedSlotRangeCompactor compactor = prunedSlotRangeCompactors.get(column);
+    if (compactor != null) {
+      compactor.onPruned(lastPrunedSlot);
+    }
   }
 
   private void continuePrunedSlotCompaction(final SlotKeyedColumn column) {
-    prunedSlotRangeCompactors.get(column).onNothingPruned();
+    final PrunedSlotRangeCompactor compactor = prunedSlotRangeCompactors.get(column);
+    if (compactor != null) {
+      compactor.onNothingPruned();
+    }
   }
 
   private record DataColumnSidecarsToPrune(

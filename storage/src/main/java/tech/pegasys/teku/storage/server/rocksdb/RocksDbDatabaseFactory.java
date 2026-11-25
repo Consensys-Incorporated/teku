@@ -71,7 +71,8 @@ public class RocksDbDatabaseFactory {
         stateStorageMode,
         stateStorageFrequency,
         storeNonCanonicalBlocks,
-        spec);
+        spec,
+        hotConfiguration.prunedSlotCompactionEnabled());
   }
 
   public static Database createV6Tree(
@@ -99,7 +100,8 @@ public class RocksDbDatabaseFactory {
         stateStorageMode,
         storeNonCanonicalBlocks,
         maxKnownNodeCacheSize,
-        spec);
+        spec,
+        hotConfiguration.prunedSlotCompactionEnabled());
   }
 
   public static Database createV6(
@@ -128,6 +130,7 @@ public class RocksDbDatabaseFactory {
         stateStorageFrequency,
         storeNonCanonicalBlocks,
         spec,
-        metricsSystem);
+        metricsSystem,
+        hotConfiguration.prunedSlotCompactionEnabled());
   }
 }

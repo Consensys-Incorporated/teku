@@ -248,6 +248,26 @@ public class BeaconNodeDataOptionsTest extends AbstractBeaconNodeCommandTest {
   }
 
   @Test
+  void prunedSlotCompactionEnabled_shouldDefaultToFalse() {
+    final TekuConfiguration tekuConfig = getTekuConfigurationFromArguments();
+    assertThat(tekuConfig.storageConfiguration().isPrunedSlotCompactionEnabled()).isFalse();
+  }
+
+  @Test
+  void prunedSlotCompactionEnabled_shouldAcceptTrue() {
+    final TekuConfiguration tekuConfig =
+        getTekuConfigurationFromArguments("--Xdata-storage-pruned-slot-compaction-enabled=true");
+    assertThat(tekuConfig.storageConfiguration().isPrunedSlotCompactionEnabled()).isTrue();
+  }
+
+  @Test
+  void prunedSlotCompactionEnabled_shouldUseFallbackValue() {
+    final TekuConfiguration tekuConfig =
+        getTekuConfigurationFromArguments("--Xdata-storage-pruned-slot-compaction-enabled");
+    assertThat(tekuConfig.storageConfiguration().isPrunedSlotCompactionEnabled()).isTrue();
+  }
+
+  @Test
   void forceClearDb_shouldDefaultToFalse() {
     final TekuConfiguration tekuConfig = getTekuConfigurationFromArguments();
     assertThat(tekuConfig.storageConfiguration().isForceClearDb()).isEqualTo(false);

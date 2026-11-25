@@ -22,6 +22,7 @@ import tech.pegasys.teku.storage.server.kvstore.schema.SchemaHotAdapter;
 import tech.pegasys.teku.storage.server.kvstore.schema.V6SchemaCombinedSnapshot;
 import tech.pegasys.teku.storage.server.kvstore.schema.V6SchemaCombinedTreeState;
 
+/** Creates databases that compact pruned slots, so tests cover it. */
 public class InMemoryKvStoreDatabaseFactory {
   public static Database createV4(
       final MockKvStoreInstance hotDb,
@@ -43,7 +44,8 @@ public class InMemoryKvStoreDatabaseFactory {
         storageMode,
         stateStorageFrequency,
         storeNonCanonicalBlocks,
-        spec);
+        spec,
+        true);
   }
 
   public static Database createV6(
@@ -60,7 +62,8 @@ public class InMemoryKvStoreDatabaseFactory {
         stateStorageFrequency,
         storeNonCanonicalBlocks,
         spec,
-        new StubMetricsSystem());
+        new StubMetricsSystem(),
+        true);
   }
 
   public static Database createTree(
@@ -70,6 +73,13 @@ public class InMemoryKvStoreDatabaseFactory {
       final Spec spec) {
     final V6SchemaCombinedTreeState schema = new V6SchemaCombinedTreeState(spec);
     return KvStoreDatabase.createWithStateTree(
-        new StubMetricsSystem(), db, schema, storageMode, storeNonCanonicalBlocks, 1000, spec);
+        new StubMetricsSystem(),
+        db,
+        schema,
+        storageMode,
+        storeNonCanonicalBlocks,
+        1000,
+        spec,
+        true);
   }
 }
