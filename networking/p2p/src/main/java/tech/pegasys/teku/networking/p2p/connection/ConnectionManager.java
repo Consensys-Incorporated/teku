@@ -61,9 +61,6 @@ public class ConnectionManager extends Service {
   private final Set<PeerAddress> staticPeers;
   private final DiscoveryService discoveryService;
   private final PeerSelectionStrategy peerSelectionStrategy;
-  private final Counter attemptedConnectionCounter;
-  private final Counter successfulConnectionCounter;
-  private final Counter failedConnectionCounter;
   private final Counter consideredCandidateCounter;
   private final Counter noDialableAddressCandidateCounter;
   private final Counter eligibleCandidateCounter;
@@ -94,15 +91,6 @@ public class ConnectionManager extends Service {
     this.peerSelectionStrategy = peerSelectionStrategy;
     this.timeProvider = timeProvider;
 
-    final LabelledMetric<Counter> connectionAttemptCounter =
-        metricsSystem.createLabelledCounter(
-            TekuMetricCategory.NETWORK,
-            "peer_connection_attempt_count_total",
-            "Total number of outbound connection attempts made",
-            "status");
-    attemptedConnectionCounter = connectionAttemptCounter.labels("attempted");
-    successfulConnectionCounter = connectionAttemptCounter.labels("successful");
-    failedConnectionCounter = connectionAttemptCounter.labels("failed");
     final LabelledMetric<Counter> candidateCounter =
         metricsSystem.createLabelledCounter(
             TekuMetricCategory.NETWORK,
@@ -258,19 +246,16 @@ public class ConnectionManager extends Service {
 
   private void attemptConnection(final PeerAddress peerAddress) {
     LOG.trace("Attempting to connect to {}", peerAddress.getId());
-    attemptedConnectionCounter.inc();
     network
         .connect(peerAddress)
         .finish(
             peer -> {
               LOG.trace("Successfully connected to peer {}", peer.getId());
-              successfulConnectionCounter.inc();
               peer.subscribeDisconnect(
                   (reason, locallyInitiated) -> peerPools.forgetPeer(peer.getId()));
             },
             error -> {
               LOG.trace(() -> "Failed to connect to peer: " + peerAddress.getId(), error);
-              failedConnectionCounter.inc();
               peerPools.forgetPeer(peerAddress.getId());
             });
   }
@@ -315,13 +300,11 @@ public class ConnectionManager extends Service {
     }
     LOG.debug("Connecting to peer {}", peerAddress);
     peerPools.addPeerToPool(peerAddress.getId(), PeerConnectionType.STATIC);
-    attemptedConnectionCounter.inc();
     return network
         .connect(peerAddress)
         .thenApply(
             peer -> {
               LOG.debug("Connection to peer {} was successful", peer.getId());
-              successfulConnectionCounter.inc();
               final UInt64 connectionTimeMillis = timeProvider.getTimeInMillis();
               peer.subscribeDisconnect(
                   (reason, locallyInitiated) -> {
@@ -350,7 +333,6 @@ public class ConnectionManager extends Service {
                   peerAddress,
                   error,
                   retryDelay.toSeconds());
-              failedConnectionCounter.inc();
               return asyncRunner.runAfterDelay(
                   () -> maintainPersistentConnection(peerAddress), retryDelay);
             });
