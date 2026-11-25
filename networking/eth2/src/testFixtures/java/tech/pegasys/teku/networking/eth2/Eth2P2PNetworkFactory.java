@@ -426,12 +426,13 @@ public class Eth2P2PNetworkFactory {
                 .peerSelectionStrategy(
                     new Eth2PeerSelectionStrategy(
                         targetPeerRange,
-                        gossipNetwork ->
+                        (subscribersByTopic, connectedPeers) ->
                             PeerSubnetSubscriptions.create(
                                 currentSpecVersionSupplier.get(),
                                 NodeIdToDataColumnSidecarSubnetsCalculator.create(
                                     spec, currentSlotSupplier),
-                                gossipNetwork,
+                                subscribersByTopic,
+                                connectedPeers,
                                 eth2PeerManager,
                                 attestationSubnetTopicProvider,
                                 syncCommitteeTopicProvider,
