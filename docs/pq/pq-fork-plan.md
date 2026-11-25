@@ -146,8 +146,8 @@ PQ is an emergency fork for when elliptic-curve cryptography can no longer be tr
 - `stark.ProveAggregates(statements, sigs)`, `stark.MergeProofs(proofs)`, `stark.VerifyAggregates(statements, proof)`. The reference implementation concatenates signatures.
 
 **Misc:**
-- `compute_legacy_xmss_pubkey(bls_pk) = sha256(pk ‖ 0x00)`.
-- `compute_legacy_vrf_root = sha256(pk ‖ 0x01)`.
+- `compute_legacy_xmss_pubkey(bls_pk) = keccak256(pk ‖ 0x00)` (sha256 before consensus-specs 4c296784).
+- `compute_legacy_vrf_root = keccak256(pk ‖ 0x01)`.
 - `compute_deposit_pubkey`: legacy hash if the top 16 bytes are non-zero, else `pk[16:]`.
 - `compute_deposit_vrf_root`: `signature[:32]` or the legacy value.
 - `compute_xmss_attestation_leaf_index(epoch) = 2^15 + epoch`.

@@ -109,6 +109,11 @@ public class DelegatingSpecConfigPq extends DelegatingSpecConfigEip8483 implemen
   }
 
   @Override
+  public int getXMaxCommitteeCountPerSlot() {
+    return delegate.getXMaxCommitteeCountPerSlot();
+  }
+
+  @Override
   public Optional<SpecConfigPq> toVersionPq() {
     return Optional.of(this);
   }

@@ -65,14 +65,14 @@ public class BeaconStateAccessorsPq extends BeaconStateAccessorsGloas {
     this.schemaDefinitionsPq = schemaDefinitions;
   }
 
-  /** get_committee_count_per_slot, modified in PQ: at most MAX_COMMITTEES_PER_SLOT_PQ. */
+  /** get_committee_count_per_slot, modified in PQ: at most X_MAX_COMMITTEE_COUNT_PER_SLOT. */
   @Override
   public UInt64 getCommitteeCountPerSlot(final long activeValidatorCount) {
     return UInt64.valueOf(
         Math.max(
             1L,
             Math.min(
-                configPq.getMaxCommitteesPerSlotPq(),
+                configPq.getXMaxCommitteeCountPerSlot(),
                 Math.floorDiv(
                     Math.floorDiv(activeValidatorCount, configPq.getSlotsPerEpoch()),
                     configPq.getTargetCommitteeSize()))));

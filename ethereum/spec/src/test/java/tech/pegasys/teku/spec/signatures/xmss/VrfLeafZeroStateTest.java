@@ -16,9 +16,8 @@ package tech.pegasys.teku.spec.signatures.xmss;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.google.common.io.Resources;
-import java.io.IOException;
 import java.nio.ByteOrder;
+import java.util.List;
 import java.util.stream.IntStream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -82,49 +81,33 @@ class VrfLeafZeroStateTest {
   }
 
   @Test
-  void fromBytes_readsTheDevnetToolingState() throws IOException {
-    // Entry 0 of ethereum-package's static_files/xmss-keys/b9dec4e1daa17dfe.vrf (pq branch at
-    // d4c9a8ace9): validator 0 of its default mnemonic, whose VRF seed the genesis tool's own VRF
-    // test pins
-    final Bytes state =
-        Bytes.wrap(
-            Resources.toByteArray(
-                Resources.getResource(getClass(), "vrf_state_devnet_validator_0.bin")));
-    final Bytes32 seed =
-        Bytes32.fromHexString("0x543fc5a4d86e79a434e9741770f7ee17c25bdc31be8d61436d7f9836538b03df");
+  void computeProof_revealsTheSecretAndOpensTheRoot() {
+    final VrfLeafZeroState state = VrfLeafZeroState.fromBytes(SEED, DEPTH, stateOf(SEED));
 
-    final VrfLeafZeroState vrfState = VrfLeafZeroState.fromBytes(seed, state);
-
-    // The VRF root the devnet genesis registered for validator 0
-    assertThat(vrfState.getRoot())
-        .isEqualTo(
-            Bytes32.fromHexString(
-                "0x2c8d6a710d3a22803be6490fef9c9247e30ac68793bffb7cbc151d17f8313cb0"));
-    for (final long slot : new long[] {0, 1, 2, 3, 7, 100, 1234}) {
-      assertThat(
-              VrfTree.computeRootFromProof(
-                  vrfState.computeProof(UInt64.valueOf(slot)), UInt64.valueOf(slot)))
+    for (final long slot : new long[] {0, 1, 2, 3, 7, 100, 255}) {
+      final List<Bytes32> proof = state.computeProof(UInt64.valueOf(slot));
+      assertThat(proof.getFirst())
           .describedAs("slot %s", slot)
-          .isEqualTo(vrfState.getRoot());
+          .isEqualTo(VrfTree.computeSecret(SEED, UInt64.valueOf(slot)));
+      assertThat(VrfTree.computeRootFromProof(proof, UInt64.valueOf(slot)))
+          .describedAs("slot %s", slot)
+          .isEqualTo(state.getRoot());
     }
   }
 
   @Test
-  void find_picksTheSeedsStateFromAFileOfStates() throws IOException {
-    final Bytes devnetState =
-        Bytes.wrap(
-            Resources.toByteArray(
-                Resources.getResource(getClass(), "vrf_state_devnet_validator_0.bin")));
-    final Bytes32 seed =
-        Bytes32.fromHexString("0x543fc5a4d86e79a434e9741770f7ee17c25bdc31be8d61436d7f9836538b03df");
-    // Another validator's state first: its siblings don't open this seed's leaf 0 to its root
-    final Bytes otherState =
-        Bytes.concatenate(Bytes32.fromHexStringLenient("0x01"), devnetState.slice(Bytes32.SIZE));
-    final Bytes states = Bytes.concatenate(otherState, devnetState);
+  void find_picksTheSeedsStateFromAFileOfStates() {
+    final Bytes seedState = stateOf(SEED);
+    final Bytes otherSeedState = stateOf(Bytes32.fromHexStringLenient("0x0be5"));
+    // A state whose siblings don't open this seed's leaf 0 to its root
+    final Bytes corrupted =
+        Bytes.concatenate(Bytes32.fromHexStringLenient("0x01"), seedState.slice(Bytes32.SIZE));
+    final Bytes states = Bytes.concatenate(otherSeedState, corrupted, seedState);
 
-    assertThat(VrfLeafZeroState.find(seed, states).map(VrfLeafZeroState::toBytes))
-        .contains(devnetState);
-    assertThat(VrfLeafZeroState.find(Bytes32.fromHexStringLenient("0x5eed"), states)).isEmpty();
+    assertThat(VrfLeafZeroState.find(SEED, DEPTH, states).map(VrfLeafZeroState::toBytes))
+        .contains(seedState);
+    assertThat(VrfLeafZeroState.find(Bytes32.fromHexStringLenient("0xabcd"), DEPTH, states))
+        .isEmpty();
   }
 
   /** The serialized slot-0 state of the depth-{@link #DEPTH} tree of {@code seed}. */

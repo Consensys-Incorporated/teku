@@ -47,6 +47,9 @@ public class PqBuilder extends BaseForkBuilder
   private Integer aggregationCutoffBps = 4000;
   private Integer aggregateDueBpsPq = 6000;
   private Integer aggregatorDelayBps = 500;
+  // Temporary and only for testing (consensus-specs af898d07); a config without it, as PQ devnet
+  // configs written before it are, has the preset's MAX_COMMITTEES_PER_SLOT_PQ
+  private Integer xMaxCommitteeCountPerSlot;
 
   PqBuilder() {}
 
@@ -72,7 +75,8 @@ public class PqBuilder extends BaseForkBuilder
             attestationSubnetCountPq,
             aggregationCutoffBps,
             aggregateDueBpsPq,
-            aggregatorDelayBps),
+            aggregatorDelayBps,
+            xMaxCommitteeCountPerSlot),
         specConfigAndParent);
   }
 
@@ -185,8 +189,17 @@ public class PqBuilder extends BaseForkBuilder
     return this;
   }
 
+  public PqBuilder xMaxCommitteeCountPerSlot(final Integer xMaxCommitteeCountPerSlot) {
+    checkNotNull(xMaxCommitteeCountPerSlot);
+    this.xMaxCommitteeCountPerSlot = xMaxCommitteeCountPerSlot;
+    return this;
+  }
+
   @Override
   public void validate() {
+    if (xMaxCommitteeCountPerSlot == null) {
+      xMaxCommitteeCountPerSlot = maxCommitteesPerSlotPq;
+    }
     defaultValuesIfRequired(this);
     validateConstants();
     // The config invariants of consensus-specs 4595f0fc: each aggregator stops collecting before it
@@ -198,6 +211,13 @@ public class PqBuilder extends BaseForkBuilder
         aggregateDueBpsPq + (AGGREGATORS_PER_COMMITTEE - 1) * aggregatorDelayBps <= 10_000,
         "The last aggregator's AGGREGATE_DUE_BPS_PQ plus AGGREGATOR_DELAY_BPS offset must be"
             + " within the slot");
+    if (maxCommitteesPerSlotPq > 0) {
+      // It sizes no type, so it must fit within CommitteeBits
+      checkArgument(
+          xMaxCommitteeCountPerSlot >= 1 && xMaxCommitteeCountPerSlot <= maxCommitteesPerSlotPq,
+          "X_MAX_COMMITTEE_COUNT_PER_SLOT must be between 1 and MAX_COMMITTEES_PER_SLOT_PQ (%s)",
+          maxCommitteesPerSlotPq);
+    }
   }
 
   @Override
