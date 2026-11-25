@@ -216,29 +216,24 @@ public class PeerSubnetSubscriptions {
   }
 
   /**
-   * A peer being disconnected stays subscribed at the gossip layer until its goodbye completes, but
-   * it no longer provides subnet coverage, so it is left out of the subscribers.
+   * Only connected peers provide subnet coverage. The gossip layer still lists a peer that is being
+   * disconnected until its goodbye completes, and may list one whose connection has just closed, so
+   * subscribers are kept only if they are connected peers.
    */
   private static Map<String, Collection<NodeId>> liveSubscribersByTopic(
       final P2PNetwork<?> network) {
     final Map<String, Collection<NodeId>> subscribersByTopic = network.getSubscribersByTopic();
-    final Set<NodeId> disconnectingPeers =
+    final Set<NodeId> connectedPeers =
         network
             .streamPeers()
-            .filter(peer -> !peer.isConnected())
+            .filter(Peer::isConnected)
             .map(Peer::getId)
             .collect(Collectors.toSet());
-    if (disconnectingPeers.isEmpty()) {
-      return subscribersByTopic;
-    }
     return subscribersByTopic.entrySet().stream()
         .collect(
             Collectors.toMap(
                 Map.Entry::getKey,
-                entry ->
-                    entry.getValue().stream()
-                        .filter(subscriber -> !disconnectingPeers.contains(subscriber))
-                        .toList()));
+                entry -> entry.getValue().stream().filter(connectedPeers::contains).toList()));
   }
 
   @VisibleForTesting
