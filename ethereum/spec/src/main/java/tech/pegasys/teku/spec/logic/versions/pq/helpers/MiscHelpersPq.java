@@ -76,12 +76,12 @@ public class MiscHelpersPq extends MiscHelpersGloas {
 
   /** compute_legacy_xmss_pubkey: the XMSS public key derived from a BLS public key. */
   public Bytes32 computeLegacyXmssPubkey(final Bytes48 pubkey) {
-    return Hash.sha256(Bytes.concatenate(pubkey, LEGACY_XMSS_PUBKEY_DOMAIN));
+    return Hash.keccak256(Bytes.concatenate(pubkey, LEGACY_XMSS_PUBKEY_DOMAIN));
   }
 
   /** compute_legacy_vrf_root: the VRF root derived from a BLS public key. */
   public Bytes32 computeLegacyVrfRoot(final Bytes48 pubkey) {
-    return Hash.sha256(Bytes.concatenate(pubkey, LEGACY_VRF_ROOT_DOMAIN));
+    return Hash.keccak256(Bytes.concatenate(pubkey, LEGACY_VRF_ROOT_DOMAIN));
   }
 
   /** compute_deposit_pubkey: the XMSS public key a deposit naming {@code pubkey} is for. */

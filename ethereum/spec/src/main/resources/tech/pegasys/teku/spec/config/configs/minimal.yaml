@@ -121,6 +121,10 @@ CONSOLIDATION_CHURN_LIMIT_QUOTIENT: 32
 # [customized] 2**7 * 10**9 (= 128,000,000,000) Gwei
 MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT_GLOAS: 128000000000
 
+# PQ
+# [customized] 2**2 (= 4) committees, temporary and only for testing
+X_MAX_COMMITTEE_COUNT_PER_SLOT: 4
+
 # Heze
 # 6667 basis points, ~67% of SLOT_DURATION_MS
 INCLUSION_LIST_DUE_BPS: 6667

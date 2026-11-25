@@ -246,6 +246,30 @@ public class SpecConfigLoaderTest {
     assertThat(config.getAggregatorDelayBps()).isEqualTo(500);
   }
 
+  @Test
+  public void shouldDefaultXMaxCommitteeCountPerSlotToThePresetWhenMissing(
+      @TempDir final Path tempDir) throws Exception {
+    // PQ devnet configs written before consensus-specs af898d07 lack it
+    final Path file = tempDir.resolve("mainnet.yml");
+    try (final InputStream inputStream = getMainnetConfigAsStream();
+        final FileWriter writer = new FileWriter(file.toFile(), StandardCharsets.UTF_8)) {
+      final BufferedReader reader =
+          new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8));
+      String line;
+      while ((line = reader.readLine()) != null) {
+        if (!line.startsWith("X_MAX_COMMITTEE_COUNT_PER_SLOT")) {
+          writer.write(line + "\n");
+        }
+      }
+    }
+    final SpecConfigPq config =
+        SpecConfigPq.required(
+            SpecConfigLoader.loadConfig(file.toString(), true, true, __ -> {}).specConfig());
+    assertThat(config.getXMaxCommitteeCountPerSlot())
+        .isEqualTo(config.getMaxCommitteesPerSlotPq())
+        .isEqualTo(16);
+  }
+
   @ParameterizedTest
   @ValueSource(
       strings = {

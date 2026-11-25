@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.spec.signatures.xmss;
 
+import static java.nio.charset.StandardCharsets.US_ASCII;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Random;
@@ -34,18 +35,55 @@ class VrfKeccakTest {
   }
 
   @Test
-  void hashLeaf_matchesKeccak256OfSeedAndLittleEndianIndex() {
+  void hashSecret_matchesComputeVrfSecret() {
     for (int i = 0; i < 200; i++) {
       final Bytes32 seed = randomBytes32();
       // Includes indices with the top bit set, which must hash as unsigned
       final long index = random.nextLong();
       final long[] out = new long[VrfKeccak.LANES];
 
-      keccak.hashLeaf(VrfKeccak.toLanes(seed), index, out, 0);
+      keccak.hashSecret(VrfKeccak.toLanes(seed), index, out, 0);
 
-      final Bytes littleEndianIndex = Bytes.ofUnsignedLong(index).reverse();
       assertThat(VrfKeccak.fromLanes(out, 0))
-          .isEqualTo(Hash.keccak256(Bytes.concatenate(seed, littleEndianIndex)));
+          .isEqualTo(
+              Hash.keccak256(
+                  Bytes.concatenate(
+                      Bytes.wrap("VRF_SECRET".getBytes(US_ASCII)), seed, littleEndian(index))));
+    }
+  }
+
+  @Test
+  void hashLeafOfSecret_matchesComputeVrfLeaf() {
+    for (int i = 0; i < 200; i++) {
+      final Bytes32 secret = randomBytes32();
+      final long index = random.nextLong();
+      final long[] lanes = new long[2 * VrfKeccak.LANES];
+      System.arraycopy(VrfKeccak.toLanes(secret), 0, lanes, VrfKeccak.LANES, VrfKeccak.LANES);
+
+      keccak.hashLeafOfSecret(lanes, VrfKeccak.LANES, index, lanes, 0);
+
+      assertThat(VrfKeccak.fromLanes(lanes, 0))
+          .isEqualTo(
+              Hash.keccak256(
+                  Bytes.concatenate(
+                      Bytes.wrap("VRF_LEAF".getBytes(US_ASCII)), secret, littleEndian(index))));
+    }
+  }
+
+  @Test
+  void hashLeaf_isTheLeafOfTheSeedsSecret() {
+    for (int i = 0; i < 50; i++) {
+      final Bytes32 seed = randomBytes32();
+      final long index = random.nextLong();
+      final long[] secret = new long[VrfKeccak.LANES];
+      final long[] expected = new long[VrfKeccak.LANES];
+      final long[] leaf = new long[VrfKeccak.LANES];
+      keccak.hashSecret(VrfKeccak.toLanes(seed), index, secret, 0);
+      keccak.hashLeafOfSecret(secret, 0, index, expected, 0);
+
+      keccak.hashLeaf(VrfKeccak.toLanes(seed), index, leaf, 0);
+
+      assertThat(leaf).isEqualTo(expected);
     }
   }
 
@@ -83,5 +121,9 @@ class VrfKeccakTest {
     final byte[] bytes = new byte[Bytes32.SIZE];
     random.nextBytes(bytes);
     return Bytes32.wrap(bytes);
+  }
+
+  private static Bytes littleEndian(final long value) {
+    return Bytes.ofUnsignedLong(value).reverse();
   }
 }

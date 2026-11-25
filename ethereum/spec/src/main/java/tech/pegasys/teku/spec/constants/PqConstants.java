@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.spec.constants;
 
+import static java.nio.charset.StandardCharsets.US_ASCII;
+
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 
@@ -37,6 +39,12 @@ public final class PqConstants {
   public static final UInt64 LEAF_OFFSET_EXECUTION_PAYLOAD_ENVELOPE = UInt64.valueOf(4);
 
   public static final int VRF_TREE_DEPTH = 31;
+
+  /** VRF_LEAF_DOMAIN: a VRF tree's leaf commits to its secret under this tag (compute_vrf_leaf). */
+  public static final Bytes VRF_LEAF_DOMAIN = Bytes.wrap("VRF_LEAF".getBytes(US_ASCII));
+
+  /** VRF_SECRET_DOMAIN: a validator derives its VRF secrets under this tag (compute_vrf_secret). */
+  public static final Bytes VRF_SECRET_DOMAIN = Bytes.wrap("VRF_SECRET".getBytes(US_ASCII));
 
   /** A post-upgrade request names 16 zero bytes followed by an XMSS public key. */
   public static final Bytes XMSS_DEPOSIT_PREFIX = Bytes.wrap(new byte[16]);

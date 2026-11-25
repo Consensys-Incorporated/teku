@@ -67,6 +67,12 @@ public interface SpecConfigPq extends SpecConfigEip8483 {
   /** AGGREGATOR_DELAY_BPS: how much later each aggregator in turn collects and broadcasts. */
   int getAggregatorDelayBps();
 
+  /**
+   * X_MAX_COMMITTEE_COUNT_PER_SLOT: the most committees per slot, for testing larger committees on
+   * a small devnet. Temporary; at most MAX_COMMITTEES_PER_SLOT_PQ.
+   */
+  int getXMaxCommitteeCountPerSlot();
+
   @Override
   Optional<SpecConfigPq> toVersionPq();
 }

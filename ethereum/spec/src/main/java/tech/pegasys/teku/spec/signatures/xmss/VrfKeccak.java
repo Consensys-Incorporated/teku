@@ -14,16 +14,28 @@
 package tech.pegasys.teku.spec.signatures.xmss;
 
 import java.util.Arrays;
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.spec.constants.PqConstants;
 
 /**
- * Keccak-256 for the two inputs of a VRF tree, without allocating: a leaf {@code keccak256(seed ‖
- * uint64_le(index))} (40 bytes) and a node {@code keccak256(left ‖ right)} (64 bytes). Both fit in
- * one Keccak block, so each is one permutation.
+ * Keccak-256 for the inputs of a VRF tree, without allocating:
  *
- * <p>Values are held as four little-endian 64-bit lanes, which is how Keccak absorbs bytes: a seed
- * or node is lanes 0-3 of the input, and the leaf index is lane 4 as it is. Deriving a VRF tree
- * hashes about 2^32 times, so this avoids the per-hash allocations of a general-purpose digest.
+ * <ul>
+ *   <li>a secret, compute_vrf_secret: {@code keccak256("VRF_SECRET" ‖ seed ‖ uint64_le(index))} (50
+ *       bytes);
+ *   <li>a leaf, compute_vrf_leaf: {@code keccak256("VRF_LEAF" ‖ secret ‖ uint64_le(index))} (48
+ *       bytes);
+ *   <li>a node: {@code keccak256(left ‖ right)} (64 bytes).
+ * </ul>
+ *
+ * Each fits in one Keccak block, so each is one permutation, and a leaf of a seed's tree is two.
+ *
+ * <p>Values are held as four little-endian 64-bit lanes, which is how Keccak absorbs bytes. The
+ * 8-byte leaf tag is a lane of its own, so a secret or node is four whole lanes of the input and
+ * the index is a lane as it is; the 10-byte secret tag shifts the seed and index two bytes into the
+ * lanes. Deriving a VRF tree hashes about 2^33 times, so this avoids the per-hash allocations of a
+ * general-purpose digest.
  *
  * <p>An instance keeps scratch state and is not thread-safe; use one per thread.
  */
@@ -46,18 +58,65 @@ final class VrfKeccak {
     0x8000000080008081L, 0x8000000000008080L, 0x0000000080000001L, 0x8000000080008008L
   };
 
-  private final long[] state = new long[25];
+  // "VRF_LEAF", one whole lane
+  private static final long LEAF_TAG = toLanes(PqConstants.VRF_LEAF_DOMAIN)[0];
+  // "VRF_SECR" and then "ET", the first ten bytes of the secret's input
+  private static final long SECRET_TAG_LANE = toLanes(PqConstants.VRF_SECRET_DOMAIN)[0];
+  private static final long SECRET_TAG_TAIL = toLanes(PqConstants.VRF_SECRET_DOMAIN)[1];
+  // The secret tag's tail is two bytes, so the seed and index start two bytes into a lane
+  private static final int SECRET_SHIFT = 16;
 
-  /** Hashes a leaf: {@code keccak256(seed ‖ uint64_le(index))} into {@code out[outOffset..+4]}. */
+  private final long[] state = new long[25];
+  private final long[] secret = new long[LANES];
+
+  /**
+   * Hashes the leaf of a seed's tree at {@code index}: compute_vrf_leaf(compute_vrf_secret(seed,
+   * index), index), into {@code out[outOffset..+4]}.
+   */
   void hashLeaf(final long[] seed, final long index, final long[] out, final int outOffset) {
+    hashSecret(seed, index, secret, 0);
+    hashLeafOfSecret(secret, 0, index, out, outOffset);
+  }
+
+  /**
+   * Hashes a secret: compute_vrf_secret, {@code keccak256("VRF_SECRET" ‖ seed ‖ uint64_le(index))},
+   * into {@code out[outOffset..+4]}.
+   */
+  void hashSecret(final long[] seed, final long index, final long[] out, final int outOffset) {
     final long[] a = state;
     Arrays.fill(a, 0L);
-    a[0] = seed[0];
-    a[1] = seed[1];
-    a[2] = seed[2];
-    a[3] = seed[3];
-    a[4] = index;
-    a[5] = FIRST_PAD_BYTE;
+    a[0] = SECRET_TAG_LANE;
+    a[1] = SECRET_TAG_TAIL | seed[0] << SECRET_SHIFT;
+    a[2] = seed[0] >>> (64 - SECRET_SHIFT) | seed[1] << SECRET_SHIFT;
+    a[3] = seed[1] >>> (64 - SECRET_SHIFT) | seed[2] << SECRET_SHIFT;
+    a[4] = seed[2] >>> (64 - SECRET_SHIFT) | seed[3] << SECRET_SHIFT;
+    a[5] = seed[3] >>> (64 - SECRET_SHIFT) | index << SECRET_SHIFT;
+    a[6] = index >>> (64 - SECRET_SHIFT) | FIRST_PAD_BYTE << SECRET_SHIFT;
+    a[LAST_RATE_LANE] = LAST_PAD_BIT;
+    permute(a);
+    copyOut(a, out, outOffset);
+  }
+
+  /**
+   * Hashes a leaf from its secret: compute_vrf_leaf, {@code keccak256("VRF_LEAF" ‖ secret ‖
+   * uint64_le(index))}, reading {@code secret[secretOffset..+4]}, into {@code out[outOffset..+4]}.
+   * {@code out} may be {@code secret}.
+   */
+  void hashLeafOfSecret(
+      final long[] secret,
+      final int secretOffset,
+      final long index,
+      final long[] out,
+      final int outOffset) {
+    final long[] a = state;
+    Arrays.fill(a, 0L);
+    a[0] = LEAF_TAG;
+    a[1] = secret[secretOffset];
+    a[2] = secret[secretOffset + 1];
+    a[3] = secret[secretOffset + 2];
+    a[4] = secret[secretOffset + 3];
+    a[5] = index;
+    a[6] = FIRST_PAD_BYTE;
     a[LAST_RATE_LANE] = LAST_PAD_BIT;
     permute(a);
     copyOut(a, out, outOffset);
@@ -92,9 +151,14 @@ final class VrfKeccak {
 
   /** The four little-endian lanes of a 32-byte value. */
   static long[] toLanes(final Bytes32 value) {
-    final long[] lanes = new long[LANES];
-    for (int i = 0; i < LANES; i++) {
-      lanes[i] = Long.reverseBytes(value.getLong(i * Long.BYTES));
+    return toLanes((Bytes) value);
+  }
+
+  /** The little-endian lanes of {@code value}, the last zero-padded. */
+  private static long[] toLanes(final Bytes value) {
+    final long[] lanes = new long[(value.size() + Long.BYTES - 1) / Long.BYTES];
+    for (int i = 0; i < value.size(); i++) {
+      lanes[i / Long.BYTES] |= (value.get(i) & 0xFFL) << (8 * (i % Long.BYTES));
     }
     return lanes;
   }

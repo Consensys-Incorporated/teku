@@ -341,20 +341,45 @@ class PqValidatorKeyLoaderTest {
   }
 
   @Test
-  void load_derivedKeysReadTheSavedVrfCache() {
-    // A cache from another seed shows the saved cache is read, not rebuilt
+  void load_derivedKeysRebuildAStaleVrfCache() {
+    // A cache that isn't the seed's, as one saved before the VRF leaves changed, is derived again
     writeFile(derivedVrfCachePath(), VRF_TREE.getCachedNodes());
 
-    assertThatThrownBy(
-            () ->
-                derivingLoader()
-                    .load(
-                        blsKeystorePath,
-                        PASSWORD,
-                        GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY,
-                        () -> GENESIS_VALIDATOR_0_BLS_SECRET_KEY))
-        .isInstanceOf(InvalidConfigurationException.class)
-        .hasMessageContaining("was not derived from");
+    final XmssSigner signer =
+        derivingLoader()
+            .load(
+                blsKeystorePath,
+                PASSWORD,
+                GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY,
+                () -> GENESIS_VALIDATOR_0_BLS_SECRET_KEY)
+            .orElseThrow();
+
+    final VrfTree expectedVrfTree =
+        VrfTree.derive(GENESIS_VALIDATOR_0_VRF_SEED, VRF_DEPTH, VRF_CACHED_HEIGHT);
+    assertThat(safeJoin(signer.computeVrfProof(UInt64.valueOf(9))))
+        .isEqualTo(expectedVrfTree.computeProof(UInt64.valueOf(9)));
+    assertThat(derivedVrfCachePath())
+        .hasBinaryContent(expectedVrfTree.getCachedNodes().toArrayUnsafe());
+  }
+
+  @Test
+  void load_derivedKeysIgnoreAStaleVrfState() {
+    writeFile(derivedVrfStatePath(), vrfStateOf(SECRETS.vrfSeed()));
+
+    final XmssSigner signer =
+        derivingLoader()
+            .load(
+                blsKeystorePath,
+                PASSWORD,
+                GENESIS_VALIDATOR_0_BLS_PUBLIC_KEY,
+                () -> GENESIS_VALIDATOR_0_BLS_SECRET_KEY)
+            .orElseThrow();
+
+    assertThat(safeJoin(signer.computeVrfProof(UInt64.valueOf(9))))
+        .isEqualTo(
+            VrfTree.derive(GENESIS_VALIDATOR_0_VRF_SEED, VRF_DEPTH, VRF_CACHED_HEIGHT)
+                .computeProof(UInt64.valueOf(9)));
+    assertThat(derivedVrfCachePath()).exists();
   }
 
   @Test

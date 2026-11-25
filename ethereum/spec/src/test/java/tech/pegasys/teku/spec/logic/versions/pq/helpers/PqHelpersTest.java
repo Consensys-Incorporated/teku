@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.google.common.io.Resources;
 import it.unimi.dsi.fastutil.ints.IntList;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.tuweni.bytes.Bytes;
@@ -109,6 +110,39 @@ class PqHelpersTest {
   }
 
   @Test
+  void committeeCountPerSlotIsCappedByXMaxCommitteeCountPerSlot() {
+    // A devnet lowers X_MAX_COMMITTEE_COUNT_PER_SLOT for fewer, larger committees
+    final Spec capped =
+        TestSpecFactory.createMinimalPq(
+            builder -> builder.pqBuilder(pq -> pq.xMaxCommitteeCountPerSlot(1)));
+    final SpecConfigPq cappedConfig = SpecConfigPq.required(capped.getGenesisSpecConfig());
+
+    assertThat(cappedConfig.getMaxCommitteesPerSlotPq()).isEqualTo(4);
+    assertThat(capped.getGenesisSpec().beaconStateAccessors().getCommitteeCountPerSlot(1_000_000))
+        .isEqualTo(UInt64.ONE);
+    // Without it, the cap is MAX_COMMITTEES_PER_SLOT_PQ
+    assertThat(
+            SpecConfigPq.required(TestSpecFactory.createMinimalPq().getGenesisSpecConfig())
+                .getXMaxCommitteeCountPerSlot())
+        .isEqualTo(4);
+  }
+
+  @Test
+  void xMaxCommitteeCountPerSlotMustFitInCommitteeBits() {
+    assertThatThrownBy(
+            () ->
+                TestSpecFactory.createMinimalPq(
+                    builder -> builder.pqBuilder(pq -> pq.xMaxCommitteeCountPerSlot(5))))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("X_MAX_COMMITTEE_COUNT_PER_SLOT");
+    assertThatThrownBy(
+            () ->
+                TestSpecFactory.createMinimalPq(
+                    builder -> builder.pqBuilder(pq -> pq.xMaxCommitteeCountPerSlot(0))))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
   void leafIndicesFollowTheSpecLayout() {
     assertThat(miscHelpers.computeXmssAttestationLeafIndex(UInt64.valueOf(5)))
         .isEqualTo(UInt64.valueOf((1L << 15) + 5));
@@ -134,15 +168,22 @@ class PqHelpersTest {
     assertThat(predicates.isLegacyPubkey(xmssDepositKey)).isFalse();
     assertThat(miscHelpers.computeDepositPubkey(xmssDepositKey)).isEqualTo(xmssKey);
     assertThat(miscHelpers.computeDepositPubkey(blsKey))
-        .isEqualTo(Hash.sha256(Bytes.concatenate(blsKey, Bytes.of(0))));
+        .isEqualTo(Hash.keccak256(Bytes.concatenate(blsKey, Bytes.of(0))));
     assertThat(miscHelpers.computeLegacyVrfRoot(blsKey))
-        .isEqualTo(Hash.sha256(Bytes.concatenate(blsKey, Bytes.of(1))));
+        .isEqualTo(Hash.keccak256(Bytes.concatenate(blsKey, Bytes.of(1))));
   }
 
   @Test
-  void vrfProofOpensTheLeafOfTheSlot() {
+  void vrfProofRevealsTheSecretThatTheLeafOfTheSlotCommitsTo() {
     final UInt64 slot = UInt64.valueOf(1234);
-    final Bytes32 leaf = dataStructureUtil.randomBytes32();
+    final Bytes32 secret = dataStructureUtil.randomBytes32();
+    // compute_vrf_leaf
+    final Bytes32 leaf =
+        Hash.keccak256(
+            Bytes.concatenate(
+                Bytes.wrap("VRF_LEAF".getBytes(StandardCharsets.US_ASCII)),
+                secret,
+                Bytes.ofUnsignedLong(slot.longValue()).reverse()));
     final List<Bytes32> branch = new ArrayList<>();
     Bytes32 node = leaf;
     for (int depth = 0; depth < PqConstants.VRF_TREE_DEPTH; depth++) {
@@ -156,16 +197,19 @@ class PqHelpersTest {
     final Bytes32 vrfRoot = node;
     final BeaconStatePq state = stateWithValidator(validator(vrfRoot), UInt64.ZERO);
     final List<Bytes32> proof = new ArrayList<>();
-    proof.add(leaf);
+    proof.add(secret);
     proof.addAll(branch);
 
     assertThat(predicates.isValidVrfProof(state, 0, slot, proof)).isTrue();
     assertThat(predicates.isValidVrfProof(state, 0, slot.plus(1), proof)).isFalse();
-    // Only the low VRF_TREE_DEPTH bits of the slot select the leaf
+    // The leaf commits to the whole slot, not only the low VRF_TREE_DEPTH bits that place it
     assertThat(
             predicates.isValidVrfProof(
                 state, 0, slot.plus(1L << PqConstants.VRF_TREE_DEPTH), proof))
-        .isTrue();
+        .isFalse();
+    // Revealing the leaf rather than the secret doesn't open it
+    proof.set(0, leaf);
+    assertThat(predicates.isValidVrfProof(state, 0, slot, proof)).isFalse();
     proof.set(0, dataStructureUtil.randomBytes32());
     assertThat(predicates.isValidVrfProof(state, 0, slot, proof)).isFalse();
   }

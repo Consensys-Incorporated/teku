@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.spec.generator;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static tech.pegasys.teku.spec.constants.PqConstants.VRF_TREE_DEPTH;
 
 import java.nio.ByteOrder;
@@ -38,12 +39,20 @@ import tech.pegasys.teku.spec.datastructures.type.SszXmssSignatureSchema;
  *   <li>Each validator's XMSS public key is a hash of its index. Tests that import these chains run
  *       with XMSS verification disabled, as the spec's own tests do, so signatures are stubs that
  *       only carry their leaf index.
- *   <li>Each validator's VRF tree has identical leaves, so its root and proofs take {@code
- *       VRF_TREE_DEPTH} hashes rather than 2^32: every node at a height is the same. The proofs are
- *       real and pass process_randao.
+ *   <li>Each validator's VRF tree is the placeholder of the spec's own test keys (consensus-specs
+ *       {@code pq} 4c296784, helpers/keys.py): a subtree of real leaves for the first 2^{@link
+ *       #VRF_SUBTREE_DEPTH} slots, shared by every validator, then siblings of the validator's own
+ *       up to its root. Its root and proofs take one subtree, 2^13 hashes, rather than 2^33. The
+ *       proofs are real and pass process_randao for slots in the subtree.
  * </ul>
  */
 public final class PqTestKeys {
+
+  /** The placeholder VRF trees commit to secrets for the first 2^12 slots only. */
+  public static final int VRF_SUBTREE_DEPTH = 12;
+
+  // The shared subtree's levels, from its leaves up to its root
+  private static final List<Bytes32[]> VRF_SUBTREE_LEVELS = vrfSubtreeLevels();
 
   private PqTestKeys() {}
 
@@ -53,19 +62,33 @@ public final class PqTestKeys {
             Bytes.wrap("xmss".getBytes(StandardCharsets.UTF_8)), index(validatorIndex)));
   }
 
-  /** The VRF root registered for the validator: the root of a tree whose leaves are all equal. */
+  /** The VRF root registered for the validator: the root of its placeholder VRF tree. */
   public static Bytes32 vrfRoot(final int validatorIndex) {
-    return vrfTreeLevels(validatorIndex).getLast();
+    Bytes32 node = VRF_SUBTREE_LEVELS.getLast()[0];
+    for (final Bytes32 sibling : vrfUpperBranch(validatorIndex)) {
+      node = Hash.keccak256(Bytes.concatenate(node, sibling));
+    }
+    return node;
   }
 
-  /** The validator's VRF proof for {@code slot}, its RANDAO reveal: the leaf, then its branch. */
+  /**
+   * The validator's VRF proof for {@code slot}, its RANDAO reveal: the secret for the slot, then
+   * the Merkle branch of the slot's leaf.
+   *
+   * @throws IllegalArgumentException for a slot beyond the shared subtree
+   */
   public static List<Bytes32> vrfProof(final int validatorIndex, final UInt64 slot) {
-    // Every leaf is equal, so the proof is the same for every slot: the leaf, then the sibling at
-    // each height, which is the node at that height
-    final List<Bytes32> levels = vrfTreeLevels(validatorIndex);
+    checkArgument(
+        slot.isLessThan(1L << VRF_SUBTREE_DEPTH),
+        "Test VRF trees only commit to the first %s slots",
+        1L << VRF_SUBTREE_DEPTH);
+    final int leaf = slot.intValue();
     final List<Bytes32> proof = new ArrayList<>(VRF_TREE_DEPTH + 1);
-    proof.add(levels.getFirst());
-    proof.addAll(levels.subList(0, VRF_TREE_DEPTH));
+    proof.add(vrfSecret(leaf));
+    for (int height = 0; height < VRF_SUBTREE_DEPTH; height++) {
+      proof.add(VRF_SUBTREE_LEVELS.get(height)[(leaf >>> height) ^ 1]);
+    }
+    proof.addAll(vrfUpperBranch(validatorIndex));
     return proof;
   }
 
@@ -107,19 +130,51 @@ public final class PqTestKeys {
                             .toList())));
   }
 
-  /** The leaf, then the node at each height up to the root. */
-  private static List<Bytes32> vrfTreeLevels(final int validatorIndex) {
-    final List<Bytes32> levels = new ArrayList<>(VRF_TREE_DEPTH + 1);
-    Bytes32 node = Hash.sha256(index(validatorIndex));
-    levels.add(node);
-    for (int height = 0; height < VRF_TREE_DEPTH; height++) {
-      node = Hash.keccak256(Bytes.concatenate(node, node));
-      levels.add(node);
+  /** The secret for {@code slot} of every placeholder VRF tree. */
+  private static Bytes32 vrfSecret(final long slot) {
+    return Hash.keccak256(
+        Bytes.concatenate(Bytes.wrap("vrf secret".getBytes(StandardCharsets.UTF_8)), index(slot)));
+  }
+
+  /** The subtree every placeholder VRF tree has on its left: each leaf commits to its secret. */
+  private static List<Bytes32[]> vrfSubtreeLevels() {
+    final List<Bytes32[]> levels = new ArrayList<>(VRF_SUBTREE_DEPTH + 1);
+    Bytes32[] level = new Bytes32[1 << VRF_SUBTREE_DEPTH];
+    for (int slot = 0; slot < level.length; slot++) {
+      level[slot] =
+          Hash.keccak256(
+              Bytes.concatenate(
+                  Bytes.wrap("VRF_LEAF".getBytes(StandardCharsets.UTF_8)),
+                  vrfSecret(slot),
+                  index(slot)));
+    }
+    levels.add(level);
+    while (level.length > 1) {
+      final Bytes32[] parents = new Bytes32[level.length / 2];
+      for (int i = 0; i < parents.length; i++) {
+        parents[i] = Hash.keccak256(Bytes.concatenate(level[2 * i], level[2 * i + 1]));
+      }
+      levels.add(parents);
+      level = parents;
     }
     return levels;
   }
 
-  private static Bytes index(final int validatorIndex) {
-    return Bytes.ofUnsignedLong(validatorIndex, ByteOrder.LITTLE_ENDIAN);
+  /** The siblings above the shared subtree, which give each validator its own VRF root. */
+  private static List<Bytes32> vrfUpperBranch(final int validatorIndex) {
+    final List<Bytes32> branch = new ArrayList<>(VRF_TREE_DEPTH - VRF_SUBTREE_DEPTH);
+    for (int height = VRF_SUBTREE_DEPTH; height < VRF_TREE_DEPTH; height++) {
+      branch.add(
+          Hash.keccak256(
+              Bytes.concatenate(
+                  Bytes.wrap("vrf node".getBytes(StandardCharsets.UTF_8)),
+                  index(validatorIndex),
+                  index(height))));
+    }
+    return branch;
+  }
+
+  private static Bytes index(final long value) {
+    return Bytes.ofUnsignedLong(value, ByteOrder.LITTLE_ENDIAN);
   }
 }

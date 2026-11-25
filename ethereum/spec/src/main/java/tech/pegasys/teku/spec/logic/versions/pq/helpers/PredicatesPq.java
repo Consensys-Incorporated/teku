@@ -55,9 +55,9 @@ public class PredicatesPq extends PredicatesGloas {
   }
 
   /**
-   * is_valid_vrf_proof: {@code proof} opens the leaf at index {@code slot} of the tree under the
-   * validator's VRF root, a Keccak-256 Merkle tree. Only the low {@code VRF_TREE_DEPTH} bits of the
-   * slot select the leaf.
+   * is_valid_vrf_proof: {@code proof} reveals the secret that the leaf at index {@code slot} of the
+   * tree under the validator's VRF root, a Keccak-256 Merkle tree, commits to. Only the low {@code
+   * VRF_TREE_DEPTH} bits of the slot select the leaf.
    */
   public boolean isValidVrfProof(
       final BeaconState state,

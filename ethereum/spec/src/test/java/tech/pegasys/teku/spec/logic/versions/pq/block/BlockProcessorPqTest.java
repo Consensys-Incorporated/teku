@@ -23,6 +23,7 @@ import static tech.pegasys.teku.spec.constants.PqConstants.XMSS_RESERVED_LEAVES;
 import com.google.common.io.Resources;
 import it.unimi.dsi.fastutil.ints.IntList;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -162,7 +163,7 @@ class BlockProcessorPqTest {
           starkVerifier);
 
   @Test
-  void randaoMixesInTheVrfLeafAfterVerifyingTheProof() throws Exception {
+  void randaoMixesInTheVrfSecretAfterVerifyingTheProof() throws Exception {
     final UInt64 slot = UInt64.ONE;
     final BeaconStatePq genesis = atSlot(fixtureGenesis(), slot);
     final int proposerIndex = accessors.getBeaconProposerIndex(genesis);
@@ -497,9 +498,15 @@ class BlockProcessorPqTest {
     return proof;
   }
 
-  /** The root of a VRF tree in which {@code proof} opens the leaf at {@code index}. */
+  /** The VRF root that {@code proof}, a secret and its leaf's branch, opens at {@code index}. */
   private static Bytes32 vrfRoot(final List<Bytes32> proof, final long index) {
-    Bytes32 node = proof.getFirst();
+    // compute_vrf_leaf: the leaf commits to the revealed secret and its index
+    Bytes32 node =
+        Hash.keccak256(
+            Bytes.concatenate(
+                Bytes.wrap("VRF_LEAF".getBytes(StandardCharsets.US_ASCII)),
+                proof.getFirst(),
+                Bytes.ofUnsignedLong(index).reverse()));
     for (int depth = 0; depth < VRF_TREE_DEPTH; depth++) {
       final Bytes32 sibling = proof.get(depth + 1);
       node =

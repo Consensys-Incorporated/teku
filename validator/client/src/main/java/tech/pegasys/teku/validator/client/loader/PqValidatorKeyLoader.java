@@ -214,13 +214,23 @@ public class PqValidatorKeyLoader {
    */
   private VrfProver loadDerivedVrfProver(
       final Bytes32 vrfSeed, final BLSPublicKey blsPublicKey, final Path vrfCacheDirectory) {
+    // Both files are derived from the seed alone, so one that doesn't match it, e.g. one saved
+    // before the VRF tree's leaves changed (consensus-specs pq b5d422b2), is derived again
     final Path vrfCachePath = derivedVrfCachePath(vrfCacheDirectory, blsPublicKey);
     if (Files.exists(vrfCachePath)) {
-      return readVrfCache(vrfCachePath, vrfSeed);
+      try {
+        return readVrfCache(vrfCachePath, vrfSeed);
+      } catch (final InvalidConfigurationException e) {
+        LOG.warn("Ignoring stale VRF cache for derived PQ keys: {}", e.getMessage());
+      }
     }
     final Path vrfStatePath = derivedVrfStatePath(vrfCacheDirectory, blsPublicKey);
     if (Files.exists(vrfStatePath)) {
-      return readVrfState(vrfStatePath, vrfSeed);
+      try {
+        return readVrfState(vrfStatePath, vrfSeed);
+      } catch (final InvalidConfigurationException e) {
+        LOG.warn("Ignoring stale VRF state for derived PQ keys: {}", e.getMessage());
+      }
     }
     final Optional<VrfLeafZeroState> fetchedState = findFetchedVrfState(vrfSeed, blsPublicKey);
     if (fetchedState.isPresent()) {

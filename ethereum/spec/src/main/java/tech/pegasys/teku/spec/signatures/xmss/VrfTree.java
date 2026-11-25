@@ -27,11 +27,12 @@ import tech.pegasys.teku.spec.constants.PqConstants;
 
 /**
  * A validator's VRF tree (PQ validator.md, "VRF tree"): a Keccak-256 Merkle tree of depth {@link
- * PqConstants#VRF_TREE_DEPTH} with one leaf per slot, derived from a secret 32-byte seed. Its root
- * is the validator's registered VRF root, and the proof for a slot is the validator's RANDAO
- * reveal.
+ * PqConstants#VRF_TREE_DEPTH} with one leaf per slot, derived from a secret 32-byte seed. The leaf
+ * for a slot commits to the validator's secret for the slot (compute_vrf_leaf of
+ * compute_vrf_secret). Its root is the validator's registered VRF root, and the proof for a slot,
+ * the secret followed by the leaf's branch, is the validator's RANDAO reveal.
  *
- * <p>Deriving the root hashes every leaf, about 2^32 Keccak-256 calls at full depth, so it is a
+ * <p>Deriving the root hashes every leaf, about 2^33 Keccak-256 calls at full depth, so it is a
  * one-off when the key is created. This class keeps the nodes at {@code cachedHeight} and every
  * node above them; a proof then costs one subtree of 2^{@code cachedHeight} leaves. At the default
  * height of 16 the cache is 2^15 nodes (1 MiB) per validator. {@link #getCachedNodes()} and {@link
@@ -143,8 +144,9 @@ public final class VrfTree implements VrfProver {
   }
 
   /**
-   * compute_vrf_proof: the leaf at index {@code slot}, followed by its Merkle branch from the leaf
-   * up.
+   * compute_vrf_proof: the secret for {@code slot}, followed by the Merkle branch of the leaf at
+   * index {@code slot}, from the leaf up. The branch holds only commitments, so it reveals no other
+   * secret.
    */
   @Override
   public List<Bytes32> computeProof(final UInt64 slot) {
@@ -167,7 +169,7 @@ public final class VrfTree implements VrfProver {
       keccak.hashLeaf(seedLanes, subtreeStart + i, layer, i * VrfKeccak.LANES);
     }
     final int leafInSubtree = (int) (leafIndex - subtreeStart);
-    proof.add(VrfKeccak.fromLanes(layer, leafInSubtree * VrfKeccak.LANES));
+    proof.add(computeSecret(seed, slot));
     for (int height = 0; height < cachedHeight; height++) {
       final int indexInLayer = leafInSubtree >>> height;
       proof.add(VrfKeccak.fromLanes(layer, (indexInLayer ^ 1) * VrfKeccak.LANES));
@@ -190,10 +192,30 @@ public final class VrfTree implements VrfProver {
     return proof;
   }
 
-  /** compute_vrf_leaf: {@code keccak256(vrf_seed ‖ uint_to_bytes(index))}. */
+  /** The leaf at {@code index} of the tree derived from {@code seed}. */
   public static Bytes32 computeLeaf(final Bytes32 seed, final UInt64 index) {
     final long[] leaf = new long[VrfKeccak.LANES];
     new VrfKeccak().hashLeaf(VrfKeccak.toLanes(seed), index.longValue(), leaf, 0);
+    return VrfKeccak.fromLanes(leaf, 0);
+  }
+
+  /**
+   * compute_vrf_secret: {@code keccak256(VRF_SECRET_DOMAIN ‖ vrf_seed ‖ uint_to_bytes(index))}, the
+   * secret that the leaf at {@code index} commits to.
+   */
+  public static Bytes32 computeSecret(final Bytes32 seed, final UInt64 index) {
+    final long[] secret = new long[VrfKeccak.LANES];
+    new VrfKeccak().hashSecret(VrfKeccak.toLanes(seed), index.longValue(), secret, 0);
+    return VrfKeccak.fromLanes(secret, 0);
+  }
+
+  /**
+   * compute_vrf_leaf: {@code keccak256(VRF_LEAF_DOMAIN ‖ secret ‖ uint_to_bytes(index))}, the leaf
+   * at {@code index} that commits to {@code secret}.
+   */
+  public static Bytes32 computeLeafOfSecret(final Bytes32 secret, final UInt64 index) {
+    final long[] leaf = new long[VrfKeccak.LANES];
+    new VrfKeccak().hashLeafOfSecret(VrfKeccak.toLanes(secret), 0, index.longValue(), leaf, 0);
     return VrfKeccak.fromLanes(leaf, 0);
   }
 
@@ -223,12 +245,13 @@ public final class VrfTree implements VrfProver {
   }
 
   /**
-   * The root that {@code proof} opens for {@code slot}: the walk in is_valid_vrf_proof. Only the
-   * low {@code proof.size() - 1} bits of the slot select the leaf.
+   * The root that {@code proof} opens for {@code slot}: the walk in is_valid_vrf_proof, from the
+   * leaf for the slot that commits to the revealed secret. Only the low {@code proof.size() - 1}
+   * bits of the slot select the leaf's position, but the leaf commits to the whole slot.
    */
   public static Bytes32 computeRootFromProof(final List<Bytes32> proof, final UInt64 slot) {
-    checkArgument(!proof.isEmpty(), "A VRF proof holds at least the leaf");
-    Bytes32 value = proof.getFirst();
+    checkArgument(!proof.isEmpty(), "A VRF proof holds at least the secret");
+    Bytes32 value = computeLeafOfSecret(proof.getFirst(), slot);
     for (int height = 0; height < proof.size() - 1; height++) {
       final Bytes32 sibling = proof.get(height + 1);
       // UInt64 holds the slot's unsigned bits, so an unsigned shift reads them

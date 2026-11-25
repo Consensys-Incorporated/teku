@@ -36,6 +36,7 @@ public class SpecConfigPqImpl extends DelegatingSpecConfigEip8483 implements Spe
   private final int aggregationCutoffBps;
   private final int aggregateDueBpsPq;
   private final int aggregatorDelayBps;
+  private final int xMaxCommitteeCountPerSlot;
 
   public SpecConfigPqImpl(
       final SpecConfigEip8483 specConfig,
@@ -55,7 +56,8 @@ public class SpecConfigPqImpl extends DelegatingSpecConfigEip8483 implements Spe
       final int attestationSubnetCountPq,
       final int aggregationCutoffBps,
       final int aggregateDueBpsPq,
-      final int aggregatorDelayBps) {
+      final int aggregatorDelayBps,
+      final int xMaxCommitteeCountPerSlot) {
     super(specConfig);
     this.maxCommitteesPerSlotPq = maxCommitteesPerSlotPq;
     this.minAttestationInclusionDelayPq = minAttestationInclusionDelayPq;
@@ -75,6 +77,7 @@ public class SpecConfigPqImpl extends DelegatingSpecConfigEip8483 implements Spe
     this.aggregationCutoffBps = aggregationCutoffBps;
     this.aggregateDueBpsPq = aggregateDueBpsPq;
     this.aggregatorDelayBps = aggregatorDelayBps;
+    this.xMaxCommitteeCountPerSlot = xMaxCommitteeCountPerSlot;
   }
 
   @Override
@@ -174,6 +177,11 @@ public class SpecConfigPqImpl extends DelegatingSpecConfigEip8483 implements Spe
   }
 
   @Override
+  public int getXMaxCommitteeCountPerSlot() {
+    return xMaxCommitteeCountPerSlot;
+  }
+
+  @Override
   public Optional<SpecConfigPq> toVersionPq() {
     return Optional.of(this);
   }
@@ -206,7 +214,8 @@ public class SpecConfigPqImpl extends DelegatingSpecConfigEip8483 implements Spe
         && attestationSubnetCountPq == that.attestationSubnetCountPq
         && aggregationCutoffBps == that.aggregationCutoffBps
         && aggregateDueBpsPq == that.aggregateDueBpsPq
-        && aggregatorDelayBps == that.aggregatorDelayBps;
+        && aggregatorDelayBps == that.aggregatorDelayBps
+        && xMaxCommitteeCountPerSlot == that.xMaxCommitteeCountPerSlot;
   }
 
   @Override
@@ -229,6 +238,7 @@ public class SpecConfigPqImpl extends DelegatingSpecConfigEip8483 implements Spe
         attestationSubnetCountPq,
         aggregationCutoffBps,
         aggregateDueBpsPq,
-        aggregatorDelayBps);
+        aggregatorDelayBps,
+        xMaxCommitteeCountPerSlot);
   }
 }

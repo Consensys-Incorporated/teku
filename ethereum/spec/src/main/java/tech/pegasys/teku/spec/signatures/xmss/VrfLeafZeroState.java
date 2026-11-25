@@ -29,11 +29,12 @@ import tech.pegasys.teku.spec.constants.PqConstants;
  * devnet tooling (ethereum-package {@code vrf_state_url}) precomputes for each validator. It saves
  * deriving the whole tree, about 2^32 hashes.
  *
- * <p>The branch of the leaf for slot {@code s} needs, at each height {@code h}, the node at index
- * {@code (s >> h) ^ 1}. Index 1 is a stored sibling of leaf 0 and index 0 is on leaf 0's path, so
- * only the nodes right of leaf 0 at the heights below the top bit of {@code s} are hashed: about
- * {@code s} leaves at most. That is cheap while slots are small, as on a young devnet, and grows
- * with the slot.
+ * <p>A proof reveals the secret for the slot (compute_vrf_secret) and the branch of the leaf that
+ * commits to it. The branch of the leaf for slot {@code s} needs, at each height {@code h}, the
+ * node at index {@code (s >> h) ^ 1}. Index 1 is a stored sibling of leaf 0 and index 0 is on leaf
+ * 0's path, so only the nodes right of leaf 0 at the heights below the top bit of {@code s} are
+ * hashed: about {@code s} leaves at most. That is cheap while slots are small, as on a young
+ * devnet, and grows with the slot.
  *
  * <p>The serialized state is {@code root ‖ uint32_le(0) ‖ sibling_0 ‖ … ‖ sibling_30}, 1028 bytes,
  * where {@code sibling_h} is the node at height {@code h} and index 1.
@@ -148,7 +149,7 @@ public final class VrfLeafZeroState implements VrfProver {
         1L << depth);
     final long leafIndex = slot.longValue();
     final List<Bytes32> proof = new ArrayList<>(depth + 1);
-    proof.add(leafIndex == 0 ? leftPath[0] : VrfTree.computeLeaf(seed, UInt64.valueOf(leafIndex)));
+    proof.add(VrfTree.computeSecret(seed, slot));
     for (int height = 0; height < depth; height++) {
       final long siblingIndex = (leafIndex >>> height) ^ 1;
       if (siblingIndex == 1) {
