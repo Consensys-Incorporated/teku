@@ -268,9 +268,10 @@ public class ConnectionManager extends Service {
   /**
    * A peer may become static while a discovery dial to it is pending or after discovery connected
    * to it. Its pool membership then belongs to the static connection loop, so the discovery
-   * bookkeeping must not drop it.
+   * bookkeeping must not drop it. Synchronized with {@link #addStaticPeer} so the peer cannot
+   * become static between the check and the removal.
    */
-  private void forgetDiscoveredPeer(final NodeId nodeId) {
+  private synchronized void forgetDiscoveredPeer(final NodeId nodeId) {
     if (!staticPeerIds.contains(nodeId)) {
       peerPools.forgetPeer(nodeId);
     }
