@@ -46,6 +46,7 @@ import tech.pegasys.teku.networking.p2p.discovery.DiscoveryService;
 import tech.pegasys.teku.networking.p2p.network.P2PNetwork;
 import tech.pegasys.teku.networking.p2p.network.PeerAddress;
 import tech.pegasys.teku.networking.p2p.peer.DisconnectReason;
+import tech.pegasys.teku.networking.p2p.peer.NodeId;
 import tech.pegasys.teku.networking.p2p.peer.Peer;
 import tech.pegasys.teku.service.serviceutils.Service;
 
@@ -59,6 +60,8 @@ public class ConnectionManager extends Service {
   private final TimeProvider timeProvider;
   private final P2PNetwork<? extends Peer> network;
   private final Set<PeerAddress> staticPeers;
+  // Static peers are dialled only by their own reconnect loop, never by discovery selection
+  private final Set<NodeId> staticPeerIds = ConcurrentHashMap.newKeySet();
   private final DiscoveryService discoveryService;
   private final PeerSelectionStrategy peerSelectionStrategy;
   private final Counter consideredCandidateCounter;
@@ -87,6 +90,7 @@ public class ConnectionManager extends Service {
     this.asyncRunner = asyncRunner;
     this.network = network;
     this.staticPeers = new HashSet<>(peerAddresses);
+    peerAddresses.forEach(peerAddress -> staticPeerIds.add(peerAddress.getId()));
     this.discoveryService = discoveryService;
     this.peerSelectionStrategy = peerSelectionStrategy;
     this.timeProvider = timeProvider;
@@ -190,6 +194,7 @@ public class ConnectionManager extends Service {
     final Set<DiscoveryPeer> candidates =
         Stream.concat(additionalPeersToConsider.stream(), discoveryService.streamKnownPeers())
             .filter(this::isPeerValid)
+            .filter(candidate -> !isStaticPeer(candidate))
             .collect(Collectors.toSet());
     final Set<DiscoveryPeer> dialable =
         candidates.stream()
@@ -252,12 +257,24 @@ public class ConnectionManager extends Service {
             peer -> {
               LOG.trace("Successfully connected to peer {}", peer.getId());
               peer.subscribeDisconnect(
-                  (reason, locallyInitiated) -> peerPools.forgetPeer(peer.getId()));
+                  (reason, locallyInitiated) -> forgetDiscoveredPeer(peer.getId()));
             },
             error -> {
               LOG.trace(() -> "Failed to connect to peer: " + peerAddress.getId(), error);
-              peerPools.forgetPeer(peerAddress.getId());
+              forgetDiscoveredPeer(peerAddress.getId());
             });
+  }
+
+  /**
+   * A peer may become static while a discovery dial to it is pending or after discovery connected
+   * to it. Its pool membership then belongs to the static connection loop, so the discovery
+   * bookkeeping must not drop it. Synchronized with {@link #addStaticPeer} so the peer cannot
+   * become static between the check and the removal.
+   */
+  private synchronized void forgetDiscoveredPeer(final NodeId nodeId) {
+    if (!staticPeerIds.contains(nodeId)) {
+      peerPools.forgetPeer(nodeId);
+    }
   }
 
   private void onPeerConnected(final Peer peer) {
@@ -285,6 +302,7 @@ public class ConnectionManager extends Service {
   public synchronized void addStaticPeer(final PeerAddress peerAddress) {
     if (!staticPeers.contains(peerAddress)) {
       staticPeers.add(peerAddress);
+      staticPeerIds.add(peerAddress.getId());
       createPersistentConnection(peerAddress);
     }
   }
@@ -373,6 +391,14 @@ public class ConnectionManager extends Service {
 
   public void addPeerPredicate(final Predicate<DiscoveryPeer> predicate) {
     peerPredicates.add(predicate);
+  }
+
+  private boolean isStaticPeer(final DiscoveryPeer candidate) {
+    return !staticPeerIds.isEmpty()
+        && network
+            .createPeerAddress(candidate)
+            .map(peerAddress -> staticPeerIds.contains(peerAddress.getId()))
+            .orElse(false);
   }
 
   private boolean isPeerValid(final DiscoveryPeer peer) {
