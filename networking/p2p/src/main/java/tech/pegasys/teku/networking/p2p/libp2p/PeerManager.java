@@ -76,7 +76,8 @@ public class PeerManager implements ConnectionHandler {
     this.peerHandlers = peerHandlers;
     this.rpcHandlers = rpcHandlers;
     this.peerScoreFunction = peerScoreFunction;
-    // Counted per actual dial, not per caller: callers that join a pending dial share one attempt
+    // Counted once per connection attempt to a peer: callers that join a pending attempt share it,
+    // and a dial to the fallback address belongs to the same attempt
     final LabelledMetric<Counter> connectionAttemptCounter =
         metricsSystem.createLabelledCounter(
             TekuMetricCategory.NETWORK,
@@ -203,8 +204,12 @@ public class PeerManager implements ConnectionHandler {
         .catchAndRethrow(
             error -> {
               failedConnectionCounter.inc();
+              // A failed attempt always ends on the fallback address when the peer has one
               LOG.debug(
-                  "Failed to connect to {}: {}", peer, Throwables.getRootCause(error).getMessage());
+                  "Failed to connect to {} via {}: {}",
+                  peer.getId(),
+                  peer.getFallbackMultiaddr().orElse(peer.getMultiaddr()),
+                  Throwables.getRootCause(error).getMessage());
               reputationManager.reportInitiatedConnectionFailed(peer);
             });
   }
