@@ -21,6 +21,10 @@ import java.util.function.Function;
 
 class RequiredSerializableFieldDefinition<TObject, TField>
     implements SerializableFieldDefinition<TObject> {
+
+  // Computed on first use. The definition is immutable, so the hash never changes; a race only
+  // computes it twice
+  private int cachedHashCode;
   private final String name;
   private final Function<TObject, TField> getter;
   protected final SerializableTypeDefinition<TField> type;
@@ -76,6 +80,13 @@ class RequiredSerializableFieldDefinition<TObject, TField>
 
   @Override
   public int hashCode() {
-    return Objects.hash(name, type);
+    // Cached: hashing walks the whole nested type, and building the OpenAPI docs hashes the same
+    // types again and again while collecting the types each endpoint references
+    int hash = cachedHashCode;
+    if (hash == 0) {
+      hash = Objects.hash(name, type);
+      cachedHashCode = hash;
+    }
+    return hash;
   }
 }
