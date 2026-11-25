@@ -1,10 +1,13 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
-  ],
+  "extends": ["config:recommended"],
   "enabledManagers": ["github-actions", "dockerfile"],
   "dependencyDashboard": false,
+  "schedule": ["before 6am on monday"],
+  "vulnerabilityAlerts": {
+    "labels": ["security"]
+  },
+  "osvVulnerabilityAlerts": true,
   "packageRules": [
     {
       "description": "Pin all GitHub Actions to SHA digests",
@@ -12,6 +15,14 @@
       "pinDigests": true,
       "minimumReleaseAge": "7 days",
       "groupName": "Renovatebot GHA Updates"
+    },
+    {
+      "description": "Allow immediate updates for Consensys-Incorporated/github-actions",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": [
+        "Consensys-Incorporated/github-actions{/,}**"
+      ],
+      "minimumReleaseAge": "0 days"
     },
     {
       "description": "Group all Dockerfile base image updates into a single PR",
