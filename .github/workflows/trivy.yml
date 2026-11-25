@@ -22,6 +22,9 @@ jobs:
       security-events: write
     uses: Consensys-Incorporated/github-actions/.github/workflows/trivy.yml@d7118b7e3733bac9a7f92f05f02f18c73892d5ad # 2.2.0
     with:
-      environment: security # holds SLACK_WEBHOOK
+      # Only the scheduled scan notifies Slack, so only it needs the security
+      # environment (which holds SLACK_WEBHOOK). Pull request branches can't
+      # deploy to that environment here; other runs use none.
+      environment: ${{ github.event_name == 'schedule' && 'security' || '' }}
     secrets:
       SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }} # value from the security environment
