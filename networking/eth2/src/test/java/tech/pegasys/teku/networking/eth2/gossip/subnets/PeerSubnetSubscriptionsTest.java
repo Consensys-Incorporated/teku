@@ -189,9 +189,58 @@ class PeerSubnetSubscriptionsTest {
         .isZero();
   }
 
+  @Test
+  public void create_shouldNotCountSubscriberThatIsDisconnecting() {
+    syncnetSubscriptions.setSubscriptions(IntList.of(1));
+    // A peer being disconnected stays in the peer list and subscribed until its goodbye completes
+    when(gossipNetwork.streamPeers())
+        .thenAnswer(__ -> Stream.of(mockPeer(PEER1), mockDisconnectingPeer(PEER2)));
+    when(gossipNetwork.getSubscribersByTopic())
+        .thenReturn(
+            Map.of(
+                ATTESTATION_SUBNET_TOPIC_PREFIX + "0", Set.of(PEER1, PEER2),
+                SYNC_COMMITTEE_SUBNET_TOPIC_PREFIX + "1", Set.of(PEER1, PEER2)));
+
+    final PeerSubnetSubscriptions subscriptions = createPeerSubnetSubscriptions();
+
+    assertThat(subscriptions.getSubscriberCountForAttestationSubnet(0)).isEqualTo(1);
+    assertThat(subscriptions.getSubscriberCountForSyncCommitteeSubnet(1)).isEqualTo(1);
+    assertThat(subscriptions.getAttestationSubnetSubscriptions(PEER2))
+        .isEqualTo(createAttnetsBitvector());
+    assertThat(subscriptions.getSyncCommitteeSubscriptions(PEER2))
+        .isEqualTo(createSyncnetsBitvector());
+  }
+
+  @Test
+  public void createScorer_shouldScoreLastSubscriberAsSoleSubscriberWhenTheOtherIsDisconnecting() {
+    when(gossipNetwork.streamPeers()).thenAnswer(__ -> Stream.of(mockPeer(PEER1)));
+    when(gossipNetwork.getSubscribersByTopic())
+        .thenReturn(Map.of(ATTESTATION_SUBNET_TOPIC_PREFIX + "0", Set.of(PEER1)));
+    final int scoreAsSoleSubscriber =
+        createPeerSubnetSubscriptions().createScorer().scoreExistingPeer(PEER1);
+
+    when(gossipNetwork.streamPeers())
+        .thenAnswer(__ -> Stream.of(mockPeer(PEER1), mockDisconnectingPeer(PEER2)));
+    when(gossipNetwork.getSubscribersByTopic())
+        .thenReturn(Map.of(ATTESTATION_SUBNET_TOPIC_PREFIX + "0", Set.of(PEER1, PEER2)));
+    final int scoreWhileOtherSubscriberDisconnects =
+        createPeerSubnetSubscriptions().createScorer().scoreExistingPeer(PEER1);
+
+    // Otherwise the last subscriber of a subnet looks redundant and can be evicted too
+    assertThat(scoreWhileOtherSubscriberDisconnects).isEqualTo(scoreAsSoleSubscriber);
+  }
+
   private Peer mockPeer(final NodeId nodeId) {
     final Peer peer = mock(Peer.class);
     when(peer.getId()).thenReturn(nodeId);
+    when(peer.isConnected()).thenReturn(true);
+    return peer;
+  }
+
+  private Peer mockDisconnectingPeer(final NodeId nodeId) {
+    final Peer peer = mock(Peer.class);
+    when(peer.getId()).thenReturn(nodeId);
+    when(peer.isConnected()).thenReturn(false);
     return peer;
   }
 

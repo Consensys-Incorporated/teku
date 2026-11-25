@@ -81,7 +81,7 @@ public class PeerSubnetSubscriptions {
       final int targetSubnetSubscriberCount,
       final SettableLabelledGauge subnetPeerCountGauge,
       final SyncCommitteeSubnetPeerCountLogger syncCommitteeSubnetPeerCountLogger) {
-    final Map<String, Collection<NodeId>> subscribersByTopic = network.getSubscribersByTopic();
+    final Map<String, Collection<NodeId>> subscribersByTopic = liveSubscribersByTopic(network);
     // Peers without a derivable discovery node id (e.g. non-secp256k1 identities) cannot be mapped
     // to DAS custody columns, so they provide no data column sidecar value and are excluded from
     // data column subnet scoring below.
@@ -213,6 +213,32 @@ public class PeerSubnetSubscriptions {
       final SchemaDefinitionsSupplier currentSchemaDefinitions,
       final SszBitvectorSchema<?> dataColumnSidecarSubnetBitmaskSchema) {
     return new Builder(currentSchemaDefinitions, dataColumnSidecarSubnetBitmaskSchema);
+  }
+
+  /**
+   * A peer being disconnected stays subscribed at the gossip layer until its goodbye completes, but
+   * it no longer provides subnet coverage, so it is left out of the subscribers.
+   */
+  private static Map<String, Collection<NodeId>> liveSubscribersByTopic(
+      final P2PNetwork<?> network) {
+    final Map<String, Collection<NodeId>> subscribersByTopic = network.getSubscribersByTopic();
+    final Set<NodeId> disconnectingPeers =
+        network
+            .streamPeers()
+            .filter(peer -> !peer.isConnected())
+            .map(Peer::getId)
+            .collect(Collectors.toSet());
+    if (disconnectingPeers.isEmpty()) {
+      return subscribersByTopic;
+    }
+    return subscribersByTopic.entrySet().stream()
+        .collect(
+            Collectors.toMap(
+                Map.Entry::getKey,
+                entry ->
+                    entry.getValue().stream()
+                        .filter(subscriber -> !disconnectingPeers.contains(subscriber))
+                        .toList()));
   }
 
   @VisibleForTesting
