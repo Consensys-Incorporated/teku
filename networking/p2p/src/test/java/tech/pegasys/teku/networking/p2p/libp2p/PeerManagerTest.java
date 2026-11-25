@@ -35,6 +35,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
+import org.hyperledger.besu.plugin.services.metrics.Counter;
+import org.hyperledger.besu.plugin.services.metrics.LabelledMetric;
 import org.hyperledger.besu.plugin.services.metrics.LabelledSuppliedMetric;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -90,7 +92,16 @@ public class PeerManagerTest {
     final MetricsSystem metricsSystem = mock(MetricsSystem.class);
     final LabelledSuppliedMetric peerClientLabelledGauge = mock(LabelledSuppliedMetric.class);
     final LabelledSuppliedMetric peerDirectionLabelledGauge = mock(LabelledSuppliedMetric.class);
+    @SuppressWarnings("unchecked")
+    final LabelledMetric<Counter> connectionAttemptCounter = mock(LabelledMetric.class);
+    when(connectionAttemptCounter.labels(any())).thenReturn(mock(Counter.class));
 
+    when(metricsSystem.createLabelledCounter(
+            eq(TekuMetricCategory.NETWORK),
+            eq("peer_connection_attempt_count_total"),
+            any(),
+            eq("status")))
+        .thenReturn(connectionAttemptCounter);
     when(metricsSystem.createLabelledSuppliedGauge(
             eq(TekuMetricCategory.LIBP2P), eq("connected_peers_current"), any(), eq("client")))
         .thenReturn(peerClientLabelledGauge);
@@ -327,6 +338,52 @@ public class PeerManagerTest {
     verify(network).connect(tcpMultiaddr);
     verify(reputationManager).reportInitiatedConnectionFailed(peerAddress);
     verify(reputationManager, never()).reportInitiatedConnectionSuccessful(peerAddress);
+  }
+
+  @Test
+  public void shouldCountOneAttemptAndOneFailureWhenTwoCallersShareOneDial() {
+    final Multiaddr multiaddr = Multiaddr.fromString("/ip4/127.0.0.1/tcp/9000");
+    final MultiaddrPeerAddress peerAddress = new MultiaddrPeerAddress(new MockNodeId(1), multiaddr);
+    final SafeFuture<Connection> dial = new SafeFuture<>();
+    when(network.connect(multiaddr)).thenReturn(dial);
+
+    final SafeFuture<Peer> firstCaller = peerManager.connect(peerAddress, network);
+    final SafeFuture<Peer> secondCaller = peerManager.connect(peerAddress, network);
+    assertThat(connectionAttempts("attempted")).isEqualTo(1);
+
+    dial.completeExceptionally(new RuntimeException("Nope"));
+    assertThat(firstCaller).isCompletedExceptionally();
+    assertThat(secondCaller).isCompletedExceptionally();
+    assertThat(connectionAttempts("failed")).isEqualTo(1);
+    assertThat(connectionAttempts("successful")).isZero();
+  }
+
+  @Test
+  public void shouldCountSuccessfulDialOnce() {
+    final Connection connection = mock(Connection.class);
+    final Session secureSession =
+        new Session(
+            PeerId.random(), PeerId.random(), EcdsaKt.generateEcdsaKeyPair().component2(), null);
+    when(connection.secureSession()).thenReturn(secureSession);
+    when(connection.closeFuture()).thenReturn(new SafeFuture<>());
+    final Multiaddr multiaddr = Multiaddr.fromString("/ip4/127.0.0.1/tcp/9000");
+    final MultiaddrPeerAddress peerAddress = new MultiaddrPeerAddress(new MockNodeId(1), multiaddr);
+    final SafeFuture<Connection> dial = new SafeFuture<>();
+    when(network.connect(multiaddr)).thenReturn(dial);
+
+    final SafeFuture<Peer> result = peerManager.connect(peerAddress, network);
+    peerManager.handleConnection(connection);
+    dial.complete(connection);
+    assertThat(result).isCompleted();
+
+    assertThat(connectionAttempts("attempted")).isEqualTo(1);
+    assertThat(connectionAttempts("successful")).isEqualTo(1);
+    assertThat(connectionAttempts("failed")).isZero();
+  }
+
+  private long connectionAttempts(final String status) {
+    return metricsSystem.getLabelledCounterValue(
+        TekuMetricCategory.NETWORK, "peer_connection_attempt_count_total", status);
   }
 
   @Test

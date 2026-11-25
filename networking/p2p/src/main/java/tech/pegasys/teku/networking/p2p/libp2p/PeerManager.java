@@ -29,6 +29,8 @@ import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
+import org.hyperledger.besu.plugin.services.metrics.Counter;
+import org.hyperledger.besu.plugin.services.metrics.LabelledMetric;
 import org.hyperledger.besu.plugin.services.metrics.LabelledSuppliedMetric;
 import org.jetbrains.annotations.NotNull;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -60,6 +62,10 @@ public class PeerManager implements ConnectionHandler {
   private final Subscribers<PeerConnectedSubscriber<Peer>> connectSubscribers =
       Subscribers.create(true);
 
+  private final Counter attemptedConnectionCounter;
+  private final Counter successfulConnectionCounter;
+  private final Counter failedConnectionCounter;
+
   public PeerManager(
       final MetricsSystem metricsSystem,
       final ReputationManager reputationManager,
@@ -70,6 +76,16 @@ public class PeerManager implements ConnectionHandler {
     this.peerHandlers = peerHandlers;
     this.rpcHandlers = rpcHandlers;
     this.peerScoreFunction = peerScoreFunction;
+    // Counted per actual dial, not per caller: callers that join a pending dial share one attempt
+    final LabelledMetric<Counter> connectionAttemptCounter =
+        metricsSystem.createLabelledCounter(
+            TekuMetricCategory.NETWORK,
+            "peer_connection_attempt_count_total",
+            "Total number of outbound connection attempts made",
+            "status");
+    attemptedConnectionCounter = connectionAttemptCounter.labels("attempted");
+    successfulConnectionCounter = connectionAttemptCounter.labels("successful");
+    failedConnectionCounter = connectionAttemptCounter.labels("failed");
     metricsSystem.createGauge(
         TekuMetricCategory.LIBP2P, "peers", "Tracks number of libp2p peers", this::getPeerCount);
     final LabelledSuppliedMetric peerClientLabelledGauge =
@@ -143,6 +159,7 @@ public class PeerManager implements ConnectionHandler {
 
   private SafeFuture<Peer> doConnect(final MultiaddrPeerAddress peer, final Network network) {
     LOG.debug("Connecting to {}", peer);
+    attemptedConnectionCounter.inc();
 
     return SafeFuture.of(() -> network.connect(peer.getMultiaddr()))
         .exceptionallyCompose(
@@ -182,7 +199,14 @@ public class PeerManager implements ConnectionHandler {
               return connectedPeer;
             })
         .exceptionallyCompose(this::handleConcurrentConnectionInitiation)
-        .catchAndRethrow(error -> reputationManager.reportInitiatedConnectionFailed(peer));
+        .thenPeek(__ -> successfulConnectionCounter.inc())
+        .catchAndRethrow(
+            error -> {
+              failedConnectionCounter.inc();
+              LOG.debug(
+                  "Failed to connect to {}: {}", peer, Throwables.getRootCause(error).getMessage());
+              reputationManager.reportInitiatedConnectionFailed(peer);
+            });
   }
 
   private CompletionStage<Peer> handleConcurrentConnectionInitiation(final Throwable error) {
