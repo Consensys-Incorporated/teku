@@ -783,7 +783,7 @@ jobs:
       jdk_version: jdk25
       include_hash_in_docker: ${{ github.event_name == 'workflow_dispatch' && inputs.include_hash_in_docker || 'false' }}
 
-  publishDockerJDK26:
+  publishDockerJDK27:
     if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/')
     needs: [assemble, unitTestsSuite, integrationTestsSuite, propertyTestsSuite, acceptanceTestsSuite, referenceTests]
     permissions:
@@ -793,7 +793,7 @@ jobs:
     uses: ./.github/workflows/publish-docker.yml
     with:
       assemble_run_id: ${{ github.run_id }}
-      jdk_version: jdk26
+      jdk_version: jdk27
       include_hash_in_docker: ${{ github.event_name == 'workflow_dispatch' && inputs.include_hash_in_docker || 'false' }}
 
   # Release Distribution

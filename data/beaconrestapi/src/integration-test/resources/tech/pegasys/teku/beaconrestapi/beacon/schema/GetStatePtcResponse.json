@@ -1,0 +1,34 @@
+{
+  "title" : "GetStatePtcResponse",
+  "type" : "object",
+  "required" : [ "execution_optimistic", "finalized", "data" ],
+  "properties" : {
+    "execution_optimistic" : {
+      "type" : "boolean"
+    },
+    "finalized" : {
+      "type" : "boolean"
+    },
+    "data" : {
+      "type" : "object",
+      "required" : [ "slot", "validators" ],
+      "properties" : {
+        "slot" : {
+          "type" : "string",
+          "description" : "unsigned 64 bit integer",
+          "example" : "1",
+          "format" : "uint64"
+        },
+        "validators" : {
+          "type" : "array",
+          "items" : {
+            "type" : "string",
+            "description" : "unsigned 64 bit integer",
+            "example" : "1",
+            "format" : "uint64"
+          }
+        }
+      }
+    }
+  }
+}
