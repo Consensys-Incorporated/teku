@@ -108,7 +108,11 @@ public class GetProposerPreferences extends RestApiEndpoint {
 
                 Signed proposer preferences are only broadcast once per proposal slot and dependent root.
                 This allows builders to retrieve the ones that were broadcast before they subscribed to the
-                `proposer_preferences` event.""")
+                `proposer_preferences` event.
+
+                An SSZ response holds a single fork's preferences, those of the version in the
+                `Eth-Consensus-Version` header. Around a fork that changes the signature scheme,
+                request the other fork's preferences by `proposal_slot`.""")
         .tags(TAG_BEACON)
         .queryParam(PROPOSAL_SLOT_PARAMETER)
         .queryParam(DEPENDENT_ROOT_PARAMETER)
@@ -148,8 +152,16 @@ public class GetProposerPreferences extends RestApiEndpoint {
                   data.getMilestone().isGreaterThanOrEqualTo(SpecMilestone.PQ)
                       ? SpecMilestone.PQ
                       : SpecMilestone.GLOAS;
-              SszProgressiveListSchema.create(getSchema(schemaDefinitionCache, milestone))
-                  .createFromElements(data.getData())
+              // An SSZ list has a single element type, so around the PQ fork, when the node holds
+              // both BLS and XMSS signed preferences, only those of the version in the
+              // Eth-Consensus-Version header are returned. The rest can be requested by slot.
+              final SignedProposerPreferencesSchema schema =
+                  getSchema(schemaDefinitionCache, milestone);
+              SszProgressiveListSchema.create(schema)
+                  .createFromElements(
+                      data.getData().stream()
+                          .filter(preferences -> preferences.getSchema().equals(schema))
+                          .toList())
                   .sszSerialize(out);
             };
     return new OctetStreamResponseContentTypeDefinition<>(serializer, __ -> Collections.emptyMap());

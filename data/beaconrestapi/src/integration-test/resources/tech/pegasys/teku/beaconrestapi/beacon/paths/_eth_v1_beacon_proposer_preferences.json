@@ -3,7 +3,7 @@
     "tags" : [ "Beacon" ],
     "operationId" : "getProposerPreferences",
     "summary" : "Get signed proposer preferences",
-    "description" : "Retrieves signed proposer preferences known by the node for upcoming proposal slots.\n\nSigned proposer preferences are only broadcast once per proposal slot and dependent root.\nThis allows builders to retrieve the ones that were broadcast before they subscribed to the\n`proposer_preferences` event.",
+    "description" : "Retrieves signed proposer preferences known by the node for upcoming proposal slots.\n\nSigned proposer preferences are only broadcast once per proposal slot and dependent root.\nThis allows builders to retrieve the ones that were broadcast before they subscribed to the\n`proposer_preferences` event.\n\nAn SSZ response holds a single fork's preferences, those of the version in the\n`Eth-Consensus-Version` header. Around a fork that changes the signature scheme,\nrequest the other fork's preferences by `proposal_slot`.",
     "parameters" : [ {
       "name" : "slot",
       "in" : "query",

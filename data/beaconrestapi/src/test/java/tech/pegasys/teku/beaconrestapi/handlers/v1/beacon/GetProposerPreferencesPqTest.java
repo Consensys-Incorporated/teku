@@ -28,7 +28,9 @@ import tech.pegasys.teku.infrastructure.ssz.schema.SszProgressiveListSchema;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferencesSchema;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 
 /** From PQ, proposer preferences carry XMSS signatures. */
 class GetProposerPreferencesPqTest extends AbstractMigratedBeaconHandlerTest {
@@ -70,5 +72,77 @@ class GetProposerPreferencesPqTest extends AbstractMigratedBeaconHandlerTest {
             SszProgressiveListSchema.create(preferences.getSchema())
                 .createFromElements(List.of(preferences))
                 .sszSerialize());
+  }
+
+  @Test
+  void shouldSerializeOnlyPqPreferencesAsSszWhenForksMix() throws Exception {
+    final SignedProposerPreferences gloasPreferences = randomGloasPreferences();
+    final SignedProposerPreferences pqPreferences =
+        dataStructureUtil.randomSignedProposerPreferences();
+
+    final byte[] ssz =
+        getResponseSszFromMetadata(
+            handler,
+            SC_OK,
+            new ObjectAndMetaData<>(
+                List.of(gloasPreferences, pqPreferences), SpecMilestone.PQ, false, false, false));
+
+    assertThat(Bytes.wrap(ssz))
+        .isEqualTo(
+            SszProgressiveListSchema.create(pqPreferences.getSchema())
+                .createFromElements(List.of(pqPreferences))
+                .sszSerialize());
+  }
+
+  @Test
+  void shouldSerializeOnlyGloasPreferencesAsSszWhenForksMix() throws Exception {
+    final SignedProposerPreferences gloasPreferences = randomGloasPreferences();
+    final SignedProposerPreferences pqPreferences =
+        dataStructureUtil.randomSignedProposerPreferences();
+
+    final byte[] ssz =
+        getResponseSszFromMetadata(
+            handler,
+            SC_OK,
+            new ObjectAndMetaData<>(
+                List.of(gloasPreferences, pqPreferences),
+                SpecMilestone.GLOAS,
+                false,
+                false,
+                false));
+
+    assertThat(Bytes.wrap(ssz))
+        .isEqualTo(
+            SszProgressiveListSchema.create(gloasPreferences.getSchema())
+                .createFromElements(List.of(gloasPreferences))
+                .sszSerialize());
+  }
+
+  @Test
+  void shouldSerializeMixedForkPreferencesAsJson() throws Exception {
+    final SignedProposerPreferences gloasPreferences = randomGloasPreferences();
+    final SignedProposerPreferences pqPreferences =
+        dataStructureUtil.randomSignedProposerPreferences();
+
+    final String json =
+        getResponseStringFromMetadata(
+            handler,
+            SC_OK,
+            new ObjectAndMetaData<>(
+                List.of(gloasPreferences, pqPreferences), SpecMilestone.PQ, false, false, false));
+
+    assertThat(JsonTestUtil.parseAsJsonNode(json).at("/data/0/signature").asText())
+        .isEqualTo(gloasPreferences.getSignature().toBytesCompressed().toHexString());
+    assertThat(JsonTestUtil.parseAsJsonNode(json).at("/data/1/signature").asText())
+        .isEqualTo(pqPreferences.getXmssSignature().toHexString());
+  }
+
+  private SignedProposerPreferences randomGloasPreferences() {
+    final SignedProposerPreferencesSchema schema =
+        SchemaDefinitionsGloas.required(
+                schemaDefinitionCache.getSchemaDefinition(SpecMilestone.GLOAS))
+            .getSignedProposerPreferencesSchema();
+    return schema.create(
+        dataStructureUtil.randomProposerPreferences(), dataStructureUtil.randomSignature());
   }
 }
