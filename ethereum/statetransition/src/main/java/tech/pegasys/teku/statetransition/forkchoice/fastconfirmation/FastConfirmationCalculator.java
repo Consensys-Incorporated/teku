@@ -75,6 +75,8 @@ class FastConfirmationCalculator {
   private final Bytes32 head;
   private final UInt64 currentSlot;
   private final UInt64 currentEpoch;
+  // CONFIRMATION_BYZANTINE_THRESHOLD: assumed maximum percentage of Byzantine validators.
+  private final int byzantineThreshold;
 
   // Per-instance (per-slot) memoization. The safety-threshold helpers query the same slot
   // committees and slot ranges for every block they score (and re-evaluate a block across the two
@@ -96,7 +98,8 @@ class FastConfirmationCalculator {
       final Spec spec,
       final FastConfirmationStore fcrStore,
       final FastConfirmationStates states,
-      final UInt64 currentSlot) {
+      final UInt64 currentSlot,
+      final int byzantineThreshold) {
     this.spec = spec;
     this.forkChoiceUtil = spec.atSlot(currentSlot).getForkChoiceUtil();
     this.fcrStore = fcrStore;
@@ -108,6 +111,7 @@ class FastConfirmationCalculator {
     this.head = fcrStore.currentSlotHead();
     this.currentSlot = currentSlot;
     this.currentEpoch = spec.computeEpochAtSlot(currentSlot);
+    this.byzantineThreshold = byzantineThreshold;
   }
 
   /** Implements {@code get_block_slot}. */
@@ -507,10 +511,7 @@ class FastConfirmationCalculator {
     final UInt64 maximumWeight =
         FastConfirmationRuleUtil.estimateCommitteeWeightBetweenSlots(
             spec, totalActiveBalance, startSlot, endSlot);
-    final UInt64 maxAdversarialWeight =
-        maximumWeight
-            .dividedBy(100)
-            .times(FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
+    final UInt64 maxAdversarialWeight = maximumWeight.dividedBy(100).times(byzantineThreshold);
     final UInt64 equivocationScore = getEquivocationScore(balanceSource, startSlot, endSlot);
     return maxAdversarialWeight.isGreaterThan(equivocationScore)
         ? maxAdversarialWeight.minus(equivocationScore)
@@ -745,9 +746,7 @@ class FastConfirmationCalculator {
             spec, totalActiveBalance, epochStart, lastSlot);
     final UInt64 remainingFfgWeight = totalActiveBalance.minusMinZero(ffgWeightTillNow);
     final UInt64 remainingHonestFfgWeight =
-        remainingFfgWeight
-            .dividedBy(100)
-            .times(100 - FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
+        remainingFfgWeight.dividedBy(100).times(100 - byzantineThreshold);
 
     final UInt64 adversarialWeight = computeAdversarialWeight(balanceSource, epochStart, lastSlot);
     // ffg_support - min(adversarial_weight, ffg_support)

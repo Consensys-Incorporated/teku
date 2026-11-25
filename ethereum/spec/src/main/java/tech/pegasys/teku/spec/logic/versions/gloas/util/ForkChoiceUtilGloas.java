@@ -190,7 +190,7 @@ public class ForkChoiceUtilGloas extends ForkChoiceUtilFulu {
 
   @Override
   public boolean isDataAvailabilityRequiredForTimeliness() {
-    // In Gloas (ePBS), beacon block timeliness is determined by block body arrival.
+    // In Gloas (ePBS), beacon block timeliness is recorded when the block is imported.
     // DA is deferred to the execution payload envelope; it does not gate beacon block timeliness.
     return false;
   }

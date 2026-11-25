@@ -203,7 +203,12 @@ public class FastConfirmationBenchmark {
   }
 
   private FastConfirmationCalculator newCalculator() {
-    return new FastConfirmationCalculator(SPEC, fcrStore, states, CURRENT_SLOT);
+    return new FastConfirmationCalculator(
+        SPEC,
+        fcrStore,
+        states,
+        CURRENT_SLOT,
+        FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
   }
 
   public static void main(final String[] args) {

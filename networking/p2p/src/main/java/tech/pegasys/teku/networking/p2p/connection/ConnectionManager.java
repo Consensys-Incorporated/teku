@@ -46,6 +46,7 @@ import tech.pegasys.teku.networking.p2p.discovery.DiscoveryService;
 import tech.pegasys.teku.networking.p2p.network.P2PNetwork;
 import tech.pegasys.teku.networking.p2p.network.PeerAddress;
 import tech.pegasys.teku.networking.p2p.peer.DisconnectReason;
+import tech.pegasys.teku.networking.p2p.peer.NodeId;
 import tech.pegasys.teku.networking.p2p.peer.Peer;
 import tech.pegasys.teku.service.serviceutils.Service;
 
@@ -59,11 +60,10 @@ public class ConnectionManager extends Service {
   private final TimeProvider timeProvider;
   private final P2PNetwork<? extends Peer> network;
   private final Set<PeerAddress> staticPeers;
+  // Static peers are dialled only by their own reconnect loop, never by discovery selection
+  private final Set<NodeId> staticPeerIds = ConcurrentHashMap.newKeySet();
   private final DiscoveryService discoveryService;
   private final PeerSelectionStrategy peerSelectionStrategy;
-  private final Counter attemptedConnectionCounter;
-  private final Counter successfulConnectionCounter;
-  private final Counter failedConnectionCounter;
   private final Counter consideredCandidateCounter;
   private final Counter noDialableAddressCandidateCounter;
   private final Counter eligibleCandidateCounter;
@@ -90,19 +90,11 @@ public class ConnectionManager extends Service {
     this.asyncRunner = asyncRunner;
     this.network = network;
     this.staticPeers = new HashSet<>(peerAddresses);
+    peerAddresses.forEach(peerAddress -> staticPeerIds.add(peerAddress.getId()));
     this.discoveryService = discoveryService;
     this.peerSelectionStrategy = peerSelectionStrategy;
     this.timeProvider = timeProvider;
 
-    final LabelledMetric<Counter> connectionAttemptCounter =
-        metricsSystem.createLabelledCounter(
-            TekuMetricCategory.NETWORK,
-            "peer_connection_attempt_count_total",
-            "Total number of outbound connection attempts made",
-            "status");
-    attemptedConnectionCounter = connectionAttemptCounter.labels("attempted");
-    successfulConnectionCounter = connectionAttemptCounter.labels("successful");
-    failedConnectionCounter = connectionAttemptCounter.labels("failed");
     final LabelledMetric<Counter> candidateCounter =
         metricsSystem.createLabelledCounter(
             TekuMetricCategory.NETWORK,
@@ -202,6 +194,7 @@ public class ConnectionManager extends Service {
     final Set<DiscoveryPeer> candidates =
         Stream.concat(additionalPeersToConsider.stream(), discoveryService.streamKnownPeers())
             .filter(this::isPeerValid)
+            .filter(candidate -> !isStaticPeer(candidate))
             .collect(Collectors.toSet());
     final Set<DiscoveryPeer> dialable =
         candidates.stream()
@@ -258,21 +251,30 @@ public class ConnectionManager extends Service {
 
   private void attemptConnection(final PeerAddress peerAddress) {
     LOG.trace("Attempting to connect to {}", peerAddress.getId());
-    attemptedConnectionCounter.inc();
     network
         .connect(peerAddress)
         .finish(
             peer -> {
               LOG.trace("Successfully connected to peer {}", peer.getId());
-              successfulConnectionCounter.inc();
               peer.subscribeDisconnect(
-                  (reason, locallyInitiated) -> peerPools.forgetPeer(peer.getId()));
+                  (reason, locallyInitiated) -> forgetDiscoveredPeer(peer.getId()));
             },
             error -> {
               LOG.trace(() -> "Failed to connect to peer: " + peerAddress.getId(), error);
-              failedConnectionCounter.inc();
-              peerPools.forgetPeer(peerAddress.getId());
+              forgetDiscoveredPeer(peerAddress.getId());
             });
+  }
+
+  /**
+   * A peer may become static while a discovery dial to it is pending or after discovery connected
+   * to it. Its pool membership then belongs to the static connection loop, so the discovery
+   * bookkeeping must not drop it. Synchronized with {@link #addStaticPeer} so the peer cannot
+   * become static between the check and the removal.
+   */
+  private synchronized void forgetDiscoveredPeer(final NodeId nodeId) {
+    if (!staticPeerIds.contains(nodeId)) {
+      peerPools.forgetPeer(nodeId);
+    }
   }
 
   private void onPeerConnected(final Peer peer) {
@@ -300,6 +302,7 @@ public class ConnectionManager extends Service {
   public synchronized void addStaticPeer(final PeerAddress peerAddress) {
     if (!staticPeers.contains(peerAddress)) {
       staticPeers.add(peerAddress);
+      staticPeerIds.add(peerAddress.getId());
       createPersistentConnection(peerAddress);
     }
   }
@@ -315,13 +318,11 @@ public class ConnectionManager extends Service {
     }
     LOG.debug("Connecting to peer {}", peerAddress);
     peerPools.addPeerToPool(peerAddress.getId(), PeerConnectionType.STATIC);
-    attemptedConnectionCounter.inc();
     return network
         .connect(peerAddress)
         .thenApply(
             peer -> {
               LOG.debug("Connection to peer {} was successful", peer.getId());
-              successfulConnectionCounter.inc();
               final UInt64 connectionTimeMillis = timeProvider.getTimeInMillis();
               peer.subscribeDisconnect(
                   (reason, locallyInitiated) -> {
@@ -350,7 +351,6 @@ public class ConnectionManager extends Service {
                   peerAddress,
                   error,
                   retryDelay.toSeconds());
-              failedConnectionCounter.inc();
               return asyncRunner.runAfterDelay(
                   () -> maintainPersistentConnection(peerAddress), retryDelay);
             });
@@ -391,6 +391,14 @@ public class ConnectionManager extends Service {
 
   public void addPeerPredicate(final Predicate<DiscoveryPeer> predicate) {
     peerPredicates.add(predicate);
+  }
+
+  private boolean isStaticPeer(final DiscoveryPeer candidate) {
+    return !staticPeerIds.isEmpty()
+        && network
+            .createPeerAddress(candidate)
+            .map(peerAddress -> staticPeerIds.contains(peerAddress.getId()))
+            .orElse(false);
   }
 
   private boolean isPeerValid(final DiscoveryPeer peer) {
