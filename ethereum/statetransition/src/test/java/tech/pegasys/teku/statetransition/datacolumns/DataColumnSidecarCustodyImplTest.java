@@ -240,7 +240,7 @@ public class DataColumnSidecarCustodyImplTest {
         new DataColumnIdentifier(beaconBlock.getRoot(), UInt64.ZERO);
     when(resolver.getBlockAtSlot(fuluSlot))
         .thenReturn(SafeFuture.completedFuture(Optional.of(beaconBlock)));
-    when(sidecarDb.getColumnIdentifiers(fuluSlot))
+    when(sidecarDb.getCustodyColumnIdentifiers(fuluSlot))
         .thenReturn(
             SafeFuture.completedFuture(
                 List.of(new DataColumnSlotAndIdentifier(fuluSlot, dataColumnIdentifier))));
@@ -253,7 +253,7 @@ public class DataColumnSidecarCustodyImplTest {
 
     SafeFuture<DataColumnSidecarCustodyImpl.SlotCustody> future =
         custody.retrieveSlotCustody(fuluSlot);
-    verify(sidecarDb).getColumnIdentifiers(fuluSlot);
+    verify(sidecarDb).getCustodyColumnIdentifiers(fuluSlot);
     verifyNoMoreInteractions(sidecarDb);
     final DataColumnSidecarCustodyImpl.SlotCustody slotCustody =
         future.get(100, TimeUnit.MILLISECONDS);

@@ -80,6 +80,14 @@ public class SchemaHotAdapter implements Schema {
     return delegate.getBestLightClientUpdateSignatureBlockRootsByPeriod();
   }
 
+  public KvStoreColumn<UInt64, Bytes> getLightClientBootstrapsBySlot() {
+    return delegate.getLightClientBootstrapsBySlot();
+  }
+
+  public KvStoreColumn<UInt64, Bytes> getLightClientSyncCommitteesByPeriod() {
+    return delegate.getLightClientSyncCommitteesByPeriod();
+  }
+
   public KvStoreVariable<UInt64> getVariableGenesisTime() {
     return delegate.getVariableGenesisTime();
   }
@@ -102,6 +110,10 @@ public class SchemaHotAdapter implements Schema {
 
   public KvStoreVariable<UInt64> getVariableCustodyGroupCount() {
     return delegate.getVariableCustodyGroupCount();
+  }
+
+  public KvStoreVariable<Bytes32> getVariableFastConfirmedRoot() {
+    return delegate.getVariableFastConfirmedRoot();
   }
 
   public KvStoreVariable<BeaconState> getVariableLatestFinalizedState() {
@@ -140,6 +152,8 @@ public class SchemaHotAdapter implements Schema {
         .put(
             "LIGHT_CLIENT_UPDATE_SIGNATURE_BLOCK_ROOTS_BY_PERIOD",
             getLightClientUpdateSignatureBlockRootsByPeriod())
+        .put("LIGHT_CLIENT_BOOTSTRAPS_BY_SLOT", getLightClientBootstrapsBySlot())
+        .put("LIGHT_CLIENT_SYNC_COMMITTEES_BY_PERIOD", getLightClientSyncCommitteesByPeriod())
         .build();
   }
 
@@ -156,6 +170,7 @@ public class SchemaHotAdapter implements Schema {
         .put("FINALIZED_DEPOSIT_SNAPSHOT", getVariableFinalizedDepositSnapshot())
         .put("LATEST_CANONICAL_BLOCK_ROOT", getVariableLatestCanonicalBlockRoot())
         .put("CUSTODY_GROUP_COUNT", getVariableCustodyGroupCount())
+        .put("FAST_CONFIRMED_ROOT", getVariableFastConfirmedRoot())
         .build();
   }
 

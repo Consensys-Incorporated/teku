@@ -157,6 +157,11 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
   }
 
   @Override
+  public Optional<Bytes32> getFastConfirmedRoot() {
+    return hotDao.getFastConfirmedRoot();
+  }
+
+  @Override
   @MustBeClosed
   public HotUpdater hotUpdater() {
     return hotDao.hotUpdater();
@@ -338,6 +343,11 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
   }
 
   @Override
+  public Optional<UInt64> getLastDataColumnSidecarArchivedSlot() {
+    return finalizedDao.getLastDataColumnSidecarArchivedSlot();
+  }
+
+  @Override
   @MustBeClosed
   public Stream<Map.Entry<Bytes32, UInt64>> getFinalizedStateRoots() {
     return finalizedDao.getFinalizedStateRoots();
@@ -385,11 +395,6 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
   }
 
   @Override
-  public Optional<UInt64> getLastDataColumnSidecarsProofsSlot() {
-    return finalizedDao.getLastDataColumnSidecarsProofsSlot();
-  }
-
-  @Override
   @MustBeClosed
   public Stream<ColumnEntry<UInt64, LightClientUpdate>> streamBestLightClientUpdates() {
     return hotDao.streamBestLightClientUpdates();
@@ -404,6 +409,28 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
   @Override
   public Optional<Bytes32> getBestLightClientUpdateSignatureBlockRoot(final UInt64 period) {
     return hotDao.getBestLightClientUpdateSignatureBlockRoot(period);
+  }
+
+  @Override
+  public Optional<Bytes> getLightClientBootstrap(final UInt64 slot) {
+    return hotDao.getLightClientBootstrap(slot);
+  }
+
+  @Override
+  public Optional<Bytes> getLightClientSyncCommittee(final UInt64 period) {
+    return hotDao.getLightClientSyncCommittee(period);
+  }
+
+  @Override
+  @MustBeClosed
+  public Stream<UInt64> streamLightClientBootstrapSlots() {
+    return hotDao.streamLightClientBootstrapSlots();
+  }
+
+  @Override
+  @MustBeClosed
+  public Stream<UInt64> streamLightClientSyncCommitteePeriods() {
+    return hotDao.streamLightClientSyncCommitteePeriods();
   }
 
   @Override
@@ -549,6 +576,11 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
     }
 
     @Override
+    public void setFastConfirmedRoot(final Bytes32 fastConfirmedRoot) {
+      hotUpdater.setFastConfirmedRoot(fastConfirmedRoot);
+    }
+
+    @Override
     public void addBestLightClientUpdate(
         final UInt64 period, final LightClientUpdate update, final Bytes32 signatureBlockRoot) {
       hotUpdater.addBestLightClientUpdate(period, update, signatureBlockRoot);
@@ -557,6 +589,22 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
     @Override
     public void removeBestLightClientUpdate(final UInt64 period) {
       hotUpdater.removeBestLightClientUpdate(period);
+    }
+
+    @Override
+    public void addLightClientBootstrap(
+        final UInt64 slot, final Bytes bootstrap, final UInt64 period, final Bytes syncCommittee) {
+      hotUpdater.addLightClientBootstrap(slot, bootstrap, period, syncCommittee);
+    }
+
+    @Override
+    public void removeLightClientBootstrap(final UInt64 slot) {
+      hotUpdater.removeLightClientBootstrap(slot);
+    }
+
+    @Override
+    public void removeLightClientSyncCommittee(final UInt64 period) {
+      hotUpdater.removeLightClientSyncCommittee(period);
     }
 
     @Override
@@ -738,6 +786,11 @@ public class KvStoreCombinedDaoAdapter implements KvStoreCombinedDao, V4Migratab
     @Override
     public void setLastDataColumnSidecarPrunedSlot(final UInt64 slot) {
       finalizedUpdater.setLastDataColumnSidecarPrunedSlot(slot);
+    }
+
+    @Override
+    public void setLastDataColumnSidecarArchivedSlot(final UInt64 slot) {
+      finalizedUpdater.setLastDataColumnSidecarArchivedSlot(slot);
     }
 
     @Override

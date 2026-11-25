@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.validator.remote;
 
+import static com.google.common.base.Preconditions.checkArgument;
+
 import com.google.common.base.Preconditions;
 import java.net.URI;
 import java.time.Duration;
@@ -41,6 +43,7 @@ import tech.pegasys.teku.validator.beaconnode.GenesisDataProvider;
 import tech.pegasys.teku.validator.beaconnode.metrics.MetricRecordingValidatorApiChannel;
 import tech.pegasys.teku.validator.remote.apiclient.OkHttpClientAuth;
 import tech.pegasys.teku.validator.remote.eventsource.EventSourceBeaconChainEventAdapter;
+import tech.pegasys.teku.validator.remote.eventsource.EventStreamSizeLimitInterceptor;
 
 public class RemoteBeaconNodeApi implements BeaconNodeApi {
 
@@ -74,13 +77,15 @@ public class RemoteBeaconNodeApi implements BeaconNodeApi {
       final ValidatorConfig validatorConfig,
       final Spec spec,
       final List<URI> beaconNodeApiEndpoints) {
-    Preconditions.checkArgument(
+    checkArgument(
         !beaconNodeApiEndpoints.isEmpty(),
         "One or more Beacon Node endpoints should be defined for enabling remote connectivity "
             + "from VC to BN.");
 
     final OkHttpClient okHttpClient =
-        createOkHttpClient(convertToOkHttpUrls(beaconNodeApiEndpoints));
+        createOkHttpClient(
+            convertToOkHttpUrls(beaconNodeApiEndpoints),
+            validatorConfig.getBeaconApiMaxResponseSizeMegabytes());
     final RemoteBeaconNodeEndpoints remoteBeaconNodeEndpoints =
         new RemoteBeaconNodeEndpoints(beaconNodeApiEndpoints);
     final HttpUrl primaryEndpoint = remoteBeaconNodeEndpoints.getPrimaryEndpoint();
@@ -170,7 +175,8 @@ public class RemoteBeaconNodeApi implements BeaconNodeApi {
             beaconNodeReadinessManager,
             primaryValidatorApi,
             failoverValidatorApis,
-            createOkHttpClientForStreamFromClient(okHttpClient),
+            createOkHttpClientForStreamFromClient(
+                okHttpClient, validatorConfig.getEventStreamMaxEventSizeMegabytes()),
             ValidatorLogger.VALIDATOR_LOGGER,
             new ForkAwareTimeBasedEventAdapter(
                 new GenesisDataProvider(asyncRunner, validatorApi),
@@ -245,16 +251,21 @@ public class RemoteBeaconNodeApi implements BeaconNodeApi {
         .toList();
   }
 
-  public static OkHttpClient createOkHttpClientForStreamFromClient(final OkHttpClient client) {
+  public static OkHttpClient createOkHttpClientForStreamFromClient(
+      final OkHttpClient client, final int maxEventSizeMegabytes) {
     // call timeout must be disabled for event streams, we use read timeout instead
-    return client
-        .newBuilder()
-        .callTimeout(Duration.ZERO)
-        .readTimeout(EVENT_STREAM_READ_TIMEOUT)
-        .build();
+    final OkHttpClient.Builder builder =
+        client.newBuilder().callTimeout(Duration.ZERO).readTimeout(EVENT_STREAM_READ_TIMEOUT);
+    builder.interceptors().removeIf(RestResponseSizeLimitInterceptor.class::isInstance);
+    builder.networkInterceptors().removeIf(RestResponseSizeLimitInterceptor.class::isInstance);
+    if (maxEventSizeMegabytes != 0) {
+      builder.addInterceptor(new EventStreamSizeLimitInterceptor(maxEventSizeMegabytes));
+    }
+    return builder.build();
   }
 
-  public static OkHttpClient createOkHttpClient(final List<HttpUrl> endpoints) {
+  public static OkHttpClient createOkHttpClient(
+      final List<HttpUrl> endpoints, final int maxResponseSizeMegabytes) {
     final OkHttpClient.Builder httpClientBuilder =
         new OkHttpClient.Builder().callTimeout(REST_CALL_TIMEOUT);
     if (endpoints.size() > 1) {
@@ -263,8 +274,25 @@ public class RemoteBeaconNodeApi implements BeaconNodeApi {
       OkHttpClientAuth.addAuthInterceptor(endpoints.get(0), httpClientBuilder);
     }
     addInterceptorForUserAgentHeader(httpClientBuilder);
+    addResponseSizeLimitInterceptors(httpClientBuilder, maxResponseSizeMegabytes);
 
     return httpClientBuilder.build();
+  }
+
+  public static void addResponseSizeLimitInterceptors(
+      final OkHttpClient.Builder httpClientBuilder, final int maxResponseSizeMegabytes) {
+    checkArgument(maxResponseSizeMegabytes >= 0, "Maximum response size must be non-negative");
+    if (maxResponseSizeMegabytes > 0) {
+      httpClientBuilder.addInterceptor(
+          new RestResponseSizeLimitInterceptor(maxResponseSizeMegabytes));
+      httpClientBuilder.addNetworkInterceptor(
+          new RestResponseSizeLimitInterceptor(maxResponseSizeMegabytes));
+      LOG.debug(
+          "Beacon Node REST API response size limit set to {} MB (encoded and decoded)",
+          maxResponseSizeMegabytes);
+    } else {
+      LOG.debug("Beacon Node REST API response size limit disabled");
+    }
   }
 
   private static void addInterceptorForUserAgentHeader(

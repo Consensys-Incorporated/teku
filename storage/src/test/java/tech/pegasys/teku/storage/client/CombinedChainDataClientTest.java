@@ -46,15 +46,18 @@ import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.datastructures.blobs.DataColumnSidecar;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
+import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockAndMetaData;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.CommitteeAssignment;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.altair.BeaconStateAltair;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnSlotAndIdentifier;
 import tech.pegasys.teku.spec.datastructures.util.SlotAndBlockRootAndBlobIndex;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
@@ -89,6 +92,20 @@ class CombinedChainDataClientTest {
     when(forkChoiceStrategy.isOptimistic(any())).thenReturn(Optional.of(true));
     when(chainHead.isOptimistic()).thenReturn(false);
     when(chainHead.getSlot()).thenReturn(UInt64.valueOf(8428924L));
+  }
+
+  @Test
+  void getCustodyDataColumnIdentifiers_delegatesRangeAsOneQuery() {
+    final UInt64 startSlot = UInt64.valueOf(100);
+    final UInt64 endSlot = UInt64.valueOf(1000);
+    final SafeFuture<List<DataColumnSlotAndIdentifier>> result = new SafeFuture<>();
+    when(historicalChainData.getCustodyDataColumnIdentifiers(startSlot, endSlot))
+        .thenReturn(result);
+
+    assertThat(client.getCustodyDataColumnIdentifiers(startSlot, endSlot)).isSameAs(result);
+
+    verify(historicalChainData).getCustodyDataColumnIdentifiers(startSlot, endSlot);
+    verify(historicalChainData, never()).getCustodyDataColumnIdentifiers(any());
   }
 
   @Test
@@ -280,24 +297,37 @@ class CombinedChainDataClientTest {
         .thenReturn(
             SafeFuture.completedFuture(
                 List.of(firstIdentifier, otherBlockIdentifier, secondIdentifier)));
-    when(historicalChainData.getSidecar(any()))
-        .thenAnswer(
-            args -> {
-              final DataColumnSlotAndIdentifier identifier = args.getArgument(0);
-              if (identifier.equals(firstIdentifier)) {
-                return SafeFuture.completedFuture(Optional.of(firstSidecar));
-              } else if (identifier.equals(secondIdentifier)) {
-                return SafeFuture.completedFuture(Optional.of(secondSidecar));
-              }
-              return SafeFuture.completedFuture(Optional.empty());
-            });
+    when(historicalChainData.getSidecars(List.of(firstIdentifier, secondIdentifier)))
+        .thenReturn(SafeFuture.completedFuture(List.of(firstSidecar, secondSidecar)));
 
     final List<DataColumnSidecar> result =
         SafeFutureAssert.safeJoin(
             client.getDataColumnSidecars(new SlotAndBlockRoot(slot, blockRoot), List.of()));
 
     assertThat(result).containsExactly(firstSidecar, secondSidecar);
-    verify(historicalChainData, never()).getSidecar(otherBlockIdentifier);
+    verify(historicalChainData).getSidecars(List.of(firstIdentifier, secondIdentifier));
+    verify(historicalChainData, never()).getSidecar(any());
+  }
+
+  @Test
+  void getsSelectedDataColumnSidecarsInOneBatchAfterFilteringIdentifiers() {
+    final SlotAndBlockRoot block =
+        new SlotAndBlockRoot(UInt64.valueOf(42), dataStructureUtil.randomBytes32());
+    final List<DataColumnSlotAndIdentifier> identifiers =
+        List.of(
+            new DataColumnSlotAndIdentifier(block.getSlot(), block.getBlockRoot(), UInt64.ZERO),
+            new DataColumnSlotAndIdentifier(block.getSlot(), block.getBlockRoot(), UInt64.ONE));
+    final List<DataColumnSidecar> sidecars = List.of(mock(DataColumnSidecar.class));
+    when(historicalChainData.getDataColumnIdentifiers(block.getSlot()))
+        .thenReturn(SafeFuture.completedFuture(identifiers));
+    when(historicalChainData.getSidecars(identifiers))
+        .thenReturn(SafeFuture.completedFuture(sidecars));
+
+    assertThat(client.getDataColumnSidecars(block, List.of(UInt64.ONE, UInt64.ZERO, UInt64.ONE)))
+        .isCompletedWithValue(sidecars);
+    verify(historicalChainData).getSidecars(identifiers);
+    verify(historicalChainData).getDataColumnIdentifiers(block.getSlot());
+    verify(historicalChainData, never()).getSidecar(any());
   }
 
   @Test
@@ -582,5 +612,131 @@ class CombinedChainDataClientTest {
 
     assertThat(clientWithProvider.getExecutionPayloadsByBlockRoots(Set.of()))
         .isCompletedWithValue(Map.of());
+  }
+
+  @Test
+  public void getLightClientBootstrap_shouldCreateBootstrapFromStateInMemory() {
+    final SignedBlockAndState blockAndState = blockAndPostState();
+    final SignedBeaconBlock block = blockAndState.getBlock();
+    final BeaconState state = blockAndState.getState();
+    when(recentChainData.getStore()).thenReturn(store);
+    when(store.getBlockStateIfAvailable(block.getRoot())).thenReturn(Optional.of(state));
+    when(recentChainData.retrieveSignedBlockByRoot(block.getRoot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(block)));
+
+    final LightClientBootstrap bootstrap =
+        SafeFutureAssert.safeJoin(client.getLightClientBootstrap(block.getRoot())).orElseThrow();
+
+    assertThat(bootstrap.getLightClientHeader().getBeacon())
+        .isEqualTo(BeaconBlockHeader.fromState(state));
+    assertThat(bootstrap.getCurrentSyncCommittee())
+        .isEqualTo(BeaconStateAltair.required(state).getCurrentSyncCommittee());
+    verify(historicalChainData, never()).getLightClientBootstrap(any());
+  }
+
+  @Test
+  public void getLightClientBootstrap_shouldReturnStoredBootstrapWithoutRegeneratingState() {
+    final LightClientBootstrap bootstrap =
+        dataStructureUtil.randomLightClientBoostrapWithHeaderSlot(UInt64.valueOf(8));
+    final Bytes32 blockRoot = bootstrap.getLightClientHeader().getBeacon().getRoot();
+    givenStoredBootstrap(blockRoot, bootstrap);
+
+    assertThat(client.getLightClientBootstrap(blockRoot))
+        .isCompletedWithValue(Optional.of(bootstrap));
+    verify(store, never()).retrieveBlockState(any(Bytes32.class));
+  }
+
+  @Test
+  public void getLightClientBootstrap_shouldIgnoreStoredBootstrapForDifferentBlock() {
+    final LightClientBootstrap bootstrap =
+        dataStructureUtil.randomLightClientBoostrapWithHeaderSlot(UInt64.valueOf(8));
+    final Bytes32 otherRoot = dataStructureUtil.randomBytes32();
+    givenStoredBootstrap(otherRoot, bootstrap);
+
+    when(store.retrieveBlockState(otherRoot))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+    when(historicalChainData.getFinalizedStateByBlockRoot(otherRoot))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+
+    assertThat(client.getLightClientBootstrap(otherRoot)).isCompletedWithValue(Optional.empty());
+  }
+
+  @Test
+  public void getLightClientBootstrap_shouldFallBackToFinalizedStateWhenNotStored() {
+    final SignedBlockAndState blockAndState = blockAndPostState();
+    final SignedBeaconBlock block = blockAndState.getBlock();
+    final BeaconState state = blockAndState.getState();
+    final AnchorPoint finalized = mock(AnchorPoint.class);
+    when(recentChainData.getStore()).thenReturn(store);
+    when(store.getBlockStateIfAvailable(block.getRoot())).thenReturn(Optional.empty());
+    when(store.getLatestFinalized()).thenReturn(finalized);
+    when(recentChainData.getSlotForBlockRoot(block.getRoot()))
+        .thenReturn(Optional.of(block.getSlot()));
+    when(historicalChainData.getLightClientBootstrap(block.getSlot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+    when(store.retrieveBlockState(block.getRoot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+    when(historicalChainData.getFinalizedStateByBlockRoot(block.getRoot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(state)));
+    when(recentChainData.retrieveSignedBlockByRoot(block.getRoot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(block)));
+
+    final LightClientBootstrap bootstrap =
+        SafeFutureAssert.safeJoin(client.getLightClientBootstrap(block.getRoot())).orElseThrow();
+
+    assertThat(bootstrap.getLightClientHeader().getBeacon())
+        .isEqualTo(BeaconBlockHeader.fromState(state));
+  }
+
+  @Test
+  public void getLightClientBootstrap_shouldIgnoreInMemoryStateAdvancedPastBlock() {
+    final LightClientBootstrap bootstrap =
+        dataStructureUtil.randomLightClientBoostrapWithHeaderSlot(UInt64.valueOf(8));
+    final Bytes32 blockRoot = bootstrap.getLightClientHeader().getBeacon().getRoot();
+    givenStoredBootstrap(blockRoot, bootstrap);
+    final BeaconState advancedState =
+        dataStructureUtil
+            .randomBeaconState(UInt64.valueOf(9))
+            .updated(
+                mutableState ->
+                    mutableState.setLatestBlockHeader(
+                        bootstrap.getLightClientHeader().getBeacon()));
+    when(store.getBlockStateIfAvailable(blockRoot)).thenReturn(Optional.of(advancedState));
+
+    assertThat(client.getLightClientBootstrap(blockRoot))
+        .isCompletedWithValue(Optional.of(bootstrap));
+  }
+
+  private SignedBlockAndState blockAndPostState() {
+    final SignedBeaconBlock candidate = dataStructureUtil.randomSignedBeaconBlock(1);
+    final BeaconState state =
+        dataStructureUtil
+            .randomBeaconState(UInt64.ONE)
+            .updated(
+                mutableState ->
+                    mutableState.setLatestBlockHeader(
+                        new BeaconBlockHeader(
+                            candidate.getSlot(),
+                            candidate.getMessage().getProposerIndex(),
+                            candidate.getParentRoot(),
+                            Bytes32.ZERO,
+                            candidate.getMessage().getBodyRoot())));
+    final SignedBeaconBlock block =
+        SignedBeaconBlock.create(
+            spec,
+            candidate.getMessage().withStateRoot(state.hashTreeRoot()),
+            candidate.getSignature());
+    return new SignedBlockAndState(block, state);
+  }
+
+  private void givenStoredBootstrap(final Bytes32 blockRoot, final LightClientBootstrap bootstrap) {
+    final UInt64 slot = bootstrap.getLightClientHeader().getBeacon().getSlot();
+    final AnchorPoint finalized = mock(AnchorPoint.class);
+    when(recentChainData.getStore()).thenReturn(store);
+    when(store.getBlockStateIfAvailable(blockRoot)).thenReturn(Optional.empty());
+    when(store.getLatestFinalized()).thenReturn(finalized);
+    when(recentChainData.getSlotForBlockRoot(blockRoot)).thenReturn(Optional.of(slot));
+    when(historicalChainData.getLightClientBootstrap(slot))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(bootstrap)));
   }
 }

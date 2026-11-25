@@ -44,6 +44,7 @@ import static tech.pegasys.teku.spec.datastructures.validator.BroadcastValidatio
 import static tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel.GOSSIP;
 import static tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel.NOT_REQUIRED;
 
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.ints.IntSet;
 import java.util.Collections;
@@ -1364,14 +1365,20 @@ class ValidatorApiHandlerTest {
   }
 
   @Test
-  void getValidatorIndices_shouldThrowExceptionWhenBestStateNotAvailable() {
+  void getValidatorIndices_shouldReturnEmptyWhenBestStateNotAvailable() {
     when(chainDataClient.getBestState()).thenReturn(Optional.empty());
 
-    // The validator client needs to be able to differentiate between the state not yet being loaded
-    // and the requested validators not existing so it doesn't skip scheduling duties.
     assertThatSafeFuture(
             validatorApiHandler.getValidatorIndices(List.of(dataStructureUtil.randomPublicKey())))
-        .isCompletedExceptionallyWith(IllegalStateException.class);
+        .isCompletedWithValue(Optional.empty());
+  }
+
+  @Test
+  void getValidatorIndices_shouldReturnEmptyMapForEmptyRequestWhenBestStateNotAvailable() {
+    when(chainDataClient.getBestState()).thenReturn(Optional.empty());
+
+    assertThatSafeFuture(validatorApiHandler.getValidatorIndices(List.of()))
+        .isCompletedWithValue(Optional.of(Map.of()));
   }
 
   @Test
@@ -1384,7 +1391,7 @@ class ValidatorApiHandlerTest {
 
     assertThatSafeFuture(
             validatorApiHandler.getValidatorIndices(List.of(validator0, unknownValidator)))
-        .isCompletedWithValue(Map.of(validator0, 0));
+        .isCompletedWithValue(Optional.of(Map.of(validator0, 0)));
   }
 
   @Test
@@ -1737,6 +1744,66 @@ class ValidatorApiHandlerTest {
   }
 
   @Test
+  public void getPtcDuties_shouldUsePreviousEpochStateAndDependentRootAfterGloasForkEpoch() {
+    setUp(TestSpecFactory.createMinimalWithGloasForkEpoch(PREVIOUS_EPOCH));
+    final BeaconState state = createGloasStateWithInitialisedPtcWindow(previousEpochStartSlot);
+    when(chainDataClient.getStateAtSlotExact(previousEpochStartSlot))
+        .thenReturn(completedFuture(Optional.of(state)));
+    when(chainDataClient.getCurrentEpoch()).thenReturn(PREVIOUS_EPOCH);
+
+    final SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> result =
+        validatorApiHandler.getPayloadTimelinessCommitteeDuties(EPOCH, IntList.of(3, 8));
+    final PayloadTimelinessCommitteeDuties duties =
+        assertCompletedSuccessfully(result).orElseThrow();
+
+    // get_block_root_at_slot(state, compute_start_slot_at_epoch(epoch - 1) - 1)
+    assertThat(duties.dependentRoot())
+        .isEqualTo(spec.getBlockRootAtSlot(state, previousEpochStartSlot.minus(1)));
+  }
+
+  @Test
+  public void getPtcDuties_shouldReturnEmptyForGloasForkEpochBeforeTheFork() {
+    setUp(TestSpecFactory.createMinimalWithGloasForkEpoch(EPOCH));
+    when(chainDataClient.getCurrentEpoch()).thenReturn(PREVIOUS_EPOCH);
+
+    final SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> result =
+        validatorApiHandler.getPayloadTimelinessCommitteeDuties(EPOCH, IntList.of(3, 8));
+
+    // not yet available (503 over REST), so validator clients quietly retry
+    assertThat(assertCompletedSuccessfully(result)).isEmpty();
+    verify(chainDataClient, never()).getStateAtSlotExact(any());
+  }
+
+  @Test
+  public void getPtcDuties_shouldUseUpgradedStateAndForkEpochDependentRootForGloasForkEpoch() {
+    setUp(TestSpecFactory.createMinimalWithGloasForkEpoch(EPOCH));
+    final BeaconState state = createGloasStateWithInitialisedPtcWindow(epochStartSlot);
+    when(chainDataClient.getStateAtSlotExact(epochStartSlot))
+        .thenReturn(completedFuture(Optional.of(state)));
+    when(chainDataClient.getCurrentEpoch()).thenReturn(EPOCH);
+
+    final IntList validatorIndices = IntList.of(IntStream.range(0, 32).toArray());
+    final SafeFuture<Optional<PayloadTimelinessCommitteeDuties>> result =
+        validatorApiHandler.getPayloadTimelinessCommitteeDuties(EPOCH, validatorIndices);
+    final PayloadTimelinessCommitteeDuties duties =
+        assertCompletedSuccessfully(result).orElseThrow();
+
+    // get_block_root_at_slot(state, compute_start_slot_at_epoch(epoch) - 1)
+    assertThat(duties.dependentRoot())
+        .isEqualTo(spec.getBlockRootAtSlot(state, epochStartSlot.minus(1)));
+    // duties come from the ptc_window of the upgraded state
+    final Int2ObjectMap<UInt64> expectedAssignments =
+        spec.getValidatorIndexToPtcAssignmentMap(state, EPOCH);
+    assertThat(duties.duties()).isNotEmpty().hasSize(expectedAssignments.size());
+    assertThat(duties.duties())
+        .allSatisfy(
+            duty ->
+                assertThat(duty.slot())
+                    .isEqualTo(expectedAssignments.get(duty.validatorIndex().intValue())));
+    verify(chainDataClient, never()).getStateAtSlotExact(previousEpochStartSlot);
+  }
+
+  @Test
   public void createPayloadAttestationData_shouldFailWhenNodeIsSyncing() {
     nodeIsSyncing();
     final SafeFuture<Optional<PayloadAttestationData>> result =
@@ -1865,6 +1932,12 @@ class ValidatorApiHandlerTest {
 
   private BeaconState createStateWithActiveValidatorsAndInitialisedPtcWindow(final UInt64 slot) {
     return dataStructureUtil.randomBeaconStateWithActiveValidatorsAndInitialisedPtcWindow(32, slot);
+  }
+
+  private BeaconState createGloasStateWithInitialisedPtcWindow(final UInt64 slot) {
+    // random states use the genesis milestone, which is pre-Gloas when Gloas forks later
+    return new DataStructureUtil(TestSpecFactory.createMinimalGloas())
+        .randomBeaconStateWithActiveValidatorsAndInitialisedPtcWindow(32, slot);
   }
 
   private void setupValidatorsState(

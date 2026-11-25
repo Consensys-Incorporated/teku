@@ -90,6 +90,8 @@ public interface KvStoreCombinedDao extends AutoCloseable {
 
   Optional<UInt64> getCustodyGroupCount();
 
+  Optional<Bytes32> getFastConfirmedRoot();
+
   Optional<SignedBeaconBlock> getNonCanonicalBlock(Bytes32 root);
 
   void ingest(KvStoreCombinedDao dao, int batchSize, Consumer<String> logger);
@@ -198,7 +200,7 @@ public interface KvStoreCombinedDao extends AutoCloseable {
 
   Optional<UInt64> getLastDataColumnSidecarPrunedSlot();
 
-  Optional<UInt64> getLastDataColumnSidecarsProofsSlot();
+  Optional<UInt64> getLastDataColumnSidecarArchivedSlot();
 
   Optional<List<List<KZGProof>>> getDataColumnSidecarsProofs(UInt64 slot);
 
@@ -209,6 +211,16 @@ public interface KvStoreCombinedDao extends AutoCloseable {
   Stream<UInt64> streamBestLightClientUpdatePeriods();
 
   Optional<Bytes32> getBestLightClientUpdateSignatureBlockRoot(UInt64 period);
+
+  Optional<Bytes> getLightClientBootstrap(UInt64 slot);
+
+  Optional<Bytes> getLightClientSyncCommittee(UInt64 period);
+
+  @MustBeClosed
+  Stream<UInt64> streamLightClientBootstrapSlots();
+
+  @MustBeClosed
+  Stream<UInt64> streamLightClientSyncCommitteePeriods();
 
   /** Triggers a full, blocking compaction of the underlying storage to reclaim freed space. */
   void compact();
@@ -240,10 +252,18 @@ public interface KvStoreCombinedDao extends AutoCloseable {
 
     void setCustodyGroupCount(UInt64 custodyGroupCount);
 
+    void setFastConfirmedRoot(Bytes32 fastConfirmedRoot);
+
     void addBestLightClientUpdate(
         UInt64 period, LightClientUpdate update, Bytes32 signatureBlockRoot);
 
     void removeBestLightClientUpdate(UInt64 period);
+
+    void addLightClientBootstrap(UInt64 slot, Bytes bootstrap, UInt64 period, Bytes syncCommittee);
+
+    void removeLightClientBootstrap(UInt64 slot);
+
+    void removeLightClientSyncCommittee(UInt64 period);
 
     void setWeakSubjectivityCheckpoint(Checkpoint checkpoint);
 
@@ -330,6 +350,8 @@ public interface KvStoreCombinedDao extends AutoCloseable {
     void setEarliestAvailableDataColumnSlot(UInt64 slot);
 
     void setLastDataColumnSidecarPrunedSlot(UInt64 slot);
+
+    void setLastDataColumnSidecarArchivedSlot(UInt64 slot);
 
     void deleteEarliestBlockSlot();
 

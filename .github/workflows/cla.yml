@@ -25,6 +25,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           path-to-signatures: 'signatures/version1/cla.json'
-          path-to-document: 'https://github.com/Consensys/cla/blob/main/CLA.md' 
+          path-to-document: 'https://github.com/Consensys-Incorporated/cla/blob/main/CLA.md' 
           branch: 'cla'
           allowlist: dependabot[bot],ci-protocols-renovate[bot]

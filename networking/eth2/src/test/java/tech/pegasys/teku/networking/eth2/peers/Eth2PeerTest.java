@@ -20,6 +20,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -130,16 +131,23 @@ class Eth2PeerTest {
 
   @Test
   void updateStatus_shouldNotUpdateStatusWhenValidationFails() {
+    final PeerStatusSubscriber initialSubscriber = mock(PeerStatusSubscriber.class);
+    final PeerStatusSubscriber subscriber = mock(PeerStatusSubscriber.class);
+    peer.subscribeInitialStatus(initialSubscriber);
+    peer.subscribeStatusUpdates(subscriber);
     when(peerChainValidator.validate(peer, randomPeerStatus))
         .thenReturn(SafeFuture.completedFuture(false));
 
     peer.updateStatus(randomPeerStatus);
 
     assertThat(peer.hasStatus()).isFalse();
+    verifyNoInteractions(initialSubscriber, subscriber);
   }
 
   @Test
   void updateStatus_shouldNotUpdateSubsequentStatusWhenValidationFails() {
+    final PeerStatusSubscriber subscriber = mock(PeerStatusSubscriber.class);
+    peer.subscribeStatusUpdates(subscriber);
     final PeerStatus status2 = randomPeerStatus();
     when(peerChainValidator.validate(peer, randomPeerStatus))
         .thenReturn(SafeFuture.completedFuture(true));
@@ -148,12 +156,14 @@ class Eth2PeerTest {
     peer.updateStatus(randomPeerStatus);
 
     assertThat(peer.hasStatus()).isTrue();
+    verify(subscriber).onPeerStatus(randomPeerStatus);
 
     peer.updateStatus(status2);
 
     // Status stays as the original peer status
     assertThat(peer.hasStatus()).isTrue();
     assertThat(peer.getStatus()).isEqualTo(randomPeerStatus);
+    verifyNoMoreInteractions(subscriber);
   }
 
   @Test

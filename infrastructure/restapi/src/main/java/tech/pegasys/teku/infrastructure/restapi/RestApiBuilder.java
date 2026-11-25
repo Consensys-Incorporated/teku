@@ -47,6 +47,7 @@ import org.eclipse.jetty.util.VirtualThreads;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.util.thread.VirtualThreadPool;
 import tech.pegasys.teku.infrastructure.http.HttpErrorResponse;
+import tech.pegasys.teku.infrastructure.io.SecretFiles;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.JavalinEndpointAdapter;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
@@ -304,7 +305,7 @@ public class RestApiBuilder {
         }
         final Bytes generated = Bytes.random(16);
         LOG.info("Initializing API auth access file {}", path.toAbsolutePath());
-        Files.writeString(path, generated.toUnprefixedHexString(), UTF_8);
+        SecretFiles.writeStringOwnerOnly(path, generated.toUnprefixedHexString());
       } catch (IOException e) {
         LOG.error("Failed to write auth file to {}", path, e);
         throw new IllegalStateException("Failed to initialise access file for validator-api.");

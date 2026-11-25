@@ -167,10 +167,10 @@ class AttestationProductionDutyTest {
   }
 
   @TestTemplate
-  public void shouldFailWhenUnsignedAttestationTargetEpochDoesNotMatchSlot() {
+  public void shouldFailWhenUnsignedAttestationEpochsAreMaxValue() {
     final Validator validator = createValidator();
 
-    // Malicious/broken beacon node response: target epoch does not correspond to SLOT.
+    // Malicious/broken beacon node response: epochs of UInt64.MAX_VALUE.
     // Must be rejected here so it never reaches slashing-protection signing records -
     // see https://github.com/Consensys-Incorporated/teku-internal/issues/334
     final Optional<AttestationData> invalidAttestationData =
@@ -200,6 +200,49 @@ class AttestationProductionDutyTest {
 
     verify(validatorDutyMetrics)
         .record(any(), any(AttestationProductionDuty.class), eq(CREATE_TOTAL));
+  }
+
+  @TestTemplate
+  public void shouldFailWhenUnsignedAttestationTargetEpochIsInTheFuture() {
+    final UInt64 slotEpoch = spec.computeEpochAtSlot(SLOT);
+    assertAttestationDataRejected(attestationDataWithEpochs(slotEpoch, slotEpoch.plus(1_000_000)));
+  }
+
+  @TestTemplate
+  public void shouldFailWhenUnsignedAttestationTargetEpochIsNextEpoch() {
+    final UInt64 slotEpoch = spec.computeEpochAtSlot(SLOT);
+    assertAttestationDataRejected(attestationDataWithEpochs(slotEpoch, slotEpoch.increment()));
+  }
+
+  @TestTemplate
+  public void shouldFailWhenUnsignedAttestationTargetEpochIsPreviousEpoch() {
+    final UInt64 slotEpoch = spec.computeEpochAtSlot(SLOT);
+    assertAttestationDataRejected(
+        attestationDataWithEpochs(slotEpoch.minus(2), slotEpoch.decrement()));
+  }
+
+  @TestTemplate
+  public void shouldFailWhenUnsignedAttestationSourceEpochIsAfterTargetEpoch() {
+    final UInt64 slotEpoch = spec.computeEpochAtSlot(SLOT);
+    assertAttestationDataRejected(attestationDataWithEpochs(slotEpoch.increment(), slotEpoch));
+  }
+
+  @TestTemplate
+  public void shouldSignAttestationWhenSourceEpochEqualsTargetEpoch() {
+    final Validator validator = createValidator();
+    final UInt64 slotEpoch = spec.computeEpochAtSlot(SLOT);
+    final AttestationData attestationData = attestationDataWithEpochs(slotEpoch, slotEpoch);
+    when(validatorApiChannel.createAttestationData(SLOT, 0))
+        .thenReturn(completedFuture(Optional.of(attestationData)));
+    final Attestation expectedAttestation =
+        expectSignAttestation(validator, 10, 0, 5, 11, attestationData);
+
+    final SafeFuture<Optional<AttestationData>> attestationResult =
+        duty.addValidator(validator, 0, 5, 10, 11);
+    performAndReportDuty();
+
+    assertThat(attestationResult).isCompletedWithValue(Optional.of(attestationData));
+    verify(validatorApiChannel).sendSignedAttestations(List.of(expectedAttestation));
   }
 
   @TestTemplate
@@ -770,8 +813,41 @@ class AttestationProductionDutyTest {
         signature);
   }
 
+  private AttestationData attestationDataWithEpochs(
+      final UInt64 sourceEpoch, final UInt64 targetEpoch) {
+    final AttestationData randomData = dataStructureUtil.randomAttestationData(SLOT);
+    return new AttestationData(
+        SLOT,
+        randomData.getIndex(),
+        randomData.getBeaconBlockRoot(),
+        new Checkpoint(sourceEpoch, dataStructureUtil.randomBytes32()),
+        new Checkpoint(targetEpoch, dataStructureUtil.randomBytes32()));
+  }
+
+  private void assertAttestationDataRejected(final AttestationData attestationData) {
+    final Validator validator = createValidator();
+    when(validatorApiChannel.createAttestationData(SLOT, 0))
+        .thenReturn(completedFuture(Optional.of(attestationData)));
+
+    final SafeFuture<Optional<AttestationData>> attestationFuture =
+        duty.addValidator(validator, 0, 5, 10, 11);
+    performAndReportDuty();
+
+    assertThat(attestationFuture).isCompletedWithValue(Optional.of(attestationData));
+    verify(validatorLogger)
+        .dutyFailed(
+            eq(TYPE),
+            eq(SLOT),
+            eq(Set.of(validator.getPublicKey().toAbbreviatedString())),
+            any(IllegalArgumentException.class));
+    verifyNoMoreInteractions(validatorLogger);
+    verifyNoInteractions(validator.getSigner());
+  }
+
   private AttestationData expectCreateAttestationData(final int committeeIndex) {
-    final AttestationData attestationData = dataStructureUtil.randomAttestationData(SLOT);
+    final UInt64 slotEpoch = spec.computeEpochAtSlot(SLOT);
+    final AttestationData attestationData =
+        attestationDataWithEpochs(slotEpoch.decrement(), slotEpoch);
     when(validatorApiChannel.createAttestationData(SLOT, isElectra ? 0 : committeeIndex))
         .thenReturn(completedFuture(Optional.of(attestationData)));
     return attestationData;

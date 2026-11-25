@@ -13,6 +13,9 @@
 
 package tech.pegasys.teku.statetransition;
 
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
+
+import java.util.function.Consumer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
@@ -57,11 +60,32 @@ public class EpochCachePrimer {
 
   private void primeCacheForBlockAtSlot(
       final MinimalBeaconBlockSummary headBlock, final UInt64 firstSlotOfEpoch) {
+    final Consumer<BeaconState> primer =
+        LOG.isDebugEnabled() ? timedPrimer(firstSlotOfEpoch) : this::primeEpochStateCaches;
     recentChainData
         .retrieveBlockState(new SlotAndBlockRoot(firstSlotOfEpoch, headBlock.getRoot()))
         .finish(
-            maybeState -> maybeState.ifPresent(this::primeEpochStateCaches),
+            maybeState -> maybeState.ifPresent(primer),
             error -> LOG.warn("Failed to precompute epoch transition", error));
+  }
+
+  /**
+   * The state retrieval is not the epoch transition: on a node in sync the state of the first slot
+   * of the next epoch has usually been generated already (the payload attributes for the next slot
+   * need it as soon as the last block of the epoch is imported), so the retrieval is a cache hit.
+   * The epoch transition itself is timed where it runs, by the debug log of StateAtSlotTask.
+   */
+  private Consumer<BeaconState> timedPrimer(final UInt64 firstSlotOfEpoch) {
+    final long start = System.nanoTime();
+    return state -> {
+      final long stateReady = System.nanoTime();
+      primeEpochStateCaches(state);
+      LOG.debug(
+          "Precomputed epoch {}: state retrieval {} ms, cache priming {} ms",
+          spec.computeEpochAtSlot(firstSlotOfEpoch),
+          NANOSECONDS.toMillis(stateReady - start),
+          NANOSECONDS.toMillis(System.nanoTime() - stateReady));
+    };
   }
 
   private boolean isWithinOneEpochOfHeadBlock(

@@ -18,7 +18,11 @@ import static tech.pegasys.teku.spec.config.SpecConfig.GENESIS_SLOT;
 
 import java.time.Duration;
 import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -28,6 +32,7 @@ import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes32;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszBytes32Vector;
 import tech.pegasys.teku.infrastructure.subscribers.Subscribers;
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
@@ -37,11 +42,14 @@ import tech.pegasys.teku.spec.config.SpecConfigAltair;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.altair.SyncAggregate;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
+import tech.pegasys.teku.spec.datastructures.state.SyncCommittee;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.altair.BeaconStateAltair;
 import tech.pegasys.teku.spec.logic.common.util.LightClientUtil;
 import tech.pegasys.teku.spec.logic.common.util.SyncCommitteeUtil;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
@@ -67,9 +75,15 @@ public class LightClientServerService
       Subscribers.create(true);
   private final Subscribers<Consumer<LightClientOptimisticUpdate>> optimisticUpdateSubscribers =
       Subscribers.create(true);
+  private final AtomicReference<Optional<PendingBootstrap>> pendingBootstrap =
+      new AtomicReference<>(Optional.empty());
+  private final Map<UInt64, PendingUpdate> pendingUpdatesByPeriod = new ConcurrentHashMap<>();
+  private final Map<Bytes32, BoundaryBootstrap> boundaryBootstraps = new ConcurrentHashMap<>();
 
   /** Period of the latest finalized checkpoint seen; nothing below it can be orphaned. */
   private volatile UInt64 finalizedPeriod = UInt64.ZERO;
+
+  private volatile UInt64 finalizedSlot = UInt64.ZERO;
 
   public LightClientServerService(
       final Spec spec,
@@ -81,10 +95,23 @@ public class LightClientServerService
         spec,
         lightClientStore,
         combinedChainDataClient::getBlockByBlockRoot,
-        combinedChainDataClient::getStateByBlockRoot,
+        blockRoot -> retrieveBlockPostState(combinedChainDataClient, blockRoot),
         (slot, blockRoot) -> isCanonicalBlock(combinedChainDataClient, slot, blockRoot),
         asyncRunner,
         timeProvider);
+  }
+
+  private static SafeFuture<Optional<BeaconState>> retrieveBlockPostState(
+      final CombinedChainDataClient combinedChainDataClient, final Bytes32 blockRoot) {
+    return combinedChainDataClient
+        .getStateByBlockRoot(blockRoot)
+        .thenApply(
+            maybeState ->
+                maybeState.or(
+                    () ->
+                        Optional.ofNullable(combinedChainDataClient.getStore())
+                            .flatMap(
+                                store -> store.getLatestFinalized().getBlockPostState(blockRoot))));
   }
 
   private static boolean isCanonicalBlock(
@@ -144,6 +171,8 @@ public class LightClientServerService
       return;
     }
 
+    captureBoundaryBootstraps(block);
+
     final Optional<SyncAggregate> maybeSyncAggregate =
         block.getMessage().getBody().getOptionalSyncAggregate();
 
@@ -184,13 +213,201 @@ public class LightClientServerService
 
     final SyncCommitteeUtil syncCommitteeUtil = spec.getSyncCommitteeUtilRequired(finalizedSlot);
     this.finalizedPeriod = syncCommitteeUtil.computeSyncCommitteePeriod(checkpoint.getEpoch());
+    this.finalizedSlot = finalizedSlot;
 
     final UInt64 oldestRetainedEpoch =
         checkpoint
             .getEpoch()
             .minusMinZero(spec.getNetworkingConfig().getMinEpochsForBlockRequests());
-    lightClientStore.pruneUpdatesBefore(
-        syncCommitteeUtil.computeSyncCommitteePeriod(oldestRetainedEpoch));
+    final UInt64 oldestRetainedPeriod =
+        syncCommitteeUtil.computeSyncCommitteePeriod(oldestRetainedEpoch);
+    lightClientStore.pruneUpdatesBefore(oldestRetainedPeriod);
+    pendingUpdatesByPeriod.keySet().removeIf(period -> period.isLessThan(oldestRetainedPeriod));
+
+    pendingBootstrap.getAndSet(Optional.empty()).ifPresent(this::retryPendingBootstrap);
+    final SafeFuture<Optional<BeaconState>> finalizedState =
+        retrieveStateByRoot.apply(checkpoint.getRoot());
+    storeBootstrap(checkpoint.getRoot(), finalizedState);
+    storeFinalizedBoundaryBootstraps(finalizedSlot, finalizedState);
+    pendingUpdatesByPeriod.forEach(this::retryPendingUpdate);
+  }
+
+  private void captureBoundaryBootstraps(final SignedBeaconBlock block) {
+    final UInt64 epochStartSlot =
+        spec.computeStartSlotAtEpoch(spec.computeEpochAtSlot(block.getSlot()));
+    if (block.getSlot().equals(epochStartSlot)) {
+      captureBoundaryBootstrap(epochStartSlot, block);
+    }
+    retrieveBlockByRoot
+        .apply(block.getParentRoot())
+        .thenAccept(
+            maybeParent ->
+                maybeParent.ifPresent(
+                    parent -> {
+                      final UInt64 nextEpochStartSlot =
+                          spec.computeStartSlotAtEpoch(
+                              spec.computeEpochAtSlot(parent.getSlot()).increment());
+                      if (nextEpochStartSlot.isLessThan(block.getSlot())) {
+                        captureBoundaryBootstrap(nextEpochStartSlot, parent);
+                      }
+                    }))
+        .finish(
+            error ->
+                LOG.warn(
+                    "Failed to capture light client bootstrap for parent of block {}",
+                    block.getRoot(),
+                    error));
+  }
+
+  private void captureBoundaryBootstrap(
+      final UInt64 boundarySlot, final SignedBeaconBlock boundaryBlock) {
+    if (boundarySlot.isLessThanOrEqualTo(finalizedSlot)) {
+      return;
+    }
+    boundaryBootstraps.computeIfAbsent(
+        boundaryBlock.getRoot(),
+        blockRoot ->
+            new BoundaryBootstrap(
+                boundarySlot,
+                blockRoot,
+                retrieveStateByRoot
+                    .apply(blockRoot)
+                    .thenApply(
+                        maybeState ->
+                            createBootstrap(
+                                boundaryBlock, maybeState.filter(this::isBlockPostState)))));
+  }
+
+  private void storeFinalizedBoundaryBootstraps(
+      final UInt64 finalizedSlot, final SafeFuture<Optional<BeaconState>> finalizedStateFuture) {
+    final List<BoundaryBootstrap> finalizedCandidates =
+        boundaryBootstraps.values().stream()
+            .filter(candidate -> candidate.slot().isLessThanOrEqualTo(finalizedSlot))
+            .toList();
+    boundaryBootstraps.values().removeAll(finalizedCandidates);
+    finalizedStateFuture
+        .thenAccept(
+            maybeState ->
+                maybeState.ifPresent(
+                    state ->
+                        finalizedCandidates.stream()
+                            .filter(candidate -> isCanonicalBoundary(state, candidate))
+                            .forEach(
+                                candidate ->
+                                    candidate
+                                        .bootstrap()
+                                        .finish(
+                                            maybeBootstrap ->
+                                                maybeBootstrap.ifPresent(
+                                                    lightClientStore::addBootstrap),
+                                            error ->
+                                                LOG.warn(
+                                                    "Failed to create light client bootstrap for block {}",
+                                                    candidate.blockRoot(),
+                                                    error)))))
+        .finish(error -> LOG.warn("Failed to store finalized light client bootstraps", error));
+  }
+
+  private boolean isCanonicalBoundary(
+      final BeaconState finalizedState, final BoundaryBootstrap candidate) {
+    final UInt64 slot = candidate.slot();
+    return slot.isLessThan(finalizedState.getSlot())
+        && finalizedState
+            .getSlot()
+            .isLessThanOrEqualTo(
+                slot.plus(spec.atSlot(slot).getConfig().getSlotsPerHistoricalRoot()))
+        && spec.getBlockRootAtSlot(finalizedState, slot).equals(candidate.blockRoot());
+  }
+
+  private boolean isBlockPostState(final BeaconState state) {
+    return state.getSlot().equals(state.getLatestBlockHeader().getSlot());
+  }
+
+  private Optional<LightClientBootstrap> createBootstrap(
+      final SignedBeaconBlock block, final Optional<BeaconState> maybeState) {
+    return maybeState.flatMap(
+        state ->
+            spec.getLightClientUtil(block.getSlot())
+                .map(util -> util.createLightClientBootstrap(state, block)));
+  }
+
+  private void retryPendingBootstrap(final PendingBootstrap pending) {
+    retrieveBlockByRoot
+        .apply(pending.blockRoot())
+        .thenAccept(
+            maybeBlock -> {
+              if (maybeBlock.isEmpty()) {
+                pendingBootstrap.compareAndSet(Optional.empty(), Optional.of(pending));
+                return;
+              }
+              final SignedBeaconBlock block = maybeBlock.get();
+              lightClientStore.addBootstrap(
+                  spec.getLightClientUtilRequired(block.getSlot())
+                      .createLightClientBootstrap(
+                          block,
+                          pending.currentSyncCommittee(),
+                          pending.currentSyncCommitteeBranch()));
+            })
+        .finish(
+            error ->
+                LOG.warn(
+                    "Failed to retry light client bootstrap for block {}",
+                    pending.blockRoot(),
+                    error));
+  }
+
+  private void retryPendingUpdate(final UInt64 period, final PendingUpdate pending) {
+    retrieveBlockByRoot
+        .apply(pending.finalizedRoot())
+        .thenAccept(
+            maybeFinalizedBlock ->
+                maybeFinalizedBlock.ifPresent(
+                    finalizedBlock -> {
+                      if (!pendingUpdatesByPeriod.remove(period, pending)) {
+                        return;
+                      }
+                      lightClientStore.addUpdate(
+                          spec.getLightClientUtilRequired(
+                                  pending.update().getAttestedHeader().getBeacon().getSlot())
+                              .withFinalizedHeader(
+                                  pending.update(), pending.finalityBranch(), finalizedBlock),
+                          pending.signatureBlockRoot(),
+                          isCanonicalBlock);
+                    }))
+        .finish(
+            error ->
+                LOG.warn(
+                    "Failed to retry light client update for block {}",
+                    pending.signatureBlockRoot(),
+                    error));
+  }
+
+  private void storeBootstrap(
+      final Bytes32 blockRoot, final SafeFuture<Optional<BeaconState>> stateFuture) {
+    retrieveBlockByRoot
+        .apply(blockRoot)
+        .thenCombine(
+            stateFuture.thenApply(maybeState -> maybeState.filter(this::isBlockPostState)),
+            (maybeBlock, maybeState) -> {
+              if (maybeBlock.isEmpty()) {
+                maybeState
+                    .flatMap(BeaconState::toVersionAltair)
+                    .ifPresent(
+                        state ->
+                            pendingBootstrap.set(
+                                Optional.of(
+                                    new PendingBootstrap(
+                                        blockRoot,
+                                        state.getCurrentSyncCommittee(),
+                                        state.createCurrentSyncCommitteeProof()))));
+                return Optional.<LightClientBootstrap>empty();
+              }
+              return createBootstrap(maybeBlock.get(), maybeState);
+            })
+        .finish(
+            maybeBootstrap -> maybeBootstrap.ifPresent(lightClientStore::addBootstrap),
+            error ->
+                LOG.warn("Failed to create light client bootstrap for block {}", blockRoot, error));
   }
 
   public void loadUpdates(final Collection<StoredLightClientUpdate> updates) {
@@ -258,6 +475,22 @@ public class LightClientServerService
                         maybeFinalizedBlock);
 
                 lightClientStore.addUpdate(update, signatureBlock.getRoot(), isCanonicalBlock);
+                if (maybeFinalizedBlock.isEmpty()
+                    && !attestedState.getFinalizedCheckpoint().getRoot().isZero()) {
+                  pendingUpdatesByPeriod.merge(
+                      spec.getSyncCommitteeUtilRequired(attestedBlock.getSlot())
+                          .computeSyncCommitteePeriod(
+                              spec.computeEpochAtSlot(attestedBlock.getSlot())),
+                      new PendingUpdate(
+                          signatureBlock.getRoot(),
+                          update,
+                          BeaconStateAltair.required(attestedState).createFinalityBranchProof(),
+                          attestedState.getFinalizedCheckpoint().getRoot()),
+                      (existing, incoming) ->
+                          incoming.participation() > existing.participation()
+                              ? incoming
+                              : existing);
+                }
 
                 final UInt64 genesisTimeMillis =
                     secondsToMillis(signatureBlockPostState.getGenesisTime());
@@ -336,5 +569,24 @@ public class LightClientServerService
       return SafeFuture.completedFuture(Optional.empty());
     }
     return retrieveBlockByRoot.apply(spec.getBlockRootAtSlot(attestedState, GENESIS_SLOT));
+  }
+
+  private record BoundaryBootstrap(
+      UInt64 slot, Bytes32 blockRoot, SafeFuture<Optional<LightClientBootstrap>> bootstrap) {}
+
+  private record PendingBootstrap(
+      Bytes32 blockRoot,
+      SyncCommittee currentSyncCommittee,
+      SszBytes32Vector currentSyncCommitteeBranch) {}
+
+  private record PendingUpdate(
+      Bytes32 signatureBlockRoot,
+      LightClientUpdate update,
+      SszBytes32Vector finalityBranch,
+      Bytes32 finalizedRoot) {
+
+    int participation() {
+      return update.getSyncAggregate().getSyncCommitteeBits().getBitCount();
+    }
   }
 }

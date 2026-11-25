@@ -15,6 +15,7 @@ package tech.pegasys.teku.storage.server.kvstore.schema;
 
 import static tech.pegasys.teku.storage.server.kvstore.schema.KvStoreVariable.asVariableId;
 import static tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreSerializer.BYTES32_SERIALIZER;
+import static tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreSerializer.BYTES_SERIALIZER;
 import static tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreSerializer.CHECKPOINT_EPOCHS_SERIALIZER;
 import static tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreSerializer.CHECKPOINT_SERIALIZER;
 import static tech.pegasys.teku.storage.server.kvstore.serialization.KvStoreSerializer.DEPOSITS_FROM_BLOCK_EVENT_SERIALIZER;
@@ -67,6 +68,10 @@ public abstract class V6SchemaCombined implements SchemaCombined {
           KvStoreColumn.create(7, BYTES32_SERIALIZER, CHECKPOINT_EPOCHS_SERIALIZER);
   private final KvStoreColumn<UInt64, LightClientUpdate> lightClientUpdatesByPeriod;
   private final KvStoreColumn<UInt64, Bytes32> lightClientUpdateSignatureBlockRootsByPeriod;
+  private static final KvStoreColumn<UInt64, Bytes> LIGHT_CLIENT_BOOTSTRAPS_BY_SLOT =
+      KvStoreColumn.create(10, UINT64_SERIALIZER, BYTES_SERIALIZER);
+  private static final KvStoreColumn<UInt64, Bytes> LIGHT_CLIENT_SYNC_COMMITTEES_BY_PERIOD =
+      KvStoreColumn.create(11, UINT64_SERIALIZER, BYTES_SERIALIZER);
 
   // Variables
   private static final KvStoreVariable<UInt64> GENESIS_TIME =
@@ -91,6 +96,8 @@ public abstract class V6SchemaCombined implements SchemaCombined {
       KvStoreVariable.create(11, BYTES32_SERIALIZER);
   private static final KvStoreVariable<UInt64> CUSTODY_GROUP_COUNT =
       KvStoreVariable.create(12, UINT64_SERIALIZER);
+  private static final KvStoreVariable<Bytes32> FAST_CONFIRMED_ROOT =
+      KvStoreVariable.create(13, BYTES32_SERIALIZER);
 
   private final KvStoreVariable<UInt64> optimisticTransitionBlockSlot;
   private final KvStoreVariable<UInt64> earliestBlobSidecarSlot;
@@ -98,6 +105,7 @@ public abstract class V6SchemaCombined implements SchemaCombined {
   private final KvStoreVariable<UInt64> firstCustodyIncompleteSlot;
   private final KvStoreVariable<UInt64> earliestAvailableDataColumnSlot;
   private final KvStoreVariable<UInt64> lastDataColumnSidecarPrunedSlot;
+  private final KvStoreVariable<UInt64> lastDataColumnSidecarArchivedSlot;
 
   private final List<Bytes> deletedVariableIds;
 
@@ -131,6 +139,8 @@ public abstract class V6SchemaCombined implements SchemaCombined {
         KvStoreVariable.create(finalizedOffset + 6, UINT64_SERIALIZER);
     lastDataColumnSidecarPrunedSlot =
         KvStoreVariable.create(finalizedOffset + 7, UINT64_SERIALIZER);
+    lastDataColumnSidecarArchivedSlot =
+        KvStoreVariable.create(finalizedOffset + 8, UINT64_SERIALIZER);
 
     deletedVariableIds = List.of(asVariableId(finalizedOffset + 5));
   }
@@ -173,6 +183,16 @@ public abstract class V6SchemaCombined implements SchemaCombined {
   @Override
   public KvStoreColumn<UInt64, Bytes32> getBestLightClientUpdateSignatureBlockRootsByPeriod() {
     return lightClientUpdateSignatureBlockRootsByPeriod;
+  }
+
+  @Override
+  public KvStoreColumn<UInt64, Bytes> getLightClientBootstrapsBySlot() {
+    return LIGHT_CLIENT_BOOTSTRAPS_BY_SLOT;
+  }
+
+  @Override
+  public KvStoreColumn<UInt64, Bytes> getLightClientSyncCommitteesByPeriod() {
+    return LIGHT_CLIENT_SYNC_COMMITTEES_BY_PERIOD;
   }
 
   @Override
@@ -246,6 +266,11 @@ public abstract class V6SchemaCombined implements SchemaCombined {
   }
 
   @Override
+  public KvStoreVariable<UInt64> getVariableLastDataColumnSidecarArchivedSlot() {
+    return lastDataColumnSidecarArchivedSlot;
+  }
+
+  @Override
   public KvStoreVariable<Bytes32> getVariableLatestCanonicalBlockRoot() {
     return LATEST_CANONICAL_BLOCK_ROOT;
   }
@@ -253,6 +278,11 @@ public abstract class V6SchemaCombined implements SchemaCombined {
   @Override
   public KvStoreVariable<UInt64> getVariableCustodyGroupCount() {
     return CUSTODY_GROUP_COUNT;
+  }
+
+  @Override
+  public KvStoreVariable<Bytes32> getVariableFastConfirmedRoot() {
+    return FAST_CONFIRMED_ROOT;
   }
 
   @Override
@@ -290,6 +320,8 @@ public abstract class V6SchemaCombined implements SchemaCombined {
         .put(
             "LIGHT_CLIENT_UPDATE_SIGNATURE_BLOCK_ROOTS_BY_PERIOD",
             getBestLightClientUpdateSignatureBlockRootsByPeriod())
+        .put("LIGHT_CLIENT_BOOTSTRAPS_BY_SLOT", getLightClientBootstrapsBySlot())
+        .put("LIGHT_CLIENT_SYNC_COMMITTEES_BY_PERIOD", getLightClientSyncCommitteesByPeriod())
         .build();
   }
 
@@ -310,9 +342,11 @@ public abstract class V6SchemaCombined implements SchemaCombined {
         .put("EARLIEST_BLOCK_SLOT_AVAILABLE", getVariableEarliestBlockSlot())
         .put("LATEST_CANONICAL_BLOCK_ROOT", getVariableLatestCanonicalBlockRoot())
         .put("CUSTODY_GROUP_COUNT", getVariableCustodyGroupCount())
+        .put("FAST_CONFIRMED_ROOT", getVariableFastConfirmedRoot())
         .put("FIRST_CUSTODY_INCOMPLETE_SLOT", getVariableFirstCustodyIncompleteSlot())
         .put("EARLIEST_AVAILABLE_DATA_COLUMN_SLOT", getVariableEarliestAvailableDataColumnSlot())
         .put("LAST_DATA_COLUMN_SLOT_PRUNED", getVariableLastDataColumnSidecarPrunedSlot())
+        .put("LAST_DATA_COLUMN_SLOT_ARCHIVED", getVariableLastDataColumnSidecarArchivedSlot())
         .build();
   }
 

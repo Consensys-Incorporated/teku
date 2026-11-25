@@ -54,6 +54,8 @@ class RemoteBeaconNodeApiTest {
   void setUp() {
     when(serviceConfig.getEventChannels()).thenReturn(eventChannels);
     when(serviceConfig.getMetricsSystem()).thenReturn(metricsSystem);
+    when(validatorConfig.getBeaconApiMaxResponseSizeMegabytes())
+        .thenReturn(ValidatorConfig.DEFAULT_BEACON_API_MAX_RESPONSE_SIZE_MB);
   }
 
   @Test

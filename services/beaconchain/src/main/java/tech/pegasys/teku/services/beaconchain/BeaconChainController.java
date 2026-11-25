@@ -133,7 +133,6 @@ import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBodySch
 import tech.pegasys.teku.spec.datastructures.blocks.blockbody.versions.capella.BeaconBlockBodySchemaCapella;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadHeader;
-import tech.pegasys.teku.spec.datastructures.forkchoice.FastConfirmationStore;
 import tech.pegasys.teku.spec.datastructures.interop.GenesisStateBuilder;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.BlobIdentifier;
 import tech.pegasys.teku.spec.datastructures.operations.AttesterSlashing;
@@ -240,6 +239,7 @@ import tech.pegasys.teku.statetransition.forkchoice.TickProcessingPerformance;
 import tech.pegasys.teku.statetransition.forkchoice.TickProcessor;
 import tech.pegasys.teku.statetransition.forkchoice.fastconfirmation.FastConfirmationEventChannel;
 import tech.pegasys.teku.statetransition.forkchoice.fastconfirmation.FastConfirmationTracker;
+import tech.pegasys.teku.statetransition.forkchoice.fastconfirmation.StoredFastConfirmedRootUpdater;
 import tech.pegasys.teku.statetransition.lightclient.LightClientServerService;
 import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
 import tech.pegasys.teku.statetransition.payloadattestation.AggregatingPayloadAttestationPool;
@@ -415,6 +415,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
   protected volatile GossipValidationHelper gossipValidationHelper;
   protected volatile DasGossipLogger dasGossipLogger;
   protected volatile DasReqRespLogger dasReqRespLogger;
+  protected volatile DataColumnSidecarArchiveReconstructor dataColumnSidecarArchiveReconstructor =
+      DataColumnSidecarArchiveReconstructor.NOOP;
   protected volatile LightClientUpdateStore lightClientUpdateStore;
   protected volatile LightClientServerService lightClientServerService;
   protected volatile SyncCommitteeSubscriptionManager syncCommitteeSubscriptionManager;
@@ -723,6 +725,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
         // Init other services
         .thenRun(this::initAll)
         .thenCompose(__ -> loadLightClientUpdates())
+        // before startServices starts the p2p network, so ReqResp handlers see existing archives
+        .thenCompose(__ -> dataColumnSidecarArchiveReconstructor.loadLastArchivedSlot())
         .thenRun(
             () -> {
               // complete spec initialization
@@ -813,6 +817,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
     initRestAPI();
     initOperationsReOrgManager();
     initStoredLatestCanonicalBlockUpdater();
+    initStoredFastConfirmedRootUpdater();
   }
 
   private void initKeyValueStore() {
@@ -1720,6 +1725,23 @@ public class BeaconChainController extends Service implements BeaconChainControl
             updates -> {
               lightClientServerService.loadUpdates(updates);
               LOG.debug("Loaded {} light client updates from storage", updates.size());
+              recentChainData
+                  .getFinalizedCheckpoint()
+                  .ifPresent(
+                      checkpoint ->
+                          lightClientServerService.onNewFinalizedCheckpoint(checkpoint, false));
+              combinedChainDataClient
+                  .getChainHead()
+                  .ifPresent(
+                      head ->
+                          head.getBlock()
+                              .thenAccept(
+                                  maybeBlock ->
+                                      maybeBlock.ifPresent(
+                                          block ->
+                                              lightClientServerService.onBlockImported(
+                                                  block, head.isOptimistic())))
+                              .finishError(LOG));
             })
         .exceptionally(
             error -> {
@@ -2169,7 +2191,6 @@ public class BeaconChainController extends Service implements BeaconChainControl
     final SuperNodeSupplier isSuperNodeSupplier =
         new SuperNodeSupplier(spec, () -> custodyGroupCountManager);
 
-    final DataColumnSidecarArchiveReconstructor dataColumnSidecarArchiveReconstructor;
     if (spec.isMilestoneSupported(SpecMilestone.FULU)) {
       dataColumnSidecarArchiveReconstructor =
           new DataColumnSidecarArchiveReconstructorImpl(
@@ -2185,8 +2206,6 @@ public class BeaconChainController extends Service implements BeaconChainControl
       eventChannels
           .subscribe(FinalizedCheckpointChannel.class, dataColumnSidecarArchiveReconstructor)
           .subscribe(SlotEventsChannel.class, dataColumnSidecarArchiveReconstructor);
-    } else {
-      dataColumnSidecarArchiveReconstructor = DataColumnSidecarArchiveReconstructor.NOOP;
     }
 
     final Eth2P2PNetworkBuilder p2pNetworkBuilder =
@@ -2525,6 +2544,10 @@ public class BeaconChainController extends Service implements BeaconChainControl
     syncService.subscribeToSyncStateChangesAndUpdate(
         syncState -> forkChoiceNotifier.onSyncingStatusChanged(syncState.isInSync()));
 
+    // fastConfirmationTracker subscription, nothing is reported before the node first reaches sync
+    syncService.subscribeToSyncStateChangesAndUpdate(
+        syncState -> fastConfirmationTracker.onSyncingStatusChanged(syncState.isInSync()));
+
     // forkChoice subscription
     forkChoice.subscribeToOptimisticHeadChangesAndUpdate(syncService.getOptimisticSyncSubscriber());
 
@@ -2573,19 +2596,23 @@ public class BeaconChainController extends Service implements BeaconChainControl
     eventChannels.subscribe(SlotEventsChannel.class, storedLatestCanonicalBlockUpdater);
   }
 
+  protected void initStoredFastConfirmedRootUpdater() {
+    if (!fastConfirmationTracker.isEnabled()) {
+      return;
+    }
+    LOG.debug("BeaconChainController.initStoredFastConfirmedRootUpdater()");
+    eventChannels.subscribe(
+        FastConfirmationEventChannel.class, new StoredFastConfirmedRootUpdater(recentChainData));
+  }
+
   protected void initForkChoiceStateProvider() {
     LOG.debug("BeaconChainController.initForkChoiceStateProvider()");
     // When fast confirmation is enabled, the FCU safe_block_hash is derived from the confirmed
-    // root (get_safe_execution_block_hash); otherwise the supplier is empty and the safe hash
-    // defaults to the justified block, as before.
+    // root (get_safe_execution_block_hash), including one restored from before a restart; otherwise
+    // the supplier is empty and the safe hash defaults to the justified block, as before.
     forkChoiceStateProvider =
         new ForkChoiceStateProvider(
-            forkChoiceExecutor,
-            recentChainData,
-            () ->
-                fastConfirmationTracker
-                    .getFastConfirmationStore()
-                    .map(FastConfirmationStore::confirmedRoot));
+            forkChoiceExecutor, recentChainData, fastConfirmationTracker::getConfirmedRoot);
   }
 
   protected void initForkChoiceNotifier() {
@@ -2756,6 +2783,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
     }
     slotProcessor.setCurrentSlot(currentSlot);
     performanceTracker.start(currentSlot);
+    dataColumnSidecarArchiveReconstructor.onNewFinalizedCheckpoint(
+        recentChainData.getStore().getFinalizedCheckpoint(), false);
   }
 
   protected UInt64 getCurrentSlot(final UInt64 genesisTime) {

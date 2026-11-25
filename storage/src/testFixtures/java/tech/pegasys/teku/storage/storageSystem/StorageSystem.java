@@ -99,7 +99,12 @@ public class StorageSystem implements AutoCloseable {
     // Create and start storage server
     final ChainStorage chainStorageServer =
         ChainStorage.create(
-            database, spec, storageMode, stateRebuildTimeoutSeconds, BlobSidecarsArchiver.NOOP);
+            database,
+            spec,
+            storageMode,
+            stateRebuildTimeoutSeconds,
+            BlobSidecarsArchiver.NOOP,
+            __ -> {});
 
     // Create recent chain data
     final FinalizedCheckpointChannel finalizedCheckpointChannel =

@@ -34,6 +34,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
@@ -312,7 +313,11 @@ public interface Database extends AutoCloseable {
 
   Optional<UInt64> getEarliestAvailableDataColumnSlot();
 
-  Optional<UInt64> getLastDataColumnSidecarsProofsSlot();
+  /**
+   * Highest slot ever archived to proofs, kept as a variable so it is read without seeking the
+   * proofs column. Never lowered: archives later pruned with the DA window keep it.
+   */
+  Optional<UInt64> getLastDataColumnSidecarArchivedSlot();
 
   Optional<List<List<KZGProof>>> getDataColumnSidecarsProofs(UInt64 slot);
 
@@ -327,6 +332,10 @@ public interface Database extends AutoCloseable {
   void removeBestLightClientUpdates(Collection<UInt64> periods);
 
   void pruneBestLightClientUpdatesBefore(UInt64 period);
+
+  void storeLightClientBootstrap(LightClientBootstrap bootstrap);
+
+  Optional<LightClientBootstrap> getLightClientBootstrap(UInt64 slot);
 
   void setEarliestAvailableDataColumnSlot(UInt64 slot);
 

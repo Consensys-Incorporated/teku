@@ -209,12 +209,6 @@ specrefs:
       # Unnecessary
       - xor#phase0
 
-      # Not implemented: the restart-resilient confirmed root (consensus-specs #5673) needs a
-      # confirmed root persisted across restarts, which Teku's FastConfirmationStore does not
-      # hold. block_should_be_finalized exists only to serve this function.
-      - get_restart_resilient_confirmed_root#phase0
-      - block_should_be_finalized#phase0
-
       # Implemented differently: Teku derives the time into a slot from a message's arrival
       # timestamp where it is needed (BlockTimelinessTracker), rather than reading it off the
       # store, so there is no store-based accessor to anchor to
