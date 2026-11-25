@@ -265,6 +265,67 @@ class ConnectionManagerTest {
   }
 
   @Test
+  public void shouldNotOfferStaticPeerToDiscoverySelection() {
+    final ConnectionManager manager = createManager(PEER1);
+    when(discoveryService.streamKnownPeers())
+        .thenReturn(Stream.of(DISCOVERY_PEER1, DISCOVERY_PEER2));
+    when(network.connect(any(PeerAddress.class))).thenReturn(new SafeFuture<>());
+
+    manager.start().join();
+    asyncRunner.executeDueActionsRepeatedly();
+
+    // Only the static connection loop dials the static peer
+    verify(network, times(1)).connect(PEER1);
+    verify(network).connect(PEER2);
+  }
+
+  @Test
+  public void shouldKeepStaticPoolMembershipWhenDiscoveryKnowsStaticPeer() {
+    final ConnectionManager manager = createManager(PEER1);
+    when(discoveryService.streamKnownPeers()).thenReturn(Stream.of(DISCOVERY_PEER1));
+    // The static dial stays pending; any further dial to the same peer fails
+    when(network.connect(PEER1))
+        .thenReturn(new SafeFuture<>())
+        .thenReturn(SafeFuture.failedFuture(new RuntimeException("Nope")));
+
+    manager.start().join();
+    asyncRunner.executeDueActionsRepeatedly();
+
+    assertThat(peerPools.getPeerConnectionType(PEER1.getId())).isEqualTo(PeerConnectionType.STATIC);
+  }
+
+  @Test
+  public void shouldNotOfferStaticPeerAddedAtRuntimeToDiscoverySelection() {
+    final ConnectionManager manager = createManager();
+    when(network.connect(any(PeerAddress.class))).thenReturn(new SafeFuture<>());
+    // The search that runs on start knows no peers
+    manager.start().join();
+    asyncRunner.executeDueActionsRepeatedly();
+
+    manager.addStaticPeer(PEER1);
+    when(discoveryService.streamKnownPeers()).thenReturn(Stream.of(DISCOVERY_PEER1));
+    manager.requestPeerSearch();
+    asyncRunner.executeDueActionsRepeatedly();
+
+    verify(network, times(1)).connect(PEER1);
+  }
+
+  @Test
+  public void shouldNotCountStaticPeerAsCandidate() {
+    final ConnectionManager manager = createManager(PEER1);
+    when(discoveryService.streamKnownPeers())
+        .thenReturn(Stream.of(DISCOVERY_PEER1, DISCOVERY_PEER2));
+    when(network.connect(any(PeerAddress.class))).thenReturn(new SafeFuture<>());
+
+    manager.start().join();
+    asyncRunner.executeDueActionsRepeatedly();
+
+    assertThat(candidateCount("considered")).isEqualTo(1);
+    assertThat(candidateCount("no_dialable_address")).isZero();
+    assertThat(candidateCount("eligible")).isEqualTo(1);
+  }
+
+  @Test
   public void shouldConnectToKnownPeersWhenStarted() {
     final ConnectionManager manager = createManager();
     when(discoveryService.streamKnownPeers())
