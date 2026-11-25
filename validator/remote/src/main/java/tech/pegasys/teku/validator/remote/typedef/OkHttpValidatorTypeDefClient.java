@@ -50,6 +50,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
@@ -58,6 +59,8 @@ import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SignedContributionAndProof;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeContribution;
 import tech.pegasys.teku.spec.datastructures.operations.versions.altair.SyncCommitteeMessage;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationAndProofPq;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.validator.BeaconPreparableProposer;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.datastructures.validator.SubnetSubscription;
@@ -363,6 +366,26 @@ public class OkHttpValidatorTypeDefClient extends OkHttpValidatorMinimalTypeDefC
     return sendAggregateAndProofsRequest.submit(aggregateAndProofs);
   }
 
+  public Optional<AttestationAndProofPq> createPqAggregate(
+      final UInt64 slot, final Bytes32 attestationHashTreeRoot, final UInt64 committeeIndex) {
+    return new CreateAggregateAttestationRequest(
+            getBaseEndpoint(),
+            getOkHttpClient(),
+            schemaDefinitionCache,
+            slot,
+            attestationHashTreeRoot,
+            Optional.of(committeeIndex),
+            true,
+            spec)
+        .submitPq();
+  }
+
+  public List<SubmitDataError> sendPqAggregateAndProofs(
+      final List<SignedAggregateAndProofPq> aggregateAndProofs) {
+    return new SendAggregateAndProofsRequest(getBaseEndpoint(), getOkHttpClient(), true, spec)
+        .submitPq(aggregateAndProofs);
+  }
+
   public List<SubmitDataError> sendSignedAttestations(final List<Attestation> attestations) {
     final SendSignedAttestationsRequest sendSignedAttestationsRequest =
         new SendSignedAttestationsRequest(
@@ -375,6 +398,12 @@ public class OkHttpValidatorTypeDefClient extends OkHttpValidatorMinimalTypeDefC
     final SendPayloadAttestationMessagesRequest sendPayloadAttestationMessagesRequest =
         new SendPayloadAttestationMessagesRequest(spec, getBaseEndpoint(), getOkHttpClient());
     return sendPayloadAttestationMessagesRequest.submit(payloadAttestationMessages);
+  }
+
+  public List<SubmitDataError> sendPqPayloadAttestationMessages(
+      final List<PayloadAttestationMessagePq> payloadAttestationMessages) {
+    return new SendPayloadAttestationMessagesRequest(spec, getBaseEndpoint(), getOkHttpClient())
+        .submitPq(payloadAttestationMessages);
   }
 
   public List<SubmitDataError> sendSignedProposerPreferences(

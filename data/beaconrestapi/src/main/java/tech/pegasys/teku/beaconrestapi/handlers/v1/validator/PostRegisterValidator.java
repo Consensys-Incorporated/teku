@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.beaconrestapi.handlers.v1.validator;
 
+import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_VALIDATOR;
@@ -27,6 +28,9 @@ import tech.pegasys.teku.infrastructure.restapi.endpoints.AsyncApiResponse;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.EndpointMetadata;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
+import tech.pegasys.teku.infrastructure.ssz.SszList;
+import tech.pegasys.teku.spec.SpecMilestone;
+import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 
 public class PostRegisterValidator extends RestApiEndpoint {
   public static final String ROUTE = "/eth/v1/validator/register_validator";
@@ -44,6 +48,8 @@ public class PostRegisterValidator extends RestApiEndpoint {
                 "Provide beacon node with registrations for the given validators to the external builder network.")
             .description(
                 "Prepares the beacon node for engaging with external builders."
+                    + " From the PQ fork a non-empty request fails with a 400, as the validator"
+                    + " registry holds XMSS public keys."
                     + " The information must be sent by the beacon node to the builder network."
                     + " It is expected that the validator client will send this information periodically"
                     + " to ensure the beacon node has correct and timely registration information"
@@ -66,9 +72,19 @@ public class PostRegisterValidator extends RestApiEndpoint {
 
   @Override
   public void handleRequest(final RestApiRequest request) throws JsonProcessingException {
+    final SszList<SignedValidatorRegistration> registrations = request.getRequestBody();
+    // From PQ the registry holds XMSS keys, which BLS-signed builder registrations can't name
+    if (!registrations.isEmpty()
+        && validatorDataProvider
+            .getMilestoneAtCurrentSlot()
+            .isGreaterThanOrEqualTo(SpecMilestone.PQ)) {
+      request.respondError(
+          SC_BAD_REQUEST, "Validator registrations are not supported from the PQ fork");
+      return;
+    }
     request.respondAsync(
         validatorDataProvider
-            .registerValidators(request.getRequestBody())
+            .registerValidators(registrations)
             .handle(
                 (__, error) -> {
                   if (error != null) {

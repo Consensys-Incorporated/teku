@@ -3,7 +3,7 @@
     "tags" : [ "Validator" ],
     "operationId" : "registerValidator",
     "summary" : "Provide beacon node with registrations for the given validators to the external builder network.",
-    "description" : "Prepares the beacon node for engaging with external builders. The information must be sent by the beacon node to the builder network. It is expected that the validator client will send this information periodically to ensure the beacon node has correct and timely registration information to provide to builders. The validator client should not sign blinded beacon blocks that do not adhere to their latest fee recipient and gas limit preferences.",
+    "description" : "Prepares the beacon node for engaging with external builders. From the PQ fork a non-empty request fails with a 400, as the validator registry holds XMSS public keys. The information must be sent by the beacon node to the builder network. It is expected that the validator client will send this information periodically to ensure the beacon node has correct and timely registration information to provide to builders. The validator client should not sign blinded beacon blocks that do not adhere to their latest fee recipient and gas limit preferences.",
     "requestBody" : {
       "content" : {
         "application/octet-stream" : {
@@ -23,12 +23,8 @@
       }
     },
     "responses" : {
-      "200" : {
-        "description" : "Registration information has been received.",
-        "content" : { }
-      },
-      "400" : {
-        "description" : "The request could not be processed, check the response for more information.",
+      "415" : {
+        "description" : "Unsupported media type",
         "content" : {
           "application/json" : {
             "schema" : {
@@ -37,8 +33,12 @@
           }
         }
       },
-      "415" : {
-        "description" : "Unsupported media type",
+      "200" : {
+        "description" : "Registration information has been received.",
+        "content" : { }
+      },
+      "400" : {
+        "description" : "The request could not be processed, check the response for more information.",
         "content" : {
           "application/json" : {
             "schema" : {

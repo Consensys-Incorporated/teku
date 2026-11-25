@@ -32,7 +32,9 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationSchema;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationAndProofPq;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.validator.remote.typedef.ResponseHandler;
 
 public class CreateAggregateAttestationRequest extends AbstractTypeDefRequest {
@@ -76,6 +78,39 @@ public class CreateAggregateAttestationRequest extends AbstractTypeDefRequest {
     }
 
     return submitPreElectra(slot, attestationHashTreeRoot, attestationSchema, specMilestone);
+  }
+
+  /**
+   * PQ: the committee's aggregate with the proof of its signatures, from the v2 endpoint, which
+   * returns an {@code AttestationAndProofPq} from PQ.
+   */
+  public Optional<AttestationAndProofPq> submitPq() {
+    if (committeeIndex.isEmpty()) {
+      throw new IllegalArgumentException("Missing required parameter: committee index");
+    }
+    final DeserializableTypeDefinition<GetPqAggregateResponse> typeDefinition =
+        DeserializableTypeDefinition.object(GetPqAggregateResponse.class)
+            .initializer(GetPqAggregateResponse::new)
+            .withField(
+                "version",
+                DeserializableTypeDefinition.enumOf(SpecMilestone.class),
+                GetPqAggregateResponse::getSpecMilestone,
+                GetPqAggregateResponse::setSpecMilestone)
+            .withField(
+                "data",
+                SchemaDefinitionsPq.required(schemaDefinitionCache.atSlot(slot))
+                    .getPqAttestationSchemas()
+                    .getAttestationAndProofSchema()
+                    .getJsonTypeDefinition(),
+                GetPqAggregateResponse::getData,
+                GetPqAggregateResponse::setData)
+            .build();
+    final Map<String, String> queryParams = new HashMap<>();
+    queryParams.put(SLOT, slot.toString());
+    queryParams.put(ATTESTATION_DATA_ROOT, attestationHashTreeRoot.toHexString());
+    queryParams.put(COMMITTEE_INDEX, committeeIndex.get().toString());
+    return get(GET_AGGREGATE_V2, queryParams, new ResponseHandler<>(typeDefinition))
+        .map(GetPqAggregateResponse::getData);
   }
 
   private Optional<ObjectAndMetaData<Attestation>> submitPostElectra(
@@ -178,6 +213,27 @@ public class CreateAggregateAttestationRequest extends AbstractTypeDefRequest {
 
     public void setSpecMilestone(final SpecMilestone specMilestone) {
       this.specMilestone = specMilestone;
+    }
+  }
+
+  public static class GetPqAggregateResponse {
+    private SpecMilestone specMilestone;
+    private AttestationAndProofPq data;
+
+    public SpecMilestone getSpecMilestone() {
+      return specMilestone;
+    }
+
+    public void setSpecMilestone(final SpecMilestone specMilestone) {
+      this.specMilestone = specMilestone;
+    }
+
+    public AttestationAndProofPq getData() {
+      return data;
+    }
+
+    public void setData(final AttestationAndProofPq data) {
+      this.data = data;
     }
   }
 }

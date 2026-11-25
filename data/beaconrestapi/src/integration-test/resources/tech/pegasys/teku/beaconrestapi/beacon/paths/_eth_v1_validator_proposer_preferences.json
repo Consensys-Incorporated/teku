@@ -26,7 +26,13 @@
           "schema" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/SignedProposerPreferences"
+              "title" : "SignedProposerPreferences",
+              "type" : "object",
+              "oneOf" : [ {
+                "$ref" : "#/components/schemas/SignedProposerPreferences"
+              }, {
+                "$ref" : "#/components/schemas/SignedProposerPreferencesPq"
+              } ]
             }
           }
         }

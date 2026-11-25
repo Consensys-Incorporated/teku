@@ -162,6 +162,14 @@ public class PostNewBlockV4 extends RestApiEndpoint {
     final Bytes randaoReveal = request.getQueryParameter(RANDAO_OR_VRF_REVEAL_PARAMETER);
     final boolean isPq =
         validatorDataProvider.getMilestoneAtSlot(slot).isGreaterThanOrEqualTo(SpecMilestone.PQ);
+    // From PQ every RANDAO reveal is a VRF proof that is checked, so it can't be skipped
+    if (isPq && request.getOptionalQueryParameter(SKIP_RANDAO_VERIFICATION_PARAMETER).isPresent()) {
+      request.respondError(
+          SC_BAD_REQUEST,
+          String.format(
+              "skip_randao_verification is not supported from the PQ fork, at slot %s", slot));
+      return;
+    }
     final int expectedRandaoRevealSize = isPq ? VRF_PROOF_SIZE : SSZ_BLS_SIGNATURE_SIZE;
     if (randaoReveal.size() != expectedRandaoRevealSize) {
       request.respondError(

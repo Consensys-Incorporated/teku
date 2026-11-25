@@ -15,23 +15,28 @@ package tech.pegasys.teku.beaconrestapi.handlers.v1.validator;
 
 import static tech.pegasys.teku.api.ValidatorDataProvider.PARTIAL_PUBLISH_FAILURE_MESSAGE;
 import static tech.pegasys.teku.beaconrestapi.BeaconRestApiTypes.ETH_CONSENSUS_VERSION_TYPE;
+import static tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.MilestoneDependentTypesUtil.headerBasedSelector;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_CONSENSUS_VERSION;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_VALIDATOR;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.TAG_VALIDATOR_REQUIRED;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import java.util.List;
-import org.apache.commons.io.function.IOFunction;
+import java.util.Optional;
+import java.util.function.BiFunction;
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.api.DataProvider;
 import tech.pegasys.teku.api.ValidatorDataProvider;
 import tech.pegasys.teku.beaconrestapi.schema.ErrorListBadRequest;
-import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
+import tech.pegasys.teku.infrastructure.json.types.SerializableOneOfTypeDefinitionBuilder;
+import tech.pegasys.teku.infrastructure.json.types.SerializableTypeDefinition;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.AsyncApiResponse;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.EndpointMetadata;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiRequest;
+import tech.pegasys.teku.infrastructure.restapi.openapi.request.OneOfArrayJsonRequestContentTypeDefinition;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -104,14 +109,32 @@ public class PostProposerPreferences extends RestApiEndpoint {
 
   private static EndpointMetadata createMetadata(
       final SchemaDefinitionCache schemaDefinitionCache, final int maxItems) {
-    final SchemaDefinitionsGloas schemaDefinitions =
-        SchemaDefinitionsGloas.required(
-            schemaDefinitionCache.getSchemaDefinition(SpecMilestone.GLOAS));
-    final SignedProposerPreferencesSchema signedProposerPreferencesSchema =
-        schemaDefinitions.getSignedProposerPreferencesSchema();
-    final IOFunction<Bytes, List<SignedProposerPreferences>> octetStreamParser =
-        bytes ->
-            SszListSchema.create(signedProposerPreferencesSchema, maxItems)
+    // From PQ the preferences are signed with XMSS: the same container with a different signature
+    final SerializableOneOfTypeDefinitionBuilder<SignedProposerPreferences> builder =
+        new SerializableOneOfTypeDefinitionBuilder<SignedProposerPreferences>()
+            .title("SignedProposerPreferences");
+    for (final SpecMilestone milestone : getMilestones(schemaDefinitionCache)) {
+      final SignedProposerPreferencesSchema schema = getSchema(schemaDefinitionCache, milestone);
+      builder.withType(value -> value.getSchema().equals(schema), schema.getJsonTypeDefinition());
+    }
+
+    final OneOfArrayJsonRequestContentTypeDefinition.BodyTypeSelector<SignedProposerPreferences>
+        bodyTypeSelector =
+            context ->
+                getSchema(
+                        schemaDefinitionCache,
+                        getMilestone(
+                            schemaDefinitionCache,
+                            Optional.ofNullable(
+                                context.getHeaders().get(HEADER_CONSENSUS_VERSION))))
+                    .getJsonTypeDefinition();
+    final BiFunction<Bytes, Optional<String>, List<SignedProposerPreferences>> octetStreamParser =
+        (bytes, headerConsensusVersion) ->
+            SszListSchema.create(
+                    getSchema(
+                        schemaDefinitionCache,
+                        getMilestone(schemaDefinitionCache, headerConsensusVersion)),
+                    maxItems)
                 .sszDeserialize(bytes)
                 .asList();
 
@@ -122,9 +145,7 @@ public class PostProposerPreferences extends RestApiEndpoint {
             "Verifies given signed proposer preferences and publishes them on the proposer_preferences gossipsub topic.")
         .tags(TAG_VALIDATOR, TAG_VALIDATOR_REQUIRED)
         .requestBodyType(
-            DeserializableTypeDefinition.listOf(
-                signedProposerPreferencesSchema.getJsonTypeDefinition()),
-            octetStreamParser)
+            SerializableTypeDefinition.listOf(builder.build()), bodyTypeSelector, octetStreamParser)
         .headerRequired(
             ETH_CONSENSUS_VERSION_TYPE.withDescription(
                 "The active consensus version to which the signed proposer preferences being submitted belongs."))
@@ -136,5 +157,33 @@ public class PostProposerPreferences extends RestApiEndpoint {
             ErrorListBadRequest.getJsonTypeDefinition())
         .withChainDataResponses()
         .build();
+  }
+
+  /** The fork of the preferences: Gloas without the header, otherwise the header's fork. */
+  private static SpecMilestone getMilestone(
+      final SchemaDefinitionCache schemaDefinitionCache, final Optional<String> headerVersion) {
+    if (headerVersion.isEmpty()) {
+      return SpecMilestone.GLOAS;
+    }
+    final SpecMilestone milestone =
+        headerBasedSelector(
+            schemaDefinitionCache, headerVersion, (headerMilestone, __) -> headerMilestone);
+    return milestone.isGreaterThanOrEqualTo(SpecMilestone.PQ)
+        ? SpecMilestone.PQ
+        : SpecMilestone.GLOAS;
+  }
+
+  /** Gloas and, when supported, PQ: the forks with distinct signed proposer preferences. */
+  public static List<SpecMilestone> getMilestones(
+      final SchemaDefinitionCache schemaDefinitionCache) {
+    return schemaDefinitionCache.getSupportedMilestones().contains(SpecMilestone.PQ)
+        ? List.of(SpecMilestone.GLOAS, SpecMilestone.PQ)
+        : List.of(SpecMilestone.GLOAS);
+  }
+
+  public static SignedProposerPreferencesSchema getSchema(
+      final SchemaDefinitionCache schemaDefinitionCache, final SpecMilestone milestone) {
+    return SchemaDefinitionsGloas.required(schemaDefinitionCache.getSchemaDefinition(milestone))
+        .getSignedProposerPreferencesSchema();
   }
 }

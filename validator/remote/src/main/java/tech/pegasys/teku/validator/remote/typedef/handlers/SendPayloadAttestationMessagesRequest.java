@@ -29,6 +29,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.validator.api.SubmitDataError;
 import tech.pegasys.teku.validator.remote.typedef.FailureListResponse;
 
@@ -57,6 +58,26 @@ public class SendPayloadAttestationMessagesRequest extends AbstractTypeDefReques
             Map.of(HEADER_CONSENSUS_VERSION, milestone.lowerCaseName()),
             payloadAttestationMessages,
             listOf(jsonTypeDefinition),
+            getFailureListResponseResponseHandler())
+        .map(FailureListResponse::failures)
+        .orElse(Collections.emptyList());
+  }
+
+  /** PQ: PTC members' payload attestation messages, signed with XMSS. */
+  public List<SubmitDataError> submitPq(
+      final List<PayloadAttestationMessagePq> payloadAttestationMessages) {
+    if (payloadAttestationMessages.isEmpty()) {
+      return Collections.emptyList();
+    }
+    final UInt64 slot = payloadAttestationMessages.getFirst().getData().getSlot();
+    final SpecMilestone milestone = spec.atSlot(slot).getMilestone();
+    return postJson(
+            SEND_PAYLOAD_ATTESTATION_MESSAGES,
+            emptyMap(),
+            emptyMap(),
+            Map.of(HEADER_CONSENSUS_VERSION, milestone.lowerCaseName()),
+            payloadAttestationMessages,
+            listOf(payloadAttestationMessages.getFirst().getSchema().getJsonTypeDefinition()),
             getFailureListResponseResponseHandler())
         .map(FailureListResponse::failures)
         .orElse(Collections.emptyList());
