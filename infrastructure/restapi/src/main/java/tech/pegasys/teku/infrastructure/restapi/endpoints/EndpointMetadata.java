@@ -39,6 +39,7 @@ import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -255,19 +256,26 @@ public class EndpointMetadata {
   }
 
   /**
-   * Returns false when the endpoint declares a 406 response and the accept header matches none of
-   * the content types of its 200 response. A missing or blank accept header is always acceptable.
+   * Returns false when the endpoint declares a 406 response and the accept headers match none of
+   * the content types of its 200 response. Multiple accept headers are treated as one
+   * comma-separated list. Missing or blank accept headers are always acceptable.
    */
-  public boolean isAcceptable(final Optional<String> acceptHeader) {
-    final OpenApiResponse okResponse = responses.get(Integer.toString(SC_OK));
-    final Optional<String> nonBlankAcceptHeader = acceptHeader.filter(h -> !h.isBlank());
-    if (nonBlankAcceptHeader.isEmpty()
-        || okResponse == null
-        || !responses.containsKey(Integer.toString(SC_NOT_ACCEPTABLE))) {
+  public boolean isAcceptable(final Optional<Enumeration<String>> acceptHeaders) {
+    if (acceptHeaders.isEmpty()) {
       return true;
     }
+    final OpenApiResponse okResponse = responses.get(Integer.toString(SC_OK));
+    if (okResponse == null || !responses.containsKey(Integer.toString(SC_NOT_ACCEPTABLE))) {
+      return true;
+    }
+    // Several Accept lines mean the same as one comma-separated list, so join them all
+    final String allAcceptHeaders =
+        Collections.list(acceptHeaders.get()).stream()
+            .filter(header -> !header.isBlank())
+            .map(header -> header.toLowerCase(Locale.ROOT))
+            .collect(Collectors.joining(","));
     return ContentTypes.getResponseContentType(
-            okResponse.getSupportedContentTypes(), nonBlankAcceptHeader)
+            okResponse.getSupportedContentTypes(), Optional.of(allAcceptHeaders))
         .isPresent();
   }
 

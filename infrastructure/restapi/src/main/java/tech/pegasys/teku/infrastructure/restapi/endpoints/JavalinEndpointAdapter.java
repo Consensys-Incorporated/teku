@@ -33,7 +33,7 @@ public class JavalinEndpointAdapter implements Handler {
   public void handle(final Context ctx) throws Exception {
     final EndpointMetadata metadata = endpoint.getMetadata();
     final RestApiRequest request = new JavalinRestApiRequest(ctx, metadata);
-    if (!metadata.isAcceptable(Optional.ofNullable(ctx.header(HEADER_ACCEPT)))) {
+    if (!metadata.isAcceptable(Optional.ofNullable(ctx.req().getHeaders(HEADER_ACCEPT)))) {
       request.respondError(
           SC_NOT_ACCEPTABLE,
           "Accept header is not supported. Must match one of: "
