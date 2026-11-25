@@ -42,6 +42,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeContents;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
@@ -144,6 +145,10 @@ public class ValidatorDataProvider {
     return spec.atSlot(slot).getMilestone();
   }
 
+  public SpecMilestone getMilestoneAtCurrentSlot() {
+    return getMilestoneAtSlot(combinedChainDataClient.getCurrentSlot());
+  }
+
   public SafeFuture<Optional<AttestationData>> createAttestationDataAtSlot(
       final UInt64 slot, final int committeeIndex) {
     if (!isStoreAvailable()) {
@@ -170,6 +175,12 @@ public class ValidatorDataProvider {
   public SafeFuture<List<SubmitDataError>> submitPayloadAttestationMessages(
       final List<PayloadAttestationMessage> messages) {
     return validatorApiChannel.sendPayloadAttestationMessages(messages);
+  }
+
+  /** PQ: publishes PTC members' payload attestation messages, signed with XMSS. */
+  public SafeFuture<List<SubmitDataError>> submitPqPayloadAttestationMessages(
+      final List<PayloadAttestationMessagePq> messages) {
+    return validatorApiChannel.sendPqPayloadAttestationMessages(messages);
   }
 
   public SafeFuture<List<SubmitDataError>> submitProposerPreferences(

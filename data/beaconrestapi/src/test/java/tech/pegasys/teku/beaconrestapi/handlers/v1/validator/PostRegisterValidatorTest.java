@@ -14,6 +14,9 @@
 package tech.pegasys.teku.beaconrestapi.handlers.v1.validator;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
@@ -29,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.beaconrestapi.AbstractMigratedBeaconHandlerTest;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
 
 public class PostRegisterValidatorTest extends AbstractMigratedBeaconHandlerTest {
@@ -36,6 +40,7 @@ public class PostRegisterValidatorTest extends AbstractMigratedBeaconHandlerTest
   @BeforeEach
   void setup() {
     setHandler(new PostRegisterValidator(validatorDataProvider));
+    when(validatorDataProvider.getMilestoneAtCurrentSlot()).thenReturn(SpecMilestone.GLOAS);
   }
 
   @Test
@@ -47,6 +52,30 @@ public class PostRegisterValidatorTest extends AbstractMigratedBeaconHandlerTest
 
     request.setRequestBody(requestBody);
     handler.handleRequest(request);
+    assertThat(request.getResponseCode()).isEqualTo(SC_OK);
+  }
+
+  @Test
+  void shouldRejectRegistrationsFromPq() throws JsonProcessingException {
+    when(validatorDataProvider.getMilestoneAtCurrentSlot()).thenReturn(SpecMilestone.PQ);
+    request.setRequestBody(dataStructureUtil.randomSignedValidatorRegistrations(2));
+
+    handler.handleRequest(request);
+
+    assertThat(request.getResponseCode()).isEqualTo(SC_BAD_REQUEST);
+    verify(validatorDataProvider, never()).registerValidators(any());
+  }
+
+  @Test
+  void shouldAcceptEmptyRegistrationsFromPq() throws JsonProcessingException {
+    when(validatorDataProvider.getMilestoneAtCurrentSlot()).thenReturn(SpecMilestone.PQ);
+    final SszList<SignedValidatorRegistration> requestBody =
+        dataStructureUtil.randomSignedValidatorRegistrations(0);
+    when(validatorDataProvider.registerValidators(requestBody)).thenReturn(SafeFuture.COMPLETE);
+    request.setRequestBody(requestBody);
+
+    handler.handleRequest(request);
+
     assertThat(request.getResponseCode()).isEqualTo(SC_OK);
   }
 

@@ -16,6 +16,8 @@ package tech.pegasys.teku.beaconrestapi.handlers.v4.validator;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assumptions.assumeThat;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.ignoreStubs;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
@@ -28,6 +30,7 @@ import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_EXEC
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_INCLUDE_PAYLOAD;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.INCLUDE_PAYLOAD;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.RANDAO_REVEAL;
+import static tech.pegasys.teku.infrastructure.http.RestApiConstants.SKIP_RANDAO_VERIFICATION;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.SLOT;
 import static tech.pegasys.teku.infrastructure.restapi.MetadataTestUtil.verifyMetadataErrorResponse;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
@@ -163,6 +166,25 @@ public class PostNewBlockV4Test extends AbstractMigratedBeaconHandlerTest {
     handler.handleRequest(request);
 
     assertThat(request.getResponseCode()).isEqualTo(HttpStatusCodes.SC_OK);
+  }
+
+  @TestTemplate
+  void shouldRejectSkipRandaoVerificationForPq() throws Exception {
+    assumeThat(specMilestone).isGreaterThanOrEqualTo(PQ);
+    final List<Bytes32> vrfProof =
+        IntStream.range(0, 32).mapToObj(__ -> dataStructureUtil.randomBytes32()).toList();
+    request.setQueryParameter(
+        RANDAO_REVEAL, Bytes.concatenate(vrfProof.toArray(Bytes[]::new)).toHexString());
+    request.setOptionalQueryParameter(SKIP_RANDAO_VERIFICATION, "");
+    request.setQueryParameter(INCLUDE_PAYLOAD, "false");
+    request.setRequestBody(BuilderConfig.NO_OP);
+
+    handler.handleRequest(request);
+
+    assertThat(request.getResponseCode()).isEqualTo(SC_BAD_REQUEST);
+    assertThat(request.getResponseBody().toString())
+        .contains("skip_randao_verification is not supported from the PQ fork");
+    verifyNoMoreInteractions(ignoreStubs(validatorDataProvider));
   }
 
   @TestTemplate

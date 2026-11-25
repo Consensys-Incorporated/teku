@@ -27,6 +27,7 @@ import tech.pegasys.teku.infrastructure.json.types.DeserializableTypeDefinition;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.datastructures.operations.SignedAggregateAndProof;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.validator.api.SubmitDataError;
 import tech.pegasys.teku.validator.remote.apiclient.ValidatorApiMethod;
 import tech.pegasys.teku.validator.remote.typedef.FailureListResponse;
@@ -59,6 +60,26 @@ public class SendAggregateAndProofsRequest extends AbstractTypeDefRequest {
       return submitPostElectra(aggregateAndProofs, specMilestone);
     }
     return submitPreElectra(aggregateAndProofs);
+  }
+
+  /** PQ: aggregators' signed aggregates with their proofs, to the v2 endpoint. */
+  public List<SubmitDataError> submitPq(final List<SignedAggregateAndProofPq> aggregateAndProofs) {
+    if (aggregateAndProofs.isEmpty()) {
+      return Collections.emptyList();
+    }
+    final SpecMilestone specMilestone =
+        spec.atSlot(aggregateAndProofs.getFirst().getMessage().getAggregate().getData().getSlot())
+            .getMilestone();
+    return postJson(
+            ValidatorApiMethod.SEND_SIGNED_AGGREGATE_AND_PROOFS_V2,
+            Collections.emptyMap(),
+            Collections.emptyMap(),
+            Map.of(RestApiConstants.HEADER_CONSENSUS_VERSION, specMilestone.lowerCaseName()),
+            aggregateAndProofs,
+            listOf(aggregateAndProofs.getFirst().getSchema().getJsonTypeDefinition()),
+            getFailureListResponseResponseHandler())
+        .map(FailureListResponse::failures)
+        .orElse(Collections.emptyList());
   }
 
   private List<SubmitDataError> submitPreElectra(

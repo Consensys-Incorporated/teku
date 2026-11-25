@@ -62,7 +62,7 @@
     "tags" : [ "Beacon", "Validator Required Api" ],
     "operationId" : "submitPayloadAttestationMessages",
     "summary" : "Submit PayloadAttestation objects to node",
-    "description" : "Submit signed payload attestation messages to the beacon node to be validated and submitted if valid.",
+    "description" : "Submit signed payload attestation messages to the beacon node to be validated and submitted if valid. From PQ the messages are signed with XMSS; set Eth-Consensus-Version to the fork of the messages.",
     "parameters" : [ {
       "name" : "Eth-Consensus-Version",
       "in" : "header",
@@ -83,7 +83,13 @@
           "schema" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/PayloadAttestationMessage"
+              "title" : "PayloadAttestationMessage",
+              "type" : "object",
+              "oneOf" : [ {
+                "$ref" : "#/components/schemas/PayloadAttestationMessage"
+              }, {
+                "$ref" : "#/components/schemas/PayloadAttestationMessagePq"
+              } ]
             }
           }
         }

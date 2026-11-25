@@ -78,16 +78,21 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestat
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.PayloadAttestationMessage;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerPreferences;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.pq.PayloadAttestationMessagePq;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockContainerAndMetaData;
 import tech.pegasys.teku.spec.datastructures.metadata.ObjectAndMetaData;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationAndProofPq;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.AttestationPq;
+import tech.pegasys.teku.spec.datastructures.operations.versions.pq.SignedAggregateAndProofPq;
 import tech.pegasys.teku.spec.datastructures.state.Validator;
 import tech.pegasys.teku.spec.datastructures.state.ValidatorPhase0;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.datastructures.validator.SubnetSubscription;
 import tech.pegasys.teku.spec.schemas.ApiSchemas;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsPq;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.validator.api.CommitteeSubscriptionRequest;
 import tech.pegasys.teku.validator.api.SendSignedBlockResult;
@@ -632,6 +637,70 @@ class RemoteValidatorApiHandlerTest {
 
     assertThat(result).isCompletedWithValue(expectedErrors);
     verify(typeDefClient).sendPayloadAttestationMessages(payloadAttestationMessages);
+  }
+
+  @Test
+  public void sendPqPayloadAttestationMessages_InvokeApiWithCorrectRequest() {
+    final DataStructureUtil pqDataStructureUtil =
+        new DataStructureUtil(TestSpecFactory.createMinimalPq());
+    final List<PayloadAttestationMessagePq> messages =
+        List.of(
+            SchemaDefinitionsPq.required(
+                    pqDataStructureUtil.getSpec().getGenesisSchemaDefinitions())
+                .getPqAttestationSchemas()
+                .getPayloadAttestationMessageSchema()
+                .create(
+                    UInt64.ONE,
+                    pqDataStructureUtil.randomPayloadAttestationData(),
+                    pqDataStructureUtil.randomXmssSignature().getBytes()));
+    final List<SubmitDataError> expectedErrors =
+        List.of(new SubmitDataError(UInt64.ZERO, "invalid payload attestation"));
+    when(typeDefClient.sendPqPayloadAttestationMessages(messages)).thenReturn(expectedErrors);
+
+    final SafeFuture<List<SubmitDataError>> result =
+        apiHandler.sendPqPayloadAttestationMessages(messages);
+    asyncRunner.executeQueuedActions();
+
+    assertThat(result).isCompletedWithValue(expectedErrors);
+  }
+
+  @Test
+  public void sendPqAggregateAndProofs_InvokeApiWithCorrectRequest() {
+    final List<SignedAggregateAndProofPq> aggregates =
+        List.of(
+            new DataStructureUtil(TestSpecFactory.createMinimalPq())
+                .randomSignedAggregateAndProofPq());
+    final List<SubmitDataError> expectedErrors =
+        List.of(new SubmitDataError(UInt64.ZERO, "invalid aggregate"));
+    when(typeDefClient.sendPqAggregateAndProofs(aggregates)).thenReturn(expectedErrors);
+
+    final SafeFuture<List<SubmitDataError>> result =
+        apiHandler.sendPqAggregateAndProofs(aggregates);
+    asyncRunner.executeQueuedActions();
+
+    assertThat(result).isCompletedWithValue(expectedErrors);
+  }
+
+  @Test
+  public void createPqAggregate_InvokeApiWithCorrectRequest() {
+    final DataStructureUtil pqDataStructureUtil =
+        new DataStructureUtil(TestSpecFactory.createMinimalPq());
+    final AttestationAndProofPq aggregate =
+        SchemaDefinitionsPq.required(pqDataStructureUtil.getSpec().getGenesisSchemaDefinitions())
+            .getPqAttestationSchemas()
+            .getAttestationAndProofSchema()
+            .create(
+                (AttestationPq) pqDataStructureUtil.randomAttestation(),
+                pqDataStructureUtil.randomBytes(64));
+    final Bytes32 root = pqDataStructureUtil.randomBytes32();
+    when(typeDefClient.createPqAggregate(UInt64.ONE, root, UInt64.valueOf(2)))
+        .thenReturn(Optional.of(aggregate));
+
+    final SafeFuture<Optional<AttestationAndProofPq>> result =
+        apiHandler.createPqAggregate(UInt64.ONE, root, UInt64.valueOf(2));
+    asyncRunner.executeQueuedActions();
+
+    assertThat(result).isCompletedWithValue(Optional.of(aggregate));
   }
 
   @Test
