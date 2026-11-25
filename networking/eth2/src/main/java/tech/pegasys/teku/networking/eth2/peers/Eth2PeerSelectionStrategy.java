@@ -167,7 +167,9 @@ public class Eth2PeerSelectionStrategy implements PeerSelectionStrategy {
   @Override
   public List<Peer> selectPeersToDisconnect(
       final P2PNetwork<?> network, final PeerPools peerPools) {
-    final List<Peer> peers = network.streamPeers().map(Peer.class::cast).toList();
+    // A peer being disconnected stays in the network's peer list until its goodbye completes
+    final List<Peer> peers =
+        network.streamPeers().filter(Peer::isConnected).map(Peer.class::cast).toList();
     final PeerSubnetSubscriptions peerSubnetSubscriptions =
         peerSubnetSubscriptionsFactory.create(network);
     final int totalOutboundRequirement =
