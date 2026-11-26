@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -396,9 +397,36 @@ public class ExecutionPayloadBidGossipValidator {
                 return rejectBid(bid, "invalid execution payload bid signature");
               }
 
-              if (!seenExecutionPayloadBids
-                  .computeIfAbsent(bid.getSlot(), __ -> ConcurrentHashMap.newKeySet())
-                  .add(builderAndParent)) {
+              final UInt64 bidValue = bid.getValue();
+              final AtomicReference<UInt64> existingBidValueReference = new AtomicReference<>();
+              final AtomicBoolean alreadySeen = new AtomicBoolean();
+              final UInt64 actualHighestBid =
+                  highestBids.compute(
+                      bidValueKey,
+                      (key, existingValue) -> {
+                        existingBidValueReference.set(existingValue);
+                        if (seenExecutionPayloadBids
+                            .getOrDefault(bid.getSlot(), Set.of())
+                            .contains(builderAndParent)) {
+                          alreadySeen.set(true);
+                          return existingValue;
+                        }
+
+                        final UInt64 newHighestBid = computeNewHighestBid(existingValue, bidValue);
+                        if (!wasBidAccepted(bidValue, existingValue, newHighestBid)) {
+                          return existingValue;
+                        }
+
+                        if (!seenExecutionPayloadBids
+                            .computeIfAbsent(bid.getSlot(), __ -> ConcurrentHashMap.newKeySet())
+                            .add(builderAndParent)) {
+                          alreadySeen.set(true);
+                          return existingValue;
+                        }
+                        return newHighestBid;
+                      });
+
+              if (alreadySeen.get()) {
                 return ignoreBid(
                     bid,
                     "another bid for parent block hash %s and parent block root %s was processed concurrently",
@@ -406,19 +434,7 @@ public class ExecutionPayloadBidGossipValidator {
                     bid.getParentBlockRoot());
               }
 
-              // Atomically check threshold and update the highest bid
-              final UInt64 bidValue = bid.getValue();
-              final AtomicReference<UInt64> existingBidRef = new AtomicReference<>();
-              final UInt64 actualHighestBid =
-                  highestBids.compute(
-                      bidValueKey,
-                      (key, existingValue) -> {
-                        existingBidRef.set(existingValue);
-                        return computeNewHighestBid(existingValue, bidValue);
-                      });
-
-              // Check if our bid was actually accepted
-              if (!wasBidAccepted(bidValue, existingBidRef.get(), actualHighestBid)) {
+              if (!wasBidAccepted(bidValue, existingBidValueReference.get(), actualHighestBid)) {
                 final UInt64 minRequired = calculateMinimumRequiredBid(actualHighestBid);
                 return ignoreBid(
                     bid,

@@ -1191,6 +1191,48 @@ public class ExecutionPayloadBidGossipValidatorTest {
                 gweiToEth(UInt64.valueOf(11_000)),
                 gweiToEth(UInt64.valueOf(11_110))));
     verify(gossipValidationHelper, never()).getParentStateInBlockEpoch(any(), any(), any());
+
+    final SignedExecutionPayloadBid winningFollowUp =
+        bidFromBuilder(builderIndex, UInt64.valueOf(12_000));
+    mockBidValidation(winningFollowUp);
+    assertThatSafeFuture(bidValidator.validate(winningFollowUp)).isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldNotUpdateHighestBidForConcurrentDuplicate() {
+    final SignedExecutionPayloadBid firstBid = bidFromBuilder(builderIndex, UInt64.valueOf(10_000));
+    mockBidValidation(firstBid);
+    final SafeFuture<Optional<BeaconState>> firstStateFuture = new SafeFuture<>();
+    when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
+        .thenReturn(firstStateFuture);
+    final SafeFuture<InternalValidationResult> firstBidResult = bidValidator.validate(firstBid);
+    assertThat(firstBidResult).isNotDone();
+
+    final SignedExecutionPayloadBid duplicateBid =
+        bidFromBuilder(builderIndex, UInt64.valueOf(12_000));
+    mockBidValidation(duplicateBid);
+    final SafeFuture<Optional<BeaconState>> duplicateStateFuture = new SafeFuture<>();
+    when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
+        .thenReturn(duplicateStateFuture);
+    final SafeFuture<InternalValidationResult> duplicateBidResult =
+        bidValidator.validate(duplicateBid);
+    assertThat(duplicateBidResult).isNotDone();
+
+    firstStateFuture.complete(Optional.of(postState));
+    assertThatSafeFuture(firstBidResult).isCompletedWithValue(ACCEPT);
+    duplicateStateFuture.complete(Optional.of(postState));
+    assertThatSafeFuture(duplicateBidResult)
+        .isCompletedWithValue(
+            ignoreBid(
+                duplicateBid,
+                "another bid for parent block hash %s and parent block root %s was processed concurrently",
+                parentBlockHash,
+                parentBlockRoot));
+
+    final SignedExecutionPayloadBid qualifyingBid =
+        bidFromBuilder(builderIndex.plus(1), UInt64.valueOf(10_100));
+    mockBidValidation(qualifyingBid);
+    assertThatSafeFuture(bidValidator.validate(qualifyingBid)).isCompletedWithValue(ACCEPT);
   }
 
   @TestTemplate
