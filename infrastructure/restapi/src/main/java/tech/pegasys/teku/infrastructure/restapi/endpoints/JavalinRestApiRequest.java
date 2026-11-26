@@ -18,6 +18,7 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_ACCEPT;
+import static tech.pegasys.teku.infrastructure.json.types.CoreTypes.HTTP_ERROR_RESPONSE_TYPE;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import io.javalin.http.Context;
@@ -38,17 +39,19 @@ import java.util.Optional;
 import java.util.TreeMap;
 import java.util.concurrent.CancellationException;
 import java.util.function.Consumer;
+import org.apache.commons.io.output.CloseShieldOutputStream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.eclipse.jetty.ee10.servlet.ServletContextRequest;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.http.HttpErrorResponse;
+import tech.pegasys.teku.infrastructure.json.JsonUtil;
 
 public class JavalinRestApiRequest implements RestApiRequest {
   private static final Logger LOG = LogManager.getLogger();
-  private static final AsyncApiResponse TIMEOUT_RESPONSE =
-      AsyncApiResponse.respondWithError(SC_INTERNAL_SERVER_ERROR, "Request timeout");
+  private static final HttpErrorResponse TIMEOUT_ERROR =
+      new HttpErrorResponse(SC_INTERNAL_SERVER_ERROR, "Request timeout");
   private final Context context;
   private final EndpointMetadata metadata;
   private final Map<String, String> pathParamMap;
@@ -118,18 +121,26 @@ public class JavalinRestApiRequest implements RestApiRequest {
           final SafeFuture<AsyncApiResponse> response =
               futureResponse.orInterrupt(
                   SafeFuture.createInterruptor(requestEnded, CancellationException::new));
+          // Empty when the timeout fires first
+          final SafeFuture<Optional<AsyncApiResponse>> responseOrTimeout =
+              response.thenApply(Optional::of);
           final SafeFuture<ByteArrayInputStream> requestResponse =
               (timeoutMillis > 0
                       ? SafeFuture.of(
-                          response.completeOnTimeout(TIMEOUT_RESPONSE, timeoutMillis, MILLISECONDS))
-                      : response)
+                          responseOrTimeout.completeOnTimeout(
+                              Optional.empty(), timeoutMillis, MILLISECONDS))
+                      : responseOrTimeout)
                   .thenApply(
-                      result -> {
+                      maybeResult -> {
                         try {
-                          respond(
-                              result.getResponseCode(),
-                              result.getResponseBody(),
-                              getResponseOutputStream());
+                          if (maybeResult.isEmpty()) {
+                            respondWithTimeout();
+                          } else {
+                            respond(
+                                maybeResult.get().getResponseCode(),
+                                maybeResult.get().getResponseBody(),
+                                getResponseOutputStream());
+                          }
                         } catch (JsonProcessingException e) {
                           LOG.trace("Failed to generate API response", e);
                           context.status(SC_INTERNAL_SERVER_ERROR);
@@ -153,6 +164,16 @@ public class JavalinRestApiRequest implements RestApiRequest {
   public void respondError(final int statusCode, final String message)
       throws JsonProcessingException {
     respond(statusCode, new HttpErrorResponse(statusCode, message), getResponseOutputStream());
+  }
+
+  /**
+   * The timeout error is written as JSON without going through the endpoint's response types:
+   * content negotiation falls back to the endpoint's default type, which its error responses may
+   * not support.
+   */
+  private void respondWithTimeout() throws JsonProcessingException {
+    context.status(SC_INTERNAL_SERVER_ERROR);
+    context.json(JsonUtil.serialize(TIMEOUT_ERROR, HTTP_ERROR_RESPONSE_TYPE));
   }
 
   private OutputStream getResponseOutputStream() {
@@ -182,7 +203,14 @@ public class JavalinRestApiRequest implements RestApiRequest {
     context.contentType(responseMetadata.getContentType());
     responseMetadata.getAdditionalHeaders().forEach(context::header);
     try {
-      metadata.serialize(statusCode, responseMetadata.getContentType(), response, out);
+      // The response stream stays open whatever the serializer does. The JSON serializer closes
+      // the stream it writes to, also when it fails, and closing a compressed stream ends the
+      // response normally before it can be aborted.
+      metadata.serialize(
+          statusCode,
+          responseMetadata.getContentType(),
+          response,
+          CloseShieldOutputStream.wrap(out));
     } catch (final JsonProcessingException | RuntimeException e) {
       abortCommittedResponse();
       throw e;
