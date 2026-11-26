@@ -25,6 +25,7 @@ import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszListSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszPrimitiveSchemas;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszProgressiveListSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszSchemaHints;
 import tech.pegasys.teku.infrastructure.ssz.schema.SszVectorSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszPrimitiveListSchema;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszField;
@@ -121,7 +122,9 @@ public class BeaconStateSchemaPq extends BeaconStateSchemaGloas {
               BeaconStateFields.listSchemaForState(
                   specConfig,
                   SszListSchema.create(
-                      ValidatorPq.SSZ_SCHEMA, specConfig.getValidatorRegistryLimit())));
+                      ValidatorPq.SSZ_SCHEMA,
+                      specConfig.getValidatorRegistryLimit(),
+                      SszSchemaHints.sszSuperNode(8))));
     }
     if (field.getIndex() == BUILDERS_FIELD_INDEX) {
       return new SszField(
