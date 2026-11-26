@@ -166,6 +166,16 @@ public class Eth2NetworkOptions {
       Eth2NetworkConfiguration.DEFAULT_FAST_CONFIRMATION_ENABLED;
 
   @Option(
+      names = {"--Xfast-confirmation-byzantine-threshold"},
+      paramLabel = "<INTEGER>",
+      description =
+          "Override the assumed maximum percentage of Byzantine validators used by the experimental fast confirmation rule (CONFIRMATION_BYZANTINE_THRESHOLD). Must be between 0 and 100. Defaults to the spec value.",
+      arity = "1",
+      converter = OptionalIntConverter.class,
+      hidden = true)
+  private OptionalInt fastConfirmationByzantineThreshold = OptionalInt.empty();
+
+  @Option(
       names = {"--Xprepare-block-production-enabled"},
       paramLabel = "<BOOLEAN>",
       description = "Enable block production to be prepared in advance.",
@@ -597,6 +607,7 @@ public class Eth2NetworkOptions {
         .rustKzgEnabled(rustKzgEnabled)
         .dataColumnSidecarExtensionRetentionEpochs(dataColumnSidecarExtensionRetentionEpochs);
     kzgPrecompute.ifPresent(builder::kzgPrecompute);
+    fastConfirmationByzantineThreshold.ifPresent(builder::fastConfirmationByzantineThreshold);
     dataColumnSidecarRecoveryMaxDelayMillis.ifPresent(
         builder::dataColumnSidecarRecoveryMaxDelayMillis);
     asyncP2pMaxQueue.ifPresent(builder::asyncP2pMaxQueue);

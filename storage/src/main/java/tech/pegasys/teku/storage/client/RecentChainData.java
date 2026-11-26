@@ -959,13 +959,9 @@ public abstract class RecentChainData
     return validatorIsConnectedProvider.isBlockProposerConnected(slot);
   }
 
-  public void setBlockTimelinessFromArrivalTime(
-      final SignedBeaconBlock block, final UInt64 arrivalTime) {
-    blockTimelinessTracker.setBlockTimelinessFromArrivalTime(block, arrivalTime);
-  }
-
-  public void setBlockTimelinessIfEmpty(final SignedBeaconBlock block) {
-    blockTimelinessTracker.setBlockTimelinessFromArrivalTime(block, store.getTimeInMillis());
+  public void setBlockTimelinessAtImport(
+      final SignedBeaconBlock block, final UInt64 importTimeMillis) {
+    blockTimelinessTracker.setBlockTimelinessAtImport(block, importTimeMillis);
   }
 
   public void setBlockTimelinessAfterDataAvailability(

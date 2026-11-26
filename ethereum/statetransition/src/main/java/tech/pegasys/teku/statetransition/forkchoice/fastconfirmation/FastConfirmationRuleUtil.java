@@ -34,10 +34,9 @@ public final class FastConfirmationRuleUtil {
   /**
    * {@code CONFIRMATION_BYZANTINE_THRESHOLD}: assumed maximum percentage of Byzantine validators.
    * The spec exposes it as configuration with a maximum of {@code 25}; both the mainnet and minimal
-   * presets set it to {@code 25}, so it is treated here as a fixed constant to avoid touching
-   * {@code SpecConfig}. If a future network ever deviates from {@code 25} this constant must be
-   * updated manually (or promoted into {@code SpecConfig}), otherwise the confirmation rule will
-   * silently use the wrong threshold.
+   * presets set it to {@code 25}, so it is kept out of {@code SpecConfig} and used as the default
+   * here. A node can assume a different threshold with {@code
+   * --Xfast-confirmation-byzantine-threshold}, which is passed to the calculator in its place.
    */
   static final int CONFIRMATION_BYZANTINE_THRESHOLD = 25;
 
