@@ -269,7 +269,6 @@ public class EndpointMetadata {
     final String allAcceptHeaders =
         Collections.list(acceptHeaders).stream()
             .filter(header -> !header.isBlank())
-            .map(header -> header.toLowerCase(Locale.ROOT))
             .collect(Collectors.joining(","));
     if (allAcceptHeaders.isEmpty()) {
       return true;

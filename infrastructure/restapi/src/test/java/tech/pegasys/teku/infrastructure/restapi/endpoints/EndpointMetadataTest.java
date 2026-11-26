@@ -198,6 +198,12 @@ class EndpointMetadataTest {
   }
 
   @Test
+  void isAcceptable_shouldBeTrueWhenWildcardAcceptsAnotherTypeThanExcludedOne() {
+    final EndpointMetadata metadata = notAcceptableMetadata();
+    assertThat(metadata.isAcceptable(acceptHeaders("application/octet-stream;q=0, */*"))).isTrue();
+  }
+
+  @Test
   void isAcceptable_shouldIgnoreCaseOfAcceptHeader() {
     final EndpointMetadata metadata = notAcceptableMetadata();
     assertThat(metadata.isAcceptable(acceptHeaders("Application/JSON"))).isTrue();
