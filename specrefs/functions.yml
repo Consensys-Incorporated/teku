@@ -12063,7 +12063,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/common/util/ForkChoiceUtil.java
       search: public BlockTimeliness computeBlockTimeliness(
     - file: storage/src/main/java/tech/pegasys/teku/storage/client/BlockTimelinessTracker.java
-      search: public void setBlockTimelinessFromArrivalTime(
+      search: public void setBlockTimelinessAtImport(
   spec: |
     <spec fn="record_block_timeliness" fork="phase0" hash="35697974">
     def record_block_timeliness(store: Store, root: Root) -> None:
@@ -12080,7 +12080,7 @@
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/gloas/util/ForkChoiceUtilGloas.java
       search: public BlockTimeliness computeBlockTimeliness(
     - file: storage/src/main/java/tech/pegasys/teku/storage/client/BlockTimelinessTracker.java
-      search: public void setBlockTimelinessFromArrivalTime(
+      search: public void setBlockTimelinessAtImport(
   spec: |
     <spec fn="record_block_timeliness" fork="gloas" hash="ef030383">
     def record_block_timeliness(store: Store, root: Root) -> None:

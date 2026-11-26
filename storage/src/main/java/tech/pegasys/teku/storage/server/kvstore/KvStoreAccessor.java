@@ -14,8 +14,10 @@
 package tech.pegasys.teku.storage.server.kvstore;
 
 import com.google.errorprone.annotations.MustBeClosed;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import tech.pegasys.teku.storage.server.kvstore.schema.KvStoreColumn;
@@ -122,6 +124,70 @@ public interface KvStoreAccessor extends AutoCloseable {
    * operation and is intended to be run offline (e.g. from the debug CLI), not on a running node.
    */
   void compact();
+
+  /**
+   * Compacts the keys of a column between from and to fully inclusive, physically dropping deleted
+   * keys and their tombstones in that range.
+   *
+   * <p>Pruning deletes keys one at a time and each delete leaves a tombstone until compaction
+   * removes it. A seek that lands among them has to step over every tombstone before it reaches a
+   * live key, so compacting a range once it has been pruned keeps later reads of it cheap. This is
+   * a blocking, I/O-heavy call: run it off the storage thread. If the database is closed while it
+   * runs, it stops early and throws {@code ShuttingDownException}.
+   *
+   * @param column the column to compact
+   * @param from the first key to compact
+   * @param to the last key to compact
+   * @param <K> the key type of the column
+   * @param <V> the value type of the column
+   */
+  <K, V> void compactRange(KvStoreColumn<K, V> column, K from, K to);
+
+  /**
+   * Counts the deletion tombstones that compaction has not dropped yet, in the data files that hold
+   * keys of a column between from and to.
+   *
+   * <p>Counts every tombstone in each data file that overlaps the range, so it can include a few
+   * from just outside it. Deletes that have not been flushed to a data file yet are not counted.
+   * RocksDB loads the counts of only a few of the files written before the database was opened, so
+   * tombstones in older files are mostly not counted until compaction rewrites those files.
+   *
+   * @param column the column to count tombstones in
+   * @param from the first key of the range
+   * @param to the last key of the range
+   * @param <K> the key type of the column
+   * @param <V> the value type of the column
+   * @return the number of tombstones, or empty if the database cannot report it
+   */
+  <K, V> OptionalLong countTombstones(KvStoreColumn<K, V> column, K from, K to);
+
+  /**
+   * Lists the data files that hold keys of a column between from and to, with the range of keys and
+   * the size of each. Compacting the range reads and rewrites these files, so their size is an
+   * estimate of how much work that is.
+   *
+   * <p>If no data file overlaps the range, writes for the column that are still in memory are
+   * flushed to data files and the files are listed again, so a range reported empty has nothing
+   * waiting to be written there either. The listing itself does no I/O.
+   *
+   * @param column the column to list data files of
+   * @param from the first key of the range
+   * @param to the last key of the range
+   * @param <K> the key type of the column
+   * @param <V> the value type of the column
+   * @return the data files overlapping the range, or empty if the database cannot report them
+   */
+  <K, V> Optional<List<DataFile<K>>> getDataFiles(KvStoreColumn<K, V> column, K from, K to);
+
+  /**
+   * A data file of a column.
+   *
+   * @param smallestKey the smallest key in the file, which may be a deleted key
+   * @param largestKey the largest key in the file, which may be a deleted key
+   * @param sizeBytes the size of the file
+   * @param <K> the key type of the column
+   */
+  record DataFile<K>(K smallestKey, K largestKey, long sizeBytes) {}
 
   interface KvStoreTransaction extends AutoCloseable {
 

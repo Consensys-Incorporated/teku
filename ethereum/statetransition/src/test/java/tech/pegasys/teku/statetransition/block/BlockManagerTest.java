@@ -61,7 +61,9 @@ import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -86,7 +88,10 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.kzg.NoOpKZG;
 import tech.pegasys.teku.service.serviceutils.ServiceCapacityExceededException;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
+import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
@@ -96,6 +101,7 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecution
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannelStub;
 import tech.pegasys.teku.spec.executionlayer.PayloadStatus;
+import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.generator.ChainBuilder.BlockOptions;
 import tech.pegasys.teku.spec.logic.common.statetransition.availability.AvailabilityChecker;
 import tech.pegasys.teku.spec.logic.common.statetransition.availability.DataAndValidationResult;
@@ -103,6 +109,7 @@ import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.BlockProce
 import tech.pegasys.teku.spec.logic.common.statetransition.exceptions.StateTransitionException;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult.FailureReason;
+import tech.pegasys.teku.spec.logic.common.util.ForkChoiceUtil.BlockTimeliness;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.blobs.BlobSidecarManager;
 import tech.pegasys.teku.statetransition.blobs.BlockEventsListenerRouter;
@@ -376,6 +383,131 @@ public class BlockManagerTest {
     assertThat(pendingBlocks.size()).isEqualTo(1);
     assertThat(futureBlocks.size()).isEqualTo(0);
     assertThat(pendingBlocks.contains(nextNextBlock)).isTrue();
+  }
+
+  @Nested
+  @TestSpecContext(
+      milestone = {SpecMilestone.ELECTRA, SpecMilestone.GLOAS},
+      signatureVerifierNoop = true)
+  class BlockTimelinessTests {
+
+    @BeforeEach
+    void setup(final SpecContext specContext) {
+      setupWithSpec(specContext.getSpec());
+    }
+
+    @TestTemplate
+    void onGossipedBlock_futureBlockShouldBeTimelyWhenImportedInItsSlot(
+        final SpecContext specContext) {
+      final UInt64 blockSlot = UInt64.ONE;
+      final SignedBeaconBlock block =
+          localChain.chainBuilder().generateBlockAtSlot(blockSlot).getBlock();
+      final UInt64 arrivalTime =
+          spec.computeTimeMillisAtSlot(blockSlot, localRecentChainData.getGenesisTimeMillis())
+              .minus(300);
+      localChain.chainUpdater().setTimeMillis(arrivalTime);
+      when(blockValidator.validateGossip(block))
+          .thenReturn(SafeFuture.completedFuture(InternalValidationResult.SAVE_FOR_FUTURE));
+
+      assertThatSafeFuture(blockManager.validateAndImportBlock(block, Optional.of(arrivalTime)))
+          .isCompletedWithValue(InternalValidationResult.SAVE_FOR_FUTURE);
+      assertThat(futureBlocks.contains(block)).isTrue();
+
+      incrementSlot();
+
+      assertThat(localRecentChainData.containsBlock(block.getRoot())).isTrue();
+      assertThat(localRecentChainData.getBlockTimeliness(block.getRoot()))
+          .contains(
+              new BlockTimeliness(true, specContext.getSpecMilestone() == SpecMilestone.GLOAS));
+      assertThat(localRecentChainData.getStore().getProposerBoostRoot()).contains(block.getRoot());
+    }
+
+    @TestTemplate
+    void onGossipedBlock_pendingChildImportedInLaterSlotShouldNotTakeProposerBoost() {
+      localChain.chainUpdater().advanceChain(incrementSlot());
+      final ChainBuilder honestChain = localChain.chainBuilder().fork();
+      final SignedBlockAndState parent =
+          localChain.chainBuilder().generateBlockAtSlot(incrementSlot());
+      final SignedBeaconBlock child =
+          localChain.chainBuilder().generateBlockAtSlot(incrementSlot()).getBlock();
+      final UInt64 arrivalTime = setTimeIntoSlot(child.getSlot(), 500);
+      when(blockValidator.validateGossip(child))
+          .thenReturn(SafeFuture.completedFuture(InternalValidationResult.SAVE_FOR_FUTURE));
+
+      assertThatSafeFuture(blockManager.validateAndImportBlock(child, Optional.of(arrivalTime)))
+          .isCompletedWithValue(InternalValidationResult.SAVE_FOR_FUTURE);
+      assertThat(pendingBlocks.contains(child)).isTrue();
+
+      final UInt64 importSlot = incrementSlot();
+      setTimeIntoSlot(importSlot, 100);
+      assertImportBlockSuccessfully(parent.getBlock());
+      if (spec.atSlot(parent.getSlot())
+          .getMilestone()
+          .isGreaterThanOrEqualTo(SpecMilestone.GLOAS)) {
+        final SignedExecutionPayloadEnvelope parentPayload =
+            localChain.chainBuilder().getExecutionPayload(parent.getRoot()).orElseThrow();
+        localChain.chainUpdater().saveExecutionPayload(parentPayload);
+        blockManager.onExecutionPayloadImported(parentPayload, false);
+      }
+
+      assertThat(localRecentChainData.containsBlock(child.getRoot())).isTrue();
+      assertThat(localRecentChainData.getBlockTimeliness(child.getRoot()))
+          .contains(new BlockTimeliness(false, false));
+      assertThat(localRecentChainData.getStore().getProposerBoostRoot()).isEmpty();
+
+      final SignedBeaconBlock honestBlock = honestChain.generateBlockAtSlot(importSlot).getBlock();
+      setTimeIntoSlot(importSlot, 500);
+      assertImportBlockSuccessfully(honestBlock);
+      assertThat(localRecentChainData.getStore().getProposerBoostRoot())
+          .contains(honestBlock.getRoot());
+      assertThatSafeFuture(forkChoice.processHead()).isCompleted();
+      assertThat(localRecentChainData.getBestBlockRoot()).contains(honestBlock.getRoot());
+    }
+
+    @TestTemplate
+    void onGossipedBlock_rejectedBlockShouldNotRecordTimeliness() {
+      final SignedBeaconBlock block =
+          localChain.chainBuilder().generateBlockAtSlot(incrementSlot()).getBlock();
+      final UInt64 arrivalTime = setTimeIntoSlot(block.getSlot(), 100);
+      when(blockValidator.validateGossip(block))
+          .thenReturn(SafeFuture.completedFuture(InternalValidationResult.reject("Invalid block")));
+
+      assertThatSafeFuture(blockManager.validateAndImportBlock(block, Optional.of(arrivalTime)))
+          .isCompletedWithValueMatching(InternalValidationResult::isReject);
+
+      assertThat(localRecentChainData.getBlockTimeliness(block.getRoot())).isEmpty();
+    }
+  }
+
+  @Test
+  void onGloasBlock_pendingParentPayloadImportedInLaterSlotShouldNotTakeProposerBoost() {
+    setupWithSpec(
+        TestSpecFactory.createMinimalGloas(
+            builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
+    final SignedBlockAndState parent =
+        localChain.chainBuilder().generateBlockAtSlot(incrementSlot());
+    localChain.chainUpdater().saveBlock(parent);
+    final SignedExecutionPayloadEnvelope parentPayload =
+        localChain.chainBuilder().getExecutionPayload(parent.getRoot()).orElseThrow();
+    final SignedBeaconBlock child =
+        localChain.chainBuilder().generateBlockAtSlot(incrementSlot()).getBlock();
+    final UInt64 arrivalTime = setTimeIntoSlot(child.getSlot(), 500);
+    when(blockValidator.validateGossip(child))
+        .thenReturn(SafeFuture.completedFuture(InternalValidationResult.SAVE_FOR_FUTURE));
+
+    assertThatSafeFuture(blockManager.validateAndImportBlock(child, Optional.of(arrivalTime)))
+        .isCompletedWithValue(InternalValidationResult.SAVE_FOR_FUTURE);
+    assertThat(pendingBlockPool.contains(child)).isTrue();
+    assertThat(pendingBlocks.contains(child)).isFalse();
+
+    incrementSlot();
+    localChain.chainUpdater().saveExecutionPayload(parentPayload);
+    blockManager.onExecutionPayloadImported(parentPayload, false);
+
+    assertThat(localRecentChainData.containsBlock(child.getRoot())).isTrue();
+    assertThat(localRecentChainData.getBlockTimeliness(child.getRoot()))
+        .contains(new BlockTimeliness(false, false));
+    assertThat(localRecentChainData.getStore().getProposerBoostRoot()).isEmpty();
   }
 
   @Test
@@ -1348,6 +1480,14 @@ public class BlockManagerTest {
     pendingBlockPool.onSlot(currentSlot);
     blockManager.onSlot(currentSlot);
     return currentSlot;
+  }
+
+  private UInt64 setTimeIntoSlot(final UInt64 slot, final long millisIntoSlot) {
+    final UInt64 timeMillis =
+        spec.computeTimeMillisAtSlot(slot, localRecentChainData.getGenesisTimeMillis())
+            .plus(millisIntoSlot);
+    localChain.chainUpdater().setTimeMillis(timeMillis);
+    return timeMillis;
   }
 
   private BlockManager setupBlockManagerWithMockRecentChainData(
