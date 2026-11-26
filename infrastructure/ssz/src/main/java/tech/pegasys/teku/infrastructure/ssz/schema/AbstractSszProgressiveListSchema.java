@@ -724,20 +724,19 @@ public abstract class AbstractSszProgressiveListSchema<
       final long chunkGIndex,
       final long lastChunkGIndex,
       final int lastChunkBytes) {
-    final int chunkBytes = chunkGIndex == lastChunkGIndex ? lastChunkBytes : LeafNode.MAX_BYTE_SIZE;
-    if (TreeUtil.ZERO_TREES_BY_ROOT.containsKey(chunkHash)) {
-      if (elementSchema.isPrimitive()) {
-        return LeafNode.ZERO_LEAVES[chunkBytes];
-      } else {
-        return elementSchema.getDefaultTree();
-      }
-    }
+    // The chunk hash can't be recognised as empty by being the root of a zero tree: a chunk of
+    // primitives is its own hash, and a non-default composite can hash to the root of a zero tree.
     if (elementSchema.isPrimitive()) {
+      final int chunkBytes =
+          chunkGIndex == lastChunkGIndex ? lastChunkBytes : LeafNode.MAX_BYTE_SIZE;
       final Bytes data = nodeSource.loadLeafNode(chunkHash, chunkGIndex);
       return LeafNode.create(data.size() > chunkBytes ? data.slice(0, chunkBytes) : data);
-    } else {
-      return elementSchema.loadBackingNodes(nodeSource, chunkHash, chunkGIndex);
     }
+    final TreeNode defaultTree = elementSchema.getDefaultTree();
+    if (chunkHash.equals(defaultTree.hashTreeRoot())) {
+      return defaultTree;
+    }
+    return elementSchema.loadBackingNodes(nodeSource, chunkHash, chunkGIndex);
   }
 
   // ===== SuperNode packing (SszSuperNodeHint) =====

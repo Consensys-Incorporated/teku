@@ -23,7 +23,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
 import tech.pegasys.teku.infrastructure.ssz.SszCollection;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
@@ -136,17 +135,61 @@ public class SszListSchemaTest extends SszListSchemaTestBase {
     assertLoadedElementsMatch(schema, maxBranchLevelsSkipped, data);
   }
 
-  @ParameterizedTest
-  @ValueSource(ints = {1, 2, 5, 15})
-  void loadBackingNodes_shouldRestoreLeavesHoldingZeroTreeRoots(final int maxBranchLevelsSkipped) {
-    // Two adjacent leaves holding the root of a zero tree hash to the root of a deeper zero tree
+  static Stream<Arguments> zeroTreeRootValueCases() {
     final SszBytes32 zeroTreeRoot = SszBytes32.of(TreeUtil.ZERO_TREES[1].hashTreeRoot());
     final SszBytes32 other = SszBytes32.of(Bytes32.fromHexString("0x1234"));
-    final SszListSchema<SszBytes32, ? extends SszList<SszBytes32>> listSchema =
-        SszListSchema.create(SszPrimitiveSchemas.BYTES32_SCHEMA, 2048);
-    final SszList<SszBytes32> data = listSchema.of(other, other, zeroTreeRoot, zeroTreeRoot, other);
+    final SszBytes32VectorSchema<?> pairSchema = SszBytes32VectorSchema.create(2);
+    return Stream.of(
+            // a leaf holding the root of a zero tree
+            Arguments.of(SszPrimitiveSchemas.BYTES32_SCHEMA, zeroTreeRoot, other),
+            // a non-default composite whose root is the root of a zero tree
+            Arguments.of(
+                pairSchema,
+                pairSchema.createFromElements(List.of(zeroTreeRoot, zeroTreeRoot)),
+                pairSchema.createFromElements(List.of(other, other))))
+        .flatMap(
+            elementCase -> {
+              final SszSchema<?> elementSchema = (SszSchema<?>) elementCase.get()[0];
+              return Stream.<SszCollectionSchema<?, ?>>of(
+                      SszListSchema.create(elementSchema, 2048),
+                      SszVectorSchema.create(elementSchema, 8),
+                      SszListSchema.createProgressive(elementSchema))
+                  .flatMap(
+                      schema ->
+                          // z is a zero tree root element, o is another one
+                          Stream.of("ozoooooo", "oozzoooo", "ozzzzooz")
+                              .flatMap(
+                                  mask ->
+                                      Stream.of(1, 2, 5, 15)
+                                          .map(
+                                              maxBranchLevelsSkipped ->
+                                                  Arguments.of(
+                                                      schema,
+                                                      mask,
+                                                      maxBranchLevelsSkipped,
+                                                      elementCase.get()[1],
+                                                      elementCase.get()[2]))));
+            });
+  }
 
-    assertLoadedElementsMatch(listSchema, maxBranchLevelsSkipped, data);
+  @ParameterizedTest(name = "{0} elements {1} skipping {2} levels")
+  @MethodSource("zeroTreeRootValueCases")
+  void loadBackingNodes_shouldRestoreValuesWithZeroTreeRoots(
+      final SszCollectionSchema<SszData, ?> schema,
+      final String zeroTreeRootMask,
+      final int maxBranchLevelsSkipped,
+      final SszData zeroTreeRootElement,
+      final SszData otherElement) {
+    assertThat(TreeUtil.ZERO_TREES_BY_ROOT).containsKey(zeroTreeRootElement.hashTreeRoot());
+    assertThat(zeroTreeRootElement).isNotEqualTo(schema.getElementSchema().getDefault());
+    final List<SszData> elements =
+        zeroTreeRootMask
+            .chars()
+            .mapToObj(c -> c == 'z' ? zeroTreeRootElement : otherElement)
+            .toList();
+    final SszCollection<SszData> data = schema.createFromElements(elements);
+
+    assertLoadedElementsMatch(schema, maxBranchLevelsSkipped, data);
   }
 
   private <T extends SszData> void assertLoadedElementsMatch(
