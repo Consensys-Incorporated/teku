@@ -15,6 +15,7 @@ package tech.pegasys.teku.storage.server.rocksdb;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -42,15 +43,22 @@ import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
 import org.rocksdb.DBOptions;
+import org.rocksdb.EnvOptions;
 import org.rocksdb.FlushOptions;
+import org.rocksdb.IngestExternalFileOptions;
+import org.rocksdb.Options;
 import org.rocksdb.PerfLevel;
 import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksIterator;
+import org.rocksdb.SstFileMetaData;
+import org.rocksdb.SstFileWriter;
 import org.rocksdb.TransactionDB;
 import org.rocksdb.TransactionDBOptions;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+import tech.pegasys.teku.storage.server.ShuttingDownException;
 import tech.pegasys.teku.storage.server.kvstore.ColumnEntry;
+import tech.pegasys.teku.storage.server.kvstore.KvStoreAccessor.DataFile;
 import tech.pegasys.teku.storage.server.kvstore.KvStoreAccessor.KvStoreTransaction;
 import tech.pegasys.teku.storage.server.kvstore.schema.KvStoreColumn;
 import tech.pegasys.teku.storage.server.kvstore.schema.Schema;
@@ -187,6 +195,176 @@ class RocksDbInstanceTest {
         instance.streamKeys(column, UInt64.valueOf(KEY_COUNT - 3), UInt64.MAX_VALUE)) {
       assertThat(keys).containsExactlyElementsOf(range(KEY_COUNT - 3, KEY_COUNT - 1));
     }
+  }
+
+  @Test
+  void compactRange_shouldDropTombstonesAndKeepLiveKeys() {
+    // The range straddles the deleted block and the first live keys
+    instance.compactRange(column, UInt64.ZERO, UInt64.valueOf(FIRST_LIVE_KEY + 49));
+
+    db.setPerfLevel(PerfLevel.ENABLE_COUNT);
+    db.getPerfContext().reset();
+    try (final Stream<UInt64> keys = instance.streamKeys(column)) {
+      assertThat(keys.findFirst()).contains(UInt64.valueOf(FIRST_LIVE_KEY));
+    }
+    assertThat(db.getPerfContext().getInternalDeleteSkippedCount()).isZero();
+
+    try (final Stream<ColumnEntry<UInt64, UInt64>> entries = instance.stream(column)) {
+      assertThat(entries)
+          .containsExactlyElementsOf(
+              range(FIRST_LIVE_KEY, KEY_COUNT - 1).stream()
+                  .map(key -> ColumnEntry.create(key, key.times(2)))
+                  .toList());
+    }
+  }
+
+  @Test
+  void compactRange_shouldFailWhenClosed() throws Exception {
+    instance.close();
+
+    assertThatThrownBy(() -> instance.compactRange(column, UInt64.ZERO, UInt64.MAX_VALUE))
+        .isInstanceOf(ShuttingDownException.class);
+  }
+
+  @Test
+  void compactRange_shouldDropTombstonesAlreadyOnTheBottomLevel() throws Exception {
+    // Deletes of keys that were never written, as pruning does for slots without proofs
+    final UInt64 first = UInt64.valueOf(KEY_COUNT + 10_000);
+    final UInt64 last = UInt64.valueOf(KEY_COUNT + 10_999);
+    // Ingest them as a file of their own: it overlaps nothing, so it goes straight to the bottom
+    // level, as tombstone-only files do when compaction moves them down without rewriting them
+    final Path sstFile = databaseDir.resolveSibling(databaseDir.getFileName() + "-tombstones.sst");
+    try (final EnvOptions envOptions = new EnvOptions();
+        final Options options = new Options();
+        final SstFileWriter writer = new SstFileWriter(envOptions, options)) {
+      writer.open(sstFile.toString());
+      for (long key = first.longValue(); key <= last.longValue(); key++) {
+        writer.delete(UINT64_SERIALIZER.serialize(UInt64.valueOf(key)));
+      }
+      writer.finish();
+    }
+    try (final IngestExternalFileOptions ingestOptions = new IngestExternalFileOptions()) {
+      db.ingestExternalFile(columnHandle, List.of(sstFile.toString()), ingestOptions);
+    }
+    assertThat(tombstonesOnTheBottomLevel()).isEqualTo(1_000);
+    assertThat(instance.countTombstones(column, first, last)).hasValue(1_000);
+
+    instance.compactRange(column, first, last);
+
+    assertThat(instance.countTombstones(column, first, last)).hasValue(0);
+  }
+
+  @Test
+  void compactRange_shouldDropTombstonesStillInMemory() throws Exception {
+    // Deletes of keys no data file holds, which no listing of the data files can see yet
+    final UInt64 first = UInt64.valueOf(KEY_COUNT + 100);
+    final UInt64 last = UInt64.valueOf(KEY_COUNT + 200);
+    try (final KvStoreTransaction transaction = instance.startTransaction()) {
+      for (long key = first.longValue(); key <= last.longValue(); key++) {
+        transaction.delete(column, UInt64.valueOf(key));
+      }
+      transaction.commit();
+    }
+
+    // Compacting the range flushes the memory overlapping it first
+    instance.compactRange(column, UInt64.ZERO, last);
+    flush();
+
+    assertThat(instance.countTombstones(column, first, last)).hasValue(0);
+  }
+
+  private long tombstonesOnTheBottomLevel() {
+    return db.getColumnFamilyMetaData(columnHandle).levels().getLast().files().stream()
+        .mapToLong(SstFileMetaData::numDeletions)
+        .sum();
+  }
+
+  @Test
+  void countTombstones_shouldCountTheDeletesInFilesHoldingTheRange() {
+    // Every delete is in the file flushed after them, which holds keys 0 to FIRST_LIVE_KEY - 1
+    assertThat(instance.countTombstones(column, UInt64.ZERO, UInt64.valueOf(100)))
+        .hasValue(FIRST_LIVE_KEY);
+    // Only the file with the original puts holds these keys
+    assertThat(
+            instance.countTombstones(
+                column, UInt64.valueOf(FIRST_LIVE_KEY + 10), UInt64.valueOf(KEY_COUNT - 1)))
+        .hasValue(0);
+  }
+
+  @Test
+  void countTombstones_shouldBeZeroOnceTheRangeIsCompacted() {
+    instance.compactRange(column, UInt64.ZERO, UInt64.valueOf(FIRST_LIVE_KEY + 49));
+
+    assertThat(instance.countTombstones(column, UInt64.ZERO, UInt64.valueOf(KEY_COUNT - 1)))
+        .hasValue(0);
+  }
+
+  @Test
+  void countTombstones_shouldFailWhenClosed() throws Exception {
+    instance.close();
+
+    assertThatThrownBy(() -> instance.countTombstones(column, UInt64.ZERO, UInt64.MAX_VALUE))
+        .isInstanceOf(ShuttingDownException.class);
+  }
+
+  @Test
+  void getDataFiles_shouldListTheFilesHoldingTheRange() {
+    // The deletes are in a file of their own, below the file with the original puts
+    assertThat(instance.getDataFiles(column, UInt64.ZERO, UInt64.valueOf(100)))
+        .hasValueSatisfying(
+            files -> {
+              assertThat(files)
+                  .extracting(DataFile::smallestKey, DataFile::largestKey)
+                  .containsExactlyInAnyOrder(
+                      tuple(UInt64.ZERO, UInt64.valueOf(KEY_COUNT - 1)),
+                      tuple(UInt64.ZERO, UInt64.valueOf(FIRST_LIVE_KEY - 1)));
+              assertThat(files).allSatisfy(file -> assertThat(file.sizeBytes()).isPositive());
+            });
+    assertThat(
+            instance.getDataFiles(
+                column, UInt64.valueOf(FIRST_LIVE_KEY + 10), UInt64.valueOf(KEY_COUNT - 1)))
+        .hasValueSatisfying(
+            files ->
+                assertThat(files)
+                    .extracting(DataFile::smallestKey, DataFile::largestKey)
+                    .containsExactly(tuple(UInt64.ZERO, UInt64.valueOf(KEY_COUNT - 1))));
+  }
+
+  @Test
+  void getDataFiles_shouldBeEmptyWhenNoFileHoldsTheRange() {
+    assertThat(
+            instance.getDataFiles(
+                column, UInt64.valueOf(KEY_COUNT + 100), UInt64.valueOf(KEY_COUNT + 200)))
+        .contains(List.of());
+  }
+
+  @Test
+  void getDataFiles_shouldFlushDeletesStillInMemoryBeforeReportingTheRangeEmpty() {
+    // Deletes of keys that were never written, as pruning does for slots without proofs
+    try (final KvStoreTransaction transaction = instance.startTransaction()) {
+      for (int i = KEY_COUNT + 100; i <= KEY_COUNT + 200; i++) {
+        transaction.delete(column, UInt64.valueOf(i));
+      }
+      transaction.commit();
+    }
+
+    assertThat(
+            instance.getDataFiles(
+                column, UInt64.valueOf(KEY_COUNT + 150), UInt64.valueOf(KEY_COUNT + 300)))
+        .hasValueSatisfying(
+            files ->
+                assertThat(files)
+                    .extracting(DataFile::smallestKey, DataFile::largestKey)
+                    .containsExactly(
+                        tuple(UInt64.valueOf(KEY_COUNT + 100), UInt64.valueOf(KEY_COUNT + 200))));
+  }
+
+  @Test
+  void getDataFiles_shouldFailWhenClosed() throws Exception {
+    instance.close();
+
+    assertThatThrownBy(() -> instance.getDataFiles(column, UInt64.ZERO, UInt64.MAX_VALUE))
+        .isInstanceOf(ShuttingDownException.class);
   }
 
   @Test

@@ -26,6 +26,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -317,6 +318,47 @@ public class CombinedKvStoreDao<S extends SchemaCombined>
   @Override
   public void compact() {
     db.compact();
+  }
+
+  @Override
+  public void compactSlotRange(
+      final SlotKeyedColumn column, final UInt64 startSlot, final UInt64 endSlot) {
+    slotKeyRange(column, startSlot, endSlot).compact(db);
+  }
+
+  @Override
+  public OptionalLong countSlotRangeTombstones(
+      final SlotKeyedColumn column, final UInt64 startSlot, final UInt64 endSlot) {
+    return slotKeyRange(column, startSlot, endSlot).countTombstones(db);
+  }
+
+  @Override
+  public Optional<List<SlotRangeDataFile>> getSlotRangeDataFiles(
+      final SlotKeyedColumn column, final UInt64 startSlot, final UInt64 endSlot) {
+    return slotKeyRange(column, startSlot, endSlot).getDataFiles(db);
+  }
+
+  private SlotKeyRange<?> slotKeyRange(
+      final SlotKeyedColumn column, final UInt64 startSlot, final UInt64 endSlot) {
+    return switch (column) {
+      case BLOB_SIDECARS ->
+          SlotKeyRange.ofBlobSidecars(
+              schema.getColumnBlobSidecarBySlotRootBlobIndex(), startSlot, endSlot);
+      case NON_CANONICAL_BLOB_SIDECARS ->
+          SlotKeyRange.ofBlobSidecars(
+              schema.getColumnNonCanonicalBlobSidecarBySlotRootBlobIndex(), startSlot, endSlot);
+      case DATA_COLUMN_SIDECARS ->
+          SlotKeyRange.ofDataColumnSidecars(
+              schema.getColumnSidecarByColumnSlotAndIdentifier(), startSlot, endSlot);
+      case NON_CANONICAL_DATA_COLUMN_SIDECARS ->
+          SlotKeyRange.ofDataColumnSidecars(
+              schema.getColumnNonCanonicalSidecarByColumnSlotAndIdentifier(), startSlot, endSlot);
+      case DATA_COLUMN_SIDECARS_PROOFS ->
+          SlotKeyRange.ofSlots(
+              schema.getColumnDataColumnSidecarsProofsBySlot(), startSlot, endSlot);
+      case FINALIZED_BLOCKS ->
+          SlotKeyRange.ofSlots(schema.getColumnFinalizedBlocksBySlot(), startSlot, endSlot);
+    };
   }
 
   @Override
