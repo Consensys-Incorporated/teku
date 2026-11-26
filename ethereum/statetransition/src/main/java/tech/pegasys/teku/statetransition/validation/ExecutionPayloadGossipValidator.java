@@ -357,6 +357,11 @@ public class ExecutionPayloadGossipValidator {
                * [REJECT] The payload's block hash is computed correctly from its content
                * (proposed in consensus-specs PR 5770). A forged envelope carrying the bid's block
                * hash must not be marked as seen, as that would shadow the builder's real envelope.
+               *
+               * The proposal lists this rule before the signature one, both reject and the order
+               * is not normative. It runs last here because its cost grows with the payload,
+               * about 0.6 ms at 170 KB and 6 ms at 2.4 MB against about 1 ms for the signature,
+               * so an envelope with an invalid signature never pays for it.
                */
               return validateBlockHashMatchesContent(envelope.getMessage());
             });
