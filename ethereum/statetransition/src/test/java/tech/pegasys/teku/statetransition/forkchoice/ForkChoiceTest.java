@@ -23,6 +23,7 @@ import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
@@ -1993,6 +1994,93 @@ class ForkChoiceTest {
     assertThat(results.get(1))
         .isCompletedWithValue(AttestationProcessingResult.invalid("Bad checkpoint"));
     assertThatSafeFuture(results.get(2)).isCompletedExceptionallyWith(IllegalStateException.class);
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void onAttestations_shouldNotHoldValidatedVotesBackForSlowValidation() {
+    final List<SignedBlockAndState> targetBlocks = importChainOfBlocks(3);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final ValidatableAttestation ready1 = validAttestationForBlock(targetBlocks.get(0));
+    final ValidatableAttestation slow = validAttestationForBlock(targetBlocks.get(1));
+    final ValidatableAttestation ready2 = validAttestationForBlock(targetBlocks.get(2));
+    // Validate the slow attestation once so it has its indexed attestation, then make the next
+    // validation wait, as if its signature were still being verified
+    assertThat(forkChoice.onAttestation(slow))
+        .isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
+    final SafeFuture<AttestationProcessingResult> slowValidation = new SafeFuture<>();
+    doReturn(slowValidation).when(spec).validateAttestationAsync(any(), eq(slow), any(), any());
+    final InlineEventThread forkChoiceThread = spy(new InlineEventThread());
+    final ForkChoice batchForkChoice = createForkChoice(recentChainData, forkChoiceThread);
+    // Ignore tasks run when the fork choice is created
+    clearInvocations(forkChoiceThread);
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        batchForkChoice.onAttestations(List.of(ready1, slow, ready2));
+
+    assertThat(results.get(0)).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
+    assertThat(results.get(1)).isNotDone();
+    assertThat(results.get(2)).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
+    verify(forkChoiceThread, times(1)).execute(any(ExceptionThrowingSupplier.class));
+
+    slowValidation.complete(AttestationProcessingResult.SUCCESSFUL);
+
+    assertThat(results.get(1)).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
+    verify(forkChoiceThread, times(2)).execute(any(ExceptionThrowingSupplier.class));
+  }
+
+  @Test
+  void onAttestations_shouldOnlyFailOwnAttestationWhenApplyingItFails() {
+    final List<SignedBlockAndState> targetBlocks = importChainOfBlocks(3);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final ValidatableAttestation valid1 = validAttestationForBlock(targetBlocks.get(0));
+    final ValidatableAttestation failing = validAttestationForBlock(targetBlocks.get(1));
+    final ValidatableAttestation valid2 = validAttestationForBlock(targetBlocks.get(2));
+    // Give the failing attestation an indexed attestation from a slot that fork choice can't
+    // process, so that only applying its vote throws
+    final UInt64 unprocessableSlot = UInt64.valueOf(999);
+    final AttestationData data = failing.getData();
+    failing.setIndexedAttestation(
+        new IndexedAttestationLight(
+            List.of(ZERO),
+            new AttestationData(
+                unprocessableSlot,
+                data.getIndex(),
+                data.getBeaconBlockRoot(),
+                data.getSource(),
+                data.getTarget()),
+            BLSSignature.empty()));
+    failing.setValidIndexedAttestation();
+    doThrow(new IllegalStateException("Boom")).when(spec).atSlot(unprocessableSlot);
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        forkChoice.onAttestations(List.of(valid1, failing, valid2));
+
+    assertThat(results.get(0)).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
+    assertThatSafeFuture(results.get(1)).isCompletedExceptionallyWith(IllegalStateException.class);
+    assertThat(results.get(2)).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
+
+    // The votes of the other attestations were still committed
+    processHead(UInt64.valueOf(5));
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy =
+        recentChainData.getForkChoiceStrategy().orElseThrow();
+    assertThat(forkChoiceStrategy.getWeight(targetBlocks.getLast().getRoot()).orElseThrow())
+        .isGreaterThan(ZERO);
+  }
+
+  @Test
+  void onAttestations_shouldFailOnlyOwnAttestationWhenStartingValidationThrows() {
+    final SignedBlockAndState targetBlock = importChainOfBlocks(1).getFirst();
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final ValidatableAttestation valid = validAttestationForBlock(targetBlock);
+    final ValidatableAttestation throwing = mock(ValidatableAttestation.class);
+    when(throwing.getData()).thenThrow(new IllegalStateException("Boom"));
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        forkChoice.onAttestations(List.of(throwing, valid));
+
+    assertThatSafeFuture(results.get(0)).isCompletedExceptionallyWith(IllegalStateException.class);
+    assertThat(results.get(1)).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
   }
 
   private List<SignedBlockAndState> importChainOfBlocks(final int count) {
