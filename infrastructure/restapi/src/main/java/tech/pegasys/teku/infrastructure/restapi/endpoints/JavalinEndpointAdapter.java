@@ -19,7 +19,6 @@ import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_ACCE
 
 import io.javalin.http.Context;
 import io.javalin.http.Handler;
-import java.util.Optional;
 
 public class JavalinEndpointAdapter implements Handler {
 
@@ -33,7 +32,7 @@ public class JavalinEndpointAdapter implements Handler {
   public void handle(final Context ctx) throws Exception {
     final EndpointMetadata metadata = endpoint.getMetadata();
     final RestApiRequest request = new JavalinRestApiRequest(ctx, metadata);
-    if (!metadata.isAcceptable(Optional.ofNullable(ctx.req().getHeaders(HEADER_ACCEPT)))) {
+    if (!metadata.isAcceptable(ctx.req().getHeaders(HEADER_ACCEPT))) {
       request.respondError(
           SC_NOT_ACCEPTABLE,
           "Accept header is not supported. Must match one of: "

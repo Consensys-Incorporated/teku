@@ -206,7 +206,6 @@ class EndpointMetadataTest {
   @Test
   void isAcceptable_shouldBeTrueWhenAcceptHeaderMissing() {
     final EndpointMetadata metadata = notAcceptableMetadata();
-    assertThat(metadata.isAcceptable(Optional.empty())).isTrue();
     assertThat(metadata.isAcceptable(acceptHeaders())).isTrue();
   }
 
@@ -232,8 +231,8 @@ class EndpointMetadataTest {
         .build();
   }
 
-  private static Optional<Enumeration<String>> acceptHeaders(final String... values) {
-    return Optional.of(Collections.enumeration(List.of(values)));
+  private static Enumeration<String> acceptHeaders(final String... values) {
+    return Collections.enumeration(List.of(values));
   }
 
   @Test

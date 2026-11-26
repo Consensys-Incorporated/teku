@@ -260,20 +260,20 @@ public class EndpointMetadata {
    * the content types of its 200 response. Multiple accept headers are treated as one
    * comma-separated list. Missing or blank accept headers are always acceptable.
    */
-  public boolean isAcceptable(final Optional<Enumeration<String>> acceptHeaders) {
-    if (acceptHeaders.isEmpty()) {
-      return true;
-    }
+  public boolean isAcceptable(final Enumeration<String> acceptHeaders) {
     final OpenApiResponse okResponse = responses.get(Integer.toString(SC_OK));
     if (okResponse == null || !responses.containsKey(Integer.toString(SC_NOT_ACCEPTABLE))) {
       return true;
     }
     // Several Accept lines mean the same as one comma-separated list, so join them all
     final String allAcceptHeaders =
-        Collections.list(acceptHeaders.get()).stream()
+        Collections.list(acceptHeaders).stream()
             .filter(header -> !header.isBlank())
             .map(header -> header.toLowerCase(Locale.ROOT))
             .collect(Collectors.joining(","));
+    if (allAcceptHeaders.isEmpty()) {
+      return true;
+    }
     return ContentTypes.getResponseContentType(
             okResponse.getSupportedContentTypes(), Optional.of(allAcceptHeaders))
         .isPresent();
