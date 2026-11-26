@@ -60,6 +60,7 @@ import tech.pegasys.teku.spec.datastructures.execution.BuilderBidOrFallbackData;
 import tech.pegasys.teku.spec.datastructures.execution.BuilderPayloadOrFallbackData;
 import tech.pegasys.teku.spec.datastructures.execution.ClientVersion;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
+import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadBlockHashCalculator;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadBody;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadContext;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadHeader;
@@ -80,6 +81,12 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionsBellatrix;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsDeneb;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsElectra;
 
+/**
+ * An in-process stand-in for an execution client, used by interop and acceptance tests through the
+ * {@code unsafe-test-stub} endpoint. It treats every payload as valid and builds payloads with
+ * synthetic transactions. From Gloas on it stamps each payload with the block hash computed from
+ * its content, since gossip validation checks that hash against the content.
+ */
 public class ExecutionLayerChannelStub implements ExecutionLayerChannel {
 
   private static final Logger LOG = LogManager.getLogger();
@@ -277,33 +284,48 @@ public class ExecutionLayerChannelStub implements ExecutionLayerChannel {
     final PayloadBuildingAttributes payloadAttributes = headAndAttrs.attributes;
 
     final List<Bytes> transactions = generateTransactions(slot, headAndAttrs);
+    final Bytes logsBloom = Bytes.random(256);
+    final Optional<ExecutionRequests> maybeExecutionRequests = getExecutionRequests(slot);
 
+    final Function<Bytes32, ExecutionPayload> createExecutionPayload =
+        blockHash ->
+            schemaDefinitionsBellatrix
+                .orElseThrow()
+                .getExecutionPayloadSchema()
+                .createExecutionPayload(
+                    builder ->
+                        builder
+                            .parentHash(headAndAttrs.head)
+                            .feeRecipient(payloadAttributes.feeRecipient())
+                            .stateRoot(Bytes32.ZERO)
+                            .receiptsRoot(Bytes32.ZERO)
+                            .logsBloom(logsBloom)
+                            .prevRandao(payloadAttributes.prevRandao())
+                            .blockNumber(UInt64.valueOf(payloadIdCounter.get()))
+                            .gasLimit(UInt64.ONE)
+                            .gasUsed(UInt64.ZERO)
+                            .timestamp(payloadAttributes.timestamp())
+                            .extraData(Bytes.EMPTY)
+                            .baseFeePerGas(UInt256.ONE)
+                            .blockHash(blockHash)
+                            .transactions(transactions)
+                            .withdrawals(() -> payloadAttributes.withdrawals().orElse(List.of()))
+                            .blobGasUsed(() -> UInt64.ZERO)
+                            .excessBlobGas(() -> UInt64.ZERO)
+                            .blockAccessList(() -> Bytes32.ZERO)
+                            .slotNumber(() -> slot));
+    final ExecutionPayload randomBlockHashExecutionPayload =
+        createExecutionPayload.apply(Bytes32.random());
+    // Gloas envelopes are only accepted when the block hash matches the payload content
     final ExecutionPayload executionPayload =
-        schemaDefinitionsBellatrix
-            .orElseThrow()
-            .getExecutionPayloadSchema()
-            .createExecutionPayload(
-                builder ->
-                    builder
-                        .parentHash(headAndAttrs.head)
-                        .feeRecipient(payloadAttributes.feeRecipient())
-                        .stateRoot(Bytes32.ZERO)
-                        .receiptsRoot(Bytes32.ZERO)
-                        .logsBloom(Bytes.random(256))
-                        .prevRandao(payloadAttributes.prevRandao())
-                        .blockNumber(UInt64.valueOf(payloadIdCounter.get()))
-                        .gasLimit(UInt64.ONE)
-                        .gasUsed(UInt64.ZERO)
-                        .timestamp(payloadAttributes.timestamp())
-                        .extraData(Bytes.EMPTY)
-                        .baseFeePerGas(UInt256.ONE)
-                        .blockHash(Bytes32.random())
-                        .transactions(transactions)
-                        .withdrawals(() -> payloadAttributes.withdrawals().orElse(List.of()))
-                        .blobGasUsed(() -> UInt64.ZERO)
-                        .excessBlobGas(() -> UInt64.ZERO)
-                        .blockAccessList(() -> Bytes32.ZERO)
-                        .slotNumber(() -> slot));
+        spec.isExecutionPayloadEnvelopeAvailableAtSlot(slot)
+            ? createExecutionPayload.apply(
+                ExecutionPayloadBlockHashCalculator.computeGloasBlockHash(
+                    randomBlockHashExecutionPayload,
+                    maybeExecutionRequests.orElseThrow(),
+                    payloadAttributes.parentBeaconBlock().blockRoot(),
+                    spec.getExecutionRequestsDataCodec(slot)))
+            : randomBlockHashExecutionPayload;
 
     // we assume all blocks are produced locally
     lastValidBlock =
@@ -320,8 +342,6 @@ public class ExecutionLayerChannelStub implements ExecutionLayerChannel {
         state.getSlot(),
         executionPayloadContext.getPayloadId(),
         executionPayload.getBlockHash());
-
-    final Optional<ExecutionRequests> maybeExecutionRequests = getExecutionRequests(slot);
 
     final GetPayloadResponse getPayloadResponse =
         headAndAttrs
