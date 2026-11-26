@@ -55,7 +55,10 @@ public final class XmssSigningKey implements AutoCloseable {
   /** Bytes of each bottom tree in {@link #cacheToBytes()}: its index, then its trees. */
   public static final int CACHE_BOTTOM_TREE_SIZE = 5300;
 
-  /** How many recently used bottom trees the native key keeps. */
+  /**
+   * How many recently used bottom trees the native key keeps. lean-pq defaults to 8 from 0.19.0;
+   * Teku keeps 4, so that a saved cache fits {@link #MAX_CACHE_SIZE} and the tree cache files.
+   */
   public static final int MAX_CACHED_BOTTOM_TREES = 4;
 
   public static final int MAX_CACHE_SIZE =
@@ -74,6 +77,7 @@ public final class XmssSigningKey implements AutoCloseable {
   private XmssSigningKey(
       final org.ethereum.leanpq.XmssSecretKey key, final List<Integer> cachedBottomTrees) {
     this.key = key;
+    key.setBottomTreeCacheSize(MAX_CACHED_BOTTOM_TREES);
     this.publicKey = XmssPublicKey.fromBytes(Bytes.wrap(key.publicKey()));
     cachedBottomTrees.forEach(index -> bottomTrees.add(Integer.toUnsignedLong(index)));
   }

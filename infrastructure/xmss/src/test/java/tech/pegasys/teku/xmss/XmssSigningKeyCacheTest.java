@@ -117,6 +117,24 @@ class XmssSigningKeyCacheTest {
   }
 
   @Test
+  void cacheKeepsOnlyTheLastBottomTreesUsed() {
+    try (XmssSigningKey loaded =
+        Xmss.loadSigningKey(SECRET_KEY, builtKey.getPublicKey(), cache).orElseThrow()) {
+      // tree 0 came with the cache; four more push it out
+      for (long tree = 1; tree <= XmssSigningKey.MAX_CACHED_BOTTOM_TREES; tree++) {
+        loaded.prepare(XmssSigningKey.firstLeafOfBottomTree(tree));
+      }
+      final Bytes trees = loaded.cacheToBytes();
+      assertThat(trees.size()).isEqualTo(XmssSigningKey.MAX_CACHE_SIZE);
+      assertThat(XmssSigningKey.cachedBottomTrees(trees)).contains(List.of(1, 2, 3, 4));
+      try (XmssSigningKey reloaded =
+          Xmss.loadSigningKey(SECRET_KEY, builtKey.getPublicKey(), trees).orElseThrow()) {
+        assertThat(reloaded.getPublicKey()).isEqualTo(builtKey.getPublicKey());
+      }
+    }
+  }
+
+  @Test
   void publicParameterIsTheEndOfThePublicKey() {
     assertThat(Xmss.publicParameter(SECRET_KEY))
         .isEqualTo(
