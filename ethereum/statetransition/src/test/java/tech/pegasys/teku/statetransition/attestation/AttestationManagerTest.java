@@ -33,11 +33,13 @@ import static tech.pegasys.teku.statetransition.validation.InternalValidationRes
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.RejectedExecutionException;
 import org.apache.logging.log4j.Level;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -115,6 +117,12 @@ class AttestationManagerTest {
     when(signatureVerificationService.start()).thenReturn(SafeFuture.completedFuture(null));
     when(signatureVerificationService.stop()).thenReturn(SafeFuture.completedFuture(null));
     when(forkChoice.applyIndexedAttestations(any())).thenReturn(completedFuture(List.of()));
+    when(forkChoice.onAttestations(any()))
+        .thenAnswer(
+            invocation ->
+                invocation.<List<ValidatableAttestation>>getArgument(0).stream()
+                    .map(forkChoice::onAttestation)
+                    .toList());
     assertThat(attestationManager.start()).isCompleted();
   }
 
@@ -312,6 +320,75 @@ class AttestationManagerTest {
     assertThat(futureAttestations.size()).isZero();
     assertThat(pendingAttestations.size()).isZero();
     verify(attestationPool).add(attestation);
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  public void shouldProcessAttestationsReleasedByBlockImportAsOneBatch() {
+    final int slot = 1024;
+    onSlot(UInt64.valueOf(slot + 1));
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(slot);
+    final Bytes32 requiredBlockRoot = block.getMessage().hashTreeRoot();
+    final ValidatableAttestation attestation1 =
+        ValidatableAttestation.from(spec, attestationFromSlot(slot, requiredBlockRoot));
+    final ValidatableAttestation attestation2 =
+        ValidatableAttestation.from(spec, attestationFromSlot(slot + 1, requiredBlockRoot));
+    when(forkChoice.onAttestation(any())).thenReturn(completedFuture(UNKNOWN_BLOCK));
+    assertThat(attestationManager.onAttestation(attestation1)).isCompleted();
+    assertThat(attestationManager.onAttestation(attestation2)).isCompleted();
+    assertThat(pendingAttestations.size()).isEqualTo(2);
+
+    when(forkChoice.onAttestation(any())).thenReturn(completedFuture(SUCCESSFUL));
+    attestationManager.onBlockImported(block, false);
+
+    final ArgumentCaptor<List<ValidatableAttestation>> released =
+        ArgumentCaptor.forClass(List.class);
+    verify(forkChoice).onAttestations(released.capture());
+    assertThat(released.getValue()).containsExactlyInAnyOrder(attestation1, attestation2);
+    assertThat(pendingAttestations.size()).isZero();
+    verify(attestationPool).add(attestation1);
+    verify(attestationPool).add(attestation2);
+  }
+
+  @Test
+  public void shouldNotProcessReleasedAttestationStillWaitingForFullPayload() {
+    final int slot = 1024;
+    onSlot(UInt64.valueOf(slot + 1));
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(slot);
+    final Bytes32 requiredBlockRoot = block.getMessage().hashTreeRoot();
+    final ValidatableAttestation attestation =
+        ValidatableAttestation.from(spec, attestationFromSlot(slot, requiredBlockRoot));
+    pendingAttestationPool.addForMissingBlock(attestation);
+    pendingAttestationPool.addForMissingFullPayload(attestation);
+
+    attestationManager.onBlockImported(block, false);
+
+    verify(forkChoice, never()).onAttestations(any());
+    verify(forkChoice, never()).onAttestation(any());
+    assertThat(pendingAttestationPool.contains(attestation)).isTrue();
+  }
+
+  @Test
+  public void shouldOnlyFailOwnAttestationWhenReleasedAttestationFails() {
+    final int slot = 1024;
+    onSlot(UInt64.valueOf(slot + 1));
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(slot);
+    final Bytes32 requiredBlockRoot = block.getMessage().hashTreeRoot();
+    final ValidatableAttestation attestation1 =
+        ValidatableAttestation.from(spec, attestationFromSlot(slot, requiredBlockRoot));
+    final ValidatableAttestation attestation2 =
+        ValidatableAttestation.from(spec, attestationFromSlot(slot + 1, requiredBlockRoot));
+    when(forkChoice.onAttestation(any())).thenReturn(completedFuture(UNKNOWN_BLOCK));
+    assertThat(attestationManager.onAttestation(attestation1)).isCompleted();
+    assertThat(attestationManager.onAttestation(attestation2)).isCompleted();
+
+    when(forkChoice.onAttestation(attestation1))
+        .thenReturn(SafeFuture.failedFuture(new RejectedExecutionException("Queue is full")));
+    when(forkChoice.onAttestation(attestation2)).thenReturn(completedFuture(SUCCESSFUL));
+    attestationManager.onBlockImported(block, false);
+
+    verify(attestationPool, never()).add(attestation1);
+    verify(attestationPool).add(attestation2);
   }
 
   @Test
