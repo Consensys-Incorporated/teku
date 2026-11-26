@@ -147,27 +147,29 @@ public class XmssKeyWarmer implements ValidatorTimingChannel {
     if (signers.isEmpty()) {
       return Optional.empty();
     }
+    final List<Long> trees = XmssLeafLayout.bottomTreesAt(spec, slot);
     final AtomicInteger remaining = new AtomicInteger(signers.size());
     final UInt64 startMillis = timeProvider.getTimeInMillis();
+    LOG.info(
+        "Preparing the leanXMSS bottom trees {} of {} validators to sign at slot {}",
+        trees,
+        signers.size(),
+        slot);
     SafeFuture.collectAll(
             signers.stream()
                 .map(signer -> prepare(signer, slot).alwaysRun(remaining::decrementAndGet)))
         .thenAccept(
-            treesPerKey -> {
-              final int trees = treesPerKey.stream().mapToInt(Integer::intValue).sum();
-              if (trees > 0) {
+            treesPerKey ->
                 LOG.info(
-                    "Built {} leanXMSS bottom trees for {} validators to sign at slot {}, in {}"
-                        + " ms",
+                    "Prepared the leanXMSS bottom trees {} of {} validators to sign at slot {} in"
+                        + " {} ms: built {} trees, the keys held the rest",
                     trees,
                     signers.size(),
                     slot,
-                    timeProvider.getTimeInMillis().minusMinZero(startMillis));
-              }
-            })
+                    timeProvider.getTimeInMillis().minusMinZero(startMillis),
+                    treesPerKey.stream().mapToInt(Integer::intValue).sum()))
         .finishError(LOG);
-    return Optional.of(
-        new WarmUp(XmssLeafLayout.bottomTreesAt(spec, slot), signers.size(), remaining));
+    return Optional.of(new WarmUp(trees, signers.size(), remaining));
   }
 
   private SafeFuture<Integer> prepare(final XmssSigner signer, final UInt64 slot) {

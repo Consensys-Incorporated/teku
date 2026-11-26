@@ -162,6 +162,33 @@ class XmssKeyWarmerTest {
   }
 
   @Test
+  void onSlot_logsWhenPreparingTreesStartsAndFinishes() {
+    final XmssKeyWarmer warmer = createWarmer(spec, 2);
+    final List<SafeFuture<Integer>> preparing = new ArrayList<>();
+    addValidator(slowSigner(preparing));
+    addValidator(signer1);
+
+    try (LogCaptor logCaptor = LogCaptor.forClass(XmssKeyWarmer.class)) {
+      warmer.onSlot(UInt64.ZERO);
+      assertThat(logCaptor.getInfoLogs())
+          .containsExactly(
+              "Preparing the leanXMSS bottom trees [0, 24576] of 2 validators to sign at slot 0");
+
+      timeProvider.advanceTimeByMillis(1500);
+      preparing.getFirst().complete(2);
+      assertThat(logCaptor.getInfoLogs())
+          .containsExactly(
+              "Preparing the leanXMSS bottom trees [0, 24576] of 2 validators to sign at slot 0",
+              "Prepared the leanXMSS bottom trees [0, 24576] of 2 validators to sign at slot 0 in"
+                  + " 1500 ms: built 3 trees, the keys held the rest");
+
+      // nothing new to prepare
+      warmer.onSlot(UInt64.ONE);
+      assertThat(logCaptor.getInfoLogs()).hasSize(2);
+    }
+  }
+
+  @Test
   void onSlot_warnsWhenKeysAreStillPreparingTheTreesOfTheSlotThatStartsUsingThem() {
     final XmssKeyWarmer warmer = createWarmer(spec, 2);
     final List<SafeFuture<Integer>> preparing = new ArrayList<>();
