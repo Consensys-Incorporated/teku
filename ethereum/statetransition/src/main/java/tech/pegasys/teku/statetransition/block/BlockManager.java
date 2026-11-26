@@ -376,7 +376,7 @@ public class BlockManager extends Service
     // Only blocks that passed gossip validation have a verified proposer and signature at this
     // point. Blocks from RPC or retries are only checked by the state transition below, so they
     // must not trigger pre-import side effects such as data column recovery and publishing.
-    if (origin.equals(Optional.of(RemoteOrigin.GOSSIP))) {
+    if (origin.isPresent() && !origin.equals(Optional.of(RemoteOrigin.RPC))) {
       preImportBlockSubscribers.deliver(l -> l.onNewBlock(block, origin));
     }
 
