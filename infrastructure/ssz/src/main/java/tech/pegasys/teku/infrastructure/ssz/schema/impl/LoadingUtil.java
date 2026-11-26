@@ -56,7 +56,13 @@ public class LoadingUtil {
       // or it may be "useless" and we can just use the default tree
       if (isZeroBranchUseful(rootGIndex, lastUsefulGIndex)) {
         return createUsefulEmptyBranch(
-            nodeSource, rootGIndex, depthToLoad, defaultTree, lastUsefulGIndex, childLoader);
+            nodeSource,
+            rootHash,
+            rootGIndex,
+            depthToLoad,
+            defaultTree,
+            lastUsefulGIndex,
+            childLoader);
       }
       return defaultTree;
     }
@@ -140,16 +146,22 @@ public class LoadingUtil {
 
   private static BranchNode createUsefulEmptyBranch(
       final TreeNodeSource nodeSource,
+      final Bytes32 rootHash,
       final long rootGIndex,
       final int depthToLoad,
       final TreeNode defaultTree,
       final long lastUsefulGIndex,
       final ChildLoader childLoader) {
+    // Both children of a zero tree are the zero tree one level down. Their hash can't be taken
+    // from the default tree: a list's default tree has empty leaves in place of its elements, so
+    // it has a zero hash where a composite element's hash is the root of a zero tree.
+    final Bytes32 childHash =
+        TreeUtil.ZERO_TREES_BY_ROOT.get(rootHash).get(GIndexUtil.LEFT_CHILD_G_INDEX).hashTreeRoot();
     final TreeNode defaultLeftNode = defaultTree.get(GIndexUtil.LEFT_CHILD_G_INDEX);
     final TreeNode leftNode =
         loadNodesToDepth(
             nodeSource,
-            defaultLeftNode.hashTreeRoot(),
+            childHash,
             GIndexUtil.gIdxLeftGIndex(rootGIndex),
             depthToLoad - 1,
             defaultLeftNode,
@@ -159,7 +171,7 @@ public class LoadingUtil {
     final TreeNode rightNode =
         loadNodesToDepth(
             nodeSource,
-            defaultRightNode.hashTreeRoot(),
+            childHash,
             GIndexUtil.gIdxRightGIndex(rootGIndex),
             depthToLoad - 1,
             defaultRightNode,
