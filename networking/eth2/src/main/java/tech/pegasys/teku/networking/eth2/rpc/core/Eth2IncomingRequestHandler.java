@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
+import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.networking.eth2.peers.Eth2Peer;
 import tech.pegasys.teku.networking.eth2.peers.PeerLookup;
@@ -46,6 +47,7 @@ public class Eth2IncomingRequestHandler<
   private final String protocolId;
   private final AsyncRunner asyncRunner;
   private final AtomicBoolean requestHandled = new AtomicBoolean(false);
+  private final SafeFuture<Void> streamClosed = new SafeFuture<>();
 
   public Eth2IncomingRequestHandler(
       final String protocolId,
@@ -95,6 +97,7 @@ public class Eth2IncomingRequestHandler<
 
   @Override
   public void closed(final NodeId nodeId, final RpcStream rpcStream) {
+    streamClosed.complete(null);
     requestDecoder.close();
   }
 
@@ -147,6 +150,7 @@ public class Eth2IncomingRequestHandler<
   }
 
   private RpcResponseCallback<TResponse> createResponseCallback(final RpcStream rpcStream) {
-    return new RpcResponseCallback<>(rpcStream, responseEncoder, asyncRunner, protocolId);
+    return new RpcResponseCallback<>(
+        rpcStream, responseEncoder, asyncRunner, protocolId, streamClosed);
   }
 }
