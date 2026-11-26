@@ -14,6 +14,7 @@
 package tech.pegasys.teku.infrastructure.restapi.endpoints;
 
 import static com.google.common.base.Preconditions.checkState;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.RestApiConstants.HEADER_ACCEPT;
@@ -23,6 +24,7 @@ import io.javalin.http.Context;
 import io.javalin.http.Header;
 import io.javalin.http.sse.SseClient;
 import io.javalin.http.sse.SseHandler;
+import jakarta.servlet.AsyncContext;
 import jakarta.servlet.AsyncEvent;
 import jakarta.servlet.AsyncListener;
 import java.io.ByteArrayInputStream;
@@ -39,11 +41,14 @@ import java.util.function.Consumer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
+import org.eclipse.jetty.ee10.servlet.ServletContextRequest;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.http.HttpErrorResponse;
 
 public class JavalinRestApiRequest implements RestApiRequest {
   private static final Logger LOG = LogManager.getLogger();
+  private static final AsyncApiResponse TIMEOUT_RESPONSE =
+      AsyncApiResponse.respondWithError(SC_INTERNAL_SERVER_ERROR, "Request timeout");
   private final Context context;
   private final EndpointMetadata metadata;
   private final Map<String, String> pathParamMap;
@@ -103,11 +108,21 @@ public class JavalinRestApiRequest implements RestApiRequest {
   public void respondAsync(final SafeFuture<AsyncApiResponse> futureResponse) {
     context.future(
         () -> {
+          final AsyncContext asyncContext = context.req().getAsyncContext();
+          // The async timeout bounds the wait for the response, so it is applied to the future.
+          // Left on the async context it would also end a response whose body is still being
+          // written, and the client would get a truncated body that looks complete.
+          final long timeoutMillis = asyncContext.getTimeout();
+          asyncContext.setTimeout(0);
           final SafeFuture<Void> requestEnded = new SafeFuture<>();
+          final SafeFuture<AsyncApiResponse> response =
+              futureResponse.orInterrupt(
+                  SafeFuture.createInterruptor(requestEnded, CancellationException::new));
           final SafeFuture<ByteArrayInputStream> requestResponse =
-              futureResponse
-                  .orInterrupt(
-                      SafeFuture.createInterruptor(requestEnded, CancellationException::new))
+              (timeoutMillis > 0
+                      ? SafeFuture.of(
+                          response.completeOnTimeout(TIMEOUT_RESPONSE, timeoutMillis, MILLISECONDS))
+                      : response)
                   .thenApply(
                       result -> {
                         try {
@@ -121,10 +136,8 @@ public class JavalinRestApiRequest implements RestApiRequest {
                         }
                         return new ByteArrayInputStream(Bytes.EMPTY.toArrayUnsafe());
                       });
-          context
-              .req()
-              .getAsyncContext()
-              .addListener(new AsyncResponseCancellationListener(requestResponse, requestEnded));
+          asyncContext.addListener(
+              new AsyncResponseCancellationListener(requestResponse, requestEnded));
           return requestResponse;
         });
   }
@@ -168,7 +181,34 @@ public class JavalinRestApiRequest implements RestApiRequest {
             statusCode, Optional.ofNullable(context.header(HEADER_ACCEPT)), response);
     context.contentType(responseMetadata.getContentType());
     responseMetadata.getAdditionalHeaders().forEach(context::header);
-    metadata.serialize(statusCode, responseMetadata.getContentType(), response, out);
+    try {
+      metadata.serialize(statusCode, responseMetadata.getContentType(), response, out);
+    } catch (final JsonProcessingException | RuntimeException e) {
+      abortCommittedResponse();
+      throw e;
+    }
+  }
+
+  /**
+   * The body is written straight to the client, so writing it can fail after the status line and
+   * headers have been sent. The status can no longer report the failure and Javalin would end the
+   * response normally, leaving the client with a truncated body that looks complete. Closing the
+   * connection makes the transfer fail on the client side instead. A response that is not yet
+   * committed is left alone and gets an error status as usual.
+   */
+  private void abortCommittedResponse() {
+    if (!context.res().isCommitted()) {
+      return;
+    }
+    LOG.debug("Closing connection, response body to {} could not be completed", context.path());
+    // The connection is closed directly because Jetty's own abort, sendError(-1), only takes
+    // effect once the request completes: by then Javalin has closed a compressed stream, which
+    // ends the response normally.
+    ServletContextRequest.getServletContextRequest(context.req())
+        .getConnectionMetaData()
+        .getConnection()
+        .getEndPoint()
+        .close(new IOException("Response body could not be completed"));
   }
 
   private static class AsyncResponseCancellationListener implements AsyncListener {
