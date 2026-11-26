@@ -28,7 +28,6 @@ import io.javalin.http.sse.SseHandler;
 import jakarta.servlet.AsyncContext;
 import jakarta.servlet.AsyncEvent;
 import jakarta.servlet.AsyncListener;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PushbackInputStream;
@@ -42,7 +41,6 @@ import java.util.function.Consumer;
 import org.apache.commons.io.output.CloseShieldOutputStream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.tuweni.bytes.Bytes;
 import org.eclipse.jetty.ee10.servlet.ServletContextRequest;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.http.HttpErrorResponse;
@@ -124,33 +122,33 @@ public class JavalinRestApiRequest implements RestApiRequest {
           // Empty when the timeout fires first
           final SafeFuture<Optional<AsyncApiResponse>> responseOrTimeout =
               response.thenApply(Optional::of);
-          final SafeFuture<ByteArrayInputStream> requestResponse =
+          final SafeFuture<Void> requestResponse =
               (timeoutMillis > 0
                       ? SafeFuture.of(
                           responseOrTimeout.completeOnTimeout(
                               Optional.empty(), timeoutMillis, MILLISECONDS))
                       : responseOrTimeout)
-                  .thenApply(
-                      maybeResult -> {
-                        try {
-                          if (maybeResult.isEmpty()) {
-                            respondWithTimeout();
-                          } else {
-                            respond(
-                                maybeResult.get().getResponseCode(),
-                                maybeResult.get().getResponseBody(),
-                                getResponseOutputStream());
-                          }
-                        } catch (JsonProcessingException e) {
-                          LOG.trace("Failed to generate API response", e);
-                          context.status(SC_INTERNAL_SERVER_ERROR);
-                        }
-                        return new ByteArrayInputStream(Bytes.EMPTY.toArrayUnsafe());
-                      });
+                  .thenAccept(this::writeAsyncResponse);
           asyncContext.addListener(
               new AsyncResponseCancellationListener(requestResponse, requestEnded));
           return requestResponse;
         });
+  }
+
+  private void writeAsyncResponse(final Optional<AsyncApiResponse> maybeResponse) {
+    try {
+      if (maybeResponse.isEmpty()) {
+        respondWithTimeout();
+      } else {
+        respond(
+            maybeResponse.get().getResponseCode(),
+            maybeResponse.get().getResponseBody(),
+            getResponseOutputStream());
+      }
+    } catch (final JsonProcessingException e) {
+      LOG.trace("Failed to generate API response", e);
+      context.status(SC_INTERNAL_SERVER_ERROR);
+    }
   }
 
   @Override
