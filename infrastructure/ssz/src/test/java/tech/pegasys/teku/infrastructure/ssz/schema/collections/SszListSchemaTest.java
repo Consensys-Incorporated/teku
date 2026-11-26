@@ -139,37 +139,39 @@ public class SszListSchemaTest extends SszListSchemaTestBase {
     final SszBytes32 zeroTreeRoot = SszBytes32.of(TreeUtil.ZERO_TREES[1].hashTreeRoot());
     final SszBytes32 other = SszBytes32.of(Bytes32.fromHexString("0x1234"));
     final SszBytes32VectorSchema<?> pairSchema = SszBytes32VectorSchema.create(2);
-    return Stream.of(
-            // a leaf holding the root of a zero tree
-            Arguments.of(SszPrimitiveSchemas.BYTES32_SCHEMA, zeroTreeRoot, other),
-            // a non-default composite whose root is the root of a zero tree
-            Arguments.of(
-                pairSchema,
-                pairSchema.createFromElements(List.of(zeroTreeRoot, zeroTreeRoot)),
-                pairSchema.createFromElements(List.of(other, other))))
+    return Stream.concat(
+        // a leaf holding the root of a zero tree
+        zeroTreeRootValueCasesFor(SszPrimitiveSchemas.BYTES32_SCHEMA, zeroTreeRoot, other),
+        // a non-default composite whose root is the root of a zero tree
+        zeroTreeRootValueCasesFor(
+            pairSchema,
+            pairSchema.createFromElements(List.of(zeroTreeRoot, zeroTreeRoot)),
+            pairSchema.createFromElements(List.of(other, other))));
+  }
+
+  private static Stream<Arguments> zeroTreeRootValueCasesFor(
+      final SszSchema<?> elementSchema,
+      final SszData zeroTreeRootElement,
+      final SszData otherElement) {
+    return Stream.<SszCollectionSchema<?, ?>>of(
+            SszListSchema.create(elementSchema, 2048),
+            SszVectorSchema.create(elementSchema, 8),
+            SszListSchema.createProgressive(elementSchema))
         .flatMap(
-            elementCase -> {
-              final SszSchema<?> elementSchema = (SszSchema<?>) elementCase.get()[0];
-              return Stream.<SszCollectionSchema<?, ?>>of(
-                      SszListSchema.create(elementSchema, 2048),
-                      SszVectorSchema.create(elementSchema, 8),
-                      SszListSchema.createProgressive(elementSchema))
-                  .flatMap(
-                      schema ->
-                          // z is a zero tree root element, o is another one
-                          Stream.of("ozoooooo", "oozzoooo", "ozzzzooz")
-                              .flatMap(
-                                  mask ->
-                                      Stream.of(1, 2, 5, 15)
-                                          .map(
-                                              maxBranchLevelsSkipped ->
-                                                  Arguments.of(
-                                                      schema,
-                                                      mask,
-                                                      maxBranchLevelsSkipped,
-                                                      elementCase.get()[1],
-                                                      elementCase.get()[2]))));
-            });
+            schema ->
+                // z is a zero tree root element, o is another one
+                Stream.of("ozoooooo", "oozzoooo", "ozzzzooz")
+                    .flatMap(
+                        zeroTreeRootMask ->
+                            Stream.of(1, 2, 5, 15)
+                                .map(
+                                    maxBranchLevelsSkipped ->
+                                        Arguments.of(
+                                            schema,
+                                            zeroTreeRootMask,
+                                            maxBranchLevelsSkipped,
+                                            zeroTreeRootElement,
+                                            otherElement))));
   }
 
   @ParameterizedTest(name = "{0} elements {1} skipping {2} levels")

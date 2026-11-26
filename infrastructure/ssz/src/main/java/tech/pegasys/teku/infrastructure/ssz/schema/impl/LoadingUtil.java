@@ -51,13 +51,14 @@ public class LoadingUtil {
       return childLoader.loadChild(nodeSource, rootHash, rootGIndex);
     }
 
-    if (TreeUtil.ZERO_TREES_BY_ROOT.containsKey(rootHash)) {
+    final TreeNode zeroTree = TreeUtil.ZERO_TREES_BY_ROOT.get(rootHash);
+    if (zeroTree != null) {
       // Zero branch, but it may be "useful" and need to ensure leaf data has the right lengths
       // or it may be "useless" and we can just use the default tree
       if (isZeroBranchUseful(rootGIndex, lastUsefulGIndex)) {
         return createUsefulEmptyBranch(
             nodeSource,
-            rootHash,
+            zeroTree,
             rootGIndex,
             depthToLoad,
             defaultTree,
@@ -146,7 +147,7 @@ public class LoadingUtil {
 
   private static BranchNode createUsefulEmptyBranch(
       final TreeNodeSource nodeSource,
-      final Bytes32 rootHash,
+      final TreeNode zeroTree,
       final long rootGIndex,
       final int depthToLoad,
       final TreeNode defaultTree,
@@ -155,8 +156,7 @@ public class LoadingUtil {
     // Both children of a zero tree are the zero tree one level down. Their hash can't be taken
     // from the default tree: a list's default tree has empty leaves in place of its elements, so
     // it has a zero hash where a composite element's hash is the root of a zero tree.
-    final Bytes32 childHash =
-        TreeUtil.ZERO_TREES_BY_ROOT.get(rootHash).get(GIndexUtil.LEFT_CHILD_G_INDEX).hashTreeRoot();
+    final Bytes32 childHash = zeroTree.get(GIndexUtil.LEFT_CHILD_G_INDEX).hashTreeRoot();
     final TreeNode defaultLeftNode = defaultTree.get(GIndexUtil.LEFT_CHILD_G_INDEX);
     final TreeNode leftNode =
         loadNodesToDepth(
