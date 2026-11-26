@@ -24,6 +24,8 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszCollectionSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.SszProgressiveListSchema;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -56,6 +58,39 @@ class BeaconStateSchemaPqTest {
         .isNotNegative();
     // 51 fields wide, 4 of them gaps
     assertThat(schema.getFieldsCount()).isEqualTo(47);
+  }
+
+  @Test
+  void packsValidatorsInSuperNodesAsEarlierForksDo() {
+    final SszCollectionSchema<?, ?> validatorsSchema =
+        (SszCollectionSchema<?, ?>)
+            schema.getChildSchema(schema.getFieldIndex(BeaconStateFields.VALIDATORS));
+    assertThat(validatorsSchema.getElementSchema()).isEqualTo(ValidatorPq.SSZ_SCHEMA);
+    assertThat(validatorsSchema.getSuperNodeLayout()).isPresent();
+  }
+
+  @Test
+  void superNodesKeepTheValidatorsRoot() {
+    // Enough validators to fill several supernodes of 256
+    final BeaconStatePq state =
+        BeaconStatePq.required(schema.createEmpty())
+            .updatedPq(
+                mutable -> {
+                  for (int i = 0; i < 1000; i++) {
+                    mutable.getValidators().append(validator(i));
+                  }
+                  mutable.getValidators().set(700, validator(5));
+                });
+    final Bytes validatorsSsz = state.getValidators().sszSerialize();
+    final SszList<?> plain =
+        SszProgressiveListSchema.create(ValidatorPq.SSZ_SCHEMA).sszDeserialize(validatorsSsz);
+    final BeaconStatePq deserialized =
+        BeaconStatePq.required(schema.sszDeserialize(state.sszSerialize()));
+
+    assertThat(state.getValidators().hashTreeRoot()).isEqualTo(plain.hashTreeRoot());
+    assertThat(deserialized.getValidators().hashTreeRoot()).isEqualTo(plain.hashTreeRoot());
+    assertThat(deserialized.getValidators().get(700)).isEqualTo(validator(5));
+    assertThat(deserialized.getValidators().get(999)).isEqualTo(validator(999));
   }
 
   @Test
