@@ -17,6 +17,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -37,6 +39,7 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionPerformance;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.SafeFutureAssert;
@@ -559,6 +562,40 @@ public class DefaultExecutionPayloadBidManagerTest {
         .onExecutionPayloadBidValidated(signedBid);
     verify(operationAddedSubscriber).onOperationAdded(signedBid, ACCEPT, false);
     verify(operationAddedSubscriber, never()).onOperationAdded(signedBid, ACCEPT, true);
+  }
+
+  @Test
+  public void retriesPendingBidsFromHighestToLowestValue() {
+    final UInt64 slot = UInt64.valueOf(10);
+    final Bytes32 parentBlockRoot = dataStructureUtil.randomBytes32();
+    final Bytes32 parentBlockHash = dataStructureUtil.randomBytes32();
+    final UInt64 builderIndex = UInt64.ONE;
+    final SignedExecutionPayloadBid lowBid =
+        createBid(slot, parentBlockRoot, parentBlockHash, UInt64.valueOf(100), builderIndex);
+    final SignedExecutionPayloadBid midBid =
+        createBid(slot, parentBlockRoot, parentBlockHash, UInt64.valueOf(200), builderIndex);
+    final SignedExecutionPayloadBid highBid =
+        createBid(slot, parentBlockRoot, parentBlockHash, UInt64.valueOf(300), builderIndex);
+    executionPayloadBidManager.onSlot(slot);
+
+    // Queue the bids in an order that is neither the expected retry order nor its reverse
+    for (final SignedExecutionPayloadBid signedBid : List.of(midBid, lowBid, highBid)) {
+      when(executionPayloadBidGossipValidator.validate(signedBid))
+          .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE))
+          .thenReturn(SafeFuture.completedFuture(ACCEPT));
+      SafeFutureAssert.safeJoin(
+          executionPayloadBidManager.validateAndAddBid(signedBid, RemoteBidOrigin.P2P));
+    }
+    assertThat(pendingExecutionPayloadBids.size()).isEqualTo(3);
+    clearInvocations(executionPayloadBidGossipValidator);
+
+    executionPayloadBidManager.onSlot(slot);
+
+    final InOrder inOrder = inOrder(executionPayloadBidGossipValidator);
+    inOrder.verify(executionPayloadBidGossipValidator).validate(highBid);
+    inOrder.verify(executionPayloadBidGossipValidator).validate(midBid);
+    inOrder.verify(executionPayloadBidGossipValidator).validate(lowBid);
+    inOrder.verifyNoMoreInteractions();
   }
 
   @Test
