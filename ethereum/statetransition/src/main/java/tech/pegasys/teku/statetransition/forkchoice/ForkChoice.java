@@ -412,7 +412,7 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
 
   private void applyValidatedAttestations(final List<ValidatedAttestation> validatedAttestations) {
     final ForkChoiceStrategy forkChoiceStrategy = getForkChoiceStrategy();
-    final List<AttestationProcessingResult> results = new ArrayList<>(validatedAttestations.size());
+    final List<ValidatedAttestation> awaitingCommit = new ArrayList<>();
     VoteUpdater transaction = null;
     for (final ValidatedAttestation validated : validatedAttestations) {
       // An error applying one attestation only fails that attestation. Votes it already added to
@@ -425,31 +425,27 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
         final boolean fullPayloadHint = getFullPayloadVoteHint(indexedAttestation.data());
         if (isFullPayloadVoteMissingTarget(
             forkChoiceStrategy, indexedAttestation.data().getBeaconBlockRoot(), fullPayloadHint)) {
-          results.add(AttestationProcessingResult.UNKNOWN_EXECUTION_PAYLOAD);
+          validated.result().complete(AttestationProcessingResult.UNKNOWN_EXECUTION_PAYLOAD);
         } else if (validationResult.isSuccessful()) {
           if (transaction == null) {
             transaction = recentChainData.startVoteUpdate();
           }
           forkChoiceStrategy.onAttestation(transaction, indexedAttestation);
-          results.add(validationResult);
+          awaitingCommit.add(validated);
         } else {
           deferredAttestations.addAttestation(indexedAttestation, fullPayloadHint);
-          results.add(validationResult);
+          validated.result().complete(validationResult);
         }
       } catch (final RuntimeException e) {
         validated.result().completeExceptionally(e);
-        results.add(null);
       }
     }
     if (transaction != null) {
       transaction.commit();
     }
-    // Votes only count once committed, so results are reported after that
-    for (int i = 0; i < validatedAttestations.size(); i++) {
-      if (results.get(i) != null) {
-        validatedAttestations.get(i).result().complete(results.get(i));
-      }
-    }
+    // Votes only count once committed, so their results are reported after that. The other
+    // results don't depend on the commit, so a failed commit only fails the votes.
+    awaitingCommit.forEach(validated -> validated.result().complete(validated.validationResult()));
   }
 
   /**

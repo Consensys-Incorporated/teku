@@ -106,6 +106,7 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.InvalidCheckpointExcepti
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.SlotAndForkChoiceNode;
+import tech.pegasys.teku.spec.datastructures.forkchoice.VoteUpdater;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationSchema;
@@ -2176,6 +2177,42 @@ class ForkChoiceTest {
     assertThat(results.get(1)).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
   }
 
+  @Test
+  void onAttestations_shouldOnlyFailVotesWhenCommitFails() {
+    setupWithSpec(
+        TestSpecFactory.createMinimalGloas(
+            builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
+
+    final SignedBlockAndState targetBlock = chainBuilder.generateBlockAtSlot(ONE);
+    importBlock(targetBlock);
+
+    final UInt64 attestationSlot = targetBlock.getSlot().plus(1);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(attestationSlot.plus(1));
+    // One vote that is applied in the batch's vote transaction, and one that isn't because it
+    // has to wait for the payload
+    final ValidatableAttestation vote =
+        createPrevalidatedAttestation(targetBlock, attestationSlot, ZERO);
+    final ValidatableAttestation fullPayloadVote =
+        createPrevalidatedFullPayloadAttestation(targetBlock, attestationSlot);
+    final RecentChainData chainData = spy(recentChainData);
+    final ForkChoice batchForkChoice = createForkChoice(chainData);
+    doAnswer(
+            invocation -> {
+              final VoteUpdater transaction = spy((VoteUpdater) invocation.callRealMethod());
+              doThrow(new IllegalStateException("Boom")).when(transaction).commit();
+              return transaction;
+            })
+        .when(chainData)
+        .startVoteUpdate();
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        batchForkChoice.onAttestations(List.of(vote, fullPayloadVote));
+
+    assertThatSafeFuture(results.get(0)).isCompletedExceptionallyWith(IllegalStateException.class);
+    assertThat(results.get(1))
+        .isCompletedWithValue(AttestationProcessingResult.UNKNOWN_EXECUTION_PAYLOAD);
+  }
+
   private List<SignedBlockAndState> importChainOfBlocks(final int count) {
     final List<SignedBlockAndState> blocks = new ArrayList<>();
     for (int slot = 1; slot <= count; slot++) {
@@ -3034,6 +3071,11 @@ class ForkChoiceTest {
 
   private ValidatableAttestation createPrevalidatedFullPayloadAttestation(
       final SignedBlockAndState targetBlock, final UInt64 attestationSlot) {
+    return createPrevalidatedAttestation(targetBlock, attestationSlot, UInt64.ONE);
+  }
+
+  private ValidatableAttestation createPrevalidatedAttestation(
+      final SignedBlockAndState targetBlock, final UInt64 attestationSlot, final UInt64 index) {
     final UInt64 targetEpoch = spec.computeEpochAtSlot(attestationSlot);
     final Bytes32 targetRoot =
         recentChainData
@@ -3044,7 +3086,7 @@ class ForkChoiceTest {
     final AttestationData data =
         new AttestationData(
             attestationSlot,
-            UInt64.ONE,
+            index,
             targetBlock.getRoot(),
             recentChainData.getStore().getJustifiedCheckpoint(),
             new Checkpoint(targetEpoch, targetRoot));
