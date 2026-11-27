@@ -78,11 +78,13 @@ import tech.pegasys.teku.statetransition.execution.PendingExecutionPayloadBid;
 import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
 import tech.pegasys.teku.statetransition.util.PendingPool;
 import tech.pegasys.teku.statetransition.util.PoolFactory;
+import tech.pegasys.teku.storage.client.ValidatorIsConnectedProvider;
 
 @TestSpecContext(milestone = {SpecMilestone.GLOAS})
 public class ExecutionPayloadBidGossipValidatorTest {
   private static final int MIN_BID_INCREMENT_PERCENTAGE = 1;
   private static final UInt64 DEFAULT_GAS_LIMIT = UInt64.valueOf(60_000_000);
+  private static final UInt64 PROPOSER_INDEX = UInt64.valueOf(5);
 
   private final Spec spec = mock(Spec.class);
   private final ReadOnlyForkChoiceStrategy forkChoiceStrategy =
@@ -90,6 +92,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
   private final GossipValidationHelper gossipValidationHelper = mock(GossipValidationHelper.class);
   private final ProposerPreferencesManager proposerPreferencesManager =
       mock(ProposerPreferencesManager.class);
+  private final ValidatorIsConnectedProvider validatorIsConnectedProvider =
+      mock(ValidatorIsConnectedProvider.class);
   private ExecutionPayloadBidGossipValidator bidValidator;
   private DataStructureUtil dataStructureUtil;
   private SignedExecutionPayloadBid signedBid;
@@ -108,7 +112,11 @@ public class ExecutionPayloadBidGossipValidatorTest {
     this.schemaDefinitions = SchemaDefinitionsGloas.required(specContext.getSchemaDefinitions());
     this.bidValidator =
         new ExecutionPayloadBidGossipValidator(
-            spec, gossipValidationHelper, proposerPreferencesManager, MIN_BID_INCREMENT_PERCENTAGE);
+            spec,
+            gossipValidationHelper,
+            proposerPreferencesManager,
+            validatorIsConnectedProvider,
+            MIN_BID_INCREMENT_PERCENTAGE);
 
     final ExecutionPayloadBid randomBid =
         dataStructureUtil.randomSignedExecutionPayloadBid(UInt64.ZERO).getMessage();
@@ -157,6 +165,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
                 });
 
     final ProposerPreferences proposerPreferences = mock(ProposerPreferences.class);
+    when(proposerPreferences.getValidatorIndex()).thenReturn(PROPOSER_INDEX);
     when(proposerPreferences.getFeeRecipient()).thenReturn(bid.getFeeRecipient());
     when(proposerPreferences.getTargetGasLimit()).thenReturn(bid.getGasLimit());
     when(proposerPreferencesManager.getProposerPreferences(bid.getSlot(), dependentRoot))
@@ -621,6 +630,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
   @TestTemplate
   void shouldIgnore_whenFeeRecipientDoesNotMatchProposerPreferences() {
     final ProposerPreferences mismatchedPreferences = mock(ProposerPreferences.class);
+    when(mismatchedPreferences.getValidatorIndex()).thenReturn(PROPOSER_INDEX);
     when(mismatchedPreferences.getFeeRecipient()).thenReturn(dataStructureUtil.randomEth1Address());
     when(mismatchedPreferences.getTargetGasLimit()).thenReturn(bid.getGasLimit());
     when(proposerPreferencesManager.getProposerPreferences(slot, dependentRoot))
@@ -739,6 +749,128 @@ public class ExecutionPayloadBidGossipValidatorTest {
                 slot,
                 parentBlockHash,
                 parentBlockRoot));
+  }
+
+  @TestTemplate
+  void shouldAcceptHigherBidsBeyondBuilderBidLimitForOurProposer() {
+    when(validatorIsConnectedProvider.isValidatorConnected(PROPOSER_INDEX.intValue(), slot))
+        .thenReturn(true);
+
+    for (final long value : new long[] {10_000, 20_000, 30_000}) {
+      final SignedExecutionPayloadBid improvingBid =
+          bidFromBuilder(builderIndex, UInt64.valueOf(value));
+      mockBidValidation(improvingBid);
+      assertThatSafeFuture(bidValidator.validate(improvingBid)).isCompletedWithValue(ACCEPT);
+    }
+  }
+
+  @TestTemplate
+  void shouldAcceptSubPercentageImprovementsForOurProposer() {
+    when(validatorIsConnectedProvider.isValidatorConnected(PROPOSER_INDEX.intValue(), slot))
+        .thenReturn(true);
+    when(gossipValidationHelper.getBuilderBidLimit(builderIndex, postState, slot))
+        .thenReturn(UInt64.valueOf(3));
+
+    for (final long value : new long[] {10_000, 10_001, 10_002}) {
+      final SignedExecutionPayloadBid improvingBid =
+          bidFromBuilder(builderIndex, UInt64.valueOf(value));
+      mockBidValidation(improvingBid);
+      assertThatSafeFuture(bidValidator.validate(improvingBid)).isCompletedWithValue(ACCEPT);
+    }
+  }
+
+  @TestTemplate
+  void shouldIgnoreEqualOrLowerBidsForOurProposer() {
+    when(validatorIsConnectedProvider.isValidatorConnected(PROPOSER_INDEX.intValue(), slot))
+        .thenReturn(true);
+    final SignedExecutionPayloadBid firstBid = bidFromBuilder(builderIndex, UInt64.valueOf(10_000));
+    mockBidValidation(firstBid);
+    assertThatSafeFuture(bidValidator.validate(firstBid)).isCompletedWithValue(ACCEPT);
+
+    for (final long value : new long[] {10_000, 9_999}) {
+      final SignedExecutionPayloadBid nonImprovingBid =
+          bidFromBuilder(builderIndex, UInt64.valueOf(value));
+      mockBidValidation(nonImprovingBid);
+      assertThatSafeFuture(bidValidator.validate(nonImprovingBid))
+          .isCompletedWithValueMatching(InternalValidationResult::isIgnore);
+    }
+
+    final SignedExecutionPayloadBid improvingBid =
+        bidFromBuilder(builderIndex, UInt64.valueOf(10_001));
+    mockBidValidation(improvingBid);
+    assertThatSafeFuture(bidValidator.validate(improvingBid)).isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldRejectInvalidSignatureBeyondBidLimitForOurProposer() {
+    when(validatorIsConnectedProvider.isValidatorConnected(PROPOSER_INDEX.intValue(), slot))
+        .thenReturn(true);
+    final SignedExecutionPayloadBid firstBid = bidFromBuilder(builderIndex, UInt64.valueOf(10_000));
+    mockBidValidation(firstBid);
+    assertThatSafeFuture(bidValidator.validate(firstBid)).isCompletedWithValue(ACCEPT);
+
+    final SignedExecutionPayloadBid higherBid =
+        bidFromBuilder(builderIndex, UInt64.valueOf(10_001));
+    mockBidValidation(higherBid);
+    when(gossipValidationHelper.isSignatureValidWithRespectToBuilderIndex(
+            any(), any(), any(), any()))
+        .thenReturn(false);
+    assertThatSafeFuture(bidValidator.validate(higherBid))
+        .isCompletedWithValue(rejectBid(higherBid, "invalid execution payload bid signature"));
+
+    when(gossipValidationHelper.isSignatureValidWithRespectToBuilderIndex(
+            any(), any(), any(), any()))
+        .thenReturn(true);
+    assertThatSafeFuture(bidValidator.validate(higherBid)).isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldIgnoreUnaffordableBidBeyondBidLimitForOurProposer() {
+    when(validatorIsConnectedProvider.isValidatorConnected(PROPOSER_INDEX.intValue(), slot))
+        .thenReturn(true);
+    final SignedExecutionPayloadBid firstBid = bidFromBuilder(builderIndex, UInt64.valueOf(10_000));
+    mockBidValidation(firstBid);
+    assertThatSafeFuture(bidValidator.validate(firstBid)).isCompletedWithValue(ACCEPT);
+
+    final SignedExecutionPayloadBid higherBid =
+        bidFromBuilder(builderIndex, UInt64.valueOf(10_001));
+    mockBidValidation(higherBid);
+    when(gossipValidationHelper.builderHasEnoughBalanceForBid(
+            UInt64.valueOf(10_001), builderIndex, postState, slot))
+        .thenReturn(false);
+    assertThatSafeFuture(bidValidator.validate(higherBid))
+        .isCompletedWithValue(ignoreBid(higherBid, "value exceeds the builder's excess balance"));
+
+    when(gossipValidationHelper.builderHasEnoughBalanceForBid(
+            UInt64.valueOf(10_001), builderIndex, postState, slot))
+        .thenReturn(true);
+    assertThatSafeFuture(bidValidator.validate(higherBid)).isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldEnforceBidLimitWhenOnlyBuilderIndexMatchesConnectedValidator() {
+    when(validatorIsConnectedProvider.isValidatorConnected(builderIndex.intValue(), slot))
+        .thenReturn(true);
+    assertThatSafeFuture(bidValidator.validate(signedBid)).isCompletedWithValue(ACCEPT);
+
+    final SignedExecutionPayloadBid higherBid =
+        bidFromBuilder(builderIndex, bid.getValue().times(2));
+    mockBidValidation(higherBid);
+    assertThatSafeFuture(bidValidator.validate(higherBid))
+        .isCompletedWithValueMatching(InternalValidationResult::isIgnore);
+  }
+
+  @TestTemplate
+  void shouldEnforceBidLimitWhenProposerIsConnectedForAnotherSlot() {
+    when(validatorIsConnectedProvider.isValidatorConnected(PROPOSER_INDEX.intValue(), slot.plus(1)))
+        .thenReturn(true);
+    assertThatSafeFuture(bidValidator.validate(signedBid)).isCompletedWithValue(ACCEPT);
+
+    final SignedExecutionPayloadBid higherBid =
+        bidFromBuilder(builderIndex, bid.getValue().times(2));
+    mockBidValidation(higherBid);
+    assertThatSafeFuture(bidValidator.validate(higherBid))
+        .isCompletedWithValueMatching(InternalValidationResult::isIgnore);
   }
 
   @TestTemplate
@@ -1236,10 +1368,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .isCompletedWithValue(
             ignoreBid(
                 lowerBid,
-                "does not meet minimum increment threshold (%s%%) after a concurrent update; current highest is %s ETH and minimum required is %s ETH",
-                MIN_BID_INCREMENT_PERCENTAGE,
-                gweiToEth(UInt64.valueOf(11_000)),
-                gweiToEth(UInt64.valueOf(11_110))));
+                "value is not higher than current highest of %s ETH",
+                gweiToEth(UInt64.valueOf(11_000))));
 
     final SignedExecutionPayloadBid intermediateBid =
         bidFromBuilder(builderIndex.plus(2), UInt64.valueOf(11_050));
@@ -1335,6 +1465,60 @@ public class ExecutionPayloadBidGossipValidatorTest {
                 slot,
                 parentBlockHash,
                 parentBlockRoot));
+  }
+
+  @TestTemplate
+  void shouldAcceptHigherBidForOurProposerWhenLimitReachedDuringValidation() {
+    when(validatorIsConnectedProvider.isValidatorConnected(PROPOSER_INDEX.intValue(), slot))
+        .thenReturn(true);
+    final SignedExecutionPayloadBid higherBid =
+        bidFromBuilder(builderIndex, UInt64.valueOf(10_001));
+    mockBidValidation(higherBid);
+    final SafeFuture<Optional<BeaconState>> stateFuture = new SafeFuture<>();
+    when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
+        .thenReturn(stateFuture);
+    final SafeFuture<InternalValidationResult> higherBidResult = bidValidator.validate(higherBid);
+    assertThat(higherBidResult).isNotDone();
+
+    final SignedExecutionPayloadBid lowerBid = bidFromBuilder(builderIndex, UInt64.valueOf(10_000));
+    mockBidValidation(lowerBid);
+    assertThatSafeFuture(bidValidator.validate(lowerBid)).isCompletedWithValue(ACCEPT);
+
+    stateFuture.complete(Optional.of(postState));
+    assertThatSafeFuture(higherBidResult).isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldNotOverwriteHigherBidAcceptedConcurrentlyForOurProposer() {
+    when(validatorIsConnectedProvider.isValidatorConnected(PROPOSER_INDEX.intValue(), slot))
+        .thenReturn(true);
+    final SignedExecutionPayloadBid firstBid = bidFromBuilder(builderIndex, UInt64.valueOf(10_000));
+    mockBidValidation(firstBid);
+    assertThatSafeFuture(bidValidator.validate(firstBid)).isCompletedWithValue(ACCEPT);
+
+    final SignedExecutionPayloadBid lowerBid = bidFromBuilder(builderIndex, UInt64.valueOf(10_001));
+    mockBidValidation(lowerBid);
+    final SafeFuture<Optional<BeaconState>> stateFuture = new SafeFuture<>();
+    when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
+        .thenReturn(stateFuture);
+    final SafeFuture<InternalValidationResult> lowerBidResult = bidValidator.validate(lowerBid);
+    assertThat(lowerBidResult).isNotDone();
+
+    final SignedExecutionPayloadBid higherBid =
+        bidFromBuilder(builderIndex, UInt64.valueOf(10_002));
+    mockBidValidation(higherBid);
+    assertThatSafeFuture(bidValidator.validate(higherBid)).isCompletedWithValue(ACCEPT);
+
+    stateFuture.complete(Optional.of(postState));
+    assertThatSafeFuture(lowerBidResult)
+        .isCompletedWithValueMatching(InternalValidationResult::isIgnore);
+    assertThatSafeFuture(bidValidator.validate(higherBid))
+        .isCompletedWithValueMatching(InternalValidationResult::isIgnore);
+
+    final SignedExecutionPayloadBid followUpBid =
+        bidFromBuilder(builderIndex, UInt64.valueOf(10_003));
+    mockBidValidation(followUpBid);
+    assertThatSafeFuture(bidValidator.validate(followUpBid)).isCompletedWithValue(ACCEPT);
   }
 
   @TestTemplate
@@ -1451,10 +1635,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .isCompletedWithValue(
             ignoreBid(
                 equalBid,
-                "does not meet minimum increment threshold (%s%%); current highest is %s ETH and minimum required is %s ETH",
-                MIN_BID_INCREMENT_PERCENTAGE,
-                gweiToEth(UInt64.ZERO),
-                gweiToEth(UInt64.ONE)));
+                "value is not higher than current highest of %s ETH",
+                gweiToEth(UInt64.ZERO)));
 
     final SignedExecutionPayloadBid higherBid = bidFromBuilder(builderIndex, UInt64.ONE);
     mockBidValidation(higherBid);
@@ -1486,6 +1668,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
     final ExecutionPayloadBid message = bid.getMessage();
     final UInt64 slot = message.getSlot();
     final ProposerPreferences matchingPreferences = mock(ProposerPreferences.class);
+    when(matchingPreferences.getValidatorIndex()).thenReturn(PROPOSER_INDEX);
     when(matchingPreferences.getFeeRecipient()).thenReturn(message.getFeeRecipient());
     when(matchingPreferences.getTargetGasLimit()).thenReturn(message.getGasLimit());
     when(gossipValidationHelper.getShufflingDependentRoot(message.getParentBlockRoot(), slot))
@@ -1676,6 +1859,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
   private void mockProposerPreferences(
       final SignedExecutionPayloadBid signedBid, final UInt64 targetGasLimit) {
     final ProposerPreferences proposerPreferences = mock(ProposerPreferences.class);
+    when(proposerPreferences.getValidatorIndex()).thenReturn(PROPOSER_INDEX);
     when(proposerPreferences.getFeeRecipient())
         .thenReturn(signedBid.getMessage().getFeeRecipient());
     when(proposerPreferences.getTargetGasLimit()).thenReturn(targetGasLimit);

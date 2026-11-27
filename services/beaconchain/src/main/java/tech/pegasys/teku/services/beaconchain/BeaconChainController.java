@@ -1034,6 +1034,7 @@ public class BeaconChainController extends Service implements BeaconChainControl
               spec,
               gossipValidationHelper,
               proposerPreferencesManager,
+              new ValidatorIsConnectedProviderReference(() -> proposersDataManager),
               beaconConfig.p2pConfig().getMinBidIncrementPercentage());
       final ReceivedExecutionPayloadBidEventsChannel
           receivedExecutionPayloadBidEventsChannelPublisher =

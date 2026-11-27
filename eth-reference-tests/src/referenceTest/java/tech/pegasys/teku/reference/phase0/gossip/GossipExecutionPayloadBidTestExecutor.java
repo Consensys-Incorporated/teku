@@ -60,6 +60,7 @@ import tech.pegasys.teku.statetransition.validation.ExecutionPayloadGossipValida
 import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 import tech.pegasys.teku.statetransition.validation.ProposerPreferencesGossipValidator;
+import tech.pegasys.teku.storage.client.ValidatorIsConnectedProvider;
 
 public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
   private final List<String> testsToSkip;
@@ -289,7 +290,21 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
             spec, gossipValidationHelper, blockGossipValidator, invalidBlockRoots);
     final ExecutionPayloadBidGossipValidator bidValidator =
         new ExecutionPayloadBidGossipValidator(
-            spec, gossipValidationHelper, proposerPreferencesManager, MIN_BID_INCREMENT_PERCENTAGE);
+            spec,
+            gossipValidationHelper,
+            proposerPreferencesManager,
+            new ValidatorIsConnectedProvider() {
+              @Override
+              public boolean isValidatorConnected(final int validatorId, final UInt64 slot) {
+                return false;
+              }
+
+              @Override
+              public SafeFuture<Boolean> isBlockProposerConnected(final UInt64 slot) {
+                return SafeFuture.completedFuture(false);
+              }
+            },
+            MIN_BID_INCREMENT_PERCENTAGE);
 
     for (final GossipExecutionPayloadBidMetaData.Message message : metaData.getMessages()) {
       validationTimeMs[0] = UInt64.valueOf(message.getCurrentTimeMs());
