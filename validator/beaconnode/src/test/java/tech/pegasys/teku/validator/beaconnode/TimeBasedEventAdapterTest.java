@@ -161,27 +161,32 @@ class TimeBasedEventAdapterTest {
     timeProvider.advanceTimeBySeconds(timeUntilNextSlot);
     asyncRunner.executeDueActionsRepeatedly();
 
-    // Attestation should not fire at 1/3 seconds (integer division rounds down)
-    timeProvider.advanceTimeBySeconds(secondsPerSlot / 3);
+    // Deadlines are rounded to the nearest millisecond: 3333 bps of 5000 ms is 1666.5 ms and
+    // 6667 bps is 3333.5 ms
+    final long attestationDueMillis =
+        gnosisSpec.atSlot(UInt64.valueOf(nextSlot)).getForkChoiceUtil().getAttestationDueMillis();
+    final long aggregateDueMillis =
+        gnosisSpec.atSlot(UInt64.valueOf(nextSlot)).getForkChoiceUtil().getAggregateDueMillis();
+    assertThat(attestationDueMillis).isEqualTo(1667);
+    assertThat(aggregateDueMillis).isEqualTo(3334);
+
+    // Attestation should not fire a millisecond before its deadline
+    timeProvider.advanceTimeByMillis(attestationDueMillis - 1);
     asyncRunner.executeDueActionsRepeatedly();
     verify(validatorTimingChannel, never()).onAttestationCreationDue(UInt64.valueOf(nextSlot));
 
-    // But does fire at 1/3 millis (precise offset)
-    final long alreadyPassedMillis = (long) (secondsPerSlot / 3) * 1000;
-    final long oneThirdMillis = (secondsPerSlot * 1000L) / 3;
-    timeProvider.advanceTimeByMillis(oneThirdMillis - alreadyPassedMillis);
+    // But does fire at the deadline (precise offset)
+    timeProvider.advanceTimeByMillis(1);
     asyncRunner.executeDueActionsRepeatedly();
     verify(validatorTimingChannel, times(1)).onAttestationCreationDue(UInt64.valueOf(nextSlot));
 
-    // Aggregation should not fire at 2/3 seconds (integer division rounds down)
-    final long twoThirdsSeconds = (long) (secondsPerSlot / 3) * 2 * 1000;
-    timeProvider.advanceTimeByMillis(twoThirdsSeconds - oneThirdMillis);
+    // Aggregation should not fire a millisecond before its deadline
+    timeProvider.advanceTimeByMillis(aggregateDueMillis - attestationDueMillis - 1);
     asyncRunner.executeDueActionsRepeatedly();
     verify(validatorTimingChannel, never()).onAttestationAggregationDue(UInt64.valueOf(nextSlot));
 
-    // But does fire at 2/3 millis (precise offset)
-    final long twoThirdsMillis = (secondsPerSlot * 2000L) / 3;
-    timeProvider.advanceTimeByMillis(twoThirdsMillis - twoThirdsSeconds);
+    // But does fire at the deadline (precise offset)
+    timeProvider.advanceTimeByMillis(1);
     asyncRunner.executeDueActionsRepeatedly();
     verify(validatorTimingChannel, times(1)).onAttestationAggregationDue(UInt64.valueOf(nextSlot));
   }
