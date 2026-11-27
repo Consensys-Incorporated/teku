@@ -242,15 +242,7 @@ public class ReferenceTestFinder {
             "fulu - mainnet - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
             "fulu - minimal - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
             "gloas - mainnet - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
-            "gloas - minimal - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
-            // TODO: https://github.com/Consensys-Incorporated/teku/issues/11767
-            // enable after ignoring bids the proposer cannot select (consensus-specs#5803)
-            "gloas - mainnet - networking/gossip_execution_payload_bid - gossip_execution_payload_bid__ignore_before_payload_attestation_due",
-            "gloas - minimal - networking/gossip_execution_payload_bid - gossip_execution_payload_bid__ignore_before_payload_attestation_due",
-            "gloas - mainnet - networking/gossip_execution_payload_bid - gossip_execution_payload_bid__ignore_on_head_parent_for_head_slot",
-            "gloas - minimal - networking/gossip_execution_payload_bid - gossip_execution_payload_bid__ignore_on_head_parent_for_head_slot",
-            "gloas - mainnet - networking/gossip_execution_payload_bid - gossip_execution_payload_bid__ignore_on_head_parent_timely_head",
-            "gloas - minimal - networking/gossip_execution_payload_bid - gossip_execution_payload_bid__ignore_on_head_parent_timely_head"));
+            "gloas - minimal - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal"));
   }
 
   private static TestFinder getForkChoiceComplianceTestFinder() {

@@ -24,6 +24,7 @@ import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ZERO;
 import static tech.pegasys.teku.spec.constants.EthConstants.ETH_TO_GWEI;
 import static tech.pegasys.teku.spec.datastructures.state.beaconstate.common.BeaconStateFields.PROPOSER_LOOKAHEAD;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.IntStream;
@@ -47,6 +48,7 @@ import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.constants.Domain;
+import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
@@ -449,17 +451,72 @@ public class GossipValidationHelperTest {
   }
 
   @TestTemplate
-  void isBidCompatibleWithHead_shouldAcceptBidBuildingOnHeadParent(final SpecContext specContext) {
+  void isBidCompatibleWithHead_shouldAcceptBidBuildingOnParentOfLateHead(
+      final SpecContext specContext) {
     specContext.assumeGloasActive();
     final BidCompatibility bidCompatibility = createBidCompatibility();
     final ExecutionPayloadBid bid =
-        createBidForParent(
-            bidCompatibility.headBid(),
-            bidCompatibility.headBid().getParentBlockHash(),
-            bidCompatibility.headBlock().getParentRoot(),
-            bidCompatibility.headBlock().getSlot());
+        createBidOnHeadParent(bidCompatibility, bidCompatibility.headBlock().getSlot().plus(ONE));
+    when(bidCompatibility.recentChainData().isBlockLate(bidCompatibility.headBlock().getRoot()))
+        .thenReturn(true);
 
     assertThat(bidCompatibility.helper().isBidCompatibleWithHead(bid)).isTrue();
+  }
+
+  @TestTemplate
+  void isBidCompatibleWithHead_shouldRejectBidBuildingOnParentOfTimelyHead(
+      final SpecContext specContext) {
+    specContext.assumeGloasActive();
+    final BidCompatibility bidCompatibility = createBidCompatibility();
+    final SignedBeaconBlock headBlock = bidCompatibility.headBlock();
+    final ExecutionPayloadBid bid =
+        createBidOnHeadParent(bidCompatibility, headBlock.getSlot().plus(ONE));
+    // A block from another proposer at the head's slot is not an equivocation
+    addBlockAtHeadSlot(
+        bidCompatibility,
+        createBlockAtHeadSlot(headBlock, headBlock.getProposerIndex().isZero() ? ONE : ZERO));
+
+    assertThat(bidCompatibility.helper().isBidCompatibleWithHead(bid)).isFalse();
+  }
+
+  @TestTemplate
+  void isBidCompatibleWithHead_shouldAcceptBidBuildingOnParentOfEquivocatingHead(
+      final SpecContext specContext) {
+    specContext.assumeGloasActive();
+    final BidCompatibility bidCompatibility = createBidCompatibility();
+    final SignedBeaconBlock headBlock = bidCompatibility.headBlock();
+    final ExecutionPayloadBid bid =
+        createBidOnHeadParent(bidCompatibility, headBlock.getSlot().plus(ONE));
+    addBlockAtHeadSlot(
+        bidCompatibility, createBlockAtHeadSlot(headBlock, headBlock.getProposerIndex()));
+
+    assertThat(bidCompatibility.helper().isBidCompatibleWithHead(bid)).isTrue();
+  }
+
+  @TestTemplate
+  void isBidCompatibleWithHead_shouldRejectBidBuildingOnHeadParentForHeadSlot(
+      final SpecContext specContext) {
+    specContext.assumeGloasActive();
+    final BidCompatibility bidCompatibility = createBidCompatibility();
+    final ExecutionPayloadBid bid =
+        createBidOnHeadParent(bidCompatibility, bidCompatibility.headBlock().getSlot());
+    when(bidCompatibility.recentChainData().isBlockLate(bidCompatibility.headBlock().getRoot()))
+        .thenReturn(true);
+
+    assertThat(bidCompatibility.helper().isBidCompatibleWithHead(bid)).isFalse();
+  }
+
+  @TestTemplate
+  void isBidCompatibleWithHead_shouldRejectBidBuildingOnHeadParentPastNextSlot(
+      final SpecContext specContext) {
+    specContext.assumeGloasActive();
+    final BidCompatibility bidCompatibility = createBidCompatibility();
+    final ExecutionPayloadBid bid =
+        createBidOnHeadParent(bidCompatibility, bidCompatibility.headBlock().getSlot().plus(2));
+    when(bidCompatibility.recentChainData().isBlockLate(bidCompatibility.headBlock().getRoot()))
+        .thenReturn(true);
+
+    assertThat(bidCompatibility.helper().isBidCompatibleWithHead(bid)).isFalse();
   }
 
   @TestTemplate
@@ -689,6 +746,34 @@ public class GossipValidationHelperTest {
     final UInt64 currentTime =
         nextSlotStartTimeMillis.plus(gossipValidationHelper.getMaxOffsetTimeInMillis()).increment();
     assertIsSlotCurrent(slot, currentTime, false);
+  }
+
+  @TestTemplate
+  void isPreviousSlotPayloadAttestationDeadlineReached_shouldRejectBeforeDeadline(
+      final SpecContext specContext) {
+    specContext.assumeGloasActive();
+    final UInt64 slot = UInt64.valueOf(1000);
+    final UInt64 deadline = getPreviousSlotPayloadAttestationDeadlineMillis(slot);
+    assertIsPreviousSlotPayloadAttestationDeadlineReached(slot, deadline.decrement(), false);
+  }
+
+  @TestTemplate
+  void isPreviousSlotPayloadAttestationDeadlineReached_shouldAcceptFromDeadline(
+      final SpecContext specContext) {
+    specContext.assumeGloasActive();
+    final UInt64 slot = UInt64.valueOf(1000);
+    final UInt64 deadline = getPreviousSlotPayloadAttestationDeadlineMillis(slot);
+    assertIsPreviousSlotPayloadAttestationDeadlineReached(slot, deadline, true);
+    assertIsPreviousSlotPayloadAttestationDeadlineReached(slot, getSlotStartTimeMillis(slot), true);
+  }
+
+  @TestTemplate
+  void isPreviousSlotPayloadAttestationDeadlineReached_shouldNeverBeReachedBeforeGloas(
+      final SpecContext specContext) {
+    specContext.assumeIsNotOneOf(SpecMilestone.GLOAS);
+    final UInt64 slot = UInt64.valueOf(1000);
+    assertIsPreviousSlotPayloadAttestationDeadlineReached(
+        slot, getSlotStartTimeMillis(slot), false);
   }
 
   @TestTemplate
@@ -1120,6 +1205,57 @@ public class GossipValidationHelperTest {
     assertThat(gossipValidationHelperMocked.isSlotCurrent(slot)).isEqualTo(expectedResult);
   }
 
+  private UInt64 getPreviousSlotPayloadAttestationDeadlineMillis(final UInt64 slot) {
+    return getSlotStartTimeMillis(slot.decrement())
+        .plus(spec.getPayloadAttestationDueMillis(slot).orElseThrow());
+  }
+
+  private void assertIsPreviousSlotPayloadAttestationDeadlineReached(
+      final UInt64 slot, final UInt64 currentTime, final boolean expectedResult) {
+    final RecentChainData recentChainDataMock = mock(RecentChainData.class);
+    final UpdatableStore storeMock = mock(UpdatableStore.class);
+    when(recentChainDataMock.getStore()).thenReturn(storeMock);
+    when(storeMock.getTimeInMillis()).thenReturn(currentTime);
+    when(recentChainDataMock.getGenesisTimeMillis())
+        .thenReturn(recentChainData.getGenesisTimeMillis());
+    final GossipValidationHelper gossipValidationHelperMocked =
+        new GossipValidationHelper(spec, recentChainDataMock, storageSystem.getMetricsSystem());
+    assertThat(gossipValidationHelperMocked.isPreviousSlotPayloadAttestationDeadlineReached(slot))
+        .isEqualTo(expectedResult);
+  }
+
+  private ExecutionPayloadBid createBidOnHeadParent(
+      final BidCompatibility bidCompatibility, final UInt64 slot) {
+    return createBidForParent(
+        bidCompatibility.headBid(),
+        bidCompatibility.headBid().getParentBlockHash(),
+        bidCompatibility.headBlock().getParentRoot(),
+        slot);
+  }
+
+  private SignedBeaconBlock createBlockAtHeadSlot(
+      final SignedBeaconBlock headBlock, final UInt64 proposerIndex) {
+    final BeaconBlock block = headBlock.getMessage();
+    return dataStructureUtil.signedBlock(
+        new BeaconBlock(
+            block.getSchema(),
+            block.getSlot(),
+            proposerIndex,
+            block.getParentRoot(),
+            dataStructureUtil.randomBytes32(),
+            block.getBody()));
+  }
+
+  private void addBlockAtHeadSlot(
+      final BidCompatibility bidCompatibility, final SignedBeaconBlock block) {
+    final SignedBeaconBlock headBlock = bidCompatibility.headBlock();
+    assertThat(block.getRoot()).isNotEqualTo(headBlock.getRoot());
+    when(bidCompatibility.strategy().getBlockRootsAtSlot(headBlock.getSlot()))
+        .thenReturn(List.of(headBlock.getRoot(), block.getRoot()));
+    when(bidCompatibility.store().getBlockIfAvailable(block.getRoot()))
+        .thenReturn(Optional.of(block));
+  }
+
   private BidCompatibility createBidCompatibility() {
     final SignedBeaconBlock headBlock = dataStructureUtil.randomSignedBeaconBlock(UInt64.ONE);
     final ExecutionPayloadBid headBid =
@@ -1135,6 +1271,7 @@ public class GossipValidationHelperTest {
     final UpdatableStore store = mock(UpdatableStore.class);
     final ReadOnlyForkChoiceStrategy strategy = mock(ReadOnlyForkChoiceStrategy.class);
     when(chainHead.getRoot()).thenReturn(headBlock.getRoot());
+    when(chainHead.getSlot()).thenReturn(headBlock.getSlot());
     when(chainHead.getParentRoot()).thenReturn(headBlock.getParentRoot());
     when(chainHead.getExecutionBlockHash()).thenReturn(headBid.getBlockHash());
     when(chainHead.getForkChoiceNode()).thenReturn(headNode);
@@ -1142,9 +1279,12 @@ public class GossipValidationHelperTest {
     when(recentChainData.getStore()).thenReturn(store);
     when(recentChainData.getForkChoiceStrategy()).thenReturn(Optional.of(strategy));
     when(store.getBlockIfAvailable(headBlock.getRoot())).thenReturn(Optional.of(headBlock));
+    when(strategy.getBlockRootsAtSlot(headBlock.getSlot()))
+        .thenReturn(List.of(headBlock.getRoot()));
     final GossipValidationHelper helper =
         new GossipValidationHelper(spec, recentChainData, storageSystem.getMetricsSystem());
-    return new BidCompatibility(helper, store, strategy, headNode, headBlock, headBid);
+    return new BidCompatibility(
+        helper, recentChainData, store, strategy, headNode, headBlock, headBid);
   }
 
   private ExecutionPayloadBid createBidForParent(
@@ -1171,6 +1311,7 @@ public class GossipValidationHelperTest {
 
   private record BidCompatibility(
       GossipValidationHelper helper,
+      RecentChainData recentChainData,
       UpdatableStore store,
       ReadOnlyForkChoiceStrategy strategy,
       ForkChoiceNode headNode,

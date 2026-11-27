@@ -108,6 +108,14 @@ public class ExecutionPayloadBidGossipValidator {
     }
 
     /*
+     * [IGNORE] The bid is received after the payload attestation deadline of the previous slot
+     */
+    if (!gossipValidationHelper.isPreviousSlotPayloadAttestationDeadlineReached(bid.getSlot())) {
+      return completedFuture(
+          ignoreBid(bid, "received before the payload attestation deadline of the previous slot"));
+    }
+
+    /*
      * [REJECT] The bid's execution payment is zero
      */
     final UInt64 executionPayment = bid.getExecutionPayment();

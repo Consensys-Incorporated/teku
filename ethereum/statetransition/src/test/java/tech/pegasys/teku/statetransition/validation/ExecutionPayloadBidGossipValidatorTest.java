@@ -163,6 +163,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .thenReturn(Optional.of(proposerPreferences));
 
     when(gossipValidationHelper.isSlotCurrentOrNext(slot)).thenReturn(true);
+    when(gossipValidationHelper.isPreviousSlotPayloadAttestationDeadlineReached(any()))
+        .thenReturn(true);
     when(gossipValidationHelper.isWithinParentProposerLookahead(any(), any())).thenReturn(true);
     when(gossipValidationHelper.getShufflingDependentRoot(parentBlockRoot, slot))
         .thenReturn(Optional.of(dependentRoot));
@@ -518,6 +520,34 @@ public class ExecutionPayloadBidGossipValidatorTest {
     assertThatSafeFuture(bidValidator.validate(signedBid))
         .isCompletedWithValue(
             ignoreBid(signedBid, "must be for current or next slot but was for slot %s", slot));
+  }
+
+  @TestTemplate
+  void shouldIgnore_whenReceivedBeforePreviousSlotPayloadAttestationDeadline() {
+    when(gossipValidationHelper.isPreviousSlotPayloadAttestationDeadlineReached(slot))
+        .thenReturn(false);
+    assertThatSafeFuture(bidValidator.validate(signedBid))
+        .isCompletedWithValue(
+            ignoreBid(
+                signedBid,
+                "received before the payload attestation deadline of the previous slot"));
+    verify(gossipValidationHelper, never()).getParentStateInBlockEpoch(any(), any(), any());
+  }
+
+  @TestTemplate
+  void shouldIgnoreEarlyBidBeforeRejectingExecutionPayment() {
+    final SignedExecutionPayloadBid bidWithPayment =
+        dataStructureUtil.randomSignedExecutionPayloadBid(UInt64.ONE);
+    final UInt64 bidSlot = bidWithPayment.getMessage().getSlot();
+    when(gossipValidationHelper.isSlotCurrentOrNext(bidSlot)).thenReturn(true);
+    when(gossipValidationHelper.isPreviousSlotPayloadAttestationDeadlineReached(bidSlot))
+        .thenReturn(false);
+
+    assertThatSafeFuture(bidValidator.validate(bidWithPayment))
+        .isCompletedWithValue(
+            ignoreBid(
+                bidWithPayment,
+                "received before the payload attestation deadline of the previous slot"));
   }
 
   @TestTemplate

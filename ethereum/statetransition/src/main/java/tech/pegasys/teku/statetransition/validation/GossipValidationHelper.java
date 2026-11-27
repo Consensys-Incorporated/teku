@@ -378,6 +378,24 @@ public class GossipValidationHelper {
   }
 
   /**
+   * Returns true once the payload attestation deadline of the slot before {@code slot} has been
+   * reached. Until then it is not decided whether the proposer of {@code slot} builds on the
+   * previous slot's payload. No clock disparity allowance applies. A slot before Gloas has no such
+   * deadline, so it is never reached.
+   */
+  public boolean isPreviousSlotPayloadAttestationDeadlineReached(final UInt64 slot) {
+    return spec.getPayloadAttestationDueMillis(slot)
+        .map(
+            payloadAttestationDueMillis ->
+                !spec.isBeforeTimeInSlot(
+                    slot.minusMinZero(ONE),
+                    recentChainData.getGenesisTimeMillis(),
+                    getCurrentTimeMillis(),
+                    payloadAttestationDueMillis))
+        .orElse(false);
+  }
+
+  /**
    * Returns true when the block with the given {@code root} is a possible dependent block for the
    * epoch starting at {@code epochStartSlot} -- i.e. spec {@code is_valid_dependent_root}. That
    * holds when, on some branch, the block is or could become the latest block prior to the start of
@@ -495,7 +513,11 @@ public class GossipValidationHelper {
     final boolean buildsOnParentPayload =
         bid.getParentBlockHash().equals(headBid.getParentBlockHash());
     if (buildsOnParentBlock && buildsOnParentPayload) {
-      return true;
+      // A proposer only builds on the head's parent to re-org the head
+      final boolean bidSlotOk = head.getSlot().increment().equals(bid.getSlot());
+      return bidSlotOk
+          && (recentChainData.isBlockLate(head.getRoot())
+              || isProposerEquivocation(store, maybeHeadBlock.get()));
     }
     if (!bid.getParentBlockRoot().equals(head.getRoot())) {
       return false;
@@ -506,6 +528,21 @@ public class GossipValidationHelper {
       return buildsOnHeadPayload;
     }
     return buildsOnParentPayload;
+  }
+
+  /**
+   * Spec {@code is_proposer_equivocation}: true when another block from the same proposer is known
+   * for the block's slot. Only blocks still held in memory are compared, so a block that is no
+   * longer available is not counted. That is enough to decide whether to propagate a bid, but not
+   * for a fork choice decision.
+   */
+  private boolean isProposerEquivocation(final ReadOnlyStore store, final SignedBeaconBlock block) {
+    // TODO: https://github.com/Consensys-Incorporated/teku/issues/10608
+    // replace with the fork choice equivocation check once it exists
+    return getForkChoiceStrategy().getBlockRootsAtSlot(block.getSlot()).stream()
+        .filter(root -> !root.equals(block.getRoot()))
+        .flatMap(root -> store.getBlockIfAvailable(root).stream())
+        .anyMatch(otherBlock -> otherBlock.getProposerIndex().equals(block.getProposerIndex()));
   }
 
   private static InternalValidationResult reject(final String reason) {
