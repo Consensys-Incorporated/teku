@@ -50,25 +50,14 @@ public class GossipTests {
           .put("networking/gossip_voluntary_exit", new GossipVoluntaryExitTestExecutor())
           .put(
               "networking/gossip_payload_attestation_message",
-              new GossipPayloadAttestationMessageTestExecutor(
-                  // TODO: the fixture pins GLOAS_FORK_EPOCH to 1 but ships a Gloas genesis state
-                  // and Gloas blocks at slots 0 and 1, which Teku cannot even deserialize since it
-                  // selects schemas by slot. Ignored until the fixture is built through a real
-                  // Fulu to Gloas transition upstream:
-                  // https://github.com/ethereum/consensus-specs/issues/5666
-                  "gossip_payload_attestation_message__reject_pre_fork_slot"))
+              new GossipPayloadAttestationMessageTestExecutor())
           .put(
               "networking/gossip_proposer_preferences", new GossipProposerPreferencesTestExecutor())
           .put(
               "networking/gossip_execution_payload_envelope",
-              // TODO: enable after consensus-specs v1.7.0-beta.5 release
-              // new GossipExecutionPayloadEnvelopeTestExecutor())
-              TestExecutor.IGNORE_TESTS)
+              new GossipExecutionPayloadEnvelopeTestExecutor())
           .put(
               "networking/gossip_execution_payload_bid",
-              // TODO: https://github.com/Consensys-Incorporated/teku/issues/11233
-              new GossipExecutionPayloadBidTestExecutor(
-                  "gossip_execution_payload_bid__ignore_builder_exit_in_parent_payload",
-                  "gossip_execution_payload_bid__ignore_builder_exit_with_pending_balance"))
+              new GossipExecutionPayloadBidTestExecutor())
           .build();
 }

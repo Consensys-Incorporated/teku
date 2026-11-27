@@ -49,4 +49,12 @@ public class StateRootRecorder {
 
     stateRootConsumer.accept(state.hashTreeRoot(), state.getSlot());
   }
+
+  /**
+   * The slot from which the next accepted state records state roots: the initial slot until a state
+   * is accepted, then the slot of the last accepted state.
+   */
+  public UInt64 getSlot() {
+    return slot;
+  }
 }

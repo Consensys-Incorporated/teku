@@ -78,4 +78,63 @@ class ContentTypesTest {
                 "application/json"))
         .isEqualTo("text/plain");
   }
+
+  @Test
+  void getRequestContentType_shouldIgnoreCase() {
+    assertThat(
+            ContentTypes.getRequestContentType(
+                Optional.of("Application/JSON; charset=UTF-8"),
+                List.of("application/octet-stream", "application/json"),
+                "application/octet-stream"))
+        .isEqualTo("application/json");
+  }
+
+  @Test
+  void getResponseContentType_shouldUseWildcardWhenMoreSpecificTypeExcluded() {
+    final List<String> supported = List.of("application/octet-stream", "application/json");
+    assertThat(
+            ContentTypes.getResponseContentType(
+                supported, Optional.of("application/octet-stream;q=0, */*")))
+        .contains("application/json");
+  }
+
+  @Test
+  void getResponseContentType_shouldSelectHighestQuality() {
+    final List<String> supported = List.of("application/json", "application/octet-stream");
+    assertThat(
+            ContentTypes.getResponseContentType(
+                supported, Optional.of("application/json;q=0.9, application/octet-stream")))
+        .contains("application/octet-stream");
+  }
+
+  @Test
+  void getResponseContentType_shouldBeEmptyWhenOnlySupportedTypeExcluded() {
+    assertThat(
+            ContentTypes.getResponseContentType(
+                List.of("application/json"), Optional.of("*/*, application/json;q=0")))
+        .isEmpty();
+  }
+
+  @Test
+  void getResponseContentType_shouldIgnoreCase() {
+    assertThat(
+            ContentTypes.getResponseContentType(
+                List.of("application/json"), Optional.of("Application/JSON")))
+        .contains("application/json");
+  }
+
+  @Test
+  void getResponseContentType_shouldTreatBareStarAsAnyType() {
+    assertThat(
+            ContentTypes.getResponseContentType(
+                List.of("application/json"), Optional.of("text/html, *; q=.2")))
+        .contains("application/json");
+  }
+
+  @Test
+  void getResponseContentType_shouldBeEmptyWhenHeaderMalformed() {
+    assertThat(
+            ContentTypes.getResponseContentType(List.of("application/json"), Optional.of("json")))
+        .isEmpty();
+  }
 }

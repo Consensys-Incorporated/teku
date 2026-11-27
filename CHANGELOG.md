@@ -14,6 +14,7 @@
  - Applying a batch of changes to an SSZ tree no longer wraps and boxes the list of changes at every tree level, which lowers the time of the epoch transition. [#11634](https://github.com/Consensys-Incorporated/teku/pull/11634)
  - Reduced the time of the epoch transition by about a third on mainnet: changes to SSZ lists are now tracked in a paged array instead of a sorted map, so reading and writing balances during epoch processing takes constant time. [#11633](https://github.com/Consensys-Incorporated/teku/pull/11633)
  - `Validator` views of the registry are now read straight from its packed SSZ bytes and are no longer cached. On mainnet this lowers the live heap of a running node by about 2 GB (about 7.2 million cached `Validator` views are no longer kept).
+ - Beacon API endpoints that list `406 Not Acceptable` in their OpenAPI documentation now return 406 when the request's `Accept` header matches none of the endpoint's response content types, instead of responding with JSON. Requests without an `Accept` header are still accepted.
 
 ### Bug Fixes
  - Slashing protection records and other files Teku writes with fsync now also sync their directory after being created or replaced, so a power loss or kernel panic shortly after signing can no longer restore a validator's previous record or remove a new one. Without this, the validator client could treat the lost signature as never made. [#11601](https://github.com/Consensys-Incorporated/teku/issues/11601)

@@ -1710,6 +1710,60 @@ public class DatabaseTest {
   }
 
   @TestTemplate
+  public void shouldIndexAllFinalizedStateRootsWhenFinalizationSpansMultipleTransactions(
+      final DatabaseContext context) throws IOException {
+    initialize(context);
+
+    // Finalize more blocks than fit in one database transaction. The tip is far enough past the
+    // transaction boundary that the states around the boundary are no longer in the state cache,
+    // so only the periodically persisted hot states are available there.
+    final UInt64 tipSlot = UInt64.valueOf(KvStoreDatabase.TX_BATCH_SIZE + 66);
+    final UInt64 finalizedEpoch = spec.computeEpochAtSlot(tipSlot);
+    final UInt64 finalizedSlot = spec.computeStartSlotAtEpoch(finalizedEpoch);
+
+    chainBuilder.generateBlocksUpToSlot(tipSlot);
+    final Checkpoint finalizedCheckpoint =
+        chainBuilder.getCurrentCheckpointForEpoch(finalizedEpoch);
+
+    add(chainBuilder.streamBlocksAndStates(GENESIS_SLOT.plus(1)).toList());
+    final StoreTransaction tx = recentChainData.startStoreTransaction();
+    tx.setFinalizedCheckpoint(finalizedCheckpoint, false);
+    assertThat(tx.commit()).isCompleted();
+
+    final List<SignedBlockAndState> finalizedBlocks =
+        chainBuilder.streamBlocksAndStates(GENESIS_SLOT, finalizedSlot).toList();
+    assertThat(finalizedBlocks).hasSizeGreaterThan(KvStoreDatabase.TX_BATCH_SIZE);
+
+    final UInt64 slotsPerHistoricalRoot =
+        UInt64.valueOf(spec.getSlotsPerHistoricalRoot(GENESIS_SLOT));
+    final Map<UInt64, Bytes32> expectedStateRoots = new TreeMap<>();
+    for (int i = 1; i < finalizedBlocks.size(); i++) {
+      final SignedBlockAndState previous = finalizedBlocks.get(i - 1);
+      final BeaconState currentState = finalizedBlocks.get(i).getState();
+      for (UInt64 slot = previous.getSlot();
+          slot.isLessThan(currentState.getSlot());
+          slot = slot.increment()) {
+        expectedStateRoots.put(
+            slot,
+            currentState.getStateRoots().getElement(slot.mod(slotsPerHistoricalRoot).intValue()));
+      }
+      expectedStateRoots.put(currentState.getSlot(), currentState.hashTreeRoot());
+    }
+    assertThat(expectedStateRoots).hasSize(finalizedSlot.intValue() + 1);
+
+    final List<UInt64> slotsMissingFromIndex =
+        expectedStateRoots.entrySet().stream()
+            .filter(
+                entry ->
+                    !database
+                        .getSlotForFinalizedStateRoot(entry.getValue())
+                        .equals(Optional.of(entry.getKey())))
+            .map(Map.Entry::getKey)
+            .toList();
+    assertThat(slotsMissingFromIndex).isEmpty();
+  }
+
+  @TestTemplate
   public void shouldRecordOptimisticTransitionExecutionPayloadWhenFinalized_singleTransaction(
       final DatabaseContext context) throws Exception {
     final SignedBlockAndState transitionBlock =

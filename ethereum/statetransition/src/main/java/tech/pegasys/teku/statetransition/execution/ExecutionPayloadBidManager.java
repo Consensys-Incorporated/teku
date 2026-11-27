@@ -39,7 +39,9 @@ public interface ExecutionPayloadBidManager {
 
         @Override
         public SafeFuture<InternalValidationResult> validateAndAddBid(
-            final SignedExecutionPayloadBid signedBid, final RemoteBidOrigin remoteBidOrigin) {
+            final SignedExecutionPayloadBid signedBid,
+            final RemoteBidOrigin remoteBidOrigin,
+            final Optional<UInt64> arrivalTimestamp) {
           return SafeFuture.completedFuture(InternalValidationResult.ACCEPT);
         }
 
@@ -59,8 +61,18 @@ public interface ExecutionPayloadBidManager {
         }
       };
 
+  default SafeFuture<InternalValidationResult> validateAndAddBid(
+      final SignedExecutionPayloadBid signedBid, final RemoteBidOrigin remoteBidOrigin) {
+    return validateAndAddBid(signedBid, remoteBidOrigin, Optional.empty());
+  }
+
+  /**
+   * @param arrivalTimestamp the time the bid was received, when known
+   */
   SafeFuture<InternalValidationResult> validateAndAddBid(
-      SignedExecutionPayloadBid signedBid, RemoteBidOrigin remoteBidOrigin);
+      SignedExecutionPayloadBid signedBid,
+      RemoteBidOrigin remoteBidOrigin,
+      Optional<UInt64> arrivalTimestamp);
 
   void subscribeOperationAdded(OperationAddedSubscriber<SignedExecutionPayloadBid> subscriber);
 
