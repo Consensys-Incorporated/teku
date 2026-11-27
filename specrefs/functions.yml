@@ -17384,7 +17384,7 @@
     - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/VoluntaryExitValidator.java
       search: validateForGossip(final SignedVoluntaryExit exit)
     - file: ethereum/spec/src/main/java/tech/pegasys/teku/spec/logic/versions/electra/operations/validation/VoluntaryExitValidatorElectra.java
-      search: public Optional<OperationInvalidReason> validateForGossip(
+      search: public Optional<OperationInvalidReason> validateIgnoreConditionsForGossip(
   spec: |
     <spec fn="validate_voluntary_exit_gossip" fork="electra" hash="3b9eb335">
     def validate_voluntary_exit_gossip(
