@@ -10,6 +10,7 @@
  - Teku no longer publishes the `-jdk26` Docker images, because Java 26 is end of life and no longer receives security fixes. Use the new `-jdk27` tags instead, or the default `-jdk25` ones.
 
 ### Additions and Improvements
+ - Scheduled the Gloas fork for the HOODI network at epoch 143616 (15 Dec 2026, 19:12:24 UTC), raising the gas limit to 200M at the fork epoch.
  - Applying a batch of changes to an SSZ tree no longer wraps and boxes the list of changes at every tree level, which lowers the time of the epoch transition. [#11634](https://github.com/Consensys-Incorporated/teku/pull/11634)
  - Reduced the time of the epoch transition by about a third on mainnet: changes to SSZ lists are now tracked in a paged array instead of a sorted map, so reading and writing balances during epoch processing takes constant time. [#11633](https://github.com/Consensys-Incorporated/teku/pull/11633)
  - `Validator` views of the registry are now read straight from its packed SSZ bytes and are no longer cached. On mainnet this lowers the live heap of a running node by about 2 GB (about 7.2 million cached `Validator` views are no longer kept).
