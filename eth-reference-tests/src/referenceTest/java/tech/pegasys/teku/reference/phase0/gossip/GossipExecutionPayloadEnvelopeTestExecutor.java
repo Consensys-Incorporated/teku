@@ -100,8 +100,7 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
               block.getRoot(), BlockImportResult.FAILED_DESCENDANT_OF_INVALID_BLOCK);
         } else {
           assertThat(importResult.isSuccessful())
-              .describedAs(
-                  "Expected setup block %s to import successfully", blockEntry.getBlock())
+              .describedAs("Expected setup block %s to import successfully", blockEntry.getBlock())
               .isTrue();
         }
       }
