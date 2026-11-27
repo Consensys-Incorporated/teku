@@ -37,7 +37,7 @@ ENV JAVA_HOME=/opt/java/openjdk
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 COPY --from=jre-build /javaruntime $JAVA_HOME
 
-RUN apt-get -y update && apt-get -y upgrade && apt-get -y install curl libc-bin libc6 adduser libjemalloc-dev && \
+RUN apt-get -y update && apt-get -y upgrade && apt-get -y install --no-install-recommends ca-certificates curl libc-bin libc6 adduser libjemalloc-dev && \
     # Clean apt cache
     apt-get clean && \
     rm -rf /var/cache/apt/archives/* && \

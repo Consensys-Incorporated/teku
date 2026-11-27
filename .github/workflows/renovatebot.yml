@@ -2,27 +2,23 @@ name: renovatebot
 
 on:
   schedule:
-    - cron: "15 3 14,28 * *"
-  push:
-    branches:
-      - master
-    paths:
-      - '.github/workflows/**'
+    - cron: "15 3 * * 1"
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {} # lock everything by default (least-privilege)
 
 jobs:
   renovatebot-check:
-    runs-on: ubuntu-24.04
-    environment: security
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run renovatebot
-        uses: ConsenSys/github-actions/renovatebot@1daaa118f66bacf74d8bcf5271fd9e210ce035ce # main
+        uses: Consensys-Incorporated/github-actions/renovatebot@d7118b7e3733bac9a7f92f05f02f18c73892d5ad # 2.2.0
         with:
-          GH_APP_ID: ${{ secrets.GH_APP_ID }}
-          GH_PRIVATE_KEY: ${{ secrets.GH_PRIVATE_KEY }}
+          GH_APP_ID: ${{ secrets.RENOVATE_APP_ID }}
+          GH_PRIVATE_KEY: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
           GH_REPOSITORY: ${{ github.repository }}
