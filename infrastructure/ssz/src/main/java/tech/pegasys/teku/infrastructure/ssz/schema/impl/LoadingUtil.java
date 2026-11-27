@@ -210,6 +210,10 @@ public class LoadingUtil {
         return createLeaf(data.slice(0, lastNodeSizeBytes));
       }
     } else {
+      final TreeNode defaultTree = elementSchema.getDefaultTree();
+      if (childHash.equals(defaultTree.hashTreeRoot())) {
+        return defaultTree;
+      }
       return elementSchema.loadBackingNodes(childNodeSource, childHash, childGIndex);
     }
   }

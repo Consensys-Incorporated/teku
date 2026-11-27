@@ -729,6 +729,10 @@ public abstract class AbstractSszProgressiveListSchema<
     if (elementSchema.isPrimitive()) {
       final int chunkBytes =
           chunkGIndex == lastChunkGIndex ? lastChunkBytes : LeafNode.MAX_BYTE_SIZE;
+      if (chunkHash.isZero()) {
+        // A zero hash can only be all-zero data, so there is nothing to load
+        return LeafNode.ZERO_LEAVES[chunkBytes];
+      }
       final Bytes data = nodeSource.loadLeafNode(chunkHash, chunkGIndex);
       return LeafNode.create(data.size() > chunkBytes ? data.slice(0, chunkBytes) : data);
     }
