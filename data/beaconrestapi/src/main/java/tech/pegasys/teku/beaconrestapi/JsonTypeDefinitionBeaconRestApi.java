@@ -151,13 +151,21 @@ public class JsonTypeDefinitionBeaconRestApi implements BeaconRestApi {
       final DataProvider dataProvider,
       final Eth1DataProvider eth1DataProvider,
       final BeaconRestApiConfig config,
+      final boolean lightClientServerEnabled,
       final EventChannels eventChannels,
       final AsyncRunner asyncRunner,
       final TimeProvider timeProvider,
       final Spec spec) {
     restApi =
         create(
-            config, dataProvider, eth1DataProvider, eventChannels, asyncRunner, timeProvider, spec);
+            config,
+            lightClientServerEnabled,
+            dataProvider,
+            eth1DataProvider,
+            eventChannels,
+            asyncRunner,
+            timeProvider,
+            spec);
   }
 
   @Override
@@ -177,6 +185,7 @@ public class JsonTypeDefinitionBeaconRestApi implements BeaconRestApi {
 
   private static RestApi create(
       final BeaconRestApiConfig config,
+      final boolean lightClientServerEnabled,
       final DataProvider dataProvider,
       final Eth1DataProvider eth1DataProvider,
       final EventChannels eventChannels,
@@ -281,7 +290,8 @@ public class JsonTypeDefinitionBeaconRestApi implements BeaconRestApi {
                     eventChannels,
                     asyncRunner,
                     timeProvider,
-                    config.getMaxPendingEvents()))
+                    config.getMaxPendingEvents(),
+                    lightClientServerEnabled))
             // Node Handlers
             .endpoint(new GetHealth(dataProvider))
             .endpoint(new GetIdentity(dataProvider, spec.getNetworkingConfig()))
@@ -347,13 +357,13 @@ public class JsonTypeDefinitionBeaconRestApi implements BeaconRestApi {
             .endpoint(new GetValidatorInclusion(dataProvider))
             .endpoint(new AddPeer(dataProvider));
 
-    builder = applyAddons(builder, config, spec, dataProvider, schemaCache);
+    builder = applyAddons(builder, lightClientServerEnabled, spec, dataProvider, schemaCache);
     return builder.build();
   }
 
   private static RestApiBuilder applyAddons(
       final RestApiBuilder builder,
-      final BeaconRestApiConfig config,
+      final boolean lightClientServerEnabled,
       final Spec spec,
       final DataProvider dataProvider,
       final SchemaDefinitionCache schemaCache) {
@@ -363,7 +373,8 @@ public class JsonTypeDefinitionBeaconRestApi implements BeaconRestApi {
             new DenebRestApiBuilderAddon(spec, dataProvider, schemaCache),
             new FuluRestApiBuilderAddon(spec, dataProvider, schemaCache),
             new GloasRestApiBuilderAddon(spec, dataProvider, schemaCache),
-            new LightClientRestApiBuilderAddon(config, dataProvider, schemaCache));
+            new LightClientRestApiBuilderAddon(
+                lightClientServerEnabled, dataProvider, schemaCache));
 
     RestApiBuilder builderUpdated = builder;
     for (RestApiBuilderAddon addon : addons) {

@@ -132,7 +132,6 @@ public abstract class AbstractDataBackedRestAPIIntegrationTest {
       BeaconRestApiConfig.builder()
           .restApiPort(0)
           .restApiEnabled(true)
-          .restApiLightClientEnabled(true)
           .restApiDocsEnabled(true)
           .restApiHostAllowlist(List.of("127.0.0.1", "localhost"))
           .restApiCorsAllowedOrigins(new ArrayList<>())
@@ -321,6 +320,7 @@ public abstract class AbstractDataBackedRestAPIIntegrationTest {
             dataProvider,
             eth1DataProvider,
             config,
+            true,
             eventChannels,
             asyncRunner,
             StubTimeProvider.withTimeInMillis(1000),

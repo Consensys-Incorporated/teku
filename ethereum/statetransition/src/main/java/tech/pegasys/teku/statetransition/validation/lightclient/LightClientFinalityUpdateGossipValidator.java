@@ -19,6 +19,7 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
+import tech.pegasys.teku.statetransition.lightclient.NewerLightClientUpdateFilter;
 import tech.pegasys.teku.storage.client.RecentChainData;
 
 public class LightClientFinalityUpdateGossipValidator
@@ -52,12 +53,6 @@ public class LightClientFinalityUpdateGossipValidator
   @Override
   protected boolean isNewer(
       final LightClientFinalityUpdate update, final LightClientFinalityUpdate forwarded) {
-    final UInt64 finalizedSlot = update.getFinalizedHeader().getBeacon().getSlot();
-    final UInt64 forwardedFinalizedSlot = forwarded.getFinalizedHeader().getBeacon().getSlot();
-    if (!finalizedSlot.equals(forwardedFinalizedSlot)) {
-      return finalizedSlot.isGreaterThan(forwardedFinalizedSlot);
-    }
-    return LightClientUpdateStore.hasSupermajority(update.getSyncAggregate())
-        && !LightClientUpdateStore.hasSupermajority(forwarded.getSyncAggregate());
+    return NewerLightClientUpdateFilter.isNewerFinalityUpdate(update, forwarded);
   }
 }

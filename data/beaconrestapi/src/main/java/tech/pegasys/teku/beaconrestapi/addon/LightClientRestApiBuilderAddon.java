@@ -14,7 +14,6 @@
 package tech.pegasys.teku.beaconrestapi.addon;
 
 import tech.pegasys.teku.api.DataProvider;
-import tech.pegasys.teku.beaconrestapi.BeaconRestApiConfig;
 import tech.pegasys.teku.beaconrestapi.RestApiBuilderAddon;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.lightclient.GetLightClientBootstrap;
 import tech.pegasys.teku.beaconrestapi.handlers.v1.beacon.lightclient.GetLightClientFinalityUpdate;
@@ -25,22 +24,22 @@ import tech.pegasys.teku.spec.schemas.SchemaDefinitionCache;
 
 public class LightClientRestApiBuilderAddon implements RestApiBuilderAddon {
 
-  final BeaconRestApiConfig config;
+  final boolean lightClientServerEnabled;
   final DataProvider dataProvider;
   final SchemaDefinitionCache schemaCache;
 
   public LightClientRestApiBuilderAddon(
-      final BeaconRestApiConfig config,
+      final boolean lightClientServerEnabled,
       final DataProvider dataProvider,
       final SchemaDefinitionCache schemaCache) {
-    this.config = config;
+    this.lightClientServerEnabled = lightClientServerEnabled;
     this.dataProvider = dataProvider;
     this.schemaCache = schemaCache;
   }
 
   @Override
   public boolean isEnabled() {
-    return config.isRestApiLightClientEnabled();
+    return lightClientServerEnabled;
   }
 
   @Override

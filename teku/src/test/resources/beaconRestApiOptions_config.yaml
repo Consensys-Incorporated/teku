@@ -5,4 +5,3 @@ rest-api-enabled: True
 rest-api-interface: "127.100.0.1"
 rest-api-host-allowlist: ["test.domain.com", "11.12.13.14"]
 rest-api-cors-origins: ["127.1.2.3", "origin.allowed.com"]
-Xrest-api-light-client-enabled: True
