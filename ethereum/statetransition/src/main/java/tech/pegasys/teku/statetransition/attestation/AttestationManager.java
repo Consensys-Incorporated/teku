@@ -315,6 +315,10 @@ public class AttestationManager extends Service
         LOG.trace(
             "Deferring attestation {} as required full payload is not yet present",
             attestation::hashTreeRoot);
+        // Known race: if the payload import notification is handled after fork choice found the
+        // payload missing but before the attestation is added here, nothing releases it again. It
+        // then stays pending until it expires, and this node misses the vote. The window is narrow
+        // and the risk is accepted.
         pendingAttestationPool.addForMissingFullPayload(attestation);
       }
       case DEFER_FORK_CHOICE_PROCESSING -> {
