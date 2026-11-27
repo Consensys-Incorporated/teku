@@ -630,7 +630,9 @@
     </spec>
 
 - name: compute_committee_weight_between_slots#phase0
-  sources: []
+  sources:
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/fastconfirmation/FastConfirmationCalculator.java
+      search: UInt64 computeCommitteeWeightBetweenSlots(
   spec: |
     <spec fn="compute_committee_weight_between_slots" fork="phase0" hash="2565fca4">
     def compute_committee_weight_between_slots(
@@ -3338,7 +3340,9 @@
     </spec>
 
 - name: get_builder_bid_limit#gloas
-  sources: []
+  sources:
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/GossipValidationHelper.java
+      search: public UInt64 getBuilderBidLimit(
   spec: |
     <spec fn="get_builder_bid_limit" fork="gloas" hash="a4aadb9b">
     def get_builder_bid_limit(state: BeaconState, builder_index: BuilderIndex) -> Uint64:
@@ -5130,7 +5134,9 @@
     </spec>
 
 - name: get_max_payload_gas_limit#gloas
-  sources: []
+  sources:
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/GossipValidationHelper.java
+      search: public UInt64 getMaxPayloadGasLimit(
   spec: |
     <spec fn="get_max_payload_gas_limit" fork="gloas" hash="f7050ebe">
     def get_max_payload_gas_limit(store: Store, block: BeaconBlock) -> Uint64:

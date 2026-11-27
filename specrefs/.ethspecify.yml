@@ -15,10 +15,6 @@ specrefs:
 
   exceptions:
     configs:
-      # Not implemented: Gloas envelope transaction-count bound
-      # https://github.com/Consensys-Incorporated/teku/issues/11766
-      - MIN_TRANSACTION_GAS#gloas
-
       # Not implemented: heze
       - MIN_SLOTS_FOR_INCLUSION_LISTS_REQUESTS#heze
 
@@ -210,10 +206,6 @@ specrefs:
       - InclusionListEntry#heze
 
     functions:
-      # Not implemented: precise FCR committee weights replace the beta.4 estimate
-      # https://github.com/Consensys-Incorporated/teku/issues/11745
-      - compute_committee_weight_between_slots#phase0
-
       # Unnecessary
       - xor#phase0
 
@@ -278,13 +270,6 @@ specrefs:
       # Not implemented: gloas
       - validate_partial_data_column_sidecar_gossip#gloas
       - compute_max_partial_data_column_sidecar_size#gloas
-      # Not implemented: balance-based builder bid limits, excluding pending withdrawals
-      # https://github.com/Consensys-Incorporated/teku/issues/11770
-      # https://github.com/Consensys-Incorporated/teku/issues/11769
-      - get_builder_bid_limit#gloas
-      # Not implemented: envelope transaction-count bound from the parent payload gas limit
-      # https://github.com/Consensys-Incorporated/teku/issues/11766
-      - get_max_payload_gas_limit#gloas
       # Not implemented: Teku computes MIN_EPOCHS_FOR_BLOCK_REQUESTS with the pre-Gloas formula
       # (SpecConfigBuilder#computeMinEpochsForBlockRequests); the EIP-8061 churn-based formula
       # has not been adopted

@@ -61,9 +61,7 @@ public class GossipTests {
               "networking/gossip_proposer_preferences", new GossipProposerPreferencesTestExecutor())
           .put(
               "networking/gossip_execution_payload_envelope",
-              // TODO: enable after consensus-specs v1.7.0-beta.5 release
-              // new GossipExecutionPayloadEnvelopeTestExecutor())
-              TestExecutor.IGNORE_TESTS)
+              new GossipExecutionPayloadEnvelopeTestExecutor())
           .put(
               "networking/gossip_execution_payload_bid",
               // TODO: https://github.com/Consensys-Incorporated/teku/issues/11233

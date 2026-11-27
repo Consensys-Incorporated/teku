@@ -31,6 +31,7 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.collections.LimitedSet;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.BlockRootAndBuilderIndex;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
@@ -255,6 +256,29 @@ public class ExecutionPayloadGossipValidator {
                     reject(
                         "Invalid execution requests. Execution Payload Envelope had execution requests root of %s but ExecutionPayload Bid had %s",
                         executionRequestsRoot, bidExecutionRequestsRoot));
+              }
+
+              /*
+               * [REJECT] The number of transactions is within the limit implied by the parent
+               * payload's gas limit
+               */
+              final UInt64 maxGasLimit =
+                  gossipValidationHelper.getMaxPayloadGasLimit(beaconBlock, bid);
+              final UInt64 minTransactionGas =
+                  SpecConfigGloas.required(spec.atSlot(envelope.getSlot()).getConfig())
+                      .getMinTransactionGas();
+              final UInt64 maxPayloadTransactions = maxGasLimit.dividedBy(minTransactionGas);
+              final int transactionsCount = payload.getTransactions().size();
+              if (maxPayloadTransactions.isLessThan(transactionsCount)) {
+                LOG.trace(
+                    "Too many transactions. Execution payload envelope had {} but the maximum is {} for a gas limit of {}. Rejecting the execution payload envelope",
+                    transactionsCount,
+                    maxPayloadTransactions,
+                    maxGasLimit);
+                return Optional.of(
+                    reject(
+                        "Too many transactions. Execution payload envelope had %s but the maximum is %s for a gas limit of %s",
+                        transactionsCount, maxPayloadTransactions, maxGasLimit));
               }
 
               return Optional.empty();

@@ -26,7 +26,6 @@ import static tech.pegasys.teku.statetransition.validation.InternalValidationRes
 import com.google.errorprone.annotations.FormatMethod;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.logging.log4j.LogManager;
@@ -57,7 +56,7 @@ public class ExecutionPayloadBidGossipValidator {
   private final GossipValidationHelper gossipValidationHelper;
   private final SigningRootUtil signingRootUtil;
   private final int minBidIncrementPercentage;
-  private final Map<UInt64, Set<BuilderAndParent>> seenExecutionPayloadBids =
+  private final Map<UInt64, Map<BuilderAndParent, UInt64>> executionPayloadBidCounts =
       LimitedMap.createSynchronizedLRU(MAX_SLOTS_TO_TRACK_BUILDERS_BIDS);
   private final Map<BidParent, UInt64> highestBids =
       LimitedMap.createSynchronizedLRU(HIGHEST_BID_SET_SIZE);
@@ -76,34 +75,21 @@ public class ExecutionPayloadBidGossipValidator {
     signingRootUtil = new SigningRootUtil(spec);
   }
 
+  /**
+   * @param receivedAtMillis the time the bid was received. It decides whether the bid was received
+   *     too early, so a bid is not judged by the time validation happens to run.
+   */
   public SafeFuture<InternalValidationResult> validate(
-      final SignedExecutionPayloadBid signedExecutionPayloadBid) {
+      final SignedExecutionPayloadBid signedExecutionPayloadBid, final UInt64 receivedAtMillis) {
     final ExecutionPayloadBid bid = signedExecutionPayloadBid.getMessage();
-
-    /*
-     * [IGNORE] This is the first bid for this slot, parent, and builder
-     */
-    final BuilderAndParent builderAndParent =
-        new BuilderAndParent(
-            bid.getBuilderIndex(), bid.getParentBlockHash(), bid.getParentBlockRoot());
-    if (seenExecutionPayloadBids.getOrDefault(bid.getSlot(), Set.of()).contains(builderAndParent)) {
-      return completedFuture(
-          ignoreBid(
-              bid,
-              "already received valid bid for slot %s, parent block hash %s, parent block root %s, and builder index %s",
-              bid.getSlot(),
-              bid.getParentBlockHash(),
-              bid.getParentBlockRoot(),
-              bid.getBuilderIndex()));
-    }
 
     /*
      * [IGNORE] This is the highest value bid seen for the slot and parent
      */
     final BidParent bidValueKey =
         new BidParent(bid.getSlot(), bid.getParentBlockHash(), bid.getParentBlockRoot());
-    final UInt64 existingBidValue = highestBids.getOrDefault(bidValueKey, UInt64.ZERO);
-    if (!existingBidValue.isZero()) {
+    final UInt64 existingBidValue = highestBids.get(bidValueKey);
+    if (existingBidValue != null) {
       final UInt64 minRequiredBid = calculateMinimumRequiredBid(existingBidValue);
 
       if (bid.getValue().isLessThan(minRequiredBid)) {
@@ -123,6 +109,15 @@ public class ExecutionPayloadBidGossipValidator {
     if (!gossipValidationHelper.isSlotCurrentOrNext(bid.getSlot())) {
       return completedFuture(
           ignoreBid(bid, "must be for current or next slot but was for slot %s", bid.getSlot()));
+    }
+
+    /*
+     * [IGNORE] The bid is received after the payload attestation deadline of the previous slot
+     */
+    if (!gossipValidationHelper.isPreviousSlotPayloadAttestationDeadlineReached(
+        bid.getSlot(), receivedAtMillis)) {
+      return completedFuture(
+          ignoreBid(bid, "received before the payload attestation deadline of the previous slot"));
     }
 
     /*
@@ -346,6 +341,19 @@ public class ExecutionPayloadBidGossipValidator {
               }
 
               /*
+               * [IGNORE] The builder has not reached its bid limit for this slot and parent
+               */
+              final BuilderAndParent builderAndParent =
+                  new BuilderAndParent(
+                      bid.getBuilderIndex(), bid.getParentBlockHash(), bid.getParentBlockRoot());
+              final UInt64 bidLimit =
+                  gossipValidationHelper.getBuilderBidLimit(
+                      bid.getBuilderIndex(), state, bid.getSlot());
+              if (getBidCount(bid.getSlot(), builderAndParent).isGreaterThanOrEqualTo(bidLimit)) {
+                return ignoreBidLimitReached(bid, bidLimit);
+              }
+
+              /*
                * [IGNORE] The builder can cover the bid
                */
               if (!gossipValidationHelper.builderHasEnoughBalanceForBid(
@@ -402,15 +410,11 @@ public class ExecutionPayloadBidGossipValidator {
               highestBids.compute(
                   bidValueKey,
                   (key, existingValue) -> {
-                    if (seenExecutionPayloadBids
-                        .getOrDefault(bid.getSlot(), Set.of())
-                        .contains(builderAndParent)) {
-                      ignoreResult.set(
-                          ignoreBid(
-                              bid,
-                              "another bid for parent block hash %s and parent block root %s was processed concurrently",
-                              bid.getParentBlockHash(),
-                              bid.getParentBlockRoot()));
+                    // Bid counts for this slot and parent are only updated within this compute,
+                    // so the bid limit check and the count update below are atomic
+                    if (getBidCount(bid.getSlot(), builderAndParent)
+                        .isGreaterThanOrEqualTo(bidLimit)) {
+                      ignoreResult.set(ignoreBidLimitReached(bid, bidLimit));
                       return existingValue;
                     }
 
@@ -428,14 +432,31 @@ public class ExecutionPayloadBidGossipValidator {
                       }
                     }
 
-                    seenExecutionPayloadBids
-                        .computeIfAbsent(bid.getSlot(), __ -> ConcurrentHashMap.newKeySet())
-                        .add(builderAndParent);
+                    executionPayloadBidCounts
+                        .computeIfAbsent(bid.getSlot(), __ -> new ConcurrentHashMap<>())
+                        .merge(builderAndParent, UInt64.ONE, UInt64::plus);
                     return bidValue;
                   });
 
               return Optional.ofNullable(ignoreResult.get()).orElseGet(() -> acceptBid(bid));
             });
+  }
+
+  private UInt64 getBidCount(final UInt64 slot, final BuilderAndParent builderAndParent) {
+    return executionPayloadBidCounts
+        .getOrDefault(slot, Map.of())
+        .getOrDefault(builderAndParent, UInt64.ZERO);
+  }
+
+  private InternalValidationResult ignoreBidLimitReached(
+      final ExecutionPayloadBid bid, final UInt64 bidLimit) {
+    return ignoreBid(
+        bid,
+        "builder has reached its bid limit of %s for slot %s, parent block hash %s and parent block root %s",
+        bidLimit,
+        bid.getSlot(),
+        bid.getParentBlockHash(),
+        bid.getParentBlockRoot());
   }
 
   private InternalValidationResult acceptBid(final ExecutionPayloadBid bid) {
@@ -482,14 +503,15 @@ public class ExecutionPayloadBidGossipValidator {
 
   /**
    * Calculates the minimum required bid value based on the current highest bid and the configured
-   * minimum increment percentage.
+   * minimum increment percentage. The bid must always be strictly higher than the current highest
+   * bid, even when the percentage increment rounds down to zero.
    *
    * @param currentHighestBid the current highest bid value
    * @return the minimum bid value required to exceed the threshold
    */
   private UInt64 calculateMinimumRequiredBid(final UInt64 currentHighestBid) {
     final UInt64 minIncrement = currentHighestBid.times(minBidIncrementPercentage).dividedBy(100);
-    return currentHighestBid.plus(minIncrement);
+    return currentHighestBid.plus(minIncrement.max(UInt64.ONE));
   }
 
   private boolean isSignatureValid(
