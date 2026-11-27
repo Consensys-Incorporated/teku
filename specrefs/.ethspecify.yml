@@ -206,10 +206,6 @@ specrefs:
       - InclusionListEntry#heze
 
     functions:
-      # Not implemented: precise FCR committee weights replace the beta.4 estimate
-      # https://github.com/Consensys-Incorporated/teku/issues/11745
-      - compute_committee_weight_between_slots#phase0
-
       # Unnecessary
       - xor#phase0
 

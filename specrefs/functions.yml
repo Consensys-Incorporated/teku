@@ -630,7 +630,9 @@
     </spec>
 
 - name: compute_committee_weight_between_slots#phase0
-  sources: []
+  sources:
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/forkchoice/fastconfirmation/FastConfirmationCalculator.java
+      search: UInt64 computeCommitteeWeightBetweenSlots(
   spec: |
     <spec fn="compute_committee_weight_between_slots" fork="phase0" hash="2565fca4">
     def compute_committee_weight_between_slots(
