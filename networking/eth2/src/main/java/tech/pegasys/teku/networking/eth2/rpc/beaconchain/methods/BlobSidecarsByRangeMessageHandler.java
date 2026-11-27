@@ -90,7 +90,9 @@ public class BlobSidecarsByRangeMessageHandler
           new RpcException(INVALID_REQUEST_CODE, "Requested slot is too far in the future"));
     }
 
-    if (spec.atSlot(maxSlot).getMilestone().isLessThan(SpecMilestone.DENEB)) {
+    // an empty request ends at startSlot - 1, which can be pre-Deneb even when it starts at Deneb
+    if (!request.getCount().isZero()
+        && spec.atSlot(maxSlot).getMilestone().isLessThan(SpecMilestone.DENEB)) {
       requestCounter.labels("pre_deneb_range").inc();
       return Optional.of(
           new RpcException(
@@ -100,8 +102,8 @@ public class BlobSidecarsByRangeMessageHandler
     final UInt64 endSlotBeforeFulu = getEndSlotBeforeFulu(maxSlot);
     final Optional<SpecConfigDeneb> maybeSpecConfig = getSpecConfigDeneb(endSlotBeforeFulu);
     if (maybeSpecConfig.isEmpty()) {
-      // Only possible when Fulu activates at the same epoch as Deneb, so no blob sidecars exist on
-      // this network. onIncomingMessage answers with an empty response.
+      // Either the request is empty, or Fulu activates at the same epoch as Deneb so no blob
+      // sidecars exist on this network. onIncomingMessage answers with an empty response.
       return Optional.empty();
     }
     final SpecConfigDeneb specConfig = maybeSpecConfig.get();
@@ -167,9 +169,10 @@ public class BlobSidecarsByRangeMessageHandler
     final UInt64 endSlotBeforeFulu = getEndSlotBeforeFulu(endSlot);
     final Optional<SpecConfigDeneb> maybeSpecConfig = getSpecConfigDeneb(endSlotBeforeFulu);
     if (maybeSpecConfig.isEmpty()) {
-      // Fulu activates at the same epoch as Deneb, so there are no blob sidecars on this network
+      // Either the request is empty and ends before Deneb, or Fulu activates at the same epoch as
+      // Deneb so there are no blob sidecars on this network
       LOG.trace(
-          "Peer {} requested {} slots of blob sidecars starting at slot {}, but blob sidecars are never available on this network.",
+          "Peer {} requested {} slots of blob sidecars starting at slot {}, but no blob sidecars exist in that range.",
           peer.getId(),
           message.getCount(),
           startSlot);

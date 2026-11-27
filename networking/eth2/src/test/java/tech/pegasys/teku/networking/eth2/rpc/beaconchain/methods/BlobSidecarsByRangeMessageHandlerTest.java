@@ -289,6 +289,32 @@ public class BlobSidecarsByRangeMessageHandlerTest {
   }
 
   @TestTemplate
+  public void shouldRespondWithNoBlobSidecarsWhenEmptyRequestStartsAtFirstDenebSlot() {
+    final BlobSidecarsByRangeMessageHandler preDenebHandler = createHandlerWithDenebAtEpochOne();
+
+    // an empty request's max slot is startSlot - 1, the last pre-Deneb slot
+    final BlobSidecarsByRangeRequestMessage request =
+        new BlobSidecarsByRangeRequestMessage(
+            UInt64.valueOf(slotsPerEpoch), ZERO, maxBlobsPerBlock);
+
+    assertThat(preDenebHandler.validateRequest(protocolId, request)).isEmpty();
+
+    preDenebHandler.onIncomingMessage(protocolId, peer, request, listener);
+
+    verify(peer).approveRequest();
+    verify(listener, never()).respond(any());
+    verify(listener).completeSuccessfully();
+    verifyNoInteractions(combinedChainDataClient);
+
+    final long preDenebRangeCount =
+        metricsSystem.getLabelledCounterValue(
+            TekuMetricCategory.NETWORK,
+            "rpc_blob_sidecars_by_range_requests_total",
+            "pre_deneb_range");
+    assertThat(preDenebRangeCount).isZero();
+  }
+
+  @TestTemplate
   public void shouldRespondWithNoBlobSidecarsWhenDenebAndFuluActivateTogether() {
     final Spec denebAndFuluSpec =
         TestSpecFactory.createMinimalWithCapellaDenebElectraAndFuluForkEpoch(
