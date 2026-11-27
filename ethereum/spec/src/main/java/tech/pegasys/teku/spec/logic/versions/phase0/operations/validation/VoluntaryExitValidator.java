@@ -105,6 +105,15 @@ public class VoluntaryExitValidator
         });
   }
 
+  /**
+   * Conditions which make a gossiped exit IGNORE rather than REJECT. They are checked after the
+   * conditions in {@link #validateForGossip} and before the signature.
+   */
+  public Optional<OperationInvalidReason> validateIgnoreConditionsForGossip(
+      final BeaconState state, final SignedVoluntaryExit signedExit) {
+    return Optional.empty();
+  }
+
   private Validator getValidator(final BeaconState state, final VoluntaryExit exit) {
     return state.getValidators().get(exit.getValidatorIndex().intValue());
   }

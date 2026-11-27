@@ -17,6 +17,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.ACCEPT;
@@ -334,6 +336,32 @@ public class VoluntaryExitValidatorTest {
         .thenReturn(Optional.of(ExitInvalidReason.validatorInactive()));
     when(mockSpec.verifyVoluntaryExitSignature(getBestState(), exit, BLSSignatureVerifier.SIMPLE))
         .thenReturn(true);
+
+    assertValidationResult(exit, REJECT, "Validator is not active");
+  }
+
+  @Test
+  public void shouldIgnoreExitWhenValidatorHasPendingWithdrawals() {
+    advanceChainAndUpdateBestBlock(6);
+    SignedVoluntaryExit exit = dataStructureUtil.randomSignedVoluntaryExit();
+    when(mockSpec.validateVoluntaryExitForGossip(getBestState(), exit))
+        .thenReturn(Optional.empty());
+    when(mockSpec.validateVoluntaryExitIgnoreConditionsForGossip(getBestState(), exit))
+        .thenReturn(Optional.of(ExitInvalidReason.pendingWithdrawalsInQueue()));
+
+    // Ignored before the signature is checked
+    assertValidationResult(exit, IGNORE, "pending withdrawals");
+    verify(mockSpec, never()).verifyVoluntaryExitSignature(any(), any(), any());
+  }
+
+  @Test
+  public void shouldRejectInvalidExitEvenWhenValidatorHasPendingWithdrawals() {
+    advanceChainAndUpdateBestBlock(6);
+    SignedVoluntaryExit exit = dataStructureUtil.randomSignedVoluntaryExit();
+    when(mockSpec.validateVoluntaryExitForGossip(getBestState(), exit))
+        .thenReturn(Optional.of(ExitInvalidReason.validatorInactive()));
+    when(mockSpec.validateVoluntaryExitIgnoreConditionsForGossip(getBestState(), exit))
+        .thenReturn(Optional.of(ExitInvalidReason.pendingWithdrawalsInQueue()));
 
     assertValidationResult(exit, REJECT, "Validator is not active");
   }

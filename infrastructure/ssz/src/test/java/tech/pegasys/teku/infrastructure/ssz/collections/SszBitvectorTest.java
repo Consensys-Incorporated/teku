@@ -100,6 +100,16 @@ public class SszBitvectorTest implements SszPrimitiveCollectionTestBase, SszVect
 
   @ParameterizedTest
   @MethodSource("bitvectorArgs")
+  void size_shouldBeSchemaLength(final SszBitvector bitvector) {
+    final int length = bitvector.getSchema().getLength();
+    assertThat(bitvector.size()).isEqualTo(length);
+    // Also through the SszBitSet interface, which declares size() separately
+    final SszBitSet bitSet = bitvector;
+    assertThat(bitSet.size()).isEqualTo(length);
+  }
+
+  @ParameterizedTest
+  @MethodSource("bitvectorArgs")
   void or_testEqualList(final SszBitvector bitvector) {
     final SszBitvector res = bitvector.or(bitvector);
     assertThat(res).isEqualTo(bitvector);

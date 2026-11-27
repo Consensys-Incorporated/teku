@@ -45,6 +45,9 @@ public interface OperationValidator {
   Optional<OperationInvalidReason> validateVoluntaryExitForGossip(
       Fork fork, BeaconState state, SignedVoluntaryExit signedExit);
 
+  Optional<OperationInvalidReason> validateVoluntaryExitIgnoreConditionsForGossip(
+      Fork fork, BeaconState state, SignedVoluntaryExit signedExit);
+
   Optional<OperationInvalidReason> validateBlsToExecutionChange(
       Fork fork, BeaconState state, BlsToExecutionChange blsToExecutionChange);
 }

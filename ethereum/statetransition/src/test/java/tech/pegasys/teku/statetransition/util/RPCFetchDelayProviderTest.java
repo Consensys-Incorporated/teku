@@ -121,14 +121,10 @@ public class RPCFetchDelayProviderTest {
     final Duration fetchDelay = rpcFetchDelayProvider.calculate(currentSlot);
 
     // we can only wait 200ms less than target
-    // note the extra 1ms is from the difference of 1/3 slot time vs the 3333 basis points
     assertThat(fetchDelay)
         .isEqualTo(
             Duration.ofMillis(
-                DEFAULT_TARGET_WAIT_MILLIS
-                    .minus(millisecondsIntoAttDueLimit)
-                    .minus(1)
-                    .longValue()));
+                DEFAULT_TARGET_WAIT_MILLIS.minus(millisecondsIntoAttDueLimit).longValue()));
   }
 
   @Test

@@ -294,7 +294,6 @@ public class SlotProcessorTest {
       names = {"MAINNET", "MINIMAL", "GNOSIS"})
   public void onTick_shouldRunAttestationsDuringProcessing(final Eth2Network eth2Network) {
     Spec spec = TestSpecFactory.create(SpecMilestone.PHASE0, eth2Network);
-    int millisPerSlot = spec.getGenesisSpecConfig().getSlotDurationMillis();
 
     SlotProcessor slotProcessor = createSlotProcessor(spec);
 
@@ -305,7 +304,7 @@ public class SlotProcessorTest {
     when(syncService.getCurrentSyncState()).thenReturn(SyncState.IN_SYNC);
     when(p2pNetwork.getPeerCount()).thenReturn(1);
 
-    slotProcessor.onTick(genesisTimeMillis.plus(millisPerSlot / 3L), Optional.empty());
+    slotProcessor.onTick(genesisTimeMillis.plus(attestationDueMillis(spec)), Optional.empty());
 
     final Checkpoint justifiedCheckpoint = recentChainData.getStore().getJustifiedCheckpoint();
     final Checkpoint finalizedCheckpoint = recentChainData.getStore().getFinalizedCheckpoint();
@@ -359,7 +358,7 @@ public class SlotProcessorTest {
     slotProcessor.onTick(genesisTimeMillis, Optional.empty());
     verify(slotEventsChannel).onSlot(ZERO);
     // Attestation due
-    slotProcessor.onTick(genesisTimeMillis.plus(oneThirdMillis(millisPerSlot)), Optional.empty());
+    slotProcessor.onTick(genesisTimeMillis.plus(attestationDueMillis(spec)), Optional.empty());
     verify(forkChoiceTrigger).onAttestationsDueForSlot(ZERO);
     // Block preparation due
     slotProcessor.onTick(
@@ -371,7 +370,7 @@ public class SlotProcessorTest {
     slotProcessor.onTick(slot1Start, Optional.empty());
     verify(slotEventsChannel).onSlot(ONE);
     // Attestation due
-    slotProcessor.onTick(slot1Start.plus(oneThirdMillis(millisPerSlot)), Optional.empty());
+    slotProcessor.onTick(slot1Start.plus(attestationDueMillis(spec)), Optional.empty());
     verify(forkChoiceTrigger).onAttestationsDueForSlot(ONE);
 
     // Block preparation due
@@ -422,13 +421,11 @@ public class SlotProcessorTest {
 
     // Progress through to end of initial epoch
     slotProcessor.onTick(nextEpochSlotMinusTwo, Optional.empty());
-    slotProcessor.onTick(
-        nextEpochSlotMinusTwo.plus(oneThirdMillis(millisPerSlot)), Optional.empty());
+    slotProcessor.onTick(nextEpochSlotMinusTwo.plus(attestationDueMillis(spec)), Optional.empty());
     slotProcessor.onTick(
         nextEpochSlotMinusTwo.plus(oneThirdMillis(millisPerSlot) * 2L), Optional.empty());
     slotProcessor.onTick(nextEpochSlotMinusOne, Optional.empty());
-    slotProcessor.onTick(
-        nextEpochSlotMinusOne.plus(oneThirdMillis(millisPerSlot)), Optional.empty());
+    slotProcessor.onTick(nextEpochSlotMinusOne.plus(attestationDueMillis(spec)), Optional.empty());
 
     // Shouldn't have precomputed epoch transition yet.
     verify(recentChainData, never()).retrieveBlockState(any(SlotAndBlockRoot.class));
@@ -460,5 +457,10 @@ public class SlotProcessorTest {
 
   private long oneThirdMillis(final long millis) {
     return millis / 3L;
+  }
+
+  // The deadline is rounded to the nearest millisecond, so it can be later than a third of the slot
+  private long attestationDueMillis(final Spec spec) {
+    return spec.atSlot(ZERO).getForkChoiceUtil().getAttestationDueMillis();
   }
 }

@@ -74,7 +74,9 @@ class SpecVoluntaryExitDispatchTest {
     // about EIP-7251 pending withdrawals and would wrongly report this exit as valid.
     assertThat(spec.validateVoluntaryExit(state, exit))
         .contains(ExitInvalidReason.pendingWithdrawalsInQueue());
-    assertThat(spec.validateVoluntaryExitForGossip(state, exit))
+    // On gossip, pending withdrawals lead to IGNORE so they are checked separately
+    assertThat(spec.validateVoluntaryExitForGossip(state, exit)).isEmpty();
+    assertThat(spec.validateVoluntaryExitIgnoreConditionsForGossip(state, exit))
         .contains(ExitInvalidReason.pendingWithdrawalsInQueue());
   }
 

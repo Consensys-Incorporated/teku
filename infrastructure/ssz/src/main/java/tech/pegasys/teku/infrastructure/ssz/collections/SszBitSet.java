@@ -28,6 +28,9 @@ public interface SszBitSet {
    */
   boolean isSet(int i);
 
+  /** Returns the number of bits in this {@link SszBitSet} */
+  int size();
+
   default boolean isSuperSetOf(final SszBitSet other) {
     return other.streamAllSetBits().allMatch(this::isSet);
   }

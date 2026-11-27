@@ -33,6 +33,11 @@ public interface SszBitvector extends SszPrimitiveVector<Boolean, SszBit>, SszBi
   }
 
   @Override
+  default int size() {
+    return SszPrimitiveVector.super.size();
+  }
+
+  @Override
   SszBitvectorSchema<? extends SszBitvector> getSchema();
 
   // Bitlist methods

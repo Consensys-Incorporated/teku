@@ -13,6 +13,8 @@
 
 package tech.pegasys.teku.spec.logic.common.util;
 
+import static tech.pegasys.teku.spec.config.SpecConfig.BASIS_POINTS;
+
 import com.google.common.annotations.VisibleForTesting;
 import java.util.List;
 import java.util.NavigableMap;
@@ -839,7 +841,8 @@ public class ForkChoiceUtil {
   @VisibleForTesting
   // get_slot_component_duration_ms
   protected int getSlotComponentDurationMillis(final int basisPoints) {
-    return (basisPoints * specConfig.getSlotDurationMillis()) / 10_000;
+    // Rounded to the nearest millisecond
+    return (basisPoints * specConfig.getSlotDurationMillis() + BASIS_POINTS / 2) / BASIS_POINTS;
   }
 
   public int getAttestationDueMillis() {

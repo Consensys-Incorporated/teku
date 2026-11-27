@@ -66,6 +66,23 @@ class SeenAggregatesCacheTest {
   }
 
   @Test
+  void isAlreadySeen_shouldBeFalseWhenSeenValueHasDifferentLength() {
+    final Bytes32 root = dataStructureUtil.randomBytes32();
+    assertThat(cache.add(root, bitlist(true, true, true, true, true))).isTrue();
+
+    // All set bits are covered, but a bitlist of a different length cannot be a superset
+    assertThat(cache.isAlreadySeen(root, bitlist(true, false, true, false))).isFalse();
+  }
+
+  @Test
+  void add_shouldBeTrueWhenSeenValueHasDifferentLength() {
+    final Bytes32 root = dataStructureUtil.randomBytes32();
+    assertThat(cache.add(root, bitlist(true, true, true, true, true))).isTrue();
+
+    assertThat(cache.add(root, bitlist(true, false, true, false))).isTrue();
+  }
+
+  @Test
   void isAlreadySeen_shouldBeFalseWhenRootIsDifferent() {
     final Bytes32 root = dataStructureUtil.randomBytes32();
     // Combined we've seen all validators

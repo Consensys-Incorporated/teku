@@ -20,6 +20,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
@@ -72,7 +73,9 @@ public class StubDataColumnSidecarManager implements AvailabilityCheckerFactory<
   @Override
   public AvailabilityChecker<UInt64> createAvailabilityChecker(final SignedBeaconBlock block) {
     return createAvailabilityChecker(
-        block.getSlot(), block.getMessage().getBody().getOptionalBlobKzgCommitments());
+        block.getSlot(),
+        block.getRoot(),
+        block.getMessage().getBody().getOptionalBlobKzgCommitments());
   }
 
   @Override
@@ -80,11 +83,14 @@ public class StubDataColumnSidecarManager implements AvailabilityCheckerFactory<
       final BeaconState state, final SignedExecutionPayloadEnvelope signedEnvelope) {
     final SszList<SszKZGCommitment> commitments =
         BeaconStateGloas.required(state).getLatestExecutionPayloadBid().getBlobKzgCommitments();
-    return createAvailabilityChecker(signedEnvelope.getSlot(), Optional.of(commitments));
+    return createAvailabilityChecker(
+        signedEnvelope.getSlot(), signedEnvelope.getBeaconBlockRoot(), Optional.of(commitments));
   }
 
   private AvailabilityChecker<UInt64> createAvailabilityChecker(
-      final UInt64 blockSlot, final Optional<SszList<SszKZGCommitment>> optionalKzgCommitments) {
+      final UInt64 blockSlot,
+      final Bytes32 blockRoot,
+      final Optional<SszList<SszKZGCommitment>> optionalKzgCommitments) {
     final boolean hasBlobs = !optionalKzgCommitments.map(SszList::isEmpty).orElse(true);
     final SafeFuture<DataAndValidationResult<UInt64>> validationResult = new SafeFuture<>();
     return new AvailabilityChecker<UInt64>() {
@@ -140,6 +146,15 @@ public class StubDataColumnSidecarManager implements AvailabilityCheckerFactory<
               blockSlot,
               optionalKzgCommitments.get().size());
           return DataAndValidationResult.invalidResult(Collections.emptyList());
+        }
+
+        // Each sidecar must belong to the block being imported, not just to its slot
+        if (dataColumnSidecars != null
+            && dataColumnSidecars.stream()
+                .anyMatch(sidecar -> !sidecar.getBeaconBlockRoot().equals(blockRoot))) {
+          LOG.warn(
+              "Data column sidecars for slot {} do not belong to block {}", blockSlot, blockRoot);
+          return DataAndValidationResult.invalidResult(List.of(blockSlot));
         }
 
         return SafeFuture.collectAll(dataColumnSidecars.stream().map(validator::validate))

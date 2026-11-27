@@ -92,11 +92,22 @@ public class VoluntaryExitValidator implements OperationValidator<SignedVoluntar
                         exit.getMessage().getValidatorIndex()));
               }
               final Optional<OperationInvalidReason> failureReason =
-                  getGossipFailureReason(state, exit);
+                  spec.validateVoluntaryExitForGossip(state, exit);
               if (failureReason.isPresent()) {
-                return InternalValidationResult.reject(
-                    "Exit for validator %s is invalid: %s",
-                    exit.getMessage().getValidatorIndex(), failureReason.get().describe());
+                return rejectInvalidExit(exit, failureReason.get());
+              }
+              // [IGNORE] The validator has no pending partial withdrawals (Electra and later)
+              final Optional<OperationInvalidReason> ignoreReason =
+                  spec.validateVoluntaryExitIgnoreConditionsForGossip(state, exit);
+              if (ignoreReason.isPresent()) {
+                return InternalValidationResult.create(
+                    IGNORE,
+                    String.format(
+                        "Exit for validator %s is ignored: %s",
+                        exit.getMessage().getValidatorIndex(), ignoreReason.get().describe()));
+              }
+              if (!spec.verifyVoluntaryExitSignature(state, exit, BLSSignatureVerifier.SIMPLE)) {
+                return rejectInvalidExit(exit, ExitInvalidReason.invalidSignature());
               }
               if (!cacheValidatorSeenEntry(exit)) {
                 LOG.trace(
@@ -150,11 +161,11 @@ public class VoluntaryExitValidator implements OperationValidator<SignedVoluntar
     return validateSignature(state, exit, invalidReason);
   }
 
-  private Optional<OperationInvalidReason> getGossipFailureReason(
-      final BeaconState state, final SignedVoluntaryExit exit) {
-    final Optional<OperationInvalidReason> invalidReason =
-        spec.validateVoluntaryExitForGossip(state, exit);
-    return validateSignature(state, exit, invalidReason);
+  private InternalValidationResult rejectInvalidExit(
+      final SignedVoluntaryExit exit, final OperationInvalidReason reason) {
+    return InternalValidationResult.reject(
+        "Exit for validator %s is invalid: %s",
+        exit.getMessage().getValidatorIndex(), reason.describe());
   }
 
   private Optional<OperationInvalidReason> validateSignature(

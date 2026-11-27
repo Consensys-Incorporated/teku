@@ -50,13 +50,11 @@ public class VoluntaryExitValidatorElectra extends VoluntaryExitValidator {
         () -> validateElectraConditions(stateElectra, signedExit));
   }
 
+  // [IGNORE] The validator has no pending partial withdrawals
   @Override
-  public Optional<OperationInvalidReason> validateForGossip(
-      final Fork fork, final BeaconState state, final SignedVoluntaryExit signedExit) {
-    final BeaconStateElectra stateElectra = BeaconStateElectra.required(state);
-    return firstOf(
-        () -> super.validateForGossip(fork, state, signedExit),
-        () -> validateElectraConditions(stateElectra, signedExit));
+  public Optional<OperationInvalidReason> validateIgnoreConditionsForGossip(
+      final BeaconState state, final SignedVoluntaryExit signedExit) {
+    return validateElectraConditions(BeaconStateElectra.required(state), signedExit);
   }
 
   @VisibleForTesting
