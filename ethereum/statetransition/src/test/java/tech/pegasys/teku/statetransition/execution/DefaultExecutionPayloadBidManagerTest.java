@@ -70,7 +70,7 @@ import tech.pegasys.teku.statetransition.validation.ExecutionPayloadBidGossipVal
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 
 public class DefaultExecutionPayloadBidManagerTest {
-  private static final Optional<UInt64> CURRENT_TIME = Optional.of(UInt64.valueOf(10_000));
+  private static final UInt64 CURRENT_TIME = UInt64.valueOf(10_000);
 
   @SuppressWarnings("unchecked")
   private final Supplier<Optional<ReadOnlyForkChoiceStrategy>> forkChoiceStrategySupplier =
@@ -99,8 +99,7 @@ public class DefaultExecutionPayloadBidManagerTest {
   private final OperationAddedSubscriber<SignedExecutionPayloadBid> operationAddedSubscriber =
       mock(OperationAddedSubscriber.class);
 
-  private final StubTimeProvider timeProvider =
-      StubTimeProvider.withTimeInMillis(CURRENT_TIME.orElseThrow());
+  private final StubTimeProvider timeProvider = StubTimeProvider.withTimeInMillis(CURRENT_TIME);
 
   private final DefaultExecutionPayloadBidManager executionPayloadBidManager =
       new DefaultExecutionPayloadBidManager(
@@ -148,7 +147,9 @@ public class DefaultExecutionPayloadBidManagerTest {
 
     assertThat(result).isCompletedWithValue(SAVE_FOR_FUTURE);
     assertThat(pendingExecutionPayloadBids.get(signedExecutionPayloadBid.hashTreeRoot()))
-        .contains(new PendingExecutionPayloadBid(signedExecutionPayloadBid, Optional.of(root)));
+        .contains(
+            new PendingExecutionPayloadBid(
+                signedExecutionPayloadBid, Optional.of(root), CURRENT_TIME));
     verify(forkChoiceStrategy)
         .getAncestor(signedExecutionPayloadBid.getMessage().getParentBlockRoot(), UInt64.ZERO);
   }
@@ -446,19 +447,19 @@ public class DefaultExecutionPayloadBidManagerTest {
   }
 
   @Test
-  public void validatesBidWithItsArrivalTimestamp() {
+  public void validatesGossipBidAtItsArrivalTimestamp() {
     final SignedExecutionPayloadBid signedBid =
         createBid(UInt64.valueOf(10), dataStructureUtil.randomBytes32(), UInt64.valueOf(100));
-    final Optional<UInt64> arrivalTimestamp = Optional.of(UInt64.valueOf(1_234));
+    final UInt64 receivedAtMillis = UInt64.valueOf(1_234);
 
-    when(executionPayloadBidGossipValidator.validate(signedBid, arrivalTimestamp))
+    when(executionPayloadBidGossipValidator.validate(signedBid, receivedAtMillis))
         .thenReturn(SafeFuture.completedFuture(InternalValidationResult.IGNORE));
 
     assertThat(
             executionPayloadBidManager.validateAndAddBid(
-                signedBid, RemoteBidOrigin.P2P, arrivalTimestamp))
+                signedBid, RemoteBidOrigin.P2P, Optional.of(receivedAtMillis)))
         .isCompletedWithValue(InternalValidationResult.IGNORE);
-    verify(executionPayloadBidGossipValidator).validate(signedBid, arrivalTimestamp);
+    verify(executionPayloadBidGossipValidator).validate(signedBid, receivedAtMillis);
   }
 
   @Test
@@ -475,25 +476,23 @@ public class DefaultExecutionPayloadBidManagerTest {
   }
 
   @Test
-  public void retriesBidSavedForFutureAtTheTimeOfTheRetry() {
+  public void retriesBidSavedForFutureWithItsOriginalReceiptTime() {
     final UInt64 slot = UInt64.valueOf(10);
     final SignedExecutionPayloadBid signedBid =
         createBid(slot, dataStructureUtil.randomBytes32(), UInt64.valueOf(100));
     executionPayloadBidManager.onSlot(slot);
-    final Optional<UInt64> arrivalTimestamp = Optional.of(UInt64.valueOf(1_234));
-    when(executionPayloadBidGossipValidator.validate(signedBid, arrivalTimestamp))
-        .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE));
+    final UInt64 receivedAtMillis = UInt64.valueOf(1_234);
+    when(executionPayloadBidGossipValidator.validate(signedBid, receivedAtMillis))
+        .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE))
+        .thenReturn(SafeFuture.completedFuture(ACCEPT));
     SafeFutureAssert.safeJoin(
         executionPayloadBidManager.validateAndAddBid(
-            signedBid, RemoteBidOrigin.P2P, arrivalTimestamp));
+            signedBid, RemoteBidOrigin.P2P, Optional.of(receivedAtMillis)));
 
     timeProvider.advanceTimeByMillis(50);
-    final Optional<UInt64> retryTimestamp = Optional.of(timeProvider.getTimeInMillis());
-    when(executionPayloadBidGossipValidator.validate(signedBid, retryTimestamp))
-        .thenReturn(SafeFuture.completedFuture(ACCEPT));
     executionPayloadBidManager.onSlot(slot);
 
-    verify(executionPayloadBidGossipValidator).validate(signedBid, retryTimestamp);
+    verify(executionPayloadBidGossipValidator, times(2)).validate(signedBid, receivedAtMillis);
     verify(receivedExecutionPayloadBidEventsChannelPublisher)
         .onExecutionPayloadBidValidated(signedBid);
   }

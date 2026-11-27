@@ -133,12 +133,12 @@ public class DefaultExecutionPayloadBidManager
   private SafeFuture<InternalValidationResult> validateAndAddBid(
       final SignedExecutionPayloadBid signedBid,
       final boolean fromNetwork,
-      final UInt64 arrivalTimestamp) {
+      final UInt64 receivedAtMillis) {
     return executionPayloadBidGossipValidator
-        .validate(signedBid, Optional.of(arrivalTimestamp))
+        .validate(signedBid, receivedAtMillis)
         .thenApply(
             result -> {
-              processValidationResult(signedBid, fromNetwork, result);
+              processValidationResult(signedBid, fromNetwork, receivedAtMillis, result);
               return result;
             });
   }
@@ -146,6 +146,7 @@ public class DefaultExecutionPayloadBidManager
   private void processValidationResult(
       final SignedExecutionPayloadBid signedBid,
       final boolean fromNetwork,
+      final UInt64 receivedAtMillis,
       final InternalValidationResult result) {
     switch (result.code()) {
       case ACCEPT -> {
@@ -166,7 +167,8 @@ public class DefaultExecutionPayloadBidManager
                             forkChoiceStrategy,
                             executionPayloadBid.getParentBlockRoot(),
                             executionPayloadBid.getSlot()));
-        pendingExecutionPayloadBids.add(new PendingExecutionPayloadBid(signedBid, dependentRoot));
+        pendingExecutionPayloadBids.add(
+            new PendingExecutionPayloadBid(signedBid, dependentRoot, receivedAtMillis));
       }
       case REJECT, IGNORE ->
           LOG.debug(
@@ -192,14 +194,12 @@ public class DefaultExecutionPayloadBidManager
     // bid limit, as long as each one beats the highest bid seen. Retry the highest value bids first
     // so lower bids are ignored where possible, instead of being forwarded and using up the limit.
     // Deferred gossip was ignored by gossipsub, so accepted retries must be explicitly published.
-    // A pending bid was not received too early, as that is checked before a bid can be saved for
-    // future processing, so the time of the retry stands in for its arrival timestamp.
-    final UInt64 retryTimestamp = timeProvider.getTimeInMillis();
     pendingBids.stream()
         .sorted(Comparator.comparing(DefaultExecutionPayloadBidManager::bidValue).reversed())
         .forEach(
             pendingBid ->
-                validateAndAddBid(pendingBid.signedBid(), false, retryTimestamp).finishError(LOG));
+                validateAndAddBid(pendingBid.signedBid(), false, pendingBid.receivedAtMillis())
+                    .finishError(LOG));
   }
 
   private static UInt64 bidValue(final PendingExecutionPayloadBid pendingBid) {

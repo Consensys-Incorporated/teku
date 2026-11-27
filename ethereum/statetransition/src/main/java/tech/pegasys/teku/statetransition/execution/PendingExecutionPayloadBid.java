@@ -15,7 +15,10 @@ package tech.pegasys.teku.statetransition.execution;
 
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes32;
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 
 public record PendingExecutionPayloadBid(
-    SignedExecutionPayloadBid signedBid, Optional<Bytes32> dependentRoot) {}
+    SignedExecutionPayloadBid signedBid,
+    Optional<Bytes32> dependentRoot,
+    UInt64 receivedAtMillis) {}

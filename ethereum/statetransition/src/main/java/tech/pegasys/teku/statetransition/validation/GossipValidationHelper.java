@@ -378,25 +378,24 @@ public class GossipValidationHelper {
   }
 
   /**
-   * Returns true when a message received at {@code arrivalTimestamp} was received no earlier than
+   * Returns true when a message received at {@code receivedAtMillis} was received no earlier than
    * the payload attestation deadline of the slot before {@code slot}. Until then it is not decided
    * whether the proposer of {@code slot} builds on the previous slot's payload. A slot before Gloas
    * has no such deadline, so it is never reached.
    *
-   * <p>No clock disparity allowance applies, so the time of receipt is used when known: the store
-   * time only advances on ticks and would make a message received right at the deadline look early.
-   * The store time is only the fallback when no time of receipt is given, which the bid manager
-   * always does.
+   * <p>No clock disparity allowance applies, so this takes the time of receipt rather than reading
+   * the store time, which only advances on ticks and would make a message received right at the
+   * deadline look early.
    */
   public boolean isPreviousSlotPayloadAttestationDeadlineReached(
-      final UInt64 slot, final Optional<UInt64> arrivalTimestamp) {
+      final UInt64 slot, final UInt64 receivedAtMillis) {
     return spec.getPayloadAttestationDueMillis(slot)
         .map(
             payloadAttestationDueMillis ->
                 !spec.isBeforeTimeInSlot(
                     slot.minusMinZero(ONE),
                     recentChainData.getGenesisTimeMillis(),
-                    arrivalTimestamp.orElseGet(this::getCurrentTimeMillis),
+                    receivedAtMillis,
                     payloadAttestationDueMillis))
         .orElse(false);
   }

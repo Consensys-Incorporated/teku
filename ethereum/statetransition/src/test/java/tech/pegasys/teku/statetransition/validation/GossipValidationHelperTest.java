@@ -768,28 +768,6 @@ public class GossipValidationHelperTest {
   }
 
   @TestTemplate
-  void isPreviousSlotPayloadAttestationDeadlineReached_shouldUseArrivalTimeWhenStoreTimeIsBehind(
-      final SpecContext specContext) {
-    specContext.assumeGloasActive();
-    final UInt64 slot = UInt64.valueOf(1000);
-    final UInt64 deadline = getPreviousSlotPayloadAttestationDeadlineMillis(slot);
-    final UInt64 storeTime = deadline.minus(500);
-    assertIsPreviousSlotPayloadAttestationDeadlineReached(
-        slot, storeTime, Optional.of(deadline), true);
-  }
-
-  @TestTemplate
-  void isPreviousSlotPayloadAttestationDeadlineReached_shouldRejectEarlyArrivalWhenValidatedLater(
-      final SpecContext specContext) {
-    specContext.assumeGloasActive();
-    final UInt64 slot = UInt64.valueOf(1000);
-    final UInt64 deadline = getPreviousSlotPayloadAttestationDeadlineMillis(slot);
-    final UInt64 storeTime = deadline.plus(500);
-    assertIsPreviousSlotPayloadAttestationDeadlineReached(
-        slot, storeTime, Optional.of(deadline.decrement()), false);
-  }
-
-  @TestTemplate
   void isPreviousSlotPayloadAttestationDeadlineReached_shouldNeverBeReachedBeforeGloas(
       final SpecContext specContext) {
     specContext.assumeIsNotOneOf(SpecMilestone.GLOAS);
@@ -1233,27 +1211,11 @@ public class GossipValidationHelperTest {
   }
 
   private void assertIsPreviousSlotPayloadAttestationDeadlineReached(
-      final UInt64 slot, final UInt64 storeTime, final boolean expectedResult) {
-    assertIsPreviousSlotPayloadAttestationDeadlineReached(
-        slot, storeTime, Optional.empty(), expectedResult);
-  }
-
-  private void assertIsPreviousSlotPayloadAttestationDeadlineReached(
-      final UInt64 slot,
-      final UInt64 currentTime,
-      final Optional<UInt64> arrivalTimestamp,
-      final boolean expectedResult) {
-    final RecentChainData recentChainDataMock = mock(RecentChainData.class);
-    final UpdatableStore storeMock = mock(UpdatableStore.class);
-    when(recentChainDataMock.getStore()).thenReturn(storeMock);
-    when(storeMock.getTimeInMillis()).thenReturn(currentTime);
-    when(recentChainDataMock.getGenesisTimeMillis())
-        .thenReturn(recentChainData.getGenesisTimeMillis());
-    final GossipValidationHelper gossipValidationHelperMocked =
-        new GossipValidationHelper(spec, recentChainDataMock, storageSystem.getMetricsSystem());
+      final UInt64 slot, final UInt64 receivedAtMillis, final boolean expectedResult) {
+    // The store time is far behind slot 1000 here and plays no part in the result
     assertThat(
-            gossipValidationHelperMocked.isPreviousSlotPayloadAttestationDeadlineReached(
-                slot, arrivalTimestamp))
+            gossipValidationHelper.isPreviousSlotPayloadAttestationDeadlineReached(
+                slot, receivedAtMillis))
         .isEqualTo(expectedResult);
   }
 

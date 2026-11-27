@@ -335,7 +335,7 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
       } else if (messageName.startsWith("execution_payload_bid_")) {
         final SignedExecutionPayloadBid signedBid =
             loadSsz(testDefinition, messageName + ".ssz_snappy", signedBidSchema::sszDeserialize);
-        result = safeJoin(bidValidator.validate(signedBid));
+        result = safeJoin(bidValidator.validate(signedBid, validationTimeMs[0]));
       } else {
         throw new AssertionError("Unknown message type for: " + messageName);
       }
