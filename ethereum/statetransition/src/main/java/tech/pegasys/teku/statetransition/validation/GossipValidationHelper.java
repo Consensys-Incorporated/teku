@@ -15,6 +15,7 @@ package tech.pegasys.teku.statetransition.validation;
 
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
 import static tech.pegasys.teku.spec.config.SpecConfigGloas.BUILDER_INDEX_SELF_BUILD;
+import static tech.pegasys.teku.spec.constants.EthConstants.ETH_TO_GWEI;
 
 import java.util.Optional;
 import java.util.Set;
@@ -41,6 +42,7 @@ import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateAccessors;
 import tech.pegasys.teku.spec.logic.common.util.AttestationUtil;
 import tech.pegasys.teku.spec.logic.common.util.AttestationValidationResult;
@@ -426,6 +428,21 @@ public class GossipValidationHelper {
       final UInt64 slot) {
     return BeaconStateAccessorsGloas.required(spec.atSlot(slot).beaconStateAccessors())
         .canBuilderCoverBid(state, builderIndex, bidValue);
+  }
+
+  /**
+   * Spec {@code get_builder_bid_limit}: the number of bids the builder may submit for each slot and
+   * parent, i.e. one bid per ETH of builder balance, excluding the balance owed in pending
+   * withdrawals.
+   */
+  public UInt64 getBuilderBidLimit(
+      final UInt64 builderIndex, final BeaconState state, final UInt64 slot) {
+    final UInt64 balance =
+        BeaconStateGloas.required(state).getBuilders().get(builderIndex.intValue()).getBalance();
+    final UInt64 pendingWithdrawalsAmount =
+        BeaconStateAccessorsGloas.required(spec.atSlot(slot).beaconStateAccessors())
+            .getPendingBalanceToWithdrawForBuilder(state, builderIndex);
+    return balance.minusMinZero(pendingWithdrawalsAmount).dividedBy(ETH_TO_GWEI);
   }
 
   public boolean isBlockHashKnown(final Bytes32 blockHash, final Bytes32 blockRoot) {

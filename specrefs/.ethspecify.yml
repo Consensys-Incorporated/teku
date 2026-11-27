@@ -278,10 +278,6 @@ specrefs:
       # Not implemented: gloas
       - validate_partial_data_column_sidecar_gossip#gloas
       - compute_max_partial_data_column_sidecar_size#gloas
-      # Not implemented: balance-based builder bid limits, excluding pending withdrawals
-      # https://github.com/Consensys-Incorporated/teku/issues/11770
-      # https://github.com/Consensys-Incorporated/teku/issues/11769
-      - get_builder_bid_limit#gloas
       # Not implemented: envelope transaction-count bound from the parent payload gas limit
       # https://github.com/Consensys-Incorporated/teku/issues/11766
       - get_max_payload_gas_limit#gloas

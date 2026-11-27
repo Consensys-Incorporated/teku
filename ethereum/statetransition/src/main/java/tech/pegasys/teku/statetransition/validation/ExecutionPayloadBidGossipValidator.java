@@ -18,7 +18,6 @@ import static tech.pegasys.teku.infrastructure.logging.Converter.gweiToEth;
 import static tech.pegasys.teku.spec.config.Constants.HIGHEST_BID_SET_SIZE;
 import static tech.pegasys.teku.spec.config.Constants.MAX_SLOTS_TO_TRACK_BUILDERS_BIDS;
 import static tech.pegasys.teku.spec.config.SpecConfigGloas.PAYLOAD_BUILDER_VERSION;
-import static tech.pegasys.teku.spec.constants.EthConstants.ETH_TO_GWEI;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ignore;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.reject;
@@ -319,7 +318,9 @@ public class ExecutionPayloadBidGossipValidator {
               final BuilderAndParent builderAndParent =
                   new BuilderAndParent(
                       bid.getBuilderIndex(), bid.getParentBlockHash(), bid.getParentBlockRoot());
-              final UInt64 bidLimit = getBuilderBidLimit(builder);
+              final UInt64 bidLimit =
+                  gossipValidationHelper.getBuilderBidLimit(
+                      bid.getBuilderIndex(), state, bid.getSlot());
               final UInt64 bidCount =
                   executionPayloadBidCounts
                       .getOrDefault(bid.getSlot(), Map.of())
@@ -408,14 +409,6 @@ public class ExecutionPayloadBidGossipValidator {
 
               return acceptBid(bid);
             });
-  }
-
-  /**
-   * Spec {@code get_builder_bid_limit}: the number of bids the builder may submit for each slot and
-   * parent, i.e. one bid per ETH of builder balance.
-   */
-  private static UInt64 getBuilderBidLimit(final Builder builder) {
-    return builder.getBalance().dividedBy(ETH_TO_GWEI);
   }
 
   /**

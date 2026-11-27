@@ -380,11 +380,6 @@ public class ReferenceTestFinder {
             "fulu - minimal - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
             "gloas - mainnet - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
             "gloas - minimal - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
-            // TODO: https://github.com/Consensys-Incorporated/teku/issues/11770
-            // Also https://github.com/Consensys-Incorporated/teku/issues/11769
-            // enable after updating builder bid limits (consensus-specs#5805 and #5843)
-            "gloas - mainnet - networking/gossip_execution_payload_bid - gossip_execution_payload_bid__ignore_builder_bid_limit_reached",
-            "gloas - minimal - networking/gossip_execution_payload_bid - gossip_execution_payload_bid__ignore_builder_bid_limit_reached",
             // TODO: https://github.com/Consensys-Incorporated/teku/issues/11767
             // enable after ignoring bids the proposer cannot select (consensus-specs#5803)
             "gloas - mainnet - networking/gossip_execution_payload_bid - gossip_execution_payload_bid__ignore_before_payload_attestation_due",

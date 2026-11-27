@@ -26,7 +26,6 @@ import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThat
 import static tech.pegasys.teku.infrastructure.logging.Converter.gweiToEth;
 import static tech.pegasys.teku.spec.config.Constants.MAX_SLOTS_TO_TRACK_BUILDERS_BIDS;
 import static tech.pegasys.teku.spec.config.SpecConfigGloas.PAYLOAD_BUILDER_VERSION;
-import static tech.pegasys.teku.spec.constants.EthConstants.ETH_TO_GWEI;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ignore;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.reject;
@@ -137,8 +136,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .thenReturn(Optional.of(dependentRoot));
     // Replace the random builders so that the bid's builder index is in range and every builder
     // carries PAYLOAD_BUILDER_VERSION; randomBuilder() assigns a random version, which the
-    // payload-builder-version rule would reject. Each builder has a balance of 1 ETH, so it may
-    // submit a single bid per slot and parent.
+    // payload-builder-version rule would reject.
     postState =
         dataStructureUtil
             .randomBeaconState()
@@ -152,7 +150,6 @@ public class ExecutionPayloadBidGossipValidatorTest {
                         dataStructureUtil
                             .builderBuilder()
                             .version(PAYLOAD_BUILDER_VERSION)
-                            .balance(ETH_TO_GWEI)
                             .build());
                   }
                 });
@@ -175,6 +172,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
     when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
         .thenReturn(SafeFuture.completedFuture(Optional.of(postState)));
     when(gossipValidationHelper.isActiveBuilder(builderIndex, postState, slot)).thenReturn(true);
+    // Each builder may submit a single bid per slot and parent by default
+    when(gossipValidationHelper.getBuilderBidLimit(any(), any(), any())).thenReturn(UInt64.ONE);
     when(spec.isExecutionPayloadEnvelopeAvailableAtSlot(slot.decrement())).thenReturn(true);
     when(gossipValidationHelper.getRandaoMixForCurrentEpoch(postState, slot))
         .thenReturn(bid.getPrevRandao());
@@ -719,9 +718,10 @@ public class ExecutionPayloadBidGossipValidatorTest {
 
   @TestTemplate
   void shouldAcceptBidsUpToBuilderBidLimit() {
-    // A builder with a balance of 3 ETH may submit 3 bids for the same slot and parent
-    postState = stateWithBuilderBalance(ETH_TO_GWEI.times(3));
+    // A builder with a bid limit of 3 may submit 3 bids for the same slot and parent
     final UInt64 bidLimit = UInt64.valueOf(3);
+    when(gossipValidationHelper.getBuilderBidLimit(builderIndex, postState, slot))
+        .thenReturn(bidLimit);
 
     for (int i = 1; i <= bidLimit.intValue(); i++) {
       final SignedExecutionPayloadBid bidWithinLimit =
@@ -745,10 +745,9 @@ public class ExecutionPayloadBidGossipValidatorTest {
   }
 
   @TestTemplate
-  void shouldIgnore_whenBuilderBalanceIsBelowOneEth() {
-    // A builder with less than 1 ETH balance has a bid limit of 0
-    postState = stateWithBuilderBalance(ETH_TO_GWEI.minus(1));
-    mockBidValidation(signedBid);
+  void shouldIgnore_whenBuilderBidLimitIsZero() {
+    when(gossipValidationHelper.getBuilderBidLimit(builderIndex, postState, slot))
+        .thenReturn(UInt64.ZERO);
 
     assertThatSafeFuture(bidValidator.validate(signedBid))
         .isCompletedWithValue(
@@ -1436,21 +1435,6 @@ public class ExecutionPayloadBidGossipValidatorTest {
           builders.set(
               builderIndex.intValue(),
               dataStructureUtil.builderBuilder().version(builderVersion).build());
-        });
-  }
-
-  private BeaconState stateWithBuilderBalance(final UInt64 balance) {
-    return postState.updated(
-        mutableState -> {
-          final SszMutableList<Builder> builders =
-              MutableBeaconStateGloas.required(mutableState).getBuilders();
-          builders.set(
-              builderIndex.intValue(),
-              dataStructureUtil
-                  .builderBuilder()
-                  .version(PAYLOAD_BUILDER_VERSION)
-                  .balance(balance)
-                  .build());
         });
   }
 

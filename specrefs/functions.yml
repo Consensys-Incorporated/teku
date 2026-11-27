@@ -3338,7 +3338,9 @@
     </spec>
 
 - name: get_builder_bid_limit#gloas
-  sources: []
+  sources:
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/GossipValidationHelper.java
+      search: public UInt64 getBuilderBidLimit(
   spec: |
     <spec fn="get_builder_bid_limit" fork="gloas" hash="a4aadb9b">
     def get_builder_bid_limit(state: BeaconState, builder_index: BuilderIndex) -> Uint64:
