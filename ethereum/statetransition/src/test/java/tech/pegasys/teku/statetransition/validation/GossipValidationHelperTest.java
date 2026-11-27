@@ -47,6 +47,7 @@ import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.constants.Domain;
+import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
@@ -446,6 +447,44 @@ public class GossipValidationHelperTest {
     final GossipValidationHelper helper =
         new GossipValidationHelper(spec, recentChainData, storageSystem.getMetricsSystem());
     assertThat(helper.getGasLimitForExecutionPayload(blockRoot, blockHash)).isEmpty();
+  }
+
+  @TestTemplate
+  void getMaxPayloadGasLimit_shouldAllowEip1559IncreaseOverParentPayloadGasLimit(
+      final SpecContext specContext) {
+    assumeThat(specContext.getSpecMilestone()).isEqualTo(SpecMilestone.GLOAS);
+    final RecentChainData recentChainData = mock(RecentChainData.class);
+    final BeaconBlock block = dataStructureUtil.randomBeaconBlock();
+    final ExecutionPayloadBid bid = dataStructureUtil.randomExecutionPayloadBid();
+    final GossipValidationHelper helper =
+        new GossipValidationHelper(spec, recentChainData, storageSystem.getMetricsSystem());
+
+    when(recentChainData.getExecutionGasLimitForBlockRootAndHash(
+            block.getParentRoot(), bid.getParentBlockHash()))
+        .thenReturn(Optional.of(UInt64.valueOf(30_000_000)));
+    assertThat(helper.getMaxPayloadGasLimit(block, bid)).isEqualTo(UInt64.valueOf(30_029_295));
+
+    // The increase saturates at zero for a parent gas limit below 1024
+    when(recentChainData.getExecutionGasLimitForBlockRootAndHash(
+            block.getParentRoot(), bid.getParentBlockHash()))
+        .thenReturn(Optional.of(UInt64.valueOf(1000)));
+    assertThat(helper.getMaxPayloadGasLimit(block, bid)).isEqualTo(UInt64.valueOf(1000));
+  }
+
+  @TestTemplate
+  void getMaxPayloadGasLimit_shouldFallBackToBidGasLimitWhenParentPayloadIsUnknown(
+      final SpecContext specContext) {
+    assumeThat(specContext.getSpecMilestone()).isEqualTo(SpecMilestone.GLOAS);
+    final RecentChainData recentChainData = mock(RecentChainData.class);
+    final BeaconBlock block = dataStructureUtil.randomBeaconBlock();
+    final ExecutionPayloadBid bid = dataStructureUtil.randomExecutionPayloadBid();
+    final GossipValidationHelper helper =
+        new GossipValidationHelper(spec, recentChainData, storageSystem.getMetricsSystem());
+
+    when(recentChainData.getExecutionGasLimitForBlockRootAndHash(
+            block.getParentRoot(), bid.getParentBlockHash()))
+        .thenReturn(Optional.empty());
+    assertThat(helper.getMaxPayloadGasLimit(block, bid)).isEqualTo(bid.getGasLimit());
   }
 
   @TestTemplate
