@@ -53,6 +53,7 @@ import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider;
+import tech.pegasys.teku.spec.config.BlobScheduleEntry;
 import tech.pegasys.teku.spec.config.SpecConfigDeneb;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
@@ -247,6 +248,124 @@ public class BlobSidecarsByRangeMessageHandlerTest {
             "count_too_big");
 
     assertThat(countTooBigCount).isOne();
+  }
+
+  @TestTemplate
+  public void validateRequest_shouldAcceptRequestWhenRangeEndsBeforeDeneb() {
+    final BlobSidecarsByRangeMessageHandler preDenebHandler = createHandlerWithDenebAtEpochOne();
+
+    // slots 0..slotsPerEpoch-1 are pre-Deneb
+    final Optional<RpcException> result =
+        preDenebHandler.validateRequest(
+            protocolId,
+            new BlobSidecarsByRangeRequestMessage(
+                ZERO, UInt64.valueOf(slotsPerEpoch), maxBlobsPerBlock));
+
+    assertThat(result).isEmpty();
+  }
+
+  @TestTemplate
+  public void shouldRespondWithNoBlobSidecarsAfterChargingRequestWhenRangeEndsBeforeDeneb() {
+    final BlobSidecarsByRangeMessageHandler preDenebHandler = createHandlerWithDenebAtEpochOne();
+
+    final BlobSidecarsByRangeRequestMessage request =
+        new BlobSidecarsByRangeRequestMessage(ZERO, ONE, maxBlobsPerBlock);
+
+    preDenebHandler.onIncomingMessage(protocolId, peer, request, listener);
+
+    verify(peer).approveRequest();
+    verify(peer, never()).approveBlobSidecarsRequest(any(), anyLong());
+    verify(listener, never()).respond(any());
+    verify(listener).completeSuccessfully();
+    verifyNoInteractions(combinedChainDataClient);
+
+    final long ignoredCount =
+        metricsSystem.getLabelledCounterValue(
+            TekuMetricCategory.NETWORK, "rpc_blob_sidecars_by_range_requests_total", "ignored");
+    assertThat(ignoredCount).isOne();
+  }
+
+  @TestTemplate
+  public void shouldNotServePreDenebRangeIfPeerRequestIsRateLimited() {
+    final BlobSidecarsByRangeMessageHandler preDenebHandler = createHandlerWithDenebAtEpochOne();
+    when(peer.approveRequest()).thenReturn(false);
+
+    final BlobSidecarsByRangeRequestMessage request =
+        new BlobSidecarsByRangeRequestMessage(ZERO, ONE, maxBlobsPerBlock);
+
+    preDenebHandler.onIncomingMessage(protocolId, peer, request, listener);
+
+    verify(peer).approveRequest();
+    verifyNoInteractions(listener, combinedChainDataClient);
+  }
+
+  @TestTemplate
+  public void validateRequest_shouldUsePreFuluBlobLimitWhenRangeEndsAfterFulu() {
+    final UInt64 fuluForkEpoch = UInt64.valueOf(2);
+    // Fulu raises the blob limit well above Electra's
+    final int fuluMaxBlobsPerBlock = 64;
+    final Spec fuluSpec =
+        TestSpecFactory.createMinimalFulu(
+            b ->
+                b.fuluForkEpoch(fuluForkEpoch)
+                    .fuluBuilder(
+                        fb ->
+                            fb.blobSchedule(
+                                List.of(
+                                    new BlobScheduleEntry(fuluForkEpoch, fuluMaxBlobsPerBlock)))));
+    final BlobSidecarsByRangeMessageHandler fuluHandler =
+        new BlobSidecarsByRangeMessageHandler(fuluSpec, metricsSystem, combinedChainDataClient);
+
+    final UInt64 lastElectraSlot = fuluSpec.computeStartSlotAtEpoch(fuluForkEpoch).decrement();
+    final int electraMaxBlobsPerBlock =
+        fuluSpec.getMaxBlobsPerBlockAtSlot(lastElectraSlot).orElseThrow();
+    final int maxRequestBlobSidecars =
+        SpecConfigDeneb.required(fuluSpec.atSlot(lastElectraSlot).getConfig())
+            .getMaxRequestBlobSidecars();
+    // the largest count that fits the limit at Electra's blob rate, but not at Fulu's
+    final UInt64 requestCount = UInt64.valueOf(maxRequestBlobSidecars / electraMaxBlobsPerBlock);
+    assertThat(requestCount.times(fuluMaxBlobsPerBlock).longValue())
+        .isGreaterThan(maxRequestBlobSidecars);
+
+    final BlobSidecarsByRangeRequestMessage request =
+        new BlobSidecarsByRangeRequestMessage(
+            fuluSpec.computeStartSlotAtEpoch(ONE), requestCount, electraMaxBlobsPerBlock);
+    assertThat(fuluSpec.atSlot(request.getMaxSlot()).getMilestone()).isEqualTo(SpecMilestone.FULU);
+
+    assertThat(fuluHandler.validateRequest(protocolId, request)).isEmpty();
+  }
+
+  @TestTemplate
+  public void shouldIgnoreRequestStartingAtFirstFuluSlot() {
+    final UInt64 fuluForkEpoch = ONE;
+    final Spec fuluSpec = TestSpecFactory.createMinimalWithFuluForkEpoch(fuluForkEpoch);
+    final BlobSidecarsByRangeMessageHandler fuluHandler =
+        new BlobSidecarsByRangeMessageHandler(fuluSpec, metricsSystem, combinedChainDataClient);
+
+    final BlobSidecarsByRangeRequestMessage request =
+        new BlobSidecarsByRangeRequestMessage(
+            fuluSpec.computeStartSlotAtEpoch(fuluForkEpoch), ONE, maxBlobsPerBlock);
+
+    fuluHandler.onIncomingMessage(protocolId, peer, request, listener);
+
+    verify(peer).approveRequest();
+    verify(peer, never()).approveBlobSidecarsRequest(any(), anyLong());
+    verify(listener, never()).respond(any());
+    verify(listener).completeSuccessfully();
+    verifyNoInteractions(combinedChainDataClient);
+
+    final long ignoredCount =
+        metricsSystem.getLabelledCounterValue(
+            TekuMetricCategory.NETWORK, "rpc_blob_sidecars_by_range_requests_total", "ignored");
+    assertThat(ignoredCount).isOne();
+  }
+
+  private BlobSidecarsByRangeMessageHandler createHandlerWithDenebAtEpochOne() {
+    // epoch 0 runs on Capella rules regardless of the milestone under test
+    return new BlobSidecarsByRangeMessageHandler(
+        TestSpecFactory.createMinimalWithDenebForkEpoch(currentForkEpoch),
+        metricsSystem,
+        combinedChainDataClient);
   }
 
   @TestTemplate
