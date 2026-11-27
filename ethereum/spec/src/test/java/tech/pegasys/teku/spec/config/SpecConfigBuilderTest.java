@@ -14,6 +14,7 @@
 package tech.pegasys.teku.spec.config;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static tech.pegasys.teku.spec.SpecMilestone.ELECTRA;
 import static tech.pegasys.teku.spec.SpecMilestone.FULU;
 
@@ -183,6 +184,31 @@ class SpecConfigBuilderTest {
                 .getRawConfig()
                 .get("TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH"))
         .isEqualTo(randomUInt64);
+  }
+
+  @Test
+  public void shouldPublishMinTransactionGasInRawConfig() {
+    final UInt64 minTransactionGas = UInt64.valueOf(12_000);
+    final Spec spec =
+        getSpec(
+            phase0Builder ->
+                phase0Builder.gloasBuilder(
+                    gloasBuilder -> gloasBuilder.minTransactionGas(minTransactionGas)));
+
+    assertThat(spec.getGenesisSpec().getConfig().getRawConfig().get("MIN_TRANSACTION_GAS"))
+        .isEqualTo(minTransactionGas);
+  }
+
+  @Test
+  public void shouldRejectZeroMinTransactionGas() {
+    assertThatThrownBy(
+            () ->
+                getSpec(
+                    phase0Builder ->
+                        phase0Builder.gloasBuilder(
+                            gloasBuilder -> gloasBuilder.minTransactionGas(UInt64.ZERO))))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("MIN_TRANSACTION_GAS must be positive");
   }
 
   private Spec getSpec(final Consumer<SpecConfigBuilder> consumer) {

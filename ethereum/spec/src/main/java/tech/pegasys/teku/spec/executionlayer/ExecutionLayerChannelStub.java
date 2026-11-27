@@ -92,6 +92,9 @@ public class ExecutionLayerChannelStub implements ExecutionLayerChannel {
   private static final Logger LOG = LogManager.getLogger();
   private static final ClientVersion STUB_CLIENT_VERSION =
       new ClientVersion("SB", ExecutionLayerChannel.STUB_ENDPOINT_PREFIX, "0.0.0", Bytes4.ZERO);
+  // A realistic gas limit, high enough for the synthetic transactions to pass the Gloas gossip rule
+  // bounding the transaction count by the gas limit (MIN_TRANSACTION_GAS per transaction)
+  private static final UInt64 GAS_LIMIT = UInt64.valueOf(30_000_000);
 
   private final TimeProvider timeProvider;
   private final Map<Bytes32, PowBlock> knownBlocks = new ConcurrentHashMap<>();
@@ -302,7 +305,7 @@ public class ExecutionLayerChannelStub implements ExecutionLayerChannel {
                             .logsBloom(logsBloom)
                             .prevRandao(payloadAttributes.prevRandao())
                             .blockNumber(UInt64.valueOf(payloadIdCounter.get()))
-                            .gasLimit(UInt64.ONE)
+                            .gasLimit(GAS_LIMIT)
                             .gasUsed(UInt64.ZERO)
                             .timestamp(payloadAttributes.timestamp())
                             .extraData(Bytes.EMPTY)

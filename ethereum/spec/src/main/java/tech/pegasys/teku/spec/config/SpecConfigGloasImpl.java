@@ -30,6 +30,7 @@ public class SpecConfigGloasImpl extends DelegatingSpecConfigFulu implements Spe
   private final int maxBuildersPerWithdrawalsSweep;
   private final int maxPayloadAttestations;
   private final int maxRequestPayloads;
+  private final UInt64 minTransactionGas;
   private final int minBuilderWithdrawabilityDelay;
   private final int payloadAttestationDueBps;
   private final int payloadDueBps;
@@ -52,6 +53,7 @@ public class SpecConfigGloasImpl extends DelegatingSpecConfigFulu implements Spe
       final int maxBuildersPerWithdrawalsSweep,
       final int maxPayloadAttestations,
       final int maxRequestPayloads,
+      final UInt64 minTransactionGas,
       final int minBuilderWithdrawabilityDelay,
       final int payloadAttestationDueBps,
       final int payloadDueBps,
@@ -72,6 +74,7 @@ public class SpecConfigGloasImpl extends DelegatingSpecConfigFulu implements Spe
     this.maxBuildersPerWithdrawalsSweep = maxBuildersPerWithdrawalsSweep;
     this.maxPayloadAttestations = maxPayloadAttestations;
     this.maxRequestPayloads = maxRequestPayloads;
+    this.minTransactionGas = minTransactionGas;
     this.ptcSize = ptcSize;
     this.minBuilderWithdrawabilityDelay = minBuilderWithdrawabilityDelay;
     this.payloadAttestationDueBps = payloadAttestationDueBps;
@@ -101,6 +104,11 @@ public class SpecConfigGloasImpl extends DelegatingSpecConfigFulu implements Spe
   @Override
   public int getMaxRequestPayloads() {
     return maxRequestPayloads;
+  }
+
+  @Override
+  public UInt64 getMinTransactionGas() {
+    return minTransactionGas;
   }
 
   @Override
@@ -202,6 +210,7 @@ public class SpecConfigGloasImpl extends DelegatingSpecConfigFulu implements Spe
         && contributionDueBps == that.contributionDueBps
         && maxPayloadAttestations == that.maxPayloadAttestations
         && maxRequestPayloads == that.maxRequestPayloads
+        && Objects.equals(minTransactionGas, that.minTransactionGas)
         && minBuilderWithdrawabilityDelay == that.minBuilderWithdrawabilityDelay
         && payloadAttestationDueBps == that.payloadAttestationDueBps
         && payloadDueBps == that.payloadDueBps
@@ -233,6 +242,7 @@ public class SpecConfigGloasImpl extends DelegatingSpecConfigFulu implements Spe
         maxBuildersPerWithdrawalsSweep,
         maxPayloadAttestations,
         maxRequestPayloads,
+        minTransactionGas,
         minBuilderWithdrawabilityDelay,
         payloadAttestationDueBps,
         payloadDueBps,
