@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.spec.config.builder;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 
 import java.util.ArrayList;
@@ -119,6 +120,8 @@ public class GloasBuilder extends BaseForkBuilder
 
   public GloasBuilder minTransactionGas(final UInt64 minTransactionGas) {
     checkNotNull(minTransactionGas);
+    // it divides the gas limit when bounding the number of transactions in a payload
+    checkArgument(!minTransactionGas.isZero(), "MIN_TRANSACTION_GAS must be positive");
     this.minTransactionGas = minTransactionGas;
     return this;
   }
@@ -281,5 +284,8 @@ public class GloasBuilder extends BaseForkBuilder
   }
 
   @Override
-  public void addOverridableItemsToRawConfig(final BiConsumer<String, Object> rawConfig) {}
+  public void addOverridableItemsToRawConfig(final BiConsumer<String, Object> rawConfig) {
+    // publish the effective value, which may be the default when the network config omits it
+    rawConfig.accept("MIN_TRANSACTION_GAS", minTransactionGas);
+  }
 }
