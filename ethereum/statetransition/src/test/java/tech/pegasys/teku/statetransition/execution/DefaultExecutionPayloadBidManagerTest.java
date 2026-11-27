@@ -44,6 +44,7 @@ import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionPerformanc
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.SafeFutureAssert;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
+import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -69,6 +70,8 @@ import tech.pegasys.teku.statetransition.validation.ExecutionPayloadBidGossipVal
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 
 public class DefaultExecutionPayloadBidManagerTest {
+  private static final Optional<UInt64> CURRENT_TIME = Optional.of(UInt64.valueOf(10_000));
+
   @SuppressWarnings("unchecked")
   private final Supplier<Optional<ReadOnlyForkChoiceStrategy>> forkChoiceStrategySupplier =
       mock(Supplier.class);
@@ -96,6 +99,9 @@ public class DefaultExecutionPayloadBidManagerTest {
   private final OperationAddedSubscriber<SignedExecutionPayloadBid> operationAddedSubscriber =
       mock(OperationAddedSubscriber.class);
 
+  private final StubTimeProvider timeProvider =
+      StubTimeProvider.withTimeInMillis(CURRENT_TIME.orElseThrow());
+
   private final DefaultExecutionPayloadBidManager executionPayloadBidManager =
       new DefaultExecutionPayloadBidManager(
           spec,
@@ -106,7 +112,8 @@ public class DefaultExecutionPayloadBidManagerTest {
           builderBidFetcher,
           bidSelector,
           forkChoiceStrategySupplier,
-          true);
+          true,
+          timeProvider);
 
   @BeforeEach
   public void setup() {
@@ -123,7 +130,7 @@ public class DefaultExecutionPayloadBidManagerTest {
         createBid(UInt64.valueOf(10), dataStructureUtil.randomBytes32(), UInt64.ONE);
     executionPayloadBidManager.onSlot(signedExecutionPayloadBid.getMessage().getSlot());
     final SafeFuture<InternalValidationResult> validation = new SafeFuture<>();
-    when(executionPayloadBidGossipValidator.validate(signedExecutionPayloadBid))
+    when(executionPayloadBidGossipValidator.validate(signedExecutionPayloadBid, CURRENT_TIME))
         .thenReturn(validation);
     final ReadOnlyForkChoiceStrategy forkChoiceStrategy = mock(ReadOnlyForkChoiceStrategy.class);
     final Bytes32 root = dataStructureUtil.randomBytes32();
@@ -153,7 +160,7 @@ public class DefaultExecutionPayloadBidManagerTest {
             ACCEPT, InternalValidationResult.IGNORE, InternalValidationResult.reject("invalid"))) {
       final SignedExecutionPayloadBid signedBid =
           createBid(UInt64.valueOf(10), dataStructureUtil.randomBytes32(), UInt64.ONE);
-      when(executionPayloadBidGossipValidator.validate(signedBid))
+      when(executionPayloadBidGossipValidator.validate(signedBid, CURRENT_TIME))
           .thenReturn(SafeFuture.completedFuture(result));
       assertThat(executionPayloadBidManager.validateAndAddBid(signedBid, RemoteBidOrigin.P2P))
           .isCompletedWithValue(result);
@@ -314,7 +321,8 @@ public class DefaultExecutionPayloadBidManagerTest {
             builderBidFetcher,
             bidSelector,
             forkChoiceStrategySupplier,
-            false);
+            false,
+            timeProvider);
     executionPayloadBidManager.subscribeOperationAdded(operationAddedSubscriber);
 
     final UInt64 slot = UInt64.valueOf(10);
@@ -324,7 +332,7 @@ public class DefaultExecutionPayloadBidManagerTest {
 
     final SignedExecutionPayloadBid p2pBid =
         createBid(slot, parentRoot, parentBlockHash, UInt64.valueOf(300));
-    when(executionPayloadBidGossipValidator.validate(p2pBid))
+    when(executionPayloadBidGossipValidator.validate(p2pBid, CURRENT_TIME))
         .thenReturn(SafeFuture.completedFuture(ACCEPT));
     SafeFutureAssert.safeJoin(
         executionPayloadBidManager.validateAndAddBid(p2pBid, RemoteBidOrigin.P2P));
@@ -438,11 +446,64 @@ public class DefaultExecutionPayloadBidManagerTest {
   }
 
   @Test
+  public void validatesBidWithItsArrivalTimestamp() {
+    final SignedExecutionPayloadBid signedBid =
+        createBid(UInt64.valueOf(10), dataStructureUtil.randomBytes32(), UInt64.valueOf(100));
+    final Optional<UInt64> arrivalTimestamp = Optional.of(UInt64.valueOf(1_234));
+
+    when(executionPayloadBidGossipValidator.validate(signedBid, arrivalTimestamp))
+        .thenReturn(SafeFuture.completedFuture(InternalValidationResult.IGNORE));
+
+    assertThat(
+            executionPayloadBidManager.validateAndAddBid(
+                signedBid, RemoteBidOrigin.P2P, arrivalTimestamp))
+        .isCompletedWithValue(InternalValidationResult.IGNORE);
+    verify(executionPayloadBidGossipValidator).validate(signedBid, arrivalTimestamp);
+  }
+
+  @Test
+  public void validatesBidWithoutArrivalTimestampAtTheCurrentTime() {
+    final SignedExecutionPayloadBid signedBid =
+        createBid(UInt64.valueOf(10), dataStructureUtil.randomBytes32(), UInt64.valueOf(100));
+
+    when(executionPayloadBidGossipValidator.validate(signedBid, CURRENT_TIME))
+        .thenReturn(SafeFuture.completedFuture(ACCEPT));
+
+    assertThat(executionPayloadBidManager.validateAndAddBid(signedBid, RemoteBidOrigin.BUILDER))
+        .isCompletedWithValue(ACCEPT);
+    verify(executionPayloadBidGossipValidator).validate(signedBid, CURRENT_TIME);
+  }
+
+  @Test
+  public void retriesBidSavedForFutureAtTheTimeOfTheRetry() {
+    final UInt64 slot = UInt64.valueOf(10);
+    final SignedExecutionPayloadBid signedBid =
+        createBid(slot, dataStructureUtil.randomBytes32(), UInt64.valueOf(100));
+    executionPayloadBidManager.onSlot(slot);
+    final Optional<UInt64> arrivalTimestamp = Optional.of(UInt64.valueOf(1_234));
+    when(executionPayloadBidGossipValidator.validate(signedBid, arrivalTimestamp))
+        .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE));
+    SafeFutureAssert.safeJoin(
+        executionPayloadBidManager.validateAndAddBid(
+            signedBid, RemoteBidOrigin.P2P, arrivalTimestamp));
+
+    timeProvider.advanceTimeByMillis(50);
+    final Optional<UInt64> retryTimestamp = Optional.of(timeProvider.getTimeInMillis());
+    when(executionPayloadBidGossipValidator.validate(signedBid, retryTimestamp))
+        .thenReturn(SafeFuture.completedFuture(ACCEPT));
+    executionPayloadBidManager.onSlot(slot);
+
+    verify(executionPayloadBidGossipValidator).validate(signedBid, retryTimestamp);
+    verify(receivedExecutionPayloadBidEventsChannelPublisher)
+        .onExecutionPayloadBidValidated(signedBid);
+  }
+
+  @Test
   public void doesNotStoreBidWhenValidationDoesNotAccept() {
     final SignedExecutionPayloadBid signedBid =
         createBid(UInt64.valueOf(10), dataStructureUtil.randomBytes32(), UInt64.valueOf(100));
 
-    when(executionPayloadBidGossipValidator.validate(signedBid))
+    when(executionPayloadBidGossipValidator.validate(signedBid, CURRENT_TIME))
         .thenReturn(SafeFuture.completedFuture(InternalValidationResult.reject("nope")));
 
     SafeFutureAssert.safeJoin(
@@ -457,7 +518,7 @@ public class DefaultExecutionPayloadBidManagerTest {
   public void acceptedBuilderBidNotifiesSubscriberAsLocal() {
     final SignedExecutionPayloadBid signedBid =
         createBid(UInt64.valueOf(10), dataStructureUtil.randomBytes32(), UInt64.valueOf(100));
-    when(executionPayloadBidGossipValidator.validate(signedBid))
+    when(executionPayloadBidGossipValidator.validate(signedBid, CURRENT_TIME))
         .thenReturn(SafeFuture.completedFuture(ACCEPT));
 
     SafeFutureAssert.safeJoin(
@@ -470,7 +531,7 @@ public class DefaultExecutionPayloadBidManagerTest {
   public void acceptedP2pBidNotifiesSubscriberAsFromNetwork() {
     final SignedExecutionPayloadBid signedBid =
         createBid(UInt64.valueOf(10), dataStructureUtil.randomBytes32(), UInt64.valueOf(100));
-    when(executionPayloadBidGossipValidator.validate(signedBid))
+    when(executionPayloadBidGossipValidator.validate(signedBid, CURRENT_TIME))
         .thenReturn(SafeFuture.completedFuture(ACCEPT));
 
     SafeFutureAssert.safeJoin(
@@ -496,7 +557,8 @@ public class DefaultExecutionPayloadBidManagerTest {
             throw new RuntimeException(e);
           }
         });
-    when(executionPayloadBidGossipValidator.validate(signedBid)).thenReturn(validationFuture);
+    when(executionPayloadBidGossipValidator.validate(signedBid, CURRENT_TIME))
+        .thenReturn(validationFuture);
 
     final SafeFuture<InternalValidationResult> result =
         executionPayloadBidManager.validateAndAddBid(signedBid, RemoteBidOrigin.BUILDER);
@@ -519,7 +581,7 @@ public class DefaultExecutionPayloadBidManagerTest {
     final SignedExecutionPayloadBid signedBid =
         createBid(slot, dataStructureUtil.randomBytes32(), UInt64.valueOf(100));
     executionPayloadBidManager.onSlot(slot);
-    when(executionPayloadBidGossipValidator.validate(signedBid))
+    when(executionPayloadBidGossipValidator.validate(signedBid, CURRENT_TIME))
         .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE))
         .thenReturn(SafeFuture.completedFuture(ACCEPT));
 
@@ -535,7 +597,7 @@ public class DefaultExecutionPayloadBidManagerTest {
 
     executionPayloadBidManager.onSlot(slot);
 
-    verify(executionPayloadBidGossipValidator, times(2)).validate(signedBid);
+    verify(executionPayloadBidGossipValidator, times(2)).validate(signedBid, CURRENT_TIME);
     verify(receivedExecutionPayloadBidEventsChannelPublisher)
         .onExecutionPayloadBidValidated(signedBid);
     verify(operationAddedSubscriber).onOperationAdded(signedBid, ACCEPT, false);
@@ -547,7 +609,7 @@ public class DefaultExecutionPayloadBidManagerTest {
     final SignedExecutionPayloadBid signedBid =
         createBid(slot, dataStructureUtil.randomBytes32(), UInt64.valueOf(100));
     executionPayloadBidManager.onSlot(slot);
-    when(executionPayloadBidGossipValidator.validate(signedBid))
+    when(executionPayloadBidGossipValidator.validate(signedBid, CURRENT_TIME))
         .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE))
         .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE))
         .thenReturn(SafeFuture.completedFuture(ACCEPT));
@@ -557,7 +619,7 @@ public class DefaultExecutionPayloadBidManagerTest {
     executionPayloadBidManager.onSlot(slot);
     executionPayloadBidManager.onSlot(slot);
 
-    verify(executionPayloadBidGossipValidator, times(3)).validate(signedBid);
+    verify(executionPayloadBidGossipValidator, times(3)).validate(signedBid, CURRENT_TIME);
     verify(receivedExecutionPayloadBidEventsChannelPublisher)
         .onExecutionPayloadBidValidated(signedBid);
     verify(operationAddedSubscriber).onOperationAdded(signedBid, ACCEPT, false);
@@ -580,7 +642,7 @@ public class DefaultExecutionPayloadBidManagerTest {
 
     // Queue the bids in an order that is neither the expected retry order nor its reverse
     for (final SignedExecutionPayloadBid signedBid : List.of(midBid, lowBid, highBid)) {
-      when(executionPayloadBidGossipValidator.validate(signedBid))
+      when(executionPayloadBidGossipValidator.validate(signedBid, CURRENT_TIME))
           .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE))
           .thenReturn(SafeFuture.completedFuture(ACCEPT));
       SafeFutureAssert.safeJoin(
@@ -592,9 +654,9 @@ public class DefaultExecutionPayloadBidManagerTest {
     executionPayloadBidManager.onSlot(slot);
 
     final InOrder inOrder = inOrder(executionPayloadBidGossipValidator);
-    inOrder.verify(executionPayloadBidGossipValidator).validate(highBid);
-    inOrder.verify(executionPayloadBidGossipValidator).validate(midBid);
-    inOrder.verify(executionPayloadBidGossipValidator).validate(lowBid);
+    inOrder.verify(executionPayloadBidGossipValidator).validate(highBid, CURRENT_TIME);
+    inOrder.verify(executionPayloadBidGossipValidator).validate(midBid, CURRENT_TIME);
+    inOrder.verify(executionPayloadBidGossipValidator).validate(lowBid, CURRENT_TIME);
     inOrder.verifyNoMoreInteractions();
   }
 
@@ -604,7 +666,7 @@ public class DefaultExecutionPayloadBidManagerTest {
     final SignedExecutionPayloadBid signedBid =
         createBid(slot, dataStructureUtil.randomBytes32(), UInt64.valueOf(100));
     executionPayloadBidManager.onSlot(slot);
-    when(executionPayloadBidGossipValidator.validate(signedBid))
+    when(executionPayloadBidGossipValidator.validate(signedBid, CURRENT_TIME))
         .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE))
         .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE))
         .thenReturn(SafeFuture.completedFuture(ACCEPT));
@@ -625,14 +687,14 @@ public class DefaultExecutionPayloadBidManagerTest {
     final SignedExecutionPayloadBid signedBid =
         createBid(slot, dataStructureUtil.randomBytes32(), UInt64.valueOf(100));
     executionPayloadBidManager.onSlot(slot);
-    when(executionPayloadBidGossipValidator.validate(signedBid))
+    when(executionPayloadBidGossipValidator.validate(signedBid, CURRENT_TIME))
         .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE));
 
     SafeFutureAssert.safeJoin(
         executionPayloadBidManager.validateAndAddBid(signedBid, RemoteBidOrigin.P2P));
     executionPayloadBidManager.onSlot(slot.plus(1));
 
-    verify(executionPayloadBidGossipValidator).validate(signedBid);
+    verify(executionPayloadBidGossipValidator).validate(signedBid, CURRENT_TIME);
     verify(receivedExecutionPayloadBidEventsChannelPublisher, never())
         .onExecutionPayloadBidValidated(signedBid);
   }
@@ -643,7 +705,7 @@ public class DefaultExecutionPayloadBidManagerTest {
     final SignedExecutionPayloadBid signedBid =
         createBid(slot, dataStructureUtil.randomBytes32(), UInt64.valueOf(100));
     executionPayloadBidManager.onSlot(slot);
-    when(executionPayloadBidGossipValidator.validate(signedBid))
+    when(executionPayloadBidGossipValidator.validate(signedBid, CURRENT_TIME))
         .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE))
         .thenReturn(SafeFuture.completedFuture(InternalValidationResult.IGNORE));
 
@@ -652,7 +714,7 @@ public class DefaultExecutionPayloadBidManagerTest {
     executionPayloadBidManager.onSlot(slot);
     executionPayloadBidManager.onSlot(slot);
 
-    verify(executionPayloadBidGossipValidator, times(2)).validate(signedBid);
+    verify(executionPayloadBidGossipValidator, times(2)).validate(signedBid, CURRENT_TIME);
   }
 
   @Test
@@ -661,7 +723,7 @@ public class DefaultExecutionPayloadBidManagerTest {
     final SignedExecutionPayloadBid signedBid =
         createBid(slot, dataStructureUtil.randomBytes32(), UInt64.valueOf(100));
     executionPayloadBidManager.onSlot(slot);
-    when(executionPayloadBidGossipValidator.validate(signedBid))
+    when(executionPayloadBidGossipValidator.validate(signedBid, CURRENT_TIME))
         .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE))
         .thenReturn(SafeFuture.completedFuture(InternalValidationResult.reject("invalid")));
 
@@ -670,7 +732,7 @@ public class DefaultExecutionPayloadBidManagerTest {
     executionPayloadBidManager.onSlot(slot);
     executionPayloadBidManager.onSlot(slot);
 
-    verify(executionPayloadBidGossipValidator, times(2)).validate(signedBid);
+    verify(executionPayloadBidGossipValidator, times(2)).validate(signedBid, CURRENT_TIME);
   }
 
   @Test
@@ -681,7 +743,7 @@ public class DefaultExecutionPayloadBidManagerTest {
     final SignedExecutionPayloadBid signedBid =
         createBid(slot, dataStructureUtil.randomBytes32(), UInt64.valueOf(100));
     executionPayloadBidManager.onSlot(slot);
-    when(executionPayloadBidGossipValidator.validate(signedBid))
+    when(executionPayloadBidGossipValidator.validate(signedBid, CURRENT_TIME))
         .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE))
         .thenReturn(SafeFuture.completedFuture(ACCEPT));
 
@@ -689,7 +751,7 @@ public class DefaultExecutionPayloadBidManagerTest {
         executionPayloadBidManager.validateAndAddBid(signedBid, RemoteBidOrigin.BUILDER));
     executionPayloadBidManager.onOperationAdded(preferences, ACCEPT, true);
 
-    verify(executionPayloadBidGossipValidator, times(2)).validate(signedBid);
+    verify(executionPayloadBidGossipValidator, times(2)).validate(signedBid, CURRENT_TIME);
     verify(receivedExecutionPayloadBidEventsChannelPublisher)
         .onExecutionPayloadBidValidated(signedBid);
   }
@@ -700,7 +762,7 @@ public class DefaultExecutionPayloadBidManagerTest {
     final SignedExecutionPayloadBid signedBid =
         createBid(UInt64.valueOf(10), parentBlock.getRoot(), UInt64.valueOf(100));
     executionPayloadBidManager.onSlot(signedBid.getMessage().getSlot());
-    when(executionPayloadBidGossipValidator.validate(signedBid))
+    when(executionPayloadBidGossipValidator.validate(signedBid, CURRENT_TIME))
         .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE))
         .thenReturn(SafeFuture.completedFuture(ACCEPT));
 
@@ -708,7 +770,7 @@ public class DefaultExecutionPayloadBidManagerTest {
         executionPayloadBidManager.validateAndAddBid(signedBid, RemoteBidOrigin.P2P));
     executionPayloadBidManager.onBlockImported(parentBlock, false);
 
-    verify(executionPayloadBidGossipValidator, times(2)).validate(signedBid);
+    verify(executionPayloadBidGossipValidator, times(2)).validate(signedBid, CURRENT_TIME);
     verify(executionPayloadBidCircuitBreaker).observeImportedBlock(parentBlock);
     verify(receivedExecutionPayloadBidEventsChannelPublisher)
         .onExecutionPayloadBidValidated(signedBid);
@@ -722,7 +784,7 @@ public class DefaultExecutionPayloadBidManagerTest {
     final SignedExecutionPayloadBid signedBid =
         createBid(UInt64.valueOf(10), parentBlock.getRoot(), UInt64.valueOf(100));
     executionPayloadBidManager.onSlot(signedBid.getMessage().getSlot());
-    when(executionPayloadBidGossipValidator.validate(signedBid))
+    when(executionPayloadBidGossipValidator.validate(signedBid, CURRENT_TIME))
         .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE))
         .thenReturn(SafeFuture.completedFuture(ACCEPT));
 
@@ -730,7 +792,7 @@ public class DefaultExecutionPayloadBidManagerTest {
         executionPayloadBidManager.validateAndAddBid(signedBid, RemoteBidOrigin.P2P));
     executionPayloadBidManager.onExecutionPayloadImported(executionPayload, false);
 
-    verify(executionPayloadBidGossipValidator, times(2)).validate(signedBid);
+    verify(executionPayloadBidGossipValidator, times(2)).validate(signedBid, CURRENT_TIME);
     verify(receivedExecutionPayloadBidEventsChannelPublisher)
         .onExecutionPayloadBidValidated(signedBid);
   }
@@ -744,7 +806,7 @@ public class DefaultExecutionPayloadBidManagerTest {
         createBid(UInt64.valueOf(10), parentBlock.getRoot(), UInt64.valueOf(100));
     executionPayloadBidManager.onSlot(signedBid.getMessage().getSlot());
     final SafeFuture<InternalValidationResult> retryResult = new SafeFuture<>();
-    when(executionPayloadBidGossipValidator.validate(signedBid))
+    when(executionPayloadBidGossipValidator.validate(signedBid, CURRENT_TIME))
         .thenReturn(SafeFuture.completedFuture(SAVE_FOR_FUTURE))
         .thenReturn(retryResult);
 
@@ -753,7 +815,7 @@ public class DefaultExecutionPayloadBidManagerTest {
     executionPayloadBidManager.onBlockImported(parentBlock, false);
     executionPayloadBidManager.onExecutionPayloadImported(executionPayload, false);
 
-    verify(executionPayloadBidGossipValidator, times(2)).validate(signedBid);
+    verify(executionPayloadBidGossipValidator, times(2)).validate(signedBid, CURRENT_TIME);
     retryResult.complete(ACCEPT);
     verify(receivedExecutionPayloadBidEventsChannelPublisher)
         .onExecutionPayloadBidValidated(signedBid);
@@ -871,7 +933,7 @@ public class DefaultExecutionPayloadBidManagerTest {
 
   private void addAcceptedBid(
       final DefaultExecutionPayloadBidManager manager, final SignedExecutionPayloadBid signedBid) {
-    when(executionPayloadBidGossipValidator.validate(signedBid))
+    when(executionPayloadBidGossipValidator.validate(signedBid, CURRENT_TIME))
         .thenReturn(SafeFuture.completedFuture(ACCEPT));
     SafeFutureAssert.safeJoin(manager.validateAndAddBid(signedBid, RemoteBidOrigin.P2P));
   }

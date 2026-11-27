@@ -46,6 +46,7 @@ import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.ssz.SszMutableList;
+import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
@@ -90,6 +91,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
   private final GossipValidationHelper gossipValidationHelper = mock(GossipValidationHelper.class);
   private final ProposerPreferencesManager proposerPreferencesManager =
       mock(ProposerPreferencesManager.class);
+  private final StubTimeProvider timeProvider = StubTimeProvider.withTimeInMillis(0);
   private ExecutionPayloadBidGossipValidator bidValidator;
   private DataStructureUtil dataStructureUtil;
   private SignedExecutionPayloadBid signedBid;
@@ -163,7 +165,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .thenReturn(Optional.of(proposerPreferences));
 
     when(gossipValidationHelper.isSlotCurrentOrNext(slot)).thenReturn(true);
-    when(gossipValidationHelper.isPreviousSlotPayloadAttestationDeadlineReached(any()))
+    when(gossipValidationHelper.isPreviousSlotPayloadAttestationDeadlineReached(any(), any()))
         .thenReturn(true);
     when(gossipValidationHelper.isWithinParentProposerLookahead(any(), any())).thenReturn(true);
     when(gossipValidationHelper.getShufflingDependentRoot(parentBlockRoot, slot))
@@ -212,7 +214,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
             null,
             null,
             () -> Optional.of(forkChoiceStrategy),
-            true);
+            true,
+            timeProvider);
     manager.onSlot(slot);
     when(proposerPreferencesManager.getProposerPreferences(slot, dependentRoot))
         .thenReturn(Optional.empty());
@@ -279,7 +282,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
             null,
             null,
             () -> Optional.of(forkChoiceStrategy),
-            true);
+            true,
+            timeProvider);
     manager.onSlot(slot);
     when(gossipValidationHelper.getSlotForBlockRoot(parentBlockRoot)).thenReturn(Optional.empty());
     when(forkChoiceStrategy.getAncestor(eq(parentBlockRoot), any())).thenReturn(Optional.empty());
@@ -356,7 +360,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
             null,
             null,
             () -> Optional.of(forkChoiceStrategy),
-            true);
+            true,
+            timeProvider);
     manager.onSlot(slot);
     when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
@@ -406,7 +411,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
             null,
             null,
             () -> Optional.of(forkChoiceStrategy),
-            true);
+            true,
+            timeProvider);
     manager.onSlot(slot);
     when(proposerPreferencesManager.getProposerPreferences(slot, dependentRoot))
         .thenReturn(Optional.empty());
@@ -451,7 +457,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
             null,
             null,
             () -> Optional.of(forkChoiceStrategy),
-            true);
+            true,
+            timeProvider);
     manager.onSlot(slot);
     when(gossipValidationHelper.getGasLimitForExecutionPayload(parentBlockRoot, parentBlockHash))
         .thenReturn(Optional.empty());
@@ -524,7 +531,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
 
   @TestTemplate
   void shouldIgnore_whenReceivedBeforePreviousSlotPayloadAttestationDeadline() {
-    when(gossipValidationHelper.isPreviousSlotPayloadAttestationDeadlineReached(slot))
+    when(gossipValidationHelper.isPreviousSlotPayloadAttestationDeadlineReached(
+            slot, Optional.empty()))
         .thenReturn(false);
     assertThatSafeFuture(bidValidator.validate(signedBid))
         .isCompletedWithValue(
@@ -535,12 +543,29 @@ public class ExecutionPayloadBidGossipValidatorTest {
   }
 
   @TestTemplate
+  void shouldJudgeBidTimingByArrivalTimestamp() {
+    final Optional<UInt64> earlyArrival = Optional.of(UInt64.valueOf(1_000));
+    final Optional<UInt64> onTimeArrival = Optional.of(UInt64.valueOf(2_000));
+    when(gossipValidationHelper.isPreviousSlotPayloadAttestationDeadlineReached(slot, earlyArrival))
+        .thenReturn(false);
+
+    assertThatSafeFuture(bidValidator.validate(signedBid, earlyArrival))
+        .isCompletedWithValue(
+            ignoreBid(
+                signedBid,
+                "received before the payload attestation deadline of the previous slot"));
+    assertThatSafeFuture(bidValidator.validate(signedBid, onTimeArrival))
+        .isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
   void shouldIgnoreEarlyBidBeforeRejectingExecutionPayment() {
     final SignedExecutionPayloadBid bidWithPayment =
         dataStructureUtil.randomSignedExecutionPayloadBid(UInt64.ONE);
     final UInt64 bidSlot = bidWithPayment.getMessage().getSlot();
     when(gossipValidationHelper.isSlotCurrentOrNext(bidSlot)).thenReturn(true);
-    when(gossipValidationHelper.isPreviousSlotPayloadAttestationDeadlineReached(bidSlot))
+    when(gossipValidationHelper.isPreviousSlotPayloadAttestationDeadlineReached(
+            bidSlot, Optional.empty()))
         .thenReturn(false);
 
     assertThatSafeFuture(bidValidator.validate(bidWithPayment))

@@ -77,6 +77,16 @@ public class ExecutionPayloadBidGossipValidator {
 
   public SafeFuture<InternalValidationResult> validate(
       final SignedExecutionPayloadBid signedExecutionPayloadBid) {
+    return validate(signedExecutionPayloadBid, Optional.empty());
+  }
+
+  /**
+   * @param arrivalTimestamp the time the bid was received, when known. It decides whether the bid
+   *     was received too early, so a bid is not judged by the time validation happens to run.
+   */
+  public SafeFuture<InternalValidationResult> validate(
+      final SignedExecutionPayloadBid signedExecutionPayloadBid,
+      final Optional<UInt64> arrivalTimestamp) {
     final ExecutionPayloadBid bid = signedExecutionPayloadBid.getMessage();
 
     /*
@@ -110,7 +120,8 @@ public class ExecutionPayloadBidGossipValidator {
     /*
      * [IGNORE] The bid is received after the payload attestation deadline of the previous slot
      */
-    if (!gossipValidationHelper.isPreviousSlotPayloadAttestationDeadlineReached(bid.getSlot())) {
+    if (!gossipValidationHelper.isPreviousSlotPayloadAttestationDeadlineReached(
+        bid.getSlot(), arrivalTimestamp)) {
       return completedFuture(
           ignoreBid(bid, "received before the payload attestation deadline of the previous slot"));
     }

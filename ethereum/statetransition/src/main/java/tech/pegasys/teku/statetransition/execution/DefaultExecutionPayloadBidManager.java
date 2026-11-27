@@ -34,6 +34,7 @@ import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionPerformanc
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.subscribers.Subscribers;
+import tech.pegasys.teku.infrastructure.time.TimeProvider;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecVersion;
@@ -75,6 +76,7 @@ public class DefaultExecutionPayloadBidManager
   private final ExecutionPayloadBidSelector bidSelector;
   private final Supplier<Optional<ReadOnlyForkChoiceStrategy>> forkChoiceStrategySupplier;
   private final boolean considerP2PBidsDuringBlockProduction;
+  private final TimeProvider timeProvider;
 
   private final Subscribers<OperationAddedSubscriber<SignedExecutionPayloadBid>> subscribers =
       Subscribers.create(true);
@@ -95,7 +97,8 @@ public class DefaultExecutionPayloadBidManager
       final BuilderBidFetcher builderBidFetcher,
       final ExecutionPayloadBidSelector bidSelector,
       final Supplier<Optional<ReadOnlyForkChoiceStrategy>> forkChoiceStrategySupplier,
-      final boolean considerP2PBidsDuringBlockProduction) {
+      final boolean considerP2PBidsDuringBlockProduction,
+      final TimeProvider timeProvider) {
     this.spec = spec;
     this.executionPayloadBidGossipValidator = executionPayloadBidGossipValidator;
     this.executionPayloadBidCircuitBreaker = executionPayloadBidCircuitBreaker;
@@ -106,12 +109,19 @@ public class DefaultExecutionPayloadBidManager
     this.bidSelector = bidSelector;
     this.forkChoiceStrategySupplier = forkChoiceStrategySupplier;
     this.considerP2PBidsDuringBlockProduction = considerP2PBidsDuringBlockProduction;
+    this.timeProvider = timeProvider;
   }
 
   @Override
   public SafeFuture<InternalValidationResult> validateAndAddBid(
-      final SignedExecutionPayloadBid signedBid, final RemoteBidOrigin remoteBidOrigin) {
-    return validateAndAddBid(signedBid, remoteBidOrigin == RemoteBidOrigin.P2P);
+      final SignedExecutionPayloadBid signedBid,
+      final RemoteBidOrigin remoteBidOrigin,
+      final Optional<UInt64> arrivalTimestamp) {
+    // A bid without an arrival timestamp is being submitted right now
+    return validateAndAddBid(
+        signedBid,
+        remoteBidOrigin == RemoteBidOrigin.P2P,
+        arrivalTimestamp.orElseGet(timeProvider::getTimeInMillis));
   }
 
   @Override
@@ -121,9 +131,11 @@ public class DefaultExecutionPayloadBidManager
   }
 
   private SafeFuture<InternalValidationResult> validateAndAddBid(
-      final SignedExecutionPayloadBid signedBid, final boolean fromNetwork) {
+      final SignedExecutionPayloadBid signedBid,
+      final boolean fromNetwork,
+      final UInt64 arrivalTimestamp) {
     return executionPayloadBidGossipValidator
-        .validate(signedBid)
+        .validate(signedBid, Optional.of(arrivalTimestamp))
         .thenApply(
             result -> {
               processValidationResult(signedBid, fromNetwork, result);
@@ -180,9 +192,14 @@ public class DefaultExecutionPayloadBidManager
     // bid limit, as long as each one beats the highest bid seen. Retry the highest value bids first
     // so lower bids are ignored where possible, instead of being forwarded and using up the limit.
     // Deferred gossip was ignored by gossipsub, so accepted retries must be explicitly published.
+    // A pending bid was not received too early, as that is checked before a bid can be saved for
+    // future processing, so the time of the retry stands in for its arrival timestamp.
+    final UInt64 retryTimestamp = timeProvider.getTimeInMillis();
     pendingBids.stream()
         .sorted(Comparator.comparing(DefaultExecutionPayloadBidManager::bidValue).reversed())
-        .forEach(pendingBid -> validateAndAddBid(pendingBid.signedBid(), false).finishError(LOG));
+        .forEach(
+            pendingBid ->
+                validateAndAddBid(pendingBid.signedBid(), false, retryTimestamp).finishError(LOG));
   }
 
   private static UInt64 bidValue(final PendingExecutionPayloadBid pendingBid) {
