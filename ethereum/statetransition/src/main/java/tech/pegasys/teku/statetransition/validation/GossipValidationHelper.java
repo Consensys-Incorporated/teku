@@ -15,6 +15,7 @@ package tech.pegasys.teku.statetransition.validation;
 
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
 import static tech.pegasys.teku.spec.config.SpecConfigGloas.BUILDER_INDEX_SELF_BUILD;
+import static tech.pegasys.teku.spec.constants.EthConstants.ETH_TO_GWEI;
 
 import java.util.Optional;
 import java.util.Set;
@@ -41,6 +42,7 @@ import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateAccessors;
 import tech.pegasys.teku.spec.logic.common.util.AttestationUtil;
 import tech.pegasys.teku.spec.logic.common.util.AttestationValidationResult;
@@ -376,6 +378,29 @@ public class GossipValidationHelper {
   }
 
   /**
+   * Returns true when a message received at {@code receivedAtMillis} was received no earlier than
+   * the payload attestation deadline of the slot before {@code slot}. Until then it is not decided
+   * whether the proposer of {@code slot} builds on the previous slot's payload. A slot before Gloas
+   * has no such deadline, so it is never reached.
+   *
+   * <p>No clock disparity allowance applies, so this takes the time of receipt rather than reading
+   * the store time, which only advances on ticks and would make a message received right at the
+   * deadline look early.
+   */
+  public boolean isPreviousSlotPayloadAttestationDeadlineReached(
+      final UInt64 slot, final UInt64 receivedAtMillis) {
+    return spec.getPayloadAttestationDueMillis(slot)
+        .map(
+            payloadAttestationDueMillis ->
+                !spec.isBeforeTimeInSlot(
+                    slot.minusMinZero(ONE),
+                    recentChainData.getGenesisTimeMillis(),
+                    receivedAtMillis,
+                    payloadAttestationDueMillis))
+        .orElse(false);
+  }
+
+  /**
    * Returns true when the block with the given {@code root} is a possible dependent block for the
    * epoch starting at {@code epochStartSlot} -- i.e. spec {@code is_valid_dependent_root}. That
    * holds when, on some branch, the block is or could become the latest block prior to the start of
@@ -428,6 +453,21 @@ public class GossipValidationHelper {
         .canBuilderCoverBid(state, builderIndex, bidValue);
   }
 
+  /**
+   * Spec {@code get_builder_bid_limit}: the number of bids the builder may submit for each slot and
+   * parent, i.e. one bid per ETH of builder balance, excluding the balance owed in pending
+   * withdrawals.
+   */
+  public UInt64 getBuilderBidLimit(
+      final UInt64 builderIndex, final BeaconState state, final UInt64 slot) {
+    final UInt64 balance =
+        BeaconStateGloas.required(state).getBuilders().get(builderIndex.intValue()).getBalance();
+    final UInt64 pendingWithdrawalsAmount =
+        BeaconStateAccessorsGloas.required(spec.atSlot(slot).beaconStateAccessors())
+            .getPendingBalanceToWithdrawForBuilder(state, builderIndex);
+    return balance.minusMinZero(pendingWithdrawalsAmount).dividedBy(ETH_TO_GWEI);
+  }
+
   public boolean isBlockHashKnown(final Bytes32 blockHash, final Bytes32 blockRoot) {
     final Optional<Bytes32> maybeBlockHash =
         recentChainData.getExecutionBlockHashForBlockRoot(blockRoot);
@@ -446,6 +486,24 @@ public class GossipValidationHelper {
   public Optional<UInt64> getGasLimitForExecutionPayload(
       final Bytes32 blockRoot, final Bytes32 blockHash) {
     return recentChainData.getExecutionGasLimitForBlockRootAndHash(blockRoot, blockHash);
+  }
+
+  /**
+   * Returns the highest gas limit the EIP-1559 transition rule allows for the execution payload of
+   * {@code block}, given the gas limit of the parent payload, i.e. the payload of the closest full
+   * ancestor. If that payload is unknown, the bid's gas limit is the bound.
+   *
+   * <p>Instead of walking the ancestors as the spec does, this relies on fork choice: the nodes of
+   * a block that builds on its parent's EMPTY variant inherit the execution block hash and gas
+   * limit of the parent's own execution parent, so the parent's node carrying the bid's parent
+   * block hash already holds the gas limit of the closest full ancestor's payload.
+   */
+  public UInt64 getMaxPayloadGasLimit(final BeaconBlock block, final ExecutionPayloadBid bid) {
+    return recentChainData
+        .getExecutionGasLimitForBlockRootAndHash(block.getParentRoot(), bid.getParentBlockHash())
+        .map(
+            parentGasLimit -> parentGasLimit.plus(parentGasLimit.dividedBy(1024).minusMinZero(ONE)))
+        .orElse(bid.getGasLimit());
   }
 
   public boolean isBidCompatibleWithHead(final ExecutionPayloadBid bid) {
@@ -478,7 +536,12 @@ public class GossipValidationHelper {
     final boolean buildsOnParentPayload =
         bid.getParentBlockHash().equals(headBid.getParentBlockHash());
     if (buildsOnParentBlock && buildsOnParentPayload) {
-      return true;
+      // A proposer only builds on the head's parent to re-org the head
+      final boolean bidSlotOk = head.getSlot().increment().equals(bid.getSlot());
+      // TODO: https://github.com/Consensys-Incorporated/teku/issues/10608
+      // also accept the bid when the head's proposer equivocated (is_proposer_equivocation), once
+      // fork choice can answer that without scanning all of its blocks
+      return bidSlotOk && recentChainData.isBlockLate(head.getRoot());
     }
     if (!bid.getParentBlockRoot().equals(head.getRoot())) {
       return false;

@@ -39,6 +39,7 @@ import tech.pegasys.teku.spec.SpecVersion;
 import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBidSchema;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
@@ -127,6 +128,9 @@ public class ExecutionPayloadGossipValidatorTest {
     when(gossipValidationHelper.isSignatureValidWithRespectToBuilderIndex(
             any(), any(), any(), any()))
         .thenReturn(true);
+    // A gas limit that allows the payload's transactions
+    when(gossipValidationHelper.getMaxPayloadGasLimit(any(), any()))
+        .thenReturn(UInt64.valueOf(30_000_000));
     // The payload content hashes to the block hash it declares
     when(gossipValidationHelper.computeExecutionPayloadBlockHash(any()))
         .thenAnswer(
@@ -287,6 +291,29 @@ public class ExecutionPayloadGossipValidatorTest {
             reject(
                 "Invalid payload gas limit. Execution Payload Envelope had %s but ExecutionPayload Bid had %s",
                 payload.getGasLimit(), bidGasLimit));
+  }
+
+  @TestTemplate
+  void shouldAcceptWhenTransactionsCountIsAtTheLimit() {
+    // MIN_TRANSACTION_GAS is 4096, so this gas limit allows exactly the single transaction
+    when(gossipValidationHelper.getMaxPayloadGasLimit(beaconBlock, getBid()))
+        .thenReturn(UInt64.valueOf(2 * 4096 - 1));
+
+    assertThatSafeFuture(validator.validate(signedEnvelope)).isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldRejectIfTooManyTransactions() {
+    // MIN_TRANSACTION_GAS is 4096, so this gas limit allows no transactions
+    final UInt64 maxGasLimit = UInt64.valueOf(4095);
+    when(gossipValidationHelper.getMaxPayloadGasLimit(beaconBlock, getBid()))
+        .thenReturn(maxGasLimit);
+
+    assertThatSafeFuture(validator.validate(signedEnvelope))
+        .isCompletedWithValue(
+            reject(
+                "Too many transactions. Execution payload envelope had %s but the maximum is %s for a gas limit of %s",
+                1, 0, maxGasLimit));
   }
 
   @TestTemplate
@@ -522,6 +549,10 @@ public class ExecutionPayloadGossipValidatorTest {
     when(gossipValidationHelper.retrieveBlockByRoot(blockRoot))
         .thenReturn(SafeFuture.completedFuture(Optional.of(blockWithParentRoot)));
     return blockWithParentRoot;
+  }
+
+  private ExecutionPayloadBid getBid() {
+    return beaconBlock.getBody().getOptionalSignedExecutionPayloadBid().orElseThrow().getMessage();
   }
 
   private BeaconState createBlockState(

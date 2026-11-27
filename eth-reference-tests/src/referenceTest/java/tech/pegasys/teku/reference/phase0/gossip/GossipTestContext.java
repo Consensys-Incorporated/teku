@@ -14,6 +14,7 @@
 package tech.pegasys.teku.reference.phase0.gossip;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.safeJoin;
 import static tech.pegasys.teku.reference.TestDataUtils.createAnchorFromStateAndMatchingBlock;
 import static tech.pegasys.teku.reference.TestDataUtils.loadSsz;
 
@@ -28,10 +29,12 @@ import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannelStub;
+import tech.pegasys.teku.spec.executionlayer.PayloadStatus;
 import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoice;
 import tech.pegasys.teku.statetransition.forkchoice.ForkChoiceStateProvider;
@@ -46,6 +49,7 @@ import tech.pegasys.teku.storage.api.LateBlockReorgPreparationHandler;
 import tech.pegasys.teku.storage.client.RecentChainData;
 import tech.pegasys.teku.storage.server.StateStorageMode;
 import tech.pegasys.teku.storage.storageSystem.InMemoryStorageSystemBuilder;
+import tech.pegasys.teku.storage.store.UpdatableStore;
 
 final class GossipTestContext {
 
@@ -116,6 +120,32 @@ final class GossipTestContext {
                     blockEntry.getBlock() + ".ssz_snappy",
                     spec::deserializeSignedBeaconBlock))
         .toList();
+  }
+
+  /**
+   * Reveals an execution payload in the store without running full envelope verification, marking
+   * its fork choice node FULL.
+   *
+   * <p>pyspec builds the store state of these fixtures directly and never verifies the revealed
+   * payloads, which need not match the gas limit the block's bid committed to (the bid gas limit
+   * tests exist precisely to vary the parent payload's gas limit), whereas {@code
+   * ForkChoice#onExecutionPayloadEnvelope} rightly refuses such a payload. Verification is the
+   * subject of the execution payload envelope message tests, not of the setup, so the store state
+   * is set up directly here.
+   */
+  void applyExecutionPayloadToStore(final SignedExecutionPayloadEnvelope signedEnvelope) {
+    final UpdatableStore.StoreTransaction transaction = recentChainData.startStoreTransaction();
+    spec.atSlot(signedEnvelope.getSlot())
+        .getForkChoiceUtil()
+        .applyExecutionPayloadToStore(transaction, signedEnvelope, false);
+    safeJoin(transaction.commit());
+    recentChainData
+        .getStore()
+        .getForkChoiceStrategy()
+        .onExecutionPayloadResult(signedEnvelope.getBeaconBlockRoot(), PayloadStatus.VALID, false);
+    // Recompute the head so it reflects the newly revealed payload; the full envelope import path
+    // does this itself, and without it the chain head keeps the payload status it had before.
+    safeJoin(forkChoice.processHead());
   }
 
   static void assertValidationResult(

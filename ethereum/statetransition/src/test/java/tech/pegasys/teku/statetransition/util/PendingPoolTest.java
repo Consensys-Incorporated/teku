@@ -457,7 +457,7 @@ public class PendingPoolTest {
     pendingBidPool.onSlot(slot);
 
     final PendingExecutionPayloadBid firstPendingBid =
-        new PendingExecutionPayloadBid(firstBid, Optional.empty());
+        new PendingExecutionPayloadBid(firstBid, Optional.empty(), UInt64.ZERO);
     pendingBidPool.add(firstPendingBid);
 
     assertThat(pendingBidPool.contains(firstBid.hashTreeRoot())).isTrue();
@@ -465,9 +465,9 @@ public class PendingPoolTest {
             pendingBidPool.getItemsDependingOn(firstBid.getMessage().getParentBlockRoot(), false))
         .containsExactly(firstPendingBid);
 
-    pendingBidPool.add(new PendingExecutionPayloadBid(secondBid, Optional.empty()));
-    pendingBidPool.add(new PendingExecutionPayloadBid(staleBid, Optional.empty()));
-    pendingBidPool.add(new PendingExecutionPayloadBid(farFutureBid, Optional.empty()));
+    pendingBidPool.add(new PendingExecutionPayloadBid(secondBid, Optional.empty(), UInt64.ZERO));
+    pendingBidPool.add(new PendingExecutionPayloadBid(staleBid, Optional.empty(), UInt64.ZERO));
+    pendingBidPool.add(new PendingExecutionPayloadBid(farFutureBid, Optional.empty(), UInt64.ZERO));
 
     assertThat(pendingBidPool.size()).isEqualTo(1);
     assertThat(pendingBidPool.contains(secondBid.hashTreeRoot())).isTrue();

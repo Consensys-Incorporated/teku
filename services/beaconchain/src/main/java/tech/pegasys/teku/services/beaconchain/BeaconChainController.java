@@ -1062,7 +1062,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
               builderBidFetcher,
               executionPayloadBidSelector,
               recentChainData::getForkChoiceStrategy,
-              beaconConfig.executionLayerConfig().getConsiderP2PBidsDuringBlockProduction());
+              beaconConfig.executionLayerConfig().getConsiderP2PBidsDuringBlockProduction(),
+              timeProvider);
       proposerPreferencesManager.subscribeOperationAdded(defaultExecutionPayloadBidManager);
       eventChannels.subscribe(SlotEventsChannel.class, defaultExecutionPayloadBidManager);
       eventChannels.subscribe(ReceivedBlockEventsChannel.class, defaultExecutionPayloadBidManager);
@@ -2236,7 +2237,8 @@ public class BeaconChainController extends Service implements BeaconChainControl
             .gossipedPayloadAttestationMessageProcessor(payloadAttestationPool::addRemote)
             .gossipedExecutionPayloadBidProcessor(
                 (signedBid, arrivalTimestamp) ->
-                    executionPayloadBidManager.validateAndAddBid(signedBid, RemoteBidOrigin.P2P))
+                    executionPayloadBidManager.validateAndAddBid(
+                        signedBid, RemoteBidOrigin.P2P, arrivalTimestamp))
             .gossipedProposerPreferencesProcessor(
                 (signedProposerPreferences, arrivalTimestamp) ->
                     proposerPreferencesManager.addRemote(signedProposerPreferences))
