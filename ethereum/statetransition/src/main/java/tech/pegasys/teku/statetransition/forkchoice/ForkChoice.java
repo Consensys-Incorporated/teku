@@ -20,7 +20,6 @@ import static tech.pegasys.teku.statetransition.forkchoice.StateRootCollector.ad
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
-import com.google.common.collect.Lists;
 import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.ints.IntSet;
 import java.net.ConnectException;
@@ -28,6 +27,9 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -114,8 +116,8 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
   public static final int BLOCK_CREATION_TOLERANCE_MS = 500;
 
   /**
-   * The most attestations {@link #onAttestations(List)} applies in one fork choice task, so that a
-   * large batch doesn't hold the fork choice thread for too long at a time.
+   * The most attestations applied in one fork choice task, so that a large batch doesn't hold the
+   * fork choice thread for too long at a time.
    */
   @VisibleForTesting static final int MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK = 1_000;
 
@@ -129,6 +131,9 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
   private final MergeTransitionBlockValidator transitionBlockValidator;
   private final AttestationStateSelector attestationStateSelector;
   private final DeferredAttestations deferredAttestations = new DeferredAttestations();
+  // Validated attestations waiting to have their votes applied on the fork choice thread
+  private final Queue<ValidatedAttestation> attestationsToApply = new ConcurrentLinkedQueue<>();
+  private final AtomicBoolean applyingQueuedAttestationsScheduled = new AtomicBoolean(false);
 
   private final Subscribers<OptimisticHeadSubscriber> optimisticSyncSubscribers =
       Subscribers.create(true);
@@ -319,9 +324,8 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
 
   /**
    * Processes attestations as {@link #onAttestation(ValidatableAttestation)} does, but applies the
-   * votes of those already validated together, up to {@link #MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK}
-   * of them in a single fork choice task and vote transaction, rather than submitting one task per
-   * attestation.
+   * votes of many attestations in a single fork choice task and vote transaction, rather than
+   * submitting one task per attestation.
    *
    * <p>Use it when many attestations are released at once, such as those waiting in the pending
    * pool for a block or payload that has just been imported. Those attestations usually had their
@@ -329,10 +333,10 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
    * would submit thousands of tasks to the fork choice thread within milliseconds and overflow its
    * queue, failing them along with anything else submitted meanwhile, such as block imports.
    *
-   * <p>An attestation that is still being validated, for example because its signature still has to
-   * be verified, is applied on its own once validated, so that no vote waits on another one. Those
-   * are paced by their validation, as all attestations were before their signatures were verified
-   * ahead of being deferred.
+   * <p>Each attestation is queued to be applied as soon as it has been validated, so that no vote
+   * waits on another one's validation, and the queue is drained by one fork choice task at a time
+   * (see {@link #scheduleApplyingQueuedAttestations()}). Attestations that finish validating
+   * together, for example because they waited on the same state, are applied together too.
    *
    * @return a result for each attestation, in the same order as {@code attestations}
    */
@@ -341,16 +345,19 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
     final List<SafeFuture<ValidatedAttestation>> validations =
         attestations.stream().map(this::validateAttestationForForkChoice).toList();
 
-    final List<SafeFuture<ValidatedAttestation>> validated = new ArrayList<>();
+    // Queue those already validated together, so that they share a task even with an idle thread
+    final List<ValidatedAttestation> validated = new ArrayList<>();
     for (final SafeFuture<ValidatedAttestation> validation : validations) {
-      if (validation.isDone()) {
-        validated.add(validation);
-      } else {
-        validation.always(() -> applyValidatedAttestations(List.of(validation)));
+      if (!validation.isDone()) {
+        validation.finish(
+            validatedAttestation -> queueToApply(List.of(validatedAttestation)),
+            // A failed validation only fails its own result
+            error -> {});
+      } else if (!validation.isCompletedExceptionally()) {
+        validated.add(validation.getImmediately());
       }
     }
-    Lists.partition(validated, MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK)
-        .forEach(this::applyValidatedAttestations);
+    queueToApply(validated);
 
     return validations.stream()
         .map(
@@ -396,54 +403,99 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
             });
   }
 
-  /** Applies the given attestations, which have all completed validation, in one task. */
-  private void applyValidatedAttestations(
-      final List<SafeFuture<ValidatedAttestation>> validations) {
+  private void queueToApply(final List<ValidatedAttestation> validatedAttestations) {
     final List<ValidatedAttestation> toApply =
-        validations.stream()
-            .filter(validation -> !validation.isCompletedExceptionally())
-            .map(SafeFuture::getImmediately)
+        validatedAttestations.stream()
             .filter(ValidatedAttestation::requiresForkChoiceThread)
             .toList();
     if (toApply.isEmpty()) {
       return;
     }
-    onForkChoiceThread(
-            () -> {
-              final ForkChoiceStrategy forkChoiceStrategy = getForkChoiceStrategy();
-              VoteUpdater transaction = null;
-              for (final ValidatedAttestation attestation : toApply) {
-                // An error applying one attestation only fails that attestation. Votes it already
-                // applied to the transaction are committed with the others: they come from a valid
-                // attestation, so counting only some of them is no worse than counting none.
-                try {
-                  final IndexedAttestationLight indexedAttestation =
-                      attestation.indexedAttestation();
-                  if (isFullPayloadVoteMissingTarget(
-                      forkChoiceStrategy,
-                      indexedAttestation.data().getBeaconBlockRoot(),
-                      attestation.fullPayloadHint())) {
-                    attestation.complete(AttestationProcessingResult.UNKNOWN_EXECUTION_PAYLOAD);
-                  } else if (attestation.validationResult().isSuccessful()) {
-                    if (transaction == null) {
-                      transaction = recentChainData.startVoteUpdate();
-                    }
-                    forkChoiceStrategy.onAttestation(transaction, indexedAttestation);
-                  } else {
-                    deferredAttestations.addAttestation(indexedAttestation, true);
-                    attestation.complete(attestation.validationResult());
-                  }
-                } catch (final RuntimeException e) {
-                  attestation.fail(e);
-                }
+    attestationsToApply.addAll(toApply);
+    scheduleApplyingQueuedAttestations();
+  }
+
+  /**
+   * Schedules a fork choice task to apply the queued attestations, unless one is already scheduled.
+   * However many attestations finish validating at once, at most one such task waits in the fork
+   * choice queue: each task applies up to {@link #MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK}
+   * attestations, then schedules the next one if more are queued.
+   */
+  private void scheduleApplyingQueuedAttestations() {
+    if (!applyingQueuedAttestationsScheduled.compareAndSet(false, true)) {
+      return;
+    }
+    onForkChoiceThread(this::applyQueuedAttestations)
+        .finish(
+            error -> {
+              // The task was rejected, for example because the fork choice queue is full, so fail
+              // the attestations waiting for it and let the next attestation schedule a new task
+              applyingQueuedAttestationsScheduled.set(false);
+              ValidatedAttestation attestation;
+              while ((attestation = attestationsToApply.poll()) != null) {
+                attestation.fail(error);
               }
-              if (transaction != null) {
-                transaction.commit();
-              }
-              // Votes are only applied once committed, so report them as successful after that
-              toApply.forEach(attestation -> attestation.complete(attestation.validationResult()));
-            })
-        .finish(error -> toApply.forEach(attestation -> attestation.fail(error)));
+            });
+  }
+
+  private void applyQueuedAttestations() {
+    // Cleared first, so that an attestation queued from now on schedules another task
+    applyingQueuedAttestationsScheduled.set(false);
+    final List<ValidatedAttestation> batch = new ArrayList<>();
+    ValidatedAttestation attestation;
+    while (batch.size() < MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK
+        && (attestation = attestationsToApply.poll()) != null) {
+      batch.add(attestation);
+    }
+    try {
+      applyValidatedAttestations(batch);
+    } catch (final RuntimeException e) {
+      batch.forEach(validatedAttestation -> validatedAttestation.fail(e));
+    }
+    if (!attestationsToApply.isEmpty()) {
+      scheduleApplyingQueuedAttestations();
+    }
+  }
+
+  private void applyValidatedAttestations(final List<ValidatedAttestation> attestations) {
+    final ForkChoiceStrategy forkChoiceStrategy = getForkChoiceStrategy();
+    final List<AttestationProcessingResult> results = new ArrayList<>(attestations.size());
+    VoteUpdater transaction = null;
+    for (final ValidatedAttestation attestation : attestations) {
+      // An error applying one attestation only fails that attestation. Votes it already applied to
+      // the transaction are committed with the others: they come from a valid attestation, so
+      // counting only some of them is no worse than counting none.
+      try {
+        final IndexedAttestationLight indexedAttestation = attestation.indexedAttestation();
+        if (isFullPayloadVoteMissingTarget(
+            forkChoiceStrategy,
+            indexedAttestation.data().getBeaconBlockRoot(),
+            attestation.fullPayloadHint())) {
+          results.add(AttestationProcessingResult.UNKNOWN_EXECUTION_PAYLOAD);
+        } else if (attestation.validationResult().isSuccessful()) {
+          if (transaction == null) {
+            transaction = recentChainData.startVoteUpdate();
+          }
+          forkChoiceStrategy.onAttestation(transaction, indexedAttestation);
+          results.add(attestation.validationResult());
+        } else {
+          deferredAttestations.addAttestation(indexedAttestation, true);
+          results.add(attestation.validationResult());
+        }
+      } catch (final RuntimeException e) {
+        attestation.fail(e);
+        results.add(null);
+      }
+    }
+    if (transaction != null) {
+      transaction.commit();
+    }
+    // Votes are only applied once committed, so only report results after that
+    for (int i = 0; i < attestations.size(); i++) {
+      if (results.get(i) != null) {
+        attestations.get(i).complete(results.get(i));
+      }
+    }
   }
 
   /**

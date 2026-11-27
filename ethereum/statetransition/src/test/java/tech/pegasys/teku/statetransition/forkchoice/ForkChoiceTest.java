@@ -2030,6 +2030,125 @@ class ForkChoiceTest {
   }
 
   @Test
+  @SuppressWarnings("unchecked")
+  void onAttestations_shouldApplyLateValidationsCompletingTogetherInOneTask() {
+    final List<SignedBlockAndState> targetBlocks = importChainOfBlocks(3);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final List<ValidatableAttestation> attestations =
+        targetBlocks.stream().map(this::validAttestationForBlock).toList();
+    // Validate each attestation once so it has its indexed attestation, then make the next
+    // validations wait, as if they all needed the same state
+    final List<SafeFuture<AttestationProcessingResult>> validations = new ArrayList<>();
+    for (final ValidatableAttestation attestation : attestations) {
+      assertThat(forkChoice.onAttestation(attestation))
+          .isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
+      final SafeFuture<AttestationProcessingResult> validation = new SafeFuture<>();
+      doReturn(validation)
+          .when(spec)
+          .validateAttestationAsync(any(), eq(attestation), any(), any());
+      validations.add(validation);
+    }
+    final QueuingEventThread forkChoiceThread = spy(new QueuingEventThread());
+    final ForkChoice batchForkChoice = createForkChoice(recentChainData, forkChoiceThread);
+    forkChoiceThread.startQueuing();
+    // Ignore tasks run when the fork choice is created
+    clearInvocations(forkChoiceThread);
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        batchForkChoice.onAttestations(attestations);
+    validations.forEach(validation -> validation.complete(AttestationProcessingResult.SUCCESSFUL));
+
+    // Only one task is queued while the fork choice thread is busy, rather than one each
+    verify(forkChoiceThread, times(1)).execute(any(ExceptionThrowingSupplier.class));
+    assertThat(results).allSatisfy(result -> assertThat(result).isNotDone());
+
+    forkChoiceThread.executePendingTasks();
+
+    assertThat(results)
+        .allSatisfy(
+            result ->
+                assertThat(result).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL));
+    verify(forkChoiceThread, times(1)).execute(any(ExceptionThrowingSupplier.class));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void onAttestations_shouldScheduleNewTaskAfterRejectedOne() {
+    final List<SignedBlockAndState> targetBlocks = importChainOfBlocks(2);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final InlineEventThread forkChoiceThread = spy(new InlineEventThread());
+    final ForkChoice batchForkChoice = createForkChoice(recentChainData, forkChoiceThread);
+    doReturn(SafeFuture.failedFuture(new RejectedExecutionException("Queue is full")))
+        .doCallRealMethod()
+        .when(forkChoiceThread)
+        .execute(any(ExceptionThrowingSupplier.class));
+
+    assertThatSafeFuture(
+            batchForkChoice.onAttestation(validAttestationForBlock(targetBlocks.getFirst())))
+        .isCompletedExceptionallyWith(RejectedExecutionException.class);
+    assertThat(batchForkChoice.onAttestation(validAttestationForBlock(targetBlocks.getLast())))
+        .isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
+  }
+
+  @Test
+  void onAttestations_shouldFailOnlyOwnAttestationWhenLateValidationFails() {
+    final List<SignedBlockAndState> targetBlocks = importChainOfBlocks(2);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final ValidatableAttestation slow = validAttestationForBlock(targetBlocks.getFirst());
+    final ValidatableAttestation valid = validAttestationForBlock(targetBlocks.getLast());
+    final SafeFuture<AttestationProcessingResult> slowValidation = new SafeFuture<>();
+    doReturn(slowValidation).when(spec).validateAttestationAsync(any(), eq(slow), any(), any());
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        forkChoice.onAttestations(List.of(slow, valid));
+    slowValidation.completeExceptionally(new IllegalStateException("Boom"));
+
+    assertThatSafeFuture(results.get(0)).isCompletedExceptionallyWith(IllegalStateException.class);
+    assertThat(results.get(1)).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
+  }
+
+  @Test
+  void onAttestations_shouldFailBatchWhenForkChoiceIsUnavailable() {
+    final List<SignedBlockAndState> targetBlocks = importChainOfBlocks(2);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final RecentChainData chainData = spy(recentChainData);
+    final ForkChoice batchForkChoice = createForkChoice(chainData);
+    doReturn(Optional.empty()).when(chainData).getUpdatableForkChoiceStrategy();
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        batchForkChoice.onAttestations(
+            targetBlocks.stream().map(this::validAttestationForBlock).toList());
+
+    assertThat(results)
+        .allSatisfy(
+            result ->
+                assertThatSafeFuture(result)
+                    .isCompletedExceptionallyWith(IllegalStateException.class));
+  }
+
+  /**
+   * Once {@link #startQueuing()} is called, queues fork choice tasks until {@link
+   * #executePendingTasks()} rather than running them straight away, as if the thread were busy.
+   */
+  private static class QueuingEventThread extends InlineEventThread {
+    private boolean queuing = false;
+
+    void startQueuing() {
+      queuing = true;
+    }
+
+    @Override
+    public <T> SafeFuture<T> execute(final ExceptionThrowingSupplier<T> callable) {
+      if (!queuing) {
+        return super.execute(callable);
+      }
+      final SafeFuture<T> result = new SafeFuture<>();
+      executeLater(() -> SafeFuture.of(callable).propagateTo(result));
+      return result;
+    }
+  }
+
+  @Test
   void onAttestations_shouldOnlyFailOwnAttestationWhenApplyingItFails() {
     final List<SignedBlockAndState> targetBlocks = importChainOfBlocks(3);
     storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
