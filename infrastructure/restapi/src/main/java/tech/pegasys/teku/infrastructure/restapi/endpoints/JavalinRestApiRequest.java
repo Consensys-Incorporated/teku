@@ -29,7 +29,6 @@ import jakarta.servlet.AsyncContext;
 import jakarta.servlet.AsyncEvent;
 import jakarta.servlet.AsyncListener;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.PushbackInputStream;
 import java.io.UncheckedIOException;
 import java.util.Collections;
@@ -103,7 +102,7 @@ public class JavalinRestApiRequest implements RestApiRequest {
 
   @Override
   public void respondOk(final Object response) throws JsonProcessingException {
-    respond(SC_OK, response, getResponseOutputStream());
+    respond(SC_OK, response);
   }
 
   @Override
@@ -144,10 +143,8 @@ public class JavalinRestApiRequest implements RestApiRequest {
       if (maybeResponse.isEmpty()) {
         respondWithTimeout();
       } else {
-        respond(
-            maybeResponse.get().getResponseCode(),
-            maybeResponse.get().getResponseBody(),
-            getResponseOutputStream());
+        respondWithOptionalBody(
+            maybeResponse.get().getResponseCode(), maybeResponse.get().getResponseBody());
       }
     } catch (final JsonProcessingException e) {
       LOG.trace("Failed to generate API response", e);
@@ -159,13 +156,13 @@ public class JavalinRestApiRequest implements RestApiRequest {
   public void respondOk(final Object response, final CacheLength cacheLength)
       throws JsonProcessingException {
     context.header(Header.CACHE_CONTROL, cacheLength.getHttpHeaderValue());
-    respond(SC_OK, response, getResponseOutputStream());
+    respond(SC_OK, response);
   }
 
   @Override
   public void respondError(final int statusCode, final String message)
       throws JsonProcessingException {
-    respond(statusCode, new HttpErrorResponse(statusCode, message), getResponseOutputStream());
+    respond(statusCode, new HttpErrorResponse(statusCode, message));
   }
 
   /**
@@ -178,26 +175,20 @@ public class JavalinRestApiRequest implements RestApiRequest {
     context.json(JsonUtil.serialize(TIMEOUT_ERROR, HTTP_ERROR_RESPONSE_TYPE));
   }
 
-  private OutputStream getResponseOutputStream() {
-    return context.outputStream();
-  }
-
-  private void respond(
-      final int statusCode, final Optional<Object> response, final OutputStream out)
+  private void respondWithOptionalBody(final int statusCode, final Optional<Object> response)
       throws JsonProcessingException {
     context.status(statusCode);
     if (response.isPresent()) {
-      respondImpl(statusCode, response.get(), out);
+      respondImpl(statusCode, response.get());
     }
   }
 
-  private void respond(final int statusCode, final Object response, final OutputStream out)
-      throws JsonProcessingException {
+  private void respond(final int statusCode, final Object response) throws JsonProcessingException {
     context.status(statusCode);
-    respondImpl(statusCode, response, out);
+    respondImpl(statusCode, response);
   }
 
-  private void respondImpl(final int statusCode, final Object response, final OutputStream out)
+  private void respondImpl(final int statusCode, final Object response)
       throws JsonProcessingException {
     final ResponseMetadata responseMetadata =
         metadata.createResponseMetadata(
@@ -212,7 +203,7 @@ public class JavalinRestApiRequest implements RestApiRequest {
           statusCode,
           responseMetadata.getContentType(),
           response,
-          CloseShieldOutputStream.wrap(out));
+          CloseShieldOutputStream.wrap(context.outputStream()));
     } catch (final Throwable e) {
       abortCommittedResponse(e);
       throw e;
