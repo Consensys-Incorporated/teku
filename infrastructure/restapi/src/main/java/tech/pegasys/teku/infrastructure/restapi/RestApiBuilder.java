@@ -102,8 +102,9 @@ public class RestApiBuilder {
   }
 
   /**
-   * Sets the timeout for future-based asynchronous REST responses. Server-sent event handlers use a
-   * separate unlimited timeout and are not affected by this setting.
+   * Sets how long a future-based asynchronous REST response may take to become available. Writing
+   * the response body is not subject to it. Server-sent event handlers use a separate unlimited
+   * timeout and are not affected by this setting.
    */
   public RestApiBuilder asyncTimeoutMillis(final long asyncTimeoutMillis) {
     checkArgument(asyncTimeoutMillis > 0, "Async timeout must be greater than zero");

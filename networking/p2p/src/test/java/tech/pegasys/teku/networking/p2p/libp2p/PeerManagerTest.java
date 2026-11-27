@@ -34,11 +34,15 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import org.apache.logging.log4j.Level;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
+import org.hyperledger.besu.plugin.services.metrics.Counter;
+import org.hyperledger.besu.plugin.services.metrics.LabelledMetric;
 import org.hyperledger.besu.plugin.services.metrics.LabelledSuppliedMetric;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.metrics.StubLabelledGauge;
 import tech.pegasys.teku.infrastructure.metrics.StubMetricsSystem;
@@ -90,7 +94,16 @@ public class PeerManagerTest {
     final MetricsSystem metricsSystem = mock(MetricsSystem.class);
     final LabelledSuppliedMetric peerClientLabelledGauge = mock(LabelledSuppliedMetric.class);
     final LabelledSuppliedMetric peerDirectionLabelledGauge = mock(LabelledSuppliedMetric.class);
+    @SuppressWarnings("unchecked")
+    final LabelledMetric<Counter> connectionAttemptCounter = mock(LabelledMetric.class);
+    when(connectionAttemptCounter.labels(any())).thenReturn(mock(Counter.class));
 
+    when(metricsSystem.createLabelledCounter(
+            eq(TekuMetricCategory.NETWORK),
+            eq("peer_connection_attempt_count_total"),
+            any(),
+            eq("status")))
+        .thenReturn(connectionAttemptCounter);
     when(metricsSystem.createLabelledSuppliedGauge(
             eq(TekuMetricCategory.LIBP2P), eq("connected_peers_current"), any(), eq("client")))
         .thenReturn(peerClientLabelledGauge);
@@ -262,6 +275,10 @@ public class PeerManagerTest {
 
     verify(reputationManager).reportInitiatedConnectionSuccessful(peerAddress);
     verify(reputationManager, never()).reportInitiatedConnectionFailed(peerAddress);
+    // The fallback dial belongs to the same connection attempt
+    assertThat(connectionAttempts("attempted")).isEqualTo(1);
+    assertThat(connectionAttempts("successful")).isEqualTo(1);
+    assertThat(connectionAttempts("failed")).isZero();
   }
 
   @Test
@@ -327,6 +344,93 @@ public class PeerManagerTest {
     verify(network).connect(tcpMultiaddr);
     verify(reputationManager).reportInitiatedConnectionFailed(peerAddress);
     verify(reputationManager, never()).reportInitiatedConnectionSuccessful(peerAddress);
+    // Two failed dials are still one failed connection attempt
+    assertThat(connectionAttempts("attempted")).isEqualTo(1);
+    assertThat(connectionAttempts("failed")).isEqualTo(1);
+    assertThat(connectionAttempts("successful")).isZero();
+  }
+
+  @Test
+  public void shouldLogFallbackAddressWhenFallbackDialFails() {
+    final Multiaddr quicMultiaddr = Multiaddr.fromString("/ip4/127.0.0.1/udp/9000/quic-v1");
+    final Multiaddr tcpMultiaddr = Multiaddr.fromString("/ip4/127.0.0.1/tcp/9000");
+    final MockNodeId nodeId = new MockNodeId(1);
+    final MultiaddrPeerAddress peerAddress =
+        new MultiaddrPeerAddress(nodeId, quicMultiaddr, Optional.of(tcpMultiaddr));
+    when(network.connect(quicMultiaddr))
+        .thenReturn(CompletableFuture.failedFuture(new RuntimeException("QUIC unreachable")));
+    when(network.connect(tcpMultiaddr))
+        .thenReturn(CompletableFuture.failedFuture(new RuntimeException("TCP unreachable")));
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(PeerManager.class, Level.DEBUG)) {
+      assertThat(peerManager.connect(peerAddress, network)).isCompletedExceptionally();
+
+      assertThat(logCaptor.getDebugLogs())
+          .contains(
+              "Failed to connect to " + nodeId + " via " + tcpMultiaddr + ": TCP unreachable");
+    }
+  }
+
+  @Test
+  public void shouldLogPrimaryAddressWhenDialFailsWithoutFallback() {
+    final Multiaddr multiaddr = Multiaddr.fromString("/ip4/127.0.0.1/tcp/9000");
+    final MockNodeId nodeId = new MockNodeId(1);
+    final MultiaddrPeerAddress peerAddress = new MultiaddrPeerAddress(nodeId, multiaddr);
+    when(network.connect(multiaddr))
+        .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Nope")));
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(PeerManager.class, Level.DEBUG)) {
+      assertThat(peerManager.connect(peerAddress, network)).isCompletedExceptionally();
+
+      assertThat(logCaptor.getDebugLogs())
+          .contains("Failed to connect to " + nodeId + " via " + multiaddr + ": Nope");
+    }
+  }
+
+  @Test
+  public void shouldCountOneAttemptAndOneFailureWhenTwoCallersShareOneDial() {
+    final Multiaddr multiaddr = Multiaddr.fromString("/ip4/127.0.0.1/tcp/9000");
+    final MultiaddrPeerAddress peerAddress = new MultiaddrPeerAddress(new MockNodeId(1), multiaddr);
+    final SafeFuture<Connection> dial = new SafeFuture<>();
+    when(network.connect(multiaddr)).thenReturn(dial);
+
+    final SafeFuture<Peer> firstCaller = peerManager.connect(peerAddress, network);
+    final SafeFuture<Peer> secondCaller = peerManager.connect(peerAddress, network);
+    assertThat(connectionAttempts("attempted")).isEqualTo(1);
+
+    dial.completeExceptionally(new RuntimeException("Nope"));
+    assertThat(firstCaller).isCompletedExceptionally();
+    assertThat(secondCaller).isCompletedExceptionally();
+    assertThat(connectionAttempts("failed")).isEqualTo(1);
+    assertThat(connectionAttempts("successful")).isZero();
+  }
+
+  @Test
+  public void shouldCountSuccessfulDialOnce() {
+    final Connection connection = mock(Connection.class);
+    final Session secureSession =
+        new Session(
+            PeerId.random(), PeerId.random(), EcdsaKt.generateEcdsaKeyPair().component2(), null);
+    when(connection.secureSession()).thenReturn(secureSession);
+    when(connection.closeFuture()).thenReturn(new SafeFuture<>());
+    final Multiaddr multiaddr = Multiaddr.fromString("/ip4/127.0.0.1/tcp/9000");
+    final MultiaddrPeerAddress peerAddress = new MultiaddrPeerAddress(new MockNodeId(1), multiaddr);
+    final SafeFuture<Connection> dial = new SafeFuture<>();
+    when(network.connect(multiaddr)).thenReturn(dial);
+
+    final SafeFuture<Peer> result = peerManager.connect(peerAddress, network);
+    peerManager.handleConnection(connection);
+    dial.complete(connection);
+    assertThat(result).isCompleted();
+
+    assertThat(connectionAttempts("attempted")).isEqualTo(1);
+    assertThat(connectionAttempts("successful")).isEqualTo(1);
+    assertThat(connectionAttempts("failed")).isZero();
+  }
+
+  private long connectionAttempts(final String status) {
+    return metricsSystem.getLabelledCounterValue(
+        TekuMetricCategory.NETWORK, "peer_connection_attempt_count_total", status);
   }
 
   @Test

@@ -622,11 +622,12 @@ public class Eth2P2PNetworkBuilder {
         .peerSelectionStrategy(
             new Eth2PeerSelectionStrategy(
                 targetPeerRange,
-                network ->
+                (subscribersByTopic, connectedPeers) ->
                     PeerSubnetSubscriptions.create(
                         combinedChainDataClient.getRecentChainData().getCurrentSpec(),
                         nodeIdToDataColumnSidecarSubnetsCalculator,
-                        network,
+                        subscribersByTopic,
+                        connectedPeers,
                         peerLookup,
                         attestationSubnetTopicProvider,
                         syncCommitteeSubnetTopicProvider,

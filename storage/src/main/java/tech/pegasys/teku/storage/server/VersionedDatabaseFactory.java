@@ -70,6 +70,7 @@ public class VersionedDatabaseFactory implements DatabaseFactory {
   private final Spec spec;
   private final boolean storeNonCanonicalBlocks;
   private final boolean rocksdbBlobDbEnabled;
+  private final boolean prunedSlotCompactionEnabled;
   private final SyncDataAccessor dbSettingFileSyncDataAccessor;
   private final Optional<Eth2Network> maybeNetwork;
 
@@ -89,6 +90,7 @@ public class VersionedDatabaseFactory implements DatabaseFactory {
     this.eth1Address = config.getEth1DepositContract();
     this.storeNonCanonicalBlocks = config.isStoreNonCanonicalBlocksEnabled();
     this.rocksdbBlobDbEnabled = config.isRocksdbBlobDbEnabled();
+    this.prunedSlotCompactionEnabled = config.isPrunedSlotCompactionEnabled();
     this.spec = config.getSpec();
 
     this.dbDirectory = this.dataDirectory.toPath().resolve(DB_PATH).toFile();
@@ -219,7 +221,9 @@ public class VersionedDatabaseFactory implements DatabaseFactory {
           maybeNetwork);
       return RocksDbDatabaseFactory.createV4(
           metricsSystem,
-          KvStoreConfiguration.v4Settings(dbDirectory.toPath()).withBlobDbEnabled(blobDbEnabled),
+          KvStoreConfiguration.v4Settings(dbDirectory.toPath())
+              .withBlobDbEnabled(blobDbEnabled)
+              .withPrunedSlotCompactionEnabled(prunedSlotCompactionEnabled),
           KvStoreConfiguration.v4Settings(v5ArchiveDirectory.toPath())
               .withBlobDbEnabled(blobDbEnabled),
           stateStorageMode,
@@ -252,7 +256,8 @@ public class VersionedDatabaseFactory implements DatabaseFactory {
           metaData
               .getHotDbConfiguration()
               .withDatabaseDir(dbDirectory.toPath())
-              .withBlobDbEnabled(blobDbEnabled),
+              .withBlobDbEnabled(blobDbEnabled)
+              .withPrunedSlotCompactionEnabled(prunedSlotCompactionEnabled),
           metaData
               .getArchiveDbConfiguration()
               .withDatabaseDir(v5ArchiveDirectory.toPath())
@@ -274,7 +279,10 @@ public class VersionedDatabaseFactory implements DatabaseFactory {
       final V6SchemaCombinedSnapshot schema = V6SchemaCombinedSnapshot.createV6(spec);
       return RocksDbDatabaseFactory.createV6(
           metricsSystem,
-          dbConfiguration.withDatabaseDir(dbDirectory.toPath()).withBlobDbEnabled(blobDbEnabled),
+          dbConfiguration
+              .withDatabaseDir(dbDirectory.toPath())
+              .withBlobDbEnabled(blobDbEnabled)
+              .withPrunedSlotCompactionEnabled(prunedSlotCompactionEnabled),
           schema,
           stateStorageMode,
           stateStorageFrequency,
@@ -302,7 +310,10 @@ public class VersionedDatabaseFactory implements DatabaseFactory {
           maybeNetwork);
       return LevelDbDatabaseFactory.createLevelDb(
           metricsSystem,
-          metaData.getHotDbConfiguration().withDatabaseDir(dbDirectory.toPath()),
+          metaData
+              .getHotDbConfiguration()
+              .withDatabaseDir(dbDirectory.toPath())
+              .withPrunedSlotCompactionEnabled(prunedSlotCompactionEnabled),
           metaData.getArchiveDbConfiguration().withDatabaseDir(v5ArchiveDirectory.toPath()),
           stateStorageMode,
           stateStorageFrequency,
@@ -319,7 +330,9 @@ public class VersionedDatabaseFactory implements DatabaseFactory {
 
       return LevelDbDatabaseFactory.createLevelDbV2(
           metricsSystem,
-          dbConfiguration.withDatabaseDir(dbDirectory.toPath()),
+          dbConfiguration
+              .withDatabaseDir(dbDirectory.toPath())
+              .withPrunedSlotCompactionEnabled(prunedSlotCompactionEnabled),
           stateStorageMode,
           stateStorageFrequency,
           storeNonCanonicalBlocks,
@@ -335,7 +348,10 @@ public class VersionedDatabaseFactory implements DatabaseFactory {
       final KvStoreConfiguration dbConfiguration = initV6Configuration();
       return RocksDbDatabaseFactory.createV6Tree(
           metricsSystem,
-          dbConfiguration.withDatabaseDir(dbDirectory.toPath()).withBlobDbEnabled(blobDbEnabled),
+          dbConfiguration
+              .withDatabaseDir(dbDirectory.toPath())
+              .withBlobDbEnabled(blobDbEnabled)
+              .withPrunedSlotCompactionEnabled(prunedSlotCompactionEnabled),
           stateStorageMode,
           storeNonCanonicalBlocks,
           maxKnownNodeCacheSize,
@@ -351,7 +367,9 @@ public class VersionedDatabaseFactory implements DatabaseFactory {
 
       return LevelDbDatabaseFactory.createLevelDbTree(
           metricsSystem,
-          dbConfiguration.withDatabaseDir(dbDirectory.toPath()),
+          dbConfiguration
+              .withDatabaseDir(dbDirectory.toPath())
+              .withPrunedSlotCompactionEnabled(prunedSlotCompactionEnabled),
           stateStorageMode,
           storeNonCanonicalBlocks,
           maxKnownNodeCacheSize,

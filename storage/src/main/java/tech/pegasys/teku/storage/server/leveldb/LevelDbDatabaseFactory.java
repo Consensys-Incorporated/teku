@@ -69,7 +69,8 @@ public class LevelDbDatabaseFactory {
         stateStorageMode,
         stateStorageFrequency,
         storeNonCanonicalBlocks,
-        spec);
+        spec,
+        hotConfiguration.prunedSlotCompactionEnabled());
   }
 
   public static Database createLevelDbV2(
@@ -97,7 +98,8 @@ public class LevelDbDatabaseFactory {
         stateStorageFrequency,
         storeNonCanonicalBlocks,
         spec,
-        metricsSystem);
+        metricsSystem,
+        hotConfiguration.prunedSlotCompactionEnabled());
   }
 
   public static Database createLevelDbTree(
@@ -125,6 +127,7 @@ public class LevelDbDatabaseFactory {
         stateStorageMode,
         storeNonCanonicalBlocks,
         maxKnownNodeCacheSize,
-        spec);
+        spec,
+        hotConfiguration.prunedSlotCompactionEnabled());
   }
 }

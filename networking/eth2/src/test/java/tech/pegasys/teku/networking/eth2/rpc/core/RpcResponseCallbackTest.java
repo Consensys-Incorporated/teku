@@ -47,8 +47,21 @@ class RpcResponseCallbackTest {
 
   private final SszData data = mock(SszData.class);
 
+  private final SafeFuture<Void> streamClosed = new SafeFuture<>();
+
   private final RpcResponseCallback<SszData> callback =
-      new RpcResponseCallback<>(rpcStream, responseEncoder, asyncRunner, PROTOCOL_ID);
+      new RpcResponseCallback<>(rpcStream, responseEncoder, asyncRunner, PROTOCOL_ID, streamClosed);
+
+  @Test
+  void isClosedShouldReflectStreamClosure() {
+    assertThat(callback.isClosed()).isFalse();
+    assertThat(callback.getStreamClosedFuture()).isNotDone();
+
+    streamClosed.complete(null);
+
+    assertThat(callback.isClosed()).isTrue();
+    assertThat(callback.getStreamClosedFuture()).isCompleted();
+  }
 
   @Test
   void shouldCloseStreamWhenResponseWriteDoesNotComplete() {

@@ -24,6 +24,7 @@ import tech.pegasys.teku.infrastructure.ssz.primitive.SszByte;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.datastructures.blocks.Eth1Data;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
@@ -167,6 +168,47 @@ class V4FinalizedStateTreeStorageLogicTest {
         .doesNotThrowAnyException();
     assertThat(loadedGloas.getPreviousEpochParticipation().get(0).get()).isEqualTo((byte) 0);
     assertThat(loadedGloas.getCurrentEpochParticipation().get(0).get()).isEqualTo((byte) 0);
+  }
+
+  @Test
+  void shouldRoundTripStateWithDefaultEth1DataVotes() {
+    // Regression: an all-zero Eth1Data vote has a zero tree as its root, so two of them sharing a
+    // parent hash to the root of a deeper zero tree. With the 2048 votes of a mainnet voting
+    // period that parent is stored as the child of a branch, and loading it asked the database for
+    // a branch node with a zero hash: "Unknown branch node: 0x00..00".
+    final Spec mainnetSpec = TestSpecFactory.createMainnetElectra();
+    final DataStructureUtil mainnetUtil = new DataStructureUtil(mainnetSpec);
+    final V6SchemaCombinedTreeState mainnetSchema = new V6SchemaCombinedTreeState(mainnetSpec);
+    final KvStoreAccessor mainnetDb =
+        MockKvStoreInstance.createEmpty(
+            mainnetSchema.getAllColumns(), mainnetSchema.getAllVariables());
+    final V4FinalizedStateTreeStorageLogic mainnetLogic =
+        new V4FinalizedStateTreeStorageLogic(new NoOpMetricsSystem(), mainnetSpec, 1000);
+
+    final Eth1Data vote = mainnetUtil.randomEth1Data();
+    final Eth1Data defaultVote = new Eth1Data();
+    final BeaconState state =
+        mainnetUtil
+            .randomBeaconState()
+            .updated(
+                mutable ->
+                    mutable.setEth1DataVotes(
+                        mutable
+                            .getEth1DataVotes()
+                            .getSchema()
+                            .of(vote, vote, defaultVote, defaultVote, vote)));
+
+    try (final KvStoreTransaction transaction = mainnetDb.startTransaction()) {
+      mainnetLogic.updater().addFinalizedState(mainnetDb, transaction, mainnetSchema, state);
+      transaction.commit();
+    }
+    final Optional<BeaconState> loaded =
+        mainnetLogic.getLatestAvailableFinalizedState(mainnetDb, mainnetSchema, state.getSlot());
+    assertThat(loaded).contains(state);
+
+    // States are loaded lazily, so read the votes as replaying a block does
+    assertThat(loaded.orElseThrow().getEth1DataVotes().asList())
+        .containsExactly(vote, vote, defaultVote, defaultVote, vote);
   }
 
   private void storeState(final BeaconState state) {

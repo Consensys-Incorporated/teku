@@ -16,6 +16,7 @@ package tech.pegasys.teku.statetransition.forkchoice.fastconfirmation;
 import com.google.common.annotations.VisibleForTesting;
 import java.time.Duration;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -52,10 +53,12 @@ public class FastConfirmationTracker {
           Optional.empty(),
           FastConfirmationEventChannel.NOOP,
           new NoOpMetricsSystem(),
-          () -> UInt64.ZERO);
+          () -> UInt64.ZERO,
+          FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
 
   private final boolean enabled;
   private final Spec spec;
+  private final int byzantineThreshold;
   private final FastConfirmationEventChannel fastConfirmationEventChannel;
 
   /** Slot of the most recent confirmed block * */
@@ -168,9 +171,11 @@ public class FastConfirmationTracker {
       final Optional<AsyncRunner> asyncRunner,
       final FastConfirmationEventChannel fastConfirmationEventChannel,
       final MetricsSystem metricsSystem,
-      final TimeProvider timeProvider) {
+      final TimeProvider timeProvider,
+      final int byzantineThreshold) {
     this.enabled = enabled;
     this.spec = spec;
+    this.byzantineThreshold = byzantineThreshold;
     this.asyncRunner = asyncRunner;
     this.fastConfirmationEventChannel = fastConfirmationEventChannel;
 
@@ -209,14 +214,46 @@ public class FastConfirmationTracker {
             "Number of slots where the fast confirmation update did not complete within its timeout");
   }
 
+  /** Creates an enabled tracker using the spec's {@code CONFIRMATION_BYZANTINE_THRESHOLD}. */
   public static FastConfirmationTracker create(
       final Spec spec,
       final Optional<AsyncRunner> asyncRunner,
       final FastConfirmationEventChannel fastConfirmationEventChannel,
       final MetricsSystem metricsSystem,
       final TimeProvider timeProvider) {
+    return create(
+        spec,
+        asyncRunner,
+        fastConfirmationEventChannel,
+        metricsSystem,
+        timeProvider,
+        OptionalInt.empty());
+  }
+
+  /**
+   * Creates an enabled tracker that assumes at most {@code byzantineThreshold} percent of the
+   * validator set is Byzantine; empty uses the spec's {@code CONFIRMATION_BYZANTINE_THRESHOLD}.
+   */
+  public static FastConfirmationTracker create(
+      final Spec spec,
+      final Optional<AsyncRunner> asyncRunner,
+      final FastConfirmationEventChannel fastConfirmationEventChannel,
+      final MetricsSystem metricsSystem,
+      final TimeProvider timeProvider,
+      final OptionalInt byzantineThreshold) {
+    byzantineThreshold.ifPresent(
+        threshold ->
+            LOG.info(
+                "Fast confirmation rule assumes a Byzantine threshold of {}% (spec value {}%)",
+                threshold, FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD));
     return new FastConfirmationTracker(
-        true, spec, asyncRunner, fastConfirmationEventChannel, metricsSystem, timeProvider);
+        true,
+        spec,
+        asyncRunner,
+        fastConfirmationEventChannel,
+        metricsSystem,
+        timeProvider,
+        byzantineThreshold.orElse(FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD));
   }
 
   public boolean isEnabled() {
@@ -683,7 +720,7 @@ public class FastConfirmationTracker {
     }
 
     final Bytes32 confirmedRoot =
-        new FastConfirmationCalculator(spec, fcrStore, maybeStates.get(), slot)
+        new FastConfirmationCalculator(spec, fcrStore, maybeStates.get(), slot, byzantineThreshold)
             .getLatestConfirmed();
     recordConfirmationOutcome(fcrStore, confirmedRoot, finalizedRoot);
 
