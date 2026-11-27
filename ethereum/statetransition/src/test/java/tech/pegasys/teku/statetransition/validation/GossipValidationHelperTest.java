@@ -24,7 +24,6 @@ import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ZERO;
 import static tech.pegasys.teku.spec.constants.EthConstants.ETH_TO_GWEI;
 import static tech.pegasys.teku.spec.datastructures.state.beaconstate.common.BeaconStateFields.PROPOSER_LOOKAHEAD;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.IntStream;
@@ -506,29 +505,10 @@ public class GossipValidationHelperTest {
       final SpecContext specContext) {
     specContext.assumeGloasActive();
     final BidCompatibility bidCompatibility = createBidCompatibility();
-    final SignedBeaconBlock headBlock = bidCompatibility.headBlock();
     final ExecutionPayloadBid bid =
-        createBidOnHeadParent(bidCompatibility, headBlock.getSlot().plus(ONE));
-    // A block from another proposer at the head's slot is not an equivocation
-    addBlockAtHeadSlot(
-        bidCompatibility,
-        createBlockAtHeadSlot(headBlock, headBlock.getProposerIndex().isZero() ? ONE : ZERO));
+        createBidOnHeadParent(bidCompatibility, bidCompatibility.headBlock().getSlot().plus(ONE));
 
     assertThat(bidCompatibility.helper().isBidCompatibleWithHead(bid)).isFalse();
-  }
-
-  @TestTemplate
-  void isBidCompatibleWithHead_shouldAcceptBidBuildingOnParentOfEquivocatingHead(
-      final SpecContext specContext) {
-    specContext.assumeGloasActive();
-    final BidCompatibility bidCompatibility = createBidCompatibility();
-    final SignedBeaconBlock headBlock = bidCompatibility.headBlock();
-    final ExecutionPayloadBid bid =
-        createBidOnHeadParent(bidCompatibility, headBlock.getSlot().plus(ONE));
-    addBlockAtHeadSlot(
-        bidCompatibility, createBlockAtHeadSlot(headBlock, headBlock.getProposerIndex()));
-
-    assertThat(bidCompatibility.helper().isBidCompatibleWithHead(bid)).isTrue();
   }
 
   @TestTemplate
@@ -1266,29 +1246,6 @@ public class GossipValidationHelperTest {
         slot);
   }
 
-  private SignedBeaconBlock createBlockAtHeadSlot(
-      final SignedBeaconBlock headBlock, final UInt64 proposerIndex) {
-    final BeaconBlock block = headBlock.getMessage();
-    return dataStructureUtil.signedBlock(
-        new BeaconBlock(
-            block.getSchema(),
-            block.getSlot(),
-            proposerIndex,
-            block.getParentRoot(),
-            dataStructureUtil.randomBytes32(),
-            block.getBody()));
-  }
-
-  private void addBlockAtHeadSlot(
-      final BidCompatibility bidCompatibility, final SignedBeaconBlock block) {
-    final SignedBeaconBlock headBlock = bidCompatibility.headBlock();
-    assertThat(block.getRoot()).isNotEqualTo(headBlock.getRoot());
-    when(bidCompatibility.strategy().getBlockRootsAtSlot(headBlock.getSlot()))
-        .thenReturn(List.of(headBlock.getRoot(), block.getRoot()));
-    when(bidCompatibility.store().getBlockIfAvailable(block.getRoot()))
-        .thenReturn(Optional.of(block));
-  }
-
   private BidCompatibility createBidCompatibility() {
     final SignedBeaconBlock headBlock = dataStructureUtil.randomSignedBeaconBlock(UInt64.ONE);
     final ExecutionPayloadBid headBid =
@@ -1312,8 +1269,6 @@ public class GossipValidationHelperTest {
     when(recentChainData.getStore()).thenReturn(store);
     when(recentChainData.getForkChoiceStrategy()).thenReturn(Optional.of(strategy));
     when(store.getBlockIfAvailable(headBlock.getRoot())).thenReturn(Optional.of(headBlock));
-    when(strategy.getBlockRootsAtSlot(headBlock.getSlot()))
-        .thenReturn(List.of(headBlock.getRoot()));
     final GossipValidationHelper helper =
         new GossipValidationHelper(spec, recentChainData, storageSystem.getMetricsSystem());
     return new BidCompatibility(
