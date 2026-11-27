@@ -488,6 +488,24 @@ public class GossipValidationHelper {
     return recentChainData.getExecutionGasLimitForBlockRootAndHash(blockRoot, blockHash);
   }
 
+  /**
+   * Returns the highest gas limit the EIP-1559 transition rule allows for the execution payload of
+   * {@code block}, given the gas limit of the parent payload, i.e. the payload of the closest full
+   * ancestor. If that payload is unknown, the bid's gas limit is the bound.
+   *
+   * <p>Instead of walking the ancestors as the spec does, this relies on fork choice: the nodes of
+   * a block that builds on its parent's EMPTY variant inherit the execution block hash and gas
+   * limit of the parent's own execution parent, so the parent's node carrying the bid's parent
+   * block hash already holds the gas limit of the closest full ancestor's payload.
+   */
+  public UInt64 getMaxPayloadGasLimit(final BeaconBlock block, final ExecutionPayloadBid bid) {
+    return recentChainData
+        .getExecutionGasLimitForBlockRootAndHash(block.getParentRoot(), bid.getParentBlockHash())
+        .map(
+            parentGasLimit -> parentGasLimit.plus(parentGasLimit.dividedBy(1024).minusMinZero(ONE)))
+        .orElse(bid.getGasLimit());
+  }
+
   public boolean isBidCompatibleWithHead(final ExecutionPayloadBid bid) {
     final Optional<ChainHead> maybeHead = recentChainData.getChainHead();
     if (maybeHead.isEmpty()) {

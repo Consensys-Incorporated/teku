@@ -13,7 +13,11 @@
 
 package tech.pegasys.teku.spec.config;
 
+import tech.pegasys.teku.infrastructure.unsigned.UInt64;
+
 public interface NetworkingSpecConfigGloas extends NetworkingSpecConfigDeneb {
 
   int getMaxRequestPayloads();
+
+  UInt64 getMinTransactionGas();
 }
