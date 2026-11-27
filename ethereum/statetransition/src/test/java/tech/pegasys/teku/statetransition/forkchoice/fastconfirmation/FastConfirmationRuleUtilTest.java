@@ -138,6 +138,7 @@ class FastConfirmationRuleUtilTest {
         .isTrue();
   }
 
+  @Test
   void shouldDetectWhenFullValidatorSetIsCovered() {
     // Slots 0..7 span the whole of epoch 0
     assertThat(FastConfirmationRuleUtil.isFullValidatorSetCovered(spec, UInt64.ZERO, uint(7)))
