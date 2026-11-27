@@ -28,7 +28,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -398,53 +397,44 @@ public class ExecutionPayloadBidGossipValidator {
               }
 
               final UInt64 bidValue = bid.getValue();
-              final AtomicReference<UInt64> existingBidValueReference = new AtomicReference<>();
-              final AtomicBoolean alreadySeen = new AtomicBoolean();
-              final UInt64 actualHighestBid =
-                  highestBids.compute(
-                      bidValueKey,
-                      (key, existingValue) -> {
-                        existingBidValueReference.set(existingValue);
-                        if (seenExecutionPayloadBids
-                            .getOrDefault(bid.getSlot(), Set.of())
-                            .contains(builderAndParent)) {
-                          alreadySeen.set(true);
-                          return existingValue;
-                        }
+              final AtomicReference<InternalValidationResult> ignoreResult =
+                  new AtomicReference<>();
+              highestBids.compute(
+                  bidValueKey,
+                  (key, existingValue) -> {
+                    if (seenExecutionPayloadBids
+                        .getOrDefault(bid.getSlot(), Set.of())
+                        .contains(builderAndParent)) {
+                      ignoreResult.set(
+                          ignoreBid(
+                              bid,
+                              "another bid for parent block hash %s and parent block root %s was processed concurrently",
+                              bid.getParentBlockHash(),
+                              bid.getParentBlockRoot()));
+                      return existingValue;
+                    }
 
-                        final UInt64 newHighestBid = computeNewHighestBid(existingValue, bidValue);
-                        if (!wasBidAccepted(bidValue, existingValue, newHighestBid)) {
-                          return existingValue;
-                        }
+                    if (existingValue != null) {
+                      final UInt64 minimum = calculateMinimumRequiredBid(existingValue);
+                      if (bidValue.isLessThan(minimum)) {
+                        ignoreResult.set(
+                            ignoreBid(
+                                bid,
+                                "does not meet minimum increment threshold (%s%%) after a concurrent update; current highest is %s ETH and minimum required is %s ETH",
+                                minBidIncrementPercentage,
+                                gweiToEth(existingValue),
+                                gweiToEth(minimum)));
+                        return existingValue;
+                      }
+                    }
 
-                        if (!seenExecutionPayloadBids
-                            .computeIfAbsent(bid.getSlot(), __ -> ConcurrentHashMap.newKeySet())
-                            .add(builderAndParent)) {
-                          alreadySeen.set(true);
-                          return existingValue;
-                        }
-                        return newHighestBid;
-                      });
+                    seenExecutionPayloadBids
+                        .computeIfAbsent(bid.getSlot(), __ -> ConcurrentHashMap.newKeySet())
+                        .add(builderAndParent);
+                    return bidValue;
+                  });
 
-              if (alreadySeen.get()) {
-                return ignoreBid(
-                    bid,
-                    "another bid for parent block hash %s and parent block root %s was processed concurrently",
-                    bid.getParentBlockHash(),
-                    bid.getParentBlockRoot());
-              }
-
-              if (!wasBidAccepted(bidValue, existingBidValueReference.get(), actualHighestBid)) {
-                final UInt64 minRequired = calculateMinimumRequiredBid(actualHighestBid);
-                return ignoreBid(
-                    bid,
-                    "does not meet minimum increment threshold (%s%%) after a concurrent update; current highest is %s ETH and minimum required is %s ETH",
-                    minBidIncrementPercentage,
-                    gweiToEth(actualHighestBid),
-                    gweiToEth(minRequired));
-              }
-
-              return acceptBid(bid);
+              return Optional.ofNullable(ignoreResult.get()).orElseGet(() -> acceptBid(bid));
             });
   }
 
@@ -500,56 +490,6 @@ public class ExecutionPayloadBidGossipValidator {
   private UInt64 calculateMinimumRequiredBid(final UInt64 currentHighestBid) {
     final UInt64 minIncrement = currentHighestBid.times(minBidIncrementPercentage).dividedBy(100);
     return currentHighestBid.plus(minIncrement);
-  }
-
-  /**
-   * Atomically computes the new highest bid value. This method is used within compute() to
-   * atomically check the threshold and update the highest bid.
-   *
-   * @param existingValue the current highest bid value (may be null for first bid)
-   * @param newBidValue the new bid value to evaluate
-   * @return the value to store (either existing if rejected, or new if accepted)
-   */
-  private UInt64 computeNewHighestBid(final UInt64 existingValue, final UInt64 newBidValue) {
-    // First bid, accept it
-    if (existingValue == null) {
-      return newBidValue;
-    }
-
-    final UInt64 minRequired = calculateMinimumRequiredBid(existingValue);
-    // Below threshold, keep existing
-    if (newBidValue.isLessThan(minRequired)) {
-      return existingValue;
-    }
-    // Accept the new bid if higher
-    return newBidValue.max(existingValue);
-  }
-
-  /**
-   * Determines if a bid was actually accepted based on the atomic compute operation result. This
-   * method correctly handles the case where bidValue equals existingBid (which would fail the
-   * threshold check but pass a naive equality test).
-   *
-   * @param bidValue the bid value that was submitted
-   * @param existingBid the bid value that existed before compute (may be null for first bid)
-   * @param actualHighestBid the resulting highest bid value after compute
-   * @return true if the bid was accepted, false if rejected due to threshold
-   */
-  private boolean wasBidAccepted(
-      final UInt64 bidValue, final UInt64 existingBid, final UInt64 actualHighestBid) {
-    // The bid must be the current highest
-    if (!actualHighestBid.equals(bidValue)) {
-      return false;
-    }
-
-    // First bid is always accepted (no threshold to check)
-    if (existingBid == null) {
-      return true;
-    }
-
-    // New bids must meet the minimum increment threshold
-    final UInt64 minRequired = calculateMinimumRequiredBid(existingBid);
-    return bidValue.isGreaterThanOrEqualTo(minRequired);
   }
 
   private boolean isSignatureValid(
