@@ -188,15 +188,10 @@ public class ReferenceTestFinder {
             "electra - minimal - fast_confirmation/is_one_confirmed - is_one_confirmed_passes_inactive_non_attester_not_in_balance_source",
             "fulu - minimal - fast_confirmation/is_one_confirmed - is_one_confirmed_passes_inactive_non_attester_not_in_balance_source",
             "gloas - minimal - fast_confirmation/is_one_confirmed - is_one_confirmed_passes_inactive_non_attester_not_in_balance_source",
-            "gloas - minimal - fast_confirmation/is_one_confirmed - is_one_confirmed_with_empty_slot_and_attester_in_two_consecutive_slots_1",
             "electra - minimal - fast_confirmation/is_one_confirmed - is_one_confirmed_with_empty_slot_and_attester_in_two_consecutive_slots_2",
             "fulu - minimal - fast_confirmation/is_one_confirmed - is_one_confirmed_with_empty_slot_and_attester_in_two_consecutive_slots_2",
             "gloas - minimal - fast_confirmation/is_one_confirmed - is_one_confirmed_with_empty_slot_and_attester_in_two_consecutive_slots_2",
             "gloas - minimal - fast_confirmation/ffg - will_current_target_be_justified_fails_with_new_validator_activated_in_head_state",
-            // TODO: https://github.com/Consensys-Incorporated/teku/pull/11628
-            // enable after adding pending-parent support to the discount (consensus-specs#5789)
-            "gloas - minimal - fast_confirmation/is_one_confirmed - empty_slot_discount_pending_and_empty_parent",
-            "gloas - minimal - fast_confirmation/is_one_confirmed - empty_slot_discount_pending_and_full_parent",
             // TODO: https://github.com/ethereum/consensus-specs/pull/5765
             // enable after binding Fulu columns to the imported block (consensus-specs#5765)
             "fulu - mainnet - fork_choice/on_block - on_block_peerdas__invalid_wrong_block",
