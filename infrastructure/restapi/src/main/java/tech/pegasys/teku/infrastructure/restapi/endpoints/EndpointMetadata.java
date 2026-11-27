@@ -24,6 +24,7 @@ import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_ACCEP
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_FOUND;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NOT_IMPLEMENTED;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_NO_CONTENT;
+import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_SERVICE_UNAVAILABLE;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_UNAUTHORIZED;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_UNSUPPORTED_MEDIA_TYPE;
@@ -38,6 +39,7 @@ import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -251,6 +253,34 @@ public class EndpointMetadata {
   public String getContentType(final int statusCode, final Optional<String> acceptHeader) {
     final OpenApiResponse openApiResponse = responses.get(Integer.toString(statusCode));
     return selectContentType(openApiResponse, acceptHeader);
+  }
+
+  /**
+   * Returns false when the endpoint declares a 406 response and the accept headers match none of
+   * the content types of its 200 response. Multiple accept headers are treated as one
+   * comma-separated list. Missing or blank accept headers are always acceptable.
+   */
+  public boolean isAcceptable(final Enumeration<String> acceptHeaders) {
+    final OpenApiResponse okResponse = responses.get(Integer.toString(SC_OK));
+    if (okResponse == null || !responses.containsKey(Integer.toString(SC_NOT_ACCEPTABLE))) {
+      return true;
+    }
+    // Several Accept lines mean the same as one comma-separated list, so join them all
+    final String allAcceptHeaders =
+        Collections.list(acceptHeaders).stream()
+            .filter(header -> !header.isBlank())
+            .collect(Collectors.joining(","));
+    if (allAcceptHeaders.isEmpty()) {
+      return true;
+    }
+    return ContentTypes.getResponseContentType(
+            okResponse.getSupportedContentTypes(), Optional.of(allAcceptHeaders))
+        .isPresent();
+  }
+
+  public List<String> getSupportedResponseContentTypes(final int statusCode) {
+    final OpenApiResponse openApiResponse = responses.get(Integer.toString(statusCode));
+    return openApiResponse == null ? emptyList() : openApiResponse.getSupportedContentTypes();
   }
 
   private String selectContentType(

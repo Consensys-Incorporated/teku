@@ -35,6 +35,8 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.Enumeration;
 import java.util.List;
 import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
@@ -175,6 +177,68 @@ class EndpointMetadataTest {
         validBuilder().response(SC_OK, "Foo").defaultResponseType("baa").build();
     assertThatThrownBy(() -> metadata.createResponseMetadata(SC_OK, Optional.empty(), "foo"))
         .isInstanceOf(IllegalStateException.class);
+  }
+
+  @Test
+  void isAcceptable_shouldBeTrueWhenAcceptHeaderMatches() {
+    final EndpointMetadata metadata = notAcceptableMetadata();
+    assertThat(metadata.isAcceptable(acceptHeaders(ContentTypes.OCTET_STREAM))).isTrue();
+  }
+
+  @Test
+  void isAcceptable_shouldBeFalseWhenNoAcceptHeaderMatches() {
+    final EndpointMetadata metadata = notAcceptableMetadata();
+    assertThat(metadata.isAcceptable(acceptHeaders("text/plain", "text/html"))).isFalse();
+  }
+
+  @Test
+  void isAcceptable_shouldJoinMultipleAcceptHeaders() {
+    final EndpointMetadata metadata = notAcceptableMetadata();
+    assertThat(metadata.isAcceptable(acceptHeaders("text/plain", ContentTypes.JSON))).isTrue();
+  }
+
+  @Test
+  void isAcceptable_shouldBeTrueWhenWildcardAcceptsAnotherTypeThanExcludedOne() {
+    final EndpointMetadata metadata = notAcceptableMetadata();
+    assertThat(metadata.isAcceptable(acceptHeaders("application/octet-stream;q=0, */*"))).isTrue();
+  }
+
+  @Test
+  void isAcceptable_shouldIgnoreCaseOfAcceptHeader() {
+    final EndpointMetadata metadata = notAcceptableMetadata();
+    assertThat(metadata.isAcceptable(acceptHeaders("Application/JSON"))).isTrue();
+  }
+
+  @Test
+  void isAcceptable_shouldBeTrueWhenAcceptHeaderMissing() {
+    final EndpointMetadata metadata = notAcceptableMetadata();
+    assertThat(metadata.isAcceptable(acceptHeaders())).isTrue();
+  }
+
+  @Test
+  void isAcceptable_shouldBeTrueWhenAcceptHeadersBlank() {
+    final EndpointMetadata metadata = notAcceptableMetadata();
+    assertThat(metadata.isAcceptable(acceptHeaders("", " "))).isTrue();
+  }
+
+  @Test
+  void isAcceptable_shouldBeTrueWhenNotAcceptableResponseNotDeclared() {
+    final EndpointMetadata metadata =
+        validBuilder()
+            .response(SC_OK, "Success", List.of(json(STRING_TYPE), octetStream(STRING_TYPE)))
+            .build();
+    assertThat(metadata.isAcceptable(acceptHeaders("text/plain"))).isTrue();
+  }
+
+  private EndpointMetadata notAcceptableMetadata() {
+    return validBuilder()
+        .response(SC_OK, "Success", List.of(json(STRING_TYPE), octetStream(STRING_TYPE)))
+        .withNotAcceptableResponse()
+        .build();
+  }
+
+  private static Enumeration<String> acceptHeaders(final String... values) {
+    return Collections.enumeration(List.of(values));
   }
 
   @Test
