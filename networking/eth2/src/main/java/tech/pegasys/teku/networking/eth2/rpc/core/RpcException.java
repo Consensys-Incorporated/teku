@@ -84,6 +84,12 @@ public class RpcException extends Exception {
     }
   }
 
+  public static class ContextPayloadMismatchException extends MalformedDataException {
+    public ContextPayloadMismatchException(final String details) {
+      super("Response payload does not match its context bytes: " + details, true);
+    }
+  }
+
   // Unexpected message length
   public static class ExtraDataAppendedException extends MalformedDataException {
     public ExtraDataAppendedException() {

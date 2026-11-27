@@ -14,6 +14,7 @@
 package tech.pegasys.teku.ethereum.executionlayer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doNothing;
@@ -31,7 +32,9 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -43,8 +46,11 @@ import tech.pegasys.teku.infrastructure.bytes.Bytes20;
 import tech.pegasys.teku.infrastructure.logging.EventLogger;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.SpecVersion;
+import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.datastructures.builder.BuilderBid;
 import tech.pegasys.teku.spec.datastructures.builder.SignedBuilderBid;
 import tech.pegasys.teku.spec.datastructures.builder.SignedValidatorRegistration;
@@ -151,6 +157,57 @@ public class BuilderBidValidatorTest {
                 .getHeader()
                 .getOptionalWithdrawalsRoot()
                 .orElseThrow());
+  }
+
+  @Nested
+  @TestSpecContext(milestone = {SpecMilestone.DENEB, SpecMilestone.ELECTRA, SpecMilestone.FULU})
+  class BlobCommitments {
+    private DataStructureUtil blobDataStructureUtil;
+    private int maxBlobsPerBlock;
+
+    @BeforeEach
+    void setUp(final SpecContext specContext) {
+      blobDataStructureUtil = specContext.getDataStructureUtil();
+      state = blobDataStructureUtil.randomBeaconState();
+      maxBlobsPerBlock =
+          specContext.getSpec().getMaxBlobsPerBlockAtSlot(state.getSlot()).orElseThrow();
+      when(specMock.getMaxBlobsPerBlockAtSlot(state.getSlot()))
+          .thenReturn(Optional.of(maxBlobsPerBlock));
+    }
+
+    @TestTemplate
+    void shouldAcceptCommitmentsAtMaxBlobsPerBlock() {
+      prepareBid(maxBlobsPerBlock);
+
+      assertThatCode(
+              () ->
+                  builderBidValidatorWithMockSpec.validateBuilderBid(
+                      signedBuilderBid, validatorRegistration, state, Optional.empty()))
+          .doesNotThrowAnyException();
+    }
+
+    @TestTemplate
+    void shouldRejectCommitmentsExceedingMaxBlobsPerBlock() {
+      prepareBid(maxBlobsPerBlock + 1);
+
+      assertThatThrownBy(
+              () ->
+                  builderBidValidatorWithMockSpec.validateBuilderBid(
+                      signedBuilderBid, validatorRegistration, state, Optional.empty()))
+          .isExactlyInstanceOf(BuilderBidValidationException.class)
+          .hasMessage(
+              "Number of kzg commitments in builder bid (%s) exceeds max blobs per block (%s)",
+              maxBlobsPerBlock + 1, maxBlobsPerBlock);
+    }
+
+    private void prepareBid(final int commitmentCount) {
+      final BuilderBid builderBid =
+          blobDataStructureUtil.randomBuilderBid(
+              builder ->
+                  builder.blobKzgCommitments(
+                      blobDataStructureUtil.randomBlobKzgCommitments(commitmentCount)));
+      signedBuilderBid = blobDataStructureUtil.randomSignedBuilderBid(builderBid);
+    }
   }
 
   @ParameterizedTest(name = "parent.{0}_target.{1}_result.{2}")

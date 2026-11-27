@@ -31,6 +31,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.blocks.StateAndBlockSummary;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
@@ -311,8 +312,27 @@ public class CombinedStorageChannelSplitter implements CombinedStorageChannel {
   }
 
   @Override
+  public SafeFuture<List<DataColumnSidecar>> getSidecars(
+      final List<DataColumnSlotAndIdentifier> identifiers) {
+    return asyncRunner.runAsync(() -> queryDelegate.getSidecars(identifiers));
+  }
+
+  @Override
   public SafeFuture<List<DataColumnSlotAndIdentifier>> getDataColumnIdentifiers(final UInt64 slot) {
     return asyncRunner.runAsync(() -> queryDelegate.getDataColumnIdentifiers(slot));
+  }
+
+  @Override
+  public SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyDataColumnIdentifiers(
+      final UInt64 slot) {
+    return asyncRunner.runAsync(() -> queryDelegate.getCustodyDataColumnIdentifiers(slot));
+  }
+
+  @Override
+  public SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyDataColumnIdentifiers(
+      final UInt64 startSlot, final UInt64 endSlot) {
+    return asyncRunner.runAsync(
+        () -> queryDelegate.getCustodyDataColumnIdentifiers(startSlot, endSlot));
   }
 
   @Override
@@ -339,7 +359,17 @@ public class CombinedStorageChannelSplitter implements CombinedStorageChannel {
   }
 
   @Override
+  public SafeFuture<Optional<UInt64>> getLastDataColumnSidecarArchivedSlot() {
+    return asyncRunner.runAsync(queryDelegate::getLastDataColumnSidecarArchivedSlot);
+  }
+
+  @Override
   public SafeFuture<List<StoredLightClientUpdate>> getBestLightClientUpdates() {
     return asyncRunner.runAsync(queryDelegate::getBestLightClientUpdates);
+  }
+
+  @Override
+  public SafeFuture<Optional<LightClientBootstrap>> getLightClientBootstrap(final UInt64 slot) {
+    return asyncRunner.runAsync(() -> queryDelegate.getLightClientBootstrap(slot));
   }
 }

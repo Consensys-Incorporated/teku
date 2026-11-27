@@ -37,6 +37,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
@@ -425,7 +426,7 @@ public class NoOpDatabase implements Database {
   public void setEarliestAvailableDataColumnSlot(final UInt64 slot) {}
 
   @Override
-  public Optional<UInt64> getLastDataColumnSidecarsProofsSlot() {
+  public Optional<UInt64> getLastDataColumnSidecarArchivedSlot() {
     return Optional.empty();
   }
 
@@ -453,6 +454,14 @@ public class NoOpDatabase implements Database {
 
   @Override
   public void pruneBestLightClientUpdatesBefore(final UInt64 period) {}
+
+  @Override
+  public void storeLightClientBootstrap(final LightClientBootstrap bootstrap) {}
+
+  @Override
+  public Optional<LightClientBootstrap> getLightClientBootstrap(final UInt64 slot) {
+    return Optional.empty();
+  }
 
   @Override
   public void setFirstCustodyIncompleteSlot(final UInt64 slot) {}

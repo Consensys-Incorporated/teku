@@ -99,6 +99,27 @@ public abstract class AbstractSszProgressiveListSchema<
    */
   private final long maxLength;
 
+  /** A group for each level: level 0 is a plain element node, the levels above cap the depth. */
+  private final SszSuperNodeLayout superNodeLayout =
+      new SszSuperNodeLayout() {
+        @Override
+        public int groupOf(final int elementIndex) {
+          return ProgressiveTreeUtil.levelForIndex(elementIndex);
+        }
+
+        @Override
+        public int groupStart(final int level) {
+          return level == 0
+              ? 0
+              : Math.toIntExact(ProgressiveTreeUtil.cumulativeCapacity(level - 1));
+        }
+
+        @Override
+        public int superNodeDepth(final int level) {
+          return Math.min(ProgressiveTreeUtil.levelDepth(level), getSuperNodeDepth());
+        }
+      };
+
   protected AbstractSszProgressiveListSchema(final SszSchema<ElementDataT> elementSchema) {
     this(elementSchema, SszSchemaHints.none());
   }
@@ -514,6 +535,11 @@ public abstract class AbstractSszProgressiveListSchema<
 
   // ===== Store/Load helpers =====
 
+  @Override
+  public Optional<SszSuperNodeLayout> getSuperNodeLayout() {
+    return getSuperNodeDepth() > 0 ? Optional.of(superNodeLayout) : Optional.empty();
+  }
+
   private int getSuperNodeDepth() {
     if (elementSchema.isPrimitive() || !elementSchema.isFixedSize()) {
       // SuperNodes only apply to fixed-size composite elements; hint is ignored otherwise
@@ -698,20 +724,23 @@ public abstract class AbstractSszProgressiveListSchema<
       final long chunkGIndex,
       final long lastChunkGIndex,
       final int lastChunkBytes) {
-    final int chunkBytes = chunkGIndex == lastChunkGIndex ? lastChunkBytes : LeafNode.MAX_BYTE_SIZE;
-    if (TreeUtil.ZERO_TREES_BY_ROOT.containsKey(chunkHash)) {
-      if (elementSchema.isPrimitive()) {
-        return LeafNode.ZERO_LEAVES[chunkBytes];
-      } else {
-        return elementSchema.getDefaultTree();
-      }
-    }
+    // The chunk hash can't be recognised as empty by being the root of a zero tree: a chunk of
+    // primitives is its own hash, and a non-default composite can hash to the root of a zero tree.
     if (elementSchema.isPrimitive()) {
+      final int chunkBytes =
+          chunkGIndex == lastChunkGIndex ? lastChunkBytes : LeafNode.MAX_BYTE_SIZE;
+      if (chunkHash.isZero()) {
+        // A zero hash can only be all-zero data, so there is nothing to load
+        return LeafNode.ZERO_LEAVES[chunkBytes];
+      }
       final Bytes data = nodeSource.loadLeafNode(chunkHash, chunkGIndex);
       return LeafNode.create(data.size() > chunkBytes ? data.slice(0, chunkBytes) : data);
-    } else {
-      return elementSchema.loadBackingNodes(nodeSource, chunkHash, chunkGIndex);
     }
+    final TreeNode defaultTree = elementSchema.getDefaultTree();
+    if (chunkHash.equals(defaultTree.hashTreeRoot())) {
+      return defaultTree;
+    }
+    return elementSchema.loadBackingNodes(nodeSource, chunkHash, chunkGIndex);
   }
 
   // ===== SuperNode packing (SszSuperNodeHint) =====

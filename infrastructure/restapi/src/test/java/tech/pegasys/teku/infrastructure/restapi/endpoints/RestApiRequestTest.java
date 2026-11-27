@@ -453,6 +453,14 @@ public class RestApiRequestTest {
   private CapturedAsyncResponse respondAsync(final SafeFuture<AsyncApiResponse> endpointResponse) {
     when(context.req()).thenReturn(servletRequest);
     when(servletRequest.getAsyncContext()).thenReturn(asyncContext);
+    // The response is written on a server thread, here the calling one
+    doAnswer(
+            invocation -> {
+              invocation.<Runnable>getArgument(0).run();
+              return null;
+            })
+        .when(asyncContext)
+        .start(any());
     final AtomicReference<CompletableFuture<?>> requestResponse = new AtomicReference<>();
     doAnswer(
             invocation -> {

@@ -246,9 +246,13 @@ public class MiscHelpersFulu extends MiscHelpersElectra {
   }
 
   public boolean verifyDataColumnSidecar(final DataColumnSidecar dataColumnSidecar) {
+    if (!(dataColumnSidecar instanceof DataColumnSidecarFulu dataColumnSidecarFulu)) {
+      LOG.trace(
+          "DataColumnSidecar is a {}, expected a Fulu data column sidecar",
+          dataColumnSidecar.getClass().getSimpleName());
+      return false;
+    }
     final int numberOfColumns = specConfigFulu.getNumberOfColumns();
-    final DataColumnSidecarFulu dataColumnSidecarFulu =
-        DataColumnSidecarFulu.required(dataColumnSidecar);
     final UInt64 epoch = computeEpochAtSlot(dataColumnSidecarFulu.getSlot());
 
     if (!dataColumnSidecarFulu.getIndex().isLessThan(numberOfColumns)) {

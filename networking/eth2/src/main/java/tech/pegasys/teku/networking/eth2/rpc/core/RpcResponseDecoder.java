@@ -111,12 +111,14 @@ public final class RpcResponseDecoder<T extends SszData, TContext> {
       }
       Optional<T> ret = payloadDecoder.get().decodeOneMessage(data);
       if (ret.isPresent()) {
+        final TContext payloadContext = context.get();
         respCodeMaybe = Optional.empty();
         contextDecoder.ifPresent(ByteBufDecoder::close);
         contextDecoder = Optional.empty();
         context = Optional.empty();
         payloadDecoder.ifPresent(ByteBufDecoder::close);
         payloadDecoder = Optional.empty();
+        contextCodec.verifyPayloadMatchesContext(payloadContext, ret.get());
       }
       return ret;
     } else {

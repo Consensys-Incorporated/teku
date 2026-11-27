@@ -20,9 +20,13 @@ import static tech.pegasys.teku.infrastructure.async.SafeFuture.completedFuture;
 import com.google.common.annotations.VisibleForTesting;
 import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -47,6 +51,7 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyStore;
 import tech.pegasys.teku.spec.datastructures.genesis.GenesisData;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockAndMetaData;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
@@ -300,13 +305,17 @@ public class CombinedChainDataClient {
                     .filter(
                         identifier ->
                             identifier.blockRoot().equals(slotAndBlockRoot.getBlockRoot())))
-        .thenCompose(this::getDataColumnSidecars);
+        .thenCompose(identifiers -> historicalChainData.getSidecars(identifiers.toList()));
   }
 
   public SafeFuture<List<List<KZGProof>>> getDataColumnSidecarProofs(final UInt64 slot) {
     return historicalChainData
         .getDataColumnSidecarsProofs(slot)
         .thenApply(maybeProofs -> maybeProofs.orElseGet(List::of));
+  }
+
+  public SafeFuture<Optional<UInt64>> getLastDataColumnSidecarArchivedSlot() {
+    return historicalChainData.getLastDataColumnSidecarArchivedSlot();
   }
 
   private Stream<DataColumnSlotAndIdentifier> filterDataColumnSidecarKeys(
@@ -675,6 +684,30 @@ public class CombinedChainDataClient {
             });
   }
 
+  /** Batch lookup: hot store first, the rest unblinded with a single EL call. */
+  public SafeFuture<Map<Bytes32, SignedExecutionPayloadEnvelope>> getExecutionPayloadsByBlockRoots(
+      final Set<Bytes32> blockRoots) {
+    final Map<Bytes32, SignedExecutionPayloadEnvelope> result = new HashMap<>();
+    final Set<Bytes32> remainingRoots = new HashSet<>();
+    for (final Bytes32 blockRoot : blockRoots) {
+      recentChainData
+          .getExecutionPayloadIfAvailable(blockRoot)
+          .ifPresentOrElse(
+              executionPayload -> result.put(blockRoot, executionPayload),
+              () -> remainingRoots.add(blockRoot));
+    }
+    if (remainingRoots.isEmpty()) {
+      return SafeFuture.completedFuture(result);
+    }
+    return executionPayloadProvider
+        .getExecutionPayloads(remainingRoots)
+        .thenApply(
+            executionPayloads -> {
+              result.putAll(executionPayloads);
+              return result;
+            });
+  }
+
   public SafeFuture<Optional<UInt64>> getEarliestAvailableBlobSidecarSlot() {
     return historicalChainData.getEarliestAvailableBlobSidecarSlot();
   }
@@ -685,6 +718,64 @@ public class CombinedChainDataClient {
 
   public SafeFuture<List<StoredLightClientUpdate>> getBestLightClientUpdates() {
     return historicalChainData.getBestLightClientUpdates();
+  }
+
+  public SafeFuture<Optional<LightClientBootstrap>> getLightClientBootstrap(
+      final Bytes32 blockRoot) {
+    final UpdatableStore store = getStore();
+    if (store == null) {
+      return SafeFuture.completedFuture(Optional.empty());
+    }
+    final Optional<BeaconState> maybeState =
+        store
+            .getBlockStateIfAvailable(blockRoot)
+            .or(() -> store.getLatestFinalized().getBlockPostState(blockRoot))
+            .filter(this::isBlockPostState);
+    if (maybeState.isPresent()) {
+      return createLightClientBootstrap(blockRoot, maybeState.get());
+    }
+    return getSlotByBlockRoot(blockRoot)
+        .thenCompose(
+            maybeSlot ->
+                maybeSlot
+                    .map(historicalChainData::getLightClientBootstrap)
+                    .orElse(SafeFuture.completedFuture(Optional.empty())))
+        .thenCompose(
+            maybeBootstrap -> {
+              final Optional<LightClientBootstrap> maybeStoredBootstrap =
+                  maybeBootstrap.filter(
+                      bootstrap ->
+                          bootstrap
+                              .getLightClientHeader()
+                              .getBeacon()
+                              .hashTreeRoot()
+                              .equals(blockRoot));
+              if (maybeStoredBootstrap.isPresent()) {
+                return SafeFuture.completedFuture(maybeStoredBootstrap);
+              }
+              return getStateByBlockRoot(blockRoot)
+                  .thenCompose(
+                      maybeRetrievedState ->
+                          maybeRetrievedState
+                              .filter(this::isBlockPostState)
+                              .map(state -> createLightClientBootstrap(blockRoot, state))
+                              .orElse(SafeFuture.completedFuture(Optional.empty())));
+            });
+  }
+
+  private boolean isBlockPostState(final BeaconState state) {
+    return state.getSlot().equals(state.getLatestBlockHeader().getSlot());
+  }
+
+  private SafeFuture<Optional<LightClientBootstrap>> createLightClientBootstrap(
+      final Bytes32 blockRoot, final BeaconState state) {
+    return getBlockByBlockRoot(blockRoot)
+        .thenApply(
+            maybeBlock ->
+                maybeBlock.flatMap(
+                    block ->
+                        spec.getLightClientUtil(block.getSlot())
+                            .map(util -> util.createLightClientBootstrap(state, block))));
   }
 
   /**
@@ -939,6 +1030,16 @@ public class CombinedChainDataClient {
 
   public SafeFuture<List<DataColumnSlotAndIdentifier>> getDataColumnIdentifiers(final UInt64 slot) {
     return historicalChainData.getDataColumnIdentifiers(slot);
+  }
+
+  public SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyDataColumnIdentifiers(
+      final UInt64 slot) {
+    return historicalChainData.getCustodyDataColumnIdentifiers(slot);
+  }
+
+  public SafeFuture<List<DataColumnSlotAndIdentifier>> getCustodyDataColumnIdentifiers(
+      final UInt64 fromSlot, final UInt64 toSlot) {
+    return historicalChainData.getCustodyDataColumnIdentifiers(fromSlot, toSlot);
   }
 
   public SafeFuture<List<DataColumnSlotAndIdentifier>> getDataColumnIdentifiers(

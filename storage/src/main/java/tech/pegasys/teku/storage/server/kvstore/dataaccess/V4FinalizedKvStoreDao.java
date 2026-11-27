@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
@@ -43,6 +44,8 @@ import tech.pegasys.teku.storage.server.kvstore.ColumnEntry;
 import tech.pegasys.teku.storage.server.kvstore.KvStoreAccessor;
 import tech.pegasys.teku.storage.server.kvstore.KvStoreAccessor.KvStoreTransaction;
 import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.FinalizedUpdater;
+import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.SlotKeyedColumn;
+import tech.pegasys.teku.storage.server.kvstore.dataaccess.KvStoreCombinedDao.SlotRangeDataFile;
 import tech.pegasys.teku.storage.server.kvstore.schema.KvStoreColumn;
 import tech.pegasys.teku.storage.server.kvstore.schema.KvStoreVariable;
 import tech.pegasys.teku.storage.server.kvstore.schema.SchemaFinalizedSnapshotStateAdapter;
@@ -68,6 +71,44 @@ public class V4FinalizedKvStoreDao {
 
   public void compact() {
     db.compact();
+  }
+
+  public void compactSlotRange(
+      final SlotKeyedColumn column, final UInt64 startSlot, final UInt64 endSlot) {
+    slotKeyRange(column, startSlot, endSlot).compact(db);
+  }
+
+  public OptionalLong countSlotRangeTombstones(
+      final SlotKeyedColumn column, final UInt64 startSlot, final UInt64 endSlot) {
+    return slotKeyRange(column, startSlot, endSlot).countTombstones(db);
+  }
+
+  public Optional<List<SlotRangeDataFile>> getSlotRangeDataFiles(
+      final SlotKeyedColumn column, final UInt64 startSlot, final UInt64 endSlot) {
+    return slotKeyRange(column, startSlot, endSlot).getDataFiles(db);
+  }
+
+  private SlotKeyRange<?> slotKeyRange(
+      final SlotKeyedColumn column, final UInt64 startSlot, final UInt64 endSlot) {
+    return switch (column) {
+      case BLOB_SIDECARS ->
+          SlotKeyRange.ofBlobSidecars(
+              schema.getColumnBlobSidecarBySlotRootBlobIndex(), startSlot, endSlot);
+      case NON_CANONICAL_BLOB_SIDECARS ->
+          SlotKeyRange.ofBlobSidecars(
+              schema.getColumnNonCanonicalBlobSidecarBySlotRootBlobIndex(), startSlot, endSlot);
+      case DATA_COLUMN_SIDECARS ->
+          SlotKeyRange.ofDataColumnSidecars(
+              schema.getColumnSidecarByColumnSlotAndIdentifier(), startSlot, endSlot);
+      case NON_CANONICAL_DATA_COLUMN_SIDECARS ->
+          SlotKeyRange.ofDataColumnSidecars(
+              schema.getColumnNonCanonicalSidecarByColumnSlotAndIdentifier(), startSlot, endSlot);
+      case DATA_COLUMN_SIDECARS_PROOFS ->
+          SlotKeyRange.ofSlots(
+              schema.getColumnDataColumnSidecarsProofsBySlot(), startSlot, endSlot);
+      case FINALIZED_BLOCKS ->
+          SlotKeyRange.ofSlots(schema.getColumnFinalizedBlocksBySlot(), startSlot, endSlot);
+    };
   }
 
   public Optional<SignedBeaconBlock> getFinalizedBlockAtSlot(final UInt64 slot) {
@@ -262,8 +303,8 @@ public class V4FinalizedKvStoreDao {
     return db.get(schema.getVariableLastDataColumnSidecarPrunedSlot());
   }
 
-  public Optional<UInt64> getLastDataColumnSidecarsProofsSlot() {
-    return db.getLastKey(schema.getColumnDataColumnSidecarsProofsBySlot());
+  public Optional<UInt64> getLastDataColumnSidecarArchivedSlot() {
+    return db.get(schema.getVariableLastDataColumnSidecarArchivedSlot());
   }
 
   public Optional<List<List<KZGProof>>> getDataColumnSidecarProofs(final UInt64 slot) {
@@ -524,6 +565,11 @@ public class V4FinalizedKvStoreDao {
     @Override
     public void setLastDataColumnSidecarPrunedSlot(final UInt64 slot) {
       transaction.put(schema.getVariableLastDataColumnSidecarPrunedSlot(), slot);
+    }
+
+    @Override
+    public void setLastDataColumnSidecarArchivedSlot(final UInt64 slot) {
+      transaction.put(schema.getVariableLastDataColumnSidecarArchivedSlot(), slot);
     }
 
     @Override

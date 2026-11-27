@@ -13,8 +13,6 @@
 
 package tech.pegasys.teku.infrastructure.ssz.collections.impl;
 
-import it.unimi.dsi.fastutil.longs.LongArrayList;
-import it.unimi.dsi.fastutil.longs.LongList;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -88,21 +86,22 @@ public abstract class AbstractSszMutablePrimitiveCollection<
           }
         });
 
-    LongList gIndices = new LongArrayList();
-    List<TreeNode> newValues = new ArrayList<>();
-    SszPrimitiveSchema<ElementT, SszElementT> elementType = getPrimitiveElementSchema();
-    for (NodeUpdate<ElementT, SszElementT> nodeUpdate : nodeUpdates) {
-      long gIndex = nodeUpdate.getNodeGIndex();
-      TreeNode originalNode =
+    final int nodeCount = nodeUpdates.size();
+    final long[] gIndices = new long[nodeCount];
+    final TreeNode[] newValues = new TreeNode[nodeCount];
+    final SszPrimitiveSchema<ElementT, SszElementT> elementType = getPrimitiveElementSchema();
+    for (int i = 0; i < nodeCount; i++) {
+      final NodeUpdate<ElementT, SszElementT> nodeUpdate = nodeUpdates.get(i);
+      final long gIndex = nodeUpdate.getNodeGIndex();
+      final TreeNode originalNode =
           nodeUpdate.getUpdates().size() < elementsPerChunk
               ? original.get(gIndex)
               : LeafNode.EMPTY_LEAF;
-      TreeNode newNode = elementType.updatePackedNode(originalNode, nodeUpdate.getUpdates());
-      newValues.add(newNode);
-      gIndices.add(gIndex);
+      gIndices[i] = gIndex;
+      newValues[i] = elementType.updatePackedNode(originalNode, nodeUpdate.getUpdates());
     }
 
-    return new TreeUpdates(gIndices, newValues);
+    return TreeUpdates.wrap(gIndices, newValues);
   }
 
   @Override

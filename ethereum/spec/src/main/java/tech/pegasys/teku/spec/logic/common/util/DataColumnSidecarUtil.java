@@ -111,6 +111,9 @@ public interface DataColumnSidecarUtil {
   Optional<SszBytes32Vector> getMaybeKzgCommitmentsInclusionProof(
       DataColumnSidecar dataColumnSidecar);
 
+  /** The sidecar's own commitments, where the fork binds them to the block; empty otherwise. */
+  Optional<SszList<SszKZGCommitment>> getMaybeKzgCommitments(DataColumnSidecar dataColumnSidecar);
+
   List<DataColumnSidecar> reconstructAllDataColumnSidecars(
       List<DataColumnSidecar> dataColumnSidecars);
 

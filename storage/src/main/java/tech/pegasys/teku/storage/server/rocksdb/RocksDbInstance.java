@@ -13,27 +13,40 @@
 
 package tech.pegasys.teku.storage.server.rocksdb;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
 import com.google.errorprone.annotations.MustBeClosed;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
-import java.util.function.Predicate;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
+import org.rocksdb.AbstractNativeReference;
 import org.rocksdb.AbstractRocksIterator;
 import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.CompactRangeOptions;
+import org.rocksdb.CompactRangeOptions.BottommostLevelCompaction;
+import org.rocksdb.FlushOptions;
+import org.rocksdb.LevelMetaData;
+import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDBException;
 import org.rocksdb.RocksIterator;
+import org.rocksdb.Slice;
+import org.rocksdb.SstFileMetaData;
 import org.rocksdb.TransactionDB;
 import tech.pegasys.teku.storage.server.DatabaseStorageException;
 import tech.pegasys.teku.storage.server.ShuttingDownException;
@@ -52,6 +65,12 @@ public class RocksDbInstance implements KvStoreAccessor {
   private final Map<KvStoreColumn<?, ?>, ColumnFamilyDescriptor> columnDescriptors;
   private final List<AutoCloseable> resources;
   private final Set<RocksDbTransaction> openTransactions = new HashSet<>();
+
+  // A range compaction runs inside a native call that must not outlive the database handle, so
+  // closing cancels the running ones (guarded by the set's monitor), which stops them at the end
+  // of their current compaction job, and then waits for them to release the read lock
+  private final Set<CompactRangeOptions> runningCompactions = new HashSet<>();
+  private final ReadWriteLock compactionLock = new ReentrantReadWriteLock();
 
   private final AtomicBoolean closed = new AtomicBoolean(false);
 
@@ -121,8 +140,8 @@ public class RocksDbInstance implements KvStoreAccessor {
       final KvStoreColumn<K, V> column, final K key) {
     assertOpen();
     final byte[] keyBytes = column.getKeySerializer().serialize(key);
-    final Consumer<RocksIterator> setupIterator = it -> it.seekForPrev(keyBytes);
-    try (final Stream<ColumnEntry<K, V>> stream = createStream(column, setupIterator)) {
+    try (final Stream<ColumnEntry<K, V>> stream =
+        createStream(column, Optional.empty(), it -> it.seekForPrev(keyBytes), readEntry(column))) {
       return stream.findFirst();
     }
   }
@@ -131,7 +150,8 @@ public class RocksDbInstance implements KvStoreAccessor {
   public <K, V> Optional<ColumnEntry<K, V>> getFirstEntry(final KvStoreColumn<K, V> column) {
     assertOpen();
     try (final Stream<ColumnEntry<K, V>> stream =
-        createStream(column, AbstractRocksIterator::seekToFirst)) {
+        createStream(
+            column, Optional.empty(), AbstractRocksIterator::seekToFirst, readEntry(column))) {
       return stream.findFirst();
     }
   }
@@ -155,28 +175,32 @@ public class RocksDbInstance implements KvStoreAccessor {
   @MustBeClosed
   public <K, V> Stream<ColumnEntry<K, V>> stream(final KvStoreColumn<K, V> column) {
     assertOpen();
-    return createStream(column, RocksIterator::seekToFirst);
+    return createStream(column, Optional.empty(), RocksIterator::seekToFirst, readEntry(column));
   }
 
   @Override
   @MustBeClosed
   public <K, V> Stream<K> streamKeys(final KvStoreColumn<K, V> column) {
     assertOpen();
-    return createKeyStream(column, RocksIterator::seekToFirst);
+    return createStream(column, Optional.empty(), RocksIterator::seekToFirst, readKey(column));
   }
 
   @Override
   @MustBeClosed
   public Stream<ColumnEntry<Bytes, Bytes>> streamRaw(final KvStoreColumn<?, ?> column) {
     assertOpen();
-    return createStreamRaw(column, RocksIterator::seekToFirst, key -> true)
-        .map(entry -> ColumnEntry.create(Bytes.wrap(entry.getKey()), Bytes.wrap(entry.getValue())));
+    return createStream(
+        column,
+        Optional.empty(),
+        RocksIterator::seekToFirst,
+        it -> ColumnEntry.create(Bytes.wrap(it.key()), Bytes.wrap(it.value())));
   }
 
   @Override
   @MustBeClosed
   public Stream<Bytes> streamKeysRaw(final KvStoreColumn<?, ?> column) {
-    return createStreamKeyRaw(column, RocksIterator::seekToFirst, key -> true).map(Bytes::wrap);
+    return createStream(
+        column, Optional.empty(), RocksIterator::seekToFirst, it -> Bytes.wrap(it.key()));
   }
 
   @Override
@@ -201,8 +225,9 @@ public class RocksDbInstance implements KvStoreAccessor {
     assertOpen();
     return createStream(
         column,
+        Optional.of(column.getKeySerializer().serialize(to)),
         iter -> iter.seek(column.getKeySerializer().serialize(from)),
-        key -> key.compareTo(to) <= 0);
+        readEntry(column));
   }
 
   @Override
@@ -210,10 +235,11 @@ public class RocksDbInstance implements KvStoreAccessor {
   public <K extends Comparable<K>, V> Stream<K> streamKeys(
       final KvStoreColumn<K, V> column, final K from, final K to) {
     assertOpen();
-    return createKeyStream(
+    return createStream(
         column,
+        Optional.of(column.getKeySerializer().serialize(to)),
         iter -> iter.seek(column.getKeySerializer().serialize(from)),
-        key -> key.compareTo(to) <= 0);
+        readKey(column));
   }
 
   @Override
@@ -231,73 +257,79 @@ public class RocksDbInstance implements KvStoreAccessor {
     return tx;
   }
 
-  @MustBeClosed
-  private <K, V> Stream<ColumnEntry<K, V>> createStream(
-      final KvStoreColumn<K, V> column, final Consumer<RocksIterator> setupIterator) {
-    return createStream(column, setupIterator, key -> true);
+  private static <K, V> Function<RocksIterator, ColumnEntry<K, V>> readEntry(
+      final KvStoreColumn<K, V> column) {
+    return it ->
+        ColumnEntry.create(
+            column.getKeySerializer().deserialize(it.key()),
+            column.getValueSerializer().deserialize(it.value()));
   }
 
-  @MustBeClosed
-  private <K, V> Stream<K> createKeyStream(
-      final KvStoreColumn<K, V> column, final Consumer<RocksIterator> setupIterator) {
-    return createKeyStream(column, setupIterator, key -> true);
+  private static <K, V> Function<RocksIterator, K> readKey(final KvStoreColumn<K, V> column) {
+    return it -> column.getKeySerializer().deserialize(it.key());
   }
 
-  @MustBeClosed
-  private <K, V> Stream<ColumnEntry<K, V>> createStream(
-      final KvStoreColumn<K, V> column,
-      final Consumer<RocksIterator> setupIterator,
-      final Predicate<K> continueTest) {
-
-    return createStreamRaw(column, setupIterator, continueTest)
-        .map(
-            entry ->
-                ColumnEntry.create(
-                    column.getKeySerializer().deserialize(entry.getKey()),
-                    column.getValueSerializer().deserialize(entry.getValue())));
-  }
-
-  @MustBeClosed
-  private <K, V> Stream<K> createKeyStream(
-      final KvStoreColumn<K, V> column,
-      final Consumer<RocksIterator> setupIterator,
-      final Predicate<K> continueTest) {
-
-    return createStreamKeyRaw(column, setupIterator, continueTest)
-        .map(entry -> column.getKeySerializer().deserialize(entry));
-  }
-
+  /**
+   * Streams the column from the position {@code setupIterator} seeks to, ending after {@code
+   * maybeLastKey} when present.
+   */
   @SuppressWarnings("MustBeClosedChecker")
   @MustBeClosed
-  private <K, V> Stream<ColumnEntry<byte[], byte[]>> createStreamRaw(
-      final KvStoreColumn<K, V> column,
+  private <T> Stream<T> createStream(
+      final KvStoreColumn<?, ?> column,
+      final Optional<byte[]> maybeLastKey,
       final Consumer<RocksIterator> setupIterator,
-      final Predicate<K> continueTest) {
+      final Function<RocksIterator, T> readEntry) {
     assertOpen();
     final ColumnFamilyHandle handle = getColumnHandle(column);
     if (handle == null) {
       return Stream.empty();
     }
-    final RocksIterator rocksDbIterator = db.newIterator(handle);
-    setupIterator.accept(rocksDbIterator);
-    return RocksDbIterator.create(column, rocksDbIterator, continueTest, closed::get).toStream();
+    final IteratorWithResources iterator =
+        createIterator(
+            maybeLastKey, readOptions -> db.newIterator(handle, readOptions), setupIterator);
+    return RocksDbIterator.create(
+            iterator.rocksIterator(), readEntry, closed::get, iterator.resources())
+        .toStream();
   }
 
-  @SuppressWarnings("MustBeClosedChecker")
-  @MustBeClosed
-  private <K, V> Stream<byte[]> createStreamKeyRaw(
-      final KvStoreColumn<K, V> column,
-      final Consumer<RocksIterator> setupIterator,
-      final Predicate<K> continueTest) {
-    assertOpen();
-    final ColumnFamilyHandle handle = getColumnHandle(column);
-    if (handle == null) {
-      return Stream.empty();
+  /**
+   * Creates an iterator and runs {@code setupIterator} on it. When {@code maybeLastKey} is present
+   * RocksDB enforces it as an upper bound, so a seek stops at the end of the range instead of
+   * stepping over every deletion tombstone up to the next live key. The {@link ReadOptions} and the
+   * bound are native resources that must outlive the iterator, so they are handed back to be closed
+   * after it, or closed here if the iterator cannot be set up.
+   */
+  @VisibleForTesting
+  static IteratorWithResources createIterator(
+      final Optional<byte[]> maybeLastKey,
+      final Function<ReadOptions, RocksIterator> newIterator,
+      final Consumer<RocksIterator> setupIterator) {
+    // The bound is exclusive: with the default bytewise comparator the smallest key greater than
+    // lastKey is lastKey followed by a zero byte
+    final Optional<Slice> maybeUpperBound =
+        maybeLastKey.map(lastKey -> new Slice(Arrays.copyOf(lastKey, lastKey.length + 1)));
+    final ReadOptions readOptions = new ReadOptions();
+    maybeUpperBound.ifPresent(readOptions::setIterateUpperBound);
+    final List<AbstractNativeReference> resources =
+        Stream.<AbstractNativeReference>concat(Stream.of(readOptions), maybeUpperBound.stream())
+            .toList();
+    RocksIterator rocksIterator = null;
+    try {
+      rocksIterator = newIterator.apply(readOptions);
+      setupIterator.accept(rocksIterator);
+      return new IteratorWithResources(rocksIterator, resources);
+    } catch (final RuntimeException e) {
+      if (rocksIterator != null) {
+        rocksIterator.close();
+      }
+      resources.forEach(AbstractNativeReference::close);
+      throw e;
     }
-    final RocksIterator rocksDbIterator = db.newIterator(handle);
-    setupIterator.accept(rocksDbIterator);
-    return RocksDbKeyIterator.create(column, rocksDbIterator, continueTest, closed::get).toStream();
   }
+
+  record IteratorWithResources(
+      RocksIterator rocksIterator, List<AbstractNativeReference> resources) {}
 
   // Compaction is a costly operation, so we run it sequentially for each column family
   // to avoid impacting read performance by blocking all access to the database while compaction is
@@ -325,14 +357,142 @@ public class RocksDbInstance implements KvStoreAccessor {
   }
 
   @Override
+  public <K, V> void compactRange(final KvStoreColumn<K, V> column, final K from, final K to) {
+    compactionLock.readLock().lock();
+    // Not exclusive, so automatic compactions keep running alongside it. By default a manual
+    // compaction skips the bottom level, but tombstones can sit there unprocessed: compaction
+    // moves a file that overlaps nothing below it down a level without rewriting it, so a file
+    // of deletes for keys that were never written reaches the bottom level intact. Forcing the
+    // bottom level drops them, and the optimized mode skips files this compaction just wrote.
+    try (final CompactRangeOptions options =
+        new CompactRangeOptions()
+            .setExclusiveManualCompaction(false)
+            .setBottommostLevelCompaction(BottommostLevelCompaction.kForceOptimized)
+            // Use one background thread rather than all of them, so automatic compactions and
+            // flushes are not held up behind it
+            .setMaxSubcompactions(1)) {
+      final ColumnFamilyHandle handle = getColumnHandle(column);
+      if (handle == null) {
+        return;
+      }
+      synchronized (runningCompactions) {
+        assertOpen();
+        runningCompactions.add(options);
+      }
+      try {
+        db.compactRange(
+            handle,
+            column.getKeySerializer().serialize(from),
+            column.getKeySerializer().serialize(to),
+            options);
+      } catch (final RocksDBException e) {
+        if (closed.get()) {
+          throw new ShuttingDownException();
+        }
+        throw RocksDbExceptionUtil.wrapException("Failed to compact RocksDB column range", e);
+      } finally {
+        synchronized (runningCompactions) {
+          runningCompactions.remove(options);
+        }
+      }
+    } finally {
+      compactionLock.readLock().unlock();
+    }
+  }
+
+  @Override
+  public <K, V> OptionalLong countTombstones(
+      final KvStoreColumn<K, V> column, final K from, final K to) {
+    // Reads native file metadata, so it must not overlap close() either
+    compactionLock.readLock().lock();
+    try {
+      assertOpen();
+      final ColumnFamilyHandle handle = getColumnHandle(column);
+      if (handle == null) {
+        return OptionalLong.of(0);
+      }
+      final byte[] fromKey = column.getKeySerializer().serialize(from);
+      final byte[] toKey = column.getKeySerializer().serialize(to);
+      return OptionalLong.of(
+          getOverlappingFiles(handle, fromKey, toKey).stream()
+              .mapToLong(SstFileMetaData::numDeletions)
+              .sum());
+    } finally {
+      compactionLock.readLock().unlock();
+    }
+  }
+
+  @Override
+  public <K, V> Optional<List<DataFile<K>>> getDataFiles(
+      final KvStoreColumn<K, V> column, final K from, final K to) {
+    // Reads native file metadata, so it must not overlap close() either
+    compactionLock.readLock().lock();
+    try {
+      assertOpen();
+      final ColumnFamilyHandle handle = getColumnHandle(column);
+      if (handle == null) {
+        return Optional.of(List.of());
+      }
+      final byte[] fromKey = column.getKeySerializer().serialize(from);
+      final byte[] toKey = column.getKeySerializer().serialize(to);
+      List<SstFileMetaData> files = getOverlappingFiles(handle, fromKey, toKey);
+      if (files.isEmpty()) {
+        // Deletes of keys that never reached a data file can still be in memory. Once flushed they
+        // are tombstones in the range, so flush them before reporting the range as empty.
+        try (final FlushOptions flushOptions = new FlushOptions().setWaitForFlush(true)) {
+          db.flush(flushOptions, handle);
+        } catch (final RocksDBException e) {
+          throw RocksDbExceptionUtil.wrapException("Failed to flush RocksDB column", e);
+        }
+        files = getOverlappingFiles(handle, fromKey, toKey);
+      }
+      return Optional.of(
+          files.stream()
+              .map(
+                  file ->
+                      new DataFile<>(
+                          column.getKeySerializer().deserialize(file.smallestKey()),
+                          column.getKeySerializer().deserialize(file.largestKey()),
+                          file.size()))
+              .toList());
+    } finally {
+      compactionLock.readLock().unlock();
+    }
+  }
+
+  private List<SstFileMetaData> getOverlappingFiles(
+      final ColumnFamilyHandle handle, final byte[] fromKey, final byte[] toKey) {
+    // The file metadata is held in memory, so this does no I/O, unlike reading the table
+    // properties of every file
+    final List<SstFileMetaData> files = new ArrayList<>();
+    for (final LevelMetaData level : db.getColumnFamilyMetaData(handle).levels()) {
+      for (final SstFileMetaData file : level.files()) {
+        if (Arrays.compareUnsigned(file.largestKey(), fromKey) >= 0
+            && Arrays.compareUnsigned(file.smallestKey(), toKey) <= 0) {
+          files.add(file);
+        }
+      }
+    }
+    return files;
+  }
+
+  @Override
   public synchronized void close() throws Exception {
     if (closed.compareAndSet(false, true)) {
-      for (RocksDbTransaction openTransaction : openTransactions) {
-        openTransaction.closeViaDatabase();
+      synchronized (runningCompactions) {
+        runningCompactions.forEach(options -> options.setCanceled(true));
       }
-      db.syncWal();
-      for (final AutoCloseable resource : resources) {
-        resource.close();
+      compactionLock.writeLock().lock();
+      try {
+        for (RocksDbTransaction openTransaction : openTransactions) {
+          openTransaction.closeViaDatabase();
+        }
+        db.syncWal();
+        for (final AutoCloseable resource : resources) {
+          resource.close();
+        }
+      } finally {
+        compactionLock.writeLock().unlock();
       }
     }
   }

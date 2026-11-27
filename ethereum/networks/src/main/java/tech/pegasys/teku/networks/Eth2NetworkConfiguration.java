@@ -150,6 +150,7 @@ public class Eth2NetworkConfiguration {
   private final boolean forkChoiceLateBlockReorgEnabled;
   private final boolean lightClientServerEnabled;
   private final boolean fastConfirmationEnabled;
+  private final OptionalInt fastConfirmationByzantineThreshold;
   private final boolean prepareBlockProductionEnabled;
   private final boolean forkChoiceUpdatedAlwaysSendPayloadAttributes;
   private final int pendingAttestationsMaxQueue;
@@ -192,6 +193,7 @@ public class Eth2NetworkConfiguration {
       final boolean forkChoiceLateBlockReorgEnabled,
       final boolean lightClientServerEnabled,
       final boolean fastConfirmationEnabled,
+      final OptionalInt fastConfirmationByzantineThreshold,
       final boolean prepareBlockProductionEnabled,
       final boolean forkChoiceUpdatedAlwaysSendPayloadAttributes,
       final int pendingAttestationsMaxQueue,
@@ -235,6 +237,7 @@ public class Eth2NetworkConfiguration {
     this.forkChoiceLateBlockReorgEnabled = forkChoiceLateBlockReorgEnabled;
     this.lightClientServerEnabled = lightClientServerEnabled;
     this.fastConfirmationEnabled = fastConfirmationEnabled;
+    this.fastConfirmationByzantineThreshold = fastConfirmationByzantineThreshold;
     this.prepareBlockProductionEnabled = prepareBlockProductionEnabled;
     this.forkChoiceUpdatedAlwaysSendPayloadAttributes =
         forkChoiceUpdatedAlwaysSendPayloadAttributes;
@@ -371,6 +374,14 @@ public class Eth2NetworkConfiguration {
     return fastConfirmationEnabled;
   }
 
+  /**
+   * Overrides the fast confirmation rule's {@code CONFIRMATION_BYZANTINE_THRESHOLD} (a percentage);
+   * empty means the spec value is used.
+   */
+  public OptionalInt getFastConfirmationByzantineThreshold() {
+    return fastConfirmationByzantineThreshold;
+  }
+
   public boolean isPrepareBlockProductionEnabled() {
     return prepareBlockProductionEnabled;
   }
@@ -433,6 +444,8 @@ public class Eth2NetworkConfiguration {
         && forkChoiceLateBlockReorgEnabled == that.forkChoiceLateBlockReorgEnabled
         && lightClientServerEnabled == that.lightClientServerEnabled
         && fastConfirmationEnabled == that.fastConfirmationEnabled
+        && Objects.equals(
+            fastConfirmationByzantineThreshold, that.fastConfirmationByzantineThreshold)
         && prepareBlockProductionEnabled == that.prepareBlockProductionEnabled
         && aggregatingAttestationPoolProfilingEnabled
             == that.aggregatingAttestationPoolProfilingEnabled
@@ -497,6 +510,7 @@ public class Eth2NetworkConfiguration {
         forkChoiceLateBlockReorgEnabled,
         lightClientServerEnabled,
         fastConfirmationEnabled,
+        fastConfirmationByzantineThreshold,
         prepareBlockProductionEnabled,
         forkChoiceUpdatedAlwaysSendPayloadAttributes,
         rustKzgEnabled,
@@ -539,6 +553,7 @@ public class Eth2NetworkConfiguration {
     private boolean forkChoiceLateBlockReorgEnabled = DEFAULT_FORK_CHOICE_LATE_BLOCK_REORG_ENABLED;
     private boolean lightClientServerEnabled = DEFAULT_LIGHT_CLIENT_SERVER_ENABLED;
     private boolean fastConfirmationEnabled = DEFAULT_FAST_CONFIRMATION_ENABLED;
+    private OptionalInt fastConfirmationByzantineThreshold = OptionalInt.empty();
     private boolean prepareBlockProductionEnabled = DEFAULT_PREPARE_BLOCK_PRODUCTION_ENABLED;
     private boolean forkChoiceUpdatedAlwaysSendPayloadAttributes =
         DEFAULT_FORK_CHOICE_UPDATED_ALWAYS_SEND_PAYLOAD_ATTRIBUTES;
@@ -649,6 +664,7 @@ public class Eth2NetworkConfiguration {
           forkChoiceLateBlockReorgEnabled,
           lightClientServerEnabled,
           fastConfirmationEnabled,
+          fastConfirmationByzantineThreshold,
           resolvePrepareBlockProductionAbility(prepareBlockProductionEnabled),
           forkChoiceUpdatedAlwaysSendPayloadAttributes,
           pendingAttestationsMaxQueue.orElse(DEFAULT_MAX_QUEUE_PENDING_ATTESTATIONS),
@@ -708,6 +724,11 @@ public class Eth2NetworkConfiguration {
       checkArgument(
           pendingAttestationsMaxQueue.orElse(DEFAULT_MAX_QUEUE_PENDING_ATTESTATIONS) >= 10000,
           "Pending attestations queue size must be at least 10000 (Xnetwork-pending-attestations-max-queue - default 70000)");
+      fastConfirmationByzantineThreshold.ifPresent(
+          threshold ->
+              checkArgument(
+                  threshold >= 0 && threshold <= 100,
+                  "Fast confirmation Byzantine threshold must be a percentage between 0 and 100 (Xfast-confirmation-byzantine-threshold)"));
     }
 
     public Builder constants(final String constants) {
@@ -1323,6 +1344,12 @@ public class Eth2NetworkConfiguration {
 
     public Builder fastConfirmationEnabled(final boolean fastConfirmationEnabled) {
       this.fastConfirmationEnabled = fastConfirmationEnabled;
+      return this;
+    }
+
+    public Builder fastConfirmationByzantineThreshold(
+        final int fastConfirmationByzantineThreshold) {
+      this.fastConfirmationByzantineThreshold = OptionalInt.of(fastConfirmationByzantineThreshold);
       return this;
     }
 

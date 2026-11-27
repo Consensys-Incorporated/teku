@@ -161,10 +161,17 @@ public class GloasStateUpgrade implements StateUpgrade<BeaconStateFulu> {
                       .getBuildersSchema()
                       .of());
               state.setNextWithdrawalBuilderIndex(UInt64.ZERO);
+              // Unset the fork slot's payload availability, which `process_slot` would have done
+              // at the previous slot had it been processed with Gloas rules
+              final int forkSlotIndex =
+                  preState.getSlot().mod(specConfig.getSlotsPerHistoricalRoot()).intValue();
               final SszBitvector executionPayloadAvailability =
                   schemaDefinitions
                       .getExecutionPayloadAvailabilitySchema()
-                      .ofBits(IntStream.range(0, specConfig.getSlotsPerHistoricalRoot()).toArray());
+                      .ofBits(
+                          IntStream.range(0, specConfig.getSlotsPerHistoricalRoot())
+                              .filter(index -> index != forkSlotIndex)
+                              .toArray());
               state.setExecutionPayloadAvailability(executionPayloadAvailability);
               final List<BuilderPendingPayment> builderPendingPayments =
                   Collections.nCopies(

@@ -266,24 +266,26 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
   }
 
   @Override
-  public SafeFuture<Map<BLSPublicKey, Integer>> getValidatorIndices(
+  public SafeFuture<Optional<Map<BLSPublicKey, Integer>>> getValidatorIndices(
       final Collection<BLSPublicKey> publicKeys) {
+    if (publicKeys.isEmpty()) {
+      return SafeFuture.completedFuture(Optional.of(Map.of()));
+    }
     return combinedChainDataClient
         .getBestState()
-        .orElseGet(
-            () ->
-                SafeFuture.failedFuture(
-                    new IllegalStateException("Head state is not yet available")))
-        .thenApply(
-            state -> {
-              @SuppressWarnings("UseFastutil")
-              final Map<BLSPublicKey, Integer> results = new HashMap<>();
-              publicKeys.forEach(
-                  publicKey ->
-                      spec.getValidatorIndex(state, publicKey)
-                          .ifPresent(index -> results.put(publicKey, index)));
-              return results;
-            });
+        .map(
+            beaconStateSafeFuture ->
+                beaconStateSafeFuture.thenApply(
+                    state -> {
+                      @SuppressWarnings("UseFastutil")
+                      final Map<BLSPublicKey, Integer> results = new HashMap<>();
+                      publicKeys.forEach(
+                          publicKey ->
+                              spec.getValidatorIndex(state, publicKey)
+                                  .ifPresent(index -> results.put(publicKey, index)));
+                      return Optional.of(results);
+                    }))
+        .orElseGet(() -> SafeFuture.completedFuture(Optional.empty()));
   }
 
   @Override
@@ -388,7 +390,19 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
                       + "within the context of the current and next epochs in the lookahead.",
                   epoch.minus(combinedChainDataClient.getCurrentEpoch()).toString())));
     }
-    final UInt64 slot = spec.computeStartSlotAtEpoch(epoch.minusMinZero(1));
+    // The PTC of the Gloas fork epoch is computed by upgrade_to_gloas from effective balances
+    // updated at the end of the previous epoch, so it is only known from the upgraded state
+    final boolean isGloasForkEpoch = spec.isMilestoneActivationEpoch(SpecMilestone.GLOAS, epoch);
+    if (isGloasForkEpoch && combinedChainDataClient.getCurrentEpoch().isLessThan(epoch)) {
+      // Not available yet rather than invalid: a validator client asks at the first slot of the
+      // fork, which can reach us just before our own clock does, and should quietly retry
+      LOG.debug(
+          "Payload Timeliness Committee duties for the Gloas fork epoch {} are not available before the fork",
+          epoch);
+      return SafeFuture.completedFuture(Optional.empty());
+    }
+    final UInt64 slot =
+        spec.computeStartSlotAtEpoch(isGloasForkEpoch ? epoch : epoch.minusMinZero(1));
     LOG.trace(
         "Retrieving Payload Timeliness Committee duties from epoch {} using state at slot {}",
         epoch,
@@ -403,8 +417,11 @@ public class ValidatorApiHandler implements ValidatorApiChannel, SlotEventsChann
 
   private PayloadTimelinessCommitteeDuties getPtcDutiesFromIndicesAndState(
       final BeaconState state, final UInt64 epoch, final IntCollection validatorIndices) {
+    // get_block_root_at_slot(state, compute_start_slot_at_epoch(epoch - 1) - 1), except for the
+    // Gloas fork epoch, where the duties can change until compute_start_slot_at_epoch(epoch) - 1
     final Bytes32 dependentRoot =
         epoch.isGreaterThan(spec.getCurrentEpoch(state))
+                || spec.isMilestoneActivationEpoch(SpecMilestone.GLOAS, epoch)
             ? spec.atEpoch(epoch).getBeaconStateUtil().getCurrentDutyDependentRoot(state)
             : spec.atEpoch(epoch).getBeaconStateUtil().getPreviousDutyDependentRoot(state);
     final List<PtcDuty> duties = new ArrayList<>();

@@ -16,6 +16,15 @@ package tech.pegasys.teku.networking.p2p.rpc;
 import io.netty.buffer.ByteBuf;
 import tech.pegasys.teku.networking.p2p.peer.NodeId;
 
+/**
+ * Handles the inbound side of an RPC stream.
+ *
+ * <p>{@link #processData}, {@link #readComplete} and {@link #closed} are invoked on the stream's
+ * event loop. {@link #closed} is invoked once when the stream's handler is removed, after {@link
+ * #readComplete}, including after {@link RpcStream#closeAbruptly()}. Decoders and other per-stream
+ * state must only be touched from those callbacks and released in {@link #closed}; other threads
+ * may only close the stream.
+ */
 public interface RpcRequestHandler {
 
   void active(final NodeId nodeId, final RpcStream rpcStream);

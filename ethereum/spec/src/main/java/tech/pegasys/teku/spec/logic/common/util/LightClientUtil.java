@@ -98,12 +98,19 @@ public class LightClientUtil {
 
     final BeaconStateAltair stateAltair = BeaconStateAltair.required(state);
 
+    return createLightClientBootstrap(
+        block,
+        stateAltair.getCurrentSyncCommittee(),
+        stateAltair.createCurrentSyncCommitteeProof());
+  }
+
+  public LightClientBootstrap createLightClientBootstrap(
+      final SignedBeaconBlock block,
+      final SyncCommittee currentSyncCommittee,
+      final SszBytes32Vector currentSyncCommitteeBranch) {
     return schemaDefinitionsAltair
         .getLightClientBootstrapSchema()
-        .create(
-            headerFromBlock(block),
-            stateAltair.getCurrentSyncCommittee(),
-            stateAltair.createCurrentSyncCommitteeProof());
+        .create(headerFromBlock(block), currentSyncCommittee, currentSyncCommitteeBranch);
   }
 
   /**
@@ -196,6 +203,22 @@ public class LightClientUtil {
         finalityBranch,
         syncAggregate,
         SszUInt64.of(block.getSlot()));
+  }
+
+  public LightClientUpdate withFinalizedHeader(
+      final LightClientUpdate update,
+      final SszBytes32Vector finalityBranch,
+      final SignedBeaconBlock finalizedBlock) {
+    return schemaDefinitionsAltair
+        .getLightClientUpdateSchema()
+        .create(
+            update.getAttestedHeader(),
+            update.getNextSyncCommittee(),
+            update.getNextSyncCommitteeBranch(),
+            headerFromBlock(finalizedBlock),
+            finalityBranch,
+            update.getSyncAggregate(),
+            update.getSignatureSlot());
   }
 
   /** {@code create_light_client_finality_update}. */

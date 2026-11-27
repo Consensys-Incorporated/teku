@@ -113,6 +113,9 @@ public class KvStoreConfiguration {
 
   @JsonIgnore private Path databaseDir;
 
+  // Set from the command line on every start, never stored with the database
+  @JsonIgnore private boolean prunedSlotCompactionEnabled = false;
+
   public static KvStoreConfiguration v4Settings(final Path databaseDir) {
     return new KvStoreConfiguration().withDatabaseDir(databaseDir);
   }
@@ -138,6 +141,12 @@ public class KvStoreConfiguration {
 
   public KvStoreConfiguration withBlobDbEnabled(final boolean blobDbEnabled) {
     this.blobDbEnabled = blobDbEnabled;
+    return this;
+  }
+
+  public KvStoreConfiguration withPrunedSlotCompactionEnabled(
+      final boolean prunedSlotCompactionEnabled) {
+    this.prunedSlotCompactionEnabled = prunedSlotCompactionEnabled;
     return this;
   }
 
@@ -193,6 +202,10 @@ public class KvStoreConfiguration {
     return blobDbEnabled;
   }
 
+  public boolean prunedSlotCompactionEnabled() {
+    return prunedSlotCompactionEnabled;
+  }
+
   @Override
   public String toString() {
     return MoreObjects.toStringHelper(this)
@@ -205,6 +218,7 @@ public class KvStoreConfiguration {
         .add("bottomMostCompressionType", bottomMostCompressionType)
         .add("databaseDir", databaseDir)
         .add("blobDbEnabled", blobDbEnabled)
+        .add("prunedSlotCompactionEnabled", prunedSlotCompactionEnabled)
         .toString();
   }
 }

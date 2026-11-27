@@ -183,13 +183,18 @@ public class StatusLogger {
     log.info("Starting doppelganger detection for public keys: {}", String.join(", ", publicKeys));
   }
 
-  public void doppelgangerDetectionTimeout(final Set<String> publicKeys) {
-    log.warn(
-        "Doppelganger Detection for public keys {} stopped due to a timeout. "
-            + "The doppelganger check couldn't be performed correctly due to "
-            + "epoch calculation errors. Some validators with the same keys could "
-            + "be active in the network. "
-            + "Please check the logs and consider running a new validator doppelgangers check",
+  public void doppelgangerDetectionUnavailable(final Set<String> publicKeys, final String reason) {
+    log.error(
+        "Doppelganger detection is temporarily unavailable for public keys {}. "
+            + "Duties for these public keys remain disabled while Teku retries. "
+            + "Reason: {}",
+        String.join(", ", publicKeys),
+        reason);
+  }
+
+  public void doppelgangerDetectionResumed(final Set<String> publicKeys) {
+    log.info(
+        "Beacon node is available. Resuming doppelganger detection for public keys {}.",
         String.join(", ", publicKeys));
   }
 
@@ -497,6 +502,17 @@ public class StatusLogger {
         print(
             "Ignoring weak subjectivity period check (--ignore-weak-subjectivity-period-enabled). Syncing "
                 + "from outside of the weak subjectivity period is considered UNSAFE.",
+            Color.YELLOW));
+  }
+
+  public void warnJwtSecretFileReadableByOthers(final Path jwtSecretFile) {
+    log.warn(
+        print(
+            "Execution engine JWT secret file "
+                + jwtSecretFile.toAbsolutePath()
+                + " is readable by all local users, who could use it to call the execution client's "
+                + "Engine API. Restrict its permissions, e.g. chmod 600, or chmod 640 with a group "
+                + "shared with the execution client.",
             Color.YELLOW));
   }
 

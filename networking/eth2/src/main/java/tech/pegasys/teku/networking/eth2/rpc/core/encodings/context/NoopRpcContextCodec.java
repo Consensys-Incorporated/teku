@@ -44,6 +44,11 @@ class NoopRpcContextCodec<TPayload extends SszData> implements RpcContextCodec<B
     return Optional.of(schema);
   }
 
+  @Override
+  public void verifyPayloadMatchesContext(final Bytes bytes, final TPayload responsePayload) {
+    // No-op
+  }
+
   private static class EmptyContextDecoder implements RpcByteBufDecoder<Bytes> {
 
     @Override

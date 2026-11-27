@@ -28,9 +28,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.LongStream;
+import org.apache.logging.log4j.Level;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.TestSpecFactory;
@@ -614,6 +616,20 @@ class FastConfirmationCalculatorTest {
   }
 
   @Test
+  void shouldComputeAdversarialWeightWithConfiguredByzantineThreshold() {
+    buildLinearChain(11);
+    final BeaconState balanceSource = genesisState();
+    final FastConfirmationCalculator calculator =
+        calculator(balanceSource, Bytes32.random(), 10, 10);
+
+    final UInt64 total = spec.getTotalActiveBalance(balanceSource);
+    assertThat(
+            calculator.computeAdversarialWeight(
+                balanceSource, UInt64.valueOf(3), UInt64.valueOf(6)))
+        .isEqualTo(estimate(total, 3, 6).dividedBy(100).times(10));
+  }
+
+  @Test
   void shouldReduceAdversarialWeightByEquivocationScore() {
     buildLinearChain(11);
     final BeaconState balanceSource = genesisState();
@@ -879,6 +895,18 @@ class FastConfirmationCalculatorTest {
   }
 
   @Test
+  void shouldComputeHonestFfgSupportWithConfiguredByzantineThreshold() {
+    buildLinearChain(11);
+    final BeaconState balanceSource = genesisState();
+    final FastConfirmationCalculator calculator = calculator(balanceSource, chain.get(10), 12, 10);
+
+    final UInt64 total = spec.getTotalActiveBalance(calculator.getPulledUpHeadState());
+    // epochStart(epoch 1) = 8, currentSlot - 1 = 11; 90% of the remaining weight is honest.
+    final UInt64 expected = total.minusMinZero(estimate(total, 8, 11)).dividedBy(100).times(90);
+    assertThat(calculator.computeHonestFfgSupportForCurrentTarget()).isEqualTo(expected);
+  }
+
+  @Test
   void shouldReportNoConflictingCheckpointWhenTargetIsGreatestUnrealizedJustified() {
     buildLinearChain(11);
     final BeaconState balanceSource = genesisState();
@@ -934,6 +962,47 @@ class FastConfirmationCalculatorTest {
         reconfirmationCalculator(genesis, chain.get(3), observed, 5);
 
     assertThat(calculator.isConfirmedChainSafe(chain.get(3))).isTrue();
+  }
+
+  @Test
+  void shouldNotReconfirmWhenPreviousBalanceSourceIsUnavailable() {
+    buildLinearChain(11);
+    final BeaconState genesis = genesisState();
+    when(forkChoice.isFullyValidated(any())).thenReturn(true);
+    when(store.getVoteSnapshot())
+        .thenReturn(voteSnapshot(allValidatorsVotingFor(genesis, chain.get(3))));
+    // Would reconfirm chain[1..3], but there is no state to score them against.
+    final Checkpoint observed = new Checkpoint(UInt64.ZERO, chain.get(0));
+    final FastConfirmationStates states =
+        new FastConfirmationStates(Optional.empty(), mock(BeaconState.class), genesis);
+    final FastConfirmationCalculator calculator =
+        new FastConfirmationCalculator(
+            spec,
+            fcrStore(chain.get(3), observed),
+            states,
+            UInt64.valueOf(5),
+            FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
+
+    assertThat(calculator.isConfirmedChainSafe(chain.get(3))).isFalse();
+  }
+
+  @Test
+  void shouldReconfirmWithoutPreviousBalanceSourceWhenThereAreNoBlocksToScore() {
+    buildLinearChain(11);
+    // The confirmed root is the observed justified checkpoint block itself, which is excluded.
+    final Checkpoint observed = new Checkpoint(UInt64.ZERO, chain.get(0));
+    final FastConfirmationStates states =
+        new FastConfirmationStates(
+            Optional.empty(), mock(BeaconState.class), mock(BeaconState.class));
+    final FastConfirmationCalculator calculator =
+        new FastConfirmationCalculator(
+            spec,
+            fcrStore(chain.get(3), observed),
+            states,
+            UInt64.valueOf(5),
+            FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
+
+    assertThat(calculator.isConfirmedChainSafe(chain.get(0))).isTrue();
   }
 
   @Test
@@ -1012,9 +1081,57 @@ class FastConfirmationCalculatorTest {
     // currentSlot 17 -> currentEpoch 2. The previous-epoch advance would dereference the pruned
     // previous slot head; the calculator must skip it and keep the finalized confirmed root.
     final FastConfirmationCalculator calculator =
-        new FastConfirmationCalculator(spec, fcrStore, states, UInt64.valueOf(17));
+        new FastConfirmationCalculator(
+            spec,
+            fcrStore,
+            states,
+            UInt64.valueOf(17),
+            FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
 
     assertThat(calculator.getLatestConfirmed()).isEqualTo(chain.get(8));
+  }
+
+  @Test
+  void shouldRestartFromObservedJustifiedAtEpochStartWithoutPreviousBalanceSource() {
+    buildLinearChain(17);
+    final Checkpoint zero = new Checkpoint(UInt64.ZERO, Bytes32.ZERO);
+    final Checkpoint observedJustified = new Checkpoint(UInt64.ONE, chain.get(8));
+    // The head's (and every epoch-1+ block's) unrealized justification matches the observed
+    // justified checkpoint.
+    for (int i = 8; i <= 16; i++) {
+      setCheckpoints(chain.get(i), observedJustified, observedJustified);
+    }
+    when(store.getFinalizedCheckpoint()).thenReturn(new Checkpoint(UInt64.ZERO, chain.get(0)));
+    // Confirmed root is a previous-epoch block, so reconfirmation has blocks 9..10 to score. The
+    // previous observed justified checkpoint is stale and its state has been pruned, so there is no
+    // previous balance source to score them against.
+    final FastConfirmationStore fcrStore =
+        new FastConfirmationStore(
+            store,
+            chain.get(10),
+            new Checkpoint(UInt64.ZERO, Bytes32.random()),
+            observedJustified,
+            zero,
+            chain.get(15),
+            chain.get(16));
+    final BeaconState state = genesisState();
+    final FastConfirmationStates states =
+        new FastConfirmationStates(Optional.empty(), state, state);
+    // currentSlot 16 = epoch 2 start: reconfirmation fails without the previous balance source, so
+    // the rule reverts to finalized and restarts from the observed justified checkpoint block.
+    final FastConfirmationCalculator calculator =
+        new FastConfirmationCalculator(
+            spec,
+            fcrStore,
+            states,
+            UInt64.valueOf(16),
+            FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
+
+    try (final LogCaptor logCaptor =
+        LogCaptor.forClass(FastConfirmationCalculator.class, Level.DEBUG)) {
+      assertThat(calculator.getLatestConfirmed()).isEqualTo(chain.get(8));
+      logCaptor.assertDebugLog("previous balance source");
+    }
   }
 
   @Test
@@ -1047,7 +1164,11 @@ class FastConfirmationCalculatorTest {
 
   private FastConfirmationCalculator calculator(final Bytes32 head, final long currentSlot) {
     return new FastConfirmationCalculator(
-        spec, fcrStore(head), placeholderStates(), UInt64.valueOf(currentSlot));
+        spec,
+        fcrStore(head),
+        placeholderStates(),
+        UInt64.valueOf(currentSlot),
+        FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
   }
 
   private FastConfirmationCalculator calculatorWithHeadState(
@@ -1057,10 +1178,19 @@ class FastConfirmationCalculatorTest {
 
   private FastConfirmationCalculator calculator(
       final BeaconState headState, final Bytes32 head, final long currentSlot) {
+    return calculator(
+        headState, head, currentSlot, FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
+  }
+
+  private FastConfirmationCalculator calculator(
+      final BeaconState headState,
+      final Bytes32 head,
+      final long currentSlot,
+      final int byzantineThreshold) {
     final FastConfirmationStates states =
         new FastConfirmationStates(Optional.empty(), mock(BeaconState.class), headState);
     return new FastConfirmationCalculator(
-        spec, fcrStore(head), states, UInt64.valueOf(currentSlot));
+        spec, fcrStore(head), states, UInt64.valueOf(currentSlot), byzantineThreshold);
   }
 
   private FastConfirmationCalculator reconfirmationCalculator(
@@ -1072,7 +1202,11 @@ class FastConfirmationCalculatorTest {
     final FastConfirmationStates states =
         new FastConfirmationStates(Optional.of(state), mock(BeaconState.class), state);
     return new FastConfirmationCalculator(
-        spec, fcrStore(head, currentObservedJustified), states, UInt64.valueOf(currentSlot));
+        spec,
+        fcrStore(head, currentObservedJustified),
+        states,
+        UInt64.valueOf(currentSlot),
+        FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
   }
 
   private FastConfirmationCalculator descendantCalculator(
@@ -1086,7 +1220,12 @@ class FastConfirmationCalculatorTest {
         new FastConfirmationStore(store, Bytes32.ZERO, zero, zero, zero, previousSlotHead, head);
     final FastConfirmationStates states =
         new FastConfirmationStates(Optional.empty(), state, state);
-    return new FastConfirmationCalculator(spec, fcrStore, states, UInt64.valueOf(currentSlot));
+    return new FastConfirmationCalculator(
+        spec,
+        fcrStore,
+        states,
+        UInt64.valueOf(currentSlot),
+        FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
   }
 
   private FastConfirmationCalculator latestConfirmedCalculator(
@@ -1102,7 +1241,12 @@ class FastConfirmationCalculatorTest {
         new FastConfirmationStore(store, confirmedRoot, zero, observedJustified, zero, head, head);
     final FastConfirmationStates states =
         new FastConfirmationStates(Optional.of(state), state, state);
-    return new FastConfirmationCalculator(spec, fcrStore, states, UInt64.valueOf(currentSlot));
+    return new FastConfirmationCalculator(
+        spec,
+        fcrStore,
+        states,
+        UInt64.valueOf(currentSlot),
+        FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
   }
 
   private FastConfirmationStore fcrStore(final Bytes32 head) {
@@ -1134,7 +1278,11 @@ class FastConfirmationCalculatorTest {
     final FastConfirmationStates states =
         new FastConfirmationStates(Optional.empty(), mock(BeaconState.class), headState);
     return new FastConfirmationCalculator(
-        GLOAS_SPEC, fcrStore(head), states, UInt64.valueOf(currentSlot));
+        GLOAS_SPEC,
+        fcrStore(head),
+        states,
+        UInt64.valueOf(currentSlot),
+        FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
   }
 
   private void buildLinearChain(final int length) {

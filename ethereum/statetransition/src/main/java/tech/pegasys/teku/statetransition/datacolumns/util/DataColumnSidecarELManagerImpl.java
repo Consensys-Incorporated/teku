@@ -264,13 +264,15 @@ public class DataColumnSidecarELManagerImpl extends AbstractIgnoringFutureHistor
   }
 
   private RecoveryTask createRecoveryTask(final DataColumnSidecar dataColumnSidecar) {
-    if (dataColumnSidecar.getMaybeKzgCommitments().isPresent()) {
-      final DataColumnSidecarUtil dataColumnSidecarUtil =
-          spec.getDataColumnSidecarUtil(dataColumnSidecar.getSlot());
+    final DataColumnSidecarUtil dataColumnSidecarUtil =
+        spec.getDataColumnSidecarUtil(dataColumnSidecar.getSlot());
+    final Optional<SszList<SszKZGCommitment>> maybeKzgCommitments =
+        dataColumnSidecarUtil.getMaybeKzgCommitments(dataColumnSidecar);
+    if (maybeKzgCommitments.isPresent()) {
       final RecoveryTask recoveryTask =
           new RecoveryTask(
               dataColumnSidecar.getMaybeSignedBlockHeader(),
-              SafeFuture.completedFuture(dataColumnSidecar.getMaybeKzgCommitments().get()),
+              SafeFuture.completedFuture(maybeKzgCommitments.get()),
               dataColumnSidecarUtil
                   .getMaybeKzgCommitmentsInclusionProof(dataColumnSidecar)
                   .map(SszPrimitiveCollection::asListUnboxed),

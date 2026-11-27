@@ -15,6 +15,8 @@ package tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThatSafeFuture;
 
@@ -33,6 +35,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.type.SszKZGCommitment;
 import tech.pegasys.teku.spec.datastructures.util.DataColumnIdentifier;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
+import tech.pegasys.teku.spec.util.DataStructureUtil;
 
 @SuppressWarnings("JavaCase")
 public class DataColumnSidecarsByRootValidatorGloasTest
@@ -102,5 +105,32 @@ public class DataColumnSidecarsByRootValidatorGloasTest
                 .DATA_COLUMN_SIDECAR_KZG_VERIFICATION_FAILED
                 .describe())
         .hasMessageContaining("DataColumnSidecar's KZG proofs do not match the bid's KZG proofs");
+  }
+
+  @Test
+  void fuluSchemaSidecarForGloasBlockFailsValidityCheck() {
+    final SignedBeaconBlock block1 = createBlock(currentForkFirstSlot);
+    final DataColumnSidecar fuluSchemaSidecar =
+        new DataStructureUtil(TestSpecFactory.createMinimalFulu())
+            .randomDataColumnSidecar(block1.asHeader(), UInt64.ZERO);
+    final DataColumnIdentifier sidecarIdentifier1_0 =
+        DataColumnIdentifier.createFromSidecar(fuluSchemaSidecar);
+    validator =
+        new DataColumnSidecarsByRootValidator(
+            peer,
+            spec,
+            metricsSystem,
+            timeProvider,
+            dataColumnSidecarSignatureValidator,
+            List.of(sidecarIdentifier1_0),
+            blobKzgCommitmentsProvider);
+
+    assertThatSafeFuture(validator.validate(fuluSchemaSidecar))
+        .isCompletedExceptionallyWith(DataColumnSidecarsResponseInvalidResponseException.class)
+        .hasMessageContaining(
+            DataColumnSidecarsResponseInvalidResponseException.InvalidResponseType
+                .DATA_COLUMN_SIDECAR_VALIDITY_CHECK_FAILED
+                .describe());
+    verify(blobKzgCommitmentsProvider, never()).getBlobKzgCommitments(fuluSchemaSidecar);
   }
 }

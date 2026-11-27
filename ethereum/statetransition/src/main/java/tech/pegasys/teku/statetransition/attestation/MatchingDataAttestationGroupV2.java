@@ -158,7 +158,12 @@ public class MatchingDataAttestationGroupV2 {
       }
     }
 
-    return new PooledAttestationWithData(attestationData, builder.buildAggregate());
+    final PooledAttestation filledUpAggregate = builder.buildAggregate();
+    if (hasInfinitySignature(filledUpAggregate)) {
+      LOG.debug("FillUp produced an aggregate with the infinity signature, keeping the original");
+      return attestation;
+    }
+    return new PooledAttestationWithData(attestationData, filledUpAggregate);
   }
 
   /**
@@ -235,19 +240,13 @@ public class MatchingDataAttestationGroupV2 {
 
   public Stream<PooledAttestationWithData> streamAggregatesForBlockProduction(
       final long timeLimitNanos) {
-    return StreamSupport.stream(
-            spliterator(timeLimitNanos, blockProductionAggregatesCandidatesStreamSupplier()), false)
-        .map(
-            pooledAttestation -> new PooledAttestationWithData(attestationData, pooledAttestation));
+    return streamAggregates(timeLimitNanos, blockProductionAggregatesCandidatesStreamSupplier());
   }
 
   public Stream<PooledAttestationWithData> streamSingleAttestationsForBlockProduction(
       final long timeLimitNanos) {
-    return StreamSupport.stream(
-            spliterator(timeLimitNanos, blockProductionSingleAttestationCandidatesStreamSupplier()),
-            false)
-        .map(
-            pooledAttestation -> new PooledAttestationWithData(attestationData, pooledAttestation));
+    return streamAggregates(
+        timeLimitNanos, blockProductionSingleAttestationCandidatesStreamSupplier());
   }
 
   public Stream<PooledAttestationWithData> streamForAggregationProduction(
@@ -261,13 +260,8 @@ public class MatchingDataAttestationGroupV2 {
     final Optional<UInt64> actualCommitteeIndex =
         includedValidators.requiresCommitteeBits() ? committeeIndex : Optional.empty();
 
-    return StreamSupport.stream(
-            spliterator(
-                timeLimitNanos,
-                aggregationProductionCandidatesStreamSupplier(actualCommitteeIndex)),
-            false)
-        .map(
-            pooledAttestation -> new PooledAttestationWithData(attestationData, pooledAttestation));
+    return streamAggregates(
+        timeLimitNanos, aggregationProductionCandidatesStreamSupplier(actualCommitteeIndex));
   }
 
   public Stream<PooledAttestationWithData> streamForApiRequest(
@@ -275,14 +269,31 @@ public class MatchingDataAttestationGroupV2 {
     if (noMatchingAttestations(committeeIndex, requiresCommitteeBits)) {
       return Stream.empty();
     }
-    return StreamSupport.stream(
-            spliterator(
-                Long.MAX_VALUE,
-                apiRequestCandidatesStreamSupplier(committeeIndex, requiresCommitteeBits)),
-            false)
+    return streamAggregates(
+        Long.MAX_VALUE, apiRequestCandidatesStreamSupplier(committeeIndex, requiresCommitteeBits));
+  }
+
+  /**
+   * Streams the aggregates built from the given candidates, dropping any aggregate whose signature
+   * is the point at infinity (see {@link #hasInfinitySignature(PooledAttestation)}).
+   */
+  private Stream<PooledAttestationWithData> streamAggregates(
+      final long timeLimitNanos,
+      final Supplier<Stream<PooledAttestation>> candidatesStreamSupplier) {
+    return StreamSupport.stream(spliterator(timeLimitNanos, candidatesStreamSupplier), false)
+        .filter(pooledAttestation -> !hasInfinitySignature(pooledAttestation))
         .map(
-            pooledAttestationBitsAndSignature ->
-                new PooledAttestationWithData(attestationData, pooledAttestationBitsAndSignature));
+            pooledAttestation -> new PooledAttestationWithData(attestationData, pooledAttestation));
+  }
+
+  /**
+   * An aggregate whose signature is the point at infinity is invalid with non-empty participation
+   * (its aggregated public key is the point at infinity too), so it is neither included in a block
+   * nor produced as an aggregate. Individually valid signatures aggregate to the point at infinity
+   * when the signers' public keys sum to the point at infinity.
+   */
+  private static boolean hasInfinitySignature(final PooledAttestation pooledAttestation) {
+    return pooledAttestation.aggregatedSignature().isInfinity();
   }
 
   private Spliterator<PooledAttestation> spliterator(

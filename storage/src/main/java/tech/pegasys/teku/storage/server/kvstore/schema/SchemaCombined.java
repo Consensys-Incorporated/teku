@@ -81,6 +81,10 @@ public interface SchemaCombined extends Schema {
 
   KvStoreColumn<UInt64, Bytes32> getBestLightClientUpdateSignatureBlockRootsByPeriod();
 
+  KvStoreColumn<UInt64, Bytes> getLightClientBootstrapsBySlot();
+
+  KvStoreColumn<UInt64, Bytes> getLightClientSyncCommitteesByPeriod();
+
   // Variables
   KvStoreVariable<UInt64> getVariableGenesisTime();
 
@@ -106,9 +110,13 @@ public interface SchemaCombined extends Schema {
 
   KvStoreVariable<UInt64> getVariableLastDataColumnSidecarPrunedSlot();
 
+  KvStoreVariable<UInt64> getVariableLastDataColumnSidecarArchivedSlot();
+
   KvStoreVariable<Bytes32> getVariableLatestCanonicalBlockRoot();
 
   KvStoreVariable<UInt64> getVariableCustodyGroupCount();
+
+  KvStoreVariable<Bytes32> getVariableFastConfirmedRoot();
 
   KvStoreVariable<UInt64> getVariableEarliestBlockSlot();
 

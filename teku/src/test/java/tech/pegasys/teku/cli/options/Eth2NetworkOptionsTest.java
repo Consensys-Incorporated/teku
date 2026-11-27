@@ -43,6 +43,24 @@ class Eth2NetworkOptionsTest extends AbstractBeaconNodeCommandTest {
   }
 
   @Test
+  void shouldDisableDataColumnSidecarExtensionArchivingByDefault() {
+    final TekuConfiguration config = getTekuConfigurationFromArguments();
+    // Integer.MAX_VALUE means all extension columns are retained, so supernode archiving is off
+    // unless explicitly configured.
+    assertThat(config.eth2NetworkConfiguration().getDataColumnSidecarExtensionRetentionEpochs())
+        .isEqualTo(Integer.MAX_VALUE);
+  }
+
+  @Test
+  void shouldUseDataColumnSidecarExtensionRetentionEpochsIfSpecified() {
+    final TekuConfiguration config =
+        getTekuConfigurationFromArguments(
+            "--Xdata-column-sidecar-extension-retention-epochs", "42");
+    assertThat(config.eth2NetworkConfiguration().getDataColumnSidecarExtensionRetentionEpochs())
+        .isEqualTo(42);
+  }
+
+  @Test
   void shouldUseAltairForkEpochIfSpecified() {
     final TekuConfiguration config =
         getTekuConfigurationFromArguments("--Xnetwork-altair-fork-epoch", "64");
@@ -150,6 +168,34 @@ class Eth2NetworkOptionsTest extends AbstractBeaconNodeCommandTest {
         getTekuConfigurationFromArguments("--Xfast-confirmation-enabled", value);
     assertThat(config.eth2NetworkConfiguration().isFastConfirmationEnabled())
         .isEqualTo(Boolean.valueOf(value));
+  }
+
+  @Test
+  void shouldUseSpecFastConfirmationByzantineThresholdByDefault() {
+    final TekuConfiguration config = getTekuConfigurationFromArguments();
+    assertThat(config.eth2NetworkConfiguration().getFastConfirmationByzantineThreshold()).isEmpty();
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {0, 20, 25, 33, 100})
+  void shouldSetFastConfirmationByzantineThreshold(final int value) {
+    final TekuConfiguration config =
+        getTekuConfigurationFromArguments(
+            "--Xfast-confirmation-byzantine-threshold", String.valueOf(value));
+    assertThat(config.eth2NetworkConfiguration().getFastConfirmationByzantineThreshold())
+        .hasValue(value);
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"-1", "101"})
+  void shouldRejectFastConfirmationByzantineThresholdOutOfRange(final String value) {
+    assertThatThrownBy(
+            () ->
+                getTekuConfigurationFromArguments(
+                    "--Xfast-confirmation-byzantine-threshold", value))
+        .isInstanceOf(AssertionError.class)
+        .hasMessageContaining(
+            "Fast confirmation Byzantine threshold must be a percentage between 0 and 100");
   }
 
   @Test

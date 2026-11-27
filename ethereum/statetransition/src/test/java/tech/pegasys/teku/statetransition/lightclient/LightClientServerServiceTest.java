@@ -17,6 +17,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.time.TimeUtilities.secondsToMillis;
 
@@ -28,9 +30,11 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiPredicate;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
+import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.time.StubTimeProvider;
@@ -44,18 +48,22 @@ import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
+import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientFinalityUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientOptimisticUpdate;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientUpdate;
+import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.generator.ChainBuilder.BlockOptions;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
+import tech.pegasys.teku.storage.api.LightClientUpdateChannel;
 import tech.pegasys.teku.storage.api.ReorgContext;
 import tech.pegasys.teku.storage.client.ChainHead;
 import tech.pegasys.teku.storage.client.CombinedChainDataClient;
 import tech.pegasys.teku.storage.client.RecentChainData;
+import tech.pegasys.teku.storage.store.UpdatableStore;
 
 @TestSpecContext(allMilestones = true, ignoredMilestones = SpecMilestone.PHASE0)
 public class LightClientServerServiceTest {
@@ -287,6 +295,213 @@ public class LightClientServerServiceTest {
   }
 
   @TestTemplate
+  public void onNewFinalizedCheckpoint_shouldStoreBootstrapForFinalizedBlock() {
+    final Chain chain = generateChain();
+    final LightClientUpdateChannel channel =
+        mock(LightClientUpdateChannel.class, invocation -> SafeFuture.COMPLETE);
+    final LightClientServerService bootstrapService =
+        new LightClientServerService(
+            spec,
+            new LightClientUpdateStore(spec, channel),
+            this::lookUpBlock,
+            this::lookUpState,
+            CANONICAL,
+            asyncRunner,
+            timeProvider);
+    final SignedBlockAndState finalized = chain.attested();
+
+    bootstrapService.onNewFinalizedCheckpoint(
+        new Checkpoint(spec.computeEpochAtSlot(finalized.getSlot()), finalized.getRoot()), false);
+
+    verify(channel)
+        .onNewLightClientBootstrap(
+            spec.getLightClientUtilRequired(finalized.getSlot())
+                .createLightClientBootstrap(finalized.getState(), finalized.getBlock()));
+  }
+
+  @TestTemplate
+  public void onNewFinalizedCheckpoint_shouldStoreBootstrapOnceMissingBlockArrives() {
+    final Chain chain = generateChain();
+    final LightClientUpdateChannel channel =
+        mock(LightClientUpdateChannel.class, invocation -> SafeFuture.COMPLETE);
+    final LightClientServerService bootstrapService =
+        new LightClientServerService(
+            spec,
+            new LightClientUpdateStore(spec, channel),
+            this::lookUpBlock,
+            this::lookUpState,
+            CANONICAL,
+            asyncRunner,
+            timeProvider);
+    final SignedBlockAndState anchor = chain.attested();
+    blocksByRoot.remove(anchor.getRoot());
+
+    bootstrapService.onNewFinalizedCheckpoint(checkpointAt(anchor), false);
+    verify(channel, never()).onNewLightClientBootstrap(any());
+
+    blocksByRoot.put(anchor.getRoot(), anchor.getBlock());
+    statesByRoot.remove(anchor.getRoot());
+    bootstrapService.onNewFinalizedCheckpoint(checkpointAt(chain.signature()), false);
+
+    verify(channel)
+        .onNewLightClientBootstrap(
+            spec.getLightClientUtilRequired(anchor.getSlot())
+                .createLightClientBootstrap(anchor.getState(), anchor.getBlock()));
+  }
+
+  @TestTemplate
+  public void onNewFinalizedCheckpoint_shouldSkipBootstrapWhenStateIsNotBlockPostState() {
+    final Chain chain = generateChain();
+    final LightClientUpdateChannel channel =
+        mock(LightClientUpdateChannel.class, invocation -> SafeFuture.COMPLETE);
+    final LightClientServerService bootstrapService =
+        new LightClientServerService(
+            spec,
+            new LightClientUpdateStore(spec, channel),
+            this::lookUpBlock,
+            this::lookUpState,
+            CANONICAL,
+            asyncRunner,
+            timeProvider);
+    final SignedBlockAndState anchor = chain.attested();
+    statesByRoot.put(
+        anchor.getRoot(),
+        anchor.getState().updated(state -> state.setSlot(state.getSlot().plus(1))));
+
+    try (final LogCaptor logCaptor = LogCaptor.forClass(LightClientServerService.class)) {
+      bootstrapService.onNewFinalizedCheckpoint(checkpointAt(anchor), false);
+
+      assertThat(logCaptor.getWarnLogs()).isEmpty();
+    }
+    verify(channel, never()).onNewLightClientBootstrap(any());
+  }
+
+  @TestTemplate
+  public void onNewFinalizedCheckpoint_shouldAddFinalityOnceMissingFinalizedBlockArrives() {
+    final Chain chain = generateChain();
+    final SignedBeaconBlock finalizedBlock = dataStructureUtil.randomSignedBeaconBlock(1);
+    finalizeAttestedStateAt(chain, finalizedBlock.getRoot());
+
+    service.onBlockImported(chain.signature().getBlock(), false);
+    assertThat(onlyUpdateAtPeriod(0).getFinalityBranch().isDefault()).isTrue();
+
+    blocksByRoot.put(finalizedBlock.getRoot(), finalizedBlock);
+    service.onNewFinalizedCheckpoint(checkpointAt(chain.signature()), false);
+
+    final LightClientUpdate update = onlyUpdateAtPeriod(0);
+    assertThat(update.getFinalityBranch().isDefault()).isFalse();
+    assertThat(update.getFinalizedHeader().getBeacon().hashTreeRoot())
+        .isEqualTo(finalizedBlock.getRoot());
+  }
+
+  @TestTemplate
+  public void onNewFinalizedCheckpoint_shouldDropPendingUpdatesBeyondRetentionWindow() {
+    final Chain chain = generateChain();
+    final SignedBeaconBlock finalizedBlock = dataStructureUtil.randomSignedBeaconBlock(1);
+    finalizeAttestedStateAt(chain, finalizedBlock.getRoot());
+    service.onBlockImported(chain.signature().getBlock(), false);
+
+    service.onNewFinalizedCheckpoint(checkpointAtPeriod(200), false);
+    blocksByRoot.put(finalizedBlock.getRoot(), finalizedBlock);
+    service.onNewFinalizedCheckpoint(checkpointAtPeriod(200), false);
+
+    assertThat(store.getBestUpdatesInRange(UInt64.ZERO, 1)).isEmpty();
+  }
+
+  @TestTemplate
+  public void onNewFinalizedCheckpoint_shouldStoreBootstrapFromStateOnlyAnchor() {
+    final Chain chain = generateChain();
+    final SignedBlockAndState anchor = chain.attested();
+    final LightClientUpdateChannel channel =
+        mock(LightClientUpdateChannel.class, invocation -> SafeFuture.COMPLETE);
+    final AnchorPoint finalizedAnchor = mock(AnchorPoint.class);
+    when(finalizedAnchor.getBlockPostState(anchor.getRoot()))
+        .thenReturn(Optional.of(anchor.getState()));
+    final UpdatableStore forkChoiceStore = mock(UpdatableStore.class);
+    when(forkChoiceStore.getLatestFinalized()).thenReturn(finalizedAnchor);
+    final CombinedChainDataClient combinedChainDataClient = mock(CombinedChainDataClient.class);
+    when(combinedChainDataClient.getStore()).thenReturn(forkChoiceStore);
+    when(combinedChainDataClient.getBlockByBlockRoot(any()))
+        .thenAnswer(invocation -> lookUpBlock(invocation.getArgument(0)));
+    when(combinedChainDataClient.getStateByBlockRoot(any()))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
+
+    new LightClientServerService(
+            spec,
+            new LightClientUpdateStore(spec, channel),
+            combinedChainDataClient,
+            asyncRunner,
+            timeProvider)
+        .onNewFinalizedCheckpoint(checkpointAt(anchor), false);
+
+    verify(channel)
+        .onNewLightClientBootstrap(
+            spec.getLightClientUtilRequired(anchor.getSlot())
+                .createLightClientBootstrap(anchor.getState(), anchor.getBlock()));
+  }
+
+  @TestTemplate
+  public void onNewFinalizedCheckpoint_shouldStoreBootstrapsForEpochsSkippedByFinality() {
+    final LightClientUpdateChannel channel =
+        mock(LightClientUpdateChannel.class, invocation -> SafeFuture.COMPLETE);
+    final LightClientServerService bootstrapService =
+        new LightClientServerService(
+            spec,
+            new LightClientUpdateStore(spec, channel),
+            this::lookUpBlock,
+            this::lookUpState,
+            CANONICAL,
+            asyncRunner,
+            timeProvider);
+    final int slotsPerEpoch = spec.getSlotsPerEpoch(UInt64.ZERO);
+    final ChainBuilder chainBuilder = ChainBuilder.create(spec);
+    chainBuilder.generateGenesis();
+    final SignedBlockAndState epochOneBoundary = chainBuilder.generateBlockAtSlot(1);
+    final SignedBlockAndState afterSkippedEpochStart =
+        chainBuilder.generateBlockAtSlot(slotsPerEpoch + 2);
+    final ChainBuilder forkBuilder = chainBuilder.fork();
+    final SignedBlockAndState epochTwoBoundary =
+        chainBuilder.generateBlockAtSlot(2L * slotsPerEpoch);
+    final SignedBlockAndState finalized = chainBuilder.generateBlockAtSlot(3L * slotsPerEpoch);
+    final SignedBlockAndState forkedEpochTwoBoundary =
+        forkBuilder.generateBlockAtSlot(
+            2L * slotsPerEpoch,
+            BlockOptions.create().setEth1Data(dataStructureUtil.randomEth1Data()));
+    Stream.of(
+            epochOneBoundary,
+            afterSkippedEpochStart,
+            epochTwoBoundary,
+            forkedEpochTwoBoundary,
+            finalized)
+        .forEach(
+            blockAndState -> {
+              blocksByRoot.put(blockAndState.getRoot(), blockAndState.getBlock());
+              statesByRoot.put(blockAndState.getRoot(), blockAndState.getState());
+            });
+
+    Stream.of(afterSkippedEpochStart, epochTwoBoundary, forkedEpochTwoBoundary, finalized)
+        .forEach(
+            blockAndState -> bootstrapService.onBlockImported(blockAndState.getBlock(), false));
+    bootstrapService.onNewFinalizedCheckpoint(checkpointAt(finalized), false);
+
+    Stream.of(epochOneBoundary, epochTwoBoundary, finalized)
+        .forEach(
+            blockAndState ->
+                verify(channel).onNewLightClientBootstrap(bootstrapFor(blockAndState)));
+    verify(channel, never()).onNewLightClientBootstrap(bootstrapFor(forkedEpochTwoBoundary));
+  }
+
+  private LightClientBootstrap bootstrapFor(final SignedBlockAndState blockAndState) {
+    return spec.getLightClientUtilRequired(blockAndState.getSlot())
+        .createLightClientBootstrap(blockAndState.getState(), blockAndState.getBlock());
+  }
+
+  private Checkpoint checkpointAt(final SignedBlockAndState blockAndState) {
+    return new Checkpoint(
+        spec.computeEpochAtSlot(blockAndState.getSlot()), blockAndState.getRoot());
+  }
+
+  @TestTemplate
   public void onNewFinalizedCheckpoint_shouldPruneUpdatesBeyondRetentionWindow() {
     addUpdateAtPeriod(1);
     final LightClientUpdate retained = addUpdateAtPeriod(200);
@@ -406,6 +621,8 @@ public class LightClientServerServiceTest {
     final Chain chain = generateChain();
     final CombinedChainDataClient combinedChainDataClient = mock(CombinedChainDataClient.class);
     when(combinedChainDataClient.getChainHead()).thenReturn(Optional.empty());
+    when(combinedChainDataClient.getBlockByBlockRoot(any()))
+        .thenReturn(SafeFuture.completedFuture(Optional.empty()));
 
     new LightClientServerService(spec, store, combinedChainDataClient, asyncRunner, timeProvider)
         .onBlockImported(chain.signature().getBlock(), false);

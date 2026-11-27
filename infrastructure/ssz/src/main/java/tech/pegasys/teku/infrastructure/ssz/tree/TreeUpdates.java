@@ -13,9 +13,12 @@
 
 package tech.pegasys.teku.infrastructure.ssz.tree;
 
+import static com.google.common.base.Preconditions.checkArgument;
+
 import com.google.common.annotations.VisibleForTesting;
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collector;
 import java.util.stream.Collectors;
 import org.apache.commons.lang3.tuple.Pair;
@@ -52,8 +55,12 @@ public class TreeUpdates {
     return Collectors.collectingAndThen(Collectors.toList(), TreeUpdates::new);
   }
 
-  private final List<Long> gIndices;
-  private final List<TreeNode> nodes;
+  // The updates of the whole set, sorted by generalized index. An instance covers the range
+  // [from, to) of them, so splitting a set neither copies nor wraps them.
+  private final long[] gIndices;
+  private final TreeNode[] nodes;
+  private final int from;
+  private final int to;
 
   private final long prefix;
   private final int heightFromLeaf;
@@ -73,37 +80,48 @@ public class TreeUpdates {
    * @throws IllegalArgumentException if the list doesn't conform to above restrictions
    */
   public TreeUpdates(final List<Update> updates) {
-    this(
-        updates.stream().map(Update::getGeneralizedIndex).toList(),
-        updates.stream().map(Update::getNewNode).toList());
+    final int count = updates.size();
+    final long[] gIndices = new long[count];
+    final TreeNode[] nodes = new TreeNode[count];
+    int i = 0;
+    for (final Update update : updates) {
+      gIndices[i] = update.getGeneralizedIndex();
+      nodes[i] = update.getNewNode();
+      i++;
+    }
+    this(gIndices, nodes);
   }
 
   public TreeUpdates(final List<Long> gIndices, final List<TreeNode> nodes) {
-    this(gIndices, nodes, 1, getDepthAndValidate(gIndices));
+    this(gIndices.stream().mapToLong(Long::longValue).toArray(), nodes.toArray(TreeNode[]::new));
   }
 
-  public TreeUpdates(final List<Long> gIndices, final List<TreeNode> nodes, final int depth) {
-    this(gIndices, nodes, 1, depth);
-    assert depth == getDepthAndValidate(gIndices);
+  /**
+   * Creates an instance on the given arrays without copying them. They must conform to the same
+   * prerequisites as the list of {@link #TreeUpdates(List)}, and the caller must not modify them
+   * afterwards.
+   *
+   * @throws IllegalArgumentException if the arrays don't conform to the prerequisites
+   */
+  public static TreeUpdates wrap(final long[] gIndices, final TreeNode[] nodes) {
+    return new TreeUpdates(gIndices, nodes);
   }
 
-  private static TreeUpdates create(
-      final List<Long> gIndices,
-      final List<TreeNode> nodes,
-      final long prefix,
-      final int heightFromLeaf) {
-    return new TreeUpdates(gIndices, nodes, prefix, heightFromLeaf);
+  private TreeUpdates(final long[] gIndices, final TreeNode[] nodes) {
+    this(gIndices, nodes, 0, gIndices.length, 1, getDepthAndValidate(gIndices, nodes.length));
   }
 
   private TreeUpdates(
-      final List<Long> gIndices,
-      final List<TreeNode> nodes,
+      final long[] gIndices,
+      final TreeNode[] nodes,
+      final int from,
+      final int to,
       final long prefix,
       final int heightFromLeaf) {
-    assert gIndices.size() == nodes.size();
-
     this.gIndices = gIndices;
     this.nodes = nodes;
+    this.from = from;
+    this.to = to;
     this.prefix = prefix;
     this.heightFromLeaf = heightFromLeaf;
   }
@@ -118,25 +136,20 @@ public class TreeUpdates {
     if (heightFromLeaf <= 0) {
       throw new IllegalStateException("Can't split leaf update");
     }
-    long lPrefix = prefix << 1;
-    long rPrefix = lPrefix | 1;
-    long pivotGIndex = rPrefix << (heightFromLeaf - 1);
+    final long lPrefix = prefix << 1;
+    final long rPrefix = lPrefix | 1;
+    final long pivotGIndex = rPrefix << (heightFromLeaf - 1);
 
-    int idx = Collections.binarySearch(gIndices, pivotGIndex);
-    int insIdx = idx < 0 ? -idx - 1 : idx;
+    final int idx = Arrays.binarySearch(gIndices, from, to, pivotGIndex);
+    final int insIdx = idx < 0 ? -idx - 1 : idx;
     return Pair.of(
-        TreeUpdates.create(
-            gIndices.subList(0, insIdx), nodes.subList(0, insIdx), lPrefix, heightFromLeaf - 1),
-        TreeUpdates.create(
-            gIndices.subList(insIdx, gIndices.size()),
-            nodes.subList(insIdx, nodes.size()),
-            rPrefix,
-            heightFromLeaf - 1));
+        new TreeUpdates(gIndices, nodes, from, insIdx, lPrefix, heightFromLeaf - 1),
+        new TreeUpdates(gIndices, nodes, insIdx, to, rPrefix, heightFromLeaf - 1));
   }
 
   /** Number of updated nodes in this set */
   public int size() {
-    return gIndices.size();
+    return to - from;
   }
 
   public boolean isEmpty() {
@@ -146,35 +159,44 @@ public class TreeUpdates {
   /** Gets generalized index for update at position [index] */
   @VisibleForTesting
   long getGIndex(final int index) {
-    return gIndices.get(index);
+    return gIndexAt(index);
   }
 
   /** Calculates and returns relative generalized index */
   public long getRelativeGIndex(final int index) {
-    return GIndexUtil.gIdxGetRelativeGIndex(gIndices.get(index), GIndexUtil.gIdxGetDepth(prefix));
+    return GIndexUtil.gIdxGetRelativeGIndex(gIndexAt(index), GIndexUtil.gIdxGetDepth(prefix));
+  }
+
+  private long gIndexAt(final int index) {
+    return gIndices[from + Objects.checkIndex(index, size())];
   }
 
   /** Gets new tree node for update at position [index] */
   public TreeNode getNode(final int index) {
-    return nodes.get(index);
+    return nodes[from + Objects.checkIndex(index, size())];
   }
 
-  private static int getDepthAndValidate(final List<Long> gIndices) {
-    if (gIndices.isEmpty()) {
+  private static int getDepthAndValidate(final long[] gIndices, final int nodeCount) {
+    checkArgument(
+        gIndices.length == nodeCount,
+        "%s generalized indices for %s nodes",
+        gIndices.length,
+        nodeCount);
+    if (gIndices.length == 0) {
       return 0;
     }
-    long highestBit = Long.highestOneBit(gIndices.get(0));
-    long mask = highestBit - 1;
-    long checkMask = ~mask;
+    final long highestBit = Long.highestOneBit(gIndices[0]);
+    final long mask = highestBit - 1;
+    final long checkMask = ~mask;
 
     long lastGIdx = -1;
-    for (int i = 0; i < gIndices.size(); i++) {
-      long gIdx = gIndices.get(i);
+    for (int i = 0; i < gIndices.length; i++) {
+      final long gIdx = gIndices[i];
       if (gIdx < 1) {
         throw new IllegalArgumentException("Invalid gIndex: " + gIdx);
       }
       if (gIdx <= lastGIdx) {
-        throw new IllegalArgumentException("Invalid gIndex ordering: " + gIndices);
+        throw new IllegalArgumentException("Invalid gIndex ordering: " + Arrays.toString(gIndices));
       }
       if ((gIdx & checkMask) != highestBit) {
         throw new IllegalArgumentException("Indices are of different depth: [0] and [" + i + "]");
@@ -194,18 +216,17 @@ public class TreeUpdates {
       throw new IllegalArgumentException(
           "Non-zero heightFromLeaf for the leaf node: " + heightFromLeaf);
     }
-    if (gIndices.size() != 1) {
-      throw new IllegalArgumentException(
-          "Number of nodes should be 1 for a leaf node: " + gIndices.size());
+    if (size() != 1) {
+      throw new IllegalArgumentException("Number of nodes should be 1 for a leaf node: " + size());
     }
-    if (gIndices.get(0) != prefix) {
+    if (gIndices[from] != prefix) {
       throw new IllegalArgumentException(
-          "Leaf gIndex != prefix: " + gIndices.get(0) + " != " + prefix);
+          "Leaf gIndex != prefix: " + gIndices[from] + " != " + prefix);
     }
   }
 
   /** Indicates that this update should be applied to the node target generalized index */
   public boolean isFinal() {
-    return (gIndices.size() == 1 && gIndices.get(0) == prefix);
+    return size() == 1 && gIndices[from] == prefix;
   }
 }

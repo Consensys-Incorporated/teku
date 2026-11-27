@@ -14,7 +14,6 @@
 package tech.pegasys.teku.spec.datastructures.execution;
 
 import static tech.pegasys.teku.infrastructure.crypto.Hash.keccak256;
-import static tech.pegasys.teku.infrastructure.crypto.Hash.sha256;
 
 import java.util.List;
 import org.apache.tuweni.bytes.Bytes;
@@ -28,6 +27,7 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderBuilder;
 import org.hyperledger.besu.ethereum.core.Difficulty;
+import org.hyperledger.besu.ethereum.core.Request;
 import org.hyperledger.besu.ethereum.core.Util;
 import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
 import org.hyperledger.besu.ethereum.mainnet.MainnetBlockHeaderFunctions;
@@ -42,8 +42,20 @@ public class ExecutionPayloadBlockHashCalculator {
   public static Bytes32 computeGloasBlockHash(
       final ExecutionPayloadEnvelope executionPayloadEnvelope,
       final ExecutionRequestsDataCodec executionRequestsDataCodec) {
-    final ExecutionPayloadGloas payload =
-        ExecutionPayloadGloas.required(executionPayloadEnvelope.getPayload());
+    return computeGloasBlockHash(
+        executionPayloadEnvelope.getPayload(),
+        executionPayloadEnvelope.getExecutionRequests(),
+        executionPayloadEnvelope.getParentBeaconBlockRoot(),
+        executionRequestsDataCodec);
+  }
+
+  /** The envelope's builder index and beacon block root are not part of the block hash */
+  public static Bytes32 computeGloasBlockHash(
+      final ExecutionPayload executionPayload,
+      final ExecutionRequests executionRequests,
+      final Bytes32 parentBeaconBlockRoot,
+      final ExecutionRequestsDataCodec executionRequestsDataCodec) {
+    final ExecutionPayloadGloas payload = ExecutionPayloadGloas.required(executionPayload);
     final BlockHeader blockHeader =
         BlockHeaderBuilder.create()
             .parentHash(Hash.wrap(payload.getParentHash()))
@@ -65,11 +77,8 @@ public class ExecutionPayloadBlockHashCalculator {
             .withdrawalsRoot(computeWithdrawalsRoot(payload))
             .blobGasUsed(toLong(payload.getBlobGasUsed()))
             .excessBlobGas(BlobGas.of(payload.getExcessBlobGas().bigIntegerValue()))
-            .parentBeaconBlockRoot(executionPayloadEnvelope.getParentBeaconBlockRoot())
-            .requestsHash(
-                computeRequestsHash(
-                    executionRequestsDataCodec.encode(
-                        executionPayloadEnvelope.getExecutionRequests())))
+            .parentBeaconBlockRoot(parentBeaconBlockRoot)
+            .requestsHash(computeRequestsHash(executionRequestsDataCodec.encode(executionRequests)))
             .balHash(BodyValidation.balHash(payload.getBlockAccessList().getBytes()))
             .slotNumber(toLong(payload.getSlotNumber()))
             .blockHeaderFunctions(new MainnetBlockHeaderFunctions())
@@ -103,9 +112,8 @@ public class ExecutionPayloadBlockHashCalculator {
   }
 
   private static Hash computeRequestsHash(final List<Bytes> executionRequestsData) {
-    final List<Bytes> requestHashes =
-        executionRequestsData.stream().map(bytes -> (Bytes) sha256(bytes)).toList();
-    return Hash.wrap(sha256(Bytes.wrap(requestHashes)));
+    return BodyValidation.requestsHash(
+        executionRequestsData.stream().map(Request::fromBytes).toList());
   }
 
   private static long toLong(final UInt64 value) {

@@ -46,6 +46,7 @@ class LightClientBootstrapProviderTest {
       new LightClientBootstrapProvider(spec, combinedChainDataClient);
 
   private SignedBlockAndState blockAndState;
+  private LightClientBootstrap bootstrap;
 
   @BeforeEach
   void setUp() {
@@ -57,8 +58,11 @@ class LightClientBootstrapProviderTest {
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
     when(combinedChainDataClient.getBlockByBlockRoot(blockAndState.getRoot()))
         .thenReturn(SafeFuture.completedFuture(Optional.of(blockAndState.getBlock())));
-    when(combinedChainDataClient.getStateByBlockRoot(blockAndState.getRoot()))
-        .thenReturn(SafeFuture.completedFuture(Optional.of(blockAndState.getState())));
+    bootstrap =
+        spec.getLightClientUtilRequired(blockAndState.getSlot())
+            .createLightClientBootstrap(blockAndState.getState(), blockAndState.getBlock());
+    when(combinedChainDataClient.getLightClientBootstrap(blockAndState.getRoot()))
+        .thenReturn(SafeFuture.completedFuture(Optional.of(bootstrap)));
     when(combinedChainDataClient.isFinalizedEpoch(UInt64.ONE)).thenReturn(true);
     when(combinedChainDataClient.getBlockInEffectAtSlot(spec.computeStartSlotAtEpoch(UInt64.ONE)))
         .thenReturn(SafeFuture.completedFuture(Optional.of(blockAndState.getBlock())));
@@ -66,11 +70,7 @@ class LightClientBootstrapProviderTest {
 
   @Test
   void shouldCreateBootstrapForFinalizedEpochBoundaryBlock() {
-    final LightClientBootstrap expected =
-        spec.getLightClientUtilRequired(blockAndState.getSlot())
-            .createLightClientBootstrap(blockAndState.getState(), blockAndState.getBlock());
-
-    assertThat(getBootstrap(blockAndState.getRoot())).contains(expected);
+    assertThat(getBootstrap(blockAndState.getRoot())).contains(bootstrap);
   }
 
   @Test
@@ -79,8 +79,8 @@ class LightClientBootstrapProviderTest {
   }
 
   @Test
-  void shouldReturnEmptyWhenStateMissing() {
-    when(combinedChainDataClient.getStateByBlockRoot(blockAndState.getRoot()))
+  void shouldReturnEmptyWhenBootstrapUnavailable() {
+    when(combinedChainDataClient.getLightClientBootstrap(blockAndState.getRoot()))
         .thenReturn(SafeFuture.completedFuture(Optional.empty()));
 
     assertThat(getBootstrap(blockAndState.getRoot())).isEmpty();
@@ -109,7 +109,7 @@ class LightClientBootstrapProviderTest {
     when(combinedChainDataClient.isFinalizedEpoch(UInt64.ONE)).thenReturn(false);
 
     assertThat(getBootstrap(blockAndState.getRoot())).isEmpty();
-    verify(combinedChainDataClient, never()).getStateByBlockRoot(any());
+    verify(combinedChainDataClient, never()).getLightClientBootstrap(any());
   }
 
   @Test
@@ -119,7 +119,7 @@ class LightClientBootstrapProviderTest {
         .thenReturn(SafeFuture.completedFuture(Optional.of(laterBlock.getBlock())));
 
     assertThat(getBootstrap(blockAndState.getRoot())).isEmpty();
-    verify(combinedChainDataClient, never()).getStateByBlockRoot(any());
+    verify(combinedChainDataClient, never()).getLightClientBootstrap(any());
   }
 
   private Optional<LightClientBootstrap> getBootstrap(final Bytes32 blockRoot) {

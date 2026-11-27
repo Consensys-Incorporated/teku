@@ -92,7 +92,7 @@ public abstract class AbstractBeaconState<TMutable extends MutableBeaconState>
 
   @Override
   protected IntCache<SszData> createCache() {
-    return new SoftRefIntCache<>(super::createCache);
+    return new SoftRefIntCache<>(super.createCacheFactory());
   }
 
   @Override

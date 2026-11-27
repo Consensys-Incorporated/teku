@@ -191,6 +191,7 @@ import tech.pegasys.teku.spec.datastructures.execution.versions.electra.Withdraw
 import tech.pegasys.teku.spec.datastructures.execution.versions.fulu.BlobsBundleFulu;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderDepositRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderExitRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionPayloadGloas;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionList;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
@@ -2521,6 +2522,11 @@ public final class DataStructureUtil {
   }
 
   public LightClientHeader randomLightClientHeader(final UInt64 slot) {
+    return randomLightClientHeader(slot, randomBeaconBlockHeader());
+  }
+
+  public LightClientHeader randomLightClientHeader(
+      final UInt64 slot, final BeaconBlockHeader beaconBlockHeader) {
     final LightClientHeaderSchema<?> headerSchema =
         getAltairSchemaDefinitions(slot).getLightClientHeaderSchema();
     final SpecMilestone milestone = spec.atSlot(slot).getMilestone();
@@ -2528,26 +2534,36 @@ public final class DataStructureUtil {
     if (milestone.isGreaterThanOrEqualTo(SpecMilestone.GLOAS)) {
       final LightClientHeaderSchemaGloas gloasSchema = headerSchema.toVersionGloasRequired();
       return gloasSchema.create(
-          randomBeaconBlockHeader(),
+          beaconBlockHeader,
           SszBytes32.of(randomBytes32()),
           randomSszBytes32Vector(gloasSchema.getExecutionBranchSchema(), this::randomBytes32));
     }
     if (milestone.isGreaterThanOrEqualTo(SpecMilestone.CAPELLA)) {
       final LightClientHeaderSchemaCapella capellaSchema = headerSchema.toVersionCapellaRequired();
       return capellaSchema.create(
-          randomBeaconBlockHeader(),
+          beaconBlockHeader,
           randomExecutionPayloadHeader(spec.atSlot(slot)),
           randomSszBytes32Vector(capellaSchema.getExecutionBranchSchema(), this::randomBytes32));
     }
-    return headerSchema.create(randomBeaconBlockHeader());
+    return headerSchema.create(beaconBlockHeader);
   }
 
   public LightClientBootstrap randomLightClientBoostrap(final UInt64 slot) {
+    return randomLightClientBoostrap(slot, randomLightClientHeader(slot));
+  }
+
+  public LightClientBootstrap randomLightClientBoostrapWithHeaderSlot(final UInt64 slot) {
+    return randomLightClientBoostrap(
+        slot, randomLightClientHeader(slot, randomBeaconBlockHeader(slot, randomUInt64())));
+  }
+
+  private LightClientBootstrap randomLightClientBoostrap(
+      final UInt64 slot, final LightClientHeader header) {
     final LightClientBootstrapSchema bootstrapSchema =
         getAltairSchemaDefinitions(slot).getLightClientBootstrapSchema();
 
     return bootstrapSchema.create(
-        randomLightClientHeader(slot),
+        header,
         randomSyncCommittee(),
         randomSszBytes32Vector(
             bootstrapSchema.getSyncCommitteeBranchSchema(), this::randomBytes32));
@@ -3792,6 +3808,41 @@ public final class DataStructureUtil {
     return getGloasSchemaDefinitions(UInt64.valueOf(slot))
         .getSignedExecutionPayloadEnvelopeSchema()
         .create(randomExecutionPayloadEnvelope(UInt64.valueOf(slot)), randomSignature());
+  }
+
+  /** Copies the Gloas payload, applying {@code payloadModifier} on top of the copied fields. */
+  public ExecutionPayload executionPayloadWithModifications(
+      final UInt64 slot,
+      final ExecutionPayload executionPayload,
+      final Consumer<ExecutionPayloadBuilder> payloadModifier) {
+    final ExecutionPayloadGloas payload = ExecutionPayloadGloas.required(executionPayload);
+    return getGloasSchemaDefinitions(slot)
+        .getExecutionPayloadSchema()
+        .createExecutionPayload(
+            builder -> {
+              builder
+                  .parentHash(payload.getParentHash())
+                  .feeRecipient(payload.getFeeRecipient())
+                  .stateRoot(payload.getStateRoot())
+                  .receiptsRoot(payload.getReceiptsRoot())
+                  .logsBloom(payload.getLogsBloom())
+                  .prevRandao(payload.getPrevRandao())
+                  .blockNumber(payload.getBlockNumber())
+                  .gasLimit(payload.getGasLimit())
+                  .gasUsed(payload.getGasUsed())
+                  .timestamp(payload.getTimestamp())
+                  .extraData(payload.getExtraData())
+                  .baseFeePerGas(payload.getBaseFeePerGas())
+                  .blockHash(payload.getBlockHash())
+                  .transactions(
+                      payload.getTransactions().stream().map(Transaction::getBytes).toList())
+                  .withdrawals(payload.getWithdrawals()::asList)
+                  .blobGasUsed(payload::getBlobGasUsed)
+                  .excessBlobGas(payload::getExcessBlobGas)
+                  .blockAccessList(() -> payload.getBlockAccessList().getBytes())
+                  .slotNumber(payload::getSlotNumber);
+              payloadModifier.accept(builder);
+            });
   }
 
   public BlindedExecutionPayloadEnvelope randomBlindedExecutionPayloadEnvelope() {

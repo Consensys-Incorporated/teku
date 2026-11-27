@@ -16,7 +16,10 @@ package tech.pegasys.teku.networking.eth2.rpc.core;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static tech.pegasys.teku.networking.eth2.rpc.core.Eth2OutgoingRequestHandler.READ_COMPLETE_TIMEOUT;
 import static tech.pegasys.teku.networking.eth2.rpc.core.Eth2OutgoingRequestHandler.RESPONSE_CHUNK_ARRIVAL_TIMEOUT;
@@ -67,6 +70,7 @@ public class Eth2OutgoingRequestHandlerTest
   private final SafeFuture<Void> finishedProcessingFuture = responseHandler.getCompletedFuture();
 
   private RpcResponseEncoder<SignedBeaconBlock, ?> responseEncoder;
+  private RpcResponseDecoder<SignedBeaconBlock, Bytes> responseDecoder;
   private List<Bytes> chunks;
 
   @BeforeEach
@@ -92,9 +96,10 @@ public class Eth2OutgoingRequestHandlerTest
     final BeaconBlocksByRangeRequestMessage request =
         new BeaconBlocksByRangeRequestMessage(UInt64.ZERO, UInt64.valueOf(maxChunks), UInt64.ONE);
 
-    final RpcResponseDecoder<SignedBeaconBlock, Bytes> responseDecoder =
-        RpcResponseDecoder.createContextFreeDecoder(
-            getRpcEncoding(), spec.getGenesisSchemaDefinitions().getSignedBeaconBlockSchema());
+    responseDecoder =
+        spy(
+            RpcResponseDecoder.createContextFreeDecoder(
+                getRpcEncoding(), spec.getGenesisSchemaDefinitions().getSignedBeaconBlockSchema()));
     return new Eth2OutgoingRequestHandler<>(
         asyncRequestRunner,
         timeoutRunner,
@@ -272,6 +277,54 @@ public class Eth2OutgoingRequestHandlerTest
     timeProvider.advanceTimeByMillis(RESPONSE_CHUNK_ARRIVAL_TIMEOUT.toMillis());
     timeoutRunner.executeDueActions();
     verify(rpcStream).closeAbruptly();
+  }
+
+  @Test
+  public void timeoutAbortClosesStreamButLeavesDecoderToClosedCallback() {
+    sendInitialPayload();
+
+    timeProvider.advanceTimeByMillis(RESPONSE_CHUNK_ARRIVAL_TIMEOUT.toMillis());
+    timeoutRunner.executeDueActions();
+    verify(rpcStream).closeAbruptly();
+    verify(responseDecoder, never()).close();
+
+    close();
+    verify(responseDecoder).close();
+
+    asyncRequestRunner.executeUntilDone();
+    assertThat(finishedProcessingFuture).isCompletedExceptionally();
+  }
+
+  @Test
+  public void secondClosedCallbackIsHarmless() throws Exception {
+    sendInitialPayload();
+    for (int i = 0; i < maxChunks; i++) {
+      deliverChunk(i);
+    }
+    complete();
+    close();
+    // a second closed callback must be harmless for the decoder
+    close();
+    verify(responseDecoder, times(2)).close();
+
+    asyncRequestRunner.executeUntilDone();
+    timeoutRunner.executeUntilDone();
+    assertThat(finishedProcessingFuture).isCompletedWithValue(null);
+    assertThat(blocks).hasSize(maxChunks);
+  }
+
+  @Test
+  public void closedStillTransitionsWhenDecoderCloseThrows() {
+    doThrow(new IllegalStateException("close failed")).when(responseDecoder).close();
+    sendInitialPayload();
+    for (int i = 0; i < maxChunks; i++) {
+      deliverChunk(i);
+    }
+    complete();
+
+    close();
+
+    assertThat(reqHandler.getState()).isEqualTo(State.CLOSED);
   }
 
   @Test

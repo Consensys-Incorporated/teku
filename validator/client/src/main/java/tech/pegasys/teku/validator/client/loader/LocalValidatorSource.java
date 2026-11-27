@@ -40,6 +40,7 @@ import tech.pegasys.teku.bls.keystore.KeyStoreValidationException;
 import tech.pegasys.teku.bls.keystore.model.KeyStoreData;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
+import tech.pegasys.teku.infrastructure.io.SecretFiles;
 import tech.pegasys.teku.service.serviceutils.layout.DataDirLayout;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.signatures.LocalSigner;
@@ -119,7 +120,7 @@ public class LocalValidatorSource extends AbstractValidatorSource implements Val
       if (passwordPath.toFile().exists() || keystorePath.toFile().exists()) {
         return new AddValidatorResult(PostKeyResult.duplicate(), Optional.empty());
       }
-      Files.write(passwordPath, password.getBytes(UTF_8));
+      SecretFiles.writeStringOwnerOnly(passwordPath, password);
       KeyStoreLoader.saveToFile(keystorePath, keyStoreData);
       final ValidatorProvider provider =
           new LocalValidatorProvider(

@@ -37,12 +37,26 @@ import tech.pegasys.teku.kzg.KZGProof;
 public class DataColumnSidecarsProofsSerializer implements KvStoreSerializer<List<List<KZGProof>>> {
   @Override
   public List<List<KZGProof>> deserialize(final byte[] data) {
+    if (data.length < Integer.BYTES) {
+      throw new KvStoreDeserializationException("Missing proofs-per-column header");
+    }
     return SSZ.decode(
         Bytes.of(data),
         reader -> {
           final List<List<KZGProof>> output = new ArrayList<>();
           final List<KZGProof> currentProofs = new ArrayList<>();
           final int proofsPerColumn = reader.readInt32();
+          final int proofBytes = data.length - Integer.BYTES;
+          if (proofsPerColumn < 0
+              || (proofsPerColumn == 0 && proofBytes != 0)
+              || (proofsPerColumn > 0
+                  && (proofBytes == 0
+                      || proofBytes % ((long) proofsPerColumn * KZGProof.SIZE) != 0))) {
+            throw new KvStoreDeserializationException(
+                String.format(
+                    "Invalid archive: %d proof bytes for %d proofs per column",
+                    proofBytes, proofsPerColumn));
+          }
 
           while (!reader.isComplete()) {
             final KZGProof kzgProof =
@@ -54,12 +68,6 @@ public class DataColumnSidecarsProofsSerializer implements KvStoreSerializer<Lis
             }
           }
 
-          if (!currentProofs.isEmpty()) {
-            throw new RuntimeException(
-                String.format(
-                    "Unexpected proofs found in database. Expecting %d proofs per column, deserialized %s columns",
-                    proofsPerColumn, output.size()));
-          }
           return output;
         });
   }

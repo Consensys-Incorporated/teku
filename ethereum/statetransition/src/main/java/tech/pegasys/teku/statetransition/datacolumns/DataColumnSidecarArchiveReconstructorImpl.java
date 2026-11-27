@@ -15,12 +15,20 @@ package tech.pegasys.teku.statetransition.datacolumns;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
+import com.google.common.annotations.VisibleForTesting;
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -29,8 +37,12 @@ import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
+import org.hyperledger.besu.plugin.services.metrics.LabelledMetric;
 import tech.pegasys.teku.infrastructure.async.AsyncRunner;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
+import tech.pegasys.teku.infrastructure.async.ThrottlingTaskQueue;
+import tech.pegasys.teku.infrastructure.async.ThrottlingTaskQueue.QueueIsFullException;
+import tech.pegasys.teku.infrastructure.exceptions.ExceptionUtil;
 import tech.pegasys.teku.infrastructure.metrics.MetricsHistogram;
 import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.time.TimeProvider;
@@ -56,12 +68,71 @@ public class DataColumnSidecarArchiveReconstructorImpl
     implements DataColumnSidecarArchiveReconstructor, FinalizedCheckpointChannel {
   private static final Logger LOG = LogManager.getLogger();
 
+  // At most this many reconstructions run concurrently; the rest are queued (see
+  // reconstructionQueue) and callers stop waiting after RECONSTRUCTION_TIMEOUT.
+  private static final int MAX_CONCURRENT_RECONSTRUCTIONS = 32;
+  // Hard bound on the reconstruction backlog: once this many are already queued, further requests
+  // are rejected immediately (served as empty) rather than growing the queue unboundedly.
+  private static final int MAX_QUEUED_RECONSTRUCTIONS = 1024;
+  // Per-request deadline: a request that has waited this long for a reconstruction gets empty and,
+  // for the rest of the request, is served only reconstructions that have already completed (see
+  // requestsPastDeadline). Kept well below the 10s requesters allow between response chunks
+  // (Eth2OutgoingRequestHandler.RESPONSE_CHUNK_ARRIVAL_TIMEOUT), so the request moves on while the
+  // peer is still listening. The shared reconstruction keeps running, so later requests join it
+  // instead of starting another.
+  private static final Duration RECONSTRUCTION_TIMEOUT = Duration.ofSeconds(5);
+  // Backstop for a reconstruction that never completes, counted from when it starts running: it is
+  // failed, freeing its throttling slot so the next request retries. Far above normal
+  // reconstruction times, so a merely slow reconstruction is not duplicated.
+  private static final Duration RECONSTRUCTION_HUNG_TIMEOUT = Duration.ofSeconds(60);
+  // How long a successful result is kept after its last request before the per-slot prune drops
+  // it. A flat wall-clock window, intentionally not derived from network/slot timing since a
+  // peer's by-root re-request pattern varies by client; kept generous so successive request waves
+  // reuse the result rather than re-reconstructing. A queued reconstruction left unrequested for
+  // this long is skipped instead of run, as its result would be pruned straight away.
+  private static final Duration RESULT_RETENTION = Duration.ofSeconds(30);
+  // Bound on the successful results kept for reuse, each holding all extension sidecars of a block
+  // (about 1-2 MB on mainnet). Past it the least recently requested results are evicted as new ones
+  // complete, so memory stays bounded however fast reconstructions complete.
+  private static final int MAX_RETAINED_RESULTS = 64;
+  // Unexpected reconstruction failures recur on every request for the affected block, so at most
+  // one per interval is logged at warn and the rest at debug.
+  private static final Duration FAILURE_WARN_INTERVAL = Duration.ofMinutes(1);
+
   private final CombinedChainDataClient chainDataClient;
   private final AsyncRunner reconstructionAsyncRunner;
+  // Fires the per-request and hung-reconstruction deadlines. Kept apart from
+  // reconstructionAsyncRunner, whose workers are busy reconstructing exactly when deadlines matter.
+  private final AsyncRunner timeoutAsyncRunner;
+  private final TimeProvider timeProvider;
   private final AtomicInteger nextTaskId = new AtomicInteger(0);
-  // Bounded by the number of concurrent in-flight RPC requests; cleanup is guaranteed by
-  // CompletionAwareResponseCallback which calls onRequestCompleted in finally blocks
-  private final Map<Integer, Map<SlotAndBlockRoot, SafeFuture<ReconstructionResult>>> recoveryTasks;
+  private final AtomicLong nextFailureWarnAtMillis = new AtomicLong(0);
+  // Caps concurrent reconstructions at MAX_CONCURRENT_RECONSTRUCTIONS and queues the overflow, so a
+  // burst of requests can't launch an unbounded number of parallel KZG reconstructions.
+  private final ThrottlingTaskQueue reconstructionQueue;
+  // Reconstruction is deterministic for archived (finalized) blocks, so in-flight and recently
+  // completed reconstructions are shared across all ReqResp requests keyed by block. In-flight
+  // entries deduplicate any number of concurrent/overlapping requests onto a single reconstruction
+  // (not capacity-bounded); successful entries are reused regardless of age and pruned on each slot
+  // once unrequested for RESULT_RETENTION, or evicted least recently requested first to keep at
+  // most maxRetainedResults of them. Failed entries are reused the same way until the next slot's
+  // prune, so a block that can't be reconstructed is tried once per slot, not once per requested
+  // column; the first request after the prune retries it.
+  private final Map<SlotAndBlockRoot, ReconstructionCacheEntry> reconstructions =
+      new ConcurrentHashMap<>();
+  private final int maxRetainedResults;
+  // Requests that have already waited out RECONSTRUCTION_TIMEOUT once. An empty result writes
+  // nothing to the stream, so further waits within the same request would add up against the
+  // peer's per-chunk timeout; such a request is served only completed reconstructions and starts no
+  // new ones. Cleared by onRequestCompleted.
+  private final Set<Integer> requestsPastDeadline = ConcurrentHashMap.newKeySet();
+  // Highest slot whose extension columns may have been archived to proofs, deciding whether a
+  // missing sidecar is worth reconstructing. Loaded from storage before ReqResp serving starts,
+  // then raised on each archive-prunable signal, as archives are only written up to a signalled
+  // slot. Empty while nothing was ever archived (archiving is off by default). Never lowered:
+  // archives pruned with the DA window fall out of isSidecarArchived by its availability check.
+  private final AtomicReference<Optional<UInt64>> lastArchivedSlot =
+      new AtomicReference<>(Optional.empty());
   private final int halfColumns;
 
   private final Supplier<Boolean> isSuperNodeSupplier;
@@ -71,19 +142,54 @@ public class DataColumnSidecarArchiveReconstructorImpl
 
   private final MetricsHistogram reconstructionTimeSeconds;
   private final Counter reconstructionSuccessCounter;
-  private final Counter reconstructionFailureCounter;
+  // Labelled by reason, keeping load shedding (rejected, storage_rejected, skipped, timeout) apart
+  // from genuine problems (unavailable, error); see failureReason
+  private final LabelledMetric<Counter> reconstructionFailureCounter;
 
   public DataColumnSidecarArchiveReconstructorImpl(
       final CombinedChainDataClient chainDataClient,
       final AsyncRunner reconstructionAsyncRunner,
+      final AsyncRunner timeoutAsyncRunner,
       final Supplier<Boolean> isSuperNodeSupplier,
       final Spec spec,
       final int dataColumnSidecarExtensionRetentionEpochs,
       final SidecarArchivePrunableChannel sidecarArchivePrunableChannel,
       final MetricsSystem metricsSystem,
       final TimeProvider timeProvider) {
+    this(
+        chainDataClient,
+        reconstructionAsyncRunner,
+        timeoutAsyncRunner,
+        isSuperNodeSupplier,
+        spec,
+        dataColumnSidecarExtensionRetentionEpochs,
+        sidecarArchivePrunableChannel,
+        metricsSystem,
+        timeProvider,
+        MAX_CONCURRENT_RECONSTRUCTIONS,
+        MAX_QUEUED_RECONSTRUCTIONS,
+        MAX_RETAINED_RESULTS);
+  }
+
+  @VisibleForTesting
+  DataColumnSidecarArchiveReconstructorImpl(
+      final CombinedChainDataClient chainDataClient,
+      final AsyncRunner reconstructionAsyncRunner,
+      final AsyncRunner timeoutAsyncRunner,
+      final Supplier<Boolean> isSuperNodeSupplier,
+      final Spec spec,
+      final int dataColumnSidecarExtensionRetentionEpochs,
+      final SidecarArchivePrunableChannel sidecarArchivePrunableChannel,
+      final MetricsSystem metricsSystem,
+      final TimeProvider timeProvider,
+      final int maxConcurrentReconstructions,
+      final int maxQueuedReconstructions,
+      final int maxRetainedResults) {
     this.chainDataClient = chainDataClient;
     this.reconstructionAsyncRunner = reconstructionAsyncRunner;
+    this.timeoutAsyncRunner = timeoutAsyncRunner;
+    this.timeProvider = timeProvider;
+    this.maxRetainedResults = maxRetainedResults;
     this.isSuperNodeSupplier = isSuperNodeSupplier;
     this.spec = spec;
     this.dataColumnSidecarExtensionRetentionEpochs =
@@ -92,8 +198,12 @@ public class DataColumnSidecarArchiveReconstructorImpl
         SpecConfigFulu.required(spec.forMilestone(SpecMilestone.FULU).getConfig())
                 .getNumberOfColumns()
             / 2;
-    this.recoveryTasks = new ConcurrentHashMap<>();
     this.sidecarArchivePrunableChannel = sidecarArchivePrunableChannel;
+    // Queue rejections (full queue) are surfaced via the rejected reason of
+    // reconstructionFailureCounter, so the queue's own metrics are omitted here to keep a single
+    // reconstructor per node metric-free of duplicates.
+    this.reconstructionQueue =
+        ThrottlingTaskQueue.create(maxConcurrentReconstructions, maxQueuedReconstructions);
     this.reconstructionTimeSeconds =
         new MetricsHistogram(
             metricsSystem,
@@ -108,25 +218,68 @@ public class DataColumnSidecarArchiveReconstructorImpl
             "data_column_sidecar_archive_reconstruction_successes_total",
             "Total number of successful data column sidecar archive reconstructions");
     this.reconstructionFailureCounter =
-        metricsSystem.createCounter(
+        metricsSystem.createLabelledCounter(
             TekuMetricCategory.BEACON,
             "data_column_sidecar_archive_reconstruction_failures_total",
-            "Total number of failed data column sidecar archive reconstructions");
+            "Total number of failed data column sidecar archive reconstructions",
+            "reason");
   }
 
   @Override
   public SafeFuture<Optional<DataColumnSidecar>> reconstructDataColumnSidecar(
-      final SignedBeaconBlock block, final UInt64 index, final int requestId) {
+      final SlotAndBlockRoot slotAndBlockRoot, final UInt64 index, final int requestId) {
     checkArgument(
-        index.isGreaterThanOrEqualTo(halfColumns),
-        "Only second-half column indices (>= %s) can be reconstructed, got %s",
+        index.isGreaterThanOrEqualTo(halfColumns) && index.isLessThan(halfColumns * 2L),
+        "Only second-half column indices in [%s, %s) can be reconstructed, got %s",
         halfColumns,
+        halfColumns * 2,
         index);
-    final Map<SlotAndBlockRoot, SafeFuture<ReconstructionResult>> slotAndBlockRootSafeFutureMap =
-        recoveryTasks.computeIfAbsent(requestId, __ -> new ConcurrentHashMap<>());
-    return slotAndBlockRootSafeFutureMap
-        .computeIfAbsent(block.getSlotAndBlockRoot(), __ -> createTask(block))
-        .thenApply(result -> result.get(index));
+    final long now = timeProvider.getTimeInMillis().longValue();
+    if (requestsPastDeadline.contains(requestId)) {
+      return getCompletedReconstruction(slotAndBlockRoot, index, requestId, now);
+    }
+    final ReconstructionCacheEntry entry =
+        reconstructions.compute(
+            slotAndBlockRoot,
+            (__, existing) -> {
+              final ReconstructionCacheEntry maybeReused =
+                  existing != null ? existing : new ReconstructionCacheEntry(RESULT_RETENTION, now);
+              maybeReused.lastRequestedAtMillis = now;
+              return maybeReused;
+            });
+    // started only once compute has returned: completing a reconstruction can evict other entries,
+    // which must not happen inside compute
+    final boolean started = entry.claimStart();
+    traceRequest(
+        slotAndBlockRoot,
+        index,
+        requestId,
+        started
+            ? "starting a new reconstruction"
+            : entry.hasFailed()
+                ? "reusing the failed result until the next slot"
+                : entry.future.isDone()
+                    ? "reusing the completed result"
+                    : "joining the running reconstruction");
+    if (started) {
+      startReconstruction(slotAndBlockRoot, entry);
+    }
+    // the deadline applies to this caller's own future only, never to the shared reconstruction
+    return entry
+        .future
+        .thenApply(result -> result.get(index))
+        .orTimeout(timeoutAsyncRunner, RECONSTRUCTION_TIMEOUT)
+        .exceptionally(
+            error -> {
+              requestsPastDeadline.add(requestId);
+              LOG.debug(
+                  "Reconstruction request for {} index {} timed out (requestId {}): {}",
+                  slotAndBlockRoot,
+                  index,
+                  requestId,
+                  error.toString());
+              return Optional.empty();
+            });
   }
 
   @Override
@@ -134,37 +287,246 @@ public class DataColumnSidecarArchiveReconstructorImpl
     return getNextTaskId();
   }
 
-  private SafeFuture<ReconstructionResult> createTask(final SignedBeaconBlock block) {
+  @Override
+  public void onSlot(final UInt64 slot) {
+    final long now = timeProvider.getTimeInMillis().longValue();
+    final AtomicInteger prunedResults = new AtomicInteger();
+    final AtomicInteger prunedFailures = new AtomicInteger();
+    reconstructions
+        .values()
+        .removeIf(
+            entry -> {
+              if (!entry.isEvictable(now)) {
+                return false;
+              }
+              (entry.hasFailed() ? prunedFailures : prunedResults).incrementAndGet();
+              return true;
+            });
+    if (prunedResults.get() > 0 || prunedFailures.get() > 0) {
+      LOG.debug(
+          "Pruned {} reconstructed results unrequested for over {}s and {} failed reconstructions "
+              + "at slot {}",
+          prunedResults.get(),
+          RESULT_RETENTION.toSeconds(),
+          prunedFailures.get(),
+          slot);
+    }
+  }
+
+  private SafeFuture<Optional<DataColumnSidecar>> getCompletedReconstruction(
+      final SlotAndBlockRoot slotAndBlockRoot,
+      final UInt64 index,
+      final int requestId,
+      final long now) {
+    final ReconstructionCacheEntry entry = reconstructions.get(slotAndBlockRoot);
+    if (entry == null || !entry.future.isDone() || entry.hasFailed()) {
+      traceRequest(
+          slotAndBlockRoot,
+          index,
+          requestId,
+          "past the request deadline, no completed result to serve");
+      return SafeFuture.completedFuture(Optional.empty());
+    }
+    traceRequest(
+        slotAndBlockRoot,
+        index,
+        requestId,
+        "past the request deadline, reusing the completed result");
+    entry.lastRequestedAtMillis = now;
+    return entry.future.thenApply(result -> result.get(index));
+  }
+
+  private void traceRequest(
+      final SlotAndBlockRoot slotAndBlockRoot,
+      final UInt64 index,
+      final int requestId,
+      final String outcome) {
+    LOG.trace(
+        "Reconstruction requested for slot {} index {} blockRoot {} (requestId {}): {}",
+        slotAndBlockRoot.getSlot(),
+        index,
+        slotAndBlockRoot.getBlockRoot(),
+        requestId,
+        outcome);
+  }
+
+  private void startReconstruction(
+      final SlotAndBlockRoot slotAndBlockRoot, final ReconstructionCacheEntry entry) {
+    reconstructionQueue
+        .queueTask(() -> runReconstruction(slotAndBlockRoot, entry))
+        .whenComplete(
+            (result, error) -> {
+              final boolean reconstructed =
+                  error == null
+                      && result.sidecars().values().stream().anyMatch(Optional::isPresent);
+              // completion counts as a request, as the waiting callers read the result now: a
+              // result that waited in the queue must not look least recently requested once ready
+              entry.lastRequestedAtMillis = timeProvider.getTimeInMillis().longValue();
+              // a single write publishes the outcome, so a successful entry is never observed
+              // as completed-but-failed
+              entry.state = reconstructed ? State.SUCCEEDED : State.FAILED;
+              if (reconstructed) {
+                reconstructionSuccessCounter.inc();
+                evictExcessResults();
+              } else {
+                reconstructionFailureCounter.labels(failureReason(entry, error)).inc();
+                if (error != null) {
+                  logReconstructionFailure(slotAndBlockRoot, error);
+                }
+              }
+            })
+        // never propagate the error to callers - an unavailable column is Optional.empty()
+        .exceptionally(__ -> emptyResult())
+        .propagateTo(entry.future);
+  }
+
+  private void evictExcessResults() {
+    // request times keep changing, so they are snapshotted for a consistent sort
+    final List<RetainedResult> retainedResults =
+        reconstructions.entrySet().stream()
+            .filter(mapping -> mapping.getValue().state == State.SUCCEEDED)
+            .map(
+                mapping ->
+                    new RetainedResult(
+                        mapping.getKey(),
+                        mapping.getValue(),
+                        mapping.getValue().lastRequestedAtMillis))
+            .toList();
+    final int excess = retainedResults.size() - maxRetainedResults;
+    if (excess <= 0) {
+      return;
+    }
+    final long now = timeProvider.getTimeInMillis().longValue();
+    retainedResults.stream()
+        .sorted(Comparator.comparingLong(RetainedResult::lastRequestedAtMillis))
+        .limit(excess)
+        .forEach(
+            result -> {
+              if (reconstructions.remove(result.slotAndBlockRoot(), result.entry())) {
+                LOG.debug(
+                    "Evicted reconstructed sidecars for slot {} blockRoot {} (last requested {} ms "
+                        + "ago) to keep at most {} results",
+                    result.slotAndBlockRoot().getSlot(),
+                    result.slotAndBlockRoot().getBlockRoot(),
+                    now - result.lastRequestedAtMillis(),
+                    maxRetainedResults);
+              }
+            });
+  }
+
+  private SafeFuture<ReconstructionResult> runReconstruction(
+      final SlotAndBlockRoot slotAndBlockRoot, final ReconstructionCacheEntry entry) {
+    entry.dequeued = true;
+    if (entry.isUnrequestedForRetention(timeProvider.getTimeInMillis().longValue())) {
+      // nobody asked for it while it was queued, so its result would be pruned on the next slot:
+      // skip the work and let the next request retry
+      entry.skipped = true;
+      LOG.debug(
+          "Skipping reconstruction for {}: unrequested for over {}s while queued",
+          slotAndBlockRoot,
+          RESULT_RETENTION.toSeconds());
+      return SafeFuture.completedFuture(emptyResult());
+    }
+    // the backstop fails a copy of the task rather than the task itself, so the task still
+    // completes, and records its duration, once the work eventually finishes
+    final SafeFuture<ReconstructionResult> taskCopy = new SafeFuture<>();
+    createTask(slotAndBlockRoot).propagateTo(taskCopy);
+    return taskCopy.orTimeout(timeoutAsyncRunner, RECONSTRUCTION_HUNG_TIMEOUT);
+  }
+
+  private static String failureReason(final ReconstructionCacheEntry entry, final Throwable error) {
+    if (error == null) {
+      // completed without sidecars: skipped while queued, or the block, first-half sidecars or
+      // extension proofs are missing or mismatched
+      return entry.skipped ? "skipped" : "unavailable";
+    }
+    if (ExceptionUtil.hasCause(error, TimeoutException.class)) {
+      return "timeout";
+    }
+    if (ExceptionUtil.hasCause(error, QueueIsFullException.class)) {
+      // a full reconstruction queue rejects the task before it runs; once running, the archived
+      // data is read through the storage query queue it shares with the other RPC handlers
+      return entry.dequeued ? "storage_rejected" : "rejected";
+    }
+    return "error";
+  }
+
+  private void logReconstructionFailure(
+      final SlotAndBlockRoot slotAndBlockRoot, final Throwable error) {
+    // timeouts and full-queue rejections are expected under load
+    if (ExceptionUtil.hasCause(error, TimeoutException.class, QueueIsFullException.class)) {
+      LOG.debug("Reconstruction failed for {}: {}", slotAndBlockRoot, error.toString());
+      return;
+    }
+    final long now = timeProvider.getTimeInMillis().longValue();
+    final long nextWarnAtMillis = nextFailureWarnAtMillis.get();
+    if (now >= nextWarnAtMillis
+        && nextFailureWarnAtMillis.compareAndSet(
+            nextWarnAtMillis, now + FAILURE_WARN_INTERVAL.toMillis())) {
+      LOG.warn("Reconstruction failed for {}", slotAndBlockRoot, error);
+    } else {
+      LOG.debug("Reconstruction failed for {}", slotAndBlockRoot, error);
+    }
+  }
+
+  private SafeFuture<ReconstructionResult> createTask(final SlotAndBlockRoot slotAndBlockRoot) {
     final List<UInt64> firstHalfOfIndices =
         Stream.iterate(UInt64.ZERO, UInt64::increment).limit(halfColumns).toList();
 
     final MetricsHistogram.Timer timer = reconstructionTimeSeconds.startTimer();
 
+    // the block is only needed once a reconstruction actually runs, so it is loaded here rather
+    // than by every request, most of which are served from completed reconstructions
     return reconstructionAsyncRunner
         .runAsync(
             () ->
                 chainDataClient
-                    .getDataColumnSidecars(block.getSlot(), firstHalfOfIndices)
-                    .thenComposeCombined(
-                        chainDataClient.getDataColumnSidecarProofs(block.getSlot()),
-                        (sidecars, proofs) ->
-                            reconstructionAsyncRunner.runAsync(
-                                () -> reconstructDataColumnSidecar(block, sidecars, proofs))))
-        .whenComplete(
-            (result, error) -> {
-              timer.closeUnchecked().run();
-              if (error == null
-                  && result.sidecars().values().stream().anyMatch(Optional::isPresent)) {
-                reconstructionSuccessCounter.inc();
-              } else {
-                reconstructionFailureCounter.inc();
-              }
-            })
-        .exceptionally(
-            ex -> {
-              LOG.error(ex.getMessage(), ex);
-              return emptyResult();
-            });
+                    .getDataColumnSidecarProofs(slotAndBlockRoot.getSlot())
+                    .thenCompose(
+                        proofs -> {
+                          if (proofs.size() != halfColumns) {
+                            LOG.debug(
+                                "Cannot reconstruct extension data column sidecars for slot {} "
+                                    + "blockRoot {}: found {} of {} extension proofs",
+                                slotAndBlockRoot.getSlot(),
+                                slotAndBlockRoot.getBlockRoot(),
+                                proofs.size(),
+                                halfColumns);
+                            return SafeFuture.completedFuture(emptyResult());
+                          }
+                          // the proofs are keyed by slot, so only the canonical block matches them
+                          return chainDataClient
+                              .getFinalizedBlockAtSlotExact(slotAndBlockRoot.getSlot())
+                              .thenApply(
+                                  maybeBlock ->
+                                      maybeBlock.filter(
+                                          block ->
+                                              block
+                                                  .getRoot()
+                                                  .equals(slotAndBlockRoot.getBlockRoot())))
+                              .thenCompose(
+                                  maybeBlock -> {
+                                    if (maybeBlock.isEmpty()) {
+                                      LOG.debug(
+                                          "Cannot reconstruct extension data column sidecars for slot {} "
+                                              + "blockRoot {}: canonical block not available",
+                                          slotAndBlockRoot.getSlot(),
+                                          slotAndBlockRoot.getBlockRoot());
+                                      return SafeFuture.completedFuture(emptyResult());
+                                    }
+                                    final SignedBeaconBlock block = maybeBlock.get();
+                                    return chainDataClient
+                                        .getDataColumnSidecars(
+                                            block.getSlotAndBlockRoot(), firstHalfOfIndices)
+                                        .thenCompose(
+                                            sidecars ->
+                                                reconstructionAsyncRunner.runAsync(
+                                                    () ->
+                                                        reconstructDataColumnSidecar(
+                                                            block, sidecars, proofs)));
+                                  });
+                        }))
+        .whenComplete((result, error) -> timer.closeUnchecked().run());
   }
 
   private ReconstructionResult reconstructDataColumnSidecar(
@@ -172,6 +534,15 @@ public class DataColumnSidecarArchiveReconstructorImpl
       final List<DataColumnSidecar> sidecars,
       final List<List<KZGProof>> proofs) {
     if (sidecars.size() != halfColumns || proofs.size() != halfColumns) {
+      LOG.debug(
+          "Cannot reconstruct extension data column sidecars for slot {} blockRoot {}: found {} of "
+              + "{} first-half sidecars and {} of {} extension proofs",
+          block.getSlot(),
+          block.getRoot(),
+          sidecars.size(),
+          halfColumns,
+          proofs.size(),
+          halfColumns);
       return emptyResult();
     }
     final SlotAndBlockRoot slotAndBlockRoot = block.getSlotAndBlockRoot();
@@ -179,6 +550,14 @@ public class DataColumnSidecarArchiveReconstructorImpl
       final DataColumnSidecar sidecar = sidecars.get(i);
       if (!sidecar.getSlotAndBlockRoot().equals(slotAndBlockRoot)
           || !sidecar.getIndex().equals(UInt64.valueOf(i))) {
+        LOG.debug(
+            "Cannot reconstruct extension data column sidecars for slot {} blockRoot {}: stored "
+                + "sidecar {} is index {} of {}",
+            block.getSlot(),
+            block.getRoot(),
+            i,
+            sidecar.getIndex(),
+            sidecar.getSlotAndBlockRoot());
         return emptyResult();
       }
     }
@@ -197,6 +576,11 @@ public class DataColumnSidecarArchiveReconstructorImpl
             dataColumnSidecarUtil.computeDataColumnKzgCommitmentsInclusionProof(
                 block.getMessage().getBody()),
             blobAndCellProofsList);
+
+    LOG.debug(
+        "Reconstructed extension data column sidecars for slot {} blockRoot {}",
+        block.getSlot(),
+        slotAndBlockRoot.getBlockRoot());
 
     return new ReconstructionResult(
         Stream.iterate(UInt64.valueOf(halfColumns), UInt64::increment)
@@ -245,12 +629,12 @@ public class DataColumnSidecarArchiveReconstructorImpl
   }
 
   @Override
-  public boolean isSidecarPruned(final UInt64 slot, final UInt64 index) {
+  public boolean isSidecarArchived(final UInt64 slot, final UInt64 index) {
     if (!isSuperNodeSupplier.get()) {
       return false;
     }
 
-    if (index.isLessThan(halfColumns)) {
+    if (index.isLessThan(halfColumns) || index.isGreaterThanOrEqualTo(halfColumns * 2L)) {
       return false;
     }
 
@@ -260,24 +644,35 @@ public class DataColumnSidecarArchiveReconstructorImpl
       return false;
     }
 
-    final Optional<UInt64> maybeFinalizedSlot = chainDataClient.getFinalizedBlockSlot();
-    if (maybeFinalizedSlot.isEmpty()) {
-      return false;
-    }
+    // Retention controls new archive writes, not whether existing archives can be served, so this
+    // follows what was actually archived.
+    return lastArchivedSlot.get().map(slot::isLessThanOrEqualTo).orElse(false);
+  }
 
-    final UInt64 finalizedEpoch = spec.computeEpochAtSlot(maybeFinalizedSlot.get());
-    final UInt64 currentEpoch = spec.getCurrentEpoch(store);
-    return slotEpoch.isLessThan(
-        finalizedEpoch.min(currentEpoch.minusMinZero(dataColumnSidecarExtensionRetentionEpochs)));
+  @Override
+  public SafeFuture<Void> loadLastArchivedSlot() {
+    return chainDataClient
+        .getLastDataColumnSidecarArchivedSlot()
+        .thenAccept(
+            maybeSlot -> {
+              LOG.debug("Loaded last archived data column sidecar slot {}", maybeSlot);
+              maybeSlot.ifPresent(this::raiseLastArchivedSlot);
+            })
+        .exceptionally(
+            error -> {
+              // not fatal: only archives beyond the next archive-prunable signal go unserved
+              LOG.warn("Failed to load last archived data column sidecar slot from storage", error);
+              return null;
+            });
+  }
+
+  private void raiseLastArchivedSlot(final UInt64 slot) {
+    lastArchivedSlot.updateAndGet(current -> Optional.of(current.map(slot::max).orElse(slot)));
   }
 
   @Override
   public void onRequestCompleted(final int requestId) {
-    final Map<SlotAndBlockRoot, SafeFuture<ReconstructionResult>> removed =
-        recoveryTasks.remove(requestId);
-    if (removed != null) {
-      LOG.debug("Request completed: {}, removing tasks ({})", requestId, removed.size());
-    }
+    requestsPastDeadline.remove(requestId);
   }
 
   @Override
@@ -296,6 +691,15 @@ public class DataColumnSidecarArchiveReconstructorImpl
     }
     final UInt64 lastPrunableSlot =
         spec.computeStartSlotAtEpoch(pruningBoundaryEpoch).minusMinZero(1);
+    LOG.debug(
+        "Signalling data column sidecar archive-prunable slot {} "
+            + "(finalizedEpoch {}, currentEpoch {}, retentionEpochs {})",
+        lastPrunableSlot,
+        finalizedEpoch,
+        currentEpoch,
+        dataColumnSidecarExtensionRetentionEpochs);
+    // raised before signalling, so slots are already served from the archive once storage writes it
+    raiseLastArchivedSlot(lastPrunableSlot);
     sidecarArchivePrunableChannel.onSidecarArchivePrunableSlot(lastPrunableSlot);
   }
 
@@ -307,6 +711,66 @@ public class DataColumnSidecarArchiveReconstructorImpl
   record ReconstructionResult(Map<UInt64, Optional<DataColumnSidecar>> sidecars) {
     Optional<DataColumnSidecar> get(final UInt64 index) {
       return Optional.ofNullable(sidecars.get(index)).flatMap(v -> v);
+    }
+  }
+
+  private enum State {
+    RUNNING,
+    SUCCEEDED,
+    FAILED
+  }
+
+  private record RetainedResult(
+      SlotAndBlockRoot slotAndBlockRoot,
+      ReconstructionCacheEntry entry,
+      long lastRequestedAtMillis) {}
+
+  /**
+   * A shared reconstruction for a single block. While running it deduplicates concurrent and
+   * overlapping requests; once successful it is reused by every later request until the per-slot
+   * prune finds it unrequested for {@code retentionMillis}, or it is evicted to keep within the
+   * retained results limit. A reconstruction that completed without producing sidecars (failed,
+   * hung past RECONSTRUCTION_HUNG_TIMEOUT, rejected by a full queue, or skipped after waiting in
+   * the queue unrequested for {@code retentionMillis}) is reused as an empty result until the next
+   * per-slot prune, after which the next request retries it.
+   */
+  private static final class ReconstructionCacheEntry {
+    private final long retentionMillis;
+    private final SafeFuture<ReconstructionResult> future = new SafeFuture<>();
+    private final AtomicBoolean started = new AtomicBoolean(false);
+    private volatile State state = State.RUNNING;
+    private volatile long lastRequestedAtMillis;
+    // set by runReconstruction: the queue handed the task over, and whether it was then skipped;
+    // both only tell apart the reasons a reconstruction failed
+    private volatile boolean dequeued;
+    private volatile boolean skipped;
+
+    private ReconstructionCacheEntry(final Duration retention, final long requestedAtMillis) {
+      this.retentionMillis = retention.toMillis();
+      // set before the entry is queued, as a free slot runs it straight away
+      this.lastRequestedAtMillis = requestedAtMillis;
+    }
+
+    /** Returns true for exactly one caller, which then starts the reconstruction. */
+    private boolean claimStart() {
+      return started.compareAndSet(false, true);
+    }
+
+    private boolean hasFailed() {
+      return state == State.FAILED;
+    }
+
+    private boolean isUnrequestedForRetention(final long nowMillis) {
+      return nowMillis - lastRequestedAtMillis > retentionMillis;
+    }
+
+    private boolean isEvictable(final long nowMillis) {
+      return switch (state) {
+        // still running - keep so concurrent requests share it
+        case RUNNING -> false;
+        case FAILED -> true;
+        case SUCCEEDED -> isUnrequestedForRetention(nowMillis);
+      };
     }
   }
 }

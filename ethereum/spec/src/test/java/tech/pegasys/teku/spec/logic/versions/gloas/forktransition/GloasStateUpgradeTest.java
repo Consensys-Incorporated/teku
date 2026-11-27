@@ -39,6 +39,7 @@ import tech.pegasys.teku.bls.BLSTestUtil;
 import tech.pegasys.teku.ethereum.execution.types.Eth1Address;
 import tech.pegasys.teku.infrastructure.ssz.SszList;
 import tech.pegasys.teku.infrastructure.ssz.SszMutableList;
+import tech.pegasys.teku.infrastructure.ssz.collections.SszBitvector;
 import tech.pegasys.teku.infrastructure.ssz.collections.SszByteList;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszByte;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBytes32;
@@ -102,6 +103,27 @@ class GloasStateUpgradeTest {
 
     assertThat(BeaconStateCache.getTransitionCaches(postState).getValidatorIndexCache())
         .isSameAs(preStateValidatorIndexCache);
+  }
+
+  @Test
+  void shouldSetPayloadAvailabilityForAllSlotsExceptForkSlot() {
+    final BeaconStateFulu preState =
+        BeaconStateFulu.required(
+            dataStructureUtil
+                .stateBuilder(SpecMilestone.FULU, 64, 0)
+                .setSlotToStartOfEpoch(GLOAS_EPOCH)
+                .build()
+                .updated(this::activateAllValidators));
+
+    final BeaconStateGloas postState =
+        BeaconStateGloas.required(createStateUpgrade().upgrade(preState));
+
+    final int slotsPerHistoricalRoot = spec.getGenesisSpecConfig().getSlotsPerHistoricalRoot();
+    final int forkSlotIndex = postState.getSlot().mod(slotsPerHistoricalRoot).intValue();
+    final SszBitvector executionPayloadAvailability = postState.getExecutionPayloadAvailability();
+    for (int i = 0; i < slotsPerHistoricalRoot; i++) {
+      assertThat(executionPayloadAvailability.getBit(i)).isEqualTo(i != forkSlotIndex);
+    }
   }
 
   @Test

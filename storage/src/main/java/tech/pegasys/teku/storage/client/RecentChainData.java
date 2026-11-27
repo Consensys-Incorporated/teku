@@ -733,9 +733,13 @@ public abstract class RecentChainData
   }
 
   public boolean containsExecutionPayload(final Bytes32 blockRoot) {
-    return Optional.ofNullable(store)
-        .map(s -> s.getExecutionPayloadIfAvailable(blockRoot).isPresent())
-        .orElse(false);
+    return getExecutionPayloadIfAvailable(blockRoot).isPresent();
+  }
+
+  /** Hot store only, no fallback. */
+  public Optional<SignedExecutionPayloadEnvelope> getExecutionPayloadIfAvailable(
+      final Bytes32 blockRoot) {
+    return Optional.ofNullable(store).flatMap(s -> s.getExecutionPayloadIfAvailable(blockRoot));
   }
 
   public Optional<UInt64> getSlotForBlockRoot(final Bytes32 root) {
@@ -955,13 +959,9 @@ public abstract class RecentChainData
     return validatorIsConnectedProvider.isBlockProposerConnected(slot);
   }
 
-  public void setBlockTimelinessFromArrivalTime(
-      final SignedBeaconBlock block, final UInt64 arrivalTime) {
-    blockTimelinessTracker.setBlockTimelinessFromArrivalTime(block, arrivalTime);
-  }
-
-  public void setBlockTimelinessIfEmpty(final SignedBeaconBlock block) {
-    blockTimelinessTracker.setBlockTimelinessFromArrivalTime(block, store.getTimeInMillis());
+  public void setBlockTimelinessAtImport(
+      final SignedBeaconBlock block, final UInt64 importTimeMillis) {
+    blockTimelinessTracker.setBlockTimelinessAtImport(block, importTimeMillis);
   }
 
   public void setBlockTimelinessAfterDataAvailability(
