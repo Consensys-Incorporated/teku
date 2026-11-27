@@ -163,8 +163,6 @@ public class MiscHelpersGloas extends MiscHelpersFulu {
     final int total = indices.size();
     checkArgument(total > 0, "Size of indices must be greater than 0");
     final SszList<Validator> validators = state.getValidators();
-    final List<UInt64> effectiveBalances =
-        indices.intStream().mapToObj(index -> validators.get(index).getEffectiveBalance()).toList();
     final IntList selected = new IntArrayList();
     int i = 0;
     Bytes32 randomBytes = Bytes32.ZERO;
@@ -177,12 +175,15 @@ public class MiscHelpersGloas extends MiscHelpersFulu {
       if (shuffleIndices) {
         nextIndex = computeShuffledIndex(nextIndex, total, seed);
       }
-      final UInt64 weight = effectiveBalances.get(nextIndex).times(MAX_RANDOM_VALUE);
+      // Only the candidate's effective balance is read: indices can be all active validators
+      final int candidateIndex = indices.getInt(nextIndex);
+      final UInt64 weight =
+          validators.get(candidateIndex).getEffectiveBalance().times(MAX_RANDOM_VALUE);
       final UInt64 randomValue = bytesToUInt64(randomBytes.slice(offset, 2));
       final UInt64 threshold =
           SpecConfigElectra.required(specConfig).getMaxEffectiveBalanceElectra().times(randomValue);
       if (weight.isGreaterThanOrEqualTo(threshold)) {
-        selected.add(indices.getInt(nextIndex));
+        selected.add(candidateIndex);
       }
       i++;
     }

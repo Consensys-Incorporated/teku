@@ -72,6 +72,8 @@ public class ValidatorConfig {
   public static final UInt64 DEFAULT_BUILDER_REGISTRATION_GAS_LIMIT = UInt64.valueOf(60_000_000);
   public static final boolean DEFAULT_OBOL_DVT_SELECTIONS_ENDPOINT_ENABLED = false;
   public static final boolean DEFAULT_ATTESTATIONS_V2_APIS_ENABLED = false;
+  public static final int DEFAULT_EVENT_STREAM_MAX_EVENT_SIZE_MEGABYTES = 8;
+  public static final int DEFAULT_BEACON_API_MAX_RESPONSE_SIZE_MB = 64;
   // Builder default options
   public static final UInt64 DEFAULT_BUILDER_MIN_BID = UInt64.ZERO;
   public static final UInt64 DEFAULT_P2P_BUILDER_MIN_BID = UInt64.ZERO;
@@ -119,10 +121,12 @@ public class ValidatorConfig {
 
   private final OptionalInt beaconApiExecutorThreads;
   private final OptionalInt beaconApiReadinessExecutorThreads;
+  private final int beaconApiMaxResponseSizeMegabytes;
 
   private final boolean isLocalSlashingProtectionSynchronizedModeEnabled;
   private final boolean dvtSelectionsEndpointEnabled;
   private final boolean attestationsV2ApisEnabled;
+  private final int eventStreamMaxEventSizeMegabytes;
 
   // Builder options
   private final UInt64 builderMinBid;
@@ -169,10 +173,12 @@ public class ValidatorConfig {
       final int executorThreads,
       final OptionalInt beaconApiExecutorThreads,
       final OptionalInt beaconApiReadinessExecutorThreads,
+      final int beaconApiMaxResponseSizeMegabytes,
       final Optional<String> sentryNodeConfigurationFile,
       final boolean isLocalSlashingProtectionSynchronizedModeEnabled,
       final boolean dvtSelectionsEndpointEnabled,
       final boolean attestationsV2ApisEnabled,
+      final int eventStreamMaxEventSizeMegabytes,
       final UInt64 builderMinBid,
       final UInt64 builderBoostFactor,
       final UInt64 p2pBuilderMinBid,
@@ -219,11 +225,13 @@ public class ValidatorConfig {
     this.executorThreads = executorThreads;
     this.beaconApiExecutorThreads = beaconApiExecutorThreads;
     this.beaconApiReadinessExecutorThreads = beaconApiReadinessExecutorThreads;
+    this.beaconApiMaxResponseSizeMegabytes = beaconApiMaxResponseSizeMegabytes;
     this.sentryNodeConfigurationFile = sentryNodeConfigurationFile;
     this.isLocalSlashingProtectionSynchronizedModeEnabled =
         isLocalSlashingProtectionSynchronizedModeEnabled;
     this.dvtSelectionsEndpointEnabled = dvtSelectionsEndpointEnabled;
     this.attestationsV2ApisEnabled = attestationsV2ApisEnabled;
+    this.eventStreamMaxEventSizeMegabytes = eventStreamMaxEventSizeMegabytes;
     this.builderMinBid = builderMinBid;
     this.builderBoostFactor = builderBoostFactor;
     this.p2pBuilderMinBid = p2pBuilderMinBid;
@@ -387,6 +395,10 @@ public class ValidatorConfig {
     return beaconApiReadinessExecutorThreads;
   }
 
+  public int getBeaconApiMaxResponseSizeMegabytes() {
+    return beaconApiMaxResponseSizeMegabytes;
+  }
+
   public Optional<String> getSentryNodeConfigurationFile() {
     return sentryNodeConfigurationFile;
   }
@@ -410,6 +422,10 @@ public class ValidatorConfig {
 
   public boolean isAttestationsV2ApisEnabled() {
     return attestationsV2ApisEnabled;
+  }
+
+  public int getEventStreamMaxEventSizeMegabytes() {
+    return eventStreamMaxEventSizeMegabytes;
   }
 
   public UInt64 getBuilderMinBid() {
@@ -484,12 +500,14 @@ public class ValidatorConfig {
     private OptionalInt executorMaxQueueSize = OptionalInt.empty();
     private OptionalInt beaconApiExecutorThreads = OptionalInt.empty();
     private OptionalInt beaconApiReadinessExecutorThreads = OptionalInt.empty();
+    private int beaconApiMaxResponseSizeMegabytes = DEFAULT_BEACON_API_MAX_RESPONSE_SIZE_MB;
     private Optional<String> sentryNodeConfigurationFile = Optional.empty();
     private int executorThreads = DEFAULT_VALIDATOR_EXECUTOR_THREADS;
     private boolean isLocalSlashingProtectionSynchronizedModeEnabled =
         DEFAULT_VALIDATOR_IS_LOCAL_SLASHING_PROTECTION_SYNCHRONIZED_ENABLED;
     private boolean dvtSelectionsEndpointEnabled = DEFAULT_OBOL_DVT_SELECTIONS_ENDPOINT_ENABLED;
     private boolean attestationsV2ApisEnabled = DEFAULT_ATTESTATIONS_V2_APIS_ENABLED;
+    private int eventStreamMaxEventSizeMegabytes = DEFAULT_EVENT_STREAM_MAX_EVENT_SIZE_MEGABYTES;
     private UInt64 builderMinBid = DEFAULT_BUILDER_MIN_BID;
     private UInt64 builderBoostFactor = DEFAULT_BUILDER_BOOST_FACTOR;
     private UInt64 p2pBuilderMinBid = DEFAULT_P2P_BUILDER_MIN_BID;
@@ -740,6 +758,15 @@ public class ValidatorConfig {
       return this;
     }
 
+    public Builder beaconApiMaxResponseSizeMegabytes(final int beaconApiMaxResponseSizeMegabytes) {
+      if (beaconApiMaxResponseSizeMegabytes < 0) {
+        throw new InvalidConfigurationException(
+            "--Xvalidator-client-beacon-api-max-response-size must be non-negative");
+      }
+      this.beaconApiMaxResponseSizeMegabytes = beaconApiMaxResponseSizeMegabytes;
+      return this;
+    }
+
     public Builder executorMaxQueueSizeIfDefault(final int executorMaxQueueSize) {
       if (this.executorMaxQueueSize.isEmpty()) {
         this.executorMaxQueueSize = OptionalInt.of(executorMaxQueueSize);
@@ -766,6 +793,15 @@ public class ValidatorConfig {
 
     public Builder attestationsV2ApisEnabled(final boolean attestationsV2ApisEnabled) {
       this.attestationsV2ApisEnabled = attestationsV2ApisEnabled;
+      return this;
+    }
+
+    public Builder eventStreamMaxEventSizeMegabytes(final int eventStreamMaxEventSizeMegabytes) {
+      if (eventStreamMaxEventSizeMegabytes < 0) {
+        throw new InvalidConfigurationException(
+            "--Xvalidator-client-event-stream-max-event-size must be non-negative");
+      }
+      this.eventStreamMaxEventSizeMegabytes = eventStreamMaxEventSizeMegabytes;
       return this;
     }
 
@@ -841,10 +877,12 @@ public class ValidatorConfig {
           executorThreads,
           beaconApiExecutorThreads,
           beaconApiReadinessExecutorThreads,
+          beaconApiMaxResponseSizeMegabytes,
           sentryNodeConfigurationFile,
           isLocalSlashingProtectionSynchronizedModeEnabled,
           dvtSelectionsEndpointEnabled,
           attestationsV2ApisEnabled,
+          eventStreamMaxEventSizeMegabytes,
           builderMinBid,
           builderBoostFactor,
           p2pBuilderMinBid,

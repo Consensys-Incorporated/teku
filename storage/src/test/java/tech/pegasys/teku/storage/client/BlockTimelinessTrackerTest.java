@@ -46,8 +46,7 @@ class BlockTimelinessTrackerTest {
 
   @Test
   void shouldReportTimelinessIfSet() {
-    tracker.setBlockTimelinessFromArrivalTime(
-        signedBlockAndState.getBlock(), computeTime(slot, 500));
+    tracker.setBlockTimelinessAtImport(signedBlockAndState.getBlock(), computeTime(slot, 500));
 
     assertThat(tracker.getBlockTimeliness(signedBlockAndState.getRoot()))
         .isPresent()
@@ -57,10 +56,8 @@ class BlockTimelinessTrackerTest {
 
   @Test
   void shouldKeepFirstTimelyObservation() {
-    tracker.setBlockTimelinessFromArrivalTime(
-        signedBlockAndState.getBlock(), computeTime(slot, 500));
-    tracker.setBlockTimelinessFromArrivalTime(
-        signedBlockAndState.getBlock(), computeTime(slot, 3000));
+    tracker.setBlockTimelinessAtImport(signedBlockAndState.getBlock(), computeTime(slot, 500));
+    tracker.setBlockTimelinessAtImport(signedBlockAndState.getBlock(), computeTime(slot, 3000));
 
     assertThat(tracker.getBlockTimeliness(signedBlockAndState.getRoot()))
         .isPresent()
@@ -69,10 +66,8 @@ class BlockTimelinessTrackerTest {
 
   @Test
   void shouldKeepFirstLateObservation() {
-    tracker.setBlockTimelinessFromArrivalTime(
-        signedBlockAndState.getBlock(), computeTime(slot, 2100));
-    tracker.setBlockTimelinessFromArrivalTime(
-        signedBlockAndState.getBlock(), computeTime(slot, 500));
+    tracker.setBlockTimelinessAtImport(signedBlockAndState.getBlock(), computeTime(slot, 2100));
+    tracker.setBlockTimelinessAtImport(signedBlockAndState.getBlock(), computeTime(slot, 500));
 
     assertThat(tracker.getBlockTimeliness(signedBlockAndState.getRoot()))
         .isPresent()
@@ -81,8 +76,7 @@ class BlockTimelinessTrackerTest {
 
   @Test
   void shouldReportLateBlock() {
-    tracker.setBlockTimelinessFromArrivalTime(
-        signedBlockAndState.getBlock(), computeTime(slot, 2100));
+    tracker.setBlockTimelinessAtImport(signedBlockAndState.getBlock(), computeTime(slot, 2100));
 
     assertThat(tracker.getBlockTimeliness(signedBlockAndState.getRoot()))
         .isPresent()
@@ -94,7 +88,7 @@ class BlockTimelinessTrackerTest {
   void shouldReportLateBlockAtTimelinessLimit() {
     final int timelinessLimit = spec.atSlot(slot).getForkChoiceUtil().getAttestationDueMillis();
 
-    tracker.setBlockTimelinessFromArrivalTime(
+    tracker.setBlockTimelinessAtImport(
         signedBlockAndState.getBlock(), computeTime(slot, timelinessLimit));
 
     assertThat(tracker.getBlockTimeliness(signedBlockAndState.getRoot()))
@@ -111,7 +105,7 @@ class BlockTimelinessTrackerTest {
 
   @ParameterizedTest(name = "{0}")
   @EnumSource(SpecMilestone.class)
-  void shouldSkipArrivalTimelinessOnlyForFulu(final SpecMilestone milestone) {
+  void shouldSkipImportTimelinessOnlyForFulu(final SpecMilestone milestone) {
     final Spec testSpec = TestSpecFactory.createMinimal(milestone);
     final DataStructureUtil util = new DataStructureUtil(testSpec);
     final SignedBlockAndState block = util.randomSignedBlockAndState(slot);
@@ -119,7 +113,7 @@ class BlockTimelinessTrackerTest {
     final BlockTimelinessTracker testTracker =
         new BlockTimelinessTracker(testSpec, () -> milestoneGenesisMillis, new HashMap<>());
 
-    testTracker.setBlockTimelinessFromArrivalTime(
+    testTracker.setBlockTimelinessAtImport(
         block.getBlock(), computeTime(milestoneGenesisMillis, testSpec, slot, 100));
 
     if (milestone == SpecMilestone.FULU) {

@@ -38,6 +38,7 @@ import tech.pegasys.teku.networking.eth2.rpc.core.ResponseCallback;
 import tech.pegasys.teku.networking.eth2.rpc.core.RpcException;
 import tech.pegasys.teku.networking.eth2.rpc.core.RpcException.ResourceUnavailableException;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.config.SpecConfigDeneb;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.BlobSidecarsByRangeRequestMessage;
@@ -89,11 +90,27 @@ public class BlobSidecarsByRangeMessageHandler
           new RpcException(INVALID_REQUEST_CODE, "Requested slot is too far in the future"));
     }
 
-    final SpecConfigDeneb specConfig =
-        SpecConfigDeneb.required(spec.atSlot(getEndSlotBeforeFulu(maxSlot)).getConfig());
+    // an empty request ends at startSlot - 1, which can be pre-Deneb even when it starts at Deneb
+    if (!request.getCount().isZero()
+        && spec.atSlot(maxSlot).getMilestone().isLessThan(SpecMilestone.DENEB)) {
+      requestCounter.labels("pre_deneb_range").inc();
+      return Optional.of(
+          new RpcException(
+              INVALID_REQUEST_CODE, "Blob sidecars not supported for the requested slot range"));
+    }
+
+    final UInt64 endSlotBeforeFulu = getEndSlotBeforeFulu(maxSlot);
+    final Optional<SpecConfigDeneb> maybeSpecConfig = getSpecConfigDeneb(endSlotBeforeFulu);
+    if (maybeSpecConfig.isEmpty()) {
+      // Either the request is empty, or Fulu activates at the same epoch as Deneb so no blob
+      // sidecars exist on this network. onIncomingMessage answers with an empty response.
+      return Optional.empty();
+    }
+    final SpecConfigDeneb specConfig = maybeSpecConfig.get();
 
     final int maxRequestBlobSidecars = specConfig.getMaxRequestBlobSidecars();
-    final int maxBlobsPerBlock = spec.getMaxBlobsPerBlockAtSlot(maxSlot).orElseThrow();
+    // only slots before Fulu are served, so use the same blob limit as onIncomingMessage does
+    final int maxBlobsPerBlock = spec.getMaxBlobsPerBlockAtSlot(endSlotBeforeFulu).orElseThrow();
 
     final int requestedCount = calculateRequestedCount(request, maxBlobsPerBlock);
 
@@ -112,6 +129,10 @@ public class BlobSidecarsByRangeMessageHandler
 
   private UInt64 getEndSlotBeforeFulu(final UInt64 maxSlot) {
     return spec.blobSidecarsDeprecationSlot().safeDecrement().min(maxSlot);
+  }
+
+  private Optional<SpecConfigDeneb> getSpecConfigDeneb(final UInt64 slot) {
+    return spec.atSlot(slot).getConfig().toVersionDeneb();
   }
 
   @Override
@@ -134,9 +155,9 @@ public class BlobSidecarsByRangeMessageHandler
       return;
     }
 
-    if (startSlot.isGreaterThan(spec.blobSidecarsDeprecationSlot())) {
+    if (startSlot.isGreaterThanOrEqualTo(spec.blobSidecarsDeprecationSlot())) {
       LOG.trace(
-          "Peer {} requested {} slots of blob sidecars starting at slot {} after Fulu. BlobSidecarsByRange v1 is deprecated and the request will be ignored.",
+          "Peer {} requested {} slots of blob sidecars starting at slot {} at or after Fulu. BlobSidecarsByRange v1 is deprecated and the request will be ignored.",
           peer.getId(),
           message.getCount(),
           startSlot);
@@ -146,8 +167,20 @@ public class BlobSidecarsByRangeMessageHandler
     }
 
     final UInt64 endSlotBeforeFulu = getEndSlotBeforeFulu(endSlot);
-    final SpecConfigDeneb specConfig =
-        SpecConfigDeneb.required(spec.atSlot(endSlotBeforeFulu).getConfig());
+    final Optional<SpecConfigDeneb> maybeSpecConfig = getSpecConfigDeneb(endSlotBeforeFulu);
+    if (maybeSpecConfig.isEmpty()) {
+      // Either the request is empty and ends before Deneb, or Fulu activates at the same epoch as
+      // Deneb so there are no blob sidecars on this network
+      LOG.trace(
+          "Peer {} requested {} slots of blob sidecars starting at slot {}, but no blob sidecars exist in that range.",
+          peer.getId(),
+          message.getCount(),
+          startSlot);
+      requestCounter.labels("ignored").inc();
+      callback.completeSuccessfully();
+      return;
+    }
+    final SpecConfigDeneb specConfig = maybeSpecConfig.get();
     final int requestedCount =
         calculateRequestedCount(
             message, spec.getMaxBlobsPerBlockAtSlot(endSlotBeforeFulu).orElseThrow());

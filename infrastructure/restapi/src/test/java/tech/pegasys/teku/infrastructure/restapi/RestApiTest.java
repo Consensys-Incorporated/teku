@@ -27,6 +27,8 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import tech.pegasys.teku.infrastructure.exceptions.InvalidConfigurationException;
 
@@ -60,6 +62,19 @@ class RestApiTest {
 
     assertThatThrownBy(() -> RestApiBuilder.ensurePasswordFile(managerDir.resolve("pass")))
         .isInstanceOf(IllegalStateException.class);
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void ensurePasswordFile_shouldCreateTokenReadableOnlyByOwner(@TempDir final Path tempDir)
+      throws IOException {
+    final Path passwordFile = tempDir.resolve("manager").resolve("pass");
+
+    RestApiBuilder.ensurePasswordFile(passwordFile);
+
+    assertThat(Files.readString(passwordFile)).isNotBlank();
+    assertThat(Files.getPosixFilePermissions(passwordFile))
+        .isEqualTo(PosixFilePermissions.fromString("rw-------"));
   }
 
   @Test

@@ -172,9 +172,6 @@ public class BlockManager extends Service
 
     final Optional<BlockImportPerformance> blockImportPerformance;
 
-    arrivalTimestamp.ifPresent(
-        arrivalTime -> recentChainData.setBlockTimelinessFromArrivalTime(block, arrivalTime));
-
     if (blockImportMetrics.isPresent()) {
       final BlockImportPerformance performance =
           new BlockImportPerformance(timeProvider, blockImportMetrics.get());

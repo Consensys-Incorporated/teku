@@ -81,6 +81,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.blockbody.BeaconBlockBodyBui
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelopeInvariants;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedBlindedExecutionPayloadEnvelope;
+import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadBlockHashCalculator;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayloadHeader;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequests;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionRequestsDataCodec;
@@ -398,6 +399,15 @@ public class Spec {
    */
   public boolean isMilestoneSupported(final SpecMilestone milestone) {
     return forkSchedule.getSupportedMilestones().contains(milestone);
+  }
+
+  /**
+   * Returns true if the given epoch is the first epoch in which the milestone (or a later one) is
+   * active, including the genesis epoch when the milestone is active from genesis.
+   */
+  public boolean isMilestoneActivationEpoch(final SpecMilestone milestone, final UInt64 epoch) {
+    return atEpoch(epoch).getMilestone().isGreaterThanOrEqualTo(milestone)
+        && (epoch.isZero() || atEpoch(epoch.minus(1)).getMilestone().isLessThan(milestone));
   }
 
   public Fork fork(final UInt64 epoch) {
@@ -1247,6 +1257,15 @@ public class Spec {
             () ->
                 new IllegalStateException(
                     "Attempting to use execution requests data codec when spec does not have execution requests data codec"));
+  }
+
+  /**
+   * The execution block hash computed locally from the envelope content, with the same header rules
+   * the execution client applies and without an Engine API call, to compare with the declared one.
+   */
+  public Bytes32 computeExecutionPayloadBlockHash(final ExecutionPayloadEnvelope envelope) {
+    return ExecutionPayloadBlockHashCalculator.computeGloasBlockHash(
+        envelope, getExecutionRequestsDataCodec(envelope.getSlot()));
   }
 
   // Data Column Sidecar Util

@@ -719,8 +719,11 @@ public abstract class AbstractSszContainerSchema<C extends SszContainer>
       final Bytes32 chunkHash,
       final long chunkGIndex,
       final SszSchema<?> fieldSchema) {
-    if (TreeUtil.ZERO_TREES_BY_ROOT.containsKey(chunkHash) || chunkHash.equals(Bytes32.ZERO)) {
-      return fieldSchema.getDefaultTree();
+    // A field can't be recognised as default by its hash being the root of a zero tree: a Bytes32
+    // field is its own hash, and a non-default composite can hash to the root of a zero tree.
+    final TreeNode defaultTree = fieldSchema.getDefaultTree();
+    if (chunkHash.equals(defaultTree.hashTreeRoot()) || chunkHash.equals(Bytes32.ZERO)) {
+      return defaultTree;
     }
     return fieldSchema.loadBackingNodes(nodeSource, chunkHash, chunkGIndex);
   }

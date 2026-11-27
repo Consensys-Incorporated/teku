@@ -21,6 +21,7 @@ import static org.mockito.Mockito.when;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_BAD_REQUEST;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_INTERNAL_SERVER_ERROR;
 import static tech.pegasys.teku.infrastructure.http.HttpStatusCodes.SC_OK;
+import static tech.pegasys.teku.statetransition.validation.ValidationResultCode.ValidationResultSubCode.IGNORE_ALREADY_SEEN;
 
 import java.io.IOException;
 import okhttp3.Response;
@@ -71,6 +72,32 @@ public class PostVoluntaryExitIntegrationTest extends AbstractDataBackedRestAPII
     final Response response = getResponse(signedVoluntaryExit);
     assertThat(response.code()).isEqualTo(SC_BAD_REQUEST);
     assertThat(response.body().string()).contains("the reason");
+  }
+
+  @Test
+  public void shouldIncludeIgnoreReasonWhenVoluntaryExitIsNotInPool() throws Exception {
+    final SignedVoluntaryExit signedVoluntaryExit =
+        dataStructureUtil.randomSignedVoluntaryExit(UInt64.ONE);
+    final String reason = "Voluntary exit is from a future epoch.";
+    when(voluntaryExitPool.addLocal(signedVoluntaryExit))
+        .thenReturn(SafeFuture.completedFuture(InternalValidationResult.ignore(reason)));
+
+    final Response response = getResponse(signedVoluntaryExit);
+    assertThat(response.code()).isEqualTo(SC_BAD_REQUEST);
+    assertThat(response.body().string()).contains(reason);
+  }
+
+  @Test
+  public void shouldReturnSuccessWhenVoluntaryExitIsAlreadyInPool() throws Exception {
+    final SignedVoluntaryExit signedVoluntaryExit =
+        dataStructureUtil.randomSignedVoluntaryExit(UInt64.ONE);
+    when(voluntaryExitPool.addLocal(signedVoluntaryExit))
+        .thenReturn(
+            SafeFuture.completedFuture(
+                InternalValidationResult.ignore(IGNORE_ALREADY_SEEN, "Already in pool")));
+
+    final Response response = getResponse(signedVoluntaryExit);
+    assertThat(response.code()).isEqualTo(SC_OK);
   }
 
   @Test

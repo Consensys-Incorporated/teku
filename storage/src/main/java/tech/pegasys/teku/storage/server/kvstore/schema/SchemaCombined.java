@@ -110,9 +110,13 @@ public interface SchemaCombined extends Schema {
 
   KvStoreVariable<UInt64> getVariableLastDataColumnSidecarPrunedSlot();
 
+  KvStoreVariable<UInt64> getVariableLastDataColumnSidecarArchivedSlot();
+
   KvStoreVariable<Bytes32> getVariableLatestCanonicalBlockRoot();
 
   KvStoreVariable<UInt64> getVariableCustodyGroupCount();
+
+  KvStoreVariable<Bytes32> getVariableFastConfirmedRoot();
 
   KvStoreVariable<UInt64> getVariableEarliestBlockSlot();
 

@@ -13,8 +13,10 @@
 
 package tech.pegasys.teku.ethereum.executionlayer;
 
+import static tech.pegasys.teku.spec.config.Constants.MAXIMUM_CONCURRENT_EE_PAYLOAD_BODIES_REQUESTS;
 import static tech.pegasys.teku.spec.config.Constants.MAXIMUM_CONCURRENT_EE_REQUESTS;
 import static tech.pegasys.teku.spec.config.Constants.MAXIMUM_CONCURRENT_NON_CRITICAL_EB_REQUESTS;
+import static tech.pegasys.teku.spec.config.Constants.MAXIMUM_QUEUED_EE_PAYLOAD_BODIES_REQUESTS;
 
 import com.google.common.annotations.VisibleForTesting;
 import java.util.Arrays;
@@ -121,7 +123,11 @@ public class ExecutionLayerManagerImpl implements ExecutionLayerManager {
     final ExecutionEngineClient metricEngineClient =
         new MetricRecordingExecutionEngineClient(rawEngineClient, timeProvider, metricsSystem);
     return new ThrottlingExecutionEngineClient(
-        metricEngineClient, MAXIMUM_CONCURRENT_EE_REQUESTS, metricsSystem);
+        metricEngineClient,
+        MAXIMUM_CONCURRENT_EE_REQUESTS,
+        MAXIMUM_CONCURRENT_EE_PAYLOAD_BODIES_REQUESTS,
+        MAXIMUM_QUEUED_EE_PAYLOAD_BODIES_REQUESTS,
+        metricsSystem);
   }
 
   public static BuilderClient createBuilderClient(

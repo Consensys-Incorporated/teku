@@ -1,5 +1,5 @@
 ARG BASE_IMAGE_PREFIX=mirror.gcr.io/library/
-FROM ${BASE_IMAGE_PREFIX}eclipse-temurin:26 AS jre-build
+FROM ${BASE_IMAGE_PREFIX}eclipse-temurin:27 AS jre-build
 
 # Create a custom Java runtime
 RUN $JAVA_HOME/bin/jlink \

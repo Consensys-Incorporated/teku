@@ -78,8 +78,83 @@ public record SigningHistory(
         .toString();
   }
 
+  /**
+   * Finds a slot or epoch that can't be stored in a {@link ValidatorSigningRecord}.
+   *
+   * <p>{@link UInt64#MAX_VALUE} is never a legitimate slot or epoch, and a stored record reads it
+   * back as "never signed", so importing it would silently remove the validator's protection. We
+   * can't tell whether such an entry means "nothing signed" or records a real signature, so the
+   * only safe option is to refuse it.
+   *
+   * @return a description of the unsupported value, or empty if every value can be stored
+   */
+  public Optional<String> findUnsupportedValue() {
+    if (signedBlocks.stream().map(SignedBlock::slot).anyMatch(UInt64.MAX_VALUE::equals)) {
+      return Optional.of("signed block slot " + UInt64.MAX_VALUE + " is not supported");
+    }
+    if (signedAttestations.stream()
+        .anyMatch(
+            attestation ->
+                UInt64.MAX_VALUE.equals(attestation.sourceEpoch())
+                    || UInt64.MAX_VALUE.equals(attestation.targetEpoch()))) {
+      return Optional.of("signed attestation epoch " + UInt64.MAX_VALUE + " is not supported");
+    }
+    return Optional.empty();
+  }
+
+  /**
+   * Finds a signed attestation whose source epoch is after its target epoch.
+   *
+   * <p>No real attestation looks like this: its source is a justified checkpoint from before its
+   * target. Importing one would set the stored source epoch above every attestation the validator
+   * can honestly make, so it would never be able to attest again. EIP-3076 test vectors mark such
+   * data as slashable, which lets an importer refuse it.
+   *
+   * @return a description of the invalid attestation, or empty if every attestation is valid
+   */
+  public Optional<String> findAttestationWithSourceAfterTarget() {
+    return signedAttestations.stream()
+        .filter(
+            attestation ->
+                attestation.sourceEpoch() != null
+                    && attestation.targetEpoch() != null
+                    && attestation.sourceEpoch().isGreaterThan(attestation.targetEpoch()))
+        .findFirst()
+        .map(
+            attestation ->
+                "signed attestation source epoch "
+                    + attestation.sourceEpoch()
+                    + " is after its target epoch "
+                    + attestation.targetEpoch());
+  }
+
+  /**
+   * Finds anything in this history that prevents it from being imported.
+   *
+   * @return a description of the problem, or empty if the history can be imported
+   * @see #findUnsupportedValue()
+   * @see #findAttestationWithSourceAfterTarget()
+   */
+  public Optional<String> findImportError() {
+    return findUnsupportedValue().or(this::findAttestationWithSourceAfterTarget);
+  }
+
+  /**
+   * Summarises this history as a {@link ValidatorSigningRecord}, merged with any existing record.
+   *
+   * <p>An attestation with its source after its target is not rejected here, so existing records
+   * holding one can still be raised. Importers check {@link #findImportError()} first.
+   *
+   * @throws IllegalArgumentException if the history contains a value reported by {@link
+   *     #findUnsupportedValue()}
+   */
   public ValidatorSigningRecord toValidatorSigningRecord(
       final Optional<ValidatorSigningRecord> maybeRecord, final Bytes32 genesisValidatorsRoot) {
+    findUnsupportedValue()
+        .ifPresent(
+            error -> {
+              throw new IllegalArgumentException(error);
+            });
 
     final UInt64 lastSignedBlockSlot =
         signedBlocks.stream()
@@ -91,14 +166,12 @@ public record SigningHistory(
         signedAttestations.stream()
             .map(SignedAttestation::sourceEpoch)
             .filter(Objects::nonNull)
-            .filter(epoch -> !epoch.equals(UInt64.MAX_VALUE))
             .max(UInt64::compareTo)
             .orElse(null);
     final UInt64 lastSignedAttestationTargetEpoch =
         signedAttestations.stream()
             .map(SignedAttestation::targetEpoch)
             .filter(Objects::nonNull)
-            .filter(epoch -> !epoch.equals(UInt64.MAX_VALUE))
             .max(UInt64::compareTo)
             .orElse(null);
 
