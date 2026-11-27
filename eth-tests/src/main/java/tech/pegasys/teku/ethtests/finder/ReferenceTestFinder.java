@@ -137,11 +137,6 @@ public class ReferenceTestFinder {
             "gloas - minimal - fork/fork - fork_validator_deposit_followed_by_builder_credentials",
             "gloas - mainnet - fork/fork - fork_validator_topup_before_builder_registration_stays_pending",
             "gloas - minimal - fork/fork - fork_validator_topup_before_builder_registration_stays_pending",
-            // TODO: https://github.com/Consensys-Incorporated/teku/pull/11628
-            // enable after adding pending-parent support to the discount (consensus-specs#5789)
-            "gloas - minimal - fast_confirmation/is_one_confirmed - empty_slot_discount_pending_and_empty_parent",
-            "gloas - minimal - fast_confirmation/is_one_confirmed - empty_slot_discount_pending_and_full_parent",
-            "gloas - minimal - fast_confirmation/is_one_confirmed - is_one_confirmed_with_empty_slot_and_attester_in_two_consecutive_slots_1",
             // TODO: https://github.com/ethereum/consensus-specs/pull/5765
             // enable after binding Fulu columns to the imported block (consensus-specs#5765)
             "fulu - mainnet - fork_choice/on_block - on_block_peerdas__invalid_wrong_block",

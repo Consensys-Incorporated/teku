@@ -53,6 +53,9 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.VoteTracker;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
+import tech.pegasys.teku.storage.protoarray.ForkChoiceStrategy;
+import tech.pegasys.teku.storage.protoarray.ProtoArray;
+import tech.pegasys.teku.storage.protoarray.ProtoNode;
 
 class FastConfirmationCalculatorTest {
 
@@ -535,7 +538,10 @@ class FastConfirmationCalculatorTest {
     // Range [0,1] covers voterForBlock (counts) and voterForOther (wrong root); slot 3 is excluded.
     assertThat(
             calculator.getNodeSupportBetweenSlots(
-                balanceSource, ForkChoiceNode.createBase(blockRoot), UInt64.ZERO, UInt64.ONE))
+                balanceSource,
+                List.of(ForkChoiceNode.createBase(blockRoot)),
+                UInt64.ZERO,
+                UInt64.ONE))
         .isEqualTo(effectiveBalance(balanceSource, voterForBlock));
   }
 
@@ -566,7 +572,10 @@ class FastConfirmationCalculatorTest {
     // payload supports the FULL node.
     assertThat(
             calculator.getNodeSupportBetweenSlots(
-                balanceSource, ForkChoiceNode.createFull(blockRoot), UInt64.ZERO, UInt64.ONE))
+                balanceSource,
+                List.of(ForkChoiceNode.createFull(blockRoot)),
+                UInt64.ZERO,
+                UInt64.ONE))
         .isEqualTo(effectiveBalance(balanceSource, fullVoter));
   }
 
@@ -581,7 +590,10 @@ class FastConfirmationCalculatorTest {
 
     assertThat(
             calculator.getNodeSupportBetweenSlots(
-                balanceSource, ForkChoiceNode.createBase(blockRoot), UInt64.ZERO, UInt64.ZERO))
+                balanceSource,
+                List.of(ForkChoiceNode.createBase(blockRoot)),
+                UInt64.ZERO,
+                UInt64.ZERO))
         .isEqualTo(UInt64.ZERO);
   }
 
@@ -855,8 +867,8 @@ class FastConfirmationCalculatorTest {
     when(forkChoice.blockSlot(parent)).thenReturn(Optional.of(UInt64.valueOf(2)));
     when(forkChoice.blockSlot(block)).thenReturn(Optional.of(UInt64.valueOf(4)));
     when(forkChoice.blockParentRoot(block)).thenReturn(Optional.of(parent));
-    // The block was built on the FULL variant of its parent, so that is the node whose support
-    // across the empty slot is discountable -- not the parent's PENDING node.
+    // The block was built on the FULL variant of its parent, so support for that variant across
+    // the empty slot is discountable.
     when(forkChoice.getAncestorNode(ForkChoiceNode.createBase(block), UInt64.valueOf(2)))
         .thenReturn(Optional.of(ForkChoiceNode.createFull(parent)));
     when(forkChoice.getSupportedNode(any(), any(), any(), anyBoolean()))
@@ -878,6 +890,101 @@ class FastConfirmationCalculatorTest {
     final UInt64 expected = effectiveBalance(balanceSource, voter).minus(adversarial);
     assertThat(calculator.computeEmptySlotSupportDiscount(balanceSource, block))
         .isEqualTo(expected);
+  }
+
+  @Test
+  void shouldDiscountParentPendingSupportTogetherWithThePayloadVariantTheBlockBuiltOn() {
+    final BeaconState balanceSource = gloasGenesisState();
+    // A Gloas fork-choice tree: the parent at slot 2 with both payload variants, and two sibling
+    // blocks at slot 7 (slots 3..6 empty), one built on each variant. Ancestry and vote resolution
+    // run through the real protoarray rather than stubs.
+    final Bytes32 parent = Bytes32.random();
+    final Bytes32 blockOnFull = Bytes32.random();
+    final Bytes32 blockOnEmpty = Bytes32.random();
+    final ForkChoiceNode parentPending = ForkChoiceNode.createBase(parent);
+    final ProtoArray protoArray =
+        ProtoArray.builder()
+            .spec(GLOAS_SPEC)
+            .currentEpoch(UInt64.ZERO)
+            .justifiedCheckpoint(new Checkpoint(UInt64.ZERO, parent))
+            .finalizedCheckpoint(new Checkpoint(UInt64.ZERO, parent))
+            .build();
+    addNode(protoArray, parentPending, 2, Bytes32.ZERO, Optional.empty());
+    addNode(
+        protoArray,
+        ForkChoiceNode.createEmpty(parent),
+        2,
+        Bytes32.ZERO,
+        Optional.of(parentPending));
+    addNode(
+        protoArray, ForkChoiceNode.createFull(parent), 2, Bytes32.ZERO, Optional.of(parentPending));
+    addNode(
+        protoArray,
+        ForkChoiceNode.createBase(blockOnFull),
+        7,
+        parent,
+        Optional.of(ForkChoiceNode.createFull(parent)));
+    addNode(
+        protoArray,
+        ForkChoiceNode.createBase(blockOnEmpty),
+        7,
+        parent,
+        Optional.of(ForkChoiceNode.createEmpty(parent)));
+    when(store.getForkChoiceStrategy())
+        .thenReturn(ForkChoiceStrategy.initialize(GLOAS_SPEC, protoArray));
+    // Empty-slot committee members: one whose latest vote for the parent is from the parent's own
+    // slot (assigned there too, across an epoch boundary) and so supports its PENDING node, one
+    // that saw the payload, and two that did not.
+    final int pendingVoter = firstCommitteeMember(GLOAS_SPEC, balanceSource, UInt64.valueOf(3));
+    final int fullVoter = firstCommitteeMember(GLOAS_SPEC, balanceSource, UInt64.valueOf(4));
+    final int emptyVoter1 = firstCommitteeMember(GLOAS_SPEC, balanceSource, UInt64.valueOf(5));
+    final int emptyVoter2 = firstCommitteeMember(GLOAS_SPEC, balanceSource, UInt64.valueOf(6));
+    when(store.getVoteSnapshot())
+        .thenReturn(
+            voteSnapshot(
+                Map.of(
+                    pendingVoter, vote(parent, 2L, false),
+                    fullVoter, vote(parent, 4L, true),
+                    emptyVoter1, vote(parent, 5L, false),
+                    emptyVoter2, vote(parent, 6L, false))));
+    final FastConfirmationCalculator calculator = gloasCalculator(balanceSource, blockOnFull, 10);
+
+    final UInt64 adversarial =
+        byzantineFraction(committeeWeight(GLOAS_SPEC, balanceSource, balanceSource, 3, 6));
+    final UInt64 pendingSupport = effectiveBalance(balanceSource, pendingVoter);
+    // Each block discounts the PENDING supporter and the supporters of the variant it built on;
+    // the other variant's supporters count against it.
+    assertThat(calculator.computeEmptySlotSupportDiscount(balanceSource, blockOnFull))
+        .isEqualTo(
+            pendingSupport.plus(effectiveBalance(balanceSource, fullVoter)).minus(adversarial));
+    assertThat(calculator.computeEmptySlotSupportDiscount(balanceSource, blockOnEmpty))
+        .isEqualTo(
+            pendingSupport
+                .plus(effectiveBalance(balanceSource, emptyVoter1))
+                .plus(effectiveBalance(balanceSource, emptyVoter2))
+                .minus(adversarial));
+  }
+
+  @Test
+  void shouldFailEmptySlotSupportDiscountWhenTheParentSlotAncestorIsMissing() {
+    final BeaconState balanceSource = genesisState();
+    // Block at slot 4 whose parent is at slot 2 leaves slot 3 empty.
+    final Bytes32 parent = Bytes32.random();
+    final Bytes32 block = Bytes32.random();
+    when(forkChoice.blockSlot(parent)).thenReturn(Optional.of(UInt64.valueOf(2)));
+    when(forkChoice.blockSlot(block)).thenReturn(Optional.of(UInt64.valueOf(4)));
+    when(forkChoice.blockParentRoot(block)).thenReturn(Optional.of(parent));
+    // Fork choice cannot walk back from the block to its parent's slot (e.g. pruned meanwhile).
+    when(forkChoice.getAncestorNode(ForkChoiceNode.createBase(block), UInt64.valueOf(2)))
+        .thenReturn(Optional.empty());
+    final int voter = firstCommitteeMember(balanceSource, UInt64.valueOf(3));
+    when(store.getVoteSnapshot()).thenReturn(voteSnapshot(Map.of(voter, vote(parent))));
+    final FastConfirmationCalculator calculator = calculatorWithHeadState(balanceSource, 10);
+
+    // Not a PENDING-only discount: the parent's PENDING support alone would understate it.
+    assertThatThrownBy(() -> calculator.computeEmptySlotSupportDiscount(balanceSource, block))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("Missing ancestor node of " + block);
   }
 
   @Test
@@ -1357,12 +1464,21 @@ class FastConfirmationCalculatorTest {
     return committeeWeight(state, state, startSlot, endSlot);
   }
 
+  private UInt64 committeeWeight(
+      final BeaconState shufflingSource,
+      final BeaconState balanceSource,
+      final long startSlot,
+      final long endSlot) {
+    return committeeWeight(spec, shufflingSource, balanceSource, startSlot, endSlot);
+  }
+
   /**
    * Spec-shaped {@code compute_committee_weight_between_slots}: materializes the union of the
    * range's committees (shuffled from {@code shufflingSource}), keeps the validators active in
    * {@code balanceSource} and sums their effective balances with {@code get_total_balance}.
    */
   private UInt64 committeeWeight(
+      final Spec committeeSpec,
       final BeaconState shufflingSource,
       final BeaconState balanceSource,
       final long startSlot,
@@ -1371,30 +1487,34 @@ class FastConfirmationCalculatorTest {
       return UInt64.ZERO;
     }
     if (FastConfirmationRuleUtil.isFullValidatorSetCovered(
-        spec, UInt64.valueOf(startSlot), UInt64.valueOf(endSlot))) {
-      return spec.getTotalActiveBalance(balanceSource);
+        committeeSpec, UInt64.valueOf(startSlot), UInt64.valueOf(endSlot))) {
+      return committeeSpec.getTotalActiveBalance(balanceSource);
     }
     final Set<Integer> participants = new HashSet<>();
     for (long slot = startSlot; slot <= endSlot; slot++) {
       final UInt64 committeeSlot = UInt64.valueOf(slot);
       final UInt64 committeesCount =
-          spec.getCommitteeCountPerSlot(shufflingSource, spec.computeEpochAtSlot(committeeSlot));
+          committeeSpec.getCommitteeCountPerSlot(
+              shufflingSource, committeeSpec.computeEpochAtSlot(committeeSlot));
       for (UInt64 index = UInt64.ZERO;
           index.isLessThan(committeesCount);
           index = index.increment()) {
-        participants.addAll(spec.getBeaconCommittee(shufflingSource, committeeSlot, index));
+        participants.addAll(
+            committeeSpec.getBeaconCommittee(shufflingSource, committeeSlot, index));
       }
     }
-    final UInt64 epoch = spec.getCurrentEpoch(balanceSource);
+    final UInt64 epoch = committeeSpec.getCurrentEpoch(balanceSource);
     final List<Integer> activeParticipants =
         participants.stream()
             .filter(
                 index ->
-                    spec.atEpoch(epoch)
+                    committeeSpec
+                        .atEpoch(epoch)
                         .predicates()
                         .isActiveValidator(balanceSource.getValidators().get(index), epoch))
             .toList();
-    return spec.atEpoch(epoch)
+    return committeeSpec
+        .atEpoch(epoch)
         .beaconStateAccessors()
         .getTotalBalance(balanceSource, activeParticipants);
   }
@@ -1635,7 +1755,31 @@ class FastConfirmationCalculatorTest {
   }
 
   private int firstCommitteeMember(final BeaconState state, final UInt64 slot) {
-    return spec.getBeaconCommittee(state, slot, UInt64.ZERO).getInt(0);
+    return firstCommitteeMember(spec, state, slot);
+  }
+
+  private int firstCommitteeMember(
+      final Spec committeeSpec, final BeaconState state, final UInt64 slot) {
+    return committeeSpec.getBeaconCommittee(state, slot, UInt64.ZERO).getInt(0);
+  }
+
+  private void addNode(
+      final ProtoArray protoArray,
+      final ForkChoiceNode node,
+      final long slot,
+      final Bytes32 parentRoot,
+      final Optional<ForkChoiceNode> parentNode) {
+    final Checkpoint zero = new Checkpoint(UInt64.ZERO, Bytes32.ZERO);
+    protoArray.addNode(
+        node,
+        UInt64.valueOf(slot),
+        parentRoot,
+        parentNode,
+        Bytes32.random(),
+        new BlockCheckpoints(zero, zero, zero, zero),
+        ProtoNode.NO_EXECUTION_BLOCK_NUMBER,
+        ProtoNode.NO_EXECUTION_BLOCK_HASH,
+        false);
   }
 
   private BeaconState withExitedValidator(final BeaconState state, final int index) {
