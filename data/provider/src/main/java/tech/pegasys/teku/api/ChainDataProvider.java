@@ -581,13 +581,9 @@ public class ChainDataProvider {
     final int epochsPerHistoricalVector =
         spec.atEpoch(stateEpoch).getConfig().getEpochsPerHistoricalVector();
     final UInt64 epoch = maybeEpoch.orElseGet(() -> spec.computeEpochAtSlot(state.getSlot()));
-    if (epoch.isGreaterThan(stateEpoch)) {
-      return Optional.empty();
-    } else if (epoch.isLessThan(stateEpoch)
-        && stateEpoch.minusMinZero(epochsPerHistoricalVector).isGreaterThan(0)
-        && stateEpoch.minusMinZero(epochsPerHistoricalVector).isGreaterThanOrEqualTo(epoch)) {
-      // ignoring the first period of epoch=0 to epochsPerHistoricalVector,
-      // return empty if the epoch is not within `epochsPerHistoricalVector` of the state epoch
+    // the state holds the mixes of the last `epochsPerHistoricalVector` epochs only
+    if (epoch.isGreaterThan(stateEpoch)
+        || epoch.plus(epochsPerHistoricalVector).isLessThanOrEqualTo(stateEpoch)) {
       return Optional.empty();
     }
     return Optional.of(
