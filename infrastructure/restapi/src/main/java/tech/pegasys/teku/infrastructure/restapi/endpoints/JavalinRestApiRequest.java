@@ -31,6 +31,7 @@ import jakarta.servlet.AsyncListener;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PushbackInputStream;
+import java.io.UncheckedIOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -128,7 +129,10 @@ public class JavalinRestApiRequest implements RestApiRequest {
                           responseOrTimeout.completeOnTimeout(
                               Optional.empty(), timeoutMillis, MILLISECONDS))
                       : responseOrTimeout)
-                  .thenAccept(this::writeAsyncResponse);
+                  // Writing the body blocks for as long as the client takes to read it, so it is
+                  // done on a server thread, as for any other response, and not on the thread
+                  // that completed the response or on the one that fired the timeout.
+                  .thenAcceptAsync(this::writeAsyncResponse, asyncContext::start);
           asyncContext.addListener(
               new AsyncResponseCancellationListener(requestResponse, requestEnded));
           return requestResponse;
@@ -209,8 +213,8 @@ public class JavalinRestApiRequest implements RestApiRequest {
           responseMetadata.getContentType(),
           response,
           CloseShieldOutputStream.wrap(out));
-    } catch (final JsonProcessingException | RuntimeException e) {
-      abortCommittedResponse();
+    } catch (final Throwable e) {
+      abortCommittedResponse(e);
       throw e;
     }
   }
@@ -222,19 +226,31 @@ public class JavalinRestApiRequest implements RestApiRequest {
    * connection makes the transfer fail on the client side instead. A response that is not yet
    * committed is left alone and gets an error status as usual.
    */
-  private void abortCommittedResponse() {
-    if (!context.res().isCommitted()) {
-      return;
+  private void abortCommittedResponse(final Throwable cause) {
+    try {
+      if (!context.res().isCommitted()) {
+        return;
+      }
+      // The connection is closed directly because Jetty's own abort, sendError(-1), only takes
+      // effect once the request completes: by then Javalin has closed a compressed stream, which
+      // ends the response normally.
+      ServletContextRequest.getServletContextRequest(context.req())
+          .getConnectionMetaData()
+          .getConnection()
+          .getEndPoint()
+          .close(new IOException("Response body could not be completed", cause));
+      if (cause instanceof UncheckedIOException) {
+        // Writing to the client failed, which is what a client going away looks like
+        LOG.debug(
+            "Closed connection, response body to {} could not be written", context.path(), cause);
+      } else {
+        LOG.warn(
+            "Closed connection, response body to {} could not be completed", context.path(), cause);
+      }
+    } catch (final Throwable e) {
+      // The failure to report is the one that stopped the body
+      cause.addSuppressed(e);
     }
-    LOG.debug("Closing connection, response body to {} could not be completed", context.path());
-    // The connection is closed directly because Jetty's own abort, sendError(-1), only takes
-    // effect once the request completes: by then Javalin has closed a compressed stream, which
-    // ends the response normally.
-    ServletContextRequest.getServletContextRequest(context.req())
-        .getConnectionMetaData()
-        .getConnection()
-        .getEndPoint()
-        .close(new IOException("Response body could not be completed"));
   }
 
   private static class AsyncResponseCancellationListener implements AsyncListener {

@@ -42,12 +42,14 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 import java.util.zip.GZIPInputStream;
 import org.apache.tuweni.bytes.Bytes;
 import org.eclipse.jetty.server.ServerConnector;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -89,6 +91,8 @@ class StreamedResponseFailureTest {
       Stream.generate(() -> Bytes.random(32).toHexString()).limit(JSON_ITEM_COUNT).toList();
 
   private final ExecutorService executor = Executors.newSingleThreadExecutor();
+  private final AtomicReference<Thread> completingThread = new AtomicReference<>();
+  private final AtomicReference<Thread> writingThread = new AtomicReference<>();
   private final HttpClient client =
       HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
   private RestApi restApi;
@@ -110,12 +114,17 @@ class StreamedResponseFailureTest {
           .endpoint(new StreamingEndpoint(prefix + "/complete", async, this::writeAll))
           .endpoint(new StreamingEndpoint(prefix + "/fail-before-commit", async, this::fail))
           .endpoint(
-              new StreamingEndpoint(prefix + "/fail-after-commit", async, this::writeThenFail));
+              new StreamingEndpoint(prefix + "/fail-after-commit", async, this::writeThenFail))
+          .endpoint(
+              new StreamingEndpoint(
+                  prefix + "/error-after-commit", async, this::writeThenThrowError))
+          .endpoint(new JsonEndpoint(prefix + "/json/complete", async, jsonItems))
+          .endpoint(
+              new JsonEndpoint(
+                  prefix + "/json/fail-after-commit", async, failingAtLastItem(jsonItems)));
     }
     builder
         .endpoint(new StreamingEndpoint("/async/slow-body", true, this::writeSlowly))
-        .endpoint(new JsonEndpoint("/json/complete", jsonItems))
-        .endpoint(new JsonEndpoint("/json/fail-after-commit", failingAtLastItem(jsonItems)))
         .endpoint(new NeverRespondingEndpoint("/async/never-responds", ContentTypes.JSON))
         .endpoint(
             new NeverRespondingEndpoint(
@@ -147,19 +156,22 @@ class StreamedResponseFailureTest {
   @CsvSource({"sync,false", "sync,true", "async,false", "async,true"})
   void shouldFailTransferWhenBodyWriterThrowsAfterResponseCommitted(
       final String mode, final boolean gzip) throws Exception {
-    final Optional<HttpResponse<byte[]>> response = send("/" + mode + "/fail-after-commit", gzip);
-
-    assertThat(response.map(StreamedResponseFailureTest::describe))
-        .describedAs("response to a request whose body could not be completed")
-        .isEmpty();
-    waitFor(() -> assertThat(connector.getConnectedEndPoints()).isEmpty(), 10, SECONDS);
+    assertTransferFailed(send("/" + mode + "/fail-after-commit", gzip));
   }
 
-  @ParameterizedTest(name = "gzip={0}")
-  @CsvSource({"false", "true"})
-  void shouldDeliverCompleteJsonBody(final boolean gzip) throws Exception {
+  // An Error is not an Exception, and must not be let through as a response that ends normally
+  @ParameterizedTest(name = "{0} gzip={1}")
+  @CsvSource({"sync,false", "sync,true", "async,false", "async,true"})
+  void shouldFailTransferWhenBodyWriterThrowsErrorAfterResponseCommitted(
+      final String mode, final boolean gzip) throws Exception {
+    assertTransferFailed(send("/" + mode + "/error-after-commit", gzip));
+  }
+
+  @ParameterizedTest(name = "{0} gzip={1}")
+  @CsvSource({"sync,false", "sync,true", "async,false", "async,true"})
+  void shouldDeliverCompleteJsonBody(final String mode, final boolean gzip) throws Exception {
     final Optional<HttpResponse<byte[]>> response =
-        send("/json/complete", Optional.of(ContentTypes.JSON), gzip);
+        send("/" + mode + "/json/complete", Optional.of(ContentTypes.JSON), gzip);
 
     assertThat(response).isPresent();
     assertThat(response.get().statusCode()).isEqualTo(SC_OK);
@@ -169,17 +181,23 @@ class StreamedResponseFailureTest {
 
   // The JSON serializer closes the stream it writes to, also when it fails. With gzip that would
   // end the response normally, with the truncated JSON even made well-formed.
-  @ParameterizedTest(name = "gzip={0}")
-  @CsvSource({"false", "true"})
-  void shouldFailTransferWhenJsonSerializationFailsAfterResponseCommitted(final boolean gzip)
-      throws Exception {
-    final Optional<HttpResponse<byte[]>> response =
-        send("/json/fail-after-commit", Optional.of(ContentTypes.JSON), gzip);
+  @ParameterizedTest(name = "{0} gzip={1}")
+  @CsvSource({"sync,false", "sync,true", "async,false", "async,true"})
+  void shouldFailTransferWhenJsonSerializationFailsAfterResponseCommitted(
+      final String mode, final boolean gzip) throws Exception {
+    assertTransferFailed(
+        send("/" + mode + "/json/fail-after-commit", Optional.of(ContentTypes.JSON), gzip));
+  }
 
-    assertThat(response.map(StreamedResponseFailureTest::describe))
-        .describedAs("response to a request whose body could not be completed")
-        .isEmpty();
-    waitFor(() -> assertThat(connector.getConnectedEndPoints()).isEmpty(), 10, SECONDS);
+  // Writing a body blocks for as long as the client takes to read it. The thread completing the
+  // response belongs to whatever produced it, storage for instance, and must not be held for that.
+  @Test
+  void shouldNotWriteAsyncBodyOnThreadCompletingTheResponse() throws Exception {
+    final Optional<HttpResponse<byte[]>> response = send("/async/complete", false);
+
+    assertThat(response).isPresent();
+    assertThat(completingThread.get()).isNotNull();
+    assertThat(writingThread.get()).isNotNull().isNotEqualTo(completingThread.get());
   }
 
   @ParameterizedTest(name = "gzip={0}")
@@ -223,6 +241,13 @@ class StreamedResponseFailureTest {
         .isEqualTo("{\"code\":500,\"message\":\"Request timeout\"}");
   }
 
+  private void assertTransferFailed(final Optional<HttpResponse<byte[]>> response) {
+    assertThat(response.map(StreamedResponseFailureTest::describe))
+        .describedAs("response to a request whose body could not be completed")
+        .isEmpty();
+    waitFor(() -> assertThat(connector.getConnectedEndPoints()).isEmpty(), 10, SECONDS);
+  }
+
   /** Returns the response, or empty when the transfer failed on the client side. */
   private Optional<HttpResponse<byte[]>> send(final String path, final boolean gzip)
       throws InterruptedException {
@@ -251,7 +276,8 @@ class StreamedResponseFailureTest {
       return Bytes.wrap(response.body());
     }
     assertThat(response.headers().firstValue("Content-Encoding")).contains("gzip");
-    try (GZIPInputStream in = new GZIPInputStream(new ByteArrayInputStream(response.body()))) {
+    try (final GZIPInputStream in =
+        new GZIPInputStream(new ByteArrayInputStream(response.body()))) {
       return Bytes.wrap(in.readAllBytes());
     }
   }
@@ -261,6 +287,7 @@ class StreamedResponseFailureTest {
   }
 
   private void writeAll(final OutputStream out) throws IOException {
+    writingThread.set(Thread.currentThread());
     out.write(firstChunk);
     out.write(secondChunk);
   }
@@ -272,6 +299,11 @@ class StreamedResponseFailureTest {
   private void writeThenFail(final OutputStream out) throws IOException {
     out.write(firstChunk);
     throw new IllegalArgumentException(FAILURE_MESSAGE);
+  }
+
+  private void writeThenThrowError(final OutputStream out) throws IOException {
+    out.write(firstChunk);
+    throw new AssertionError(FAILURE_MESSAGE);
   }
 
   private void writeSlowly(final OutputStream out) throws IOException {
@@ -299,6 +331,18 @@ class StreamedResponseFailureTest {
         return items.size();
       }
     };
+  }
+
+  // The response is completed from another thread once the request thread is back with the
+  // server, as an endpoint loading its data from storage would
+  private void completeLater(
+      final SafeFuture<AsyncApiResponse> response, final AsyncApiResponse result) {
+    CompletableFuture.delayedExecutor(100, MILLISECONDS, executor)
+        .execute(
+            () -> {
+              completingThread.set(Thread.currentThread());
+              response.complete(result);
+            });
   }
 
   private static Javalin getJavalin(final RestApi restApi)
@@ -336,17 +380,15 @@ class StreamedResponseFailureTest {
       }
       final SafeFuture<AsyncApiResponse> response = new SafeFuture<>();
       request.respondAsync(response);
-      // Completed from another thread once the request thread is back with the server, as an
-      // endpoint loading its data from storage would
-      CompletableFuture.delayedExecutor(100, MILLISECONDS, executor)
-          .execute(() -> response.complete(AsyncApiResponse.respondOk(bodyWriter)));
+      completeLater(response, AsyncApiResponse.respondOk(bodyWriter));
     }
   }
 
-  private static class JsonEndpoint extends RestApiEndpoint {
+  private class JsonEndpoint extends RestApiEndpoint {
+    private final boolean async;
     private final List<String> items;
 
-    private JsonEndpoint(final String path, final List<String> items) {
+    private JsonEndpoint(final String path, final boolean async, final List<String> items) {
       super(
           get(path)
               .operationId(path)
@@ -354,12 +396,19 @@ class StreamedResponseFailureTest {
               .description("Responds with a JSON body")
               .response(SC_OK, "Success", JSON_BODY_TYPE)
               .build());
+      this.async = async;
       this.items = items;
     }
 
     @Override
     public void handleRequest(final RestApiRequest request) throws JsonProcessingException {
-      request.respondOk(items);
+      if (!async) {
+        request.respondOk(items);
+        return;
+      }
+      final SafeFuture<AsyncApiResponse> response = new SafeFuture<>();
+      request.respondAsync(response);
+      completeLater(response, AsyncApiResponse.respondOk(items));
     }
   }
 
