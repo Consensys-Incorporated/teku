@@ -5132,7 +5132,9 @@
     </spec>
 
 - name: get_max_payload_gas_limit#gloas
-  sources: []
+  sources:
+    - file: ethereum/statetransition/src/main/java/tech/pegasys/teku/statetransition/validation/GossipValidationHelper.java
+      search: public UInt64 getMaxPayloadGasLimit(
   spec: |
     <spec fn="get_max_payload_gas_limit" fork="gloas" hash="f7050ebe">
     def get_max_payload_gas_limit(store: Store, block: BeaconBlock) -> Uint64:

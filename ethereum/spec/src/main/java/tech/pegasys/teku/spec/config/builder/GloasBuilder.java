@@ -37,6 +37,8 @@ public class GloasBuilder extends BaseForkBuilder
   private Integer attestationDueBpsGloas;
   private Integer contributionDueBpsGloas;
   private Integer maxRequestPayloads;
+  // defaulting to the spec value for compatibility with network configs which don't define it yet
+  private UInt64 minTransactionGas = UInt64.valueOf(4096);
   private Integer minBuilderWithdrawabilityDelay;
   private Integer payloadAttestationDueBps;
   private Integer payloadDueBps;
@@ -78,6 +80,7 @@ public class GloasBuilder extends BaseForkBuilder
             maxBuildersPerWithdrawalsSweep,
             maxPayloadAttestations,
             maxRequestPayloads,
+            minTransactionGas,
             minBuilderWithdrawabilityDelay,
             payloadAttestationDueBps,
             payloadDueBps,
@@ -111,6 +114,12 @@ public class GloasBuilder extends BaseForkBuilder
   public GloasBuilder maxRequestPayloads(final Integer maxRequestPayloads) {
     checkNotNull(maxRequestPayloads);
     this.maxRequestPayloads = maxRequestPayloads;
+    return this;
+  }
+
+  public GloasBuilder minTransactionGas(final UInt64 minTransactionGas) {
+    checkNotNull(minTransactionGas);
+    this.minTransactionGas = minTransactionGas;
     return this;
   }
 
@@ -251,6 +260,7 @@ public class GloasBuilder extends BaseForkBuilder
     constants.put("attestationDueBpsGloas", attestationDueBpsGloas);
     constants.put("contributionDueBpsGloas", contributionDueBpsGloas);
     constants.put("maxRequestPayloads", maxRequestPayloads);
+    constants.put("minTransactionGas", minTransactionGas);
     constants.put("minBuilderWithdrawabilityDelay", minBuilderWithdrawabilityDelay);
     constants.put("payloadAttestationDueBps", payloadAttestationDueBps);
     constants.put("payloadDueBps", payloadDueBps);

@@ -78,6 +78,9 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
                 .toList());
 
     final Map<Bytes32, BlockImportResult> invalidBlockRoots = new HashMap<>();
+    final SignedExecutionPayloadEnvelopeSchema schema =
+        SchemaDefinitionsGloas.required(spec.atSlot(state.getSlot()).getSchemaDefinitions())
+            .getSignedExecutionPayloadEnvelopeSchema();
 
     for (final BlockEntryAndBlock blockEntryAndBlock : blocks) {
       final GossipExecutionPayloadEnvelopeMetaData.BlockEntry blockEntry =
@@ -100,6 +103,13 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
         assertThat(importResult.isSuccessful())
             .describedAs("Expected setup block %s to import successfully", blockEntry.getBlock())
             .isTrue();
+      }
+      // blockEntry.getPayload() names the payload already revealed for this block in the setup
+      // store, which is what makes the fork choice node FULL
+      if (blockEntry.getPayload() != null) {
+        ctx.applyExecutionPayloadToStore(
+            loadSsz(
+                testDefinition, blockEntry.getPayload() + ".ssz_snappy", schema::sszDeserialize));
       }
     }
 
@@ -138,9 +148,6 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
               public void onBlockImported(
                   final SignedBeaconBlock block, final boolean executionOptimistic) {}
             });
-    final SignedExecutionPayloadEnvelopeSchema schema =
-        SchemaDefinitionsGloas.required(spec.atSlot(state.getSlot()).getSchemaDefinitions())
-            .getSignedExecutionPayloadEnvelopeSchema();
     final ExecutionPayloadGossipValidator validator =
         new ExecutionPayloadGossipValidator(
             spec, gossipValidationHelper, blockGossipValidator, invalidBlockRoots);
@@ -196,12 +203,19 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
       @JsonProperty(value = "failed", defaultValue = "false")
       private boolean failed;
 
+      @JsonProperty(value = "payload")
+      private String payload;
+
       public String getBlock() {
         return block;
       }
 
       public boolean isFailed() {
         return failed;
+      }
+
+      public String getPayload() {
+        return payload;
       }
     }
 

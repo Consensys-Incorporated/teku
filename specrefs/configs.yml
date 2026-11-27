@@ -632,7 +632,9 @@
     </spec>
 
 - name: MIN_TRANSACTION_GAS#gloas
-  sources: []
+  sources:
+    - file: ethereum/spec/src/main/resources/tech/pegasys/teku/spec/config/configs/mainnet.yaml
+      search: "MIN_TRANSACTION_GAS:"
   spec: |
     <spec config_var="MIN_TRANSACTION_GAS" fork="gloas" hash="7aee0cb2">
     MIN_TRANSACTION_GAS: Uint64 = 4096
