@@ -137,28 +137,6 @@ public class ReferenceTestFinder {
             "gloas - minimal - fork/fork - fork_validator_deposit_followed_by_builder_credentials",
             "gloas - mainnet - fork/fork - fork_validator_topup_before_builder_registration_stays_pending",
             "gloas - minimal - fork/fork - fork_validator_topup_before_builder_registration_stays_pending",
-            // TODO: https://github.com/ethereum/consensus-specs/pull/5765
-            // enable after binding Fulu columns to the imported block (consensus-specs#5765)
-            "fulu - mainnet - fork_choice/on_block - on_block_peerdas__invalid_wrong_block",
-            "fulu - minimal - fork_choice/on_block - on_block_peerdas__invalid_wrong_block",
-            // TODO: https://github.com/ethereum/consensus-specs/pull/5766
-            // enable after skipping seen bitsets of different lengths (consensus-specs#5766)
-            "altair - mainnet - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
-            "altair - minimal - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
-            "bellatrix - mainnet - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
-            "bellatrix - minimal - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
-            "capella - mainnet - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
-            "capella - minimal - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
-            "deneb - mainnet - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
-            "deneb - minimal - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
-            "electra - mainnet - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
-            "electra - minimal - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
-            "fulu - mainnet - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
-            "fulu - minimal - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
-            "gloas - mainnet - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
-            "gloas - minimal - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
-            "phase0 - mainnet - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
-            "phase0 - minimal - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
             // TODO: https://github.com/ethereum/consensus-specs/pull/5838
             // enable after selecting sync committees by message slot (consensus-specs#5838)
             "altair - minimal - networking/gossip_sync_committee_contribution_and_proof - gossip_sync_committee_contribution_and_proof__missed_period_boundary_slot",
@@ -175,14 +153,6 @@ public class ReferenceTestFinder {
             "electra - minimal - networking/gossip_sync_committee_message - gossip_sync_committee_message__missed_period_boundary_slot",
             "fulu - minimal - networking/gossip_sync_committee_message - gossip_sync_committee_message__missed_period_boundary_slot",
             "gloas - minimal - networking/gossip_sync_committee_message - gossip_sync_committee_message__missed_period_boundary_slot",
-            // TODO: https://github.com/Consensys-Incorporated/teku/issues/11746
-            // enable after ignoring exits with pending partial withdrawals (consensus-specs#5764).
-            "electra - mainnet - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
-            "electra - minimal - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
-            "fulu - mainnet - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
-            "fulu - minimal - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
-            "gloas - mainnet - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
-            "gloas - minimal - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
             // TODO: https://github.com/Consensys-Incorporated/teku/issues/10608
             // enable after accepting bids on the parent of a head whose proposer equivocated
             // (consensus-specs#5803)

@@ -111,6 +111,11 @@ public class VoluntaryExitValidator
 
   public static class ExitInvalidReason {
 
+    // A single instance, so gossip validation can recognise it and IGNORE instead of REJECT
+    private static final OperationInvalidReason PENDING_WITHDRAWALS_IN_QUEUE =
+        () ->
+            "Validator cannot be exited while there are pending withdrawals in the withdrawal queue";
+
     public static OperationInvalidReason invalidValidatorIndex() {
       return () -> "Invalid validator index";
     }
@@ -136,8 +141,7 @@ public class VoluntaryExitValidator
     }
 
     public static OperationInvalidReason pendingWithdrawalsInQueue() {
-      return () ->
-          "Validator cannot be exited while there are pending withdrawals in the withdrawal queue";
+      return PENDING_WITHDRAWALS_IN_QUEUE;
     }
   }
 }

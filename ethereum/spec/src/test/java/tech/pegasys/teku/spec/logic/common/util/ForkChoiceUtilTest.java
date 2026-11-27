@@ -500,8 +500,12 @@ class ForkChoiceUtilTest {
   public static Stream<Arguments> basisPointsComputationParameters() {
     return Stream.of(
         Arguments.of(1667, 1000),
-        Arguments.of(3333, 1999),
+        Arguments.of(3333, 2000),
         Arguments.of(6667, 4000),
+        // 3334 * 6000 / 10000 = 2000.4, which rounds down
+        Arguments.of(3334, 2000),
+        // 1251 * 6000 / 10000 = 750.6, which rounds up
+        Arguments.of(1251, 751),
         Arguments.of(10000, 6000));
   }
 
@@ -515,7 +519,7 @@ class ForkChoiceUtilTest {
 
   @Test
   void check_AttestationDueMillis() {
-    assertThat(forkChoiceUtil.getAttestationDueMillis()).isEqualTo(1999);
+    assertThat(forkChoiceUtil.getAttestationDueMillis()).isEqualTo(2000);
   }
 
   @Test

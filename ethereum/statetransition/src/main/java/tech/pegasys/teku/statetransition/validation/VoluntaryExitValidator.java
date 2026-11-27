@@ -94,6 +94,14 @@ public class VoluntaryExitValidator implements OperationValidator<SignedVoluntar
               final Optional<OperationInvalidReason> failureReason =
                   getGossipFailureReason(state, exit);
               if (failureReason.isPresent()) {
+                // [IGNORE] The validator has no pending partial withdrawals (Electra and later)
+                if (failureReason.get().equals(ExitInvalidReason.pendingWithdrawalsInQueue())) {
+                  return InternalValidationResult.create(
+                      IGNORE,
+                      String.format(
+                          "Exit for validator %s has pending withdrawals in the queue.",
+                          exit.getMessage().getValidatorIndex()));
+                }
                 return InternalValidationResult.reject(
                     "Exit for validator %s is invalid: %s",
                     exit.getMessage().getValidatorIndex(), failureReason.get().describe());

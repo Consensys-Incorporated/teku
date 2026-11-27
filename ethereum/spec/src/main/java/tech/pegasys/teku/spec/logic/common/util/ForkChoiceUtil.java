@@ -839,7 +839,8 @@ public class ForkChoiceUtil {
   @VisibleForTesting
   // get_slot_component_duration_ms
   protected int getSlotComponentDurationMillis(final int basisPoints) {
-    return (basisPoints * specConfig.getSlotDurationMillis()) / 10_000;
+    // Rounded to the nearest millisecond
+    return (basisPoints * specConfig.getSlotDurationMillis() + 5_000) / 10_000;
   }
 
   public int getAttestationDueMillis() {

@@ -339,6 +339,18 @@ public class VoluntaryExitValidatorTest {
   }
 
   @Test
+  public void shouldIgnoreExitWhenValidatorHasPendingWithdrawals() {
+    advanceChainAndUpdateBestBlock(6);
+    SignedVoluntaryExit exit = dataStructureUtil.randomSignedVoluntaryExit();
+    when(mockSpec.validateVoluntaryExitForGossip(getBestState(), exit))
+        .thenReturn(Optional.of(ExitInvalidReason.pendingWithdrawalsInQueue()));
+    when(mockSpec.verifyVoluntaryExitSignature(getBestState(), exit, BLSSignatureVerifier.SIMPLE))
+        .thenReturn(true);
+
+    assertValidationResult(exit, IGNORE, "pending withdrawals");
+  }
+
+  @Test
   public void shouldRejectExitWithInvalidSignature() {
     advanceChainAndUpdateBestBlock(6);
     SignedVoluntaryExit exit = dataStructureUtil.randomSignedVoluntaryExit();

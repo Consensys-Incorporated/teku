@@ -46,6 +46,9 @@ public class SeenAggregatesCache<KeyT> {
 
   private boolean isAlreadySeen(
       final Set<SszBitSet> seenAggregates, final SszBitSet aggregationBits) {
-    return seenAggregates.stream().anyMatch(seen -> seen.isSuperSetOf(aggregationBits));
+    // A bitset of a different length cannot be a superset
+    return seenAggregates.stream()
+        .anyMatch(
+            seen -> seen.size() == aggregationBits.size() && seen.isSuperSetOf(aggregationBits));
   }
 }
