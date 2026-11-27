@@ -110,7 +110,7 @@ public class VoluntaryExitValidator
    * conditions in {@link #validateForGossip} and before the signature.
    */
   public Optional<OperationInvalidReason> validateIgnoreConditionsForGossip(
-      final Fork fork, final BeaconState state, final SignedVoluntaryExit signedExit) {
+      final BeaconState state, final SignedVoluntaryExit signedExit) {
     return Optional.empty();
   }
 

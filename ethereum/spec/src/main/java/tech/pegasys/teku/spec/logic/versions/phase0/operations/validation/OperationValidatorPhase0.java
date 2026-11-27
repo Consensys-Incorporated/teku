@@ -92,7 +92,7 @@ public class OperationValidatorPhase0 implements OperationValidator {
   @Override
   public Optional<OperationInvalidReason> validateVoluntaryExitIgnoreConditionsForGossip(
       final Fork fork, final BeaconState state, final SignedVoluntaryExit signedExit) {
-    return voluntaryExitValidator.validateIgnoreConditionsForGossip(fork, state, signedExit);
+    return voluntaryExitValidator.validateIgnoreConditionsForGossip(state, signedExit);
   }
 
   @Override
