@@ -20,6 +20,7 @@ import static tech.pegasys.teku.statetransition.forkchoice.StateRootCollector.ad
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
+import com.google.common.collect.Lists;
 import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.ints.IntSet;
 import java.net.ConnectException;
@@ -27,9 +28,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
-import java.util.Queue;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -131,9 +129,6 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
   private final MergeTransitionBlockValidator transitionBlockValidator;
   private final AttestationStateSelector attestationStateSelector;
   private final DeferredAttestations deferredAttestations = new DeferredAttestations();
-  // Validated attestations waiting to have their votes applied on the fork choice thread
-  private final Queue<ValidatedAttestation> attestationsToApply = new ConcurrentLinkedQueue<>();
-  private final AtomicBoolean applyingQueuedAttestationsScheduled = new AtomicBoolean(false);
 
   private final Subscribers<OptimisticHeadSubscriber> optimisticSyncSubscribers =
       Subscribers.create(true);
@@ -319,13 +314,15 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
 
   public SafeFuture<AttestationProcessingResult> onAttestation(
       final ValidatableAttestation attestation) {
-    return onAttestations(List.of(attestation)).getFirst();
+    return toProcessingResult(
+        validateAttestation(attestation)
+            .thenPeek(validated -> applyOnForkChoiceThread(List.of(validated))));
   }
 
   /**
    * Processes attestations as {@link #onAttestation(ValidatableAttestation)} does, but applies the
-   * votes of many attestations in a single fork choice task and vote transaction, rather than
-   * submitting one task per attestation.
+   * votes of up to {@link #MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK} attestations in a single fork
+   * choice task and vote transaction, rather than submitting one task per attestation.
    *
    * <p>Use it when many attestations are released at once, such as those waiting in the pending
    * pool for a block or payload that has just been imported. Those attestations usually had their
@@ -333,52 +330,34 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
    * would submit thousands of tasks to the fork choice thread within milliseconds and overflow its
    * queue, failing them along with anything else submitted meanwhile, such as block imports.
    *
-   * <p>Each attestation is queued to be applied as soon as it has been validated, so that no vote
-   * waits on another one's validation, and the queue is drained by one fork choice task at a time
-   * (see {@link #scheduleApplyingQueuedAttestations()}). Attestations that finish validating
-   * together, for example because they waited on the same state, are applied together too.
+   * <p>The votes of a task are applied once all of its attestations have been validated.
    *
    * @return a result for each attestation, in the same order as {@code attestations}
    */
   public List<SafeFuture<AttestationProcessingResult>> onAttestations(
       final List<ValidatableAttestation> attestations) {
-    final List<SafeFuture<ValidatedAttestation>> validations =
-        attestations.stream().map(this::validateAttestationForForkChoice).toList();
-
-    // Queue those already validated together, so that they share a task even with an idle thread
-    final List<ValidatedAttestation> validated = new ArrayList<>();
-    for (final SafeFuture<ValidatedAttestation> validation : validations) {
-      if (!validation.isDone()) {
-        validation.finish(
-            validatedAttestation -> queueToApply(List.of(validatedAttestation)),
-            // A failed validation only fails its own result
-            error -> {});
-      } else if (!validation.isCompletedExceptionally()) {
-        validated.add(validation.getImmediately());
-      }
-    }
-    queueToApply(validated);
-
-    return validations.stream()
-        .map(
-            validation ->
-                validation
-                    .thenCompose(ValidatedAttestation::result)
-                    .exceptionallyCompose(
-                        error -> {
-                          final Throwable rootCause = Throwables.getRootCause(error);
-                          if (rootCause instanceof InvalidCheckpointException) {
-                            return SafeFuture.completedFuture(
-                                AttestationProcessingResult.invalid(rootCause.getMessage()));
-                          }
-                          return SafeFuture.failedFuture(error);
-                        }))
+    return Lists.partition(attestations, MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK).stream()
+        .flatMap(
+            batch -> {
+              final List<SafeFuture<ValidatedAttestation>> validations =
+                  batch.stream().map(this::validateAttestation).toList();
+              // A failed validation only fails its own result, the others are still applied
+              SafeFuture.allOf(validations.toArray(SafeFuture[]::new))
+                  .always(
+                      () ->
+                          applyOnForkChoiceThread(
+                              validations.stream()
+                                  .filter(validation -> !validation.isCompletedExceptionally())
+                                  .map(SafeFuture::getImmediately)
+                                  .toList()));
+              return validations.stream().map(this::toProcessingResult);
+            })
         .toList();
   }
 
-  private SafeFuture<ValidatedAttestation> validateAttestationForForkChoice(
+  private SafeFuture<ValidatedAttestation> validateAttestation(
       final ValidatableAttestation attestation) {
-    // Starting validation can't throw out of onAttestations: any error fails only this attestation
+    // Starting validation doesn't throw: any error only fails this attestation
     return SafeFuture.of(() -> attestationStateSelector.getStateToValidate(attestation.getData()))
         .thenCompose(
             maybeState ->
@@ -389,160 +368,110 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
               final boolean deferred =
                   validationResult.getStatus() == Status.DEFER_FORK_CHOICE_PROCESSING;
               if (!validationResult.isSuccessful() && !deferred) {
-                return ValidatedAttestation.completed(validationResult);
+                return ValidatedAttestation.completed(attestation, validationResult);
               }
-              final IndexedAttestationLight indexedAttestation = getIndexedAttestation(attestation);
-              final boolean fullPayloadHint = getFullPayloadVoteHint(attestation.getData());
-              if (deferred && !fullPayloadHint) {
+              if (deferred && !getFullPayloadVoteHint(attestation.getData())) {
                 // No full payload target to check, so avoid the fork choice thread
-                deferredAttestations.addAttestation(indexedAttestation, false);
-                return ValidatedAttestation.completed(validationResult);
+                deferredAttestations.addAttestation(getIndexedAttestation(attestation), false);
+                return ValidatedAttestation.completed(attestation, validationResult);
               }
-              return ValidatedAttestation.applyOnForkChoiceThread(
-                  indexedAttestation, validationResult, fullPayloadHint);
+              return ValidatedAttestation.toApplyOnForkChoiceThread(attestation, validationResult);
             });
   }
 
-  private void queueToApply(final List<ValidatedAttestation> validatedAttestations) {
-    final List<ValidatedAttestation> toApply =
-        validatedAttestations.stream()
-            .filter(ValidatedAttestation::requiresForkChoiceThread)
-            .toList();
-    if (toApply.isEmpty()) {
-      return;
-    }
-    attestationsToApply.addAll(toApply);
-    scheduleApplyingQueuedAttestations();
-  }
-
-  private void scheduleApplyingQueuedAttestations() {
-    scheduleApplyingQueuedAttestations(false);
+  private SafeFuture<AttestationProcessingResult> toProcessingResult(
+      final SafeFuture<ValidatedAttestation> validation) {
+    return validation
+        .thenCompose(ValidatedAttestation::result)
+        .exceptionallyCompose(
+            error -> {
+              final Throwable rootCause = Throwables.getRootCause(error);
+              if (rootCause instanceof InvalidCheckpointException) {
+                return SafeFuture.completedFuture(
+                    AttestationProcessingResult.invalid(rootCause.getMessage()));
+              }
+              return SafeFuture.failedFuture(error);
+            });
   }
 
   /**
-   * Schedules a fork choice task to apply the queued attestations, unless one is already scheduled.
-   * However many attestations finish validating at once, at most one such task waits in the fork
-   * choice queue: each task applies up to {@link #MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK}
-   * attestations, then schedules the next one if more are queued.
-   *
-   * @param afterQueuedTasks whether to queue the task behind the fork choice tasks already waiting,
-   *     even on the fork choice thread, where it would otherwise run straight away. Used between
-   *     batches, so that block imports and other fork choice tasks can run in between.
+   * Applies the validated attestations that still need the fork choice thread in a single task,
+   * which completes their results. If the task fails, for example because the fork choice queue is
+   * full, so do they.
    */
-  private void scheduleApplyingQueuedAttestations(final boolean afterQueuedTasks) {
-    if (!applyingQueuedAttestationsScheduled.compareAndSet(false, true)) {
+  private void applyOnForkChoiceThread(final List<ValidatedAttestation> validatedAttestations) {
+    final List<ValidatedAttestation> toApply =
+        validatedAttestations.stream().filter(validated -> !validated.result().isDone()).toList();
+    if (toApply.isEmpty()) {
       return;
     }
-    final ExceptionThrowingSupplier<Void> task =
-        () -> {
-          applyQueuedAttestations();
-          return null;
-        };
-    (afterQueuedTasks ? forkChoiceExecutor.executeLater(task) : forkChoiceExecutor.execute(task))
+    onForkChoiceThread(() -> applyValidatedAttestations(toApply))
         .finish(
-            error -> {
-              // The task was rejected, for example because the fork choice queue is full, so fail
-              // the attestations waiting for it and let the next attestation schedule a new task
-              applyingQueuedAttestationsScheduled.set(false);
-              ValidatedAttestation attestation;
-              while ((attestation = attestationsToApply.poll()) != null) {
-                attestation.fail(error);
-              }
-            });
+            error -> toApply.forEach(validated -> validated.result().completeExceptionally(error)));
   }
 
-  private void applyQueuedAttestations() {
-    // Cleared first, so that an attestation queued from now on schedules another task
-    applyingQueuedAttestationsScheduled.set(false);
-    final List<ValidatedAttestation> batch = new ArrayList<>();
-    ValidatedAttestation attestation;
-    while (batch.size() < MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK
-        && (attestation = attestationsToApply.poll()) != null) {
-      batch.add(attestation);
-    }
-    try {
-      applyValidatedAttestations(batch);
-    } catch (final RuntimeException e) {
-      batch.forEach(validatedAttestation -> validatedAttestation.fail(e));
-    }
-    if (!attestationsToApply.isEmpty()) {
-      scheduleApplyingQueuedAttestations(true);
-    }
-  }
-
-  private void applyValidatedAttestations(final List<ValidatedAttestation> attestations) {
+  private void applyValidatedAttestations(final List<ValidatedAttestation> validatedAttestations) {
     final ForkChoiceStrategy forkChoiceStrategy = getForkChoiceStrategy();
-    final List<AttestationProcessingResult> results = new ArrayList<>(attestations.size());
+    final List<AttestationProcessingResult> results = new ArrayList<>(validatedAttestations.size());
     VoteUpdater transaction = null;
-    for (final ValidatedAttestation attestation : attestations) {
-      // An error applying one attestation only fails that attestation. Votes it already applied to
+    for (final ValidatedAttestation validated : validatedAttestations) {
+      // An error applying one attestation only fails that attestation. Votes it already added to
       // the transaction are committed with the others: they come from a valid attestation, so
       // counting only some of them is no worse than counting none.
       try {
-        final IndexedAttestationLight indexedAttestation = attestation.indexedAttestation();
+        final AttestationProcessingResult validationResult = validated.validationResult();
+        final IndexedAttestationLight indexedAttestation =
+            getIndexedAttestation(validated.attestation());
+        final boolean fullPayloadHint = getFullPayloadVoteHint(indexedAttestation.data());
         if (isFullPayloadVoteMissingTarget(
-            forkChoiceStrategy,
-            indexedAttestation.data().getBeaconBlockRoot(),
-            attestation.fullPayloadHint())) {
+            forkChoiceStrategy, indexedAttestation.data().getBeaconBlockRoot(), fullPayloadHint)) {
           results.add(AttestationProcessingResult.UNKNOWN_EXECUTION_PAYLOAD);
-        } else if (attestation.validationResult().isSuccessful()) {
+        } else if (validationResult.isSuccessful()) {
           if (transaction == null) {
             transaction = recentChainData.startVoteUpdate();
           }
           forkChoiceStrategy.onAttestation(transaction, indexedAttestation);
-          results.add(attestation.validationResult());
+          results.add(validationResult);
         } else {
-          deferredAttestations.addAttestation(indexedAttestation, true);
-          results.add(attestation.validationResult());
+          deferredAttestations.addAttestation(indexedAttestation, fullPayloadHint);
+          results.add(validationResult);
         }
       } catch (final RuntimeException e) {
-        attestation.fail(e);
+        validated.result().completeExceptionally(e);
         results.add(null);
       }
     }
     if (transaction != null) {
       transaction.commit();
     }
-    // Votes are only applied once committed, so only report results after that
-    for (int i = 0; i < attestations.size(); i++) {
+    // Votes only count once committed, so results are reported after that
+    for (int i = 0; i < validatedAttestations.size(); i++) {
       if (results.get(i) != null) {
-        attestations.get(i).complete(results.get(i));
+        validatedAttestations.get(i).result().complete(results.get(i));
       }
     }
   }
 
   /**
-   * An attestation validated for fork choice. Either its result is final, or it still has to be
-   * applied on the fork choice thread, which then completes {@link #result()}.
+   * An attestation validated for fork choice. Either {@link #result()} is already complete, or the
+   * attestation still has to be applied on the fork choice thread, which then completes it.
    */
   private record ValidatedAttestation(
-      IndexedAttestationLight indexedAttestation,
+      ValidatableAttestation attestation,
       AttestationProcessingResult validationResult,
-      boolean fullPayloadHint,
-      boolean requiresForkChoiceThread,
       SafeFuture<AttestationProcessingResult> result) {
 
-    static ValidatedAttestation completed(final AttestationProcessingResult validationResult) {
+    static ValidatedAttestation completed(
+        final ValidatableAttestation attestation,
+        final AttestationProcessingResult validationResult) {
       return new ValidatedAttestation(
-          null, validationResult, false, false, SafeFuture.completedFuture(validationResult));
+          attestation, validationResult, SafeFuture.completedFuture(validationResult));
     }
 
-    static ValidatedAttestation applyOnForkChoiceThread(
-        final IndexedAttestationLight indexedAttestation,
-        final AttestationProcessingResult validationResult,
-        final boolean fullPayloadHint) {
-      return new ValidatedAttestation(
-          indexedAttestation, validationResult, fullPayloadHint, true, new SafeFuture<>());
-    }
-
-    /** Completes the result, unless it has already been completed. */
-    void complete(final AttestationProcessingResult processingResult) {
-      result.complete(processingResult);
-    }
-
-    /** Fails the result, unless it has already been completed. */
-    void fail(final Throwable error) {
-      result.completeExceptionally(error);
+    static ValidatedAttestation toApplyOnForkChoiceThread(
+        final ValidatableAttestation attestation,
+        final AttestationProcessingResult validationResult) {
+      return new ValidatedAttestation(attestation, validationResult, new SafeFuture<>());
     }
   }
 

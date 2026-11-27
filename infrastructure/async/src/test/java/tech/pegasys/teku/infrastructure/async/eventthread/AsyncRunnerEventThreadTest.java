@@ -96,30 +96,6 @@ class AsyncRunnerEventThreadTest {
     assertThat(Waiter.waitFor(result)).isEqualTo("Yay");
   }
 
-  @Test
-  void supplier_shouldExecuteLaterEvenIfAlreadyOnEventThread() throws Exception {
-    eventThread.start();
-    final SafeFuture<SafeFuture<String>> laterResult = new SafeFuture<>();
-    waitForOnEventThread(
-        () -> {
-          final SafeFuture<String> result =
-              eventThread.executeLater(
-                  () -> {
-                    eventThread.checkOnEventThread();
-                    return "Later";
-                  });
-          // Should be queued rather than run synchronously
-          assertThat(result).isNotDone();
-          laterResult.complete(result);
-        });
-    assertThat(Waiter.waitFor(Waiter.waitFor(laterResult))).isEqualTo("Later");
-  }
-
-  @Test
-  void supplier_shouldFailExecuteLaterWhenNotStarted() {
-    assertThat(eventThread.executeLater(() -> "Never")).isCompletedExceptionally();
-  }
-
   private void waitForOnEventThread(final Runnable action) throws Exception {
     final SafeFuture<Void> complete = new SafeFuture<>();
     eventThread.execute(

@@ -72,14 +72,6 @@ public class AsyncRunnerEventThread implements EventThread {
   }
 
   @Override
-  public <T> SafeFuture<T> executeLater(final ExceptionThrowingSupplier<T> callable) {
-    if (!started.get()) {
-      return SafeFuture.failedFuture(new IllegalStateException("EventThread not started"));
-    }
-    return thread.runAsync(() -> recordEventThreadIdAndExecute(callable));
-  }
-
-  @Override
   public <T> SafeFuture<T> execute(final ExceptionThrowingSupplier<T> callable) {
     // Note: started is only set to true after thread has been initialized so if it is true, thread
     // must be initialized.
