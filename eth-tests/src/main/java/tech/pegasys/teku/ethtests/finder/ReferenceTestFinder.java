@@ -110,33 +110,8 @@ public class ReferenceTestFinder {
             // TODO-GLOAS: the following tests require equivocation
             // see https://github.com/Consensys-Incorporated/teku/issues/10608
             "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_with_enough_ffg_votes_previous_epoch",
-            "gloas - minimal - fork_choice/reorg - simple_attempted_reorg_without_enough_ffg_votes",
             "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_with_enough_ffg_votes_current_epoch",
             "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_without_enough_ffg_votes_current_epoch",
-            // TODO: https://github.com/Consensys-Incorporated/teku/issues/11749
-            // enable after separating builder and validator deposits (consensus-specs#5736)
-            "gloas - mainnet - fork/fork - fork_builder_deposit_followed_by_invalid_validator_deposit",
-            "gloas - minimal - fork/fork - fork_builder_deposit_followed_by_invalid_validator_deposit",
-            "gloas - mainnet - fork/fork - fork_builder_deposit_followed_by_non_builder_credentials",
-            "gloas - minimal - fork/fork - fork_builder_deposit_followed_by_non_builder_credentials",
-            "gloas - mainnet - fork/fork - fork_builder_registration_and_topup_with_existing_validator_pubkey",
-            "gloas - minimal - fork/fork - fork_builder_registration_and_topup_with_existing_validator_pubkey",
-            "gloas - mainnet - fork/fork - fork_builder_topup_overrides_earlier_pending_validator",
-            "gloas - minimal - fork/fork - fork_builder_topup_overrides_earlier_pending_validator",
-            "gloas - mainnet - fork/fork - fork_existing_validator_invalid_builder_then_valid_builder",
-            "gloas - minimal - fork/fork - fork_existing_validator_invalid_builder_then_valid_builder",
-            "gloas - mainnet - fork/fork - fork_existing_validator_valid_non_builder_topup_after_builder",
-            "gloas - minimal - fork/fork - fork_existing_validator_valid_non_builder_topup_after_builder",
-            "gloas - mainnet - fork/fork - fork_invalid_topup_before_validator_and_builder_is_discarded",
-            "gloas - minimal - fork/fork - fork_invalid_topup_before_validator_and_builder_is_discarded",
-            "gloas - mainnet - fork/fork - fork_mixed_validity_validator_deposits_surrounding_builder_deposits",
-            "gloas - minimal - fork/fork - fork_mixed_validity_validator_deposits_surrounding_builder_deposits",
-            "gloas - mainnet - fork/fork - fork_pending_validator_invalid_non_builder_topup_after_builder",
-            "gloas - minimal - fork/fork - fork_pending_validator_invalid_non_builder_topup_after_builder",
-            "gloas - mainnet - fork/fork - fork_validator_deposit_followed_by_builder_credentials",
-            "gloas - minimal - fork/fork - fork_validator_deposit_followed_by_builder_credentials",
-            "gloas - mainnet - fork/fork - fork_validator_topup_before_builder_registration_stays_pending",
-            "gloas - minimal - fork/fork - fork_validator_topup_before_builder_registration_stays_pending",
             // TODO: https://github.com/ethereum/consensus-specs/pull/5838
             // enable after selecting sync committees by message slot (consensus-specs#5838)
             "altair - minimal - networking/gossip_sync_committee_contribution_and_proof - gossip_sync_committee_contribution_and_proof__missed_period_boundary_slot",
