@@ -117,7 +117,7 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
    * The most attestations applied in one fork choice task, so that a large batch doesn't hold the
    * fork choice thread for too long at a time.
    */
-  @VisibleForTesting static final int MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK = 1_000;
+  public static final int MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK = 1_000;
 
   private static final Logger LOG = LogManager.getLogger();
 

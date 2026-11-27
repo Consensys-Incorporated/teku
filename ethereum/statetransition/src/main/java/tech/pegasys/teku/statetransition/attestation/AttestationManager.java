@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.statetransition.attestation;
 
+import com.google.common.collect.Lists;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.RejectedExecutionException;
@@ -241,9 +242,13 @@ public class AttestationManager extends Service
 
   /**
    * Processes the attestations released from the pending pool once the block or payload they were
-   * waiting for has been imported. They are passed to fork choice as one batch: most had their
+   * waiting for has been imported. They are passed to fork choice in batches: most had their
    * signatures verified before they were deferred, so processing them one at a time would flood the
    * fork choice thread's queue with thousands of tasks at once.
+   *
+   * <p>The results of a batch are handled before the next batch is validated. Otherwise fork choice
+   * could find a payload missing for an early batch long before those attestations are put back in
+   * the pending pool, and if the payload is imported in between, nothing releases them again.
    */
   private void onPendingAttestations(
       final List<ValidatableAttestation> releasedAttestations, final String failureDescription) {
@@ -251,17 +256,17 @@ public class AttestationManager extends Service
         releasedAttestations.stream()
             .filter(attestation -> !pendingAttestationPool.contains(attestation))
             .toList();
-    if (attestations.isEmpty()) {
-      return;
-    }
-    final List<SafeFuture<AttestationProcessingResult>> results =
-        attestationProcessor.onAttestations(attestations);
-    for (int i = 0; i < attestations.size(); i++) {
-      final ValidatableAttestation attestation = attestations.get(i);
-      results
-          .get(i)
-          .thenApply(result -> onAttestationProcessed(attestation, result))
-          .finish(err -> logProcessingFailure(failureDescription, err));
+    for (final List<ValidatableAttestation> batch :
+        Lists.partition(attestations, ForkChoice.MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK)) {
+      final List<SafeFuture<AttestationProcessingResult>> results =
+          attestationProcessor.onAttestations(batch);
+      for (int i = 0; i < batch.size(); i++) {
+        final ValidatableAttestation attestation = batch.get(i);
+        results
+            .get(i)
+            .thenApply(result -> onAttestationProcessed(attestation, result))
+            .finish(err -> logProcessingFailure(failureDescription, err));
+      }
     }
   }
 

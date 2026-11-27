@@ -15,6 +15,7 @@ package tech.pegasys.teku.statetransition.attestation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -34,6 +35,9 @@ import static tech.pegasys.teku.statetransition.validation.InternalValidationRes
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 import org.apache.logging.log4j.Level;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterEach;
@@ -389,6 +393,60 @@ class AttestationManagerTest {
 
     verify(attestationPool, never()).add(attestation1);
     verify(attestationPool).add(attestation2);
+  }
+
+  @Test
+  public void shouldNotMissPayloadImportedWhileLaterBatchesAreProcessed() {
+    final int slot = 1024;
+    onSlot(UInt64.valueOf(slot + 1));
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(slot);
+    final Bytes32 blockRoot = block.getMessage().hashTreeRoot();
+    final SignedExecutionPayloadEnvelope executionPayload =
+        mock(SignedExecutionPayloadEnvelope.class);
+    when(executionPayload.getBeaconBlockRoot()).thenReturn(blockRoot);
+    // One more full payload vote than fits in a fork choice batch, all waiting for the block
+    final int attestationCount = ForkChoice.MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK + 1;
+    final AttestationData data = fullPayloadAttestationFromSlot(slot, blockRoot).getData();
+    final List<ValidatableAttestation> attestations =
+        IntStream.range(0, attestationCount)
+            .mapToObj(
+                i ->
+                    ValidatableAttestation.from(
+                        spec,
+                        attestationSchema.create(
+                            attestationSchema
+                                .getAggregationBitsSchema()
+                                .ofBits(attestationCount, i),
+                            data,
+                            BLSSignature.empty())))
+            .toList();
+    attestations.forEach(pendingAttestationPool::addForMissingBlock);
+    // Fork choice finds the payload missing for the first batch of votes. The payload is then
+    // imported while the next batch is being validated.
+    final AtomicInteger validatedCount = new AtomicInteger();
+    final AtomicBoolean payloadImported = new AtomicBoolean();
+    doAnswer(
+            invocation ->
+                invocation.<List<ValidatableAttestation>>getArgument(0).stream()
+                    .map(
+                        attestation -> {
+                          if (validatedCount.getAndIncrement()
+                              == ForkChoice.MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK) {
+                            payloadImported.set(true);
+                            attestationManager.onExecutionPayloadImported(executionPayload, false);
+                          }
+                          return completedFuture(
+                              payloadImported.get() ? SUCCESSFUL : UNKNOWN_EXECUTION_PAYLOAD);
+                        })
+                    .toList())
+        .when(forkChoice)
+        .onAttestations(any());
+
+    attestationManager.onBlockImported(block, false);
+
+    // No vote is left waiting for the payload that has already been imported
+    assertThat(attestations.stream().filter(pendingAttestationPool::contains).count()).isZero();
+    verify(attestationPool, times(attestationCount)).add(any());
   }
 
   @Test
