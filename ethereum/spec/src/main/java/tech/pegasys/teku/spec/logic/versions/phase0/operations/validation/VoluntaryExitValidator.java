@@ -105,16 +105,20 @@ public class VoluntaryExitValidator
         });
   }
 
+  /**
+   * Conditions which make a gossiped exit IGNORE rather than REJECT. They are checked after the
+   * conditions in {@link #validateForGossip} and before the signature.
+   */
+  public Optional<OperationInvalidReason> validateIgnoreConditionsForGossip(
+      final Fork fork, final BeaconState state, final SignedVoluntaryExit signedExit) {
+    return Optional.empty();
+  }
+
   private Validator getValidator(final BeaconState state, final VoluntaryExit exit) {
     return state.getValidators().get(exit.getValidatorIndex().intValue());
   }
 
   public static class ExitInvalidReason {
-
-    // A single instance, so gossip validation can recognise it and IGNORE instead of REJECT
-    private static final OperationInvalidReason PENDING_WITHDRAWALS_IN_QUEUE =
-        () ->
-            "Validator cannot be exited while there are pending withdrawals in the withdrawal queue";
 
     public static OperationInvalidReason invalidValidatorIndex() {
       return () -> "Invalid validator index";
@@ -141,7 +145,8 @@ public class VoluntaryExitValidator
     }
 
     public static OperationInvalidReason pendingWithdrawalsInQueue() {
-      return PENDING_WITHDRAWALS_IN_QUEUE;
+      return () ->
+          "Validator cannot be exited while there are pending withdrawals in the withdrawal queue";
     }
   }
 }

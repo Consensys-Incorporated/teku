@@ -29,6 +29,7 @@ public interface SpecConfig extends NetworkingSpecConfig {
   UInt64 GENESIS_SLOT = UInt64.ZERO;
   UInt64 GENESIS_EPOCH = UInt64.ZERO;
   UInt64 FAR_FUTURE_EPOCH = UInt64.MAX_VALUE;
+  int BASIS_POINTS = 10_000;
 
   static SpecConfigBuilder builder() {
     return new SpecConfigBuilder();
