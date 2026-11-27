@@ -77,6 +77,8 @@ class FastConfirmationCalculator {
   private final Bytes32 head;
   private final UInt64 currentSlot;
   private final UInt64 currentEpoch;
+  // CONFIRMATION_BYZANTINE_THRESHOLD: assumed maximum percentage of Byzantine validators.
+  private final int byzantineThreshold;
 
   // Per-instance (per-slot) memoization. The safety-threshold helpers query the same slot
   // committees and slot ranges for every block they score (and re-evaluate a block across the two
@@ -100,7 +102,8 @@ class FastConfirmationCalculator {
       final Spec spec,
       final FastConfirmationStore fcrStore,
       final FastConfirmationStates states,
-      final UInt64 currentSlot) {
+      final UInt64 currentSlot,
+      final int byzantineThreshold) {
     this.spec = spec;
     this.forkChoiceUtil = spec.atSlot(currentSlot).getForkChoiceUtil();
     this.fcrStore = fcrStore;
@@ -112,6 +115,7 @@ class FastConfirmationCalculator {
     this.head = fcrStore.currentSlotHead();
     this.currentSlot = currentSlot;
     this.currentEpoch = spec.computeEpochAtSlot(currentSlot);
+    this.byzantineThreshold = byzantineThreshold;
   }
 
   /** Implements {@code get_block_slot}. */
@@ -533,10 +537,7 @@ class FastConfirmationCalculator {
       final BeaconState balanceSource, final UInt64 startSlot, final UInt64 endSlot) {
     final UInt64 maximumWeight =
         computeCommitteeWeightBetweenSlots(balanceSource, startSlot, endSlot);
-    final UInt64 maxAdversarialWeight =
-        maximumWeight
-            .dividedBy(100)
-            .times(FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
+    final UInt64 maxAdversarialWeight = maximumWeight.dividedBy(100).times(byzantineThreshold);
     final UInt64 equivocationScore = getEquivocationScore(balanceSource, startSlot, endSlot);
     return maxAdversarialWeight.isGreaterThan(equivocationScore)
         ? maxAdversarialWeight.minus(equivocationScore)
@@ -778,9 +779,7 @@ class FastConfirmationCalculator {
         computeCommitteeWeightBetweenSlots(balanceSource, epochStart, lastSlot);
     final UInt64 remainingFfgWeight = totalActiveBalance.minusMinZero(ffgWeightTillNow);
     final UInt64 remainingHonestFfgWeight =
-        remainingFfgWeight
-            .dividedBy(100)
-            .times(100 - FastConfirmationRuleUtil.CONFIRMATION_BYZANTINE_THRESHOLD);
+        remainingFfgWeight.dividedBy(100).times(100 - byzantineThreshold);
 
     final UInt64 adversarialWeight = computeAdversarialWeight(balanceSource, epochStart, lastSlot);
     // ffg_support - min(adversarial_weight, ffg_support)
@@ -818,6 +817,10 @@ class FastConfirmationCalculator {
    * the current-epoch observed justified checkpoint up to {@code confirmedRoot}, is LMD-GHOST safe
    * against the previous balance source. Run at the start of each epoch to relax the synchrony
    * assumption (reconfirmation).
+   *
+   * <p>The previous balance source is only read once the checkpoint check has passed and there are
+   * blocks to score, as in the spec. If it is needed but was pruned, the chain cannot be shown safe
+   * and this returns {@code false}, reverting to the finalized block.
    */
   boolean isConfirmedChainSafe(final Bytes32 confirmedRoot) {
     final Checkpoint observedJustified = fcrStore.currentEpochObservedJustifiedCheckpoint();
@@ -842,14 +845,20 @@ class FastConfirmationCalculator {
               : ancestorAtPreviousEpochStart;
     }
 
-    final BeaconState previousBalanceSource =
-        states
-            .previousBalanceSource()
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "Previous balance source is required for reconfirmation"));
     final List<Bytes32> chainToReconfirm = getAncestorRoots(confirmedRoot, startRootExclusive);
+    if (chainToReconfirm.isEmpty()) {
+      return true;
+    }
+    final Optional<BeaconState> maybePreviousBalanceSource = states.previousBalanceSource();
+    if (maybePreviousBalanceSource.isEmpty()) {
+      LOG.debug(
+          "Fast confirmation for slot {}: previous balance source for {} unavailable, cannot reconfirm {}",
+          currentSlot,
+          fcrStore.previousEpochObservedJustifiedCheckpoint(),
+          confirmedRoot);
+      return false;
+    }
+    final BeaconState previousBalanceSource = maybePreviousBalanceSource.get();
     // Score the whole chain in a single pass over the validator set instead of one per block.
     final Map<Bytes32, UInt64> chainScores =
         computeChainAttestationScores(chainToReconfirm, previousBalanceSource);

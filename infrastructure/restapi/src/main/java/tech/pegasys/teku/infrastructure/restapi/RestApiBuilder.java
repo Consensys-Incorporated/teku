@@ -47,6 +47,7 @@ import org.eclipse.jetty.util.VirtualThreads;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.util.thread.VirtualThreadPool;
 import tech.pegasys.teku.infrastructure.http.HttpErrorResponse;
+import tech.pegasys.teku.infrastructure.io.SecretFiles;
 import tech.pegasys.teku.infrastructure.json.JsonUtil;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.JavalinEndpointAdapter;
 import tech.pegasys.teku.infrastructure.restapi.endpoints.RestApiEndpoint;
@@ -101,8 +102,9 @@ public class RestApiBuilder {
   }
 
   /**
-   * Sets the timeout for future-based asynchronous REST responses. Server-sent event handlers use a
-   * separate unlimited timeout and are not affected by this setting.
+   * Sets how long a future-based asynchronous REST response may take to become available. Writing
+   * the response body is not subject to it. Server-sent event handlers use a separate unlimited
+   * timeout and are not affected by this setting.
    */
   public RestApiBuilder asyncTimeoutMillis(final long asyncTimeoutMillis) {
     checkArgument(asyncTimeoutMillis > 0, "Async timeout must be greater than zero");
@@ -304,7 +306,7 @@ public class RestApiBuilder {
         }
         final Bytes generated = Bytes.random(16);
         LOG.info("Initializing API auth access file {}", path.toAbsolutePath());
-        Files.writeString(path, generated.toUnprefixedHexString(), UTF_8);
+        SecretFiles.writeStringOwnerOnly(path, generated.toUnprefixedHexString());
       } catch (IOException e) {
         LOG.error("Failed to write auth file to {}", path, e);
         throw new IllegalStateException("Failed to initialise access file for validator-api.");

@@ -162,7 +162,9 @@ public class FileBackedStorageSystemBuilder {
   private Database createLevelDb1Database() {
     return LevelDbDatabaseFactory.createLevelDb(
         new StubMetricsSystem(),
-        KvStoreConfiguration.v5HotDefaults().withDatabaseDir(hotDir),
+        KvStoreConfiguration.v5HotDefaults()
+            .withDatabaseDir(hotDir)
+            .withPrunedSlotCompactionEnabled(true),
         KvStoreConfiguration.v5ArchiveDefaults().withDatabaseDir(archiveDir),
         storageMode,
         stateStorageFrequency,
@@ -176,7 +178,7 @@ public class FileBackedStorageSystemBuilder {
     final V6SchemaCombinedSnapshot schema = V6SchemaCombinedSnapshot.createV6(spec);
     return RocksDbDatabaseFactory.createV6(
         new StubMetricsSystem(),
-        configDefault.withDatabaseDir(hotDir),
+        configDefault.withDatabaseDir(hotDir).withPrunedSlotCompactionEnabled(true),
         schema,
         storageMode,
         stateStorageFrequency,
@@ -188,7 +190,7 @@ public class FileBackedStorageSystemBuilder {
     KvStoreConfiguration configDefault = KvStoreConfiguration.v6SingleDefaults();
     return LevelDbDatabaseFactory.createLevelDbV2(
         new StubMetricsSystem(),
-        configDefault.withDatabaseDir(hotDir),
+        configDefault.withDatabaseDir(hotDir).withPrunedSlotCompactionEnabled(true),
         storageMode,
         stateStorageFrequency,
         storeNonCanonicalBlocks,
@@ -199,7 +201,7 @@ public class FileBackedStorageSystemBuilder {
     KvStoreConfiguration configDefault = KvStoreConfiguration.v6SingleDefaults();
     return RocksDbDatabaseFactory.createV6Tree(
         new StubMetricsSystem(),
-        configDefault.withDatabaseDir(hotDir),
+        configDefault.withDatabaseDir(hotDir).withPrunedSlotCompactionEnabled(true),
         storageMode,
         storeNonCanonicalBlocks,
         10_000,
@@ -210,7 +212,7 @@ public class FileBackedStorageSystemBuilder {
     KvStoreConfiguration configDefault = KvStoreConfiguration.v6SingleDefaults();
     return LevelDbDatabaseFactory.createLevelDbTree(
         new StubMetricsSystem(),
-        configDefault.withDatabaseDir(hotDir),
+        configDefault.withDatabaseDir(hotDir).withPrunedSlotCompactionEnabled(true),
         storageMode,
         storeNonCanonicalBlocks,
         10_000,
@@ -220,7 +222,9 @@ public class FileBackedStorageSystemBuilder {
   private Database createV5Database() {
     return RocksDbDatabaseFactory.createV4(
         new StubMetricsSystem(),
-        KvStoreConfiguration.v5HotDefaults().withDatabaseDir(hotDir),
+        KvStoreConfiguration.v5HotDefaults()
+            .withDatabaseDir(hotDir)
+            .withPrunedSlotCompactionEnabled(true),
         KvStoreConfiguration.v5ArchiveDefaults().withDatabaseDir(archiveDir),
         storageMode,
         stateStorageFrequency,
@@ -231,7 +235,7 @@ public class FileBackedStorageSystemBuilder {
   private Database createV4Database() {
     return RocksDbDatabaseFactory.createV4(
         new StubMetricsSystem(),
-        KvStoreConfiguration.v4Settings(hotDir),
+        KvStoreConfiguration.v4Settings(hotDir).withPrunedSlotCompactionEnabled(true),
         KvStoreConfiguration.v4Settings(archiveDir),
         storageMode,
         stateStorageFrequency,

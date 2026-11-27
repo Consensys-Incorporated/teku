@@ -191,6 +191,7 @@ import tech.pegasys.teku.spec.datastructures.execution.versions.electra.Withdraw
 import tech.pegasys.teku.spec.datastructures.execution.versions.fulu.BlobsBundleFulu;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderDepositRequest;
 import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.BuilderExitRequest;
+import tech.pegasys.teku.spec.datastructures.execution.versions.gloas.ExecutionPayloadGloas;
 import tech.pegasys.teku.spec.datastructures.execution.versions.heze.InclusionList;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
@@ -3807,6 +3808,41 @@ public final class DataStructureUtil {
     return getGloasSchemaDefinitions(UInt64.valueOf(slot))
         .getSignedExecutionPayloadEnvelopeSchema()
         .create(randomExecutionPayloadEnvelope(UInt64.valueOf(slot)), randomSignature());
+  }
+
+  /** Copies the Gloas payload, applying {@code payloadModifier} on top of the copied fields. */
+  public ExecutionPayload executionPayloadWithModifications(
+      final UInt64 slot,
+      final ExecutionPayload executionPayload,
+      final Consumer<ExecutionPayloadBuilder> payloadModifier) {
+    final ExecutionPayloadGloas payload = ExecutionPayloadGloas.required(executionPayload);
+    return getGloasSchemaDefinitions(slot)
+        .getExecutionPayloadSchema()
+        .createExecutionPayload(
+            builder -> {
+              builder
+                  .parentHash(payload.getParentHash())
+                  .feeRecipient(payload.getFeeRecipient())
+                  .stateRoot(payload.getStateRoot())
+                  .receiptsRoot(payload.getReceiptsRoot())
+                  .logsBloom(payload.getLogsBloom())
+                  .prevRandao(payload.getPrevRandao())
+                  .blockNumber(payload.getBlockNumber())
+                  .gasLimit(payload.getGasLimit())
+                  .gasUsed(payload.getGasUsed())
+                  .timestamp(payload.getTimestamp())
+                  .extraData(payload.getExtraData())
+                  .baseFeePerGas(payload.getBaseFeePerGas())
+                  .blockHash(payload.getBlockHash())
+                  .transactions(
+                      payload.getTransactions().stream().map(Transaction::getBytes).toList())
+                  .withdrawals(payload.getWithdrawals()::asList)
+                  .blobGasUsed(payload::getBlobGasUsed)
+                  .excessBlobGas(payload::getExcessBlobGas)
+                  .blockAccessList(() -> payload.getBlockAccessList().getBytes())
+                  .slotNumber(payload::getSlotNumber);
+              payloadModifier.accept(builder);
+            });
   }
 
   public BlindedExecutionPayloadEnvelope randomBlindedExecutionPayloadEnvelope() {

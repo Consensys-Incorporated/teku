@@ -37,6 +37,7 @@ import tech.pegasys.teku.reference.BlsSetting;
 import tech.pegasys.teku.reference.TestExecutor;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ProposerPreferences;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBidSchema;
@@ -47,13 +48,11 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedProposerP
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
-import tech.pegasys.teku.spec.executionlayer.PayloadStatus;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.statetransition.OperationAddedSubscriber;
 import tech.pegasys.teku.statetransition.block.ReceivedBlockEventsChannel;
 import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
-import tech.pegasys.teku.statetransition.forkchoice.ForkChoice;
 import tech.pegasys.teku.statetransition.validation.BlockBroadcastValidator;
 import tech.pegasys.teku.statetransition.validation.BlockGossipValidator;
 import tech.pegasys.teku.statetransition.validation.ExecutionPayloadBidGossipValidator;
@@ -61,8 +60,6 @@ import tech.pegasys.teku.statetransition.validation.ExecutionPayloadGossipValida
 import tech.pegasys.teku.statetransition.validation.GossipValidationHelper;
 import tech.pegasys.teku.statetransition.validation.InternalValidationResult;
 import tech.pegasys.teku.statetransition.validation.ProposerPreferencesGossipValidator;
-import tech.pegasys.teku.storage.client.RecentChainData;
-import tech.pegasys.teku.storage.store.UpdatableStore;
 
 public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
   private final List<String> testsToSkip;
@@ -152,10 +149,7 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
         final Path envelopeFile =
             testDefinition.getTestDirectory().resolve(blockEntry.getPayload() + ".ssz_snappy");
         if (Files.exists(envelopeFile)) {
-          applyExecutionPayloadToStore(
-              spec,
-              ctx.recentChainData,
-              ctx.forkChoice,
+          ctx.applyExecutionPayloadToStore(
               loadSsz(
                   testDefinition,
                   blockEntry.getPayload() + ".ssz_snappy",
@@ -201,6 +195,13 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
           @Override
           public UInt64 getCurrentTimeMillis() {
             return validationTimeMs[0];
+          }
+
+          @Override
+          public Bytes32 computeExecutionPayloadBlockHash(final ExecutionPayloadEnvelope envelope) {
+            // The fixtures carry a zero payload block hash, so Teku's content check (not a spec
+            // rule) must treat the declared hash as matching
+            return envelope.getPayload().getBlockHash();
           }
 
           @Override
@@ -316,7 +317,7 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
         if (result.isAccept()) {
           final ExecutionPayload payload = signedEnvelope.getMessage().getPayload();
           seenExecutionPayloadGasLimits.put(payload.getBlockHash(), payload.getGasLimit());
-          applyExecutionPayloadToStore(spec, ctx.recentChainData, ctx.forkChoice, signedEnvelope);
+          ctx.applyExecutionPayloadToStore(signedEnvelope);
         }
       } else if (messageName.startsWith("execution_payload_bid_")) {
         final SignedExecutionPayloadBid signedBid =
@@ -329,36 +330,6 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
       GossipTestContext.assertValidationResult(
           "message " + messageName, message.getExpected(), result);
     }
-  }
-
-  /**
-   * Reveals an execution payload in the store without running full envelope verification, marking
-   * its fork choice node FULL.
-   *
-   * <p>These fixtures reuse a single beacon block across the suite while varying the payload
-   * revealed for it -- the gas limit tests exist precisely to vary the parent payload's gas limit
-   * -- so the payload frequently does not match the gas limit the block's bid committed to. pyspec
-   * builds that store state directly and never verifies it, whereas {@code
-   * ForkChoice#onExecutionPayloadEnvelope} rightly refuses it. Verification is the subject of the
-   * execution payload envelope tests, not these, so the store state is set up directly here.
-   */
-  private static void applyExecutionPayloadToStore(
-      final Spec spec,
-      final RecentChainData recentChainData,
-      final ForkChoice forkChoice,
-      final SignedExecutionPayloadEnvelope signedEnvelope) {
-    final UpdatableStore.StoreTransaction transaction = recentChainData.startStoreTransaction();
-    spec.atSlot(signedEnvelope.getSlot())
-        .getForkChoiceUtil()
-        .applyExecutionPayloadToStore(transaction, signedEnvelope, false);
-    safeJoin(transaction.commit());
-    recentChainData
-        .getStore()
-        .getForkChoiceStrategy()
-        .onExecutionPayloadResult(signedEnvelope.getBeaconBlockRoot(), PayloadStatus.VALID, false);
-    // Recompute the head so it reflects the newly revealed payload; the full envelope import path
-    // does this itself, and without it the chain head keeps the payload status it had before.
-    safeJoin(forkChoice.processHead());
   }
 
   @SuppressWarnings("unused")

@@ -266,6 +266,25 @@ public class AttestationProductionDuty implements Duty {
         !attestationData.getTarget().getEpoch().equals(UInt64.MAX_VALUE),
         "Unsigned attestation target epoch must not be UInt64.MAX_VALUE");
 
+    // The slot is our own duty slot, so this bounds the target to the epoch we are attesting in.
+    // Without it a beacon node could get a far-future target signed and persisted as the
+    // slashing-protection floor, leaving the validator unable to attest until that epoch.
+    final UInt64 expectedTargetEpoch = spec.computeEpochAtSlot(slot);
+    checkArgument(
+        attestationData.getTarget().getEpoch().equals(expectedTargetEpoch),
+        "Unsigned attestation target epoch (%s) does not match epoch %s of slot %s",
+        attestationData.getTarget().getEpoch(),
+        expectedTargetEpoch,
+        slot);
+    checkArgument(
+        attestationData
+            .getSource()
+            .getEpoch()
+            .isLessThanOrEqualTo(attestationData.getTarget().getEpoch()),
+        "Unsigned attestation source epoch (%s) is after target epoch (%s)",
+        attestationData.getSource().getEpoch(),
+        attestationData.getTarget().getEpoch());
+
     spec.atSlot(slot)
         .getAttestationUtil()
         .validateCommitteeIndexValue(attestationData.getIndex())

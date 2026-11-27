@@ -50,7 +50,9 @@ import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -74,7 +76,9 @@ import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.kzg.KZG;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.SpecMilestone;
+import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecFactory;
+import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.attestation.ValidatableAttestation;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
@@ -119,6 +123,7 @@ import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportRe
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult.FailureReason;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.ExecutionPayloadImportResult;
 import tech.pegasys.teku.spec.logic.common.util.AsyncBLSSignatureVerifier;
+import tech.pegasys.teku.spec.logic.common.util.ForkChoiceUtil.BlockTimeliness;
 import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.datacolumns.DataAvailabilitySampler;
@@ -193,7 +198,7 @@ class ForkChoiceTest {
   private void setupWithSpec(
       final Spec unmockedSpec, final StoreConfig storeConfig, final boolean initializeGenesis) {
     unmockedSpec.reinitializeForTesting(
-        (block) -> blobSidecarsAvailabilityChecker,
+        block -> blobSidecarsAvailabilityChecker,
         AvailabilityCheckerFactory.NOOP_DATACOLUMN_SIDECAR,
         KZG.DISABLED);
     // Setting up spec and all dependants
@@ -1182,6 +1187,69 @@ class ForkChoiceTest {
 
     // proposer boost is given to the first block despite the fork chain having bigger weight
     assertThat(recentChainData.getStore().getProposerBoostRoot()).hasValue(block.getRoot());
+  }
+
+  @Nested
+  @TestSpecContext(milestone = {SpecMilestone.ELECTRA, SpecMilestone.FULU, SpecMilestone.GLOAS})
+  class BlockTimelinessTests {
+
+    @BeforeEach
+    void setup(final SpecContext specContext) {
+      setupWithSpec(specContext.getSpec());
+    }
+
+    @TestTemplate
+    void onBlock_shouldNotBoostBlockWhenValidationCompletesInLaterSlot() {
+      final SignedBlockAndState block = chainBuilder.generateNextBlock();
+      storageSystem.chainUpdater().setCurrentSlot(block.getSlot());
+      final SafeFuture<BroadcastValidationResult> validationResult = new SafeFuture<>();
+      when(blockBroadcastValidator.getResult()).thenReturn(validationResult);
+
+      final SafeFuture<BlockImportResult> importResult =
+          forkChoice.onBlock(
+              block.getBlock(), Optional.empty(), blockBroadcastValidator, executionLayer);
+      assertThatSafeFuture(importResult).isNotDone();
+
+      tickToSlot(block.getSlot().increment());
+      validationResult.complete(BroadcastValidationResult.SUCCESS);
+
+      assertBlockImportedSuccessfully(importResult, false);
+      assertThat(recentChainData.getStore().getProposerBoostRoot()).isEmpty();
+      if (spec.atSlot(block.getSlot()).getMilestone() == SpecMilestone.FULU) {
+        // DA completed in the block's slot, but that must not grant the next slot's boost.
+        assertThat(recentChainData.getBlockTimeliness(block.getRoot()))
+            .contains(new BlockTimeliness(true, false));
+      } else {
+        assertThat(recentChainData.getBlockTimeliness(block.getRoot()))
+            .contains(new BlockTimeliness(false, false));
+      }
+    }
+  }
+
+  @Test
+  void onBlock_shouldRecordTimelinessWhenValidationCompletes() {
+    setupWithSpec(TestSpecFactory.createMinimalGloas());
+    final SignedBlockAndState block = chainBuilder.generateNextBlock();
+    storageSystem.chainUpdater().setCurrentSlot(block.getSlot());
+    final SafeFuture<BroadcastValidationResult> validationResult = new SafeFuture<>();
+    when(blockBroadcastValidator.getResult()).thenReturn(validationResult);
+
+    final SafeFuture<BlockImportResult> importResult =
+        forkChoice.onBlock(
+            block.getBlock(), Optional.empty(), blockBroadcastValidator, executionLayer);
+    assertThatSafeFuture(importResult).isNotDone();
+
+    storageSystem
+        .chainUpdater()
+        .setTimeMillis(
+            spec.computeTimeMillisAtSlot(block.getSlot(), recentChainData.getGenesisTimeMillis())
+                .plus(spec.atSlot(block.getSlot()).getForkChoiceUtil().getAttestationDueMillis()));
+    validationResult.complete(BroadcastValidationResult.SUCCESS);
+
+    assertBlockImportedSuccessfully(importResult, false);
+    assertThat(recentChainData.getBlockTimeliness(block.getRoot()))
+        .contains(new BlockTimeliness(false, true));
+    assertThat(recentChainData.getStore().getProposerBoostRoot()).isEmpty();
   }
 
   @Test
@@ -2402,6 +2470,61 @@ class ForkChoiceTest {
                 .orElseThrow()
                 .getWeight())
         .isEqualTo(ZERO);
+  }
+
+  @Test
+  void onExecutionPayloadEnvelope_invalidChildPayloadShouldInvalidateOptimisticParentPayload() {
+    setupWithSpec(
+        TestSpecFactory.createMinimalGloas(
+            builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy =
+        recentChainData.getForkChoiceStrategy().orElseThrow();
+
+    final SignedBlockAndState grandparent = chainBuilder.generateBlockAtSlot(ONE);
+    importBlock(grandparent);
+    importPayload(grandparent);
+    final SignedBlockAndState parent = chainBuilder.generateBlockAtSlot(2);
+    importBlock(parent);
+    importPayloadOptimistically(parent);
+    // The child builds on FULL(parent)
+    final SignedBlockAndState child = chainBuilder.generateBlockAtSlot(3);
+    importBlock(child);
+
+    // The execution layer finds the parent payload invalid while validating the child's payload
+    importPayloadWithStatus(child, invalidWithLatestValidPayloadOf(grandparent));
+
+    assertThat(
+            forkChoiceStrategy.getBlockData(
+                parent.getRoot(), ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL))
+        .isEmpty();
+    assertThat(forkChoiceStrategy.getBlockData(child.getRoot())).isEmpty();
+    assertThat(
+            forkChoiceStrategy
+                .getBlockData(parent.getRoot(), ForkChoicePayloadStatus.PAYLOAD_STATUS_EMPTY)
+                .map(ProtoNodeData::isOptimistic))
+        .contains(false);
+  }
+
+  private PayloadStatus invalidWithLatestValidPayloadOf(final SignedBlockAndState block) {
+    final Bytes32 latestValidHash =
+        chainBuilder
+            .getExecutionPayloadAtSlot(block.getSlot())
+            .orElseThrow()
+            .getMessage()
+            .getPayload()
+            .getBlockHash();
+    return PayloadStatus.invalid(Optional.of(latestValidHash), Optional.of("bad payload"));
+  }
+
+  private void importPayloadWithStatus(
+      final SignedBlockAndState block, final PayloadStatus payloadStatus) {
+    executionLayer.setPayloadStatus(payloadStatus);
+    assertThat(
+            forkChoice.onExecutionPayloadEnvelope(
+                chainBuilder.getExecutionPayloadAtSlot(block.getSlot()).orElseThrow(),
+                executionLayer,
+                Optional.of(mock(ReceivedExecutionPayloadEventsChannel.class))))
+        .isCompletedWithValueMatching(result -> !result.isSuccessful());
   }
 
   /** Imports the block's execution payload while the execution layer is still syncing. */

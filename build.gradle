@@ -6,7 +6,6 @@ import com.github.jk1.license.render.ReportRenderer
 import groovy.json.JsonBuilder
 import groovy.json.JsonSlurper
 import groovy.xml.XmlSlurper
-import org.gradle.jvm.toolchain.JavaLanguageVersion
 import io.consensys.protocols.license.reporter.GroupedLicenseHtmlRenderer
 import tech.pegasys.teku.depcheck.DepCheckPlugin
 
@@ -286,8 +285,7 @@ spotless {
 		allprojects.collect { project -> project.file('build.gradle') }.findAll { it.isFile() })
 		trimTrailingWhitespace()
 		endWithNewline()
-		// greclipse() temporarily disabled: it provisions Eclipse jars via P2 from download.eclipse.org,
-		// which is down for maintenance and fails every CI run. Re-enable once the site is back.
+		greclipse('4.39')
 	}
 }
 
@@ -526,7 +524,7 @@ allprojects {
 }
 
 def nightly = System.getenv("NIGHTLY") != null
-def refTestVersion = nightly ? "nightly" : "v1.7.0-beta.4"
+def refTestVersion = nightly ? "nightly" : "v1.7.0-beta.5"
 def blsRefTestVersion = 'v0.1.2'
 def slashingProtectionInterchangeRefTestVersion = 'v5.3.0'
 def refTestBaseUrl = 'https://github.com/ethereum/consensus-specs/releases/download'
@@ -936,7 +934,7 @@ tasks.register("dockerDistUntar") {
 	}
 }
 
-def dockerJdkVariants = ["jdk25", "jdk26"]
+def dockerJdkVariants = ["jdk25", "jdk27"]
 def dockerBuildDir = "build/docker-teku/"
 def localDockerImage = "local/teku"
 

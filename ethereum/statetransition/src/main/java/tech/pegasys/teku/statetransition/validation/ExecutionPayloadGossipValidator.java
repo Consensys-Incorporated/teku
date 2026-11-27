@@ -31,6 +31,7 @@ import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.collections.LimitedSet;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.config.SpecConfigGloas;
 import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.epbs.BlockRootAndBuilderIndex;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
@@ -38,7 +39,10 @@ import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloa
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.execution.ExecutionPayload;
+import tech.pegasys.teku.spec.datastructures.execution.Transaction;
+import tech.pegasys.teku.spec.datastructures.execution.versions.capella.ExecutionPayloadCapella;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.validator.BroadcastValidationLevel;
 import tech.pegasys.teku.spec.logic.common.statetransition.results.BlockImportResult;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
@@ -47,13 +51,13 @@ public class ExecutionPayloadGossipValidator {
 
   private static final Logger LOG = LogManager.getLogger();
 
+  private final Spec spec;
   private final GossipValidationHelper gossipValidationHelper;
   private final BlockGossipValidator blockGossipValidator;
   private final SigningRootUtil signingRootUtil;
 
-  // isPayloadSeen iterates while envelope validation may add entries
   private final Set<BlockRootAndBuilderIndex> seenPayloads =
-      LimitedSet.createSynchronizedIterable(VALID_EXECUTION_PAYLOAD_SET_SIZE);
+      LimitedSet.createSynchronizedNatural(VALID_EXECUTION_PAYLOAD_SET_SIZE);
 
   private final Map<Bytes32, BlockImportResult> invalidBlockRoots;
 
@@ -62,6 +66,7 @@ public class ExecutionPayloadGossipValidator {
       final GossipValidationHelper gossipValidationHelper,
       final BlockGossipValidator blockGossipValidator,
       final Map<Bytes32, BlockImportResult> invalidBlockRoots) {
+    this.spec = spec;
     this.gossipValidationHelper = gossipValidationHelper;
     this.blockGossipValidator = blockGossipValidator;
     this.invalidBlockRoots = invalidBlockRoots;
@@ -132,13 +137,6 @@ public class ExecutionPayloadGossipValidator {
             });
   }
 
-  public boolean isPayloadSeen(final Bytes32 beaconBlockRoot) {
-    return seenPayloads.stream()
-        .anyMatch(
-            blockRootAndBuilderIndex ->
-                blockRootAndBuilderIndex.blockRoot().equals(beaconBlockRoot));
-  }
-
   private SafeFuture<Optional<InternalValidationResult>> performWithBlockValidation(
       final ExecutionPayloadEnvelope envelope) {
     return gossipValidationHelper
@@ -172,6 +170,20 @@ public class ExecutionPayloadGossipValidator {
               final ExecutionPayloadBid bid = maybeExecutionPayloadBid.get();
 
               /*
+               * [REJECT] The envelope's parent beacon block root matches the block's parent root
+               */
+              if (!envelope.getParentBeaconBlockRoot().equals(beaconBlock.getParentRoot())) {
+                LOG.trace(
+                    "Invalid parent beacon block root. Execution payload envelope had {} but the block had {}. Rejecting the execution payload envelope",
+                    envelope.getParentBeaconBlockRoot(),
+                    beaconBlock.getParentRoot());
+                return Optional.of(
+                    reject(
+                        "Invalid parent beacon block root. Execution payload envelope had %s but the block had %s",
+                        envelope.getParentBeaconBlockRoot(), beaconBlock.getParentRoot()));
+              }
+
+              /*
                * [REJECT] The envelope is from the builder committed to by the bid
                */
               if (!envelope.getBuilderIndex().equals(bid.getBuilderIndex())) {
@@ -184,10 +196,39 @@ public class ExecutionPayloadGossipValidator {
                         "Invalid builder index. Execution payload envelope had %s but the block execution payload bid had %s",
                         envelope.getBuilderIndex(), bid.getBuilderIndex()));
               }
+              final ExecutionPayload payload = envelope.getPayload();
+
+              /*
+               * [REJECT] The payload's previous randao matches the bid's previous randao
+               */
+              if (!payload.getPrevRandao().equals(bid.getPrevRandao())) {
+                LOG.trace(
+                    "Invalid payload prev randao. Envelope had {} but bid had {}. Rejecting the execution payload envelope",
+                    payload.getPrevRandao(),
+                    bid.getPrevRandao());
+                return Optional.of(
+                    reject(
+                        "Invalid payload prev randao. Execution Payload Envelope had %s but ExecutionPayload Bid had %s",
+                        payload.getPrevRandao(), bid.getPrevRandao()));
+              }
+
+              /*
+               * [REJECT] The payload's gas limit matches the bid's gas limit
+               */
+              if (!payload.getGasLimit().equals(bid.getGasLimit())) {
+                LOG.trace(
+                    "Invalid payload gas limit. Envelope had {} but bid had {}. Rejecting the execution payload envelope",
+                    payload.getGasLimit(),
+                    bid.getGasLimit());
+                return Optional.of(
+                    reject(
+                        "Invalid payload gas limit. Execution Payload Envelope had %s but ExecutionPayload Bid had %s",
+                        payload.getGasLimit(), bid.getGasLimit()));
+              }
+
               /*
                * [REJECT] The payload's block hash matches the bid's block hash
                */
-              final ExecutionPayload payload = envelope.getPayload();
               final Bytes32 payloadBlockHash = payload.getBlockHash();
               final Bytes32 bidBlockHash = bid.getBlockHash();
               if (!payloadBlockHash.equals(bidBlockHash)) {
@@ -215,6 +256,29 @@ public class ExecutionPayloadGossipValidator {
                     reject(
                         "Invalid execution requests. Execution Payload Envelope had execution requests root of %s but ExecutionPayload Bid had %s",
                         executionRequestsRoot, bidExecutionRequestsRoot));
+              }
+
+              /*
+               * [REJECT] The number of transactions is within the limit implied by the parent
+               * payload's gas limit
+               */
+              final UInt64 maxGasLimit =
+                  gossipValidationHelper.getMaxPayloadGasLimit(beaconBlock, bid);
+              final UInt64 minTransactionGas =
+                  SpecConfigGloas.required(spec.atSlot(envelope.getSlot()).getConfig())
+                      .getMinTransactionGas();
+              final UInt64 maxPayloadTransactions = maxGasLimit.dividedBy(minTransactionGas);
+              final int transactionsCount = payload.getTransactions().size();
+              if (maxPayloadTransactions.isLessThan(transactionsCount)) {
+                LOG.trace(
+                    "Too many transactions. Execution payload envelope had {} but the maximum is {} for a gas limit of {}. Rejecting the execution payload envelope",
+                    transactionsCount,
+                    maxPayloadTransactions,
+                    maxGasLimit);
+                return Optional.of(
+                    reject(
+                        "Too many transactions. Execution payload envelope had %s but the maximum is %s for a gas limit of %s",
+                        transactionsCount, maxPayloadTransactions, maxGasLimit));
               }
 
               return Optional.empty();
@@ -300,24 +364,123 @@ public class ExecutionPayloadGossipValidator {
                     envelope.getBeaconBlockRoot());
                 return SAVE_FOR_FUTURE;
               }
+              final BeaconState blockState = maybeState.get();
+              final Optional<InternalValidationResult> payloadValidationResult =
+                  validatePayloadAgainstBlockState(envelope.getMessage(), blockState);
+              if (payloadValidationResult.isPresent()) {
+                return payloadValidationResult.get();
+              }
               /*
                * [REJECT] The envelope signature is valid
                */
-              if (!isSignatureValid(envelope, maybeState.get())) {
+              if (!isSignatureValid(envelope, blockState)) {
                 LOG.trace("Invalid signed execution payload envelope signature. Rejecting");
                 return reject("Invalid signed execution payload envelope signature");
               }
-              return ACCEPT;
+              /*
+               * [REJECT] The payload's block hash is computed correctly from its content
+               * (proposed in consensus-specs PR 5770). A forged envelope carrying the bid's block
+               * hash must not be marked as seen, as that would shadow the builder's real envelope.
+               *
+               * The proposal lists this rule before the signature one, both reject and the order
+               * is not normative. It runs last here because its cost grows with the payload,
+               * about 0.6 ms at 170 KB and 6 ms at 2.4 MB against about 1 ms for the signature,
+               * so an envelope with an invalid signature never pays for it.
+               */
+              return validateBlockHashMatchesContent(envelope.getMessage());
             });
   }
 
+  private Optional<InternalValidationResult> validatePayloadAgainstBlockState(
+      final ExecutionPayloadEnvelope envelope, final BeaconState blockState) {
+    final ExecutionPayload payload = envelope.getPayload();
+    final BeaconStateGloas blockStateGloas = BeaconStateGloas.required(blockState);
+
+    /*
+     * [REJECT] The payload builds on the execution head of the block's post-state
+     */
+    if (!payload.getParentHash().equals(blockStateGloas.getLatestBlockHash())) {
+      LOG.trace(
+          "Invalid payload parent hash. Envelope had {} but the latest block hash is {}. Rejecting the execution payload envelope",
+          payload.getParentHash(),
+          blockStateGloas.getLatestBlockHash());
+      return Optional.of(
+          reject(
+              "Invalid payload parent hash. Execution Payload Envelope had %s but the latest block hash is %s",
+              payload.getParentHash(), blockStateGloas.getLatestBlockHash()));
+    }
+
+    /*
+     * [REJECT] The payload's timestamp is correct with respect to the slot
+     */
+    final UInt64 expectedTimestamp = spec.computeTimeAtSlot(blockState, envelope.getSlot());
+    if (!payload.getTimestamp().equals(expectedTimestamp)) {
+      LOG.trace(
+          "Invalid payload timestamp. Envelope had {} but expected {}. Rejecting the execution payload envelope",
+          payload.getTimestamp(),
+          expectedTimestamp);
+      return Optional.of(
+          reject(
+              "Invalid payload timestamp. Execution Payload Envelope had %s but expected %s",
+              payload.getTimestamp(), expectedTimestamp));
+    }
+
+    /*
+     * [REJECT] The payload contains no empty transactions
+     */
+    if (payload.getTransactions().stream().anyMatch(Transaction::isEmpty)) {
+      LOG.trace(
+          "Execution payload envelope contains an empty transaction. Rejecting the execution payload envelope");
+      return Optional.of(reject("Execution payload envelope contains an empty transaction"));
+    }
+
+    /*
+     * [REJECT] The payload's withdrawals match the withdrawals expected by the block's post-state
+     */
+    final Bytes32 withdrawalsRoot =
+        ExecutionPayloadCapella.required(payload).getWithdrawals().hashTreeRoot();
+    final Bytes32 expectedWithdrawalsRoot =
+        blockStateGloas.getPayloadExpectedWithdrawals().hashTreeRoot();
+    if (!withdrawalsRoot.equals(expectedWithdrawalsRoot)) {
+      LOG.trace(
+          "Invalid payload withdrawals. Envelope had withdrawals root {} but expected {}. Rejecting the execution payload envelope",
+          withdrawalsRoot,
+          expectedWithdrawalsRoot);
+      return Optional.of(
+          reject(
+              "Invalid payload withdrawals. Execution Payload Envelope had withdrawals root %s but expected %s",
+              withdrawalsRoot, expectedWithdrawalsRoot));
+    }
+
+    return Optional.empty();
+  }
+
+  private InternalValidationResult validateBlockHashMatchesContent(
+      final ExecutionPayloadEnvelope envelope) {
+    final Bytes32 declaredBlockHash = envelope.getPayload().getBlockHash();
+    final Bytes32 computedBlockHash =
+        gossipValidationHelper.computeExecutionPayloadBlockHash(envelope);
+    if (!computedBlockHash.equals(declaredBlockHash)) {
+      LOG.debug(
+          "Execution payload envelope for block root {} from builder {} declares block hash {} but its content hashes to {}. Rejecting the execution payload envelope",
+          envelope.getBeaconBlockRoot(),
+          envelope.getBuilderIndex(),
+          declaredBlockHash,
+          computedBlockHash);
+      return reject(
+          "Execution payload envelope block hash %s does not match the block hash %s computed from its content",
+          declaredBlockHash, computedBlockHash);
+    }
+    return ACCEPT;
+  }
+
   private boolean isSignatureValid(
-      final SignedExecutionPayloadEnvelope envelope, final BeaconState postState) {
+      final SignedExecutionPayloadEnvelope envelope, final BeaconState blockState) {
     final Bytes signingRoot =
         signingRootUtil.signingRootForSignExecutionPayloadEnvelope(
-            envelope.getMessage(), postState.getForkInfo());
+            envelope.getMessage(), blockState.getForkInfo());
     return gossipValidationHelper.isSignatureValidWithRespectToBuilderIndex(
-        signingRoot, envelope.getMessage().getBuilderIndex(), envelope.getSignature(), postState);
+        signingRoot, envelope.getMessage().getBuilderIndex(), envelope.getSignature(), blockState);
   }
 
   private InternalValidationResult markAsSeen(

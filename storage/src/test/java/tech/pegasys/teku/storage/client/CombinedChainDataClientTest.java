@@ -25,13 +25,16 @@ import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tech.pegasys.teku.dataproviders.lookup.BlockProvider;
 import tech.pegasys.teku.dataproviders.lookup.EarliestBlobSidecarSlotProvider;
+import tech.pegasys.teku.dataproviders.lookup.ExecutionPayloadProvider;
 import tech.pegasys.teku.dataproviders.lookup.StateAndBlockSummaryProvider;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.SafeFutureAssert;
@@ -47,6 +50,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlockHeader;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.lightclient.LightClientBootstrap;
 import tech.pegasys.teku.spec.datastructures.metadata.BlockAndMetaData;
 import tech.pegasys.teku.spec.datastructures.state.AnchorPoint;
@@ -293,24 +297,37 @@ class CombinedChainDataClientTest {
         .thenReturn(
             SafeFuture.completedFuture(
                 List.of(firstIdentifier, otherBlockIdentifier, secondIdentifier)));
-    when(historicalChainData.getSidecar(any()))
-        .thenAnswer(
-            args -> {
-              final DataColumnSlotAndIdentifier identifier = args.getArgument(0);
-              if (identifier.equals(firstIdentifier)) {
-                return SafeFuture.completedFuture(Optional.of(firstSidecar));
-              } else if (identifier.equals(secondIdentifier)) {
-                return SafeFuture.completedFuture(Optional.of(secondSidecar));
-              }
-              return SafeFuture.completedFuture(Optional.empty());
-            });
+    when(historicalChainData.getSidecars(List.of(firstIdentifier, secondIdentifier)))
+        .thenReturn(SafeFuture.completedFuture(List.of(firstSidecar, secondSidecar)));
 
     final List<DataColumnSidecar> result =
         SafeFutureAssert.safeJoin(
             client.getDataColumnSidecars(new SlotAndBlockRoot(slot, blockRoot), List.of()));
 
     assertThat(result).containsExactly(firstSidecar, secondSidecar);
-    verify(historicalChainData, never()).getSidecar(otherBlockIdentifier);
+    verify(historicalChainData).getSidecars(List.of(firstIdentifier, secondIdentifier));
+    verify(historicalChainData, never()).getSidecar(any());
+  }
+
+  @Test
+  void getsSelectedDataColumnSidecarsInOneBatchAfterFilteringIdentifiers() {
+    final SlotAndBlockRoot block =
+        new SlotAndBlockRoot(UInt64.valueOf(42), dataStructureUtil.randomBytes32());
+    final List<DataColumnSlotAndIdentifier> identifiers =
+        List.of(
+            new DataColumnSlotAndIdentifier(block.getSlot(), block.getBlockRoot(), UInt64.ZERO),
+            new DataColumnSlotAndIdentifier(block.getSlot(), block.getBlockRoot(), UInt64.ONE));
+    final List<DataColumnSidecar> sidecars = List.of(mock(DataColumnSidecar.class));
+    when(historicalChainData.getDataColumnIdentifiers(block.getSlot()))
+        .thenReturn(SafeFuture.completedFuture(identifiers));
+    when(historicalChainData.getSidecars(identifiers))
+        .thenReturn(SafeFuture.completedFuture(sidecars));
+
+    assertThat(client.getDataColumnSidecars(block, List.of(UInt64.ONE, UInt64.ZERO, UInt64.ONE)))
+        .isCompletedWithValue(sidecars);
+    verify(historicalChainData).getSidecars(identifiers);
+    verify(historicalChainData).getDataColumnIdentifiers(block.getSlot());
+    verify(historicalChainData, never()).getSidecar(any());
   }
 
   @Test
@@ -516,6 +533,85 @@ class CombinedChainDataClientTest {
                 return Optional.empty();
               }
             });
+  }
+
+  @Test
+  void getExecutionPayloadsByBlockRoots_shouldServeHotPayloadsAndBatchTheRestThroughProvider() {
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final DataStructureUtil gloasDataStructureUtil = new DataStructureUtil(gloasSpec);
+    final SignedExecutionPayloadEnvelope hotEnvelope =
+        gloasDataStructureUtil.randomSignedExecutionPayloadEnvelope(1);
+    final SignedExecutionPayloadEnvelope finalizedEnvelope =
+        gloasDataStructureUtil.randomSignedExecutionPayloadEnvelope(2);
+    final Bytes32 unknownRoot = gloasDataStructureUtil.randomBytes32();
+
+    final List<Set<Bytes32>> providerRequests = new ArrayList<>();
+    final ExecutionPayloadProvider executionPayloadProvider =
+        roots -> {
+          providerRequests.add(roots);
+          return SafeFuture.completedFuture(
+              Map.of(finalizedEnvelope.getBeaconBlockRoot(), finalizedEnvelope));
+        };
+    final CombinedChainDataClient clientWithProvider =
+        new CombinedChainDataClient(
+            recentChainData, historicalChainData, gloasSpec, executionPayloadProvider);
+    when(recentChainData.getExecutionPayloadIfAvailable(hotEnvelope.getBeaconBlockRoot()))
+        .thenReturn(Optional.of(hotEnvelope));
+
+    final SafeFuture<Map<Bytes32, SignedExecutionPayloadEnvelope>> result =
+        clientWithProvider.getExecutionPayloadsByBlockRoots(
+            Set.of(
+                hotEnvelope.getBeaconBlockRoot(),
+                finalizedEnvelope.getBeaconBlockRoot(),
+                unknownRoot));
+
+    assertThat(result)
+        .isCompletedWithValue(
+            Map.of(
+                hotEnvelope.getBeaconBlockRoot(),
+                hotEnvelope,
+                finalizedEnvelope.getBeaconBlockRoot(),
+                finalizedEnvelope));
+    // The roots not available in the hot store are resolved with a single provider call
+    assertThat(providerRequests)
+        .containsExactly(Set.of(finalizedEnvelope.getBeaconBlockRoot(), unknownRoot));
+  }
+
+  @Test
+  void getExecutionPayloadsByBlockRoots_shouldNotQueryProviderWhenAllPayloadsAreHot() {
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final DataStructureUtil gloasDataStructureUtil = new DataStructureUtil(gloasSpec);
+    final SignedExecutionPayloadEnvelope hotEnvelope =
+        gloasDataStructureUtil.randomSignedExecutionPayloadEnvelope(1);
+
+    final ExecutionPayloadProvider executionPayloadProvider =
+        roots -> {
+          throw new AssertionError("Provider should not be queried");
+        };
+    final CombinedChainDataClient clientWithProvider =
+        new CombinedChainDataClient(
+            recentChainData, historicalChainData, gloasSpec, executionPayloadProvider);
+    when(recentChainData.getExecutionPayloadIfAvailable(hotEnvelope.getBeaconBlockRoot()))
+        .thenReturn(Optional.of(hotEnvelope));
+
+    assertThat(
+            clientWithProvider.getExecutionPayloadsByBlockRoots(
+                Set.of(hotEnvelope.getBeaconBlockRoot())))
+        .isCompletedWithValue(Map.of(hotEnvelope.getBeaconBlockRoot(), hotEnvelope));
+  }
+
+  @Test
+  void getExecutionPayloadsByBlockRoots_shouldReturnEmptyMapForNoRoots() {
+    final ExecutionPayloadProvider executionPayloadProvider =
+        roots -> {
+          throw new AssertionError("Provider should not be queried");
+        };
+    final CombinedChainDataClient clientWithProvider =
+        new CombinedChainDataClient(
+            recentChainData, historicalChainData, spec, executionPayloadProvider);
+
+    assertThat(clientWithProvider.getExecutionPayloadsByBlockRoots(Set.of()))
+        .isCompletedWithValue(Map.of());
   }
 
   @Test

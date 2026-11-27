@@ -15,6 +15,7 @@ package tech.pegasys.teku.statetransition.validation;
 
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
 import static tech.pegasys.teku.spec.config.SpecConfigGloas.BUILDER_INDEX_SELF_BUILD;
+import static tech.pegasys.teku.spec.constants.EthConstants.ETH_TO_GWEI;
 
 import java.util.Optional;
 import java.util.Set;
@@ -30,6 +31,7 @@ import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SlotAndBlockRoot;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
+import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadBid;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
@@ -40,6 +42,7 @@ import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.ForkInfo;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.logic.common.helpers.BeaconStateAccessors;
 import tech.pegasys.teku.spec.logic.common.util.AttestationUtil;
 import tech.pegasys.teku.spec.logic.common.util.AttestationValidationResult;
@@ -427,10 +430,29 @@ public class GossipValidationHelper {
         .canBuilderCoverBid(state, builderIndex, bidValue);
   }
 
+  /**
+   * Spec {@code get_builder_bid_limit}: the number of bids the builder may submit for each slot and
+   * parent, i.e. one bid per ETH of builder balance, excluding the balance owed in pending
+   * withdrawals.
+   */
+  public UInt64 getBuilderBidLimit(
+      final UInt64 builderIndex, final BeaconState state, final UInt64 slot) {
+    final UInt64 balance =
+        BeaconStateGloas.required(state).getBuilders().get(builderIndex.intValue()).getBalance();
+    final UInt64 pendingWithdrawalsAmount =
+        BeaconStateAccessorsGloas.required(spec.atSlot(slot).beaconStateAccessors())
+            .getPendingBalanceToWithdrawForBuilder(state, builderIndex);
+    return balance.minusMinZero(pendingWithdrawalsAmount).dividedBy(ETH_TO_GWEI);
+  }
+
   public boolean isBlockHashKnown(final Bytes32 blockHash, final Bytes32 blockRoot) {
     final Optional<Bytes32> maybeBlockHash =
         recentChainData.getExecutionBlockHashForBlockRoot(blockRoot);
     return maybeBlockHash.isPresent() && blockHash.equals(maybeBlockHash.get());
+  }
+
+  public Bytes32 computeExecutionPayloadBlockHash(final ExecutionPayloadEnvelope envelope) {
+    return spec.computeExecutionPayloadBlockHash(envelope);
   }
 
   public Optional<SignedExecutionPayloadEnvelope> getRecentlyImportedExecutionPayload(
@@ -441,6 +463,24 @@ public class GossipValidationHelper {
   public Optional<UInt64> getGasLimitForExecutionPayload(
       final Bytes32 blockRoot, final Bytes32 blockHash) {
     return recentChainData.getExecutionGasLimitForBlockRootAndHash(blockRoot, blockHash);
+  }
+
+  /**
+   * Returns the highest gas limit the EIP-1559 transition rule allows for the execution payload of
+   * {@code block}, given the gas limit of the parent payload, i.e. the payload of the closest full
+   * ancestor. If that payload is unknown, the bid's gas limit is the bound.
+   *
+   * <p>Instead of walking the ancestors as the spec does, this relies on fork choice: the nodes of
+   * a block that builds on its parent's EMPTY variant inherit the execution block hash and gas
+   * limit of the parent's own execution parent, so the parent's node carrying the bid's parent
+   * block hash already holds the gas limit of the closest full ancestor's payload.
+   */
+  public UInt64 getMaxPayloadGasLimit(final BeaconBlock block, final ExecutionPayloadBid bid) {
+    return recentChainData
+        .getExecutionGasLimitForBlockRootAndHash(block.getParentRoot(), bid.getParentBlockHash())
+        .map(
+            parentGasLimit -> parentGasLimit.plus(parentGasLimit.dividedBy(1024).minusMinZero(ONE)))
+        .orElse(bid.getGasLimit());
   }
 
   public boolean isBidCompatibleWithHead(final ExecutionPayloadBid bid) {

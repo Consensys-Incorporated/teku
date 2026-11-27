@@ -423,7 +423,7 @@ public class ForkChoiceUtil {
   }
 
   /**
-   * Computes block timeliness based on the arrival time relative to the slot start.
+   * Computes block timeliness based on the fork-choice processing time relative to the slot start.
    *
    * <p>Spec reference: record_block_timeliness
    *

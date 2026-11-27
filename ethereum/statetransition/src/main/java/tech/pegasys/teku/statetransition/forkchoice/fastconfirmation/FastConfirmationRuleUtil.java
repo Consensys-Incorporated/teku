@@ -26,10 +26,9 @@ public final class FastConfirmationRuleUtil {
   /**
    * {@code CONFIRMATION_BYZANTINE_THRESHOLD}: assumed maximum percentage of Byzantine validators.
    * The spec exposes it as configuration with a maximum of {@code 25}; both the mainnet and minimal
-   * presets set it to {@code 25}, so it is treated here as a fixed constant to avoid touching
-   * {@code SpecConfig}. If a future network ever deviates from {@code 25} this constant must be
-   * updated manually (or promoted into {@code SpecConfig}), otherwise the confirmation rule will
-   * silently use the wrong threshold.
+   * presets set it to {@code 25}, so it is kept out of {@code SpecConfig} and used as the default
+   * here. A node can assume a different threshold with {@code
+   * --Xfast-confirmation-byzantine-threshold}, which is passed to the calculator in its place.
    */
   static final int CONFIRMATION_BYZANTINE_THRESHOLD = 25;
 
@@ -37,6 +36,20 @@ public final class FastConfirmationRuleUtil {
 
   public static boolean isStartSlotAtEpoch(final Spec spec, final UInt64 slot) {
     return spec.computeStartSlotAtEpoch(spec.computeEpochAtSlot(slot)).equals(slot);
+  }
+
+  /**
+   * Implements {@code block_should_be_finalized} from the Fast Confirmation spec: whether, at
+   * {@code currentSlot}, the block at {@code blockSlot} is old enough to have been finalized
+   * already, i.e. the start of the second epoch after the first checkpoint at or after it has been
+   * reached.
+   */
+  static boolean blockShouldBeFinalized(
+      final Spec spec, final UInt64 blockSlot, final UInt64 currentSlot) {
+    final UInt64 nextCheckpointEpoch =
+        spec.computeEpochAtSlot(blockSlot.plus(spec.getSlotsPerEpoch(blockSlot) - 1));
+    final UInt64 earliestFinalitySlot = spec.computeStartSlotAtEpoch(nextCheckpointEpoch.plus(2));
+    return earliestFinalitySlot.isLessThanOrEqualTo(currentSlot);
   }
 
   /**

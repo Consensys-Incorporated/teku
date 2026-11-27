@@ -21,6 +21,7 @@ import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThat
 import static tech.pegasys.teku.infrastructure.time.TimeUtilities.secondsToMillis;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ONE;
 import static tech.pegasys.teku.infrastructure.unsigned.UInt64.ZERO;
+import static tech.pegasys.teku.spec.constants.EthConstants.ETH_TO_GWEI;
 import static tech.pegasys.teku.spec.datastructures.state.beaconstate.common.BeaconStateFields.PROPOSER_LOOKAHEAD;
 
 import java.util.Optional;
@@ -46,6 +47,7 @@ import tech.pegasys.teku.spec.TestSpecContext;
 import tech.pegasys.teku.spec.TestSpecFactory;
 import tech.pegasys.teku.spec.TestSpecInvocationContextProvider.SpecContext;
 import tech.pegasys.teku.spec.constants.Domain;
+import tech.pegasys.teku.spec.datastructures.blocks.BeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBlockAndState;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadBid;
@@ -57,9 +59,11 @@ import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrate
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.fulu.BeaconStateSchemaFulu;
+import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.MutableBeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
+import tech.pegasys.teku.spec.schemas.SchemaDefinitionsGloas;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.storage.client.ChainHead;
 import tech.pegasys.teku.storage.client.ChainUpdater;
@@ -443,6 +447,44 @@ public class GossipValidationHelperTest {
     final GossipValidationHelper helper =
         new GossipValidationHelper(spec, recentChainData, storageSystem.getMetricsSystem());
     assertThat(helper.getGasLimitForExecutionPayload(blockRoot, blockHash)).isEmpty();
+  }
+
+  @TestTemplate
+  void getMaxPayloadGasLimit_shouldAllowEip1559IncreaseOverParentPayloadGasLimit(
+      final SpecContext specContext) {
+    assumeThat(specContext.getSpecMilestone()).isEqualTo(SpecMilestone.GLOAS);
+    final RecentChainData recentChainData = mock(RecentChainData.class);
+    final BeaconBlock block = dataStructureUtil.randomBeaconBlock();
+    final ExecutionPayloadBid bid = dataStructureUtil.randomExecutionPayloadBid();
+    final GossipValidationHelper helper =
+        new GossipValidationHelper(spec, recentChainData, storageSystem.getMetricsSystem());
+
+    when(recentChainData.getExecutionGasLimitForBlockRootAndHash(
+            block.getParentRoot(), bid.getParentBlockHash()))
+        .thenReturn(Optional.of(UInt64.valueOf(30_000_000)));
+    assertThat(helper.getMaxPayloadGasLimit(block, bid)).isEqualTo(UInt64.valueOf(30_029_295));
+
+    // The increase saturates at zero for a parent gas limit below 1024
+    when(recentChainData.getExecutionGasLimitForBlockRootAndHash(
+            block.getParentRoot(), bid.getParentBlockHash()))
+        .thenReturn(Optional.of(UInt64.valueOf(1000)));
+    assertThat(helper.getMaxPayloadGasLimit(block, bid)).isEqualTo(UInt64.valueOf(1000));
+  }
+
+  @TestTemplate
+  void getMaxPayloadGasLimit_shouldFallBackToBidGasLimitWhenParentPayloadIsUnknown(
+      final SpecContext specContext) {
+    assumeThat(specContext.getSpecMilestone()).isEqualTo(SpecMilestone.GLOAS);
+    final RecentChainData recentChainData = mock(RecentChainData.class);
+    final BeaconBlock block = dataStructureUtil.randomBeaconBlock();
+    final ExecutionPayloadBid bid = dataStructureUtil.randomExecutionPayloadBid();
+    final GossipValidationHelper helper =
+        new GossipValidationHelper(spec, recentChainData, storageSystem.getMetricsSystem());
+
+    when(recentChainData.getExecutionGasLimitForBlockRootAndHash(
+            block.getParentRoot(), bid.getParentBlockHash()))
+        .thenReturn(Optional.empty());
+    assertThat(helper.getMaxPayloadGasLimit(block, bid)).isEqualTo(bid.getGasLimit());
   }
 
   @TestTemplate
@@ -937,6 +979,83 @@ public class GossipValidationHelperTest {
             gossipValidationHelper.builderHasEnoughBalanceForBid(
                 bidValue, UInt64.ZERO, modifiedState, slot))
         .isTrue();
+  }
+
+  @TestTemplate
+  void getBuilderBidLimit_shouldAllowOneBidPerWholeEthOfBalance(final SpecContext specContext) {
+    specContext.assumeGloasActive();
+    final BeaconState originalState = recentChainData.getBestState().orElseThrow().getImmediately();
+    final UInt64 slot = originalState.getSlot();
+    final UInt64 builderIndex = getNextBuilderIndex(originalState);
+
+    // 3.5 ETH
+    final UInt64 builderBalance = ETH_TO_GWEI.times(7).dividedBy(2);
+    final BeaconState modifiedState =
+        stateWithBuilder(originalState, builderBalance, builderIndex, UInt64.ZERO);
+
+    assertThat(gossipValidationHelper.getBuilderBidLimit(builderIndex, modifiedState, slot))
+        .isEqualTo(UInt64.valueOf(3));
+  }
+
+  @TestTemplate
+  void getBuilderBidLimit_shouldExcludePendingWithdrawals(final SpecContext specContext) {
+    specContext.assumeGloasActive();
+    final BeaconState originalState = recentChainData.getBestState().orElseThrow().getImmediately();
+    final UInt64 slot = originalState.getSlot();
+    final UInt64 builderIndex = getNextBuilderIndex(originalState);
+
+    // 3 ETH balance with 1 gwei owed in a pending withdrawal leaves less than 3 whole ETH
+    final BeaconState modifiedState =
+        stateWithBuilder(originalState, ETH_TO_GWEI.times(3), builderIndex, UInt64.ONE);
+
+    assertThat(gossipValidationHelper.getBuilderBidLimit(builderIndex, modifiedState, slot))
+        .isEqualTo(UInt64.valueOf(2));
+  }
+
+  @TestTemplate
+  void getBuilderBidLimit_shouldBeZeroWhenPendingWithdrawalsExceedBalance(
+      final SpecContext specContext) {
+    specContext.assumeGloasActive();
+    final BeaconState originalState = recentChainData.getBestState().orElseThrow().getImmediately();
+    final UInt64 slot = originalState.getSlot();
+    final UInt64 builderIndex = getNextBuilderIndex(originalState);
+
+    final BeaconState modifiedState =
+        stateWithBuilder(originalState, ETH_TO_GWEI.times(2), builderIndex, ETH_TO_GWEI.times(5));
+
+    assertThat(gossipValidationHelper.getBuilderBidLimit(builderIndex, modifiedState, slot))
+        .isEqualTo(UInt64.ZERO);
+  }
+
+  private UInt64 getNextBuilderIndex(final BeaconState state) {
+    return UInt64.valueOf(BeaconStateGloas.required(state).getBuilders().size());
+  }
+
+  private BeaconState stateWithBuilder(
+      final BeaconState state,
+      final UInt64 balance,
+      final UInt64 builderIndex,
+      final UInt64 pendingWithdrawalAmount) {
+    return state.updated(
+        mutableState -> {
+          final MutableBeaconStateGloas mutableStateGloas =
+              MutableBeaconStateGloas.required(mutableState);
+          mutableStateGloas
+              .getBuilders()
+              .append(dataStructureUtil.builderBuilder().balance(balance).build());
+          if (!pendingWithdrawalAmount.isZero()) {
+            mutableStateGloas
+                .getBuilderPendingWithdrawals()
+                .append(
+                    SchemaDefinitionsGloas.required(
+                            spec.atSlot(state.getSlot()).getSchemaDefinitions())
+                        .getBuilderPendingWithdrawalSchema()
+                        .create(
+                            dataStructureUtil.randomEth1Address(),
+                            pendingWithdrawalAmount,
+                            builderIndex));
+          }
+        });
   }
 
   @TestTemplate
