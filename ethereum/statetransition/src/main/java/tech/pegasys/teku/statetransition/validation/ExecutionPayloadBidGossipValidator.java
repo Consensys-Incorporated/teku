@@ -47,6 +47,7 @@ import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.Be
 import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.signatures.SigningRootUtil;
 import tech.pegasys.teku.statetransition.execution.ProposerPreferencesManager;
+import tech.pegasys.teku.storage.client.ValidatorIsConnectedProvider;
 
 public class ExecutionPayloadBidGossipValidator {
 
@@ -62,15 +63,18 @@ public class ExecutionPayloadBidGossipValidator {
       LimitedMap.createSynchronizedLRU(HIGHEST_BID_SET_SIZE);
 
   private final ProposerPreferencesManager proposerPreferencesManager;
+  private final ValidatorIsConnectedProvider validatorIsConnectedProvider;
 
   public ExecutionPayloadBidGossipValidator(
       final Spec spec,
       final GossipValidationHelper gossipValidationHelper,
       final ProposerPreferencesManager proposerPreferencesManager,
+      final ValidatorIsConnectedProvider validatorIsConnectedProvider,
       final int minBidIncrementPercentage) {
     this.spec = spec;
     this.gossipValidationHelper = gossipValidationHelper;
     this.proposerPreferencesManager = proposerPreferencesManager;
+    this.validatorIsConnectedProvider = validatorIsConnectedProvider;
     this.minBidIncrementPercentage = minBidIncrementPercentage;
     signingRootUtil = new SigningRootUtil(spec);
   }
@@ -85,18 +89,12 @@ public class ExecutionPayloadBidGossipValidator {
     final BidParent bidValueKey =
         new BidParent(bid.getSlot(), bid.getParentBlockHash(), bid.getParentBlockRoot());
     final UInt64 existingBidValue = highestBids.get(bidValueKey);
-    if (existingBidValue != null) {
-      final UInt64 minRequiredBid = calculateMinimumRequiredBid(existingBidValue);
-
-      if (bid.getValue().isLessThan(minRequiredBid)) {
-        return completedFuture(
-            ignoreBid(
-                bid,
-                "does not meet minimum increment threshold (%s%%); current highest is %s ETH and minimum required is %s ETH",
-                minBidIncrementPercentage,
-                gweiToEth(existingBidValue),
-                gweiToEth(minRequiredBid)));
-      }
+    if (existingBidValue != null && bid.getValue().isLessThanOrEqualTo(existingBidValue)) {
+      return completedFuture(
+          ignoreBid(
+              bid,
+              "value is not higher than current highest of %s ETH",
+              gweiToEth(existingBidValue)));
     }
 
     /*
@@ -190,6 +188,26 @@ public class ExecutionPayloadBidGossipValidator {
     if (proposerPreferences.isEmpty()) {
       return completedFuture(
           saveBidForFuture(bid, "no proposer preferences available; saving for future processing"));
+    }
+
+    // A connected proposer must be able to accept improving bids beyond the builder's gossip
+    // allowance
+    final boolean isProposerConnected =
+        validatorIsConnectedProvider.isValidatorConnected(
+            proposerPreferences.get().getValidatorIndex().intValue(), bid.getSlot());
+    final int requiredIncrementPercentage = isProposerConnected ? 0 : minBidIncrementPercentage;
+    if (existingBidValue != null) {
+      final UInt64 minRequiredBid =
+          calculateMinimumRequiredBid(existingBidValue, requiredIncrementPercentage);
+      if (bid.getValue().isLessThan(minRequiredBid)) {
+        return completedFuture(
+            ignoreBid(
+                bid,
+                "does not meet minimum increment threshold (%s%%); current highest is %s ETH and minimum required is %s ETH",
+                requiredIncrementPercentage,
+                gweiToEth(existingBidValue),
+                gweiToEth(minRequiredBid)));
+      }
     }
 
     /*
@@ -336,7 +354,9 @@ public class ExecutionPayloadBidGossipValidator {
               final UInt64 bidLimit =
                   gossipValidationHelper.getBuilderBidLimit(
                       bid.getBuilderIndex(), state, bid.getSlot());
-              if (getBidCount(bid.getSlot(), builderAndParent).isGreaterThanOrEqualTo(bidLimit)) {
+              if (!isProposerConnected
+                  && getBidCount(bid.getSlot(), builderAndParent)
+                      .isGreaterThanOrEqualTo(bidLimit)) {
                 return ignoreBidLimitReached(bid, bidLimit);
               }
 
@@ -399,20 +419,30 @@ public class ExecutionPayloadBidGossipValidator {
                   (key, existingValue) -> {
                     // Bid counts for this slot and parent are only updated within this compute,
                     // so the bid limit check and the count update below are atomic
-                    if (getBidCount(bid.getSlot(), builderAndParent)
-                        .isGreaterThanOrEqualTo(bidLimit)) {
+                    if (!isProposerConnected
+                        && getBidCount(bid.getSlot(), builderAndParent)
+                            .isGreaterThanOrEqualTo(bidLimit)) {
                       ignoreResult.set(ignoreBidLimitReached(bid, bidLimit));
                       return existingValue;
                     }
 
                     if (existingValue != null) {
-                      final UInt64 minimum = calculateMinimumRequiredBid(existingValue);
+                      if (bidValue.isLessThanOrEqualTo(existingValue)) {
+                        ignoreResult.set(
+                            ignoreBid(
+                                bid,
+                                "value is not higher than current highest of %s ETH",
+                                gweiToEth(existingValue)));
+                        return existingValue;
+                      }
+                      final UInt64 minimum =
+                          calculateMinimumRequiredBid(existingValue, requiredIncrementPercentage);
                       if (bidValue.isLessThan(minimum)) {
                         ignoreResult.set(
                             ignoreBid(
                                 bid,
                                 "does not meet minimum increment threshold (%s%%) after a concurrent update; current highest is %s ETH and minimum required is %s ETH",
-                                minBidIncrementPercentage,
+                                requiredIncrementPercentage,
                                 gweiToEth(existingValue),
                                 gweiToEth(minimum)));
                         return existingValue;
@@ -494,10 +524,13 @@ public class ExecutionPayloadBidGossipValidator {
    * bid, even when the percentage increment rounds down to zero.
    *
    * @param currentHighestBid the current highest bid value
+   * @param requiredIncrementPercentage the minimum percentage increment, or zero for a connected
+   *     proposer
    * @return the minimum bid value required to exceed the threshold
    */
-  private UInt64 calculateMinimumRequiredBid(final UInt64 currentHighestBid) {
-    final UInt64 minIncrement = currentHighestBid.times(minBidIncrementPercentage).dividedBy(100);
+  private UInt64 calculateMinimumRequiredBid(
+      final UInt64 currentHighestBid, final int requiredIncrementPercentage) {
+    final UInt64 minIncrement = currentHighestBid.times(requiredIncrementPercentage).dividedBy(100);
     return currentHighestBid.plus(minIncrement.max(UInt64.ONE));
   }
 
