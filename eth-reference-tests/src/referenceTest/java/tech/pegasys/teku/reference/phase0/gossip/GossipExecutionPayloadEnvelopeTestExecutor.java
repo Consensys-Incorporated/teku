@@ -32,7 +32,6 @@ import tech.pegasys.teku.reference.BlsSetting;
 import tech.pegasys.teku.reference.TestExecutor;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.blocks.SignedBeaconBlock;
-import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.ExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelopeSchema;
 import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
@@ -86,23 +85,25 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
       final GossipExecutionPayloadEnvelopeMetaData.BlockEntry blockEntry =
           blockEntryAndBlock.blockEntry();
       final SignedBeaconBlock block = blockEntryAndBlock.block();
-      if (block.getRoot().equals(ctx.anchorPoint.getRoot())) {
-        continue;
-      }
-      ctx.forkChoice.onTick(
-          spec.computeTimeMillisAtSlot(block.getSlot(), ctx.recentChainData.getGenesisTimeMillis()),
-          Optional.empty());
-      final BlockImportResult importResult =
-          safeJoin(
-              ctx.forkChoice.onBlock(
-                  block, Optional.empty(), BlockBroadcastValidator.NOOP, ctx.executionLayer));
-      if (blockEntry.isFailed()) {
-        invalidBlockRoots.put(
-            block.getRoot(), BlockImportResult.FAILED_DESCENDANT_OF_INVALID_BLOCK);
-      } else {
-        assertThat(importResult.isSuccessful())
-            .describedAs("Expected setup block %s to import successfully", blockEntry.getBlock())
-            .isTrue();
+      // The anchor is already in the store, but its payload may still need to be revealed below
+      if (!block.getRoot().equals(ctx.anchorPoint.getRoot())) {
+        ctx.forkChoice.onTick(
+            spec.computeTimeMillisAtSlot(
+                block.getSlot(), ctx.recentChainData.getGenesisTimeMillis()),
+            Optional.empty());
+        final BlockImportResult importResult =
+            safeJoin(
+                ctx.forkChoice.onBlock(
+                    block, Optional.empty(), BlockBroadcastValidator.NOOP, ctx.executionLayer));
+        if (blockEntry.isFailed()) {
+          invalidBlockRoots.put(
+              block.getRoot(), BlockImportResult.FAILED_DESCENDANT_OF_INVALID_BLOCK);
+        } else {
+          assertThat(importResult.isSuccessful())
+              .describedAs(
+                  "Expected setup block %s to import successfully", blockEntry.getBlock())
+              .isTrue();
+        }
       }
       // blockEntry.getPayload() names the payload already revealed for this block in the setup
       // store, which is what makes the fork choice node FULL
@@ -127,13 +128,6 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
             return declaredFinalizedCheckpoint
                 .map(checkpoint -> slot.isLessThan(checkpoint.getEpochStartSlot(spec)))
                 .orElseGet(() -> super.isBeforeFinalizedSlot(slot));
-          }
-
-          @Override
-          public Bytes32 computeExecutionPayloadBlockHash(final ExecutionPayloadEnvelope envelope) {
-            // The fixtures carry a zero payload block hash, so Teku's content check (not a spec
-            // rule) must treat the declared hash as matching
-            return envelope.getPayload().getBlockHash();
           }
         };
     final BlockGossipValidator blockGossipValidator =
