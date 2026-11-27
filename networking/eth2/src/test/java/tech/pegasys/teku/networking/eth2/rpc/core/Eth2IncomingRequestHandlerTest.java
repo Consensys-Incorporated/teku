@@ -19,11 +19,13 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import io.netty.buffer.ByteBuf;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -113,6 +115,42 @@ public class Eth2IncomingRequestHandlerTest
   }
 
   @Test
+  public void shouldChargeRequestBudgetWhenRequestFailsValidation() {
+    deliverBytes(invalidRequestData());
+
+    verify(peer, times(1)).approveRequest();
+    verify(peer, never()).adjustReputation(any());
+    // INVALID_REQUEST response code
+    verify(rpcStream).writeBytes(argThat(bytes -> bytes.get(0) == 1));
+  }
+
+  @Test
+  public void shouldRespondWithInvalidRequestWhenRequestBudgetIsExhausted() {
+    when(peer.approveRequest()).thenReturn(false);
+
+    deliverBytes(invalidRequestData());
+
+    verify(peer, times(1)).approveRequest();
+    // INVALID_REQUEST response code
+    verify(rpcStream).writeBytes(argThat(bytes -> bytes.get(0) == 1));
+  }
+
+  @Test
+  public void shouldChargeRequestBudgetOnlyOnceWhenRequestIsValid() {
+    deliverBytes(requestData);
+
+    // charged by the handler itself, not again by the dispatcher
+    verify(peer, times(1)).approveRequest();
+  }
+
+  private Bytes invalidRequestData() {
+    // a step of zero fails BeaconBlocksByRange validation
+    return beaconChainMethods
+        .beaconBlocksByRange()
+        .encodeRequest(new BeaconBlocksByRangeRequestMessage(UInt64.ONE, UInt64.ONE, UInt64.ZERO));
+  }
+
+  @Test
   public void shouldNotRetainInputWhenStreamClosedAfterPartialData() {
     // Send partial data (incomplete request); the decoder copies what it has to keep
     final ByteBuf partialData = Utils.toByteBuf(requestData.slice(0, requestData.size() / 2));
@@ -155,6 +193,37 @@ public class Eth2IncomingRequestHandlerTest
     reqHandler.closed(nodeId, rpcStream);
 
     // Should not throw any exceptions
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  public void shouldReportStreamClosureToResponseCallback() {
+    final AtomicReference<ResponseCallback<SignedBeaconBlock>> capturedCallback =
+        new AtomicReference<>();
+    final Eth2RpcMethod<BeaconBlocksByRangeRequestMessage, SignedBeaconBlock> method =
+        beaconChainMethods.beaconBlocksByRange();
+    final RpcResponseEncoder<SignedBeaconBlock, ?> responseEncoder = mock(RpcResponseEncoder.class);
+    final Eth2IncomingRequestHandler<BeaconBlocksByRangeRequestMessage, SignedBeaconBlock>
+        requestHandler =
+            new Eth2IncomingRequestHandler<>(
+                method.getIds().get(0),
+                responseEncoder,
+                new RpcRequestDecoder<>(
+                    BeaconBlocksByRangeRequestMessage.SSZ_SCHEMA, getRpcEncoding()),
+                asyncRunner,
+                peerLookup,
+                (protocolId, peer, request, callback) -> capturedCallback.set(callback));
+
+    requestHandler.processData(nodeId, rpcStream, Utils.toByteBuf(requestData));
+
+    assertThat(capturedCallback.get()).isNotNull();
+    assertThat(capturedCallback.get().isClosed()).isFalse();
+    assertThat(capturedCallback.get().getStreamClosedFuture()).isNotDone();
+
+    requestHandler.closed(nodeId, rpcStream);
+
+    assertThat(capturedCallback.get().isClosed()).isTrue();
+    assertThat(capturedCallback.get().getStreamClosedFuture()).isCompleted();
   }
 
   @Test

@@ -243,7 +243,6 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
       final Optional<BlockImportPerformance> blockImportPerformance,
       final BlockBroadcastValidator blockBroadcastValidator,
       final ExecutionLayerChannel executionLayer) {
-    recentChainData.setBlockTimelinessIfEmpty(block);
     final ForkChoiceUtil forkChoiceUtil = spec.atSlot(block.getSlot()).getForkChoiceUtil();
     return forkChoiceUtil
         .retrievePreStateRequiredOnBlock(recentChainData.getStore(), block)
@@ -826,6 +825,8 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
         blobSidecars,
         earliestBlobSidecarsSlot);
 
+    // Record only successful imports using the same store time as the boost decision
+    recentChainData.setBlockTimelinessAtImport(block, transaction.getTimeInMillis());
     final boolean shouldUpdateProposerBoostRoot =
         preImportHead
             .filter(
@@ -948,12 +949,17 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
     if (transaction.getProposerBoostRoot().isPresent()) {
       return false;
     }
+    // is_current_slot
+    final UInt64 currentSlot = spec.getCurrentSlot(transaction);
+    if (!block.getSlot().equals(currentSlot)) {
+      return false;
+    }
     // is_timely
     if (recentChainData.isBlockLate(block.getRoot())) {
       return false;
     }
 
-    final UInt64 currentEpoch = spec.computeEpochAtSlot(spec.getCurrentSlot(transaction));
+    final UInt64 currentEpoch = spec.computeEpochAtSlot(currentSlot);
     final Optional<Bytes32> maybeBlockDependentRoot =
         getShufflingDependentRoot(block, currentEpoch, forkChoiceStrategy);
     final Optional<Bytes32> maybeHeadDependentRoot =
