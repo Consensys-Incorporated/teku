@@ -38,6 +38,7 @@ import tech.pegasys.teku.networking.eth2.rpc.core.ResponseCallback;
 import tech.pegasys.teku.networking.eth2.rpc.core.RpcException;
 import tech.pegasys.teku.networking.eth2.rpc.core.RpcException.ResourceUnavailableException;
 import tech.pegasys.teku.spec.Spec;
+import tech.pegasys.teku.spec.SpecMilestone;
 import tech.pegasys.teku.spec.config.SpecConfigDeneb;
 import tech.pegasys.teku.spec.datastructures.blobs.versions.deneb.BlobSidecar;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.BlobSidecarsByRangeRequestMessage;
@@ -89,12 +90,18 @@ public class BlobSidecarsByRangeMessageHandler
           new RpcException(INVALID_REQUEST_CODE, "Requested slot is too far in the future"));
     }
 
+    if (spec.atSlot(maxSlot).getMilestone().isLessThan(SpecMilestone.DENEB)) {
+      requestCounter.labels("pre_deneb_range").inc();
+      return Optional.of(
+          new RpcException(
+              INVALID_REQUEST_CODE, "Blob sidecars not supported for the requested slot range"));
+    }
+
     final UInt64 endSlotBeforeFulu = getEndSlotBeforeFulu(maxSlot);
     final Optional<SpecConfigDeneb> maybeSpecConfig = getSpecConfigDeneb(endSlotBeforeFulu);
     if (maybeSpecConfig.isEmpty()) {
-      // The whole range is before Deneb, so there are no blob sidecars to serve. Accept it here so
-      // it is answered with an empty response after being charged against the peer's request
-      // budget in onIncomingMessage.
+      // Only possible when Fulu activates at the same epoch as Deneb, so no blob sidecars exist on
+      // this network. onIncomingMessage answers with an empty response.
       return Optional.empty();
     }
     final SpecConfigDeneb specConfig = maybeSpecConfig.get();
@@ -160,8 +167,9 @@ public class BlobSidecarsByRangeMessageHandler
     final UInt64 endSlotBeforeFulu = getEndSlotBeforeFulu(endSlot);
     final Optional<SpecConfigDeneb> maybeSpecConfig = getSpecConfigDeneb(endSlotBeforeFulu);
     if (maybeSpecConfig.isEmpty()) {
+      // Fulu activates at the same epoch as Deneb, so there are no blob sidecars on this network
       LOG.trace(
-          "Peer {} requested {} slots of blob sidecars starting at slot {} before Deneb. There are no blob sidecars to serve.",
+          "Peer {} requested {} slots of blob sidecars starting at slot {}, but blob sidecars are never available on this network.",
           peer.getId(),
           message.getCount(),
           startSlot);

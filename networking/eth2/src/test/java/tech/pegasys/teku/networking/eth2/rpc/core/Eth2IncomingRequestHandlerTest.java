@@ -19,6 +19,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -110,6 +111,42 @@ public class Eth2IncomingRequestHandlerTest
     asyncRunner.executeQueuedActions();
     asyncRunner.executeQueuedActions();
     verify(rpcStream, never()).closeAbruptly();
+  }
+
+  @Test
+  public void shouldChargeRequestBudgetWhenRequestFailsValidation() {
+    deliverBytes(invalidRequestData());
+
+    verify(peer, times(1)).approveRequest();
+    verify(peer, never()).adjustReputation(any());
+    // INVALID_REQUEST response code
+    verify(rpcStream).writeBytes(argThat(bytes -> bytes.get(0) == 1));
+  }
+
+  @Test
+  public void shouldRespondWithInvalidRequestWhenRequestBudgetIsExhausted() {
+    when(peer.approveRequest()).thenReturn(false);
+
+    deliverBytes(invalidRequestData());
+
+    verify(peer, times(1)).approveRequest();
+    // INVALID_REQUEST response code
+    verify(rpcStream).writeBytes(argThat(bytes -> bytes.get(0) == 1));
+  }
+
+  @Test
+  public void shouldChargeRequestBudgetOnlyOnceWhenRequestIsValid() {
+    deliverBytes(requestData);
+
+    // charged by the handler itself, not again by the dispatcher
+    verify(peer, times(1)).approveRequest();
+  }
+
+  private Bytes invalidRequestData() {
+    // a step of zero fails BeaconBlocksByRange validation
+    return beaconChainMethods
+        .beaconBlocksByRange()
+        .encodeRequest(new BeaconBlocksByRangeRequestMessage(UInt64.ONE, UInt64.ONE, UInt64.ZERO));
   }
 
   @Test
