@@ -15,6 +15,7 @@ package tech.pegasys.teku.statetransition.attestation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -33,11 +34,16 @@ import static tech.pegasys.teku.statetransition.validation.InternalValidationRes
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 import org.apache.logging.log4j.Level;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import tech.pegasys.infrastructure.logging.LogCaptor;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
@@ -115,6 +121,12 @@ class AttestationManagerTest {
     when(signatureVerificationService.start()).thenReturn(SafeFuture.completedFuture(null));
     when(signatureVerificationService.stop()).thenReturn(SafeFuture.completedFuture(null));
     when(forkChoice.applyIndexedAttestations(any())).thenReturn(completedFuture(List.of()));
+    when(forkChoice.onAttestations(any()))
+        .thenAnswer(
+            invocation ->
+                invocation.<List<ValidatableAttestation>>getArgument(0).stream()
+                    .map(forkChoice::onAttestation)
+                    .toList());
     assertThat(attestationManager.start()).isCompleted();
   }
 
@@ -312,6 +324,129 @@ class AttestationManagerTest {
     assertThat(futureAttestations.size()).isZero();
     assertThat(pendingAttestations.size()).isZero();
     verify(attestationPool).add(attestation);
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  public void shouldProcessAttestationsReleasedByBlockImportAsOneBatch() {
+    final int slot = 1024;
+    onSlot(UInt64.valueOf(slot + 1));
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(slot);
+    final Bytes32 requiredBlockRoot = block.getMessage().hashTreeRoot();
+    final ValidatableAttestation attestation1 =
+        ValidatableAttestation.from(spec, attestationFromSlot(slot, requiredBlockRoot));
+    final ValidatableAttestation attestation2 =
+        ValidatableAttestation.from(spec, attestationFromSlot(slot + 1, requiredBlockRoot));
+    when(forkChoice.onAttestation(any())).thenReturn(completedFuture(UNKNOWN_BLOCK));
+    assertThat(attestationManager.onAttestation(attestation1)).isCompleted();
+    assertThat(attestationManager.onAttestation(attestation2)).isCompleted();
+    assertThat(pendingAttestations.size()).isEqualTo(2);
+
+    when(forkChoice.onAttestation(any())).thenReturn(completedFuture(SUCCESSFUL));
+    attestationManager.onBlockImported(block, false);
+
+    final ArgumentCaptor<List<ValidatableAttestation>> released =
+        ArgumentCaptor.forClass(List.class);
+    verify(forkChoice).onAttestations(released.capture());
+    assertThat(released.getValue()).containsExactlyInAnyOrder(attestation1, attestation2);
+    assertThat(pendingAttestations.size()).isZero();
+    verify(attestationPool).add(attestation1);
+    verify(attestationPool).add(attestation2);
+  }
+
+  @Test
+  public void shouldNotProcessReleasedAttestationStillWaitingForFullPayload() {
+    final int slot = 1024;
+    onSlot(UInt64.valueOf(slot + 1));
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(slot);
+    final Bytes32 requiredBlockRoot = block.getMessage().hashTreeRoot();
+    final ValidatableAttestation attestation =
+        ValidatableAttestation.from(spec, attestationFromSlot(slot, requiredBlockRoot));
+    pendingAttestationPool.addForMissingBlock(attestation);
+    pendingAttestationPool.addForMissingFullPayload(attestation);
+
+    attestationManager.onBlockImported(block, false);
+
+    verify(forkChoice, never()).onAttestations(any());
+    verify(forkChoice, never()).onAttestation(any());
+    assertThat(pendingAttestationPool.contains(attestation)).isTrue();
+  }
+
+  @Test
+  public void shouldOnlyFailOwnAttestationWhenReleasedAttestationFails() {
+    final int slot = 1024;
+    onSlot(UInt64.valueOf(slot + 1));
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(slot);
+    final Bytes32 requiredBlockRoot = block.getMessage().hashTreeRoot();
+    final ValidatableAttestation attestation1 =
+        ValidatableAttestation.from(spec, attestationFromSlot(slot, requiredBlockRoot));
+    final ValidatableAttestation attestation2 =
+        ValidatableAttestation.from(spec, attestationFromSlot(slot + 1, requiredBlockRoot));
+    when(forkChoice.onAttestation(any())).thenReturn(completedFuture(UNKNOWN_BLOCK));
+    assertThat(attestationManager.onAttestation(attestation1)).isCompleted();
+    assertThat(attestationManager.onAttestation(attestation2)).isCompleted();
+
+    when(forkChoice.onAttestation(attestation1))
+        .thenReturn(SafeFuture.failedFuture(new RejectedExecutionException("Queue is full")));
+    when(forkChoice.onAttestation(attestation2)).thenReturn(completedFuture(SUCCESSFUL));
+    attestationManager.onBlockImported(block, false);
+
+    verify(attestationPool, never()).add(attestation1);
+    verify(attestationPool).add(attestation2);
+  }
+
+  @Test
+  public void shouldNotMissPayloadImportedWhileLaterBatchesAreProcessed() {
+    final int slot = 1024;
+    onSlot(UInt64.valueOf(slot + 1));
+    final SignedBeaconBlock block = dataStructureUtil.randomSignedBeaconBlock(slot);
+    final Bytes32 blockRoot = block.getMessage().hashTreeRoot();
+    final SignedExecutionPayloadEnvelope executionPayload =
+        mock(SignedExecutionPayloadEnvelope.class);
+    when(executionPayload.getBeaconBlockRoot()).thenReturn(blockRoot);
+    // One more full payload vote than fits in a fork choice batch, all waiting for the block
+    final int attestationCount = ForkChoice.MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK + 1;
+    final AttestationData data = fullPayloadAttestationFromSlot(slot, blockRoot).getData();
+    final List<ValidatableAttestation> attestations =
+        IntStream.range(0, attestationCount)
+            .mapToObj(
+                i ->
+                    ValidatableAttestation.from(
+                        spec,
+                        attestationSchema.create(
+                            attestationSchema
+                                .getAggregationBitsSchema()
+                                .ofBits(attestationCount, i),
+                            data,
+                            BLSSignature.empty())))
+            .toList();
+    attestations.forEach(pendingAttestationPool::addForMissingBlock);
+    // Fork choice finds the payload missing for the first batch of votes. The payload is then
+    // imported while the next batch is being validated.
+    final AtomicInteger validatedCount = new AtomicInteger();
+    final AtomicBoolean payloadImported = new AtomicBoolean();
+    doAnswer(
+            invocation ->
+                invocation.<List<ValidatableAttestation>>getArgument(0).stream()
+                    .map(
+                        attestation -> {
+                          if (validatedCount.getAndIncrement()
+                              == ForkChoice.MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK) {
+                            payloadImported.set(true);
+                            attestationManager.onExecutionPayloadImported(executionPayload, false);
+                          }
+                          return completedFuture(
+                              payloadImported.get() ? SUCCESSFUL : UNKNOWN_EXECUTION_PAYLOAD);
+                        })
+                    .toList())
+        .when(forkChoice)
+        .onAttestations(any());
+
+    attestationManager.onBlockImported(block, false);
+
+    // No vote is left waiting for the payload that has already been imported
+    assertThat(attestations.stream().filter(pendingAttestationPool::contains).count()).isZero();
+    verify(attestationPool, times(attestationCount)).add(any());
   }
 
   @Test

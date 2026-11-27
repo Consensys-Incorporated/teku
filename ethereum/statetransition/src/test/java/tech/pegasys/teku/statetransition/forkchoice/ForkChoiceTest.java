@@ -20,8 +20,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
@@ -41,9 +44,12 @@ import static tech.pegasys.teku.statetransition.forkchoice.ForkChoice.BLOCK_CREA
 import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.ints.IntSet;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -67,6 +73,7 @@ import tech.pegasys.teku.bls.BLSPublicKey;
 import tech.pegasys.teku.bls.BLSSignature;
 import tech.pegasys.teku.bls.BLSSignatureVerifier;
 import tech.pegasys.teku.ethereum.performance.trackers.BlockProductionPerformance;
+import tech.pegasys.teku.infrastructure.async.ExceptionThrowingSupplier;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
 import tech.pegasys.teku.infrastructure.async.StubAsyncRunner;
 import tech.pegasys.teku.infrastructure.async.eventthread.InlineEventThread;
@@ -95,9 +102,11 @@ import tech.pegasys.teku.spec.datastructures.execution.PowBlock;
 import tech.pegasys.teku.spec.datastructures.forkchoice.FastConfirmationStore;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoiceNode;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ForkChoicePayloadStatus;
+import tech.pegasys.teku.spec.datastructures.forkchoice.InvalidCheckpointException;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ProtoNodeData;
 import tech.pegasys.teku.spec.datastructures.forkchoice.ReadOnlyForkChoiceStrategy;
 import tech.pegasys.teku.spec.datastructures.forkchoice.SlotAndForkChoiceNode;
+import tech.pegasys.teku.spec.datastructures.forkchoice.VoteUpdater;
 import tech.pegasys.teku.spec.datastructures.operations.Attestation;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationData;
 import tech.pegasys.teku.spec.datastructures.operations.AttestationSchema;
@@ -107,6 +116,7 @@ import tech.pegasys.teku.spec.datastructures.state.Checkpoint;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.BeaconState;
 import tech.pegasys.teku.spec.datastructures.state.beaconstate.versions.gloas.BeaconStateGloas;
 import tech.pegasys.teku.spec.datastructures.util.AttestationProcessingResult;
+import tech.pegasys.teku.spec.datastructures.util.AttestationProcessingResult.Status;
 import tech.pegasys.teku.spec.executionlayer.ExecutionLayerChannelStub;
 import tech.pegasys.teku.spec.executionlayer.ExecutionPayloadStatus;
 import tech.pegasys.teku.spec.executionlayer.ForkChoiceState;
@@ -1879,6 +1889,361 @@ class ForkChoiceTest {
   }
 
   @Test
+  @SuppressWarnings("unchecked")
+  void onAttestations_shouldApplyAllVotesInOneForkChoiceTask() {
+    final List<SignedBlockAndState> targetBlocks = importChainOfBlocks(3);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final List<ValidatableAttestation> attestations =
+        Stream.concat(
+                targetBlocks.stream().map(this::validAttestationForBlock),
+                Stream.of(attestationWithTargetAfterEpochStart(targetBlocks.getLast())))
+            .toList();
+    final InlineEventThread forkChoiceThread = spy(new InlineEventThread());
+    final ForkChoice batchForkChoice = createForkChoice(recentChainData, forkChoiceThread);
+    // Ignore tasks run when the fork choice is created
+    clearInvocations(forkChoiceThread);
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        batchForkChoice.onAttestations(attestations);
+
+    assertThat(results).hasSize(4);
+    for (int i = 0; i < 3; i++) {
+      assertThat(results.get(i)).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
+    }
+    assertThat(results.get(3))
+        .isCompletedWithValueMatching(result -> result.getStatus() == Status.INVALID);
+    verify(forkChoiceThread, times(1)).execute(any(ExceptionThrowingSupplier.class));
+
+    processHead(UInt64.valueOf(5));
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy =
+        recentChainData.getForkChoiceStrategy().orElseThrow();
+    assertThat(forkChoiceStrategy.getWeight(targetBlocks.getLast().getRoot()).orElseThrow())
+        .isGreaterThan(ZERO);
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void onAttestations_shouldSplitLargeBatchesIntoSeveralForkChoiceTasks() {
+    final SignedBlockAndState targetBlock = importChainOfBlocks(1).getFirst();
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final ValidatableAttestation attestation = validAttestationForBlock(targetBlock);
+    final List<ValidatableAttestation> attestations =
+        Collections.nCopies(ForkChoice.MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK + 1, attestation);
+    final InlineEventThread forkChoiceThread = spy(new InlineEventThread());
+    final ForkChoice batchForkChoice = createForkChoice(recentChainData, forkChoiceThread);
+    // Ignore tasks run when the fork choice is created
+    clearInvocations(forkChoiceThread);
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        batchForkChoice.onAttestations(attestations);
+
+    assertThat(results).hasSize(attestations.size());
+    assertThat(results)
+        .allSatisfy(
+            result ->
+                assertThat(result).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL));
+    verify(forkChoiceThread, times(2)).execute(any(ExceptionThrowingSupplier.class));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void onAttestations_shouldOnlyFailAttestationsOfRejectedForkChoiceTask() {
+    final List<SignedBlockAndState> targetBlocks = importChainOfBlocks(2);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final List<ValidatableAttestation> attestations =
+        Collections.nCopies(
+            ForkChoice.MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK + 1,
+            validAttestationForBlock(targetBlocks.getFirst()));
+    final InlineEventThread forkChoiceThread = spy(new InlineEventThread());
+    final ForkChoice batchForkChoice = createForkChoice(recentChainData, forkChoiceThread);
+    doCallRealMethod()
+        .doReturn(SafeFuture.failedFuture(new RejectedExecutionException("Queue is full")))
+        .doCallRealMethod()
+        .when(forkChoiceThread)
+        .execute(any(ExceptionThrowingSupplier.class));
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        batchForkChoice.onAttestations(attestations);
+
+    assertThat(results.subList(0, ForkChoice.MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK))
+        .allSatisfy(
+            result ->
+                assertThat(result).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL));
+    assertThatSafeFuture(results.getLast())
+        .isCompletedExceptionallyWith(RejectedExecutionException.class);
+    // A later attestation still gets applied
+    assertThat(batchForkChoice.onAttestation(validAttestationForBlock(targetBlocks.getLast())))
+        .isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void onAttestations_shouldFailAttestationsWaitingForRejectedForkChoiceTask() {
+    final List<SignedBlockAndState> targetBlocks = importChainOfBlocks(2);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final List<ValidatableAttestation> attestations =
+        List.of(
+            validAttestationForBlock(targetBlocks.getFirst()),
+            attestationWithTargetAfterEpochStart(targetBlocks.getLast()),
+            validAttestationForBlock(targetBlocks.getLast()));
+    final InlineEventThread forkChoiceThread = spy(new InlineEventThread());
+    final ForkChoice batchForkChoice = createForkChoice(recentChainData, forkChoiceThread);
+    // Ignore tasks run when the fork choice is created
+    clearInvocations(forkChoiceThread);
+    doReturn(SafeFuture.failedFuture(new RejectedExecutionException("Queue is full")))
+        .when(forkChoiceThread)
+        .execute(any(ExceptionThrowingSupplier.class));
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        batchForkChoice.onAttestations(attestations);
+
+    assertThatSafeFuture(results.get(0))
+        .isCompletedExceptionallyWith(RejectedExecutionException.class);
+    // Only the attestations that needed the fork choice thread fail
+    assertThat(results.get(1))
+        .isCompletedWithValueMatching(result -> result.getStatus() == Status.INVALID);
+    assertThatSafeFuture(results.get(2))
+        .isCompletedExceptionallyWith(RejectedExecutionException.class);
+  }
+
+  @Test
+  void onAttestations_shouldOnlyAffectOwnResultWhenValidationFails() {
+    final List<SignedBlockAndState> targetBlocks = importChainOfBlocks(3);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final ValidatableAttestation valid = validAttestationForBlock(targetBlocks.get(0));
+    final ValidatableAttestation invalidCheckpoint = validAttestationForBlock(targetBlocks.get(1));
+    final ValidatableAttestation failing = validAttestationForBlock(targetBlocks.get(2));
+    doReturn(SafeFuture.failedFuture(new InvalidCheckpointException("Bad checkpoint")))
+        .when(spec)
+        .validateAttestationAsync(any(), eq(invalidCheckpoint), any(), any());
+    doReturn(SafeFuture.failedFuture(new IllegalStateException("Boom")))
+        .when(spec)
+        .validateAttestationAsync(any(), eq(failing), any(), any());
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        forkChoice.onAttestations(List.of(valid, invalidCheckpoint, failing));
+
+    assertThat(results.get(0)).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
+    assertThat(results.get(1))
+        .isCompletedWithValue(AttestationProcessingResult.invalid("Bad checkpoint"));
+    assertThatSafeFuture(results.get(2)).isCompletedExceptionallyWith(IllegalStateException.class);
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void onAttestations_shouldApplyVotesInOneTaskOnceAllAttestationsAreValidated() {
+    final List<SignedBlockAndState> targetBlocks = importChainOfBlocks(3);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final List<ValidatableAttestation> attestations =
+        targetBlocks.stream().map(this::validAttestationForBlock).toList();
+    // Validate two of the attestations once so they have their indexed attestation, then make their
+    // next validation wait, as if their signatures were still being verified
+    final List<SafeFuture<AttestationProcessingResult>> slowValidations = new ArrayList<>();
+    for (final ValidatableAttestation slow : attestations.subList(1, 3)) {
+      assertThat(forkChoice.onAttestation(slow))
+          .isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
+      final SafeFuture<AttestationProcessingResult> slowValidation = new SafeFuture<>();
+      doReturn(slowValidation).when(spec).validateAttestationAsync(any(), eq(slow), any(), any());
+      slowValidations.add(slowValidation);
+    }
+    final InlineEventThread forkChoiceThread = spy(new InlineEventThread());
+    final ForkChoice batchForkChoice = createForkChoice(recentChainData, forkChoiceThread);
+    // Ignore tasks run when the fork choice is created
+    clearInvocations(forkChoiceThread);
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        batchForkChoice.onAttestations(attestations);
+    slowValidations.getFirst().complete(AttestationProcessingResult.SUCCESSFUL);
+
+    // Validations finishing one by one don't get a fork choice task each
+    assertThat(results).allSatisfy(result -> assertThat(result).isNotDone());
+    verify(forkChoiceThread, never()).execute(any(ExceptionThrowingSupplier.class));
+
+    slowValidations.getLast().complete(AttestationProcessingResult.SUCCESSFUL);
+
+    assertThat(results)
+        .allSatisfy(
+            result ->
+                assertThat(result).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL));
+    verify(forkChoiceThread, times(1)).execute(any(ExceptionThrowingSupplier.class));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void onAttestations_shouldScheduleNewTaskAfterRejectedOne() {
+    final List<SignedBlockAndState> targetBlocks = importChainOfBlocks(2);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final InlineEventThread forkChoiceThread = spy(new InlineEventThread());
+    final ForkChoice batchForkChoice = createForkChoice(recentChainData, forkChoiceThread);
+    doReturn(SafeFuture.failedFuture(new RejectedExecutionException("Queue is full")))
+        .doCallRealMethod()
+        .when(forkChoiceThread)
+        .execute(any(ExceptionThrowingSupplier.class));
+
+    assertThatSafeFuture(
+            batchForkChoice.onAttestation(validAttestationForBlock(targetBlocks.getFirst())))
+        .isCompletedExceptionallyWith(RejectedExecutionException.class);
+    assertThat(batchForkChoice.onAttestation(validAttestationForBlock(targetBlocks.getLast())))
+        .isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
+  }
+
+  @Test
+  void onAttestations_shouldFailOnlyOwnAttestationWhenLateValidationFails() {
+    final List<SignedBlockAndState> targetBlocks = importChainOfBlocks(2);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final ValidatableAttestation slow = validAttestationForBlock(targetBlocks.getFirst());
+    final ValidatableAttestation valid = validAttestationForBlock(targetBlocks.getLast());
+    final SafeFuture<AttestationProcessingResult> slowValidation = new SafeFuture<>();
+    doReturn(slowValidation).when(spec).validateAttestationAsync(any(), eq(slow), any(), any());
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        forkChoice.onAttestations(List.of(slow, valid));
+    slowValidation.completeExceptionally(new IllegalStateException("Boom"));
+
+    assertThatSafeFuture(results.get(0)).isCompletedExceptionallyWith(IllegalStateException.class);
+    assertThat(results.get(1)).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
+  }
+
+  @Test
+  void onAttestations_shouldFailBatchWhenForkChoiceIsUnavailable() {
+    final List<SignedBlockAndState> targetBlocks = importChainOfBlocks(2);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final RecentChainData chainData = spy(recentChainData);
+    final ForkChoice batchForkChoice = createForkChoice(chainData);
+    doReturn(Optional.empty()).when(chainData).getUpdatableForkChoiceStrategy();
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        batchForkChoice.onAttestations(
+            targetBlocks.stream().map(this::validAttestationForBlock).toList());
+
+    assertThat(results)
+        .allSatisfy(
+            result ->
+                assertThatSafeFuture(result)
+                    .isCompletedExceptionallyWith(IllegalStateException.class));
+  }
+
+  @Test
+  void onAttestations_shouldOnlyFailOwnAttestationWhenApplyingItFails() {
+    final List<SignedBlockAndState> targetBlocks = importChainOfBlocks(3);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final ValidatableAttestation valid1 = validAttestationForBlock(targetBlocks.get(0));
+    final ValidatableAttestation failing = validAttestationForBlock(targetBlocks.get(1));
+    final ValidatableAttestation valid2 = validAttestationForBlock(targetBlocks.get(2));
+    // Give the failing attestation an indexed attestation from a slot that fork choice can't
+    // process, so that only applying its vote throws
+    final UInt64 unprocessableSlot = UInt64.valueOf(999);
+    final AttestationData data = failing.getData();
+    failing.setIndexedAttestation(
+        new IndexedAttestationLight(
+            List.of(ZERO),
+            new AttestationData(
+                unprocessableSlot,
+                data.getIndex(),
+                data.getBeaconBlockRoot(),
+                data.getSource(),
+                data.getTarget()),
+            BLSSignature.empty()));
+    failing.setValidIndexedAttestation();
+    doThrow(new IllegalStateException("Boom")).when(spec).atSlot(unprocessableSlot);
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        forkChoice.onAttestations(List.of(valid1, failing, valid2));
+
+    assertThat(results.get(0)).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
+    assertThatSafeFuture(results.get(1)).isCompletedExceptionallyWith(IllegalStateException.class);
+    assertThat(results.get(2)).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
+
+    // The votes of the other attestations were still committed
+    processHead(UInt64.valueOf(5));
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy =
+        recentChainData.getForkChoiceStrategy().orElseThrow();
+    assertThat(forkChoiceStrategy.getWeight(targetBlocks.getLast().getRoot()).orElseThrow())
+        .isGreaterThan(ZERO);
+  }
+
+  @Test
+  void onAttestations_shouldFailOnlyOwnAttestationWhenStartingValidationThrows() {
+    final SignedBlockAndState targetBlock = importChainOfBlocks(1).getFirst();
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final ValidatableAttestation valid = validAttestationForBlock(targetBlock);
+    final ValidatableAttestation throwing = mock(ValidatableAttestation.class);
+    when(throwing.getData()).thenThrow(new IllegalStateException("Boom"));
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        forkChoice.onAttestations(List.of(throwing, valid));
+
+    assertThatSafeFuture(results.get(0)).isCompletedExceptionallyWith(IllegalStateException.class);
+    assertThat(results.get(1)).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
+  }
+
+  @Test
+  void onAttestations_shouldOnlyFailVotesWhenCommitFails() {
+    setupWithSpec(
+        TestSpecFactory.createMinimalGloas(
+            builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
+
+    final SignedBlockAndState targetBlock = chainBuilder.generateBlockAtSlot(ONE);
+    importBlock(targetBlock);
+
+    final UInt64 attestationSlot = targetBlock.getSlot().plus(1);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(attestationSlot.plus(1));
+    // One vote that is applied in the batch's vote transaction, and one that isn't because it
+    // has to wait for the payload
+    final ValidatableAttestation vote =
+        createPrevalidatedAttestation(targetBlock, attestationSlot, ZERO);
+    final ValidatableAttestation fullPayloadVote =
+        createPrevalidatedFullPayloadAttestation(targetBlock, attestationSlot);
+    final RecentChainData chainData = spy(recentChainData);
+    final ForkChoice batchForkChoice = createForkChoice(chainData);
+    doAnswer(
+            invocation -> {
+              final VoteUpdater transaction = spy((VoteUpdater) invocation.callRealMethod());
+              doThrow(new IllegalStateException("Boom")).when(transaction).commit();
+              return transaction;
+            })
+        .when(chainData)
+        .startVoteUpdate();
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        batchForkChoice.onAttestations(List.of(vote, fullPayloadVote));
+
+    assertThatSafeFuture(results.get(0)).isCompletedExceptionallyWith(IllegalStateException.class);
+    assertThat(results.get(1))
+        .isCompletedWithValue(AttestationProcessingResult.UNKNOWN_EXECUTION_PAYLOAD);
+  }
+
+  private List<SignedBlockAndState> importChainOfBlocks(final int count) {
+    final List<SignedBlockAndState> blocks = new ArrayList<>();
+    for (int slot = 1; slot <= count; slot++) {
+      final SignedBlockAndState block = chainBuilder.generateBlockAtSlot(slot);
+      importBlock(block);
+      blocks.add(block);
+    }
+    return blocks;
+  }
+
+  private ValidatableAttestation validAttestationForBlock(final SignedBlockAndState block) {
+    return ValidatableAttestation.from(
+        spec, chainBuilder.streamValidAttestationsWithTargetBlock(block).findFirst().orElseThrow());
+  }
+
+  private ValidatableAttestation attestationWithTargetAfterEpochStart(
+      final SignedBlockAndState block) {
+    final Attestation attestation =
+        attestationSchema.create(
+            attestationSchema.getAggregationBitsSchema().ofBits(5),
+            new AttestationData(
+                block.getSlot(),
+                spec.computeEpochAtSlot(block.getSlot()),
+                block.getRoot(),
+                block.getState().getCurrentJustifiedCheckpoint(),
+                new Checkpoint(ZERO, block.getRoot())),
+            BLSSignature.empty());
+    return ValidatableAttestation.from(spec, attestation);
+  }
+
+  @Test
   void onAttestation_shouldDeferAttestationsFromCurrentSlot() {
     storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(10));
     final UInt64 currentSlot = recentChainData.getCurrentSlot().orElseThrow();
@@ -2438,6 +2803,46 @@ class ForkChoiceTest {
   }
 
   @Test
+  void onAttestation_gloasFullVoteFromCurrentSlotShouldBeDeferredWhenPayloadIsPresent() {
+    setupWithSpec(
+        TestSpecFactory.createMinimalGloas(
+            builder -> builder.blsSignatureVerifier(BLSSignatureVerifier.NOOP)));
+
+    final SignedBlockAndState targetBlock = chainBuilder.generateBlockAtSlot(ONE);
+    importBlock(targetBlock);
+    importPayload(targetBlock);
+
+    final UInt64 attestationSlot = targetBlock.getSlot().plus(1);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(attestationSlot);
+    final ValidatableAttestation attestation =
+        createPrevalidatedFullPayloadAttestation(targetBlock, attestationSlot);
+
+    assertThat(forkChoice.onAttestation(attestation))
+        .isCompletedWithValue(AttestationProcessingResult.DEFER_FOR_FORK_CHOICE);
+
+    final ReadOnlyForkChoiceStrategy forkChoiceStrategy =
+        recentChainData.getForkChoiceStrategy().orElseThrow();
+    assertThat(fullPayloadWeight(forkChoiceStrategy, targetBlock)).isEqualTo(ZERO);
+
+    // The deferred vote is applied at the start of the next slot
+    forkChoice.onTick(
+        spec.computeTimeMillisAtSlot(
+            attestationSlot.plus(1), recentChainData.getGenesisTimeMillis()),
+        Optional.empty());
+    processHead(attestationSlot.plus(1));
+
+    assertThat(fullPayloadWeight(forkChoiceStrategy, targetBlock)).isGreaterThan(ZERO);
+  }
+
+  private UInt64 fullPayloadWeight(
+      final ReadOnlyForkChoiceStrategy forkChoiceStrategy, final SignedBlockAndState block) {
+    return forkChoiceStrategy
+        .getBlockData(block.getRoot(), ForkChoicePayloadStatus.PAYLOAD_STATUS_FULL)
+        .orElseThrow()
+        .getWeight();
+  }
+
+  @Test
   void applyIndexedAttestations_gloasFullVoteShouldNotApplyWhenExecutionPayloadMissing() {
     setupWithSpec(
         TestSpecFactory.createMinimalGloas(
@@ -2628,12 +3033,17 @@ class ForkChoiceTest {
   }
 
   private ForkChoice createForkChoice(final RecentChainData recentChainData) {
+    return createForkChoice(recentChainData, eventThread);
+  }
+
+  private ForkChoice createForkChoice(
+      final RecentChainData recentChainData, final InlineEventThread forkChoiceThread) {
     return new ForkChoice(
         spec,
-        eventThread,
+        forkChoiceThread,
         recentChainData,
         forkChoiceNotifier,
-        new ForkChoiceStateProvider(eventThread, recentChainData),
+        new ForkChoiceStateProvider(forkChoiceThread, recentChainData),
         new TickProcessor(spec, recentChainData),
         transitionBlockValidator,
         FastConfirmationTracker.NOOP,
@@ -2661,6 +3071,11 @@ class ForkChoiceTest {
 
   private ValidatableAttestation createPrevalidatedFullPayloadAttestation(
       final SignedBlockAndState targetBlock, final UInt64 attestationSlot) {
+    return createPrevalidatedAttestation(targetBlock, attestationSlot, UInt64.ONE);
+  }
+
+  private ValidatableAttestation createPrevalidatedAttestation(
+      final SignedBlockAndState targetBlock, final UInt64 attestationSlot, final UInt64 index) {
     final UInt64 targetEpoch = spec.computeEpochAtSlot(attestationSlot);
     final Bytes32 targetRoot =
         recentChainData
@@ -2671,7 +3086,7 @@ class ForkChoiceTest {
     final AttestationData data =
         new AttestationData(
             attestationSlot,
-            UInt64.ONE,
+            index,
             targetBlock.getRoot(),
             recentChainData.getStore().getJustifiedCheckpoint(),
             new Checkpoint(targetEpoch, targetRoot));

@@ -13,6 +13,7 @@
 
 package tech.pegasys.teku.statetransition.attestation;
 
+import com.google.common.collect.Lists;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.RejectedExecutionException;
@@ -219,16 +220,9 @@ public class AttestationManager extends Service
   public void onBlockImported(final SignedBeaconBlock block, final boolean executionOptimistic) {
     final Bytes32 blockRoot = block.getMessage().hashTreeRoot();
     activeValidatorChannel.onBlockImported(block);
-    pendingAttestationPool
-        .removeAttestationsWaitingForBlock(blockRoot)
-        .forEach(
-            attestation ->
-                onAttestation(attestation)
-                    .finish(
-                        err ->
-                            logProcessingFailure(
-                                "Failed to process pending attestation dependent on " + blockRoot,
-                                err)));
+    onPendingAttestations(
+        pendingAttestationPool.removeAttestationsWaitingForBlock(blockRoot),
+        "Failed to process pending attestation dependent on " + blockRoot);
   }
 
   @Override
@@ -241,17 +235,39 @@ public class AttestationManager extends Service
   public void onExecutionPayloadImported(
       final SignedExecutionPayloadEnvelope executionPayload, final boolean executionOptimistic) {
     final Bytes32 blockRoot = executionPayload.getBeaconBlockRoot();
-    pendingAttestationPool
-        .removeAttestationsWaitingForFullPayload(blockRoot)
-        .forEach(
-            attestation ->
-                onAttestation(attestation)
-                    .finish(
-                        err ->
-                            logProcessingFailure(
-                                "Failed to process pending attestation dependent on full payload "
-                                    + blockRoot,
-                                err)));
+    onPendingAttestations(
+        pendingAttestationPool.removeAttestationsWaitingForFullPayload(blockRoot),
+        "Failed to process pending attestation dependent on full payload " + blockRoot);
+  }
+
+  /**
+   * Processes the attestations released from the pending pool once the block or payload they were
+   * waiting for has been imported. They are passed to fork choice in batches: most had their
+   * signatures verified before they were deferred, so processing them one at a time would flood the
+   * fork choice thread's queue with thousands of tasks at once.
+   *
+   * <p>The results of a batch are handled before the next batch is validated. Otherwise fork choice
+   * could find a payload missing for an early batch long before those attestations are put back in
+   * the pending pool, and if the payload is imported in between, nothing releases them again.
+   */
+  private void onPendingAttestations(
+      final List<ValidatableAttestation> releasedAttestations, final String failureDescription) {
+    final List<ValidatableAttestation> attestations =
+        releasedAttestations.stream()
+            .filter(attestation -> !pendingAttestationPool.contains(attestation))
+            .toList();
+    for (final List<ValidatableAttestation> batch :
+        Lists.partition(attestations, ForkChoice.MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK)) {
+      final List<SafeFuture<AttestationProcessingResult>> results =
+          attestationProcessor.onAttestations(batch);
+      for (int i = 0; i < batch.size(); i++) {
+        final ValidatableAttestation attestation = batch.get(i);
+        results
+            .get(i)
+            .thenApply(result -> onAttestationProcessed(attestation, result))
+            .finish(err -> logProcessingFailure(failureDescription, err));
+      }
+    }
   }
 
   /**
@@ -276,47 +292,50 @@ public class AttestationManager extends Service
 
     return attestationProcessor
         .onAttestation(attestation)
-        .thenApply(
-            result -> {
-              activeValidatorChannel.onAttestation(attestation);
+        .thenApply(result -> onAttestationProcessed(attestation, result));
+  }
 
-              switch (result.getStatus()) {
-                case SUCCESSFUL -> {
-                  LOG.trace("Processed attestation {} successfully", attestation::hashTreeRoot);
-                  aggregatingAttestationPool.add(attestation);
-                  sendToSubscribersIfProducedLocally(attestation);
-                }
-                case UNKNOWN_BLOCK -> {
-                  LOG.trace(
-                      "Deferring attestation {} as required block is not yet present",
-                      attestation::hashTreeRoot);
-                  pendingAttestationPool.addForMissingBlock(attestation);
-                }
-                case UNKNOWN_EXECUTION_PAYLOAD -> {
-                  LOG.trace(
-                      "Deferring attestation {} as required full payload is not yet present",
-                      attestation::hashTreeRoot);
-                  pendingAttestationPool.addForMissingFullPayload(attestation);
-                }
-                case DEFER_FORK_CHOICE_PROCESSING -> {
-                  LOG.trace(
-                      "Defer fork choice processing of attestation {}", attestation::hashTreeRoot);
-                  sendToSubscribersIfProducedLocally(attestation);
-                  aggregatingAttestationPool.add(attestation);
-                }
-                case SAVED_FOR_FUTURE -> {
-                  LOG.trace(
-                      "Deferring attestation {} until a future slot", attestation::hashTreeRoot);
-                  aggregatingAttestationPool.add(attestation);
-                  futureAttestations.add(attestation);
-                }
-                case INVALID -> {}
-                default ->
-                    throw new UnsupportedOperationException(
-                        "AttestationProcessingResult is unrecognizable");
-              }
-              return result;
-            });
+  private AttestationProcessingResult onAttestationProcessed(
+      final ValidatableAttestation attestation, final AttestationProcessingResult result) {
+    activeValidatorChannel.onAttestation(attestation);
+
+    switch (result.getStatus()) {
+      case SUCCESSFUL -> {
+        LOG.trace("Processed attestation {} successfully", attestation::hashTreeRoot);
+        aggregatingAttestationPool.add(attestation);
+        sendToSubscribersIfProducedLocally(attestation);
+      }
+      case UNKNOWN_BLOCK -> {
+        LOG.trace(
+            "Deferring attestation {} as required block is not yet present",
+            attestation::hashTreeRoot);
+        pendingAttestationPool.addForMissingBlock(attestation);
+      }
+      case UNKNOWN_EXECUTION_PAYLOAD -> {
+        LOG.trace(
+            "Deferring attestation {} as required full payload is not yet present",
+            attestation::hashTreeRoot);
+        // Known race: if the payload import notification is handled after fork choice found the
+        // payload missing but before the attestation is added here, nothing releases it again. It
+        // then stays pending until it expires, and this node misses the vote. The window is narrow
+        // and the risk is accepted.
+        pendingAttestationPool.addForMissingFullPayload(attestation);
+      }
+      case DEFER_FORK_CHOICE_PROCESSING -> {
+        LOG.trace("Defer fork choice processing of attestation {}", attestation::hashTreeRoot);
+        sendToSubscribersIfProducedLocally(attestation);
+        aggregatingAttestationPool.add(attestation);
+      }
+      case SAVED_FOR_FUTURE -> {
+        LOG.trace("Deferring attestation {} until a future slot", attestation::hashTreeRoot);
+        aggregatingAttestationPool.add(attestation);
+        futureAttestations.add(attestation);
+      }
+      case INVALID -> {}
+      default ->
+          throw new UnsupportedOperationException("AttestationProcessingResult is unrecognizable");
+    }
+    return result;
   }
 
   private void sendToSubscribersIfProducedLocally(final ValidatableAttestation attestation) {
