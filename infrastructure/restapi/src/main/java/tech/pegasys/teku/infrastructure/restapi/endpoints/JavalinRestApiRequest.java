@@ -143,7 +143,8 @@ public class JavalinRestApiRequest implements RestApiRequest {
       if (maybeResponse.isEmpty()) {
         respondWithTimeout();
       } else {
-        respond(maybeResponse.get().getResponseCode(), maybeResponse.get().getResponseBody());
+        respondWithOptionalBody(
+            maybeResponse.get().getResponseCode(), maybeResponse.get().getResponseBody());
       }
     } catch (final JsonProcessingException e) {
       LOG.trace("Failed to generate API response", e);
@@ -174,7 +175,7 @@ public class JavalinRestApiRequest implements RestApiRequest {
     context.json(JsonUtil.serialize(TIMEOUT_ERROR, HTTP_ERROR_RESPONSE_TYPE));
   }
 
-  private void respond(final int statusCode, final Optional<Object> response)
+  private void respondWithOptionalBody(final int statusCode, final Optional<Object> response)
       throws JsonProcessingException {
     context.status(statusCode);
     if (response.isPresent()) {
