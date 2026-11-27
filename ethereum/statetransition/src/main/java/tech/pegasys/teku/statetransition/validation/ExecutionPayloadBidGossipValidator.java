@@ -398,6 +398,13 @@ public class ExecutionPayloadBidGossipValidator {
 
               // Check if our bid was actually accepted
               if (!wasBidAccepted(bidValue, existingBidRef.get(), actualHighestBid)) {
+                // The bid is not forwarded, so it must not use up the builder's bid limit
+                final Map<BuilderAndParent, UInt64> bidCounts =
+                    executionPayloadBidCounts.get(bid.getSlot());
+                if (bidCounts != null) {
+                  bidCounts.computeIfPresent(
+                      builderAndParent, (key, count) -> count.minusMinZero(1));
+                }
                 final UInt64 minRequired = calculateMinimumRequiredBid(actualHighestBid);
                 return ignoreBid(
                     bid,
