@@ -46,6 +46,11 @@ public class DelegatingSpecConfigGloas extends DelegatingSpecConfigFulu implemen
   }
 
   @Override
+  public UInt64 getMinTransactionGas() {
+    return delegate.getMinTransactionGas();
+  }
+
+  @Override
   public int getMinBuilderWithdrawabilityDelay() {
     return delegate.getMinBuilderWithdrawabilityDelay();
   }
