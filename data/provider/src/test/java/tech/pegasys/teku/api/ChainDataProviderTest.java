@@ -1573,6 +1573,8 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
     ArrayList<Arguments> args = new ArrayList<>();
     args.add(Arguments.of(stateSlot, currentEpoch - epochsPerHistoricalVector, Optional.empty()));
     args.add(Arguments.of(stateSlot, currentEpoch + 1, Optional.empty()));
+    // at epoch `epochsPerHistoricalVector`, the mix of epoch 0 is overwritten
+    args.add(Arguments.of(epochsPerHistoricalVector * slotsPerEpoch, 0, Optional.empty()));
     final Optional<Bytes32> randao =
         Optional.of(
             Bytes32.fromHexString(
