@@ -26,6 +26,7 @@ import static tech.pegasys.teku.infrastructure.async.SafeFutureAssert.assertThat
 import static tech.pegasys.teku.infrastructure.logging.Converter.gweiToEth;
 import static tech.pegasys.teku.spec.config.Constants.MAX_SLOTS_TO_TRACK_BUILDERS_BIDS;
 import static tech.pegasys.teku.spec.config.SpecConfigGloas.PAYLOAD_BUILDER_VERSION;
+import static tech.pegasys.teku.spec.constants.EthConstants.ETH_TO_GWEI;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ACCEPT;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.ignore;
 import static tech.pegasys.teku.statetransition.validation.InternalValidationResult.reject;
@@ -136,7 +137,8 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .thenReturn(Optional.of(dependentRoot));
     // Replace the random builders so that the bid's builder index is in range and every builder
     // carries PAYLOAD_BUILDER_VERSION; randomBuilder() assigns a random version, which the
-    // payload-builder-version rule would reject.
+    // payload-builder-version rule would reject. Each builder has a balance of 1 ETH, so it may
+    // submit a single bid per slot and parent.
     postState =
         dataStructureUtil
             .randomBeaconState()
@@ -150,6 +152,7 @@ public class ExecutionPayloadBidGossipValidatorTest {
                         dataStructureUtil
                             .builderBuilder()
                             .version(PAYLOAD_BUILDER_VERSION)
+                            .balance(ETH_TO_GWEI)
                             .build());
                   }
                 });
@@ -696,17 +699,66 @@ public class ExecutionPayloadBidGossipValidatorTest {
   }
 
   @TestTemplate
-  void shouldIgnore_whenAlreadySeen() {
+  void shouldIgnore_whenBuilderBidLimitReached() {
     assertThatSafeFuture(bidValidator.validate(signedBid)).isCompletedWithValue(ACCEPT);
+    // A higher bid from the same builder for the same slot and parent, so only the bid limit check
+    // can trigger
+    final SignedExecutionPayloadBid higherBid =
+        bidFromBuilder(builderIndex, bid.getValue().times(2));
+    mockBidValidation(higherBid);
+    assertThatSafeFuture(bidValidator.validate(higherBid))
+        .isCompletedWithValue(
+            ignoreBid(
+                higherBid,
+                "builder has reached its bid limit of %s for slot %s, parent block hash %s and parent block root %s",
+                UInt64.ONE,
+                slot,
+                parentBlockHash,
+                parentBlockRoot));
+  }
+
+  @TestTemplate
+  void shouldAcceptBidsUpToBuilderBidLimit() {
+    // A builder with a balance of 3 ETH may submit 3 bids for the same slot and parent
+    postState = stateWithBuilderBalance(ETH_TO_GWEI.times(3));
+    final UInt64 bidLimit = UInt64.valueOf(3);
+
+    for (int i = 1; i <= bidLimit.intValue(); i++) {
+      final SignedExecutionPayloadBid bidWithinLimit =
+          bidFromBuilder(builderIndex, UInt64.valueOf(10_000L * i));
+      mockBidValidation(bidWithinLimit);
+      assertThatSafeFuture(bidValidator.validate(bidWithinLimit)).isCompletedWithValue(ACCEPT);
+    }
+
+    // A higher bid past the limit is ignored, so only the bid limit check can trigger
+    final SignedExecutionPayloadBid extraBid = bidFromBuilder(builderIndex, UInt64.valueOf(50_000));
+    mockBidValidation(extraBid);
+    assertThatSafeFuture(bidValidator.validate(extraBid))
+        .isCompletedWithValue(
+            ignoreBid(
+                extraBid,
+                "builder has reached its bid limit of %s for slot %s, parent block hash %s and parent block root %s",
+                bidLimit,
+                slot,
+                parentBlockHash,
+                parentBlockRoot));
+  }
+
+  @TestTemplate
+  void shouldIgnore_whenBuilderBalanceIsBelowOneEth() {
+    // A builder with less than 1 ETH balance has a bid limit of 0
+    postState = stateWithBuilderBalance(ETH_TO_GWEI.minus(1));
+    mockBidValidation(signedBid);
+
     assertThatSafeFuture(bidValidator.validate(signedBid))
         .isCompletedWithValue(
             ignoreBid(
                 signedBid,
-                "already received valid bid for slot %s, parent block hash %s, parent block root %s, and builder index %s",
+                "builder has reached its bid limit of %s for slot %s, parent block hash %s and parent block root %s",
+                UInt64.ZERO,
                 slot,
                 parentBlockHash,
-                parentBlockRoot,
-                builderIndex));
+                parentBlockRoot));
   }
 
   @TestTemplate
@@ -1006,15 +1058,18 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .isSignatureValidWithRespectToBuilderIndex(any(), any(), any(), any());
     clearInvocations(gossipValidationHelper);
 
-    assertThatSafeFuture(bidValidator.validate(signedBid))
+    final SignedExecutionPayloadBid higherBid =
+        bidFromBuilder(builderIndex, bid.getValue().times(2));
+    mockBidValidation(higherBid);
+    assertThatSafeFuture(bidValidator.validate(higherBid))
         .isCompletedWithValue(
             ignoreBid(
-                signedBid,
-                "already received valid bid for slot %s, parent block hash %s, parent block root %s, and builder index %s",
+                higherBid,
+                "builder has reached its bid limit of %s for slot %s, parent block hash %s and parent block root %s",
+                UInt64.ONE,
                 slot,
                 parentBlockHash,
-                parentBlockRoot,
-                builderIndex));
+                parentBlockRoot));
   }
 
   @TestTemplate
@@ -1050,28 +1105,30 @@ public class ExecutionPayloadBidGossipValidatorTest {
     when(gossipValidationHelper.getParentStateInBlockEpoch(slot.decrement(), parentBlockRoot, slot))
         .thenReturn(SafeFuture.completedFuture(Optional.of(postState)));
 
-    // Validate and complete a second bid from the same builder while first is in flight
+    // Validate and complete a second, lower bid from the same builder while first is in flight, so
+    // the first bid still beats it and only the bid limit check can trigger
     final SignedExecutionPayloadBid secondBid =
-        dataStructureUtil.randomSignedExecutionPayloadBid(signedBid.getMessage());
+        bidFromBuilder(builderIndex, bid.getValue().dividedBy(2));
+    mockBidValidation(secondBid);
     final SafeFuture<InternalValidationResult> secondBidResult = bidValidator.validate(secondBid);
 
-    // Wait for second bid to fully complete and add builder to set
+    // Wait for second bid to fully complete and use up the builder's bid limit
     assertThatSafeFuture(secondBidResult).isCompletedWithValue(ACCEPT);
     secondBidResult.join();
 
-    // Now complete the first bid's validation - it should hit the race condition check
+    // Now complete the first bid's validation
     slowStateFuture.complete(Optional.of(postState));
 
-    // First bid should be ignored because builder was added by second bid
+    // First bid should be ignored because the second bid used up the builder's bid limit
     assertThatSafeFuture(firstBidResult)
         .isCompletedWithValue(
             ignoreBid(
                 signedBid,
-                "already received valid bid for slot %s, parent block hash %s, parent block root %s, and builder index %s",
+                "builder has reached its bid limit of %s for slot %s, parent block hash %s and parent block root %s",
+                UInt64.ONE,
                 slot,
                 parentBlockHash,
-                parentBlockRoot,
-                builderIndex));
+                parentBlockRoot));
   }
 
   @TestTemplate
@@ -1113,11 +1170,11 @@ public class ExecutionPayloadBidGossipValidatorTest {
         .isCompletedWithValue(
             ignoreBid(
                 bidForCachedSlot,
-                "already received valid bid for slot %s, parent block hash %s, parent block root %s, and builder index %s",
+                "builder has reached its bid limit of %s for slot %s, parent block hash %s and parent block root %s",
+                UInt64.ONE,
                 cachedSlot,
                 parentBlockHash,
-                parentBlockRoot,
-                sameBuilder));
+                parentBlockRoot));
   }
 
   @TestTemplate
@@ -1379,6 +1436,21 @@ public class ExecutionPayloadBidGossipValidatorTest {
           builders.set(
               builderIndex.intValue(),
               dataStructureUtil.builderBuilder().version(builderVersion).build());
+        });
+  }
+
+  private BeaconState stateWithBuilderBalance(final UInt64 balance) {
+    return postState.updated(
+        mutableState -> {
+          final SszMutableList<Builder> builders =
+              MutableBeaconStateGloas.required(mutableState).getBuilders();
+          builders.set(
+              builderIndex.intValue(),
+              dataStructureUtil
+                  .builderBuilder()
+                  .version(PAYLOAD_BUILDER_VERSION)
+                  .balance(balance)
+                  .build());
         });
   }
 
