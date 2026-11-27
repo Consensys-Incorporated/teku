@@ -128,7 +128,13 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
       // separately via the per-message helper below.
       final UInt64 blockSlotStartMs =
           spec.computeTimeMillisAtSlot(block.getSlot(), ctx.recentChainData.getGenesisTimeMillis());
-      ctx.forkChoice.onTick(blockSlotStartMs, Optional.empty());
+      // A late block is received after its slot's attestation deadline, which is what makes
+      // is_head_late true for it.
+      final UInt64 blockImportTimeMs =
+          blockEntry.isLate()
+              ? blockSlotStartMs.plus(spec.getAttestationDueMillis(block.getSlot()))
+              : blockSlotStartMs;
+      ctx.forkChoice.onTick(blockImportTimeMs, Optional.empty());
       final BlockImportResult importResult =
           safeJoin(
               ctx.forkChoice.onBlock(
@@ -322,7 +328,7 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
       } else if (messageName.startsWith("execution_payload_bid_")) {
         final SignedExecutionPayloadBid signedBid =
             loadSsz(testDefinition, messageName + ".ssz_snappy", signedBidSchema::sszDeserialize);
-        result = safeJoin(bidValidator.validate(signedBid));
+        result = safeJoin(bidValidator.validate(signedBid, validationTimeMs[0]));
       } else {
         throw new AssertionError("Unknown message type for: " + messageName);
       }
@@ -376,6 +382,9 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
       @JsonProperty(value = "payload")
       private String payload;
 
+      @JsonProperty(value = "late", defaultValue = "false")
+      private boolean late;
+
       public String getBlock() {
         return block;
       }
@@ -386,6 +395,10 @@ public class GossipExecutionPayloadBidTestExecutor implements TestExecutor {
 
       public String getPayload() {
         return payload;
+      }
+
+      public boolean isLate() {
+        return late;
       }
     }
 

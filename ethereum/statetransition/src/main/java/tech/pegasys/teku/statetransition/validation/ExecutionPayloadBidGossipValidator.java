@@ -75,8 +75,12 @@ public class ExecutionPayloadBidGossipValidator {
     signingRootUtil = new SigningRootUtil(spec);
   }
 
+  /**
+   * @param receivedAtMillis the time the bid was received. It decides whether the bid was received
+   *     too early, so a bid is not judged by the time validation happens to run.
+   */
   public SafeFuture<InternalValidationResult> validate(
-      final SignedExecutionPayloadBid signedExecutionPayloadBid) {
+      final SignedExecutionPayloadBid signedExecutionPayloadBid, final UInt64 receivedAtMillis) {
     final ExecutionPayloadBid bid = signedExecutionPayloadBid.getMessage();
 
     /*
@@ -105,6 +109,15 @@ public class ExecutionPayloadBidGossipValidator {
     if (!gossipValidationHelper.isSlotCurrentOrNext(bid.getSlot())) {
       return completedFuture(
           ignoreBid(bid, "must be for current or next slot but was for slot %s", bid.getSlot()));
+    }
+
+    /*
+     * [IGNORE] The bid is received after the payload attestation deadline of the previous slot
+     */
+    if (!gossipValidationHelper.isPreviousSlotPayloadAttestationDeadlineReached(
+        bid.getSlot(), receivedAtMillis)) {
+      return completedFuture(
+          ignoreBid(bid, "received before the payload attestation deadline of the previous slot"));
     }
 
     /*

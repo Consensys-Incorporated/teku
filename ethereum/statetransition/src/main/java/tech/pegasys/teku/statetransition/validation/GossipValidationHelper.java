@@ -378,6 +378,29 @@ public class GossipValidationHelper {
   }
 
   /**
+   * Returns true when a message received at {@code receivedAtMillis} was received no earlier than
+   * the payload attestation deadline of the slot before {@code slot}. Until then it is not decided
+   * whether the proposer of {@code slot} builds on the previous slot's payload. A slot before Gloas
+   * has no such deadline, so it is never reached.
+   *
+   * <p>No clock disparity allowance applies, so this takes the time of receipt rather than reading
+   * the store time, which only advances on ticks and would make a message received right at the
+   * deadline look early.
+   */
+  public boolean isPreviousSlotPayloadAttestationDeadlineReached(
+      final UInt64 slot, final UInt64 receivedAtMillis) {
+    return spec.getPayloadAttestationDueMillis(slot)
+        .map(
+            payloadAttestationDueMillis ->
+                !spec.isBeforeTimeInSlot(
+                    slot.minusMinZero(ONE),
+                    recentChainData.getGenesisTimeMillis(),
+                    receivedAtMillis,
+                    payloadAttestationDueMillis))
+        .orElse(false);
+  }
+
+  /**
    * Returns true when the block with the given {@code root} is a possible dependent block for the
    * epoch starting at {@code epochStartSlot} -- i.e. spec {@code is_valid_dependent_root}. That
    * holds when, on some branch, the block is or could become the latest block prior to the start of
@@ -513,7 +536,12 @@ public class GossipValidationHelper {
     final boolean buildsOnParentPayload =
         bid.getParentBlockHash().equals(headBid.getParentBlockHash());
     if (buildsOnParentBlock && buildsOnParentPayload) {
-      return true;
+      // A proposer only builds on the head's parent to re-org the head
+      final boolean bidSlotOk = head.getSlot().increment().equals(bid.getSlot());
+      // TODO: https://github.com/Consensys-Incorporated/teku/issues/10608
+      // also accept the bid when the head's proposer equivocated (is_proposer_equivocation), once
+      // fork choice can answer that without scanning all of its blocks
+      return bidSlotOk && recentChainData.isBlockLate(head.getRoot());
     }
     if (!bid.getParentBlockRoot().equals(head.getRoot())) {
       return false;
