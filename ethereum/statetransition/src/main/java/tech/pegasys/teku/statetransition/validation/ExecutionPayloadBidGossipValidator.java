@@ -84,8 +84,8 @@ public class ExecutionPayloadBidGossipValidator {
      */
     final BidParent bidValueKey =
         new BidParent(bid.getSlot(), bid.getParentBlockHash(), bid.getParentBlockRoot());
-    final UInt64 existingBidValue = highestBids.getOrDefault(bidValueKey, UInt64.ZERO);
-    if (!existingBidValue.isZero()) {
+    final UInt64 existingBidValue = highestBids.get(bidValueKey);
+    if (existingBidValue != null) {
       final UInt64 minRequiredBid = calculateMinimumRequiredBid(existingBidValue);
 
       if (bid.getValue().isLessThan(minRequiredBid)) {
@@ -490,14 +490,15 @@ public class ExecutionPayloadBidGossipValidator {
 
   /**
    * Calculates the minimum required bid value based on the current highest bid and the configured
-   * minimum increment percentage.
+   * minimum increment percentage. The bid must always be strictly higher than the current highest
+   * bid, even when the percentage increment rounds down to zero.
    *
    * @param currentHighestBid the current highest bid value
    * @return the minimum bid value required to exceed the threshold
    */
   private UInt64 calculateMinimumRequiredBid(final UInt64 currentHighestBid) {
     final UInt64 minIncrement = currentHighestBid.times(minBidIncrementPercentage).dividedBy(100);
-    return currentHighestBid.plus(minIncrement);
+    return currentHighestBid.plus(minIncrement.max(UInt64.ONE));
   }
 
   private boolean isSignatureValid(

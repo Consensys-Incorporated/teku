@@ -1393,6 +1393,32 @@ public class ExecutionPayloadBidGossipValidatorTest {
   }
 
   @TestTemplate
+  void shouldIgnore_whenBidEqualsZeroValueHighestBid() {
+    // Allow more than one bid from the builder, so only the highest bid check can trigger
+    when(gossipValidationHelper.getBuilderBidLimit(builderIndex, postState, slot))
+        .thenReturn(UInt64.valueOf(2));
+    final SignedExecutionPayloadBid firstBid = bidFromBuilder(builderIndex, UInt64.ZERO);
+    mockBidValidation(firstBid);
+    assertThatSafeFuture(bidValidator.validate(firstBid)).isCompletedWithValue(ACCEPT);
+
+    // The percentage increment of a 0 highest bid is 0, but a bid must still be strictly higher
+    final SignedExecutionPayloadBid equalBid = bidFromBuilder(builderIndex, UInt64.ZERO);
+    mockBidValidation(equalBid);
+    assertThatSafeFuture(bidValidator.validate(equalBid))
+        .isCompletedWithValue(
+            ignoreBid(
+                equalBid,
+                "does not meet minimum increment threshold (%s%%); current highest is %s ETH and minimum required is %s ETH",
+                MIN_BID_INCREMENT_PERCENTAGE,
+                gweiToEth(UInt64.ZERO),
+                gweiToEth(UInt64.ONE)));
+
+    final SignedExecutionPayloadBid higherBid = bidFromBuilder(builderIndex, UInt64.ONE);
+    mockBidValidation(higherBid);
+    assertThatSafeFuture(bidValidator.validate(higherBid)).isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
   void shouldAccept_whenBidWellAboveMinimumIncrementThreshold() {
     // First bid with known value
     final UInt64 firstBidValue = UInt64.valueOf(10000);
