@@ -2225,8 +2225,7 @@ public class KvStoreDatabase implements Database {
       final Map<Bytes32, SignedBlindedExecutionPayloadEnvelope> blindedExecutionPayloads,
       final Set<Bytes32> orphanedExecutionPayloadRoots) {
 
-    final Optional<Checkpoint> initialCheckpoint = dao.getAnchor();
-    final Optional<Bytes32> initialBlockRoot = initialCheckpoint.map(Checkpoint::getRoot);
+    final Optional<Bytes32> initialBlockRoot = dao.getAnchor().map(Checkpoint::getRoot);
     // Get previously finalized block to build on top of
     final BeaconBlockSummary baseBlock = getLatestFinalizedBlockOrSummary();
 
@@ -2239,18 +2238,19 @@ public class KvStoreDatabase implements Database {
             .toList();
 
     int i = 0;
-    UInt64 lastSlot = baseBlock.getSlot();
+    // Carried across transactions: a recorder only writes state roots when it accepts a state, so
+    // the next transaction has to resume from the last recorded slot, not from the last block.
+    UInt64 recordedSlot = baseBlock.getSlot();
     while (i < finalizedRoots.size()) {
       final int start = i;
       try (final FinalizedUpdater updater = finalizedUpdater()) {
         final StateRootRecorder recorder =
-            new StateRootRecorder(lastSlot, updater::addFinalizedStateRoot, spec);
+            new StateRootRecorder(recordedSlot, updater::addFinalizedStateRoot, spec);
 
         while (i < finalizedRoots.size() && (i - start) < TX_BATCH_SIZE) {
           final Bytes32 blockRoot = finalizedRoots.get(i);
 
-          final Optional<UInt64> maybeBlockSlot =
-              addFinalizedBlock(blockRoot, finalizedBlocks, updater, initialBlockRoot);
+          addFinalizedBlock(blockRoot, finalizedBlocks, updater, initialBlockRoot);
           updateExecutionPayloadEnvelopeOfFinalizedBlock(
               blockRoot, blindedExecutionPayloads, orphanedExecutionPayloadRoots, updater);
 
@@ -2262,12 +2262,10 @@ public class KvStoreDatabase implements Database {
                     recorder.acceptNextState(state);
                   });
 
-          lastSlot =
-              maybeBlockSlot.orElseGet(
-                  () -> initialCheckpoint.orElseThrow().getEpochStartSlot(spec));
           i++;
         }
         updater.commit();
+        recordedSlot = recorder.getSlot();
         if (i >= TX_BATCH_SIZE) {
           STATUS_LOG.recordedFinalizedBlocks(i, finalizedRoots.size());
         }
@@ -2304,7 +2302,7 @@ public class KvStoreDatabase implements Database {
     }
   }
 
-  private Optional<UInt64> addFinalizedBlock(
+  private void addFinalizedBlock(
       final Bytes32 blockRoot,
       final Map<Bytes32, SignedBeaconBlock> finalizedBlocks,
       final FinalizedUpdater updater,
@@ -2312,22 +2310,20 @@ public class KvStoreDatabase implements Database {
     final SignedBeaconBlock block = finalizedBlocks.get(blockRoot);
     if (block != null) {
       addFinalizedBlock(block, updater);
-      return Optional.of(block.getSlot());
+      return;
     }
 
     final Optional<Bytes> rawBlock = dao.getHotBlockAsSsz(blockRoot);
     if (rawBlock.isPresent()) {
       final UInt64 slot = BeaconBlockInvariants.extractSignedBlockContainerSlot(rawBlock.get());
       updater.addFinalizedBlockRaw(slot, blockRoot, rawBlock.get());
-      return Optional.of(slot);
+      return;
     }
 
     // If block is missing and doesn't match the initial anchor, throw
     if (initialBlockRoot.filter(r -> r.equals(blockRoot)).isEmpty()) {
       throw new IllegalStateException("Missing finalized block");
     }
-
-    return Optional.empty();
   }
 
   /**

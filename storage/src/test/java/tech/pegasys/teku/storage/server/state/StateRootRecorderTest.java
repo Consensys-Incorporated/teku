@@ -51,6 +51,40 @@ public class StateRootRecorderTest {
   }
 
   @Test
+  public void getSlot_shouldReturnInitialSlotBeforeAnyStateIsAccepted() {
+    final StateRootRecorder stateRootRecorder =
+        new StateRootRecorder(
+            slot.minus(2), (stateRoot, slot) -> stateRoots.put(slot, stateRoot), spec);
+    assertThat(stateRootRecorder.getSlot()).isEqualTo(slot.minus(2));
+  }
+
+  @Test
+  public void getSlot_shouldReturnSlotOfLastAcceptedState() {
+    final StateRootRecorder stateRootRecorder =
+        new StateRootRecorder(
+            slot.minus(2), (stateRoot, slot) -> stateRoots.put(slot, stateRoot), spec);
+    stateRootRecorder.acceptNextState(state);
+    assertThat(stateRootRecorder.getSlot()).isEqualTo(slot);
+  }
+
+  @Test
+  public void shouldRecordWithoutGapsWhenResumedFromSlotOfPreviousRecorder() {
+    final StateRootRecorder firstRecorder =
+        new StateRootRecorder(
+            slot.minus(4), (stateRoot, slot) -> stateRoots.put(slot, stateRoot), spec);
+    final BeaconState earlierState = state.updated(s -> s.setSlot(slot.minus(2)));
+    firstRecorder.acceptNextState(earlierState);
+
+    final StateRootRecorder resumedRecorder =
+        new StateRootRecorder(
+            firstRecorder.getSlot(), (stateRoot, slot) -> stateRoots.put(slot, stateRoot), spec);
+    resumedRecorder.acceptNextState(state);
+
+    assertThat(stateRoots)
+        .containsOnlyKeys(slot.minus(4), slot.minus(3), slot.minus(2), slot.minus(ONE), slot);
+  }
+
+  @Test
   public void shouldLimitToSlotsPerHistoricalRoot() {
     final UInt64 history =
         UInt64.valueOf(spec.getGenesisSpecConfig().getSlotsPerHistoricalRoot()).plus(10);
