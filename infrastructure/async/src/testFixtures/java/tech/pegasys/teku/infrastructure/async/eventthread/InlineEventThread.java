@@ -55,6 +55,13 @@ public class InlineEventThread implements EventThread {
   }
 
   @Override
+  public <T> SafeFuture<T> executeLater(final ExceptionThrowingSupplier<T> callable) {
+    final SafeFuture<T> result = new SafeFuture<>();
+    pendingTasks.add(() -> SafeFuture.of(callable).propagateTo(result));
+    return result;
+  }
+
+  @Override
   public <T> SafeFuture<T> execute(final ExceptionThrowingSupplier<T> callable) {
     final SafeFuture<T> result = new SafeFuture<>();
     withEventThreadMarkerSet(() -> SafeFuture.of(callable).propagateTo(result));

@@ -415,17 +415,30 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
     scheduleApplyingQueuedAttestations();
   }
 
+  private void scheduleApplyingQueuedAttestations() {
+    scheduleApplyingQueuedAttestations(false);
+  }
+
   /**
    * Schedules a fork choice task to apply the queued attestations, unless one is already scheduled.
    * However many attestations finish validating at once, at most one such task waits in the fork
    * choice queue: each task applies up to {@link #MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK}
    * attestations, then schedules the next one if more are queued.
+   *
+   * @param afterQueuedTasks whether to queue the task behind the fork choice tasks already waiting,
+   *     even on the fork choice thread, where it would otherwise run straight away. Used between
+   *     batches, so that block imports and other fork choice tasks can run in between.
    */
-  private void scheduleApplyingQueuedAttestations() {
+  private void scheduleApplyingQueuedAttestations(final boolean afterQueuedTasks) {
     if (!applyingQueuedAttestationsScheduled.compareAndSet(false, true)) {
       return;
     }
-    onForkChoiceThread(this::applyQueuedAttestations)
+    final ExceptionThrowingSupplier<Void> task =
+        () -> {
+          applyQueuedAttestations();
+          return null;
+        };
+    (afterQueuedTasks ? forkChoiceExecutor.executeLater(task) : forkChoiceExecutor.execute(task))
         .finish(
             error -> {
               // The task was rejected, for example because the fork choice queue is full, so fail
@@ -453,7 +466,7 @@ public class ForkChoice implements ForkChoiceUpdatedResultSubscriber {
       batch.forEach(validatedAttestation -> validatedAttestation.fail(e));
     }
     if (!attestationsToApply.isEmpty()) {
-      scheduleApplyingQueuedAttestations();
+      scheduleApplyingQueuedAttestations(true);
     }
   }
 

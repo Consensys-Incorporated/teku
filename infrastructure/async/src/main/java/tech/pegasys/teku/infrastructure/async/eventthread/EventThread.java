@@ -37,6 +37,13 @@ public interface EventThread extends Executor {
    */
   void executeLater(final Runnable task);
 
+  /**
+   * Add a task to the end of the event queue, even if the current thread is the event thread, and
+   * return its result. Unlike {@link #executeLater(Runnable)}, the returned future fails if the
+   * task can't be queued, for example because the queue is full.
+   */
+  <T> SafeFuture<T> executeLater(final ExceptionThrowingSupplier<T> callable);
+
   <T> SafeFuture<T> execute(final ExceptionThrowingSupplier<T> callable);
 
   <T> SafeFuture<T> executeFuture(final Supplier<SafeFuture<T>> callable);

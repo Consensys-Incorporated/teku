@@ -43,13 +43,16 @@ import static tech.pegasys.teku.statetransition.forkchoice.ForkChoice.BLOCK_CREA
 import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.ints.IntSet;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes32;
@@ -1940,7 +1943,65 @@ class ForkChoiceTest {
         .allSatisfy(
             result ->
                 assertThat(result).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL));
-    verify(forkChoiceThread, times(2)).execute(any(ExceptionThrowingSupplier.class));
+    verify(forkChoiceThread, times(1)).execute(any(ExceptionThrowingSupplier.class));
+    // The next batch waits behind the fork choice tasks already queued
+    verify(forkChoiceThread, times(1)).executeLater(any(ExceptionThrowingSupplier.class));
+  }
+
+  @Test
+  void onAttestations_shouldLetOtherForkChoiceTasksRunBetweenBatches() {
+    final SignedBlockAndState targetBlock = importChainOfBlocks(1).getFirst();
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final List<ValidatableAttestation> attestations =
+        Collections.nCopies(
+            ForkChoice.MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK + 1,
+            validAttestationForBlock(targetBlock));
+    final QueuingEventThread forkChoiceThread = new QueuingEventThread();
+    final ForkChoice batchForkChoice = createForkChoice(recentChainData, forkChoiceThread);
+    forkChoiceThread.startQueuing();
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        batchForkChoice.onAttestations(attestations);
+    // Another fork choice task, such as a block import, queued behind the first batch
+    final AtomicLong appliedBeforeOtherTask = new AtomicLong(-1);
+    forkChoiceThread.executeLater(
+        () -> appliedBeforeOtherTask.set(results.stream().filter(SafeFuture::isDone).count()));
+    forkChoiceThread.runQueuedTasks();
+
+    assertThat(appliedBeforeOtherTask).hasValue(ForkChoice.MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK);
+    assertThat(results)
+        .allSatisfy(
+            result ->
+                assertThat(result).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void onAttestations_shouldFailAttestationsLeftWhenNextBatchIsRejected() {
+    final List<SignedBlockAndState> targetBlocks = importChainOfBlocks(2);
+    storageSystem.chainUpdater().advanceCurrentSlotToAtLeast(UInt64.valueOf(5));
+    final List<ValidatableAttestation> attestations =
+        Collections.nCopies(
+            ForkChoice.MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK + 1,
+            validAttestationForBlock(targetBlocks.getFirst()));
+    final InlineEventThread forkChoiceThread = spy(new InlineEventThread());
+    final ForkChoice batchForkChoice = createForkChoice(recentChainData, forkChoiceThread);
+    doReturn(SafeFuture.failedFuture(new RejectedExecutionException("Queue is full")))
+        .when(forkChoiceThread)
+        .executeLater(any(ExceptionThrowingSupplier.class));
+
+    final List<SafeFuture<AttestationProcessingResult>> results =
+        batchForkChoice.onAttestations(attestations);
+
+    assertThat(results.subList(0, ForkChoice.MAX_ATTESTATIONS_PER_FORK_CHOICE_TASK))
+        .allSatisfy(
+            result ->
+                assertThat(result).isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL));
+    assertThatSafeFuture(results.getLast())
+        .isCompletedExceptionallyWith(RejectedExecutionException.class);
+    // A later attestation still gets applied
+    assertThat(batchForkChoice.onAttestation(validAttestationForBlock(targetBlocks.getLast())))
+        .isCompletedWithValue(AttestationProcessingResult.SUCCESSFUL);
   }
 
   @Test
@@ -2062,7 +2123,7 @@ class ForkChoiceTest {
     verify(forkChoiceThread, times(1)).execute(any(ExceptionThrowingSupplier.class));
     assertThat(results).allSatisfy(result -> assertThat(result).isNotDone());
 
-    forkChoiceThread.executePendingTasks();
+    forkChoiceThread.runQueuedTasks();
 
     assertThat(results)
         .allSatisfy(
@@ -2127,14 +2188,31 @@ class ForkChoiceTest {
   }
 
   /**
-   * Once {@link #startQueuing()} is called, queues fork choice tasks until {@link
-   * #executePendingTasks()} rather than running them straight away, as if the thread were busy.
+   * Once {@link #startQueuing()} is called, behaves like the real fork choice thread when busy:
+   * tasks wait in a queue until {@link #runQueuedTasks()}, except those submitted with {@code
+   * execute} from a queued task, which run straight away as they are already on the thread.
    */
   private static class QueuingEventThread extends InlineEventThread {
+    private final Queue<Runnable> queuedTasks = new ArrayDeque<>();
     private boolean queuing = false;
+    private boolean runningQueuedTask = false;
 
     void startQueuing() {
       queuing = true;
+    }
+
+    void runQueuedTasks() {
+      Runnable task;
+      while ((task = queuedTasks.poll()) != null) {
+        runningQueuedTask = true;
+        markAsOnEventThread();
+        try {
+          task.run();
+        } finally {
+          markAsOffEventThread();
+          runningQueuedTask = false;
+        }
+      }
     }
 
     @Override
@@ -2142,9 +2220,26 @@ class ForkChoiceTest {
       if (!queuing) {
         return super.execute(callable);
       }
+      return runningQueuedTask ? SafeFuture.of(callable) : executeLater(callable);
+    }
+
+    @Override
+    public <T> SafeFuture<T> executeLater(final ExceptionThrowingSupplier<T> callable) {
+      if (!queuing) {
+        return super.executeLater(callable);
+      }
       final SafeFuture<T> result = new SafeFuture<>();
-      executeLater(() -> SafeFuture.of(callable).propagateTo(result));
+      queuedTasks.add(() -> SafeFuture.of(callable).propagateTo(result));
       return result;
+    }
+
+    @Override
+    public void executeLater(final Runnable task) {
+      if (!queuing) {
+        super.executeLater(task);
+        return;
+      }
+      queuedTasks.add(task);
     }
   }
 
