@@ -110,6 +110,10 @@ public class Eth2IncomingRequestHandler<
       final Optional<RpcException> requestValidationError =
           localMessageHandler.validateRequest(protocolId, request);
       if (requestValidationError.isPresent()) {
+        // Rejected requests never reach the handler, which is where accepted requests are charged
+        // against the peer's request budget. Charge them here so a peer flooding invalid requests
+        // is rate limited and disconnected like one flooding valid requests.
+        peer.ifPresent(Eth2Peer::approveRequest);
         callback.completeWithErrorResponse(requestValidationError.get());
         return;
       }
