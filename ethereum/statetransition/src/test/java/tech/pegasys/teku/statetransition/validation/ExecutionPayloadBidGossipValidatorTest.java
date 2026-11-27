@@ -35,6 +35,8 @@ import com.google.errorprone.annotations.FormatMethod;
 import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.apache.logging.log4j.Level;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -1148,6 +1150,10 @@ public class ExecutionPayloadBidGossipValidatorTest {
                 slot,
                 parentBlockHash,
                 parentBlockRoot));
+    verify(gossipValidationHelper, never())
+        .builderHasEnoughBalanceForBid(any(), any(), any(), any());
+    verify(gossipValidationHelper, never())
+        .isSignatureValidWithRespectToBuilderIndex(any(), any(), any(), any());
   }
 
   @TestTemplate
@@ -1292,6 +1298,43 @@ public class ExecutionPayloadBidGossipValidatorTest {
         bidFromBuilder(builderIndex.plus(1), UInt64.valueOf(10_100));
     mockBidValidation(qualifyingBid);
     assertThatSafeFuture(bidValidator.validate(qualifyingBid)).isCompletedWithValue(ACCEPT);
+  }
+
+  @TestTemplate
+  void shouldIgnoreBidWhenBidLimitIsReachedAfterEarlyLimitCheck() {
+    final SignedExecutionPayloadBid firstBid = bidFromBuilder(builderIndex, UInt64.valueOf(20_000));
+    final SignedExecutionPayloadBid secondBid =
+        bidFromBuilder(builderIndex, UInt64.valueOf(10_000));
+    mockBidValidation(firstBid);
+    mockBidValidation(secondBid);
+
+    // The signature check runs after the early bid limit check, so validating the second bid from
+    // inside the first bid's signature check uses up the limit between the two limit checks
+    final AtomicBoolean secondBidStarted = new AtomicBoolean(false);
+    final AtomicReference<SafeFuture<InternalValidationResult>> secondBidResult =
+        new AtomicReference<>();
+    when(gossipValidationHelper.isSignatureValidWithRespectToBuilderIndex(
+            any(), any(), any(), any()))
+        .thenAnswer(
+            __ -> {
+              if (secondBidStarted.compareAndSet(false, true)) {
+                secondBidResult.set(bidValidator.validate(secondBid));
+              }
+              return true;
+            });
+
+    final SafeFuture<InternalValidationResult> firstBidResult = bidValidator.validate(firstBid);
+
+    assertThatSafeFuture(secondBidResult.get()).isCompletedWithValue(ACCEPT);
+    assertThatSafeFuture(firstBidResult)
+        .isCompletedWithValue(
+            ignoreBid(
+                firstBid,
+                "builder has reached its bid limit of %s for slot %s, parent block hash %s and parent block root %s",
+                UInt64.ONE,
+                slot,
+                parentBlockHash,
+                parentBlockRoot));
   }
 
   @TestTemplate

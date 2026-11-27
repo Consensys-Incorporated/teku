@@ -17,6 +17,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -175,11 +176,17 @@ public class DefaultExecutionPayloadBidManager
   }
 
   private void retryPendingBids(final Collection<PendingExecutionPayloadBid> pendingBids) {
-    // As with non-deferred bids, gossip validation accepts the first valid bid for each
-    // (slot, builder index). Reconsider ordering if the spec allows multiple bids per tuple.
+    // Gossip validation accepts several bids from a builder for the same slot and parent, up to its
+    // bid limit, as long as each one beats the highest bid seen. Retry the highest value bids first
+    // so lower bids are ignored where possible, instead of being forwarded and using up the limit.
     // Deferred gossip was ignored by gossipsub, so accepted retries must be explicitly published.
-    pendingBids.forEach(
-        pendingBid -> validateAndAddBid(pendingBid.signedBid(), false).finishError(LOG));
+    pendingBids.stream()
+        .sorted(Comparator.comparing(DefaultExecutionPayloadBidManager::bidValue).reversed())
+        .forEach(pendingBid -> validateAndAddBid(pendingBid.signedBid(), false).finishError(LOG));
+  }
+
+  private static UInt64 bidValue(final PendingExecutionPayloadBid pendingBid) {
+    return pendingBid.signedBid().getMessage().getValue();
   }
 
   @Override
