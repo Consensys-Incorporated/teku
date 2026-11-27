@@ -42,8 +42,8 @@ class BlockTimelinessTracker {
     this.blockTimeliness = blockTimeliness;
   }
 
-  public void setBlockTimelinessFromArrivalTime(
-      final SignedBeaconBlock block, final UInt64 arrivalTimeMillis) {
+  public void setBlockTimelinessAtImport(
+      final SignedBeaconBlock block, final UInt64 importTimeMillis) {
     if (blockTimeliness.get(block.getRoot()) != null) {
       return;
     }
@@ -53,8 +53,7 @@ class BlockTimelinessTracker {
       // Timeliness will be recorded after data availability check completes
       return;
     }
-    blockTimeliness.put(
-        block.getRoot(), computeBlockTimelinessFromArrivalTime(block, arrivalTimeMillis));
+    blockTimeliness.put(block.getRoot(), computeBlockTimeliness(block, importTimeMillis));
   }
 
   /**
@@ -66,15 +65,13 @@ class BlockTimelinessTracker {
     if (blockTimeliness.get(block.getRoot()) != null) {
       return;
     }
-    blockTimeliness.put(
-        block.getRoot(), computeBlockTimelinessFromArrivalTime(block, dataAvailableTimeMillis));
+    blockTimeliness.put(block.getRoot(), computeBlockTimeliness(block, dataAvailableTimeMillis));
   }
 
-  BlockTimeliness computeBlockTimelinessFromArrivalTime(
-      final SignedBeaconBlock block, final UInt64 arrivalTimeMillis) {
+  BlockTimeliness computeBlockTimeliness(final SignedBeaconBlock block, final UInt64 timeMillis) {
     final UInt64 genesisTimeMillis = genesisTimeMillisSupplier.get();
     final UInt64 computedSlot =
-        spec.getCurrentSlot(arrivalTimeMillis.dividedBy(1000), genesisTimeMillis.dividedBy(1000));
+        spec.getCurrentSlot(timeMillis.dividedBy(1000), genesisTimeMillis.dividedBy(1000));
     final Bytes32 root = block.getRoot();
     if (computedSlot.isGreaterThan(block.getMessage().getSlot())) {
       LOG.debug(
@@ -86,7 +83,7 @@ class BlockTimelinessTracker {
     }
     final UInt64 slotStartTimeMillis =
         spec.computeTimeMillisAtSlot(computedSlot, genesisTimeMillis);
-    final int millisIntoSlot = arrivalTimeMillis.minusMinZero(slotStartTimeMillis).intValue();
+    final int millisIntoSlot = timeMillis.minusMinZero(slotStartTimeMillis).intValue();
 
     final ForkChoiceUtil forkChoiceUtil = spec.atSlot(computedSlot).getForkChoiceUtil();
     final int timelinessLimit = forkChoiceUtil.getAttestationDueMillis();
@@ -94,7 +91,7 @@ class BlockTimelinessTracker {
         forkChoiceUtil.computeBlockTimeliness(
             block.getMessage().getSlot(), computedSlot, millisIntoSlot);
     LOG.debug(
-        "Block {}:{} arrived at {} ms into slot {}, timeliness limit is {} ms. result: {}",
+        "Block {}:{} timeliness recorded at {} ms into slot {}, timeliness limit is {} ms. result: {}",
         root,
         block.getSlot(),
         millisIntoSlot,

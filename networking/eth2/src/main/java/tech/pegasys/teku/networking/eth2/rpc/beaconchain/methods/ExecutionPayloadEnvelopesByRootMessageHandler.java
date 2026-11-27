@@ -13,22 +13,18 @@
 
 package tech.pegasys.teku.networking.eth2.rpc.beaconchain.methods;
 
+import com.google.common.annotations.VisibleForTesting;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import java.util.function.Function;
 import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
-import org.hyperledger.besu.plugin.services.metrics.Counter;
-import org.hyperledger.besu.plugin.services.metrics.LabelledMetric;
 import tech.pegasys.teku.infrastructure.async.SafeFuture;
-import tech.pegasys.teku.infrastructure.metrics.TekuMetricCategory;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszBytes32;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
-import tech.pegasys.teku.networking.eth2.peers.Eth2Peer;
-import tech.pegasys.teku.networking.eth2.peers.RequestKey;
-import tech.pegasys.teku.networking.eth2.rpc.core.PeerRequiredLocalMessageHandler;
 import tech.pegasys.teku.networking.eth2.rpc.core.ResponseCallback;
+import tech.pegasys.teku.networking.p2p.rpc.StreamClosedException;
 import tech.pegasys.teku.spec.Spec;
 import tech.pegasys.teku.spec.datastructures.epbs.versions.gloas.SignedExecutionPayloadEnvelope;
 import tech.pegasys.teku.spec.datastructures.networking.libp2p.rpc.ExecutionPayloadEnvelopesByRootRequestMessage;
@@ -42,129 +38,155 @@ import tech.pegasys.teku.storage.client.CombinedChainDataClient;
  * schema limits
  */
 public class ExecutionPayloadEnvelopesByRootMessageHandler
-    extends PeerRequiredLocalMessageHandler<
-        ExecutionPayloadEnvelopesByRootRequestMessage, SignedExecutionPayloadEnvelope> {
-
-  private static final Logger LOG = LogManager.getLogger();
-
-  private final Spec spec;
-  private final CombinedChainDataClient combinedChainDataClient;
-  private final LabelledMetric<Counter> requestCounter;
-  private final Counter totalExecutionPayloadEnvelopesRequestedCounter;
+    extends AbstractExecutionPayloadEnvelopesMessageHandler<
+        ExecutionPayloadEnvelopesByRootRequestMessage,
+        ExecutionPayloadEnvelopesByRootMessageHandler.RequestState> {
 
   public ExecutionPayloadEnvelopesByRootMessageHandler(
       final Spec spec,
       final CombinedChainDataClient combinedChainDataClient,
-      final MetricsSystem metricsSystem) {
-    this.spec = spec;
-    this.combinedChainDataClient = combinedChainDataClient;
-    requestCounter =
-        metricsSystem.createLabelledCounter(
-            TekuMetricCategory.NETWORK,
-            "rpc_execution_payload_envelopes_by_root_requests_total",
-            "Total number of execution payload envelopes by root requests received",
-            "status");
-    totalExecutionPayloadEnvelopesRequestedCounter =
-        metricsSystem.createCounter(
-            TekuMetricCategory.NETWORK,
-            "rpc_execution_payload_envelopes_by_root_requested_envelopes_total",
-            "Total number of execution payload envelopes requested in accepted execution payload envelopes by root requests from peers");
+      final MetricsSystem metricsSystem,
+      final ExecutionPayloadEnvelopesRequestLimiter requestLimiter) {
+    this(
+        spec,
+        combinedChainDataClient,
+        metricsSystem,
+        requestLimiter,
+        DEFAULT_UNBLINDING_BATCH_SIZE);
+  }
+
+  @VisibleForTesting
+  ExecutionPayloadEnvelopesByRootMessageHandler(
+      final Spec spec,
+      final CombinedChainDataClient combinedChainDataClient,
+      final MetricsSystem metricsSystem,
+      final ExecutionPayloadEnvelopesRequestLimiter requestLimiter,
+      final int unblindingBatchSize) {
+    super(
+        spec,
+        combinedChainDataClient,
+        metricsSystem,
+        requestLimiter,
+        unblindingBatchSize,
+        "by_root");
   }
 
   @Override
-  public void onIncomingMessage(
-      final String protocolId,
-      final Eth2Peer peer,
+  protected long getRequestedCount(final ExecutionPayloadEnvelopesByRootRequestMessage message) {
+    return message.size();
+  }
+
+  /** Envelopes held in memory need no EL call, so only other roots take a permit. */
+  @Override
+  protected boolean requiresPermit(final ExecutionPayloadEnvelopesByRootRequestMessage message) {
+    for (final SszBytes32 beaconBlockRoot : message) {
+      if (combinedChainDataClient
+          .getRecentChainData()
+          .getExecutionPayloadIfAvailable(beaconBlockRoot.get())
+          .isEmpty()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  @Override
+  protected RequestState createRequestState(
       final ExecutionPayloadEnvelopesByRootRequestMessage message,
       final ResponseCallback<SignedExecutionPayloadEnvelope> callback) {
-    LOG.trace(
-        "Peer {} requested {} execution payload envelopes with roots: {}",
-        peer.getId(),
-        message.size(),
-        message);
-
-    final Optional<RequestKey> maybeRequestKey =
-        peer.approveExecutionPayloadEnvelopesRequest(callback, message.size());
-
-    if (!peer.approveRequest() || maybeRequestKey.isEmpty()) {
-      requestCounter.labels("rate_limited").inc();
-      return;
-    }
-
-    requestCounter.labels("ok").inc();
-    totalExecutionPayloadEnvelopesRequestedCounter.inc(message.size());
-
-    final AtomicInteger sentExecutionPayloadEnvelopes = new AtomicInteger(0);
-    final UInt64 currentEpoch =
-        combinedChainDataClient.getRecentChainData().getCurrentEpoch().orElse(UInt64.ZERO);
-    final UInt64 minServableEpoch =
-        currentEpoch
-            .minusMinZero(spec.getNetworkingConfig().getMinEpochsForBlockRequests())
-            .max(spec.getSpecConfig(currentEpoch).getGloasForkEpoch());
-
-    SafeFuture<Void> future = SafeFuture.COMPLETE;
-
+    final List<Bytes32> blockRoots = new ArrayList<>();
     for (final SszBytes32 beaconBlockRoot : message) {
-      future =
-          future.thenCompose(
-              __ ->
-                  respondToBlockRoot(
-                      beaconBlockRoot.get(),
-                      minServableEpoch,
-                      callback,
-                      sentExecutionPayloadEnvelopes));
+      blockRoots.add(beaconBlockRoot.get());
     }
+    return new RequestState(callback, blockRoots, getMinServableEpoch());
+  }
 
-    future.finish(
-        () -> {
-          if (sentExecutionPayloadEnvelopes.get() != message.size()) {
-            peer.adjustExecutionPayloadEnvelopesRequest(
-                maybeRequestKey.get(), sentExecutionPayloadEnvelopes.get());
-          }
-          callback.completeSuccessfully();
-        },
-        err -> handleError(err, callback, "execution payload envelopes by root"));
+  @Override
+  protected SafeFuture<Void> serve(final RequestState requestState) {
+    return sendNextBatch(requestState);
   }
 
   /**
-   * Resolves the slot for the requested root before retrieving the envelope. Retrieving an envelope
-   * for a finalized block requires reading the blinded envelope from the database and unblinding it
-   * with an execution layer round trip, so a root already known to be outside the servable range is
-   * rejected up front rather than after that work has been done. A root whose slot can't be
-   * resolved still goes through retrieval, where the range is enforced against the envelope itself.
+   * Filters a batch of roots by servable range, loads their envelopes in one lookup and sends them.
    */
-  private SafeFuture<Void> respondToBlockRoot(
-      final Bytes32 beaconBlockRoot,
-      final UInt64 minServableEpoch,
-      final ResponseCallback<SignedExecutionPayloadEnvelope> callback,
-      final AtomicInteger sentExecutionPayloadEnvelopes) {
-    return combinedChainDataClient
-        .getSlotByBlockRoot(beaconBlockRoot)
+  private SafeFuture<Void> sendNextBatch(final RequestState requestState) {
+    if (!requestState.hasMoreBlockRoots()) {
+      return SafeFuture.COMPLETE;
+    }
+    if (requestState.isStreamClosed()) {
+      return SafeFuture.failedFuture(new StreamClosedException());
+    }
+    final UInt64 minServableEpoch = requestState.getMinServableEpoch();
+    final List<Bytes32> blockRoots = requestState.takeNextBlockRoots(unblindingBatchSize);
+    return selectRetrievableBlockRoots(blockRoots, minServableEpoch)
         .thenCompose(
-            maybeSlot -> {
-              if (maybeSlot.isPresent()
-                  && !isWithinServableRange(maybeSlot.get(), minServableEpoch)) {
-                return SafeFuture.COMPLETE;
-              }
-              return combinedChainDataClient
-                  .getExecutionPayloadByBlockRoot(beaconBlockRoot)
-                  .thenCompose(
-                      maybeExecutionPayloadEnvelope ->
-                          maybeExecutionPayloadEnvelope
-                              .filter(
-                                  envelope ->
-                                      isWithinServableRange(
-                                          envelope.getMessage().getSlot(), minServableEpoch))
-                              .map(
-                                  executionPayloadEnvelope ->
-                                      callback
-                                          .respond(executionPayloadEnvelope)
-                                          .thenRun(sentExecutionPayloadEnvelopes::incrementAndGet))
-                              .orElse(SafeFuture.COMPLETE));
-            });
+            retrievableBlockRoots -> {
+              requestState.charge(retrievableBlockRoots.size());
+              return loadExecutionPayloadEnvelopes(
+                  retrievableBlockRoots,
+                  Function.identity(),
+                  (blockRoot, executionPayload) ->
+                      isWithinServableRange(
+                          executionPayload.getMessage().getSlot(), minServableEpoch));
+            })
+        .thenCompose(requestState::sendExecutionPayloadEnvelopes)
+        .thenCompose(__ -> sendNextBatch(requestState));
+  }
+
+  /**
+   * Drops roots known to be outside the servable range before any EL work. Roots with an unknown
+   * slot are kept and checked against the envelope instead.
+   */
+  private SafeFuture<List<Bytes32>> selectRetrievableBlockRoots(
+      final List<Bytes32> blockRoots, final UInt64 minServableEpoch) {
+    return SafeFuture.collectAll(
+            blockRoots.stream()
+                .map(
+                    blockRoot ->
+                        combinedChainDataClient
+                            .getSlotByBlockRoot(blockRoot)
+                            .thenApply(
+                                maybeSlot ->
+                                    maybeSlot.isEmpty()
+                                            || isWithinServableRange(
+                                                maybeSlot.get(), minServableEpoch)
+                                        ? Optional.of(blockRoot)
+                                        : Optional.<Bytes32>empty())))
+        .thenApply(roots -> roots.stream().flatMap(Optional::stream).toList());
   }
 
   private boolean isWithinServableRange(final UInt64 slot, final UInt64 minServableEpoch) {
     return spec.computeEpochAtSlot(slot).isGreaterThanOrEqualTo(minServableEpoch);
+  }
+
+  static class RequestState extends ExecutionPayloadEnvelopesRequestState {
+
+    private final List<Bytes32> blockRoots;
+    private final UInt64 minServableEpoch;
+    private int nextBlockRootIndex = 0;
+
+    RequestState(
+        final ResponseCallback<SignedExecutionPayloadEnvelope> callback,
+        final List<Bytes32> blockRoots,
+        final UInt64 minServableEpoch) {
+      super(callback, blockRoots.size());
+      this.blockRoots = blockRoots;
+      this.minServableEpoch = minServableEpoch;
+    }
+
+    UInt64 getMinServableEpoch() {
+      return minServableEpoch;
+    }
+
+    boolean hasMoreBlockRoots() {
+      return nextBlockRootIndex < blockRoots.size();
+    }
+
+    List<Bytes32> takeNextBlockRoots(final int maxBlockRoots) {
+      final int endIndex = Math.min(nextBlockRootIndex + maxBlockRoots, blockRoots.size());
+      final List<Bytes32> batch = List.copyOf(blockRoots.subList(nextBlockRootIndex, endIndex));
+      nextBlockRootIndex = endIndex;
+      return batch;
+    }
   }
 }

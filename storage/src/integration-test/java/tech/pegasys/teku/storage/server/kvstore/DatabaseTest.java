@@ -241,6 +241,47 @@ public class DatabaseTest {
   }
 
   @TestTemplate
+  public void pruneOldestBlobSidecars_compactsPrunedSlotsAndKeepsLiveSidecars(
+      final DatabaseContext context) throws IOException {
+    initialize(context);
+
+    // Enough pruned slots for the first compaction, which starts at slot 0
+    final long lastPrunedSlot = KvStoreDatabase.MIN_PRUNED_SLOTS_PER_COMPACTION;
+    final BlobSidecar prunedSidecar =
+        dataStructureUtil.randomBlobSidecarForBlock(
+            dataStructureUtil.randomSignedBeaconBlock(1), 0);
+    final BlobSidecar lastPrunedSidecar =
+        dataStructureUtil.randomBlobSidecarForBlock(
+            dataStructureUtil.randomSignedBeaconBlock(lastPrunedSlot), 0);
+    final BlobSidecar liveSidecar =
+        dataStructureUtil.randomBlobSidecarForBlock(
+            dataStructureUtil.randomSignedBeaconBlock(lastPrunedSlot + 1), 0);
+
+    database.storeBlobSidecar(prunedSidecar);
+    database.storeBlobSidecar(lastPrunedSidecar);
+    database.storeBlobSidecar(liveSidecar);
+    database.storeNonCanonicalBlobSidecar(prunedSidecar);
+    database.storeNonCanonicalBlobSidecar(lastPrunedSidecar);
+    database.storeNonCanonicalBlobSidecar(liveSidecar);
+
+    // Same order as BlobSidecarPruner
+    assertThat(
+            database.pruneOldestBlobSidecars(
+                UInt64.valueOf(lastPrunedSlot), 10, blobSidecarsArchiver))
+        .isFalse();
+    assertThat(
+            database.pruneOldestNonCanonicalBlobSidecars(
+                UInt64.valueOf(lastPrunedSlot), 10, blobSidecarsArchiver))
+        .isFalse();
+
+    assertBlobSidecarKeys(ZERO, UInt64.MAX_VALUE, blobSidecarToKey(liveSidecar));
+    assertThat(database.getBlobSidecar(blobSidecarToKey(liveSidecar))).contains(liveSidecar);
+    assertThat(database.getNonCanonicalBlobSidecar(blobSidecarToKey(liveSidecar)))
+        .contains(liveSidecar);
+    assertThat(database.getNonCanonicalBlobSidecar(blobSidecarToKey(lastPrunedSidecar))).isEmpty();
+  }
+
+  @TestTemplate
   public void verifyBlobsLifecycle(final DatabaseContext context) throws IOException {
     initialize(context);
 
@@ -2954,6 +2995,28 @@ public class DatabaseTest {
   }
 
   @TestTemplate
+  public void pruneFinalizedBlocks_compactsPrunedSlotsAndKeepsLiveBlocks(
+      final DatabaseContext context) throws Exception {
+    initialize(context, StateStorageMode.ARCHIVE);
+    // Skipped slots take the pruned range to the first compaction, which starts at slot 0
+    final UInt64 lastPrunedSlot = UInt64.valueOf(KvStoreDatabase.MIN_PRUNED_SLOTS_PER_COMPACTION);
+    addBlocks(chainBuilder.generateBlocksUpToSlot(2));
+    addBlocks(chainBuilder.generateBlockAtSlot(lastPrunedSlot));
+    final SignedBlockAndState liveBlock = chainBuilder.generateBlockAtSlot(lastPrunedSlot.plus(10));
+    addBlocks(liveBlock);
+    justifyAndFinalizeEpoch(spec.computeEpochAtSlot(liveBlock.getSlot()).plus(1), liveBlock);
+
+    assertThat(database.pruneFinalizedBlocks(lastPrunedSlot, 100, liveBlock.getSlot()))
+        .isEqualTo(lastPrunedSlot);
+
+    assertThat(database.getFinalizedBlockAtSlot(ONE)).isEmpty();
+    assertThat(database.getFinalizedBlockAtSlot(lastPrunedSlot)).isEmpty();
+    assertThat(database.getFinalizedBlockAtSlot(liveBlock.getSlot()))
+        .contains(liveBlock.getBlock());
+    assertThat(database.getEarliestAvailableBlockSlot()).contains(liveBlock.getSlot());
+  }
+
+  @TestTemplate
   public void pruneFinalizedBlocks_UpdatesEarliestAvailableBlockSlot(final DatabaseContext context)
       throws Exception {
     initialize(context, StateStorageMode.ARCHIVE);
@@ -3310,6 +3373,55 @@ public class DatabaseTest {
         database.streamDataColumnIdentifiers(ZERO, block3Sidecar0.getSlot())) {
       assertThat(dataColumnIdentifiersStream.toList()).isEmpty();
     }
+  }
+
+  @TestTemplate
+  public void pruneAllSidecars_compactsPrunedSlotsAndKeepsLiveSidecars(
+      final DatabaseContext context) throws IOException {
+    setupWithSpec(TestSpecFactory.createMinimalFulu());
+    initialize(context);
+
+    // Enough pruned slots for the first compaction, which starts at slot 0
+    final UInt64 lastPrunedSlot = UInt64.valueOf(KvStoreDatabase.MIN_PRUNED_SLOTS_PER_COMPACTION);
+    final DataColumnSidecar prunedSidecar =
+        dataStructureUtil.randomDataColumnSidecar(
+            dataStructureUtil.randomSignedBeaconBlockHeader(ONE), ZERO);
+    final DataColumnSidecar lastPrunedSidecar =
+        dataStructureUtil.randomDataColumnSidecar(
+            dataStructureUtil.randomSignedBeaconBlockHeader(lastPrunedSlot), ZERO);
+    final DataColumnSidecar liveSidecar =
+        dataStructureUtil.randomDataColumnSidecar(
+            dataStructureUtil.randomSignedBeaconBlockHeader(lastPrunedSlot.plus(1)), ZERO);
+    final DataColumnSidecar prunedNonCanonicalSidecar =
+        dataStructureUtil.randomDataColumnSidecar(
+            dataStructureUtil.randomSignedBeaconBlockHeader(lastPrunedSlot), ONE);
+    final DataColumnSidecar liveNonCanonicalSidecar =
+        dataStructureUtil.randomDataColumnSidecar(
+            dataStructureUtil.randomSignedBeaconBlockHeader(lastPrunedSlot.plus(100)), ONE);
+
+    database.addSidecar(prunedSidecar);
+    database.addSidecar(lastPrunedSidecar);
+    database.addSidecar(liveSidecar);
+    database.addNonCanonicalSidecar(prunedNonCanonicalSidecar);
+    database.addNonCanonicalSidecar(liveNonCanonicalSidecar);
+
+    database.pruneAllSidecars(lastPrunedSlot, 10);
+
+    final DataColumnSlotAndIdentifier liveColumn =
+        DataColumnSlotAndIdentifier.fromDataColumn(liveSidecar);
+    final DataColumnSlotAndIdentifier liveNonCanonicalColumn =
+        DataColumnSlotAndIdentifier.fromDataColumn(liveNonCanonicalSidecar);
+    try (final Stream<DataColumnSlotAndIdentifier> dataColumnIdentifiersStream =
+        database.streamDataColumnIdentifiers(ZERO, UInt64.MAX_VALUE)) {
+      assertThat(dataColumnIdentifiersStream.toList()).containsExactly(liveColumn);
+    }
+    try (final Stream<DataColumnSlotAndIdentifier> dataColumnIdentifiersStream =
+        database.streamNonCanonicalDataColumnIdentifiers(ZERO, UInt64.MAX_VALUE)) {
+      assertThat(dataColumnIdentifiersStream.toList()).containsExactly(liveNonCanonicalColumn);
+    }
+    assertThat(database.getSidecar(liveColumn)).contains(liveSidecar);
+    assertThat(database.getNonCanonicalSidecar(liveNonCanonicalColumn))
+        .contains(liveNonCanonicalSidecar);
   }
 
   @TestTemplate

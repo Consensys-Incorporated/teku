@@ -87,15 +87,7 @@ public class ReferenceTestFinder {
                       new SszTestFinder("ssz_generic"),
                       new SszTestFinder("ssz_static"),
                       new ShufflingTestFinder(),
-                      new PyspecTestFinder(
-                          List.of(),
-                          List.of(
-                              // TODO-GLOAS: the following tests require equivocation
-                              // see https://github.com/Consensys-Incorporated/teku/issues/10608
-                              "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_with_enough_ffg_votes_previous_epoch",
-                              "gloas - minimal - fork_choice/reorg - simple_attempted_reorg_without_enough_ffg_votes",
-                              "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_with_enough_ffg_votes_current_epoch",
-                              "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_without_enough_ffg_votes_current_epoch")),
+                      getPyspecTestFinder(),
                       new MerkleProofTestFinder())
                   .flatMap(unchecked(finder -> finder.findTests(fork, spec, testsPath)));
             });
@@ -109,6 +101,93 @@ public class ReferenceTestFinder {
         throw new RuntimeException(t);
       }
     };
+  }
+
+  private static TestFinder getPyspecTestFinder() {
+    return new PyspecTestFinder(
+        List.of(),
+        List.of(
+            // TODO-GLOAS: the following tests require equivocation
+            // see https://github.com/Consensys-Incorporated/teku/issues/10608
+            "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_with_enough_ffg_votes_previous_epoch",
+            "gloas - minimal - fork_choice/reorg - simple_attempted_reorg_without_enough_ffg_votes",
+            "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_with_enough_ffg_votes_current_epoch",
+            "gloas - minimal - fork_choice/reorg - include_votes_another_empty_chain_without_enough_ffg_votes_current_epoch",
+            // TODO: https://github.com/Consensys-Incorporated/teku/issues/11749
+            // enable after separating builder and validator deposits (consensus-specs#5736)
+            "gloas - mainnet - fork/fork - fork_builder_deposit_followed_by_invalid_validator_deposit",
+            "gloas - minimal - fork/fork - fork_builder_deposit_followed_by_invalid_validator_deposit",
+            "gloas - mainnet - fork/fork - fork_builder_deposit_followed_by_non_builder_credentials",
+            "gloas - minimal - fork/fork - fork_builder_deposit_followed_by_non_builder_credentials",
+            "gloas - mainnet - fork/fork - fork_builder_registration_and_topup_with_existing_validator_pubkey",
+            "gloas - minimal - fork/fork - fork_builder_registration_and_topup_with_existing_validator_pubkey",
+            "gloas - mainnet - fork/fork - fork_builder_topup_overrides_earlier_pending_validator",
+            "gloas - minimal - fork/fork - fork_builder_topup_overrides_earlier_pending_validator",
+            "gloas - mainnet - fork/fork - fork_existing_validator_invalid_builder_then_valid_builder",
+            "gloas - minimal - fork/fork - fork_existing_validator_invalid_builder_then_valid_builder",
+            "gloas - mainnet - fork/fork - fork_existing_validator_valid_non_builder_topup_after_builder",
+            "gloas - minimal - fork/fork - fork_existing_validator_valid_non_builder_topup_after_builder",
+            "gloas - mainnet - fork/fork - fork_invalid_topup_before_validator_and_builder_is_discarded",
+            "gloas - minimal - fork/fork - fork_invalid_topup_before_validator_and_builder_is_discarded",
+            "gloas - mainnet - fork/fork - fork_mixed_validity_validator_deposits_surrounding_builder_deposits",
+            "gloas - minimal - fork/fork - fork_mixed_validity_validator_deposits_surrounding_builder_deposits",
+            "gloas - mainnet - fork/fork - fork_pending_validator_invalid_non_builder_topup_after_builder",
+            "gloas - minimal - fork/fork - fork_pending_validator_invalid_non_builder_topup_after_builder",
+            "gloas - mainnet - fork/fork - fork_validator_deposit_followed_by_builder_credentials",
+            "gloas - minimal - fork/fork - fork_validator_deposit_followed_by_builder_credentials",
+            "gloas - mainnet - fork/fork - fork_validator_topup_before_builder_registration_stays_pending",
+            "gloas - minimal - fork/fork - fork_validator_topup_before_builder_registration_stays_pending",
+            // TODO: https://github.com/ethereum/consensus-specs/pull/5765
+            // enable after binding Fulu columns to the imported block (consensus-specs#5765)
+            "fulu - mainnet - fork_choice/on_block - on_block_peerdas__invalid_wrong_block",
+            "fulu - minimal - fork_choice/on_block - on_block_peerdas__invalid_wrong_block",
+            // TODO: https://github.com/ethereum/consensus-specs/pull/5766
+            // enable after skipping seen bitsets of different lengths (consensus-specs#5766)
+            "altair - mainnet - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
+            "altair - minimal - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
+            "bellatrix - mainnet - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
+            "bellatrix - minimal - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
+            "capella - mainnet - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
+            "capella - minimal - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
+            "deneb - mainnet - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
+            "deneb - minimal - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
+            "electra - mainnet - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
+            "electra - minimal - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
+            "fulu - mainnet - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
+            "fulu - minimal - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
+            "gloas - mainnet - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
+            "gloas - minimal - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
+            "phase0 - mainnet - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
+            "phase0 - minimal - networking/gossip_beacon_aggregate_and_proof - gossip_beacon_aggregate_and_proof__reject_aggregation_bits_size_mismatch_after_seen",
+            // TODO: https://github.com/ethereum/consensus-specs/pull/5838
+            // enable after selecting sync committees by message slot (consensus-specs#5838)
+            "altair - minimal - networking/gossip_sync_committee_contribution_and_proof - gossip_sync_committee_contribution_and_proof__missed_period_boundary_slot",
+            "bellatrix - minimal - networking/gossip_sync_committee_contribution_and_proof - gossip_sync_committee_contribution_and_proof__missed_period_boundary_slot",
+            "capella - minimal - networking/gossip_sync_committee_contribution_and_proof - gossip_sync_committee_contribution_and_proof__missed_period_boundary_slot",
+            "deneb - minimal - networking/gossip_sync_committee_contribution_and_proof - gossip_sync_committee_contribution_and_proof__missed_period_boundary_slot",
+            "electra - minimal - networking/gossip_sync_committee_contribution_and_proof - gossip_sync_committee_contribution_and_proof__missed_period_boundary_slot",
+            "fulu - minimal - networking/gossip_sync_committee_contribution_and_proof - gossip_sync_committee_contribution_and_proof__missed_period_boundary_slot",
+            "gloas - minimal - networking/gossip_sync_committee_contribution_and_proof - gossip_sync_committee_contribution_and_proof__missed_period_boundary_slot",
+            "altair - minimal - networking/gossip_sync_committee_message - gossip_sync_committee_message__missed_period_boundary_slot",
+            "bellatrix - minimal - networking/gossip_sync_committee_message - gossip_sync_committee_message__missed_period_boundary_slot",
+            "capella - minimal - networking/gossip_sync_committee_message - gossip_sync_committee_message__missed_period_boundary_slot",
+            "deneb - minimal - networking/gossip_sync_committee_message - gossip_sync_committee_message__missed_period_boundary_slot",
+            "electra - minimal - networking/gossip_sync_committee_message - gossip_sync_committee_message__missed_period_boundary_slot",
+            "fulu - minimal - networking/gossip_sync_committee_message - gossip_sync_committee_message__missed_period_boundary_slot",
+            "gloas - minimal - networking/gossip_sync_committee_message - gossip_sync_committee_message__missed_period_boundary_slot",
+            // TODO: https://github.com/Consensys-Incorporated/teku/issues/11746
+            // enable after ignoring exits with pending partial withdrawals (consensus-specs#5764).
+            "electra - mainnet - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
+            "electra - minimal - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
+            "fulu - mainnet - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
+            "fulu - minimal - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
+            "gloas - mainnet - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
+            "gloas - minimal - networking/gossip_voluntary_exit - gossip_voluntary_exit__ignore_pending_partial_withdrawal",
+            // TODO: https://github.com/Consensys-Incorporated/teku/issues/10608
+            // enable after accepting bids on the parent of a head whose proposer equivocated
+            // (consensus-specs#5803)
+            "gloas - mainnet - networking/gossip_execution_payload_bid - gossip_execution_payload_bid__valid_on_head_parent_proposer_equivocation",
+            "gloas - minimal - networking/gossip_execution_payload_bid - gossip_execution_payload_bid__valid_on_head_parent_proposer_equivocation"));
   }
 
   private static TestFinder getForkChoiceComplianceTestFinder() {

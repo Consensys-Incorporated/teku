@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.matches;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -94,7 +95,15 @@ class PeerSubnetSubscriptionsTest {
     when(dataColumnSidecarSubnetTopicProvider.getTopicForSubnet(anyInt()))
         .thenAnswer(
             invocation -> DATA_COLUMN_SIDECAR_SUBNET_TOPIC_PREFIX + invocation.getArgument(0));
-    when(gossipNetwork.streamPeers()).thenAnswer(invocation -> Stream.empty());
+    // By default every gossip subscriber is a connected peer. This answer reads the mock, so
+    // tests override it with doAnswer(...).when(...): when(...) would run it while stubbing.
+    when(gossipNetwork.streamPeers())
+        .thenAnswer(
+            invocation ->
+                gossipNetwork.getSubscribersByTopic().values().stream()
+                    .flatMap(Collection::stream)
+                    .distinct()
+                    .map(this::mockPeer));
   }
 
   @Test
@@ -156,10 +165,11 @@ class PeerSubnetSubscriptionsTest {
     final NodeId peerWithoutDiscoveryNodeId = new MockNodeId(2);
     // streamPeers() yields raw libp2p peers (as in production), not Eth2Peers; discovery node id
     // presence is resolved via the Eth2 peer lookup.
-    when(gossipNetwork.streamPeers())
-        .thenAnswer(
+    doAnswer(
             __ ->
-                Stream.of(mockPeer(peerWithDiscoveryNodeId), mockPeer(peerWithoutDiscoveryNodeId)));
+                Stream.of(mockPeer(peerWithDiscoveryNodeId), mockPeer(peerWithoutDiscoveryNodeId)))
+        .when(gossipNetwork)
+        .streamPeers();
     final Eth2Peer eth2PeerWithNodeId = mockEth2Peer(Optional.of(UInt256.ONE));
     final Eth2Peer eth2PeerWithoutNodeId = mockEth2Peer(Optional.empty());
     when(peerLookup.getConnectedPeer(peerWithDiscoveryNodeId))
@@ -189,9 +199,74 @@ class PeerSubnetSubscriptionsTest {
         .isZero();
   }
 
+  @Test
+  public void create_shouldNotCountSubscriberThatIsDisconnecting() {
+    syncnetSubscriptions.setSubscriptions(IntList.of(1));
+    // A peer being disconnected stays in the peer list and subscribed until its goodbye completes
+    doAnswer(__ -> Stream.of(mockPeer(PEER1), mockDisconnectingPeer(PEER2)))
+        .when(gossipNetwork)
+        .streamPeers();
+    when(gossipNetwork.getSubscribersByTopic())
+        .thenReturn(
+            Map.of(
+                ATTESTATION_SUBNET_TOPIC_PREFIX + "0", Set.of(PEER1, PEER2),
+                SYNC_COMMITTEE_SUBNET_TOPIC_PREFIX + "1", Set.of(PEER1, PEER2)));
+
+    final PeerSubnetSubscriptions subscriptions = createPeerSubnetSubscriptions();
+
+    assertThat(subscriptions.getSubscriberCountForAttestationSubnet(0)).isEqualTo(1);
+    assertThat(subscriptions.getSubscriberCountForSyncCommitteeSubnet(1)).isEqualTo(1);
+    assertThat(subscriptions.getAttestationSubnetSubscriptions(PEER2))
+        .isEqualTo(createAttnetsBitvector());
+    assertThat(subscriptions.getSyncCommitteeSubscriptions(PEER2))
+        .isEqualTo(createSyncnetsBitvector());
+  }
+
+  @Test
+  public void create_shouldNotCountSubscriberThatIsNoLongerInThePeerList() {
+    // The gossip topics can still list a peer whose connection has just closed
+    doAnswer(__ -> Stream.of(mockPeer(PEER1))).when(gossipNetwork).streamPeers();
+    when(gossipNetwork.getSubscribersByTopic())
+        .thenReturn(Map.of(ATTESTATION_SUBNET_TOPIC_PREFIX + "0", Set.of(PEER1, PEER2)));
+
+    final PeerSubnetSubscriptions subscriptions = createPeerSubnetSubscriptions();
+
+    assertThat(subscriptions.getSubscriberCountForAttestationSubnet(0)).isEqualTo(1);
+    assertThat(subscriptions.getAttestationSubnetSubscriptions(PEER2))
+        .isEqualTo(createAttnetsBitvector());
+  }
+
+  @Test
+  public void createScorer_shouldScoreLastSubscriberAsSoleSubscriberWhenTheOtherIsDisconnecting() {
+    doAnswer(__ -> Stream.of(mockPeer(PEER1))).when(gossipNetwork).streamPeers();
+    when(gossipNetwork.getSubscribersByTopic())
+        .thenReturn(Map.of(ATTESTATION_SUBNET_TOPIC_PREFIX + "0", Set.of(PEER1)));
+    final int scoreAsSoleSubscriber =
+        createPeerSubnetSubscriptions().createScorer().scoreExistingPeer(PEER1);
+
+    doAnswer(__ -> Stream.of(mockPeer(PEER1), mockDisconnectingPeer(PEER2)))
+        .when(gossipNetwork)
+        .streamPeers();
+    when(gossipNetwork.getSubscribersByTopic())
+        .thenReturn(Map.of(ATTESTATION_SUBNET_TOPIC_PREFIX + "0", Set.of(PEER1, PEER2)));
+    final int scoreWhileOtherSubscriberDisconnects =
+        createPeerSubnetSubscriptions().createScorer().scoreExistingPeer(PEER1);
+
+    // Otherwise the last subscriber of a subnet looks redundant and can be evicted too
+    assertThat(scoreWhileOtherSubscriberDisconnects).isEqualTo(scoreAsSoleSubscriber);
+  }
+
   private Peer mockPeer(final NodeId nodeId) {
     final Peer peer = mock(Peer.class);
     when(peer.getId()).thenReturn(nodeId);
+    when(peer.isConnected()).thenReturn(true);
+    return peer;
+  }
+
+  private Peer mockDisconnectingPeer(final NodeId nodeId) {
+    final Peer peer = mock(Peer.class);
+    when(peer.getId()).thenReturn(nodeId);
+    when(peer.isConnected()).thenReturn(false);
     return peer;
   }
 
@@ -314,10 +389,16 @@ class PeerSubnetSubscriptionsTest {
   }
 
   private PeerSubnetSubscriptions createPeerSubnetSubscriptions() {
+    // The same snapshot the peer selection strategy takes
+    final Map<String, Collection<NodeId>> subscribersByTopic =
+        gossipNetwork.getSubscribersByTopic();
+    final List<Peer> connectedPeers =
+        gossipNetwork.streamPeers().filter(Peer::isConnected).toList();
     return PeerSubnetSubscriptions.create(
         currentSpecVersionSupplier.get(),
         NodeIdToDataColumnSidecarSubnetsCalculator.NOOP,
-        gossipNetwork,
+        subscribersByTopic,
+        connectedPeers,
         peerLookup,
         attestationTopicProvider,
         syncCommitteeTopicProvider,

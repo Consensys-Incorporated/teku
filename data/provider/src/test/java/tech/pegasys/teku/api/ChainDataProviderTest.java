@@ -99,6 +99,7 @@ import tech.pegasys.teku.spec.datastructures.state.versions.gloas.Builder;
 import tech.pegasys.teku.spec.generator.AttestationGenerator;
 import tech.pegasys.teku.spec.generator.ChainBuilder;
 import tech.pegasys.teku.spec.logic.common.statetransition.epoch.EpochProcessor;
+import tech.pegasys.teku.spec.schemas.api.StatePtcData;
 import tech.pegasys.teku.spec.util.BeaconStateBuilderCapella;
 import tech.pegasys.teku.spec.util.DataStructureUtil;
 import tech.pegasys.teku.statetransition.lightclient.LightClientUpdateStore;
@@ -1064,6 +1065,115 @@ public class ChainDataProviderTest extends AbstractChainDataProviderTest {
             () -> provider.getBuildersFromState(data.randomBeaconState(), List.of(), List.of()))
         .isInstanceOf(BadRequestException.class)
         .hasMessageContaining("prior to GLOAS");
+  }
+
+  @Test
+  public void getStatePtc_shouldDefaultToStateSlotAndKeepCommitteeOrder() {
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final BeaconState state =
+        new DataStructureUtil(gloasSpec).randomBeaconState(UInt64.valueOf(19));
+    final ChainDataProvider provider = createProvider(gloasSpec);
+
+    final StatePtcData ptc =
+        provider
+            .getStatePtc(Optional.of(gloasStateAndMetaData(state)), Optional.empty())
+            .orElseThrow()
+            .getData();
+
+    assertThat(ptc.getSlot()).isEqualTo(UInt64.valueOf(19));
+    assertThat(ptc.getValidators().asListUnboxed())
+        .isEqualTo(BeaconStateGloas.required(state).getPtcWindow().get(11).asListUnboxed());
+  }
+
+  @ParameterizedTest
+  @MethodSource("getStatePtcWindowArgs")
+  public void getStatePtc_shouldEnforcePtcWindow(
+      final long stateSlot, final long requestedSlot, final boolean inWindow) {
+    final Spec gloasSpec = TestSpecFactory.createMinimalGloas();
+    final BeaconState state =
+        new DataStructureUtil(gloasSpec).randomBeaconState(UInt64.valueOf(stateSlot));
+    final ChainDataProvider provider = createProvider(gloasSpec);
+    final Optional<StateAndMetaData> stateAndMetaData = Optional.of(gloasStateAndMetaData(state));
+    final Optional<UInt64> slot = Optional.of(UInt64.valueOf(requestedSlot));
+
+    if (inWindow) {
+      assertThat(
+              provider
+                  .getStatePtc(stateAndMetaData, slot)
+                  .orElseThrow()
+                  .getData()
+                  .getValidators()
+                  .asListUnboxed())
+          .isEqualTo(
+              gloasSpec
+                  .getPtc(state, UInt64.valueOf(requestedSlot))
+                  .intStream()
+                  .mapToObj(UInt64::valueOf)
+                  .toList());
+    } else {
+      assertThatThrownBy(() -> provider.getStatePtc(stateAndMetaData, slot))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("is not queryable");
+    }
+  }
+
+  static Stream<Arguments> getStatePtcWindowArgs() {
+    return Stream.of(
+        Arguments.of(16, 7, false),
+        Arguments.of(16, 8, true),
+        Arguments.of(16, 31, true),
+        Arguments.of(16, 32, false),
+        Arguments.of(0, 0, true),
+        Arguments.of(0, 15, true),
+        Arguments.of(0, 16, false));
+  }
+
+  @Test
+  public void getStatePtc_shouldRejectPreGloasSlot() {
+    final Spec gloasSpec = TestSpecFactory.createMinimalWithGloasForkEpoch(ONE);
+    final BeaconState state = new DataStructureUtil(gloasSpec).randomBeaconState(UInt64.valueOf(8));
+    final ChainDataProvider provider = createProvider(gloasSpec);
+
+    assertThatThrownBy(
+            () ->
+                provider.getStatePtc(
+                    Optional.of(gloasStateAndMetaData(state)), Optional.of(UInt64.valueOf(7))))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("before the Gloas fork epoch");
+  }
+
+  @Test
+  public void getStatePtc_shouldRejectPreGloasState() {
+    final StateAndMetaData stateAndMetaData =
+        new StateAndMetaData(
+            data.randomBeaconState(), spec.getGenesisSpec().getMilestone(), false, true, false);
+    final ChainDataProvider provider = createProvider(spec);
+
+    assertThatThrownBy(() -> provider.getStatePtc(Optional.of(stateAndMetaData), Optional.empty()))
+        .isInstanceOf(BadRequestException.class)
+        .hasMessageContaining("prior to GLOAS");
+  }
+
+  @Test
+  public void getStatePtc_shouldReturnEmptyWhenStateNotFound() {
+    final ChainDataProvider provider = createProvider(spec);
+
+    assertThat(provider.getStatePtc(Optional.empty(), Optional.empty())).isEmpty();
+  }
+
+  private ChainDataProvider createProvider(final Spec providerSpec) {
+    return new ChainDataProvider(
+        providerSpec,
+        recentChainData,
+        combinedChainDataClient,
+        rewardCalculatorMock,
+        mockBlobSidecarReconstructionProvider,
+        mockBlobReconstructionProvider,
+        new LightClientUpdateStore(providerSpec));
+  }
+
+  private StateAndMetaData gloasStateAndMetaData(final BeaconState state) {
+    return new StateAndMetaData(state, SpecMilestone.GLOAS, false, true, false);
   }
 
   private BeaconStateGloas createGloasStateWithBuilders(

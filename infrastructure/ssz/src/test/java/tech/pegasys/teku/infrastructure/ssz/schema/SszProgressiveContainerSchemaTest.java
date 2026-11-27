@@ -25,12 +25,15 @@ import org.junit.jupiter.params.provider.ValueSource;
 import tech.pegasys.teku.infrastructure.ssz.SszContainer;
 import tech.pegasys.teku.infrastructure.ssz.SszData;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszByte;
+import tech.pegasys.teku.infrastructure.ssz.primitive.SszBytes32;
 import tech.pegasys.teku.infrastructure.ssz.primitive.SszUInt64;
 import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszBitlistSchema;
+import tech.pegasys.teku.infrastructure.ssz.schema.collections.SszBytes32VectorSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.impl.AbstractSszContainerSchema;
 import tech.pegasys.teku.infrastructure.ssz.schema.impl.AbstractSszContainerSchema.NamedSchema;
 import tech.pegasys.teku.infrastructure.ssz.sos.SszLengthBounds;
 import tech.pegasys.teku.infrastructure.ssz.tree.TreeNode;
+import tech.pegasys.teku.infrastructure.ssz.tree.TreeUtil;
 import tech.pegasys.teku.infrastructure.unsigned.UInt64;
 
 public class SszProgressiveContainerSchemaTest {
@@ -358,6 +361,29 @@ public class SszProgressiveContainerSchemaTest {
             List.of(
                 SszUInt64.of(UInt64.valueOf(12345)), SszBitlistSchema.create(64).ofBits(10, 0, 5)));
     assertStoreLoadRoundtrip(varSchema, node, maxBranchLevelsSkipped);
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {1, 5, 15})
+  void storeAndLoadBackingNodes_fieldsWithZeroTreeRoots(final int maxBranchLevelsSkipped) {
+    // Non-default values that are, or hash to, the root of a zero tree
+    final SszBytes32 zeroTreeRoot = SszBytes32.of(TreeUtil.ZERO_TREES[1].hashTreeRoot());
+    final SszBytes32VectorSchema<?> pairSchema = SszBytes32VectorSchema.create(2);
+    final SszContainerSchema<SszContainer> schema =
+        SszContainerSchema.createProgressive(
+            "ZeroTreeRoots",
+            new boolean[] {true, true, true},
+            List.of(
+                NamedSchema.of("number", SszPrimitiveSchemas.UINT64_SCHEMA),
+                NamedSchema.of("root", SszPrimitiveSchemas.BYTES32_SCHEMA),
+                NamedSchema.of("pair", pairSchema)));
+    final TreeNode node =
+        schema.createTreeFromFieldValues(
+            List.of(
+                SszUInt64.of(UInt64.valueOf(12345)),
+                zeroTreeRoot,
+                pairSchema.createFromElements(List.of(zeroTreeRoot, zeroTreeRoot))));
+    assertStoreLoadRoundtrip(schema, node, maxBranchLevelsSkipped);
   }
 
   private void assertStoreLoadRoundtrip(

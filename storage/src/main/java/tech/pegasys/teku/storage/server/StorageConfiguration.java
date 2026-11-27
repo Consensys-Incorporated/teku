@@ -34,6 +34,7 @@ import tech.pegasys.teku.spec.Spec;
 public class StorageConfiguration {
   public static final boolean DEFAULT_STORE_NON_CANONICAL_BLOCKS_ENABLED = false;
   public static final boolean DEFAULT_ROCKSDB_BLOB_DB_ENABLED = false;
+  public static final boolean DEFAULT_PRUNED_SLOT_COMPACTION_ENABLED = false;
   public static final int DEFAULT_STATE_REBUILD_TIMEOUT_SECONDS = 120;
   public static final long DEFAULT_STORAGE_FREQUENCY = 2048L;
   public static final int DEFAULT_MAX_KNOWN_NODE_CACHE_SIZE = 5_000_000;
@@ -77,6 +78,7 @@ public class StorageConfiguration {
   private final int stateRebuildTimeoutSeconds;
   private final boolean forceClearDb;
   private final boolean rocksdbBlobDbEnabled;
+  private final boolean prunedSlotCompactionEnabled;
   private final Duration pruningWarnTimeout;
 
   private StorageConfiguration(
@@ -100,6 +102,7 @@ public class StorageConfiguration {
       final Spec spec,
       final boolean forceClearDb,
       final boolean rocksdbBlobDbEnabled,
+      final boolean prunedSlotCompactionEnabled,
       final Duration pruningWarnTimeout) {
     this.eth1DepositContract = eth1DepositContract;
     this.dataStorageMode = dataStorageMode;
@@ -121,6 +124,7 @@ public class StorageConfiguration {
     this.spec = spec;
     this.forceClearDb = forceClearDb;
     this.rocksdbBlobDbEnabled = rocksdbBlobDbEnabled;
+    this.prunedSlotCompactionEnabled = prunedSlotCompactionEnabled;
     this.pruningWarnTimeout = pruningWarnTimeout;
   }
 
@@ -208,6 +212,10 @@ public class StorageConfiguration {
     return rocksdbBlobDbEnabled;
   }
 
+  public boolean isPrunedSlotCompactionEnabled() {
+    return prunedSlotCompactionEnabled;
+  }
+
   public Duration getPruningWarnTimeout() {
     return pruningWarnTimeout;
   }
@@ -235,6 +243,7 @@ public class StorageConfiguration {
     private int statePruningLimit = DEFAULT_STATE_PRUNING_LIMIT;
     private boolean forceClearDb = false;
     private boolean rocksdbBlobDbEnabled = DEFAULT_ROCKSDB_BLOB_DB_ENABLED;
+    private boolean prunedSlotCompactionEnabled = DEFAULT_PRUNED_SLOT_COMPACTION_ENABLED;
     private Duration pruningWarnTimeout = DEFAULT_PRUNING_WARN_TIMEOUT;
 
     private Builder() {}
@@ -399,6 +408,11 @@ public class StorageConfiguration {
       return this;
     }
 
+    public Builder prunedSlotCompactionEnabled(final boolean prunedSlotCompactionEnabled) {
+      this.prunedSlotCompactionEnabled = prunedSlotCompactionEnabled;
+      return this;
+    }
+
     public Builder pruningWarnTimeout(final Duration pruningWarnTimeout) {
       this.pruningWarnTimeout = pruningWarnTimeout;
       return this;
@@ -428,6 +442,7 @@ public class StorageConfiguration {
           spec,
           forceClearDb,
           rocksdbBlobDbEnabled,
+          prunedSlotCompactionEnabled,
           pruningWarnTimeout);
     }
 

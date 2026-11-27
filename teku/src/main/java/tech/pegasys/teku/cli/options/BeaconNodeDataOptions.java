@@ -14,6 +14,7 @@
 package tech.pegasys.teku.cli.options;
 
 import static tech.pegasys.teku.service.serviceutils.layout.DataConfig.DEFAULT_DEBUG_DATA_DUMPING_ENABLED;
+import static tech.pegasys.teku.storage.server.StorageConfiguration.DEFAULT_PRUNED_SLOT_COMPACTION_ENABLED;
 import static tech.pegasys.teku.storage.server.StorageConfiguration.DEFAULT_ROCKSDB_BLOB_DB_ENABLED;
 import static tech.pegasys.teku.storage.server.StorageConfiguration.DEFAULT_STATE_REBUILD_TIMEOUT_SECONDS;
 
@@ -248,6 +249,19 @@ public class BeaconNodeDataOptions extends ValidatorClientDataOptions {
   private boolean rocksdbBlobDbEnabled = DEFAULT_ROCKSDB_BLOB_DB_ENABLED;
 
   @CommandLine.Option(
+      names = {"--Xdata-storage-pruned-slot-compaction-enabled"},
+      hidden = true,
+      paramLabel = "<BOOLEAN>",
+      showDefaultValue = Visibility.ALWAYS,
+      description =
+          "Compact the database range freed by finalized block, blob sidecar and data column "
+              + "sidecar pruning once 256 slots have been pruned, dropping the deletion tombstones "
+              + "pruning leaves behind.",
+      fallbackValue = "true",
+      arity = "0..1")
+  private boolean prunedSlotCompactionEnabled = DEFAULT_PRUNED_SLOT_COMPACTION_ENABLED;
+
+  @CommandLine.Option(
       names = {"--force-clear-db"},
       paramLabel = "<BOOLEAN>",
       showDefaultValue = Visibility.ALWAYS,
@@ -289,6 +303,7 @@ public class BeaconNodeDataOptions extends ValidatorClientDataOptions {
                 .statePruningLimit(statePruningLimit)
                 .forceClearDb(forceClearDb)
                 .rocksdbBlobDbEnabled(rocksdbBlobDbEnabled)
+                .prunedSlotCompactionEnabled(prunedSlotCompactionEnabled)
                 .pruningWarnTimeout(Duration.ofSeconds(pruningWarnTimeoutSeconds)));
     builder.sync(
         b ->

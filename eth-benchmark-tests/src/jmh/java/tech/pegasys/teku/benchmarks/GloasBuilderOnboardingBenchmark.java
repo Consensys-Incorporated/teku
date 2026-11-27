@@ -60,8 +60,9 @@ import tech.pegasys.teku.spec.util.DataStructureUtil;
 /**
  * Measures the Fulu to Gloas state upgrade when the pending deposit queue holds many validly signed
  * deposits for new validators, followed by a few builder deposits for new pubkeys. Builder
- * onboarding only needs to know whether a builder deposit's pubkey is a pending validator, so the
- * validator deposits' signatures should not dominate the upgrade time.
+ * onboarding only needs to know whether a pubkey is a pending validator when a builder deposit for
+ * it has an invalid signature, so the validator deposits' signatures should not dominate the
+ * upgrade time.
  *
  * <p>Run with: ./gradlew :eth-benchmark-tests:jmh --args="GloasBuilderOnboardingBenchmark"
  */

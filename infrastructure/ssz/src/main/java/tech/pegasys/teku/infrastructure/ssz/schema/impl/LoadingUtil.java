@@ -51,12 +51,19 @@ public class LoadingUtil {
       return childLoader.loadChild(nodeSource, rootHash, rootGIndex);
     }
 
-    if (TreeUtil.ZERO_TREES_BY_ROOT.containsKey(rootHash)) {
+    final TreeNode zeroTree = TreeUtil.ZERO_TREES_BY_ROOT.get(rootHash);
+    if (zeroTree != null) {
       // Zero branch, but it may be "useful" and need to ensure leaf data has the right lengths
       // or it may be "useless" and we can just use the default tree
       if (isZeroBranchUseful(rootGIndex, lastUsefulGIndex)) {
         return createUsefulEmptyBranch(
-            nodeSource, rootGIndex, depthToLoad, defaultTree, lastUsefulGIndex, childLoader);
+            nodeSource,
+            zeroTree,
+            rootGIndex,
+            depthToLoad,
+            defaultTree,
+            lastUsefulGIndex,
+            childLoader);
       }
       return defaultTree;
     }
@@ -140,16 +147,21 @@ public class LoadingUtil {
 
   private static BranchNode createUsefulEmptyBranch(
       final TreeNodeSource nodeSource,
+      final TreeNode zeroTree,
       final long rootGIndex,
       final int depthToLoad,
       final TreeNode defaultTree,
       final long lastUsefulGIndex,
       final ChildLoader childLoader) {
+    // Both children of a zero tree are the zero tree one level down. Their hash can't be taken
+    // from the default tree: a list's default tree has empty leaves in place of its elements, so
+    // it has a zero hash where a composite element's hash is the root of a zero tree.
+    final Bytes32 childHash = zeroTree.get(GIndexUtil.LEFT_CHILD_G_INDEX).hashTreeRoot();
     final TreeNode defaultLeftNode = defaultTree.get(GIndexUtil.LEFT_CHILD_G_INDEX);
     final TreeNode leftNode =
         loadNodesToDepth(
             nodeSource,
-            defaultLeftNode.hashTreeRoot(),
+            childHash,
             GIndexUtil.gIdxLeftGIndex(rootGIndex),
             depthToLoad - 1,
             defaultLeftNode,
@@ -159,7 +171,7 @@ public class LoadingUtil {
     final TreeNode rightNode =
         loadNodesToDepth(
             nodeSource,
-            defaultRightNode.hashTreeRoot(),
+            childHash,
             GIndexUtil.gIdxRightGIndex(rootGIndex),
             depthToLoad - 1,
             defaultRightNode,
@@ -198,6 +210,10 @@ public class LoadingUtil {
         return createLeaf(data.slice(0, lastNodeSizeBytes));
       }
     } else {
+      final TreeNode defaultTree = elementSchema.getDefaultTree();
+      if (childHash.equals(defaultTree.hashTreeRoot())) {
+        return defaultTree;
+      }
       return elementSchema.loadBackingNodes(childNodeSource, childHash, childGIndex);
     }
   }

@@ -77,28 +77,39 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
                 .toList());
 
     final Map<Bytes32, BlockImportResult> invalidBlockRoots = new HashMap<>();
+    final SignedExecutionPayloadEnvelopeSchema schema =
+        SchemaDefinitionsGloas.required(spec.atSlot(state.getSlot()).getSchemaDefinitions())
+            .getSignedExecutionPayloadEnvelopeSchema();
 
     for (final BlockEntryAndBlock blockEntryAndBlock : blocks) {
       final GossipExecutionPayloadEnvelopeMetaData.BlockEntry blockEntry =
           blockEntryAndBlock.blockEntry();
       final SignedBeaconBlock block = blockEntryAndBlock.block();
-      if (block.getRoot().equals(ctx.anchorPoint.getRoot())) {
-        continue;
+      // The anchor is already in the store, but its payload may still need to be revealed below
+      if (!block.getRoot().equals(ctx.anchorPoint.getRoot())) {
+        ctx.forkChoice.onTick(
+            spec.computeTimeMillisAtSlot(
+                block.getSlot(), ctx.recentChainData.getGenesisTimeMillis()),
+            Optional.empty());
+        final BlockImportResult importResult =
+            safeJoin(
+                ctx.forkChoice.onBlock(
+                    block, Optional.empty(), BlockBroadcastValidator.NOOP, ctx.executionLayer));
+        if (blockEntry.isFailed()) {
+          invalidBlockRoots.put(
+              block.getRoot(), BlockImportResult.FAILED_DESCENDANT_OF_INVALID_BLOCK);
+        } else {
+          assertThat(importResult.isSuccessful())
+              .describedAs("Expected setup block %s to import successfully", blockEntry.getBlock())
+              .isTrue();
+        }
       }
-      ctx.forkChoice.onTick(
-          spec.computeTimeMillisAtSlot(block.getSlot(), ctx.recentChainData.getGenesisTimeMillis()),
-          Optional.empty());
-      final BlockImportResult importResult =
-          safeJoin(
-              ctx.forkChoice.onBlock(
-                  block, Optional.empty(), BlockBroadcastValidator.NOOP, ctx.executionLayer));
-      if (blockEntry.isFailed()) {
-        invalidBlockRoots.put(
-            block.getRoot(), BlockImportResult.FAILED_DESCENDANT_OF_INVALID_BLOCK);
-      } else {
-        assertThat(importResult.isSuccessful())
-            .describedAs("Expected setup block %s to import successfully", blockEntry.getBlock())
-            .isTrue();
+      // blockEntry.getPayload() names the payload already revealed for this block in the setup
+      // store, which is what makes the fork choice node FULL
+      if (blockEntry.getPayload() != null) {
+        ctx.applyExecutionPayloadToStore(
+            loadSsz(
+                testDefinition, blockEntry.getPayload() + ".ssz_snappy", schema::sszDeserialize));
       }
     }
 
@@ -130,9 +141,6 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
               public void onBlockImported(
                   final SignedBeaconBlock block, final boolean executionOptimistic) {}
             });
-    final SignedExecutionPayloadEnvelopeSchema schema =
-        SchemaDefinitionsGloas.required(spec.atSlot(state.getSlot()).getSchemaDefinitions())
-            .getSignedExecutionPayloadEnvelopeSchema();
     final ExecutionPayloadGossipValidator validator =
         new ExecutionPayloadGossipValidator(
             spec, gossipValidationHelper, blockGossipValidator, invalidBlockRoots);
@@ -188,12 +196,19 @@ public class GossipExecutionPayloadEnvelopeTestExecutor implements TestExecutor 
       @JsonProperty(value = "failed", defaultValue = "false")
       private boolean failed;
 
+      @JsonProperty(value = "payload")
+      private String payload;
+
       public String getBlock() {
         return block;
       }
 
       public boolean isFailed() {
         return failed;
+      }
+
+      public String getPayload() {
+        return payload;
       }
     }
 
